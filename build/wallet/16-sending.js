@@ -183,6 +183,8 @@
               bolt11: inv,
               // the proof that this invoice was paid, when the mint gave one (`preimageOf`)
               preimage: preimage || undefined,
+              // where it was paid from, which is not always where the phone is by now (`logTx`)
+              mint: at,
             });
             logAudit({
               hash: quote.quote,

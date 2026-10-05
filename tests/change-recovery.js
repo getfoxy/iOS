@@ -15,7 +15,7 @@
  *    says the change was taken
  *  - and neither touches a payment whose change really was kept
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, rebook } = require('./harness');
 
 const MINT = 'https://m.test';
 let failed = 0;
@@ -69,6 +69,8 @@ async function run() {
     log.unshift(Object.assign({ hash, dir: 'in', sats: 1180, grossSats: 1180 + changeSats, changeSats,
       changeState: state, at: Math.floor(Date.now() / 1000) - 90, settled: true, feeSats: 0 }, more || {}));
     recv.storage.setItem('foxy.cashu.log', JSON.stringify(log));
+    // the row is written by hand with no mint, and the change it belongs to was made with no payment behind it
+    rebook(recv);
   };
 
   // ---- written down as given back, and nobody has it ----------------------

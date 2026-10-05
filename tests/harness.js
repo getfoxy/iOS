@@ -156,7 +156,140 @@ function loadReal(opts) {
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
   W._keysetCheckDelay = o.keysetCheckDelay || [0, 0];
-  return { W, window: w, storage: w.localStorage };
+  const ctx = { W, window: w, storage: w.localStorage };
+  watchBooks(ctx);
+  return ctx;
+}
+
+/* ---- the books ---------------------------------------------------------
+ *
+ * Every page loadReal makes is asked one more question as the suite ends,
+ * whatever the suite was about: do its history entries still account for the
+ * ecash it holds? It is the sum the history screen's card does
+ * (16-history-lists.js `histAudit`: ADDS UP, DOES NOT ADD UP) and the live
+ * suites do after every scenario (tools/live/tap-scenarios.js `books`), one
+ * mint at a time, in sats.
+ *
+ * A test asks whether the thing it is about happened. This asks whether
+ * anything else did: a piece counted twice, a fee on no entry, change that
+ * came back with no row. Those pass a test that compares with `>=`, and they
+ * are what a person would otherwise find as a balance that is not what the
+ * payments say.
+ *
+ * What is compared is the change since the page was made, so a page started
+ * with ecash already in its storage is not a failure: what its entries say,
+ * less what it holds, must be what it was. A page with money on its way
+ * (a token not yet swapped in, a melt still routing, a move between mints)
+ * is not judged; its entries are not meant to add up until that lands.
+ *
+ * `noBooks(ctx, why)` for a page a test puts ecash into, or takes it out of,
+ * behind the wallet's back; `rebook(ctx)` after doing so, to carry on being
+ * judged from there. FOXY_BOOKS=0 turns the question off. */
+const BOOK_KEYS = { log: 'foxy.cashu.log', proofs: 'foxy.cashu.proofs.', held: 'foxy.cashu.held',
+                    melting: 'foxy.cashu.melting', fees: 'foxy.cashu.topupfees' };
+const bookMint = (u) => String(u || '').replace(/\/+$/, '');
+const watched = [];
+function stored(ctx, key, dflt) {
+  try { const v = JSON.parse(ctx.storage.getItem(key)); return v == null ? dflt : v; } catch (e) { return dflt; }
+}
+/* One line a mint: what the entries say this page should hold there, what it
+ * holds (the pile, and pieces held back for a swap the mint has not answered),
+ * and the difference. */
+function books(ctx) {
+  const rows = stored(ctx, BOOK_KEYS.log, []);
+  const says = new Map(), holds = new Map();
+  const add = (m, mint, n) => m.set(bookMint(mint), (m.get(bookMint(mint)) || 0) + n);
+  (Array.isArray(rows) ? rows : []).forEach((e) => {
+    if (!e || (e.unit && e.unit !== 'sat')) return;
+    if (e.state === 'failed' || e.failed || e.atRisk) return;
+    if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
+    if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(says, e.mint, Number(e.sats) || 0); return; }
+    const owedBack = e.changeState === 'owed' ? (Number(e.changeSats) || 0) : 0;
+    add(says, e.mint, -((Number(e.sats) || 0) + Math.max(0, Number(e.feeSats) || 0) + owedBack));
+  });
+  // less the fees no entry could carry, which the card counts too (topUpFeeSats)
+  const fees = stored(ctx, BOOK_KEYS.fees, {});
+  Object.keys(fees || {}).forEach((mint) => add(says, mint, -Math.max(0, Math.round(Number(fees[mint]) || 0))));
+  const sum = (list) => (Array.isArray(list) ? list : []).reduce((n, p) => n + (Number(p && p.amount) || 0), 0);
+  for (let i = 0; i < ctx.storage.length; i++) {
+    const k = ctx.storage.key(i);
+    if (k && k.indexOf(BOOK_KEYS.proofs) === 0) add(holds, k.slice(BOOK_KEYS.proofs.length), sum(stored(ctx, k, [])));
+  }
+  const held = stored(ctx, BOOK_KEYS.held, {});
+  Object.keys(held || {}).forEach((id) => {
+    const h = held[id];
+    if (h && !(h.unit && h.unit !== 'sat')) add(holds, h.mint, sum(h.proofs));
+  });
+  const out = {};
+  new Set([...says.keys(), ...holds.keys()]).forEach((mint) => {
+    const a = says.get(mint) || 0, b = holds.get(mint) || 0;
+    out[mint] = { says: a, holds: b, off: a - b };
+  });
+  return out;
+}
+/* Money on its way, which the entries are not meant to account for yet. */
+function limbo(ctx) {
+  const W = ctx.W, n = (f) => { try { return Math.round(Number(f()) || 0); } catch (e) { return 0; } };
+  return {
+    unclaimed: n(() => W.unclaimedSats()),
+    recovering: n(() => W.recoveringSats()),
+    melts: (stored(ctx, BOOK_KEYS.melting, []) || []).length || 0,
+    move: n(() => (W.pendingMove && W.pendingMove() ? 1 : 0)),
+  };
+}
+function watchBooks(ctx) {
+  if (process.env.FOXY_BOOKS === '0') return;
+  ctx.booksFrom = books(ctx);
+  // where in the suite the page was made, to find the test by
+  const frames = String(new Error().stack || '').split('\n').slice(1)
+    .filter((l) => !/harness\.js|node:internal|node_modules/.test(l))
+    .map((l) => (/([^\/\\(]+\.js:\d+)/.exec(l) || [])[1]).filter(Boolean);
+  ctx.booksAt = frames.slice(0, 3).map((f, i) => (i ? f.replace(/^.*\.js/, '') : f)).join(' < ');
+  if (!watched.length) process.on('exit', judgeBooks);
+  watched.push(ctx);
+}
+/* The entries at a mint, newest first, short: which way, how much, the fee,
+ * and what kind of entry. For the line that says they do not add up. */
+function bookRows(ctx, mint) {
+  return (stored(ctx, BOOK_KEYS.log, []) || []).filter((e) => e && bookMint(e.mint) === mint).map((e) =>
+    (e.dir === 'in' ? '+' : '-') + (Number(e.sats) || 0)
+    + (Number(e.feeSats) > 0 ? 'f' + Number(e.feeSats) : '')
+    + (Number(e.grossSats) > 0 ? 'g' + Number(e.grossSats) : '')
+    + (Number(e.changeSats) > 0 ? 'c' + Number(e.changeSats) : '')
+    + (e.changeState ? '(' + e.changeState + ')' : '')
+    + (e.state === 'pending' ? 'P' : '') + (e.state === 'failed' ? 'F' : '') + (e.atRisk ? 'R' : '')
+    + (e.unit && e.unit !== 'sat' ? 'U' : '')
+    + '<' + String(e.memo || '').slice(0, 14) + '|' + String(e.hash || '').slice(0, 10) + '>').join(' ');
+}
+function rebook(ctx) { ctx.booksFrom = books(ctx); }
+function noBooks(ctx, why) { ctx.booksOff = why || 'not judged'; }
+/* What does not add up on a page, as lines to print; none when it does. */
+function booksWrong(ctx) {
+  if (ctx.booksOff || !ctx.booksFrom) return [];
+  const l = limbo(ctx);
+  if (l.unclaimed || l.recovering || l.melts || l.move) return [];
+  const now = books(ctx), was = ctx.booksFrom, wrong = [];
+  new Set([...Object.keys(now), ...Object.keys(was)]).forEach((mint) => {
+    const a = now[mint] || { says: 0, holds: 0, off: 0 }, b = was[mint] || { says: 0, holds: 0, off: 0 };
+    if (a.off === b.off) return;
+    wrong.push((mint || 'no mint named') + ': holds ' + a.holds + ' (' + (a.holds - b.holds >= 0 ? '+' : '') + (a.holds - b.holds)
+      + ' since the page was made), its entries account for ' + (a.says - b.says >= 0 ? '+' : '') + (a.says - b.says)
+      + ': ' + Math.abs(a.off - b.off) + ' sats ' + (a.off - b.off > 0 ? 'fewer are here than' : 'more are here than') + ' they explain'
+      + '\n        entries: ' + (bookRows(ctx, mint) || 'none'));
+  });
+  return wrong;
+}
+function judgeBooks() {
+  let bad = 0;
+  watched.forEach((ctx, i) => {
+    let wrong = [];
+    try { wrong = booksWrong(ctx); } catch (e) { wrong = ['could not be read: ' + (e && e.message)]; }
+    wrong.forEach((line) => { bad += 1; console.log('FAIL  the books of the page made at ' + (ctx.booksAt || 'page ' + (i + 1)) + ' do not add up — ' + line); });
+  });
+  if (bad) {
+    console.log(bad + ' page(s) whose entries do not account for what they hold (tests/harness.js, "the books")');
+    process.exitCode = 1;
+  }
 }
 
 /* A mint made of cashu-ts's own crypto, for loadReal's page, answering the
@@ -1042,5 +1175,5 @@ function nativePhone(opts) {
   return phone;
 }
 
-module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
+module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
                    p2pkParent, p2pkAt };

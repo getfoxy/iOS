@@ -70,7 +70,7 @@
  * A run that sees a confirmed payout's fee rise at all now fails.
  */
 process.env.TZ = 'UTC';
-const { loadReal, fakeMint, nativePhone } = require('./harness');
+const { loadReal, fakeMint, nativePhone, noBooks } = require('./harness');
 const { ledgerBalances, makeProofBox, snapshot } = require('./invariants');
 
 const arg = (name, fallback) => {
@@ -597,6 +597,8 @@ async function round(seed) {
     if (P.step.moved) stepOff = 'a transfer moved money between mints';
     if (P.step.refunded) stepOff = 'an on-chain payout was refunded';
     if (stepOff) say('(ledger check off for this step: ' + stepOff + ')');
+    // and the harness's own question as the suite ends (harness.js, "the books") is off with it, for the same reason
+    if (ledgerOff) noBooks(P, 'a write was refused, or the seed put a lost swap back');
     const ledger = (ledgerOff || stepOff) ? null : await ledgerBalances(W, before, after);
     if (ledger) { clearInterval(watchDepth); return { seed, schedule, problem: ledger }; }
     const pile = [];

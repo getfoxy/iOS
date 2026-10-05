@@ -3819,6 +3819,12 @@
     var list = load(K.log, []);
     // which mint this happened at, so history can be read one mint at a time.
     // Entries written before this have no mint and are shown everywhere.
+    /* The mint the phone is on, unless the entry names one, and an entry for
+     * money that moved should: a transfer between mints has the phone on the
+     * other mint for a while, and a payment that lands meanwhile was filed
+     * there, at a mint it never touched. The history card then said DOES NOT
+     * ADD UP at both mints for good, by that payment (tests/harness.js, "the
+     * books", from tests/interleave.js). */
     /* And what bitcoin cost at the time. History shows dollars, and the
      * dollars of a payment are the dollars it was worth when it was made: a
      * figure worked out again from today's price makes last week's lunch
@@ -10932,6 +10938,8 @@
           hash: quoteId,
           // the invoice's payment hash, kept from when it was made
           payHash: entry.payHash || undefined,
+          // where it was claimed, which is not always where the phone is by now (`logTx`)
+          mint: mintOf(w),
         });
         return sumProofs(fresh);
       });
@@ -11853,6 +11861,8 @@
               bolt11: inv,
               // the proof that this invoice was paid, when the mint gave one (`preimageOf`)
               preimage: preimage || undefined,
+              // where it was paid from, which is not always where the phone is by now (`logTx`)
+              mint: at,
             });
             logAudit({
               hash: quote.quote,
@@ -13108,6 +13118,7 @@
           state: 'success',
           memo: 'reclaimed',
           hash: 'reclaim-' + Date.now(),
+          mint: intoMint,
         });
         console.log('[foxy] reclaimed', got, 'sats at', hostOf(tok.mint));
         return { sats: got, host: hostOf(tok.mint) };
@@ -14073,6 +14084,8 @@
             if (prior && Number(prior.changeDust) > 0) entry.sats += Number(prior.changeDust);
           } catch (e0) {}
         }
+        // a new entry is filed where the pieces went; one being finished stays where it was written
+        if (!into || !txSeen(into)) entry.mint = intoMint;
         logTx(entry, into);
         console.log('[foxy] took', got, 'sats of ecash at', hostOf(tok.mint),
                     tok.amount !== got ? '(' + (tok.amount - got) + ' to the mint fee)' : '');
@@ -14631,6 +14644,7 @@
           state: 'success',
           memo: 'ecash',
           hash: hash,
+          mint: at,
         });
         logAudit({
           hash: hash,
@@ -14685,7 +14699,7 @@
      * the entry becomes what really happened: the whole piece, gone. Either way
      * the three figures stay on it, which is what a person can send in a report
      * about a payment that looked wrong. */
-    changeSettled: function (hash, sats) {
+    changeSettled: function (hash, sats, opts) {
       var got = Number(sats) || 0;
       var rows = [];
       try { rows = (load(K.log, []) || []).filter(function (e) { return e && e.hash === hash; }); }
@@ -14693,6 +14707,14 @@
       if (!rows.length) return false;
       var one = rows[0];
       var gross = Number(one.grossSats) || Number(one.sats) || 0;
+      /* The payment itself sent back (`opts.refund`), on top of change that
+       * had already come: both are back. Written over the change, a payment
+       * of 312 for 310 whose 2 came back and whose 310 was then returned read
+       * as having cost 2, when it cost nothing (tests/crossings.js, by the
+       * books). Never more than went. */
+      if (got > 0 && opts && opts.refund && one.changeState === 'came back') {
+        got = Math.min(gross, got + (Number(one.changeSats) || 0));
+      }
       if (got > 0) {
         amendTx(hash, { changeSats: got, sats: Math.max(0, gross - got),
                         changeState: 'came back' });
@@ -15842,6 +15864,16 @@
               var worth = sumProofs(rest.proofs || []);
               var cost = swapFeeFor(wallet, rest.proofs || []);
               if (isFinite(cost) && cost > 0 && worth > 0 && worth - cost <= 0) {
+                /* Unless pieces of it were handed on first. The entry was
+                 * written net of the fee for claiming every piece, and the
+                 * ones that went never paid it: what the payment was worth
+                 * here is what was handed on, which is everything but this
+                 * (`whole`, as the claim below reckons it). A payment of 3 in
+                 * two pieces, written as 1, with its 2 handed on and its 1
+                 * let go, left the books a sat out for good. */
+                if (one.whole > 0) {
+                  try { amendTx('req-' + id, { sats: Math.max(0, one.whole - worth) }); } catch (xD) {}
+                }
                 dropUnclaimed(id);
                 dropLockKey(id);
                 console.log('[foxy] ' + worth + ' sat(s) left of a payment are too little to claim at this mint (its fee is '
@@ -16291,6 +16323,8 @@
              * merely slow and one that a stranger can still take back must not
              * look the same in a list. */
             trusted: true, memo: 'ecash, offline', hash: into,
+            // the mint the request named and the payment is at (`readPayment`), wherever the phone is by now
+            mint: p.mint,
           });
           tell('paid', { sats: kept, trusted: true });
           return;
@@ -16325,6 +16359,8 @@
             grossSats: p.sats, changeSats: giveBack,
             changeState: giveBack > 0 ? 'making' : '',
             memo: 'ecash', hash: into,
+            // the mint the request named and the payment is at (`readPayment`), wherever the phone is by now
+            mint: p.mint,
           });
           tell('paid', { sats: kept });
           claim().catch(function (e) {
@@ -16888,8 +16924,17 @@
               setProofs(proofs(here).filter(function (pr) { return !(pr && gone[pr.secret]); }), here, w);
               var took = sumProofs(spent);
               try {
-                amendTx(g.hash, { state: 'success', settled: true, highRisk: false, taken: true, sats: took,
-                                  memo: 'ecash, taken after a refusal' });
+                /* And change it was owed is not coming. The entry went on
+                 * saying `owed`, which the history card counts as money still
+                 * out: a payment of 320 for 300, taken whole, read as 340 and
+                 * the card said DOES NOT ADD UP by the 20 (tests/crossings.js
+                 * 6, by the books). */
+                var owedOn = (load(K.log, []) || []).some(function (e) {
+                  return e && e.hash === g.hash && e.changeState === 'owed' && Number(e.changeSats) > 0;
+                });
+                amendTx(g.hash, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true, sats: took,
+                                                memo: 'ecash, taken after a refusal' },
+                                              owedOn ? { changeState: 'never came' } : {}));
               } catch (x) {}
               console.warn('[foxy] ecash a phone refused has since been redeemed: ' + took + ' sats; its entry says paid');
               out.push({ state: 'taken', hash: g.hash, sats: took });

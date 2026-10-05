@@ -399,6 +399,8 @@
           hash: quoteId,
           // the invoice's payment hash, kept from when it was made
           payHash: entry.payHash || undefined,
+          // where it was claimed, which is not always where the phone is by now (`logTx`)
+          mint: mintOf(w),
         });
         return sumProofs(fresh);
       });

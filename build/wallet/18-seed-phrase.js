@@ -231,6 +231,7 @@
           state: 'success',
           memo: 'reclaimed',
           hash: 'reclaim-' + Date.now(),
+          mint: intoMint,
         });
         console.log('[foxy] reclaimed', got, 'sats at', hostOf(tok.mint));
         return { sats: got, host: hostOf(tok.mint) };

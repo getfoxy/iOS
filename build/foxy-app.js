@@ -8055,7 +8055,8 @@ class Component extends DCLogic {
             if (refund) {
               // the payment's own entry says it came back, as it does for change
               this._carriedPay = null;
-              try { if (carried.hash && W.changeSettled) W.changeSettled(carried.hash, net); } catch (e) {}
+              // on top of any change that had already come back for it
+              try { if (carried.hash && W.changeSettled) W.changeSettled(carried.hash, net, { refund: true }); } catch (e) {}
               /* All of it, or it is not the payment coming back. The check
                * above has a ceiling and no floor: 10 sats locked to this
                * phone passed it for a payment of 310, and the card said the

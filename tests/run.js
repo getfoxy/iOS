@@ -3166,7 +3166,7 @@ const eq = (got, want, what) =>
    * the mocked keychain's words with the bundled bip39 and cashu-ts's NUT-13
    * derivation. What reaches the mint must be NUT-13's outputs for the words. */
   {
-    const { loadReal, fakeMint, nativePhone } = require('./harness');
+    const { loadReal, fakeMint, nativePhone, rebook } = require('./harness');
     const NS_WORDS = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const NS_OTHER = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
     const NS_MINT = 'https://m.test';
@@ -3352,6 +3352,8 @@ const eq = (got, want, what) =>
       W.onSpentElsewhere((r) => { told = r; });
       const mark = log.seen.length;
       const failed = await W.sendToken(250).then(() => null, (e) => e);
+      // the spend elsewhere is the planted step: the wallet found it and dropped the piece, and no entry says so
+      rebook(P);
       if (!failed || !/not enough/i.test(failed.message)) return 'the send: ' + (failed ? failed.message : 'went through');
       const checks = log.seen.slice(mark).filter(x => x.path === '/v1/checkstate');
       if (checks.length !== 1) return checks.length + ' checks, wanted 1';
@@ -4022,6 +4024,7 @@ const eq = (got, want, what) =>
       const nearly = setOf(6, bigs[0]);
       if (!nearly) return 'could not build a pile at six of each';
       P.storage.setItem(key, JSON.stringify(nearly));
+      rebook(P); // the pile is replaced by hand
       const r1 = await W.tidyChange();
       if (r1.skipped) return 'six of ' + EACH + ' was called full: ' + r1.skipped;
       const after1 = nsPile(P.storage);
@@ -4033,6 +4036,7 @@ const eq = (got, want, what) =>
       const full = setOf(EACH, bigs[1]);
       if (!full) return 'could not build a pile at ' + EACH;
       P.storage.setItem(key, JSON.stringify(full));
+      rebook(P); // and replaced again
       const r2 = await W.tidyChange();
       if (r2.skipped) return 'at ' + EACH + ' it stopped instead of starting the next tier: ' + r2.skipped;
       const after2 = nsPile(P.storage);
@@ -4075,6 +4079,7 @@ const eq = (got, want, what) =>
       if (!key) return 'no pile on disk';
       // an empty pile, then the token comes back in
       P.storage.setItem(key, JSON.stringify([]));
+      rebook(P); // the pile is emptied by hand, so the token comes back to a wallet that holds nothing
       const mark = log.seen.length;
       await W.receiveToken(made.token);
       const swaps = log.seen.slice(mark).filter(x => x.path === '/v1/swap').length;
@@ -4134,6 +4139,7 @@ const eq = (got, want, what) =>
       const made = await W.sendToken(64);
       const left = await W.balanceSats();
       const got = await W.importProofs(made.token);
+      rebook(P); // an import writes no entry, and nothing in the app calls it
       if (got !== 64) return 'the import answered ' + got + ', wanted 64';
       if (await W.balanceSats() !== left + 64) return 'balance after the import: ' + await W.balanceSats() + ', was ' + left;
       const info = W.tokenInfo((await W.sendToken(32)).token);
@@ -4283,6 +4289,8 @@ const eq = (got, want, what) =>
       if (!row0) return 'no row for the payment';
       if (Number(row0.sats) > afterIn - before - 424 + 0) return 'the row keeps ' + row0.sats + ' of ' + (afterIn - before) + ' that arrived with 424 going back';
       const change = await B.W.sendToken(424 - inFee, { unit: 'sat', lockTo: '02' + 'ab'.repeat(32), purpose: 'change' });
+      // asked for by hand: the callers that make change for a payment settle its fee onto that payment's entry, and none ran here
+      rebook(B);
       if (!(change.fee > 0)) return 'making change cost nothing at a fee mint: ' + change.fee;
       const afterOut = await B.W.balanceSats();
       if (afterIn - afterOut !== change.sats + change.fee) return 'the pile fell by ' + (afterIn - afterOut) + ', the token and fee say ' + (change.sats + change.fee);
@@ -4730,6 +4738,7 @@ const eq = (got, want, what) =>
       if (qAsks.map(a => a.start + '+' + a.count).join() !== '0+150,150+150,300+150,450+150,600+150,750+150,900+100') return 'asks: ' + qAsks.map(a => a.start + '+' + a.count).join();
       // adopting it moves the phone's counter to past what the mint signed
       await Q.W.adoptScan([clipped], { merge: true });
+      rebook(Q); // a restore brings ecash in with no entry; this page held nothing before it
       return Q.phone.counters.get(NS_WORDS).get(P.mint.id) === clipped.counters[P.mint.id] ? null
         : 'counter after adopting: ' + Q.phone.counters.get(NS_WORDS).get(P.mint.id);
     });
@@ -4769,6 +4778,7 @@ const eq = (got, want, what) =>
       // Yes
       pb.hooks.adopt = () => true;
       await W.adoptScan(rows, { candidate, overwrite: true });
+      rebook(B); // a restore brings the other wallet's ecash in with no entry, which the history card says it can do
       if (pb.keychain.words !== NS_OTHER) return 'the phone did not adopt the words';
       if (!pb.aside.some(x => x.words === NS_WORDS)) return 'the old seed\'s counters were not set aside';
       const next = pb.counters.get(NS_OTHER).get(X.mint.id);
@@ -4791,6 +4801,9 @@ const eq = (got, want, what) =>
       const same = await X.W.enterSeedNative();
       const xrows = await X.W.scanSeed({ candidate: same }, [NS_MINT]);
       await X.W.adoptScan(xrows, { candidate: same, merge: true });
+      /* B holds these words too and swapped two of X's pieces in the meantime, which X knows nothing of: the merge adds
+       * what B's swap made, and X's copies of the spent pieces stay until a payment finds them. Two wallets on one seed. */
+      rebook(X);
       if (alerted || X.keychain.words !== NS_OTHER || X.phone.aside.length) return 'the same words replaced the seed';
       if (!(await W.forgetSeedCandidate(candidate)) || pb.candidates.has(candidate)) return 'the candidate was not forgotten';
       if (B.rec.toSeed || B.rec.bridge.some(a => WORD_ACTION.test(a))) return 'the page used the words';
@@ -5008,6 +5021,7 @@ const eq = (got, want, what) =>
       if (B.phone.refusals.length) return 'the phone refused: ' + JSON.stringify(B.phone.refusals);
       // the mints that answered after the adopt, kept as they arrived (merge); c's counter moves past 150 in served steps
       await B.W.adoptScan([byUrl['https://b.test'], byUrl['https://c.test']], { merge: true });
+      rebook(B); // a restore brings the other wallet's ecash in at all three mints, with no entry
       for (const url of Object.keys(want)) {
         const pile = JSON.parse(B.storage.getItem('foxy.cashu.proofs.' + url) || '[]');
         if (sumOf(pile) !== want[url]) return 'pile at ' + url + ': ' + sumOf(pile);
@@ -5042,6 +5056,7 @@ const eq = (got, want, what) =>
       if (other.length) return 'the phone refused: ' + JSON.stringify(other);
       // the late mints kept as they arrived, then what is left partial (the window of the wallet's own seed) scanned again
       await B.W.adoptScan([byUrl['https://b.test'], byUrl['https://c.test']], { merge: true });
+      rebook(B); // a restore brings the other wallet's ecash in at all three mints, with no entry
       const left = rows.filter(r => r.partial).map(r => r.url);
       if (left.length) {
         const again = await B.W.scanSeed(null, left);
@@ -5113,6 +5128,7 @@ const eq = (got, want, what) =>
       B.storage.setItem('foxy.req.unclaimed',
         JSON.stringify({ 'req-2': { token: 'cashuBstranded', at: 1, sats: 9, stranded: true } }));
       const held = await threw(() => B.W.adoptScan(rows, { candidate: other, overwrite: true }));
+      rebook(B); // a restore brings the other wallet's ecash in with no entry
       if (held) return 'a stranded payment held the seed: ' + held.message;
       B.storage.removeItem('foxy.req.unclaimed');
       return eq(B.keychain.words, NS_OTHER, 'the seed once nothing was settling');

@@ -1672,6 +1672,12 @@
     var list = load(K.log, []);
     // which mint this happened at, so history can be read one mint at a time.
     // Entries written before this have no mint and are shown everywhere.
+    /* The mint the phone is on, unless the entry names one, and an entry for
+     * money that moved should: a transfer between mints has the phone on the
+     * other mint for a while, and a payment that lands meanwhile was filed
+     * there, at a mint it never touched. The history card then said DOES NOT
+     * ADD UP at both mints for good, by that payment (tests/harness.js, "the
+     * books", from tests/interleave.js). */
     /* And what bitcoin cost at the time. History shows dollars, and the
      * dollars of a payment are the dollars it was worth when it was made: a
      * figure worked out again from today's price makes last week's lunch

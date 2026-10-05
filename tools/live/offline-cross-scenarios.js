@@ -454,7 +454,7 @@ async function launch(p, o) {
         const told = W.tapChangeKept(true);
         if (refund) {
           p.carriedPay = null;
-          try { if (carried.hash && W.changeSettled) W.changeSettled(carried.hash, net); } catch (e) {}
+          try { if (carried.hash && W.changeSettled) W.changeSettled(carried.hash, net, { refund: true }); } catch (e) {}
         }
         if (p.changeDue) {
           p.changeDue = false; p.owed = 0;

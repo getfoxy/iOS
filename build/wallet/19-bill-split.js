@@ -910,6 +910,8 @@
             if (prior && Number(prior.changeDust) > 0) entry.sats += Number(prior.changeDust);
           } catch (e0) {}
         }
+        // a new entry is filed where the pieces went; one being finished stays where it was written
+        if (!into || !txSeen(into)) entry.mint = intoMint;
         logTx(entry, into);
         console.log('[foxy] took', got, 'sats of ecash at', hostOf(tok.mint),
                     tok.amount !== got ? '(' + (tok.amount - got) + ' to the mint fee)' : '');
@@ -1468,6 +1470,7 @@
           state: 'success',
           memo: 'ecash',
           hash: hash,
+          mint: at,
         });
         logAudit({
           hash: hash,
@@ -1522,7 +1525,7 @@
      * the entry becomes what really happened: the whole piece, gone. Either way
      * the three figures stay on it, which is what a person can send in a report
      * about a payment that looked wrong. */
-    changeSettled: function (hash, sats) {
+    changeSettled: function (hash, sats, opts) {
       var got = Number(sats) || 0;
       var rows = [];
       try { rows = (load(K.log, []) || []).filter(function (e) { return e && e.hash === hash; }); }
@@ -1530,6 +1533,14 @@
       if (!rows.length) return false;
       var one = rows[0];
       var gross = Number(one.grossSats) || Number(one.sats) || 0;
+      /* The payment itself sent back (`opts.refund`), on top of change that
+       * had already come: both are back. Written over the change, a payment
+       * of 312 for 310 whose 2 came back and whose 310 was then returned read
+       * as having cost 2, when it cost nothing (tests/crossings.js, by the
+       * books). Never more than went. */
+      if (got > 0 && opts && opts.refund && one.changeState === 'came back') {
+        got = Math.min(gross, got + (Number(one.changeSats) || 0));
+      }
       if (got > 0) {
         amendTx(hash, { changeSats: got, sats: Math.max(0, gross - got),
                         changeState: 'came back' });

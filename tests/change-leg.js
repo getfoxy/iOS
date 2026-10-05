@@ -21,7 +21,7 @@
  * until the link has already decided. So this models the link: both pages, the
  * real message order, and the two clocks that actually killed it.
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, rebook } = require('./harness');
 
 const MINT = 'https://m.test';
 let failed = 0;
@@ -259,6 +259,7 @@ async function run() {
       ok(wrong.ok === false && /not locked to a key this phone asked for/.test(wrong.why),
          'change locked to somebody else is refused', wrong.why);
       const plain = await t.rx.W.sendToken(5, { unit: 'sat' }).catch((e) => ({ why: e.message }));
+      rebook(t.rx); // the locked token above is change made with no payment behind it, so 5 sats left with no entry of their own
       const open = plain.token ? t.payer.W.checkChange(plain.token, 28) : { ok: null, why: plain.why };
       ok(open.ok === false && /not locked to a key this phone asked for/.test(open.why),
          'and so is change locked to nobody', open.why);
@@ -667,6 +668,7 @@ async function run() {
     written('req-lost-change', 90);
     // and older than a day: whatever was owed has been claimed or forgotten, and is left alone
     written('req-old-change', 90000);
+    rebook(rx); // the two payments above are written by hand with no mint, and the 300 of change was made for neither
     rx.W.repairOwedChange();
     await settle();
     const found = history(rx).filter((e) => e.hash === 'req-lost-change')[0] || {};

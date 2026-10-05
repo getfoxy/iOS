@@ -26,7 +26,7 @@
  *     entry turned from pending to failed rather than vanishing
  *   - locked ecash arriving offline still needs no card at all
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, rebook } = require('./harness');
 
 const MINT = 'https://m.test';
 let failed = 0;
@@ -466,6 +466,7 @@ async function run() {
          'change that never comes turns the entry into what it really cost',
          JSON.stringify(gone && { sats: gone.sats, state: gone.changeState }));
       t.payer.W.changeSettled(made.hash, 28);
+      rebook(t.payer);   // the entry is told by hand that 28 sats came back, and none were put in the pile
       const back = history(t.payer).filter((e) => e.hash === made.hash)[0];
       ok(back && back.sats === 100 && back.changeState === 'came back',
          'and change that comes back turns it into what it really cost',

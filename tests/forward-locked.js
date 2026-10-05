@@ -23,7 +23,7 @@
  * signer. The real-mint leg wants tools/live, and Docker was down when this was
  * written.
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, rebook } = require('./harness');
 
 const MINT = 'https://m.test';
 const OTHER_WORDS = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
@@ -299,6 +299,7 @@ async function run() {
     const pile = JSON.parse(A.storage.getItem(key) || '[]');
     const before = pile.reduce((n, p) => n + Number(p.amount), 0);
     A.storage.setItem(key, JSON.stringify(pile.concat(stray)));
+    rebook(A);   // a locked piece is put back into the pile by hand, with no entry, so the books start again from here
     const made = await A.W.sendToken(before, { unit: 'sat' }).then((r) => r, (e) => e);
     const out = made && made.token ? A.W.tokenInfo(made.token).proofs : [];
     ok(out.length > 0 && out.every((pr) => pr.secret.charAt(0) !== '['),

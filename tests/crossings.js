@@ -20,7 +20,7 @@
  *   - a payment the receiver refused sat behind a button on the payer's phone
  *     until somebody pressed it.
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, noBooks } = require('./harness');
 
 const HOME = 'https://home.test';
 const THEIR = 'https://their.test';
@@ -255,7 +255,16 @@ async function run() {
       const chk = payer.W.checkChange(token, payer.carried || 0);
       payer.changes.push({ ok: chk.ok, why: chk.why, sats: chk.sats });
       if (!chk.ok) { payer.W.tapChangeKept(false); return; }
-      try { payer.W.keepChange(token, chk.sats); if (payer.lastHash) payer.W.changeSettled(payer.lastHash, payer.W.changeNet(token)); payer.W.tapChangeKept(true); }
+      try {
+        payer.W.keepChange(token, chk.sats);
+        /* As the app tells them apart (15-paid-wake-keyboard.js): with a payment
+         * being carried and no change owed on it, what arrives is the payment
+         * coming back, on top of any change that already had. */
+        const row = history(payer).filter((e) => e.hash === payer.lastHash)[0] || {};
+        const refund = !!payer.carried && row.changeState !== 'owed';
+        if (payer.lastHash) payer.W.changeSettled(payer.lastHash, payer.W.changeNet(token), refund ? { refund: true } : undefined);
+        payer.W.tapChangeKept(true);
+      }
       catch (e) { payer.W.tapChangeKept(false); }
     });
     rx.told = [];
@@ -565,6 +574,8 @@ async function run() {
       if (hit) pile.push(hit);
     });
     p.storage.setItem(key, JSON.stringify(pile));
+    // the locked payments were written into the waiting store by hand with no arrival entries, and the pile was replaced
+    noBooks(p, 'its waiting payments and its pile are written by hand');
     const held = pile.reduce((n, pr) => n + Number(String(pr.amount)), 0);
     // one sat more than the locked payments hold: the pile adds that, and the fee on all of it
     const want = rowsSum + 1;

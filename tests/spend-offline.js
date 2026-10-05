@@ -19,7 +19,7 @@
  * down as handed on and takes them out of the unclaimed store, and a second
  * attempt has to find nothing.
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, noBooks } = require('./harness');
 
 const MINT = 'https://m.test';
 let failed = 0;
@@ -331,6 +331,70 @@ async function run() {
       String(await shop.W.balanceSats()));
     await shop.W.claimUnclaimed();
     ok(Object.keys(rows(shop)).length === 0, 'and nothing is left waiting', JSON.stringify(Object.keys(rows(shop))));
+    /* And its entry says what it was worth here: the 2 that went on. It was
+     * written as 1, net of the fee for claiming both pieces, and neither was
+     * ever claimed. */
+    const dustRow = JSON.parse(shop.storage.getItem('foxy.cashu.log') || '[]').filter((e) => e.hash === 'req-' + askDust.id)[0] || {};
+    ok(dustRow.sats === 2, 'and the payment it was left of is written as what was handed on, not net of a fee nobody paid', String(dustRow.sats));
+    // the 2 was handed on by hand above, with no entry of its own, so this page's books are not judged
+    noBooks(shop, 'a piece is handed on by hand, with no entry');
+  }
+
+  /* ---- a payment spent from, then claimed, at a mint that charges ----------
+   *
+   * A payment of 8 arrives as 10 in two pieces: the payer adds the sat a
+   * piece this mint takes for swapping them in, and the entry says 8. The 2
+   * is paid on while offline and the 8 is claimed after, for 7. So the
+   * payment was worth 9 here: the 2 that went on, which never paid its sat,
+   * and the 7. The claim has always written that; the piece too small to
+   * claim, above, did not, and this is the same sum where there is something
+   * left to claim. */
+  {
+    const dear = page({ feePpk: 1000,
+      words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' });
+    await dear.W.connect(MINT, null, null, { remember: true });
+    await dear.W.claim((await dear.W.invoice(2000, '')).hash);
+    const shop = page({ sharedMint: dear.mint, feePpk: 1000,
+      words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' });
+    await shop.W.connect(MINT, null, null, { remember: true });
+    await shop.W.primeLocks();
+    const ask = shop.W.decodeRequest(shop.W.paymentRequest(8, { purpose: 'receive' })) || {};
+    shop.deaf = true;
+    goOffline(shop.W);
+    await shop.W.connect(MINT, null, null, { remember: true });
+    const made = await dear.W.sendToken(8, { unit: 'sat', lockTo: ask.lockTo });
+    const info = shop.W.tokenInfo(made.token);
+    shop.W._requestPaid(JSON.stringify({
+      id: ask.id, mint: String(info.mint || '').replace(/\/+$/, ''), unit: 'sat',
+      proofs: info.proofs.map((pr) => Object.assign({ id: pr.id, amount: pr.amount, secret: pr.secret, C: pr.C },
+        pr.dleq ? { dleq: pr.dleq } : {})),
+    }), 'shop-part', 'tap');
+    await settle();
+    const came = info.proofs.map((pr) => Number(pr.amount)).sort((a, b) => a - b);
+    const entry = () => JSON.parse(shop.storage.getItem('foxy.cashu.log') || '[]').filter((e) => e.hash === 'req-' + ask.id)[0] || {};
+    ok(came.join('+') === '2+8' && entry().sats === 8,
+       'a payment of 8 waiting at a mint that charges a sat a piece is 10 in two pieces, written as 8', came.join('+') + ' written as ' + entry().sats);
+
+    // the 2 goes on, signed here, as the first payment's did above
+    const pieces = shop.W.tokenInfo((rows(shop)[ask.id] || {}).token || '');
+    const two = pieces.proofs.filter((pr) => Number(pr.amount) === 2);
+    const gave = await shop.W.forwardLocked(shop.window.CashuTS.getEncodedToken({
+      mint: String(pieces.mint || '').replace(/\/+$/, ''), unit: 'sat', proofs: two }))
+      .then((r) => r, (e) => ({ why: e && e.message }));
+    ok(gave.sats === 2, 'its 2 is paid on while offline', JSON.stringify(gave.why || gave.sats));
+
+    shop.deaf = false;
+    shop.W.setOffline(false);
+    shop.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    await shop.W.connect(MINT, null, null, { remember: true });
+    await shop.W.claimUnclaimed();
+    await settle();
+    const held = await shop.W.balanceSats();
+    ok(!rows(shop)[ask.id] && held === 7, 'and its 8 is claimed, for 7', String(held));
+    ok(entry().sats === 9,
+       'its entry is the 2 that was paid on and the 7 that was kept: the piece that went paid no fee', String(entry().sats));
+    // the 2 was handed on by hand, with no entry of its own, so this page's books are not judged
+    noBooks(shop, 'a piece is handed on by hand, with no entry');
   }
 
   console.log('\n' + (failed ? failed + ' spend-offline check(s) failed'
