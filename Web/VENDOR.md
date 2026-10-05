@@ -352,6 +352,10 @@ and hash.
 
 ## Fonts, images and icons
 
+None of these is covered by the repository's MIT licence, which is for the
+code and the documents (`README.md`, *Licence*). Each keeps the licence the
+table gives it, and one with no licence recorded is licensed by nothing here.
+
 What each shipped font, icon and image is, where it came from, and under what
 licence. It was written from the files themselves (each font's `name` table,
 read with fontTools; each image's chunks and metadata) and from the
