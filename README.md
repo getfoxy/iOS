@@ -172,7 +172,9 @@ what a seed restores, what it does not), `SEED-HANDLING.md`, `Web/VENDOR.md`.
   learn the phone is starting Snowflake. They never see a mint, an amount or a
   payment.
 - **Coming back from the background sets up a private connection again.** Tor
-  goes off the network as Foxy leaves. On return it is set up the way launch
+  goes off the network as Foxy leaves, once what is with a mint has come back:
+  a payment is waited for up to twenty seconds, anything else up to three, and
+  from then nothing new is sent. On return it is set up the way launch
   sets it up, behind the same screen, and the home screen shows once the
   balance has loaded. Nothing is tried on the connection from before. The PIN
   lock comes back on a real return from the background.
@@ -260,6 +262,7 @@ Forked from a fiat-and-bitcoin prototype and cut down to ecash only.
 
 - `REVIEW.md`: a reviewer's front door: reading order, claims with their tests, glossary.
 - `AUDIT.md`: a map for verifying: trust boundaries, how the shipped files are made, CI, what is not proven.
+- `ARCHITECTURE.md`: one page: the two layers, why the wallet is a web page, how the build works.
 - `THREAT-MODEL.md`: what Foxy defends against and what it does not.
 - `MONEY.md`: every path where value moves, and what a kill at each step costs.
 - `SEED-HANDLING.md`: the seed, the counters and restore.
@@ -268,6 +271,7 @@ Forked from a fiat-and-bitcoin prototype and cut down to ecash only.
 - `CASHU-CONFORMANCE.md`: each NUT, where it is implemented and tested, and where Foxy differs.
 - `NETWORK-TEST.md`: how to watch what leaves the phone, and where each call originates.
 - `TAP-TO-PAY.md`: ecash handed between two phones over Bluetooth: the design and its limits.
+- `TAP-SPEC.md`: the tap and offline rules as a short spec, with what it claims and what is known to be weak.
 - `UWB-TAP.md`: a design for gating tap to pay on ultra-wideband ranging; not built.
 - `DEVICE-TESTS.md`: what only a real iPhone can prove, and how.
 - `TODO-LATER.md`: work decided on and deferred.

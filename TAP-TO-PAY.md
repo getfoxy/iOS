@@ -78,12 +78,14 @@ failed hand-over costs the time it took to try and nothing else.
 
 ## How it works
 
-**Version 2.** The v1 protocol — a fixed service, three characteristics, and a
-code over the offer and a nonce — was replaced by the commitment handshake
-below (`TapCrypto.swift`, `TapSession.swift`). `TapProtocol.swift` still holds
-v1's service and characteristic UUIDs and its code function; the app uses none
-of them (only a test calls the code function). Its size limits are still in
-use.
+**Version 3** (`TapCrypto.version`; see *Versions*). The v1 protocol — a fixed
+service, three characteristics, and a code over the offer and a nonce — was
+replaced by the commitment handshake below (`TapCrypto.swift`,
+`TapSession.swift`); version 3 is that handshake with a version byte in front
+of its first two messages, and every sealed message bound to its own kind.
+`TapProtocol.swift` still holds v1's service and characteristic UUIDs and its
+code function; the app uses none of them (only a test calls the code
+function). Its size limits are still in use.
 
 The receiver is a Bluetooth *peripheral* and advertises while its invoice
 screen is armed: by itself under AUTO TAP TO PAY, on a press of TAP with it
@@ -127,12 +129,27 @@ the code and the amount still follow. Signal
 strength decides which phone to talk to; it proves nothing about who owns it,
 and the code does that. See *Tuning* for why each number is what it is.
 
+**Two receivers side by side.** Before any tap the payer opens a quiet link to
+the strongest receiver it hears and says "near" down it, which is what puts
+CONNECT TO PAY on that receiver's screen (*CONNECT TO PAY and the near doors*).
+That link was opened once and never looked at again. With two tills on a
+counter it stayed with whichever was heard first: that till went on showing
+the card while the phone was held to the other, which showed nothing, and it
+worked only when the first till's invoice was closed. The link now moves to
+another receiver that has plainly been the nearer one: near enough to be told
+about, heard for a full second, and stronger by more than the 8 dB two phones
+side by side differ by (`TapProximity.rival`). The first till's card comes
+down as the second's goes up. Not more than once in three seconds, and two
+tills that read alike keep the link where it is; whichever is touched is the
+one that is paid. `TapProtocolTests` (`testAnotherReceiverPlainlyNearerIsARival`
+and the three after it); `DEVICE-TESTS.md` §22i.
+
 **The six messages.** Nothing is sealed until M4, because there is nothing to
 seal until both sides hold a key. M1 to M3 are public by design: two public
 keys, two nonces and a hash.
 
-    M1  payer → receiver   a promise about a key not yet shown
-    M2  receiver → payer   the receiver's key and nonce
+    M1  payer → receiver   its version, and a promise about a key not yet shown
+    M2  receiver → payer   its version, and the receiver's key and nonce
     M3  payer → receiver   the key it promised; the receiver checks it
     M4  receiver → payer   the offer, sealed
     M5  payer → receiver   the payment, sealed
@@ -165,7 +182,13 @@ as far as 48 KB; a larger one goes in parts (*Large payments*).
 
 and the link keys come from HKDF-SHA256 over the same shared secret, salted
 with the transcript — one key each way, sealed with ChaChaPoly under counter
-nonces, with the transcript as associated data.
+nonces. The associated data is the transcript and the message's own kind: the
+kind byte travels in the clear in front of the sealed bytes, and bound in like
+this a message relabelled on the air is one that will not open. (It was not
+bound, so a payer's "say that again" could be relabelled as "I kept the
+change" and the receiver would have believed it; `TapSessionTests`,
+`testASealedMessageRelabelledOnTheAirStopsTheLink`.) The transcript holds the
+version both sides said, so neither can be talked down to another.
 
 The commitment is what the four digits rest on. The payer hashes its public
 key with a nonce and sends only that hash (M1); it reveals the key itself
@@ -230,6 +253,41 @@ which is the single largest caveat in this document and is recorded in
   UUIDs say.
 - The first time a receive screen arms — or a payer's phone first listens — iOS
   asks for Bluetooth permission.
+
+## Versions
+
+The first byte of M1 and of M2, in the clear, is the version of the wire the
+sender speaks. It is read before anything else, whatever follows it, so the
+one thing every version can do with a message it cannot read is learn which
+version sent it.
+
+- **The same version**: the handshake goes on.
+- **Another version**: the link is let go, and the phone says so — UPDATE FOXY
+  TO TAP, "The other phone has a different version of Foxy, so the two cannot
+  tap", with the code on the screen as the way through for now. A receiver
+  answers the payer first with a hello that holds its own version and nothing
+  else, so the payer's phone can say the same. The payer then leaves that
+  phone alone for ten seconds, as it does one that is not a Foxy.
+- **A Foxy from before the version byte** (version 2) sends a promise with
+  nothing in front of it. A receiver tells it apart by its size and raises the
+  card. The other way round nothing can be said: the older receiver reads a
+  newer promise as one of the wrong size and stops, and the newer payer sees
+  only a phone that went quiet.
+
+The labels in the hashes still say "v2": they name the handshake's shape,
+which has not changed. The doors' labels must never change. They are how any
+two Foxys find each other, whatever they speak, and a phone that cannot be
+found cannot be told to update.
+
+What a change of version costs: two phones on different versions cannot tap
+until both are updated. They can still pay each other by scanning.
+
+Tests: `TapSessionTests` (`testEachSideSaysItsVersionFirst`,
+`testAPhoneFromBeforeTheVersionIsToldApart`,
+`testAnotherVersionIsAnsweredWithThisOne`), `TapCryptoTests`
+(`testTheVersionIsPartOfWhatWasAgreed`,
+`testAMessageSealedAsOneKindDoesNotOpenAsAnother`), and `tests/tap-nearby.js`
+for the card.
 
 ## Tuning
 

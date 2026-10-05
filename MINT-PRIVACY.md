@@ -56,6 +56,34 @@ payment's quote, swap and melt (the inputs). Test: "each job at a mint leaves
 on its own circuit, and connecting asks the mint about no proof and no sent
 token".
 
+**N1a. A question asked twice — a small, chosen cost.** A circuit sometimes
+goes nowhere, and a request on it sits until its clock runs out: a minute for
+an invoice, on a phone standing beside one the same mint answered in two
+seconds. An invoice and a fee quote are asked again on a second circuit after
+five seconds of nothing, and the first answer is used (`askedTwice`); a proof
+check has done the same after six. What the mint can join by it: the two fee
+quotes name the same Lightning invoice, so they are plainly one payment's, as
+that payment's quote, swap and melt already were. The two invoice requests
+share nothing but their amount and their second: each carries a one-time
+NUT-20 key of its own. A payment whose quote came by the second circuit goes
+on by it, so it is still one circuit for the money. A swap or a melt is never
+asked twice. Tests: "an invoice the mint is slow to give is asked for again,
+and the first to answer is the invoice" and the four after it.
+
+**N1b. A circuit kept ready — a small, chosen cost.** A circuit takes a second
+or three to build after Foxy comes to the front, and one that goes nowhere
+costs a minute. One is opened ahead of time, by asking the mint for its
+keysets on it, and kept only once the mint has answered (`warmSpare`). The
+next job a person is waiting for takes it: an invoice, a fee quote, a payment,
+a token's swap (`needNow`). It is handed out once and is then that job's
+alone, so it is still one circuit to a job; what the mint sees on it is a
+question about its keysets and then the job, which is how a job's first
+connect looks anyway. Sweeps, checks and top-ups do not take it. It is let go
+after five minutes, when the mint changes, and when Foxy has been away. The
+cost is one more public question to the mint each time Foxy is opened. Tests:
+"a circuit is made ready ahead of time, and the next invoice leaves on it" and
+the three after it.
+
 **N2. TLS session resumption — not a vector.** Checked locally: a new
 URLSession offers no session from another (TLS 1.2 and 1.3), and Foxy makes a
 new session for every request (Route.startOnce).

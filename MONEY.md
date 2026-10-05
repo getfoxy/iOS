@@ -42,7 +42,7 @@ and the counters are the phone's, kept by the native side (the keychain and
 | `foxy.req.lockkeys` | the P2PK key this phone put in each request — what opens the ecash above |
 | `foxy.split.pending` | a bill being collected from several people |
 | `foxy.cashu.log` | local history; the mint keeps none |
-| `foxy.cashu.audit` | what the last 30 payments consumed and produced |
+| `foxy.cashu.audit` | what payments consumed and produced: the last 100 in full, 400 more as receipts with nothing spendable in them |
 | `foxy.txmeta` | notes on payments — and, for an ecash send, the token itself |
 
 Every write is `localStorage.setItem`, synchronous from the page's side.
@@ -931,9 +931,14 @@ in front of payments and a receiver's answers.
   below target, six at a time. Nothing runs in the foreground: `tidyChangeNow`
   only notes that one is owed, `putAway(true)` starts it, no new swap starts
   after twelve seconds away, and the phone keeps Tor on the network for
-  twenty (`FoxyWebView.appEnteredBackground`, `moneyInFlight`). There is no
+  twenty (`FoxyWebView.appEnteredBackground`, `moneyInFlight`). Anything else
+  that is out, a fee quote or a check of a piece, is waited for three seconds
+  more, and from then no request leaves until Foxy is back (`Route.leaving`,
+  `Route.shutDoor`): a request the page starts in that moment is told it was
+  not sent, which is what it is told with no Tor at all. There is no
   waiting screen; one was tried and taken out. Tests:
-  `tests/watch-rearm.js`, `tests/kept-token.js`.
+  `tests/watch-rearm.js`, `tests/kept-token.js`, `FoxyTests/RouteTests.swift`
+  (putting Foxy away).
 - **A swap still out as the window closes keeps its piece spendable.** At
   eighteen seconds `topUpClosing` asks the mint (`checkstate`) whether the
   input has been taken; if not, the record is marked `freeInputs` and

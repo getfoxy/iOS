@@ -1398,6 +1398,91 @@ Two phones on **different** mints.
    wait half a minute with a connection. **Pass:** the card does not come
    again and again; it is said once.
 
+#### 22h. Two versions of the tap
+
+The wire has a version (TAP-TO-PAY.md, *Versions*). Two phones on the same
+build first, then one of them on an older build.
+
+1. **The same build on both.** Tap as usual, same mint, then two mints.
+   **Pass:** the four digits match and the payment goes through, as before.
+   This is the check that the version byte and the bound message kind broke
+   nothing.
+2. **Change, and a payer put away.** An offline payer pays over, so change
+   comes back; and a payer put in the background straight after SEND, then
+   brought back. **Pass:** the change is kept, and the payer hears the result
+   again. Both use messages that are now bound to their kind.
+3. **An older payer.** The receiver on this build, the payer on a build from
+   before the version byte. Receiver asks, touch. **Pass:** the receiver shows
+   UPDATE FOXY TO TAP, with "For now, they can scan the code on this screen".
+   Nothing is paid. Scanning the code pays.
+4. **An older receiver.** The other way round. **Pass:** nothing is paid and
+   nothing is said on either phone (the older one cannot read the newer
+   promise). The payer's connecting screen goes away by itself.
+
+#### 22i. Two receivers side by side
+
+Two phones each showing an invoice, a hand's width apart, and a third to pay.
+
+1. Bring the payer near the first, then move it to the second without
+   touching either. **Pass:** CONNECT TO PAY comes down on the first and goes
+   up on the second within a couple of seconds. It does not stay on the first.
+2. Touch the second. **Pass:** the four digits appear on the second and the
+   payer, and the second is the one paid. The first is still on its invoice.
+3. Hold the payer between the two, the same distance from each. **Pass:** the
+   card stays on one of them and does not jump back and forth.
+4. Pay the first as well. **Pass:** paid as usual.
+
+#### 22j. What this build changed besides the tap
+
+1. **The PIN pad.** Type a PIN quickly with two thumbs, and with taps that
+   land between two keys. **Pass:** every tap registers once, and each key
+   turns orange while it is down.
+2. **The first invoice after coming back.** Put Foxy away for a minute, open
+   it, RECEIVE, an amount, NEXT. **Pass:** the code is up in about two
+   seconds. The diary says "a circuit to … is ready for what comes next"
+   after the return, and the invoice's request leaves on that circuit.
+3. **A slow circuit.** Hard to cause on purpose. In a diary where an invoice
+   or a fee quote took more than five seconds: **Pass:** "has not answered in
+   5s; asking again on another circuit" is there, and the screen did not wait
+   a minute.
+4. **Backing out early.** RECEIVE, an amount, NEXT, and BACK within a second.
+   Then MENU, the mint list, pick another mint. **Pass:** it switches; it
+   does not say to wait for a payment to finish.
+5. **The mint list.** With more mints than fit, the list scrolls to ADD MINT
+   BY URL and ADD MINT BY QR.
+6. **A receipt.** Pay another Foxy by tap at the same mint (a locked
+   payment). Open the payment in history a few seconds later. **Pass:**
+   RECEIPT says it was taken by the key it was locked to; COPY RECEIPT copies
+   it; DELETE removes it and it does not come back.
+7. **Proof of payment.** Pay a Lightning invoice at another mint. **Pass:**
+   the payment's screen has PROOF OF PAYMENT, 64 characters, and tapping it
+   copies. Receive over Lightning: its screen has PAYMENT HASH.
+8. **An invoice on screen.** RECEIVE, an amount, NEXT, and with the code up
+   go to the mint list and pick another mint. **Pass:** it switches. Pay the
+   invoice from another wallet afterwards: the sats arrive at the mint the
+   invoice was made at.
+
+#### 22k. Putting Foxy away while it is asking a mint
+
+Tor leaves the network when Foxy is put away. A request cut at that moment,
+while Tor was still building its circuit, was counted against the entry relay,
+and a phone whose relays had been marked down that way took many seconds for
+an invoice. Debug build, diary pulled afterwards.
+
+1. SEND, paste a Lightning invoice, and go to the home screen the moment the
+   fee is being asked for. Come back after ten seconds. Do it five times.
+   **Pass:** the diary has `staying on the network for … request(s) still
+   out, 3s at most` and no `never left (the proxy refused the stream)`
+   between a putting-away and the return after it.
+2. In the same diary compare the entry relays `going to the background` with
+   those at the next return. **Pass:** none goes from up to down across a
+   trip.
+3. Pay a tap and pocket the phone at once. **Pass:** as before: `staying on
+   the network for … money request(s)`, and the payment is whole on return.
+4. Put Foxy away and bring it straight back, ten times, quickly. **Pass:**
+   every return connects; RECEIVE makes an invoice after each. Nothing says
+   Foxy is not connected to Tor once the home screen is up.
+
 ---
 
 ## Getting a log off somebody else's phone
@@ -1433,4 +1518,4 @@ been used on a phone. Update the table when a section is run.
 | Run on a device, passed | §1, §5a, §5f, §5g, §5h, §5i, §14a, §14b, §21a (all traffic is Tor; the control run with CONTINUE UNPROTECTED is not done), §22b |
 | Run on a device, in part | §4 (each transport connects; a payment through each is not run), §5b (long returns reconnect, including the recovery from a reclaimed control listener; the 30 minute return on cellular with the phone locked is not recorded), §14c (a pasted phrase stayed on the clipboard; fixed in code, not re-run), §17 (the card and the token work and three faults it found are fixed; run it again) |
 | Simulator only | §8, §10, §11, §12 (the keychain test, not 12b to 12d), §16, §19 (steps 1, 3 and 4), §20 (steps 1 and 4), §21b (the mechanism; the 4-to-5-second claim is not tested), §21c, §21e (steps 1 and 2), §21f (step 1), §21g (steps 1 and 2) |
-| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g |
+| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k |

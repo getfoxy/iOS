@@ -129,6 +129,14 @@ others.
 | 64 | A Lightning address or LNURL is paid only when the invoice it resolves to is for exactly the amount asked, to the millisat (`msatOf`), and for the description it sent (LUD-06). Compared in rounded sats, an address server could return up to half a sat more than asked and be paid | `16-sending.js:payLnurl`, `20-helpers.js:msatOf` | `tests/run.js` "a lightning address invoice must match the amount asked for to the millisat" |
 | 65 | A receiver put away with a tap payment in hand still answers it, and a payer back in front waits for that answer instead of reading a refused question as the payment failing | `TAP-TO-PAY.md`, `FoxyBridge+Delivery.swift:closeInboxForBackground`, `FoxyBridge+Tap.swift` (`tapAnswerKeys`), `TapLink.swift:askAgain` | `tools/smoke.py` check 44; not yet run on two phones |
 | 66 | Ecash this phone has already swapped in, offered to it again, is said to be already here, and is not taken twice; what is remembered of it holds no secret | `03-seed-counters-logs.js:noteTaken`/`mineIfTaken`, `11-cards.js:claimFailed` | `tests/crossings.js` 9, `tests/cards-logic.js` |
+| 67 | A sealed tap message is bound to the kind it was sealed as, so one relabelled on the air does not open; and both phones say the version of the wire they speak before anything else, so two that differ tell the person instead of failing silently | `TAP-TO-PAY.md` *Versions*, `TapCrypto.swift:seal`/`open`/`version`, `TapSession.swift` (`otherVersion`), `26d-tap.js:tapVersionCard` | `TapCryptoTests`, `TapSessionTests`, `tests/tap-nearby.js` |
+| 68 | An invoice and a fee quote are asked again on a second circuit after five seconds of nothing, and the first answer is used; a swap or a melt is never asked twice, and a payment goes on by the circuit its quote came by | `MINT-PRIVACY.md` N1a, `00-header-and-mint-errors.js:askedTwice` | `tests/run.js` "an invoice the mint is slow to give is asked for again…" and the four after it |
+| 69 | One circuit is opened ahead of time and kept only once the mint has answered on it; the next job a person waits for takes it, it is handed out once, and work nobody waits on never takes it | `MINT-PRIVACY.md` N1b, `03-seed-counters-logs.js:warmSpare`/`needNow` | `tests/run.js` "a circuit is made ready ahead of time…" and the three after it |
+| 70 | A Lightning send keeps the preimage the mint gave and a Lightning receive its invoice's payment hash; every send keeps the public values of the pieces that left; the last 100 payments are on record in full and 400 more as receipts that hold no secret | `STORAGE.md` (`foxy.cashu.log`, `foxy.cashu.audit`), `03-seed-counters-logs.js:logAudit`/`shapeAudit`, `00-header-and-mint-errors.js:preimageOf`, `05-paying-this-mint.js:invoicePaymentHash` | `tests/run.js` "a Lightning payment keeps the preimage…" and the three after it |
+| 71 | A payment locked to one key keeps its pieces, and once the mint says they are spent, the signature they were spent with, checked against each piece before it is believed; the person can delete it | `20-helpers.js:lockedReceipt`/`forgetReceipt`, `26-render-history-and-contacts.js` (RECEIPT) | `tests/run.js` "a locked payment keeps its pieces…", snapshot "txDetail, a locked payment with its receipt" |
+| 72 | The PIN pad takes a touch anywhere in a key's cell, the moment it lands, once, and shows it | `10-pin.js:pinOverlay` | `tests/pin-pad.js` |
+| 73 | Tor leaves the network only once every request is back, a payment waited for twenty seconds and anything else three; from then nothing new leaves, and the door opens again by itself | `Route.swift:leaving`/`shutDoor`, `FoxyWebView.swift:appEnteredBackground` | `FoxyTests/RouteTests.swift` (putting Foxy away); on a phone `DEVICE-TESTS.md` §22k |
+| 74 | An invoice nobody has paid does not stop a switch of mints: it is let go, stays on file and is claimed when it is paid; a swap or payment under way still does | `09-melt-paste-switch.js:refuseSwitchWhileBusy` | `tests/switch-guard.js` |
 
 Rows 15 and 16 are the ones to spend time on: they are the weakest proofs of
 the strongest claims. Row 12 was one of them until §22b was run.
@@ -171,7 +179,9 @@ each here.
 
 `THREAT-MODEL.md` (what is defended against), `MONEY.md` (how money moves),
 `SEED-HANDLING.md`, `STORAGE.md`, `CASHU-CONFORMANCE.md` (against the NUTs),
-`MINT-PRIVACY.md` (what a mint learns), `TAP-TO-PAY.md`, `TOOLCHAIN.md`,
+`MINT-PRIVACY.md` (what a mint learns), `TAP-TO-PAY.md`, `TAP-SPEC.md` (the
+tap and offline rules, short, written to be attacked), `ARCHITECTURE.md` (one
+page on the two layers and the build), `TOOLCHAIN.md`,
 `DEVICE-TESTS.md` (what only a phone can prove), `AUDIT.md` (a map of where to
 look and how to check each claim). `build/README.md` says how the page is
 built.

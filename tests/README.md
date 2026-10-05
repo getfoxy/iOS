@@ -165,7 +165,7 @@ a check that quietly stops checking reads like a passing one. The proof box and
 the lock are still asserted there. Removing the lock's serialisation makes it
 fail, which is how it is known to work.
 
-**`run.js`** is the suite: 212 tests, among them the one-time move of an older
+**`run.js`** is the suite: 234 tests, among them the one-time move of an older
 install onto the phone (words migrated, the same, different, refused and sent
 again, past the phone's window; counters sent once and never written after;
 a fresh install with nothing to move), a cancelled Face ID followed by a launch
@@ -192,6 +192,29 @@ and its render functions, against `types/app.d.ts`, with `noImplicitAny` and
 turned autocorrect on and a tap that threw, which **`type-check-finds.js`** keeps
 fixed.
 
+## Whether the tests ask enough
+
+A suite that passes says the code does what the tests ask, not that they ask
+enough. `tools/mutate.js` makes one small change to `Web/foxy-wallet.js` at a
+time (a `<` to `<=`, an `&&` to `||`, a condition to `true`, a block emptied),
+runs the wallet's suites against it in a copy of the tree, and writes down
+whether any of them failed. A change nothing notices is a gap in the tests or
+code that does nothing.
+
+    node tools/mutate.js --baseline                      # how long each suite takes, and which fail unchanged
+    node tools/mutate.js --sample 100 --only 'paying|sending|receiving'
+    node tools/mutate.js --ids FILE --suites run,crossings   # the same changes again, after a test was written
+
+It is not part of `tools/check-all.sh`: a hundred changes take the better part
+of an hour. The first sample of the parts that move money made 474 changes,
+of which 232 were caught, 237 were not and 5 could not be run. The gaps that
+mattered were closed one at a time, each new test shown to do its job by
+making the same change again (`--ids`): 69 changes nothing had noticed are
+caught now, and 6 were shown to make no difference. A named suite that fails
+with nothing changed stops the run, since it would call every change caught.
+An id is an offset into the wallet as it was, so a list of them is good only
+until the wallet is next edited.
+
 ## What these cannot do
 
 **The mint is a stub.** It answers; it does not decide. Fee arithmetic, the
@@ -208,10 +231,10 @@ simulator in `tools/nativetests` (`swift test --package-path
 tools/nativetests`, run by `tools/check-all.sh`), the simulator scripts in
 `tools/sim`, and the phone checklist in `DEVICE-TESTS.md`.
 
-**Little about the screen.** `build/foxy-app.js` is a 17,660-line class that
+**Little about the screen.** `build/foxy-app.js` is a 17,814-line class that
 cannot be instantiated outside its runtime. `render-parity.js` renders every
 screen and popup of the real class, as a static preview with no wallet;
-`render-snapshots.js` renders 206 views — those, each screen in representative
+`render-snapshots.js` renders 211 views — those, each screen in representative
 states against a stand-in wallet, and the cards and dialogs built in plain DOM —
 and compares each view's markup byte for byte, and a hash of what `renderVals()`
 returned, with `snapshots/render/` (`--update` rewrites them after an intended
