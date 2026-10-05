@@ -1,0 +1,190 @@
+<!-- history, done, pending and failed -->
+<div id="dc-root">
+<div class="sc-host" data-sc-name="index">
+<div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
+<div data-foxy-app="1" data-foxy-theme="true" style="width: 100%; height: 100%; position: relative;">
+<div data-foxy-theme="dark" style="height: 100%; position: relative; box-sizing: border-box; transition: padding .16s ease; --acc-set: #E8622A; --acc-lt-set: #F79A3C; --acc-dk-set: #C24A1B; --acc-rgb-set: 232,98,42; padding-bottom: 0px;">
+<input type="text" tabindex="-1" aria-hidden="true" autocomplete="off" autocapitalize="off" spellcheck="false" style="position: fixed; left: 0px; bottom: 0px; width: 1px; height: 1px; padding: 0px; border: 0px; outline: none; opacity: 0; font-size: 16px; background: transparent; color: transparent; caret-color: transparent; pointer-events: none; z-index: -1;">
+<div style="height: 100%; position: relative; display: flex; flex-direction: column; background-image: repeating-linear-gradient(135deg,rgba(var(--ink-rgb),.045) 0 10px,rgba(var(--ink-rgb),0) 10px 24px); font-family: SatSymbol, Figtree, system-ui, sans-serif; animation: foxyIn .22s ease;">
+<div style="background: var(--bg); padding: 56px 22px 18px; display: flex; flex-direction: row; align-items: center; gap: 12px; flex: 0 0 auto;">
+<div style="flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; border-top: 1px solid var(--lift-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scpa">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M19.5 12H5m0 0 6-6m-6 6 6 6">
+</path>
+</svg>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; align-items: center;">
+<div style="font-size: 22px; font-weight: 800; line-height: 1.25; letter-spacing: -0.022em; color: var(--ink); text-align: center;">HISTORY</div>
+</div>
+<div style="flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; border-top: 1px solid var(--lift-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp0">
+<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M4.5 6.5h15M9.5 6.5V4.8h5v1.7">
+</path>
+<path d="M6.5 6.5 7.4 20h9.2l.9-13.5">
+</path>
+<path d="M10.2 10v6.4M13.8 10v6.4">
+</path>
+</svg>
+</div>
+</div>
+<div style="flex: 0 0 auto; background: var(--bg); padding: 0px 20px 14px;">
+<div style="display: flex; gap: 4px; padding: 4px; border-radius: 24px; background: var(--surface); border: 1px solid rgba(var(--ink-rgb),.1); box-shadow: inset 0 1.5px 0 rgba(0,0,0,.2);">
+<div style="flex: 1 1 0%; height: 40px; border-radius: 20px; background: var(--acc); display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: 0.05em; color: rgb(255, 255, 255); cursor: pointer; transition: background .16s ease;" class="scp4">ALL</div>
+<div style="flex: 1 1 0%; height: 40px; border-radius: 20px; background: transparent; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: 0.05em; color: rgba(var(--ink-rgb),.5); cursor: pointer; transition: background .16s ease;" class="scp4">RECEIVED</div>
+<div style="flex: 1 1 0%; height: 40px; border-radius: 20px; background: transparent; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: 0.05em; color: rgba(var(--ink-rgb),.5); cursor: pointer; transition: background .16s ease;" class="scp4">SENT</div>
+</div>
+</div>
+<div style="flex: 1 1 0%; min-height: 0px; overflow-y: auto; scrollbar-width: none; padding: 14px 16px 31px; display: flex; flex-direction: column; gap: 14px; position: relative;">
+<div style="padding: 12px 16px; border-radius: 18px; background: var(--surface); border: 1.5px solid rgba(var(--ink-rgb),.12); box-sizing: border-box; display: flex; flex-direction: column; gap: 4px;">
+<div style="font-size: 15px; font-weight: 800; letter-spacing: 0.07em; color: var(--btc-ink);">
+<span class="sc-interp">LAST 500 PAYMENTS</span>
+</div>
+<div style="font-size: 16px; font-weight: 500; line-height: 1.35; color: rgba(var(--ink-rgb),.6); text-wrap: pretty;">
+<span class="sc-interp">Only the latest five hundred are kept, so the balance cannot be checked back to the start.</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 18px; font-weight: 700; letter-spacing: 0.07em; color: rgba(var(--ink-rgb),.85); padding: 0px 6px;">
+<span class="sc-interp">EARLIER</span>
+</div>
+<div style="padding: 12px 16px 12px 14px; border-radius: 20px; background: var(--surface); border: 1.5px solid rgba(var(--ok-rgb),.7); animation: none; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .12s ease,box-shadow .12s ease;" class="scph">
+<div style="width: 38px; height: 38px; border-radius: 13px; flex: 0 0 auto; background: var(--ok); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: var(--ink); box-shadow: inset 0 -2px 0 rgba(var(--bg-rgb),.12);">
+<span class="sc-interp">A</span>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">pizza</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ok-ink); white-space: nowrap;">
+<span class="sc-interp">+$ 1.34</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">10:42</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.4); white-space: nowrap;">
+<span class="sc-interp">₿ 2,100</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">
+</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; color: rgba(var(--ink-rgb),.3); white-space: nowrap;">
+<span class="sc-interp">BAL $ 160.00 · ₿ 250,000</span>
+</div>
+</div>
+</div>
+</div>
+<div style="padding: 12px 16px 12px 14px; border-radius: 20px; background: var(--surface); border: 1.5px solid rgba(var(--ok-rgb),.7); animation: none; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .12s ease,box-shadow .12s ease;" class="scph">
+<div style="width: 38px; height: 38px; border-radius: 13px; flex: 0 0 auto; background: var(--ok); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: var(--ink); box-shadow: inset 0 -2px 0 rgba(var(--bg-rgb),.12);">
+<span class="sc-interp">E</span>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">ecash</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--bad); white-space: nowrap;">
+<span class="sc-interp">−$ 0.01</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">Aug 29</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.4); white-space: nowrap;">
+<span class="sc-interp">₿ 21</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">
+</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; color: rgba(var(--ink-rgb),.3); white-space: nowrap;">
+<span class="sc-interp">BAL $ 158.66 · ₿ 247,900</span>
+</div>
+</div>
+</div>
+</div>
+<div style="padding: 12px 16px 12px 14px; border-radius: 20px; background: var(--surface); border: 1.5px solid var(--btc-ink); animation: none; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .12s ease,box-shadow .12s ease;" class="scph">
+<div style="width: 38px; height: 38px; border-radius: 13px; flex: 0 0 auto; background: var(--btc-ink); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: var(--ink); box-shadow: inset 0 -2px 0 rgba(var(--bg-rgb),.12);">
+<span class="sc-interp">B</span>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">bob@example.com</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--bad); white-space: nowrap;">
+<span class="sc-interp">−$ 3.21</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 600; color: var(--btc-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">Sent · not yet claimed</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.4); white-space: nowrap;">
+<span class="sc-interp">₿ 5,012</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">Yesterday</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; color: rgba(var(--ink-rgb),.3); white-space: nowrap;">
+<span class="sc-interp">BAL $ 158.67 · ₿ 247,921</span>
+</div>
+</div>
+</div>
+</div>
+<div style="padding: 12px 16px 12px 14px; border-radius: 20px; background: var(--surface); border: 1.5px solid rgba(var(--bad-rgb),.7); animation: none; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .12s ease,box-shadow .12s ease;" class="scph">
+<div style="width: 38px; height: 38px; border-radius: 13px; flex: 0 0 auto; background: var(--bad); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: var(--ink); box-shadow: inset 0 -2px 0 rgba(var(--bg-rgb),.12);">
+<span class="sc-interp">D</span>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">dave@example.com</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--bad); white-space: nowrap;">
+<span class="sc-interp">−$ 0.19</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 600; color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">Failed</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.4); white-space: nowrap;">
+<span class="sc-interp">₿ 300</span>
+</div>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<div style="flex: 1 1 0%; min-width: 0px; font-size: 18px; font-weight: 500; color: rgba(var(--ink-rgb),.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+<span class="sc-interp">Aug 30</span>
+</div>
+<div style="flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; color: rgba(var(--ink-rgb),.3); white-space: nowrap;">
+<span class="sc-interp">BAL $ 161.88 · ₿ 252,933</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div style="position: absolute; left: 0px; right: 0px; top: 0px; height: 56px; display: flex; align-items: center; justify-content: center; pointer-events: none; font-family: SatSymbol, Sora, system-ui, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.55); opacity: 0; transition: opacity .15s ease;">PULL TO REFRESH</div>
+</div>
+</div>
+<div style="position: absolute; left: 0px; right: 0px; top: 0px; z-index: 70; display: flex; justify-content: center; pointer-events: none; transform: translateY(-100%); opacity: 0; transition: transform .26s cubic-bezier(.2,.9,.25,1),opacity .2s ease;">
+<div style="width: 100%; height: 108px; background: var(--acc); padding: 56px 24px 0px; box-sizing: border-box; box-shadow: 0 8px 26px rgba(0,0,0,.34); font-family: SatSymbol, Sora, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 0.02em; color: rgb(255, 255, 255); text-align: center; display: flex; align-items: center; justify-content: center;">
+<span class="sc-interp">
+</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>

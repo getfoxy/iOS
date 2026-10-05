@@ -1,0 +1,40 @@
+#!/bin/sh
+# pre-push — the checks, before anything leaves this machine.
+#
+# Foxy's checks used to run on GitHub Actions on every push (.github/workflows/
+# checks.yml). A check nobody runs is a claim nobody has tested — so the same
+# suite runs here instead, and a push with a failing tree does not happen.
+#
+# Install: sh tools/install-hooks.sh
+# Skip once, deliberately: git push --no-verify
+# Also run the Swift tests (needs a simulator build, minutes): FOXY_PUSH_SWIFT=1 git push
+#
+# What runs is tools/check-all.sh: the joined sources against their parts, the
+# shipped files against a clean regeneration, smoke, both type checks, every
+# wallet and app suite, the render snapshots and the spec vectors — about a
+# minute, no network. With swift on the machine it also runs the native seed
+# tests. It writes no tracked file.
+set -e
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+printf '\n[pre-push] running tools/check-all.sh\n'
+if ! sh tools/check-all.sh > /tmp/foxy-pre-push.log 2>&1; then
+    tail -30 /tmp/foxy-pre-push.log
+    printf '\n[pre-push] the checks failed — nothing pushed. Full output: /tmp/foxy-pre-push.log\n'
+    printf '[pre-push] to push anyway, deliberately: git push --no-verify\n\n'
+    exit 1
+fi
+tail -1 /tmp/foxy-pre-push.log
+
+if [ "${FOXY_PUSH_SWIFT:-}" = "1" ]; then
+    printf '[pre-push] running tools/unit-tests.sh (simulator build)\n'
+    if ! sh tools/unit-tests.sh > /tmp/foxy-pre-push-swift.log 2>&1; then
+        tail -20 /tmp/foxy-pre-push-swift.log
+        printf '\n[pre-push] the Swift tests failed — nothing pushed.\n'
+        exit 1
+    fi
+    tail -1 /tmp/foxy-pre-push-swift.log
+fi
+
+printf '[pre-push] green; pushing\n\n'

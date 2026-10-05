@@ -1,0 +1,27 @@
+{
+  // The type check of the app class and its renderer:
+  //   node node_modules/typescript/bin/tsc -p tests/types/tsconfig.app.json
+  //
+  // A project of its own, apart from the wallet's (tsconfig.json), so the two
+  // tighten at their own pace. It reads build/foxy-app.js, the app class joined
+  // from build/app, as JavaScript, against app.d.ts: the runtime's DCLogic, React,
+  // and what the page puts on window. It emits nothing.
+  // Not yet: noImplicitAny (661 errors, from unannotated parameters and values)
+  // and strictNullChecks (30 errors, where a value can be null), counted
+  // with --noImplicitAny and --strictNullChecks on the command line.
+  // Each can be turned on once the file is annotated far enough to pass it.
+  // this.state and this.props are any (app.d.ts), so most of what a render
+  // function reads is unchecked until the state has a type.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "target": "es2020",
+    "lib": ["es2022", "dom"],
+    "skipLibCheck": true,
+    "types": []
+  },
+  "files": ["../../build/foxy-app.js", "app.d.ts"]
+}

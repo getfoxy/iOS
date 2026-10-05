@@ -1,0 +1,58 @@
+# Tor rebuilt on a clean Mac.
+#
+# tools/build-tor.sh --verify builds Tor, OpenSSL, libevent and xz from their
+# signed, pinned tags and compares the result, byte for byte, with what
+# Vendor/Tor.sha256 records from the original build. VERIFIED here means a
+# GitHub machine, with its own copy of Apple's Xcode and its own build of the
+# autotools, made the same bytes: nothing particular to the original build
+# machine got into Tor.
+#
+# The Xcode is the recorded one, 26.3 (17C529), which GitHub's macOS 26 image
+# carries beside newer ones, used where the image installs it (Xcode_26.3.app):
+# build-tor.sh reaches Xcode through a fixed link, so where it lives no longer
+# reaches the bytes. The first three runs differed in exactly the compiler
+# path OpenSSL and Tor record. The autotools are not Homebrew's:
+# build-tor.sh builds GNU's signed releases itself (tools/build-autotools.sh),
+# after the image's Homebrew once offered automake 1.18.1 where 1.19 was recorded.
+#
+# Runs weekly (so a rebuild is not only as
+# recent as the last change to it: the sources' remotes, GNU's tarballs and the
+# runner's Xcode 26.3 are checked again), and from the Actions tab once this
+# file is on the default branch. On DIFFERENT, the rebuilt listing is attached
+# to the run, to compare file by file.
+name: tor
+
+# No push trigger: a rebuild takes hours. The checks that gate a push run on
+# the machine that makes the commit (tools/hooks/pre-push).
+on:
+  schedule:
+    - cron: '41 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: macos-26
+    timeout-minutes: 240
+    env:
+      FOXY_TOR_JOBS: '3'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - name: Xcode 26.3 (17C529)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcode-select -p
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Build version 17C529' || { echo "::error::this runner's Xcode is not 26.3 (17C529)"; exit 1; }
+      - run: bash tools/build-tor.sh --verify
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4, pinned by commit
+        with:
+          name: tor-rebuilt-listing
+          path: |
+            build/tor-rebuilt-listing.txt
+            build/tor-rebuilt
+            build/tor-logs
+          if-no-files-found: ignore

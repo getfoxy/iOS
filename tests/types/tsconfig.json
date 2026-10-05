@@ -1,0 +1,28 @@
+{
+  // The type check of the wallet: node node_modules/typescript/bin/tsc -p tests/types
+  //
+  // TypeScript 6.0.3 (package.json, pinned in package-lock.json), a single
+  // JavaScript package, reads Web/foxy-wallet.js as JavaScript and checks it
+  // against what its own code and JSDoc comments say. It emits nothing.
+  // strictNullChecks is on. Its 37 errors were narrowing the
+  // checker could not see (a value checked for null before a callback that
+  // used it, callbacks declared as null, empty arrays read as never[]), fixed
+  // with narrowing and JSDoc that change nothing at run time; none was a null
+  // the code could actually meet.
+  // Not yet: noImplicitAny (916 errors, from unannotated parameters and values),
+  // counted with --noImplicitAny on the command line. It can be
+  // turned on once the file is annotated far enough to pass it.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "target": "es2020",
+    "lib": ["es2022", "dom"],
+    "skipLibCheck": true,
+    "types": []
+  },
+  "files": ["../../Web/foxy-wallet.js", "globals.d.ts"]
+}

@@ -1,0 +1,165 @@
+# Foxy's checks on GitHub Actions.
+#
+# This runs only when the repository is on GitHub and Actions is enabled there.
+# Nothing here runs by itself on a developer's machine; AUDIT.md says so.
+#
+#   checks   on demand: sh tools/check-all.sh (offline, ~1 min)
+#   native   on demand: the native seed's Swift tests on macOS,
+#            no simulator (swift test --package-path tools/nativetests): NUT-13
+#            against the spec's and cashu-ts's vectors, BIP-39, the counters'
+#            rules and every seed action with a stub vault
+#   vendor   weekly and on demand: every vendored library against its public
+#            release and rebuilt from source where its script can
+#            (python3 tools/verify-vendor.py --deep: cashu-ts and bip39
+#            --from-source, React --rebuild, Tor's sources and signatures).
+#            Not on push, so push checks stay fast. Tor's own rebuild needs the
+#            recorded Xcode and is tor.yml's, weekly as well.
+#   iptproxy on demand only: build IPtProxy twice from pinned sources and compare
+#            with Vendor/IPtProxy.sha256 (two full builds, needs Go)
+#   simulator on demand only: the half of the Swift tests that need Foxy.app
+#            on an iOS simulator, which the native job cannot build — the bridge's
+#            action table and input checks, Route's host rules, the prompt queue,
+#            the 4 MB answer cap, the seed screens and the seed's Bridge-side
+#            rules. It builds Tor from source the first time (hours) and takes it
+#            from the cache after, so it is neither on push nor weekly: macOS
+#            minutes bill at ten times Linux's rate.
+#
+# The Tor rebuild on a clean Mac is its own workflow, tor.yml.
+name: checks
+
+# There are no push or pull-request triggers. The suite that gates a push runs
+# on the machine that makes the commit (tools/hooks/pre-push, installed by
+# tools/install-hooks.sh); here it runs when asked for, and the vendor check
+# weekly. `checks` and `native` are written to run on a push or a pull request
+# too, for anyone who adds those triggers back under `on:`.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      iptproxy:
+        description: 'Also rebuild IPtProxy and compare with Vendor/IPtProxy.sha256'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4, pinned by commit
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5, pinned by commit
+        with:
+          python-version: '3.12'
+      # jsdom and its dependencies, exactly as package-lock.json pins them
+      # (npm ci checks each tarball's sha512). Test-only; nothing here ships.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      # the Swift tests are the native job's
+      - run: sh tools/check-all.sh
+        env:
+          FOXY_NATIVE_TESTS: skip
+      - run: sh tools/verify-shipped.sh
+
+  native:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - run: swift --version
+      - run: swift test --package-path tools/nativetests
+
+  vendor:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    # the source rebuilds: cashu-ts's and bip39's inputs from git (~5 min), and
+    # React's release build (Node 14 under Rosetta, Closure Compiler on the
+    # image's Java), which took the longest locally
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4, pinned by commit
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5, pinned by commit
+        with:
+          python-version: '3.12'
+      - run: python3 tools/verify-vendor.py --deep
+      # Tor runs in the wallet's process: fail when a newer Tor.framework has shipped
+      - run: sh tools/vendor/check-tor-fresh.sh
+
+  iptproxy:
+    if: github.event_name == 'workflow_dispatch' && inputs.iptproxy
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5, pinned by commit
+        with:
+          go-version: '1.25'
+      - run: sh tools/vendor/verify-iptproxy.sh
+
+  # The Swift tests that need the whole app: FoxyTests on a simulator. The native
+  # job builds Foxy/Keychain alone, so half the Swift tests never ran here —
+  # BridgeTests among them, which is what holds the bridge's action table to
+  # THREAT-MODEL.md §1.
+  #
+  # Tor is the expensive part: Foxy links it, so the app cannot build without it,
+  # and Vendor/TorPod/tor.xcframework is not in the repository. It is built from
+  # source on a cache miss (hours, as tor.yml budgets) and restored after, keyed
+  # on the files that decide its bytes. A restored framework is not trusted on
+  # the cache's word: smoke check 18 compares it with Vendor/Tor.sha256, and this
+  # job fails if that check could only SKIP.
+  # On demand only, not weekly: a run builds Tor from source on a cache miss and
+  # macOS minutes bill at ten times the Linux rate, which a weekly slot would
+  # spend quickly. Run it from the Actions tab before a release, or after
+  # anything that touches the bridge, Route or the seed screens.
+  simulator:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 240
+    env:
+      FOXY_TOR_JOBS: '3'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4, pinned by commit
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5, pinned by commit
+        with:
+          python-version: '3.12'
+      # the recorded Xcode, so a Tor built here is the one Vendor/Tor.sha256 names
+      - name: Xcode 26.3 (17C529)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Build version 17C529' || { echo "::error::this runner's Xcode is not 26.3 (17C529)"; exit 1; }
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4, pinned by commit
+        id: tor
+        with:
+          path: Vendor/TorPod/tor.xcframework
+          key: tor-${{ runner.os }}-xcode26.3-${{ hashFiles('tools/build-tor.sh', 'tools/build-autotools.sh', 'Vendor/Tor.sha256') }}
+      - name: Build Tor from signed sources (only when the cache misses)
+        if: steps.tor.outputs.cache-hit != 'true'
+        run: bash tools/build-tor.sh
+      # Whatever the cache handed over, smoke 18 hashes it against Vendor/Tor.sha256.
+      # A skip there means it could not look, which for this job is a failure.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: The Tor here is the one Vendor/Tor.sha256 records
+        run: |
+          python3 tools/smoke.py | tee smoke.log
+          if grep -E '^[0-9]+ check\(s\) skipped' smoke.log | grep -q '18'; then
+            echo "::error::smoke check 18 skipped: the tor.xcframework was not there to compare"
+            exit 1
+          fi
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - run: pod install
+      - run: sh tools/unit-tests.sh

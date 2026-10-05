@@ -1,0 +1,31 @@
+# React and ReactDOM rebuilt from React's signed tag, on Linux.
+#
+# tools/vendor/verify-react.sh --rebuild checks the two files embedded in
+# Web/index.html against npm, then builds them with React's own release script
+# from tag v18.3.1 (commit f1338f80, SSH-signed by Andrew Clark), with Node
+# 14.17.6 from a signed checksum list and yarn 1.22.22 from React's lockfile,
+# and compares byte for byte. A local run on macOS used Java 25; here it is
+# Linux with the image's default Java 17, the version React's CI used.
+#
+# Runs weekly, and from the Actions tab once this file is on the default branch.
+name: react
+
+# No push trigger: every commit touching the page would start this one. The
+# checks that gate a push run on the machine that makes the commit
+# (tools/hooks/pre-push).
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4, pinned by commit
+      - run: java -version
+      - run: bash tools/vendor/verify-react.sh --rebuild
