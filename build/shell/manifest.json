@@ -1,0 +1,56 @@
+[
+  {
+    "uuid": "21177c5f-9104-4fe5-a9b5-e02de44163b0",
+    "mime": "image/svg+xml",
+    "compressed": true,
+    "file": "build/shell/assets/icon-bolt.svg"
+  },
+  {
+    "uuid": "0e7a9336-3355-4315-871d-237a54736709",
+    "mime": "image/svg+xml",
+    "compressed": true,
+    "file": "build/shell/assets/icon-0e7a9336.svg"
+  },
+  {
+    "uuid": "64b433ba-e6ef-4c0b-9d49-9dacd943871b",
+    "mime": "text/javascript",
+    "compressed": true,
+    "file": "build/foxy-render.js"
+  },
+  {
+    "uuid": "8d4aa6b2-16cb-4c42-a6f2-d85feb8c0047",
+    "mime": "text/javascript",
+    "compressed": true,
+    "file": "build/shell/assets/react-18.3.1.production.min.js"
+  },
+  {
+    "uuid": "93c76fbd-259d-463c-a60d-5ed97ad7e690",
+    "mime": "text/javascript",
+    "compressed": true,
+    "file": "build/shell/assets/react-dom-18.3.1.production.min.js"
+  },
+  {
+    "uuid": "ef48d7d8-7097-417b-bcd9-31588805be02",
+    "mime": "font/woff2",
+    "compressed": false,
+    "file": "build/shell/assets/font-ef48d7d8.woff2"
+  },
+  {
+    "uuid": "ccd2d25b-da8b-4c54-afc7-0396a1360306",
+    "mime": "font/woff2",
+    "compressed": false,
+    "file": "build/shell/assets/font-ccd2d25b.woff2"
+  },
+  {
+    "uuid": "ad30d34a-2e66-4858-bc76-fce22b7ce8e5",
+    "mime": "font/woff2",
+    "compressed": false,
+    "file": "build/shell/assets/font-ad30d34a.woff2"
+  },
+  {
+    "uuid": "94600041-dd05-498a-9e76-89cefb385282",
+    "mime": "font/woff2",
+    "compressed": false,
+    "file": "build/shell/assets/font-94600041.woff2"
+  }
+]

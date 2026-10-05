@@ -1,0 +1,5 @@
+{
+  "open": "<script type=\"text/x-dc\" data-dc-script=\"\" data-props=\"{&quot;cardOffline&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Flash card&quot;,&quot;label&quot;:&quot;Simulate no connection&quot;}}\">",
+  "marker": "<!--FOXY_APP_SCRIPT-->",
+  "tail": "</script>\n</body>\n</html>"
+}
