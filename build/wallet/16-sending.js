@@ -14,7 +14,8 @@
         return Promise.reject(new Error('That is not a Lightning invoice.'));
       }
       var w;
-      try { w = need(); } catch (e) { return Promise.reject(e); }
+      // on the circuit kept ready, when there is one (`needNow`)
+      try { w = needNow(); } catch (e) { return Promise.reject(e); }
 
       /* An invoice with no amount on it, and the amount the person typed.
        *
@@ -42,26 +43,33 @@
       if (!carries && typeof w.mintInfo !== 'object' && typeof w.getMintInfo !== 'function') {
         return Promise.reject(new Error('Foxy could not ask this mint whether it pays invoices with no amount.'));
       }
-      var quoteFor = function () {
-        if (carries) return w.createMeltQuoteBolt11(inv);
+      var quoteFor = function (via) {
+        if (carries) return via.createMeltQuoteBolt11(inv);
         var info = null;
-        try { info = w.getMintInfo ? w.getMintInfo() : null; } catch (e) { info = null; }
+        try { info = via.getMintInfo ? via.getMintInfo() : null; } catch (e) { info = null; }
         var can = false;
         try { can = !!(info && info.supportsAmountless && info.supportsAmountless('bolt11', 'sat')); }
         catch (e) { can = false; }
         if (!can) {
-          throw new Error(hostOf(mintOf(w)) + ' does not pay invoices that name no amount. '
+          throw new Error(hostOf(mintOf(via)) + ' does not pay invoices that name no amount. '
             + 'Ask for one with the amount on it, or move to a mint that does.');
         }
-        return w.createMeltQuoteBolt11(inv, asked * 1000);
+        return via.createMeltQuoteBolt11(inv, asked * 1000);
       };
 
       // Every other mint call is wrapped; this one was not, so a dead circuit
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      return withTimeout(Promise.resolve().then(quoteFor), 30000, 'the mint\u2019s fee quote')
-        .then(function (quote) {
+      /* And asked again on another circuit after five seconds of nothing
+       * (`askedTwice`): a quote commits to nothing, so two cost nothing. The
+       * payment then goes by the circuit that answered. The split and the
+       * melt are never asked twice, and a road that would not carry a quote
+       * is no road to send them down. */
+      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote')
+        .then(function (won) {
+        var quote = won.got;
+        w = won.w;
         stage('quote');
         var owed = satsOf(quote.amount) + satsOf(quote.fee_reserve);
         var at = mintOf(w);
@@ -147,7 +155,7 @@
            * failed — so the proofs are held and the sweep settles them
            * against the mint later. */
           /* The payment went: drop the hold, keep the change, log it. */
-          function landed(change, restored) {
+          function landed(change, restored, preimage) {
             /* The change before the hold goes: a pile that cannot be written
              * throws (W6) and leaves the hold, which sweepMelts settles as PAID
              * with the change restored from its recorded outputs. */
@@ -173,6 +181,8 @@
               memo: '',
               hash: quote.quote,
               bolt11: inv,
+              // the proof that this invoice was paid, when the mint gave one (`preimageOf`)
+              preimage: preimage || undefined,
             });
             logAudit({
               hash: quote.quote,
@@ -253,7 +263,7 @@
             if (state === 'UNPAID' || state === 'FAILED') throw notSent();
 
             // it landed: the hold is no longer needed
-            return landed(res.change || []);
+            return landed(res.change || [], false, preimageOf(res));
           }).catch(function (e) {
             // the payment may still have gone through; its change could not be verified
             if (badSignatures(e)) reportBadSignatures(hostOf(at), 'pay');
@@ -286,17 +296,19 @@
             var answered = mintRefused(e);
             return withTimeout(w.checkMeltQuoteBolt11(quote.quote), 20000, 'the payment\u2019s state')
               .then(function (q) {
-                return { state: String((q && q.state) || '').toUpperCase(), change: (q && q.change) || [] };
-              }, function () { return { state: 'UNKNOWN', change: [] }; })
+                return { state: String((q && q.state) || '').toUpperCase(), change: (q && q.change) || [],
+                         preimage: preimageOf(q) };
+              }, function () { return { state: 'UNKNOWN', change: [], preimage: '' }; })
               .then(function (r) {
                 // FAILED is the mint's verdict on a payment it tried; UNPAID only counts once it answered
                 if (r.state === 'FAILED' || (r.state === 'UNPAID' && answered)) throw notSent(msg);
                 if (r.state === 'PAID') {
                   // change as proofs if the answer carried them; otherwise from the reserved counters
                   var usable = (r.change || []).filter(function (p) { return p && p.secret; });
-                  if (usable.length) return landed(usable);
+                  if (usable.length) return landed(usable, false, r.preimage);
                   return recoverMeltChange(w, meltOutputs, at)
-                    .then(function (proofs) { return landed(proofs, true); }, function () { return landed([]); });
+                    .then(function (proofs) { return landed(proofs, true, r.preimage); },
+                          function () { return landed([], false, r.preimage); });
                 }
                 function stillHeld() {
                   console.warn('[foxy] melt outcome unknown (' + (r.state || 'no answer') + '), proofs stay held:', msg.slice(0, 80));

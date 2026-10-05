@@ -391,6 +391,8 @@ struct TapProximity {
      * feet paired on a link reading -37 while the advertisements sitting a
      * third of a second either side of it said -46. */
     private var lastAd: [UUID: Int] = [:]
+    /// When that last advertisement was heard, for `rival`.
+    private var lastAdAt: [UUID: TimeInterval] = [:]
     /// What the last verdict fell short on, in words, for the log.
     private(set) var why = ""
     /* Which pool the last verdict came from, so the log can name the number
@@ -408,6 +410,7 @@ struct TapProximity {
         guard dbm < 0, dbm > -120 else { return }
         heard[id, default: []].append((at, dbm))
         lastAd[id] = dbm
+        lastAdAt[id] = at
     }
 
     /// An open link's own reading, on its own scale. See `linked`.
@@ -416,7 +419,7 @@ struct TapProximity {
         linked[id, default: []].append((at, dbm))
     }
 
-    mutating func forget() { heard = [:]; linked = [:]; lastAd = [:] }
+    mutating func forget() { heard = [:]; linked = [:]; lastAd = [:]; lastAdAt = [:] }
 
     /// The most recent advertisement from a phone, for saying in the log how
     /// an advertisement and a connection event compare — and for the check
@@ -437,6 +440,49 @@ struct TapProximity {
             .filter { $0.count >= 2 && $0.median >= warmDbm }
             .sorted { $0.median > $1.median }
         return ranked.first?.id
+    }
+
+    /* Another receiver that has plainly been nearer than the one the quiet
+     * link is open to, or nil.
+     *
+     * The quiet link is opened to the strongest receiver heard, and it is the
+     * link that "near" is said down: the receiver at the other end puts up
+     * CONNECT TO PAY. It was never looked at again. A phone carried from one
+     * till to the till beside it kept its link to the first, which went on
+     * showing the card, while the one the phone was being held to showed
+     * nothing; it worked only when the first till's invoice was closed.
+     *
+     * So the link moves, on the same terms a tap is chosen on: the other
+     * receiver is near enough to be told about (`nearbyDbm`), has been heard
+     * for a full second (`rivalHold`), and is stronger by more than two phones
+     * side by side differ (`tieDb`). Two tills that read alike keep the link
+     * where it is, and whichever is touched is the one that is paid.
+     *
+     * The linked receiver is measured on advertisements too, while they still
+     * arrive; then by its last one for a few seconds; and after that by the
+     * link's own readings, which are a rougher scale but the only one left. */
+    mutating func rival(of target: UUID, at now: TimeInterval) -> (id: UUID, median: Int, theirs: Int)? {
+        heard = heard.compactMapValues { r in
+            let kept = r.filter { now - $0.at <= memory }
+            return kept.isEmpty ? nil : kept
+        }
+        let others = heard.filter { $0.key != target }
+            .map { (id: $0.key, median: Self.median($0.value.map(\.dbm)), readings: $0.value) }
+            .sorted { $0.median > $1.median }
+        guard let best = others.first, best.readings.count >= minReadings, best.median >= nearbyDbm else { return nil }
+        let span = (best.readings.last?.at ?? now) - (best.readings.first?.at ?? now)
+        guard span >= rivalHold - 0.05 else { return nil }
+        let theirs: Int
+        if let ads = heard[target] {
+            theirs = Self.median(ads.map(\.dbm))
+        } else if let last = lastAd[target], let at = lastAdAt[target], now - at <= 5 {
+            theirs = last
+        } else if let link = linked[target]?.filter({ now - $0.at <= memory }), !link.isEmpty {
+            theirs = Self.median(link.map(\.dbm))
+        } else {
+            theirs = -127
+        }
+        return best.median >= theirs + tieDb ? (best.id, best.median, theirs) : nil
     }
 
     mutating func verdict(at now: TimeInterval) -> Verdict {

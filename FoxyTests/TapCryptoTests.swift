@@ -2,7 +2,7 @@ import XCTest
 import CryptoKit
 @testable import Foxy
 
-/// The v2 handshake, without a radio (TAP-TO-PAY.md). What is checked here is
+/// The handshake, without a radio (TAP-TO-PAY.md). What is checked here is
 /// the thing the four digits on two screens are supposed to mean.
 final class TapCryptoTests: XCTestCase {
 
@@ -102,42 +102,76 @@ final class TapCryptoTests: XCTestCase {
         let run = try handshake()
         let body = Data("the offer".utf8)
         let sealed = try XCTUnwrap(TapCrypto.seal(body, with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         XCTAssertEqual(TapCrypto.open(sealed, with: run.payerKeys.receiverToPayer,
-                                      counter: 0, transcript: run.keys.transcript), body)
+                                      counter: 0, transcript: run.keys.transcript, kind: 0x04), body)
     }
 
     func testTheWrongKeyDoesNotOpenIt() throws {
         let run = try handshake()
         let sealed = try XCTUnwrap(TapCrypto.seal(Data("x".utf8), with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         XCTAssertNil(TapCrypto.open(sealed, with: run.keys.payerToReceiver,
-                                    counter: 0, transcript: run.keys.transcript))
+                                    counter: 0, transcript: run.keys.transcript, kind: 0x04))
     }
 
     func testTheWrongCounterDoesNotOpenIt() throws {
         let run = try handshake()
         let sealed = try XCTUnwrap(TapCrypto.seal(Data("x".utf8), with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         XCTAssertNil(TapCrypto.open(sealed, with: run.keys.receiverToPayer,
-                                    counter: 1, transcript: run.keys.transcript))
+                                    counter: 1, transcript: run.keys.transcript, kind: 0x04))
     }
 
     func testAnotherHandshakeDoesNotOpenIt() throws {
         let run = try handshake()
         let sealed = try XCTUnwrap(TapCrypto.seal(Data("x".utf8), with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         XCTAssertNil(TapCrypto.open(sealed, with: run.keys.receiverToPayer,
-                                    counter: 0, transcript: Data(repeating: 9, count: 32)))
+                                    counter: 0, transcript: Data(repeating: 9, count: 32), kind: 0x04))
+    }
+
+    /// A sealed message is bound to the kind it was sealed as. The kind byte
+    /// travels in the clear, so without this somebody able to change bytes on
+    /// the air could relabel a payer's "say that again" as "I kept the
+    /// change" and the receiver would open it and believe it.
+    func testAMessageSealedAsOneKindDoesNotOpenAsAnother() throws {
+        let run = try handshake()
+        let body = Data("12".utf8)
+        let again: UInt8 = 0x0C, changeTaken: UInt8 = 0x08
+        let sealed = try XCTUnwrap(TapCrypto.seal(body, with: run.keys.payerToReceiver,
+                                                  counter: 0, transcript: run.keys.transcript, kind: again))
+        XCTAssertEqual(TapCrypto.open(sealed, with: run.payerKeys.payerToReceiver,
+                                      counter: 0, transcript: run.keys.transcript, kind: again), body)
+        XCTAssertNil(TapCrypto.open(sealed, with: run.payerKeys.payerToReceiver,
+                                    counter: 0, transcript: run.keys.transcript, kind: changeTaken),
+                     "relabelled, it must be a message that will not open")
+    }
+
+    /// The version both phones said is part of what they agreed. Two phones
+    /// that were each told a different one end up with different digits and
+    /// keys, so neither can be talked down to a version the other never spoke.
+    func testTheVersionIsPartOfWhatWasAgreed() throws {
+        let r = Curve25519.KeyAgreement.PrivateKey(), p = Curve25519.KeyAgreement.PrivateKey()
+        let nr = TapCrypto.randomNonce(), np = TapCrypto.randomNonce()
+        let service = UUID()
+        let R = r.publicKey.rawRepresentation, P = p.publicKey.rawRepresentation
+        let now = TapCrypto.transcript(service: service, r: R, p: P, nr: nr, np: np)
+        XCTAssertEqual(now, TapCrypto.transcript(version: TapCrypto.version, service: service, r: R, p: P, nr: nr, np: np))
+        let other = TapCrypto.transcript(version: TapCrypto.version + 1, service: service, r: R, p: P, nr: nr, np: np)
+        XCTAssertNotEqual(now, other)
+        let shared = try r.sharedSecretFromKeyAgreement(with: p.publicKey)
+        XCTAssertNotEqual(TapCrypto.keys(shared: shared, transcript: now).receiverToPayer,
+                          TapCrypto.keys(shared: shared, transcript: other).receiverToPayer)
     }
 
     func testAChangedByteDoesNotOpenIt() throws {
         let run = try handshake()
         var sealed = try XCTUnwrap(TapCrypto.seal(Data("the offer".utf8), with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         sealed[3] ^= 0x01
         XCTAssertNil(TapCrypto.open(sealed, with: run.keys.receiverToPayer,
-                                    counter: 0, transcript: run.keys.transcript))
+                                    counter: 0, transcript: run.keys.transcript, kind: 0x04))
     }
 
     /// What seal hands back must be indexable from zero.
@@ -149,7 +183,7 @@ final class TapCryptoTests: XCTestCase {
     func testWhatSealHandsBackStartsAtZero() throws {
         let run = try handshake()
         let sealed = try XCTUnwrap(TapCrypto.seal(Data("x".utf8), with: run.keys.receiverToPayer,
-                                                  counter: 0, transcript: run.keys.transcript))
+                                                  counter: 0, transcript: run.keys.transcript, kind: 0x04))
         XCTAssertEqual(sealed.startIndex, 0)
         XCTAssertEqual(sealed.indices.first, 0)
         _ = sealed[0]                      // would trap on an offset slice

@@ -1274,6 +1274,97 @@
     return onCircuit(wallet);
   }
 
+  /* One circuit kept ready for whatever the person does next.
+   *
+   * Every job leaves on a circuit of its own, and a circuit takes a second or
+   * three to build after Foxy comes to the front. Now and then one goes
+   * nowhere at all: the request sits on it until its clock runs out, while
+   * the mint is answering the phone beside it. A swap sat on such a circuit
+   * for 56 seconds in front of two people holding their phones together.
+   *
+   * So one circuit is opened ahead of time, by asking the mint something it
+   * tells anybody (its keysets), and kept only once the mint has answered on
+   * it. The next job a person is waiting for takes it: an invoice, a fee
+   * quote, a payment, a token. That job starts on a road that has just been
+   * shown to reach the mint, and another is opened behind it.
+   *
+   * It is still one circuit to a job. The spare is handed out once and is
+   * then that job's alone; what the mint sees on it is a question about its
+   * keysets followed by the job, which is what a job's first connect looks
+   * like anyway. Work nobody is waiting on (sweeps, checks, top-ups) does not
+   * take it. It is let go after five minutes, when Tor would be retiring the
+   * circuit, when the mint changes, and when Foxy has been away. */
+  var spare = /** @type {?{ label: string, mint: string, at: number }} */ (null);
+  var sparing = /** @type {?Promise<boolean>} */ (null);
+  var SPARE_FOR_MS = 5 * 60 * 1000;
+
+  function spareReady() {
+    return !!(spare && wallet && spare.mint === mintOf(wallet) && Date.now() - spare.at < SPARE_FOR_MS);
+  }
+
+  function dropSpare() { spare = null; }
+
+  /* Open one, unless one is ready or on its way. Two tries at most, each on a
+   * circuit of its own and given eight seconds: a road that will not carry
+   * this is not one to keep. Resolves whether a spare is ready. Silent when
+   * it fails; the job that would have used it asks on a fresh circuit, as it
+   * always did. */
+  function warmSpare() {
+    if (FoxyWallet._spareOff || !wallet || !routeOpen() || !bridged()) return Promise.resolve(false);
+    if (spareReady()) return Promise.resolve(true);
+    if (sparing) return sparing;
+    spare = null;
+    var at = mintOf(wallet);
+    var tryOne = function (left) {
+      var label = newCircuitLabel(), began = Date.now();
+      var asked = FoxyWallet.nativeRequest({ endpoint: at + '/v1/keysets', method: 'GET',
+                                              foxyFresh: true, foxyCircuit: label });
+      var clock = new Promise(function (_, no) {
+        setTimeout(function () { no(new Error('no answer')); }, FoxyWallet._spareWaitMs || 8000);
+      });
+      return Promise.race([asked, clock]).then(function () {
+        // the mint changed, or the route went, while it was being opened
+        if (!wallet || mintOf(wallet) !== at || !routeOpen()) return false;
+        spare = { label: label, mint: at, at: Date.now() };
+        console.log('[foxy] a circuit to ' + hostOf(at) + ' is ready for what comes next, in '
+          + (Date.now() - began) + ' ms');
+        return true;
+      }, function () {
+        if (left > 0 && wallet && mintOf(wallet) === at && routeOpen()) return tryOne(left - 1);
+        console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
+        return false;
+      });
+    };
+    var run = tryOne(1);
+    sparing = run;
+    var free = function () { if (sparing === run) sparing = null; };
+    run.then(free, free);
+    return run;
+  }
+
+  /* A moment later, so it does not ride on the heels of the job that has just
+   * taken the last one. */
+  function warmSpareSoon() {
+    if (FoxyWallet._spareOff) return;
+    setTimeout(function () { warmSpare(); }, FoxyWallet._spareAfterMs === undefined ? 1500 : FoxyWallet._spareAfterMs);
+  }
+
+  /* The connected wallet for a job somebody is waiting on: on the spare
+   * circuit when one is ready, and on a new one of its own when not. */
+  function viewNow(w) {
+    if (!spareReady()) { dropSpare(); warmSpareSoon(); return onCircuit(w); }
+    var label = /** @type {{ label: string }} */ (spare).label;
+    dropSpare();
+    warmSpareSoon();
+    return onLabel(w, label);
+  }
+
+  function needNow() {
+    assertRoute();
+    if (!wallet) throw new Error('No mint connected yet. Call FoxyWallet.connect() first.');
+    return viewNow(wallet);
+  }
+
   /* Each job at a mint leaves from its own Tor exit.
    *
    * A mint sees the exit every request comes from. All of a mint's requests
@@ -1491,15 +1582,75 @@
    * outputs are live change, and also already in the proof list — this is a
    * duplicate of money the wallet holds, not a new copy of a secret.
    *
-   * Capped at 30, and cleared whenever history is. */
+   * The last hundred in full, and four hundred more as receipts; cleared
+   * whenever history is.
+   *
+   * In full is every piece, for working out where money went: about seven
+   * kilobytes a payment and twenty for one that refills the small change, so
+   * five hundred of those would be most of the page's whole store, and a
+   * store that is full refuses the writes that money depends on. It is held
+   * to a megabyte as well as to a hundred.
+   *
+   * A receipt is what proves something and nothing that spends: when, where,
+   * how much, the payment's id, and the public value of each piece that left
+   * (`ys`). A mint knows a piece by that value and by nothing else, so with
+   * it anybody can ask whether the piece was spent, and nobody can spend it.
+   * Every send keeps them from the start, because the pieces of a sent token
+   * are dropped from here once it is claimed and these have to outlast them. */
+  var AUDIT_FULL = 100, AUDIT_ALL = 500, AUDIT_FULL_CHARS = 1000000;
+
+  /* The value a mint knows a piece by (NUT-00's Y), or ''. */
+  function lookupOf(p) {
+    try {
+      var CT = window.CashuTS;
+      if (!CT || !CT.hashToCurve || !p || typeof p.secret !== 'string') return '';
+      return String(CT.hashToCurve(new TextEncoder().encode(p.secret)).toHex(true));
+    } catch (e) { return ''; }
+  }
+
+  function slimAudit(a) {
+    if (!a || a.slim) return a;
+    var out = /** @type {any} */ ({ at: a.at, mint: a.mint, hash: a.hash, sats: a.sats, feeSats: a.feeSats,
+                                    kind: a.kind, slim: true,
+                                    ins: (a.inputs || []).length || (a.ys || []).length,
+                                    outs: (a.outputs || []).length });
+    if (a.ys && a.ys.length) out.ys = a.ys;
+    if (a.lockedTo) out.lockedTo = a.lockedTo;
+    return out;
+  }
+
+  /* Newest first: in full while there is room for it, receipts after that. */
+  function shapeAudit(list) {
+    var chars = 0, full = 0;
+    return (list || []).slice(0, AUDIT_ALL).map(function (a) {
+      if (!a || a.slim) return a;
+      var size = JSON.stringify(a).length;
+      if (full >= AUDIT_FULL || chars + size > AUDIT_FULL_CHARS) return slimAudit(a);
+      full += 1; chars += size;
+      return a;
+    });
+  }
+
   function logAudit(entry) {
     try {
       var list = load(K.audit, []);
-      list.unshift(Object.assign({
+      var rec = /** @type {any} */ (Object.assign({
         at: Math.floor(Date.now() / 1000),
         mint: String(mintUrl || '').replace(/\/+$/, ''),
       }, entry));
-      save(K.audit, list.slice(0, 30));
+      // what left this wallet, by the values the mint knows it by
+      if (!rec.ys) rec.ys = (rec.inputs || []).map(lookupOf).filter(Boolean);
+      /* A token whose every piece is locked to one key: said on the record,
+       * because those pieces are kept once it is claimed, where a plain
+       * token's are dropped. Nobody but that key's holder could ever spend
+       * them, and once the mint says they are spent, the signature they were
+       * spent with is the proof of who took the payment (`lockedReceipt`). */
+      if (rec.kind === 'token' && rec.inputs && rec.inputs.length) {
+        var keys = rec.inputs.map(lockedTo);
+        if (keys[0] && keys.every(function (k) { return k === keys[0]; })) rec.lockedTo = keys[0];
+      }
+      list.unshift(rec);
+      save(K.audit, shapeAudit(list));
     } catch (e) {
       // an audit record is never worth failing a payment over
       console.warn('[foxy] could not record the audit trail:', e && e.message);

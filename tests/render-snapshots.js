@@ -138,6 +138,16 @@ function wallet(over) {
     auditTrail: (hash) => (hash === 'hash-audit'
       ? [{ inputs: [{ amount: 64, id: '00ab', secret: 'secret-one' }, { amount: 32, id: '00ab', secret: 'secret-two' }],
         outputs: [{ amount: 90, id: '00ab', secret: 'secret-three' }] }]
+      // a payment locked to the phone that asked, with the signature its pieces were spent with
+      : hash === 'hash-receipt'
+      ? [{ kind: 'token', mint: 'https://m.example', at: 1700000000, sats: 21, lockedTo: '02' + 'ab'.repeat(32),
+        ys: ['02' + 'cd'.repeat(32)],
+        inputs: [{ amount: 21, id: '00ab', secret: '["P2PK",{"nonce":"n","data":"02' + 'ab'.repeat(32) + '","tags":[]}]', C: '02' + 'ef'.repeat(32) }],
+        outputs: [], spent: { at: 1700000100, witness: ['{"signatures":["' + '9'.repeat(128) + '"]}'] } }]
+      // older than the last hundred: a receipt, with the pieces themselves let go
+      : hash === 'hash-slim'
+      ? [{ kind: 'token', mint: 'https://m.example', at: 1690000000, sats: 500, slim: true, ins: 4, outs: 7,
+        ys: ['02' + 'cd'.repeat(32)] }]
       : []),
     lastToken: () => ({ token: 'cashuBstubtoken', sats: 1234, hash: 'tok-hash' }),
     clearLastToken() {},
@@ -358,6 +368,13 @@ function representative() {
   add('history, a fresh wallet', at('history', { fresh: true }));
   add('txDetail, received, a note, a token, an audit record', at('txDetail', { tx: TX_IN, txAuditCopied: true, txTokenCopied: true }));
   add('txDetail, sent, pending, a fee', at('txDetail', { tx: TX_OUT, txReclaiming: true }));
+  /* What can be shown to somebody else about a payment: the preimage of a
+   * Lightning send, the payment hash of a Lightning receive, and for ecash
+   * locked to the phone that asked, the signature it was spent with. */
+  add('txDetail, a Lightning send with its proof of payment', at('txDetail', { tx: Object.assign({}, TX_OUT, { pending: false, preimage: '0f'.repeat(32) }) }));
+  add('txDetail, a Lightning receive with its payment hash', at('txDetail', { tx: { name: 'Lightning', dir: 'in', time: '09:12', sats: 1500, fee: 0, rail: 'LIGHTNING', hash: 'hash-in-ln', payHash: 'a1'.repeat(32) } }));
+  add('txDetail, a locked payment with its receipt', at('txDetail', { tx: { name: 'Paid in person', dir: 'out', time: '14:39', sats: 21, fee: 0, rail: 'CASHU', hash: 'hash-receipt' } }));
+  add('txDetail, a payment older than the last hundred, as a receipt', at('txDetail', { tx: { name: 'ecash', dir: 'out', time: 'Aug 2', sats: 500, fee: 0, rail: 'CASHU', hash: 'hash-slim' } }));
   add('txDetail, another unit', at('txDetail', { tx: TX_USD }));
   add('txDetail, cash', at('txDetail', { tx: TX_CASH }));
   add('txDetail, an ecash receive', at('txDetail', { tx: { dir: 'in', sats: 21, hash: 'token-1789157866360', memo: 'ecash' } }));

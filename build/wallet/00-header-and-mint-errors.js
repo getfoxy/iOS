@@ -686,6 +686,45 @@
     };
   }
 
+  /* A question asked again, on a circuit of its own, when the first has said
+   * nothing for five seconds. Resolves { got, w }: the answer, and the wallet
+   * view that got it, so whatever follows can go by the road that worked.
+   *
+   * Every job leaves on a Tor circuit of its own, and now and then one of
+   * them goes nowhere: the request sits until its clock runs out, a minute
+   * for an invoice, while the same mint answers the phone beside it in two
+   * seconds. Only for questions that cost nothing asked twice. A second
+   * invoice is a quote nobody is shown and nobody pays, and a second fee
+   * quote is a figure; each lapses at the mint by itself. Never a swap or a
+   * melt, which move money.
+   *
+   * An answer from either is the answer. A failure ends it at once while
+   * only one has been asked, as it always did; once two have, it takes both
+   * failing, and the error is the later one's. */
+  function askedTwice(w, what, ask) {
+    return new Promise(function (ok, no) {
+      var settled = false, second = false, failed = 0;
+      var yes = function (via) {
+        return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
+      };
+      var bad = function (e) {
+        failed += 1;
+        if (settled || (second && failed < 2)) return;
+        settled = true; clearTimeout(again); no(e);
+      };
+      var again = setTimeout(function () {
+        if (settled) return;
+        var other;
+        try { other = onCircuit(w); } catch (e) { other = null; }
+        if (!other) return;
+        second = true;
+        console.log('[foxy] ' + what + ' has not answered in 5s; asking again on another circuit');
+        Promise.resolve().then(function () { return ask(other); }).then(yes(other), bad);
+      }, FoxyWallet._askAgainMs || 5000);
+      Promise.resolve().then(function () { return ask(w); }).then(yes(w), bad);
+    });
+  }
+
   /* Each proof's state at the mint, as 'UNSPENT' / 'PENDING' / 'SPENT'. */
   function statesOf(w, list) {
     /* Asked again, on a circuit of its own, when the first has said nothing
@@ -961,6 +1000,19 @@
 
   function hexOf(bytes) {
     return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+
+  /* The Lightning preimage in a mint's answer about a payment (NUT-05), or ''.
+   *
+   * It is the one receipt a payee cannot argue with: only somebody who was
+   * paid that invoice can know it. The mint gives it once the payment has
+   * settled, in the melt's own answer or when the quote is asked about
+   * later. It was never kept. Thirty-two bytes of hex and nothing else is
+   * taken for one; a mint that settles a payment between two of its own
+   * users has none to give and says null. */
+  function preimageOf(answer) {
+    var p = answer && (answer.payment_preimage || (answer.quote && answer.quote.payment_preimage));
+    return (typeof p === 'string' && /^[0-9a-f]{64}$/i.test(p)) ? p.toLowerCase() : '';
   }
 
   function quoteLock(w) {

@@ -105,6 +105,15 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     check('home stops the invoice watch', stopped === 1 && !a._watching && !a._stopWatch, stopped + ' stop(s)');
     check('and an invoice still on its way will not arm another', a._invoiceRun === 5, String(a._invoiceRun));
     check('so the switch is not refused for it', a.refuseSwitchWhileBusy() === false && !said(a), a.toasts.join('; '));
+    /* Left within a second, before the mint had answered: nothing is being
+     * watched yet, and the invoice that answers a moment later must not start
+     * a watch on a screen that has gone. It did, and the switch was refused
+     * for an invoice nobody had seen. */
+    const b = app(wallet());
+    b._watching = false; b._stopWatch = null; b._invoiceRun = 7;
+    b.endReceiveAtHome();
+    check('home with an invoice still being asked for: its answer will be an older request\u2019s, and arm nothing',
+      b._invoiceRun === 8 && !b._watching, String(b._invoiceRun));
     check('and every arrival at home asks',
       /prevState\.screen !== this\.state\.screen\) \{[\s\S]{0,400}if \(this\.state\.screen === 'home'\) this\.endReceiveAtHome\(\);/.test(src),
       'componentDidUpdate');
@@ -114,7 +123,6 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
   const busy = [
     ['the proof lock is held', (a, W) => { W.depth = 1; }],
     ['a send is in flight', a => { a._sendRun = new Promise(() => {}); }],
-    ['an invoice is being watched', a => { a._watching = true; }],
     ['a token is being claimed and moved', a => { a.state.nmBusy = true; }],
     ['change is being collected', a => { a._chasingChange = true; }],
     ['a token is being made for a request', a => { a.state.reqBusy = true; }],
@@ -126,6 +134,25 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     await wait(0);
     check('switch screen refuses when ' + label, !touched(W, 'connect') && said(a),
       JSON.stringify({ calls: W.calls, toasts: a.toasts }));
+  }
+  {
+    /* An unpaid invoice is not a payment in progress: nothing has moved. It
+     * used to hold the switch until the person went back and closed it. The
+     * watch is let go, the invoice stays on file, and the switch goes on. */
+    const W = wallet(), a = app(W);
+    let stopped = 0;
+    a._watching = true; a._stopWatch = () => { stopped += 1; }; a._invoiceRun = 2;
+    a.justSwitch(THERE);
+    await wait(0);
+    check('an invoice being watched does not hold the switch: the watch is let go and the mint is changed',
+      stopped === 1 && !a._watching && a._invoiceRun === 3 && touched(W, 'connect ' + THERE) && !said(a),
+      JSON.stringify({ stopped, calls: W.calls, toasts: a.toasts }));
+    // but with money really moving as well, it still waits, and the invoice is let go all the same
+    const W2 = wallet(), b = app(W2);
+    b._watching = true; b._stopWatch = () => {}; b._sendRun = new Promise(() => {});
+    b.justSwitch(THERE);
+    await wait(0);
+    check('with a payment under way as well, the switch still waits', !touched(W2, 'connect') && said(b), JSON.stringify(W2.calls));
   }
   {
     const W = wallet(), a = app(W);

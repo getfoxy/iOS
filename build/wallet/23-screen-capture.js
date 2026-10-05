@@ -134,6 +134,12 @@
     _resumed: function (away) {
       // secrets from the phone that no operation used do not outlive a trip to the background
       clearNativeSecrets(false, false);
+      /* Nor does the circuit kept ready: iOS closes what a suspended app had
+       * open, so it is opened again now, as Foxy comes to the front, on the
+       * guess that the person is about to pay or be paid. With Tor still
+       * coming back this does nothing, and Tor coming up asks again. */
+      dropSpare();
+      warmSpareSoon();
       if (FoxyWallet._onResume) {
         FoxyWallet._onResume(Number(away) || 0);
         return;

@@ -153,9 +153,19 @@ async function run() {
   /* Named or not, this phone can open its own lock. Finding it by the lock
    * rather than by request id is what lets a payment that arrived and was
    * never claimed be pasted in later and still be money. */
+  const asked = (action) => ctx.phone.asks.filter((m) => m.action === action).length;
+  const keysAsked = asked('p2pkKey'), walksAsked = asked('p2pkPubkeys');
   const got = await W.receiveToken(made.token);
   ok(!!got && got.sats > 0,
     'and with no key named, the phone finds its own and claims it (' + (got && got.sats) + ' sats)');
+  /* By the row, not by walking the seed. The row keeps the index, so the phone
+   * is asked for that one key. The walk is the slow road — up to sixty-seven
+   * round trips on a phone — and it is also what hides a row lookup that has
+   * stopped working: the claim still succeeds, only a minute later, and
+   * nothing here would say so. */
+  ok(asked('p2pkKey') === keysAsked + 1 && asked('p2pkPubkeys') === walksAsked,
+    'the row named the index: one key asked of the phone, and the seed not walked ('
+    + (asked('p2pkKey') - keysAsked) + ' key, ' + (asked('p2pkPubkeys') - walksAsked) + ' walk batches)');
 
   // ---- a lock that is ours and somebody else's too --------------------------
   {
@@ -565,6 +575,33 @@ async function run() {
     try { await W.receiveToken(paid.token, { hash: 'req-' + request.id }); } catch (e) { no = e; }
     ok(!no, 'a row whose public key does not match is ignored, and the lock is found by walking'
       + (no ? ' — ' + String(no.message).slice(0, 90) : ''));
+  }
+
+  // ---- and a row that names the lock, where this seed derives another key ---
+  {
+    /* The comparison itself. The row above was made not to match the token, so
+     * the phone was never asked about it; this one names the token's own lock
+     * and an index the phone answers for. What the phone derives there is a
+     * key of this seed, which is not the key the ecash is locked to. Handed
+     * back and used, it signs a swap no mint would take. So it opens nothing,
+     * and the ecash is still there for the key that does. */
+    const raw = ctx.window.CashuTS.createRandomSecretKey();
+    const theirs = Buffer.from(ctx.window.CashuTS.getPubKeyFromPrivKey(raw)).toString('hex');
+    const paid = await W.sendToken(5, { unit: 'sat', lockTo: theirs });
+    const rows = JSON.parse(ctx.storage.getItem('foxy.req.lockkeys') || '{}');
+    const index = Object.keys(rows).map((k) => rows[k].i).filter((i) => Number.isInteger(i))[0];
+    rows['another-seed'] = { i: index, pub: theirs, at: Date.now() };
+    ctx.storage.setItem('foxy.req.lockkeys', JSON.stringify(rows));
+    let took = null, no = null;
+    try { took = await W.receiveToken(paid.token); } catch (e) { no = e; }
+    ok(!took && !!no && /locked to/.test(String(no.message)),
+      'a row naming a lock this seed derives another key for opens nothing with the phone\u2019s key'
+      + (took ? ' — took ' + took.sats + ' sats' : no ? '' : ' — no refusal'));
+    const rows2 = JSON.parse(ctx.storage.getItem('foxy.req.lockkeys') || '{}');
+    delete rows2['another-seed'];
+    ctx.storage.setItem('foxy.req.lockkeys', JSON.stringify(rows2));
+    const back = await W.receiveToken(paid.token, { unlockWith: Buffer.from(raw).toString('hex') });
+    ok(!!back && back.sats === 5, 'and the ecash was not touched: its own key still takes it (' + (back && back.sats) + ' sats)');
   }
 
   // ---- rows from before hold real money and go on working -----------------

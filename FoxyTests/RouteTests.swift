@@ -6,6 +6,73 @@ import XCTest
 final class RouteTests: XCTestCase {
     private func url(_ text: String) -> URL { URL(string: text)! }
 
+    // MARK: putting Foxy away
+
+    func testASwapAndItsTopUpAreWaitedFor() {
+        XCTAssertEqual(Route.leaving(money: 1, tidying: false, out: 1, waited: 0.4, onTheRest: 0), .wait)
+        XCTAssertEqual(Route.leaving(money: 0, tidying: true, out: 0, waited: 12, onTheRest: 0), .wait)
+        // however long the rest has been waited for, money still is
+        XCTAssertEqual(Route.leaving(money: 1, tidying: false, out: 3, waited: 19, onTheRest: 9), .wait)
+    }
+
+    func testAfterTwentySecondsTorLeavesWhateverIsOut() {
+        XCTAssertEqual(Route.leaving(money: 1, tidying: false, out: 1, waited: 20.1, onTheRest: 0), .leave(after: 0))
+        XCTAssertEqual(Route.leaving(money: 0, tidying: true, out: 0, waited: 20.1, onTheRest: 0), .leave(after: 0))
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 2, waited: 20.1, onTheRest: 1), .leave(after: 0))
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 0, waited: 20.1, onTheRest: 0), .leave(after: 0.5))
+    }
+
+    func testARequestThatMovesNoMoneyIsWaitedForThreeSeconds() {
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 1, waited: 0.4, onTheRest: 0), .wait)
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 2, waited: 3.2, onTheRest: 2.9), .wait)
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 2, waited: 3.6, onTheRest: 3.1), .leave(after: 0))
+        // the three seconds are counted from when money last moved, not from the putting-away
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 1, waited: 15, onTheRest: 0.5), .wait)
+    }
+
+    func testWithNothingOutTorLeavesAfterHalfASecond() {
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 0, waited: 0.4, onTheRest: 0), .leave(after: 0.5))
+        XCTAssertEqual(Route.leaving(money: 0, tidying: false, out: 0, waited: 9, onTheRest: 3.5), .leave(after: 0.5))
+    }
+
+    func testTheDoorShutsForAFewSecondsAndOpensByItself() {
+        defer { Route.openDoor() }
+        XCTAssertFalse(Route.shut(at: 100))
+        Route.shutDoor(at: 100)
+        XCTAssertTrue(Route.shut(at: 100))
+        XCTAssertTrue(Route.shut(at: 100 + Route.shutFor - 0.1))
+        // nobody opened it: a missed return cannot leave the wallet without a route
+        XCTAssertFalse(Route.shut(at: 100 + Route.shutFor))
+        Route.shutDoor(at: 200)
+        Route.openDoor()
+        XCTAssertFalse(Route.shut(at: 200.1))
+    }
+
+    func testNothingLeavesWhileTheDoorIsShutAndWhatIsOutIsCounted() {
+        // the open connection, so that a request can start with no Tor in the test host;
+        // the address is this machine's own, on a port nothing listens on
+        Route.unprotected = true
+        defer { Route.unprotected = false; Route.openDoor() }
+        let request = URLRequest(url: url("https://127.0.0.1:1/v1/keysets"))
+        let before = Route.out
+
+        Route.shutDoor()
+        var called = false
+        XCTAssertNil(Route.start(request) { _, _, _ in called = true })
+        XCTAssertEqual(Route.out, before, "a request that was refused is not out")
+
+        Route.openDoor()
+        let answered = expectation(description: "the request ends")
+        var during = -1
+        let task = Route.start(request) { _, _, _ in answered.fulfill() }
+        during = Route.out
+        XCTAssertNotNil(task)
+        XCTAssertEqual(during, before + 1, "out from the moment it starts")
+        wait(for: [answered], timeout: 20)
+        XCTAssertEqual(Route.out, before, "and not once it has ended, however it ended")
+        XCTAssertFalse(called, "the refused request's answer was never asked for")
+    }
+
     func testMintAddressesAreHttpsOrHttpToAnOnion() {
         XCTAssertNil(Route.urlProblem(url("https://mint.minibits.cash/Bitcoin")))
         XCTAssertNil(Route.urlProblem(url("HTTPS://Mint.Example.com:3338/v1/info")))

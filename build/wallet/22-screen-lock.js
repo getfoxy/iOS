@@ -21,11 +21,15 @@
      * change, so the real cost is usually lower and never higher. */
     quoteFee: function (bolt11) {
       assertRoute();
-      var w = wallet && onCircuit(wallet);
-      if (!w || !bolt11) return Promise.resolve(null);
-      return withTimeout(w.createMeltQuoteBolt11(String(bolt11)), 20000,
-        'the mint\u2019s fee quote')
-        .then(function (q) {
+      if (!wallet || !bolt11) return Promise.resolve(null);
+      // on the circuit kept ready, when there is one
+      var w = viewNow(wallet);
+      // asked again on another circuit after five seconds of nothing (`askedTwice`)
+      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', function (via) {
+        return via.createMeltQuoteBolt11(String(bolt11));
+      }), 20000, 'the mint\u2019s fee quote')
+        .then(function (won) {
+          var q = won.got;
           return {
             amount: satsOf(q.amount) || 0,
             feeReserve: satsOf(q.fee_reserve) || 0,
@@ -291,28 +295,18 @@
     /* Open the road to the mint before it is needed.
      *
      * An invoice is one request, and most of its two to three seconds is not
-     * the mint thinking: it is a Tor stream being opened and a TLS handshake
-     * on it, after the connection from the last request has gone idle or the
-     * app has been in the background. The amount is not known until NEXT, so
-     * the invoice itself cannot be asked for early — but the connection can
-     * be made while the amount is typed, on the same circuit the invoice will
-     * use, by asking the mint something it tells anybody.
-     * Never answered from the cache, or nothing would be opened. At most once
-     * in twenty seconds, and silent if it fails: the invoice asks properly. */
-    warmMint: function () {
-      var w = wallet;
-      if (!w || !routeOpen()) return Promise.resolve(false);
-      var now = Date.now();
-      if (now - (FoxyWallet._warmedAt || 0) < 20000) return Promise.resolve(false);
-      FoxyWallet._warmedAt = now;
-      var began = Date.now();
-      return FoxyWallet.nativeRequest({ endpoint: mintOf(w) + '/v1/keysets', method: 'GET', foxyFresh: true })
-        .then(function () {
-          console.log('[foxy] mint warmed for the invoice to come, in ' + (Date.now() - began) + ' ms');
-          return true;
-        }, function () { return false; });
-    },
-    _warmedAt: 0,
+     * the mint thinking: it is a circuit being built and a connection made on
+     * it. The amount is not known until NEXT, so the invoice itself cannot be
+     * asked for early, but the road can be opened while the amount is typed.
+     *
+     * This asked the mint for its keysets on no circuit in particular, from
+     * when every request to a mint shared one. Each job has had a circuit of
+     * its own since, so the invoice left on a new one and what had been
+     * warmed was a road it did not take. It is the circuit kept ready that is
+     * opened now, and the invoice takes that one (`warmSpare`, `needNow`). */
+    warmMint: function () { return warmSpare(); },
+    /* For the tests: whether a circuit is ready, and its label. */
+    _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 
     nativeRequest: function (opts) {
       var o = opts || {};

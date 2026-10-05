@@ -886,6 +886,9 @@ final class WebHostController: UIViewController {
     /// A tap that was mid-payment when Foxy went away asks the receiver what it
     /// missed, a moment after the app is running again.
     @objc private func cameToFront() {
+        // before the page hears it is back: requests may leave again
+        parkRun += 1
+        Route.openDoor()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.bridge.tapWoke()
         }
@@ -932,6 +935,8 @@ final class WebHostController: UIViewController {
     }
 
     private var backgroundedAt: Date?
+    /// Which putting-away is under way; a return makes the one before it stale.
+    private var parkRun = 0
 
     @objc private func appEnteredBackground() {
         backgroundedAt = Date()
@@ -962,7 +967,8 @@ final class WebHostController: UIViewController {
             task = .invalid
         }
         task = UIApplication.shared.beginBackgroundTask(withName: "Tor off the network") { finish() }
-        /* Not under a payment, and not under the top-up that follows one.
+        /* Not under a payment, not under the top-up that follows one, and not
+         * under anything else that is with a mint.
          *
          * A swap, melt or mint that is with the mint right now is waited for,
          * and so is the small-change top-up the page starts when it is put
@@ -970,35 +976,69 @@ final class WebHostController: UIViewController {
          * the phone would otherwise come back to a wallet with no change to
          * give. Twenty seconds at most — iOS allows about thirty — and half a
          * second after the last of it, for the page to write down what came
-         * back. If Foxy is brought back meanwhile, Tor stays where it is. */
+         * back.
+         *
+         * Then whatever else is out, three seconds at most, and from there
+         * nothing new leaves (Route's door): a request cut while Tor was still
+         * building its circuit costs Tor's trust in an entry relay, and the
+         * next invoice pays for it. The rule is Route.leaving.
+         *
+         * If Foxy is brought back meanwhile, Tor stays where it is and the
+         * door opens (appBecameActive). `parkRun` is which putting-away this
+         * is: one that was overtaken by a return, and then by another
+         * putting-away, must not park Tor under the second one's payment. */
+        parkRun += 1
+        let run = parkRun
         let began = Date()
-        var said = false
+        var said = false, saidRest = false
+        var restSince: Date?
+        func stillAway() -> Bool {
+            run == self.parkRun && UIApplication.shared.applicationState == .background
+        }
         func park() {
-            guard UIApplication.shared.applicationState == .background else { finish(); return }
+            guard stillAway() else {
+                if run == self.parkRun { Route.openDoor() }
+                finish()
+                return
+            }
             bridge.torBackgrounded { finish() }
         }
-        func waitForMoney() {
-            guard UIApplication.shared.applicationState == .background else { finish(); return }
+        func waitForRequests() {
+            guard stillAway() else { finish(); return }
             webView.evaluateJavaScript("!!(window.FoxyWallet && window.FoxyWallet._tidying)") { [weak self] answer, _ in
-                guard let self else { finish(); return }
-                let waiting = self.bridge.moneyInFlight.count
-                let busy = waiting > 0 || (answer as? Bool) == true
-                let late = Date().timeIntervalSince(began) > 20
-                if !busy || late {
-                    if busy { print("[foxy] tor: still busy with the mint after 20s; leaving the network anyway") }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + (busy ? 0 : 0.5)) { park() }
+                guard let self, run == self.parkRun else { finish(); return }
+                let money = self.bridge.moneyInFlight.count
+                let tidying = (answer as? Bool) == true
+                let out = Route.out
+                // the three seconds are for a stretch with no money moving, and start again after one that had
+                if money > 0 || tidying { restSince = nil } else if out > 0, restSince == nil { restSince = Date() }
+                let step = Route.leaving(money: money, tidying: tidying, out: out,
+                                         waited: Date().timeIntervalSince(began),
+                                         onTheRest: restSince.map { Date().timeIntervalSince($0) } ?? 0)
+                guard case .leave(let after) = step else {
+                    if (money > 0 || tidying) && !said {
+                        said = true
+                        print("[foxy] tor: staying on the network for \(money) money request(s) and the change top-up, 20s at most")
+                    } else if money == 0 && !tidying && !saidRest {
+                        saidRest = true
+                        print("[foxy] tor: staying on the network for \(out) request(s) still out, 3s at most")
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { waitForRequests() }
                     return
                 }
-                if !said {
-                    said = true
-                    print("[foxy] tor: staying on the network for \(waiting) money request(s) and the change top-up, 20s at most")
+                if money > 0 || tidying {
+                    print("[foxy] tor: still busy with the mint after 20s; leaving the network anyway")
+                } else if out > 0 {
+                    print("[foxy] tor: \(out) request(s) still out; leaving the network anyway")
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { waitForMoney() }
+                // nothing new from here; what the page starts now is told it was not sent
+                Route.shutDoor()
+                DispatchQueue.main.asyncAfter(deadline: .now() + after) { park() }
             }
         }
         // a moment for the page to hear it has been put away and start its top-up
         webView.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._putAway && window.FoxyWallet._putAway(true)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { waitForMoney() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { waitForRequests() }
     }
 
     @objc private func appBecameActive() {
@@ -1014,6 +1054,9 @@ final class WebHostController: UIViewController {
          * see the splash image for three or four seconds, and then the home
          * screen"). Nothing was reconnecting, so there was nothing to wait
          * for. */
+        // back: a putting-away still waiting stops here, and requests may leave again
+        parkRun += 1
+        Route.openDoor()
         let wentAway = backgroundedAt != nil
         if !wentAway {
             removeCover()

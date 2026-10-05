@@ -369,6 +369,25 @@ class Component extends DCLogic {
   // a scanned invoice with no amount drops you into the same keypad as receive
   openTx(t) {
     this.setState(p => ({ screen: 'txDetail', stack: p.stack.concat([p.screen]), tx: t }));
+    this.receiptCheck(t);
+  }
+
+  /* A payment locked to the phone that asked for it, looked at: the mint is
+   * asked whether its pieces were spent, and by whose signature
+   * (`lockedReceipt`). Once, as the screen opens; the answer is kept on the
+   * payment's record, and the screen is drawn again when it changes anything.
+   * Only where there is something to ask about and a way to ask. */
+  receiptCheck(t) {
+    const W = window.FoxyWallet;
+    if (!t || t.dir !== 'out' || !t.hash || !W || !W.lockedReceipt || !W.auditTrail) return;
+    if (this.offlineNow && this.offlineNow()) return;
+    const rec = (W.auditTrail(t.hash) || [])[0];
+    if (!rec || !rec.lockedTo || rec.slim || rec.spent || !(rec.inputs || []).length) return;
+    W.lockedReceipt(t.hash).then((got) => {
+      if (got && this.state.screen === 'txDetail' && this.state.tx && this.state.tx.hash === t.hash) {
+        this.setState({ txReceiptAt: got.at });
+      }
+    }, () => {});
   }
 
   /* What `sats` of this entry were worth in cents when it settled, or null
@@ -2981,6 +3000,15 @@ class Component extends DCLogic {
     this.setState({ reqBusy: false, req: null, sendPhase: 'settled' });
     // paid by tap: remembered, so the same offer heard again is not paid again (26d-tap.js)
     if (req && req.viaTap && this.tapMarkPaid) this.tapMarkPaid(this._tapOfferNow, req);
+    /* A payment locked to them has a receipt to collect: the signature its
+     * pieces are spent with, which the mint says once they have swapped it
+     * in (`lockedReceipt`). A receiver with a route swaps at once, so a few
+     * seconds on is when to ask; one without has not yet, and the payment's
+     * own screen asks again whenever it is opened. */
+    if (r && r.hash && r.lockedTo && W.lockedReceipt && !(this.offlineNow && this.offlineNow())) {
+      const hash = r.hash;
+      setTimeout(() => { try { W.lockedReceipt(hash); } catch (e) {} }, 8000);
+    }
     /* Over-paid, so the receiver owes change back over this link. It has to
      * swap at the mint to make it, which takes seconds — and the payer was
      * letting the link go the moment the person got back to home, one second
@@ -4287,6 +4315,20 @@ class Component extends DCLogic {
   }
 
   refuseSwitchWhileBusy() {
+    /* An invoice nobody has paid is let go, not waited for.
+     *
+     * A watched invoice used to count as a payment in progress, and it is
+     * not one: nothing has moved, and there is nothing to finish. It stopped
+     * a person switching mints until they found their way back to the
+     * invoice and closed it. The watch ends here. The invoice stays on file
+     * with its key, and if somebody pays it after all, it is collected the
+     * next time this phone is on that mint (the sweep). What still waits is
+     * money that is really moving: a swap, a payment, a token being claimed. */
+    if (this._watching || this._stopWatch) {
+      console.log('[foxy] mint switch: an unpaid invoice is let go; it stays on file and is collected if it is paid');
+      this._invoiceRun = (this._invoiceRun || 0) + 1;
+      this.stopReceive();
+    }
     if (!this.moneyBusy()) return false;
     console.log('[foxy] mint switch refused: a payment is in progress (' + this.busyWhy()
       + '), on ' + this.state.screen);
@@ -4963,14 +5005,49 @@ class Component extends DCLogic {
     if (!o.noKeypad) paint();
 
     // the keypad
+    /* The whole cell takes the touch, not only the round key drawn in it.
+     *
+     * The keys were 66 high with 14 between them, and the 14 was dead: a thumb
+     * landing between two keys pressed neither. And they waited for a click,
+     * which iOS gives only for a touch that barely moves and ends alone, so a
+     * quick second key, or a thumb that slid a little, was a tap that did
+     * nothing. Now the cells meet edge to edge, a key takes the touch the
+     * moment it lands, and it turns orange while it is down so there is no
+     * doubt it was felt. */
     const pad = el('margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);'
-      + 'gap:14px;width:100%;max-width:300px');
+      + 'width:100%;max-width:336px;touch-action:manipulation;'
+      + '-webkit-user-select:none;user-select:none;-webkit-touch-callout:none');
     const key = (label, onTap, quiet) => {
-      const k = el('height:66px;border-radius:33px;display:flex;align-items:center;'
-        + 'justify-content:center;font-size:26px;font-weight:700;cursor:pointer;'
-        + (quiet ? 'color:rgba(245,241,236,.55);background:transparent'
-                 : 'color:var(--ink,#F5F1EC);background:rgba(245,241,236,.08)'), label);
-      k.addEventListener('click', onTap);
+      const k = el('height:80px;display:flex;align-items:center;justify-content:center;'
+        + 'cursor:pointer;-webkit-tap-highlight-color:transparent');
+      const rest = quiet ? 'transparent' : 'rgba(245,241,236,.08)';
+      const ink = quiet ? 'rgba(245,241,236,.55)' : 'var(--ink,#F5F1EC)';
+      const face = el('flex:1;margin:0 7px;height:66px;border-radius:33px;display:flex;align-items:center;'
+        + 'justify-content:center;font-size:26px;font-weight:700;pointer-events:none;'
+        + 'transition:background .1s ease;color:' + ink + ';background:' + rest, label);
+      k.appendChild(face);
+      // the empty corner is not a key
+      if (!label) return k;
+      let litAt = 0, dim = null, touched = false;
+      const lit = () => {
+        clearTimeout(dim);
+        litAt = Date.now();
+        face.style.background = 'var(--acc,#F2802E)';
+        face.style.color = '#fff';
+      };
+      // long enough to be seen, however quick the tap
+      const unlit = () => {
+        clearTimeout(dim);
+        dim = setTimeout(() => { face.style.background = rest; face.style.color = ink; },
+                         Math.max(0, 140 - (Date.now() - litAt)));
+      };
+      k.addEventListener('pointerdown', () => { touched = true; lit(); onTap(); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach((kind) => k.addEventListener(kind, unlit));
+      // a click with no touch before it (a pointer-less browser, a test): the same key press
+      k.addEventListener('click', () => {
+        if (touched) { touched = false; return; }
+        lit(); onTap(); unlit();
+      });
       return k;
     };
     for (let d = 1; d <= 9; d++) {
@@ -8751,6 +8828,11 @@ class Component extends DCLogic {
            * until the mint has broadcast — it answers `outpoint: null` before
            * that — and empty for every other rail. */
           txid: meta.txid || '',
+          /* A Lightning payment's preimage, when the mint gave one: the proof
+           * that the invoice was paid, for the detail screen. */
+          preimage: t.preimage || '',
+          // and on a receive, the payment hash of the invoice this phone made
+          payHash: t.payHash || '',
         });
         // Anyone address-shaped is saved to the book on sight, once.
         //
@@ -10151,9 +10233,18 @@ class Component extends DCLogic {
    * finished thirty seconds before.
    * The quote stays on file and the sweep claims it if it is ever paid. */
   endReceiveAtHome() {
+    /* And an invoice still being asked for is let go when it answers.
+     *
+     * Back out of the invoice screen within a second, before the mint has
+     * answered, and there is no watch to stop yet. The answer then came a
+     * moment later, to a screen that was no longer there, and started one:
+     * switching mints was refused for "a payment in progress" that was an
+     * invoice nobody had ever seen, until home was reached a second time. The
+     * request is marked as an older one here, whether or not anything is
+     * being watched, so its answer is dropped (`openReceiveNow`). */
+    this._invoiceRun = (this._invoiceRun || 0) + 1;
     if (!this._watching && !this._stopWatch) return;
     console.log('[foxy] receive: home, so the invoice watch stops; the sweep has the quote');
-    this._invoiceRun = (this._invoiceRun || 0) + 1;
     this.stopReceive();
   }
 
@@ -13040,14 +13131,63 @@ class Component extends DCLogic {
         if (!tx.txid) return;
         this.toast(this.copyText(tx.txid) ? 'TXID Copied' : 'Could not copy');
       },
+      /* The proof that a Lightning payment was made: its preimage, which only
+       * somebody paid that invoice can know. Shown where the mint gave one;
+       * a payment between two wallets at one mint has none. Tap to copy, as
+       * the transaction id is. */
+      txPreimage: tx.preimage || '',
+      txHasPreimage: !!tx.preimage,
+      txCopyPreimage: () => {
+        if (!tx.preimage) return;
+        this.toast(this.copyText(tx.preimage) ? 'Proof of payment copied' : 'Could not copy');
+      },
+      /* And on a Lightning receive, the payment hash of the invoice: what a
+       * payer's proof of payment is held against. */
+      txPayHash: tx.payHash || '',
+      txHasPayHash: !!tx.payHash,
+      txCopyPayHash: () => {
+        if (!tx.payHash) return;
+        this.toast(this.copyText(tx.payHash) ? 'Payment hash copied' : 'Could not copy');
+      },
       /* What this payment consumed and produced: a count and a copy button.
        * The proofs themselves are hex, they are long, and the outputs of a
        * recent payment are live change with no business on screen. */
       txHasAudit: !!(audit && audit.length),
+      /* A record older than the last hundred is a receipt: the counts, and the
+       * public values of what left, with the pieces themselves let go. */
       txAuditLine: (audit && audit.length)
-        ? (audit[0].inputs || []).length + ' proofs in  \u00b7  '
-          + (audit[0].outputs || []).length + ' proofs out'
+        ? (audit[0].slim ? Number(audit[0].ins) || 0
+           : Math.max((audit[0].inputs || []).length, (audit[0].ys || []).length)) + ' proofs in  \u00b7  '
+          + (audit[0].slim ? Number(audit[0].outs) || 0 : (audit[0].outputs || []).length) + ' proofs out'
         : '',
+      /* A payment locked to the phone that asked for it, once the mint says
+       * its pieces are spent: they could only be spent by that phone's key,
+       * and the signature they were spent with is kept here. That is what
+       * shows somebody else who took the payment. The pieces are spent, so
+       * copying them hands over nothing. DELETE is the person's to press:
+       * a receipt is also a record of who was paid. */
+      txHasReceipt: !!(audit && audit[0] && audit[0].spent && (audit[0].inputs || []).length),
+      txReceiptLine: (audit && audit[0] && audit[0].spent)
+        ? 'Taken by the key it was locked to.' : '',
+      txReceiptCta: s.txReceiptCopied ? 'COPIED' : 'COPY RECEIPT',
+      txCopyReceipt: () => {
+        const a = audit && audit[0];
+        if (!a || !a.spent) return;
+        const text = JSON.stringify({
+          what: 'a Cashu payment locked to one key (NUT-11), and the signature its pieces were spent with (NUT-07)',
+          mint: a.mint, paid: a.at, sats: a.sats, lockedTo: a.lockedTo, spentSeenAt: a.spent.at,
+          proofs: (a.inputs || []).map((p, i) => ({ amount: p.amount, id: p.id, secret: p.secret, C: p.C,
+                                                    witness: a.spent.witness[i] })),
+        });
+        if (!this.copyText(text)) { this.toast('Could not copy', true); return; }
+        this.setState({ txReceiptCopied: true });
+        setTimeout(() => this.setState({ txReceiptCopied: false }), 1600);
+      },
+      txDeleteReceipt: () => {
+        const W = window.FoxyWallet;
+        if (!W || !W.forgetReceipt || !tx.hash) return;
+        if (W.forgetReceipt(tx.hash)) { this.toast('Receipt deleted'); this.setState({ txReceiptAt: 0 }); }
+      },
       txAuditCta: s.txAuditCopied ? 'COPIED' : 'COPY RECORD',
       txCopyAudit: () => {
         /* A record to share, not money. A proof's secret with its signature
@@ -14952,6 +15092,14 @@ class Component extends DCLogic {
       this.tapReceiving(Number(ev.pct) || 0);
       return;
     }
+    /* The other phone speaks another version of the tap, so the two cannot
+     * talk (TAP-TO-PAY.md, *Versions*). Said, on whichever side can know it:
+     * a tap that just does nothing is the one outcome the version was added
+     * to prevent. */
+    if (ev.stage === 'version') {
+      this.tapVersionCard(ev.side);
+      return;
+    }
     /* Shaken: the button is pressed, with every rule the button has. Only on
      * a receive screen with an offer, and only when not already on the air —
      * a shake never puts the code card away and never touches a payer that
@@ -16263,6 +16411,23 @@ class Component extends DCLogic {
     });
   }
 
+
+  /* The card for a phone that speaks another version of the tap. A code on a
+   * screen is read by every version, so that is the way through for now, said
+   * from where this phone stands. Once in a quarter of a minute: phones held
+   * together try again, and the card would come up over and over. */
+  tapVersionCard(side) {
+    if (Date.now() < (this._tapVersionSaid || 0)) return;
+    this._tapVersionSaid = Date.now() + 15000;
+    console.log('[foxy] tap: the other phone speaks another version of the tap; saying so');
+    if (side === 'pay') { this.tapBuzz(false); this.hideConnecting(); }
+    this.blockedCard('tapVersion', {
+      tone: 'warn',
+      title: 'UPDATE FOXY TO TAP',
+      reason: 'The other phone has a different version of Foxy, so the two cannot tap.\nUpdate Foxy on both phones.',
+      chip: side === 'pay' ? 'For now, scan the code on their screen.' : 'For now, they can scan the code on this screen.',
+    });
+  }
 
   /* The receiver's half: they are stuck at another mint and this phone is not.
    *

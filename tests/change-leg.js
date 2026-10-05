@@ -86,6 +86,13 @@ function page(o) {
             if (ctx.swapFate === 'lost') return reply(w, m.id, null, 'The network connection was lost.');
             return reply(w, m.id, '400\n' + JSON.stringify({ detail: 'This mint is not taking swaps.', code: 11000 }));
           }
+          /* The next swap this page asks for, held at the mint until the test lets it go. */
+          if (ctx.holdSwap && String(m.url || '').indexOf('/v1/swap') >= 0) {
+            const h = ctx.holdSwap;
+            ctx.holdSwap = null;
+            h.held = true;
+            return h.until.then(() => reply(w, m.id, mint.handle(m)));
+          }
           return reply(w, m.id, mint.handle(m));
         case 'inboxAnswer':
           // as the phone passes it on (`handleInboxAnswer`): 200, 409 and 422, anything else as 422
@@ -103,6 +110,8 @@ function page(o) {
           // M7: money going back over the link, if it is still there
           if (!L || !L.up) return reply(w, m.id, null, 'That phone is no longer connected.');
           L.log.push('M7 change');
+          // what this phone's own entry for the payment says while the change is on its way
+          ctx.atHandoff = history(ctx).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || null;
           setTimeout(() => L.payer && L.payer.W._tapChange(String(m.body || '')), 0);
           return reply(w, m.id, 'ok');
         case 'tapChangeKept':
@@ -284,6 +293,19 @@ async function run() {
        'showing the net, with what moved and what came back kept on it',
        JSON.stringify(entries[0] && { sats: entries[0].sats, gross: entries[0].grossSats,
                                       change: entries[0].changeSats, state: entries[0].changeState }));
+
+    /* The receiver's entry for the same payment says it was given back once
+     * the payer has kept it, and holds the change itself: locked to the payer,
+     * so a payer who says it never came can be shown it. */
+    const rrow = history(t.rx).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || {};
+    ok(rrow.sats === 100 && rrow.grossSats === 128 && rrow.changeSats === 28
+       && rrow.changeState === 'given back' && rrow.changeKept === true,
+       'the receiver\'s entry says what it kept and that the change was given back, once the payer has kept it',
+       JSON.stringify({ sats: rrow.sats, gross: rrow.grossSats, change: rrow.changeSats, state: rrow.changeState, kept: rrow.changeKept }));
+    const heldBack = rrow.hash ? t.rx.W.tagsFor(rrow.hash).changeToken : '';
+    ok(typeof heldBack === 'string' && heldBack.length > 0 && heldBack === t.payer.lastChange,
+       'the change the receiver made is kept on the payment\'s entry, the same token the payer was handed',
+       typeof heldBack === 'string' ? heldBack.length + ' characters' : String(heldBack));
   }
 
   /* ---- 2: the receiver's teardown beats the mint ------------------------
@@ -301,6 +323,12 @@ async function run() {
        t.L.log.join(' | '));
     ok(t.L.log.some((l) => l === 'down: the receiver finished with it'),
        'because the link is gone by the time the mint answers', t.L.log.join(' | '));
+    /* The payer paid 128 for 100 and nothing came back. Its entry says what
+     * was paid, and that the other 28 are still owed to it, not that they came. */
+    const out = history(t.payer).filter((e) => e.dir === 'out')[0] || {};
+    ok(out.sats === 100 && out.grossSats === 128 && out.changeSats === 28 && out.changeState === 'owed',
+       'the payer\'s entry says what it paid and that 28 sats of change are still owed',
+       JSON.stringify({ sats: out.sats, gross: out.grossSats, change: out.changeSats, state: out.changeState }));
   }
 
   /* ---- 3: a receiver that tears down instantly ---------------------------
@@ -493,6 +521,193 @@ async function run() {
     await t.rx.W.recoverSwaps(); await t.rx.W.claimUnclaimed();
     ok((await t.rx.W.balanceSats()) === before, 'and that stays true: nothing is claimed later',
        (await t.rx.W.balanceSats()) + ' held, was ' + before);
+  }
+
+  /* ---- 8: what making change cost, on the entry it belongs to ----------
+   * The cost of the change is worked out before its swap, and the swap can
+   * land a sat either side of it. A sat cheaper than allowed for stays with
+   * the payment, and the entry says so: it is what stayed on the phone, and
+   * no more. At 300 ppk, 100 asked and 128 handed over, the change comes out
+   * a sat cheaper. */
+  {
+    const t = await pair({ feePpk: 300 });
+    const rowsOf = (x) => history(x).reduce((a, e) => {
+      if (e.dir === 'in' && /^(tap|req)-change-/.test(String(e.hash || ''))) return a;
+      return a + (e.dir === 'in' ? Number(e.sats) : -(Number(e.sats) + (Number(e.feeSats) || 0)));
+    }, 0);
+    const rxBefore = await t.rx.W.balanceSats();
+    const ask = t.rx.W.decodeRequest(t.rx.W.paymentRequest(100, { purpose: 'receive' })) || {};
+    const paid = await t.payer.W.payRequest(Object.assign({}, ask, { sats: 100, unit: 'sat', viaTap: true }),
+      () => {}, { overpayOk: true }).then((r) => ({ made: r }), (e) => ({ why: (e && e.message) || String(e) }));
+    if (paid.made) t.payer.lastHash = paid.made.hash;
+    await settle(1500);
+    const rise = (await t.rx.W.balanceSats()) - rxBefore;
+    const row = history(t.rx).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || {};
+    const said = JSON.stringify({ sats: row.sats, fee: row.feeSats, dust: row.changeDust, change: row.changeSats,
+                                  cost: row.changeCost }) + ', rose by ' + rise;
+    ok(!!paid.made && Number(row.changeDust) === 1,
+       'making the change came out a sat cheaper than allowed for, and the entry says so',
+       paid.made ? said : paid.why);
+    ok(Number(row.sats) === rise && rise === 101,
+       'the sat stays with the payment: the entry is what stayed on the phone', said);
+    ok(rowsOf(t.rx) === await t.rx.W.balanceSats(), 'so the receiver\'s entries add up to its balance',
+       rowsOf(t.rx) + ' vs ' + await t.rx.W.balanceSats());
+  }
+
+  /* ---- 9: a payment that arrived locked, with a top-up in flight --------
+   * Ecash locked to this phone is written down the moment it lands and
+   * swapped in after, so the entry is there while the change is made and while
+   * anything else the phone is doing at the mint finishes. A top-up swap that
+   * lands in that gap puts its fee on the entry (the newest payment), and the
+   * swap that then takes the payment in has to keep that charge rather than
+   * write the entry afresh. Here the payer is online and hands over 128 for a
+   * request of 100, locked, so the change goes back over the link as well. */
+  {
+    const t = await pair({ feePpk: 150 });
+    goOnline(t.payer.W); t.payer.deaf = false;
+    const rowOf = (c) => history(c).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || null;
+    const rowsOf = (x) => history(x).reduce((a, e) => a + (e.dir === 'in' ? Number(e.sats) : -(Number(e.sats) + (Number(e.feeSats) || 0))), 0);
+    const rxBefore = await t.rx.W.balanceSats();
+    // the top-up is on its way to the mint, and held there while the payment arrives
+    let letGo = null;
+    const gate = { held: false, until: new Promise((r) => { letGo = r; }) };
+    t.rx.holdSwap = gate;
+    const topUp = t.rx.W.tidyChange();
+    for (let i = 0; i < 100 && !gate.held; i++) await new Promise((r) => setTimeout(r, 20));
+    const ask = t.rx.W.decodeRequest(t.rx.W.paymentRequest(100, { purpose: 'receive' })) || {};
+    const paying = t.payer.W.payRequest(Object.assign({}, ask, { sats: 128, unit: 'sat', viaTap: true }),
+      () => {}, { overpayOk: true }).then((r) => ({ made: r }), (e) => ({ why: (e && e.message) || String(e) }));
+    for (let i = 0; i < 200 && !rowOf(t.rx); i++) await new Promise((r) => setTimeout(r, 20));
+    letGo();
+    const split = await topUp.then((r) => r, (e) => ({ skipped: (e && e.message) || String(e) }));
+    const paid = await paying;
+    await settle(1500);
+    const rise = (await t.rx.W.balanceSats()) - rxBefore;
+    const row = rowOf(t.rx) || {};
+    const mid = t.rx.atHandoff || {};
+    const said = JSON.stringify({ sats: row.sats, fee: row.feeSats, topUp: row.topUpFee, change: row.changeSats,
+                                  state: row.changeState }) + ', rose by ' + rise;
+    ok(!!paid.made && !split.skipped && Number(row.topUpFee) > 0 && row.changeSats === 28,
+       'a payment locked to the receiver, with change owed, that a top-up lands in the middle of',
+       paid.made ? said + ' ' + JSON.stringify(split) : paid.why);
+    ok(mid.changeState === 'making' && mid.changeSats === 28,
+       'while the change is on its way, the receiver\'s entry says it is being made',
+       JSON.stringify({ state: mid.changeState, change: mid.changeSats }));
+    ok(row.changeState === 'given back' && row.changeKept === true,
+       'and once the payer has kept it, that it was given back', said);
+    ok(Number(row.sats) === rise,
+       'the top-up\'s fee is still on the entry once the payment is swapped in, and the entry is what stayed', said);
+    ok(rowsOf(t.rx) === await t.rx.W.balanceSats(), 'so the receiver\'s entries add up to its balance',
+       rowsOf(t.rx) + ' vs ' + await t.rx.W.balanceSats());
+  }
+
+  /* ---- 10: a token shown as a code, that paid over -----------------------
+   * An offline payer with no exact pieces pays over and puts a key for the
+   * difference in the token's note (the app asks for that when it is going to
+   * show a code). Nobody is asked anything, because nothing is given away: the
+   * receiver keeps what was asked, makes the rest locked to that key, and
+   * shows it as a code to scan. */
+  {
+    const t = await pair();
+    await t.payer.W.primeLocks();
+    const made = await t.payer.W.sendToken(100, { cover: true, changeNote: true })
+      .then((r) => r, (e) => ({ why: (e && e.message) || String(e) }));
+    const note = made.token ? t.rx.W.changeNoteOf(made.token) : null;
+    ok(!!made.token && made.over === 28 && made.changeAsked === true
+       && !!note && /^0[23][0-9a-f]{64}$/.test(note.changeTo) && note.asked === 100,
+       'a token that has to pay over is given a key for its change, with no question put to anybody',
+       made.token ? JSON.stringify({ over: made.over, asked: made.changeAsked, note }) : made.why);
+    const rxBefore = await t.rx.W.balanceSats();
+    let shown = null;
+    t.rx.W.onChangeStuck((x) => { shown = x; });
+    const got = made.token ? await t.rx.W.receiveToken(made.token).then((r) => r, (e) => ({ why: e.message })) : {};
+    await settle(1200);
+    const rise = (await t.rx.W.balanceSats()) - rxBefore;
+    const row = history(t.rx).filter((e) => e.dir === 'in' && e.hash === got.hash)[0] || {};
+    ok(got.changeDue === 28 && rise === 100,
+       'scanned by the receiver, it keeps what was asked and makes the 28 over as change',
+       JSON.stringify({ due: got.changeDue, rose: rise, why: got.why }));
+    ok(Number(row.sats) === 100 && row.grossSats === 128 && row.changeSats === 28,
+       'and its entry says 100 for the payment, with the 128 that arrived and the 28 that went back beside it',
+       JSON.stringify({ sats: row.sats, gross: row.grossSats, change: row.changeSats }));
+    const back = shown && shown.token ? t.payer.W.checkChange(shown.token, 28) : { ok: false, why: 'no change was shown' };
+    ok(!!shown && shown.sats === 28 && back.ok === true && back.sats === 28,
+       'the change is shown as a code, locked to the key the payer named',
+       JSON.stringify({ shown: shown && shown.sats, ok: back.ok, why: back.why }));
+    const rows = history(t.rx).reduce((a, e) => a + (e.dir === 'in' ? Number(e.sats) : -(Number(e.sats) + (Number(e.feeSats) || 0))), 0);
+    ok(rows === await t.rx.W.balanceSats(), 'and the receiver\'s entries add up to its balance',
+       rows + ' vs ' + await t.rx.W.balanceSats());
+  }
+
+  /* ---- 11: change made and never put on its payment's entry --------------
+   * Before the change was kept on the entry it was made, tagged under a hash
+   * of its own, and a phone put away at that moment left the payment saying
+   * the change was on its way for good. Found again when history is read, by
+   * its amount and the minute it was made in, for as long as it can still be
+   * of use: a day. */
+  {
+    const rx = page();
+    await rx.W.connect(MINT, null, null, { remember: true });
+    await rx.W.claim((await rx.W.invoice(2000, '')).hash);
+    const px = page({ sharedMint: rx.mint,
+      words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' });
+    await px.W.connect(MINT, null, null, { remember: true });
+    await px.W.primeLocks();
+    const ask = px.W.decodeRequest(px.W.paymentRequest(300, { purpose: 'receive' })) || {};
+    const lost = await rx.W.sendToken(300, { unit: 'sat', lockTo: ask.lockTo, purpose: 'change' })
+      .then((r) => r, (e) => ({ why: (e && e.message) || String(e) }));
+    const now = Math.floor(Date.now() / 1000);
+    const written = (hash, age) => {
+      const log = history(rx);
+      log.unshift({ hash, dir: 'in', sats: 1180, grossSats: 1480, changeSats: 300, changeState: 'making',
+                    at: now - age, settled: true, feeSats: 0 });
+      rx.storage.setItem('foxy.cashu.log', JSON.stringify(log));
+    };
+    // a minute and a half old: past "it may still be on its way", well within a day
+    written('req-lost-change', 90);
+    // and older than a day: whatever was owed has been claimed or forgotten, and is left alone
+    written('req-old-change', 90000);
+    rx.W.repairOwedChange();
+    await settle();
+    const found = history(rx).filter((e) => e.hash === 'req-lost-change')[0] || {};
+    ok(!!lost.token && found.changeState === 'not handed' && rx.W.tagsFor('req-lost-change').token === lost.token,
+       'change that was made and never reached its payment\'s entry is found, and is on the entry to be shown',
+       JSON.stringify({ state: found.changeState, why: lost.why }));
+    const old = history(rx).filter((e) => e.hash === 'req-old-change')[0] || {};
+    ok(old.changeState === 'making' && !rx.W.tagsFor('req-old-change').token,
+       'a payment more than a day old is left as it was', JSON.stringify({ state: old.changeState }));
+  }
+
+  /* ---- 12: the fee a top-up swap costs -----------------------------------
+   * Splitting a big piece into small ones costs a fee at a mint that charges
+   * one. It is put on the newest payment at that mint that really moved
+   * money, and every top-up adds to it. Not on a payment that failed, not on
+   * an entry of nothing. A receive's amount drops by it. */
+  {
+    const t = page({ feePpk: 1000 });
+    await t.W.connect(MINT, null, null, { remember: true });
+    await t.W.claim((await t.W.invoice(3000, '')).hash);
+    const funded = history(t)[0] || {};
+    // newer than the receive: a payment that did not go through, and an entry of nothing
+    const odd = [
+      { hash: 'refused-ecash', dir: 'out', sats: 40, feeSats: 0, settled: false, state: 'failed', memo: 'ecash, refused', mint: MINT, at: funded.at },
+      { hash: 'nothing-ecash', dir: 'in', sats: 0, feeSats: 0, settled: true, state: 'success', memo: 'ecash', mint: MINT, at: funded.at },
+    ];
+    t.storage.setItem('foxy.cashu.log', JSON.stringify(odd.concat(history(t))));
+    const first = await t.W.tidyChange();
+    const second = await t.W.tidyChange();
+    const rowOf = (hash) => history(t).filter((e) => e.hash === hash)[0] || {};
+    const got = rowOf(funded.hash);
+    ok(!first.skipped && !second.skipped && got.feeSats === 2 && got.topUpFee === 2 && got.sats === 2998,
+       'two top-ups at a fee mint: both fees are on the receive they followed, and its amount drops by them',
+       JSON.stringify({ first, second, sats: got.sats, fee: got.feeSats, topUp: got.topUpFee }));
+    const failed = rowOf('refused-ecash'), nil = rowOf('nothing-ecash');
+    ok(!failed.feeSats && !failed.topUpFee && failed.sats === 40,
+       'a payment that failed is not charged a fee it did not cost', JSON.stringify({ sats: failed.sats, fee: failed.feeSats, topUp: failed.topUpFee }));
+    ok(!nil.feeSats && !nil.topUpFee && nil.sats === 0,
+       'and neither is an entry of nothing', JSON.stringify({ sats: nil.sats, fee: nil.feeSats, topUp: nil.topUpFee }));
+    ok(history(t).reduce((a, e) => a + (e.dir === 'in' ? Number(e.sats) : 0), 0) === await t.W.balanceSats(),
+       'so what the receive says it kept is what the wallet holds', String(await t.W.balanceSats()));
   }
 
   console.log('\n' + (failed ? failed + ' change-leg check(s) failed'

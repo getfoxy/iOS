@@ -425,6 +425,55 @@ const usdProof = (amount) => ({ ...proof(amount), id: USD_ID });
     return eq(sumOf(pile(ctx.storage, USD_PILE)), 109, 'usd pile after putting back');
   });
 
+  await test('putting back sets-aside ecash sends sats to the sat pile and each other unit to its own', async () => {
+    const satForeign = proof(32);
+    const usdForeign = usdProof(9);
+    const sat = proof(64);
+    const ctx = await wallet({
+      spent: new Set([satForeign.secret, usdForeign.secret]),
+      storage: {
+        [SAT_PILE]: JSON.stringify([sat, satForeign]),
+        [USD_PILE]: JSON.stringify([usdForeign]),
+        'foxy.cashu.imported': JSON.stringify([satForeign.secret, usdForeign.secret]),
+      },
+    });
+    await ctx.W.reconcile();
+    const q = JSON.parse(ctx.storage.getItem('foxy.cashu.quarantine') || '[]');
+    if (q.length !== 2) return 'both were set aside: ' + JSON.stringify(q.map((r) => r.unit));
+    if (ctx.W.quarantinedSats() !== 32) return 'quarantinedSats ' + ctx.W.quarantinedSats();
+
+    ctx.spent.delete(satForeign.secret);
+    ctx.spent.delete(usdForeign.secret);
+    const back = await ctx.W.unquarantine();
+    if (back.back !== 32) return 'sats put back: ' + JSON.stringify(back);
+    // only units other than sats are reported apart: sats are `back`
+    if (!back.backUnits || Object.keys(back.backUnits).join() !== 'usd' || back.backUnits.usd !== 9) {
+      return 'backUnits: ' + JSON.stringify(back.backUnits);
+    }
+    const bad = eq(sumOf(pile(ctx.storage, SAT_PILE)), 96, 'sat pile after putting back');
+    if (bad) return bad;
+    const bad2 = eq(sumOf(pile(ctx.storage, USD_PILE)), 9, 'usd pile after putting back');
+    if (bad2) return bad2;
+    return eq(JSON.parse(ctx.storage.getItem('foxy.cashu.quarantine') || '[]').length, 0, 'what is still set aside');
+  });
+
+  await test('putting back sats alone reports no other unit', async () => {
+    const satForeign = proof(32);
+    const ctx = await wallet({
+      spent: new Set([satForeign.secret]),
+      storage: {
+        [SAT_PILE]: JSON.stringify([proof(64), satForeign]),
+        'foxy.cashu.imported': JSON.stringify([satForeign.secret]),
+      },
+    });
+    await ctx.W.reconcile();
+    ctx.spent.delete(satForeign.secret);
+    const back = await ctx.W.unquarantine();
+    if (back.back !== 32) return 'sats put back: ' + JSON.stringify(back);
+    if (back.backUnits) return 'a sats-only return named units: ' + JSON.stringify(back.backUnits);
+    return eq(sumOf(pile(ctx.storage, SAT_PILE)), 96, 'sat pile after putting back');
+  });
+
   await test('a sat-only reconcile returns what it always did', async () => {
     const a = proof(64), b = proof(8);
     const ctx = await wallet({ spent: new Set([b.secret]), storage: { [SAT_PILE]: JSON.stringify([a, b]) } });

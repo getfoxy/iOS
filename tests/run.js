@@ -1147,6 +1147,48 @@ const eq = (got, want, what) =>
     return eq(old.balance, 10, 'balance after the sweep');
   });
 
+  await test('a hold that cannot be dropped is not charged for its split again by every sweep', async () => {
+    /* The ecash goes back to the pile and the hold is dropped, and the drop
+     * is a write that a full store refuses. The proofs are home either way.
+     * What the split cost is charged only once the hold has really gone:
+     * charged while it is still there, the next sweep finds it and charges
+     * again, on every launch, for as long as the store is full. */
+    const { stubCashu } = require('./harness');
+    const cashu = stubCashu();
+    const Base = cashu.Wallet;
+    cashu.Wallet = class extends Base { checkMeltQuoteBolt11() { return Promise.resolve({ state: 'FAILED' }); } };
+    const held = proof(10);
+    const ctx = load({ cashu, storage: {
+      'foxy.cashu.melting': JSON.stringify([{ quote: 'm9', mint: 'https://m.test', proofs: [held], splitFee: 2,
+        at: Math.floor(Date.now() / 1000) - 600 }]),
+      'foxy.cashu.log': JSON.stringify([{ at: Math.floor(Date.now() / 1000) - 900, mint: 'https://m.test', dir: 'in',
+        sats: 50, feeSats: 0, settled: true, state: 'success', memo: '', hash: 'earlier' }]),
+    } });
+    const feeOn = () => {
+      const row = JSON.parse(ctx.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.hash === 'earlier')[0] || {};
+      return (Number(row.feeSats) || 0) + ctx.W.topUpFeeSats();
+    };
+    const real = ctx.window.Storage.prototype.setItem;
+    let full = true;
+    ctx.window.Storage.prototype.setItem = function (k, v) {
+      if (full && String(k) === 'foxy.cashu.melting') throw new Error('QuotaExceededError');
+      return real.call(this, k, v);
+    };
+    await ctx.W.connect('https://m.test', { remember: true });
+    await ctx.W.sweepMelts();
+    await ctx.W.sweepMelts();
+    const stuck = JSON.parse(ctx.storage.getItem('foxy.cashu.melting') || '[]').length;
+    const charged = feeOn();
+    full = false;
+    await ctx.W.sweepMelts();
+    ctx.window.Storage.prototype.setItem = real;
+    if (stuck !== 1) return 'the hold was dropped while the store refused the write';
+    if (charged !== 0) return charged + ' sats of fee were charged while the hold was still there';
+    if (JSON.parse(ctx.storage.getItem('foxy.cashu.melting') || '[]').length) return 'the hold is still there once the store takes the write';
+    if (feeOn() !== 2) return 'the split\'s fee, once the hold went: ' + feeOn();
+    return eq(await ctx.W.balanceSats(), 10, 'balance: the proofs are home once, not three times');
+  });
+
   await test('W4 a melt that never answered, then read UNPAID, stays held until the sweep', async () => {
     // the request may still be on its way: a retry must not be able to pay twice
     const r = await payWith('UNPAID');
@@ -1368,6 +1410,128 @@ const eq = (got, want, what) =>
     return minted && minted[2] === 'q0' && !minted[3] ? null : 'the claim was not a plain one: ' + JSON.stringify(minted);
   });
 
+  // ---- a question asked twice: an invoice, a fee quote -----------------------
+
+  /* A mint whose answers to an invoice or a fee quote can hang. `hang` is how
+   * many of the first askings never answer; `fail`, how many reject. Each
+   * asking is numbered, so a test can tell which one the wallet went on with. */
+  const slowStub = (o = {}) => {
+    const { stubCashu } = require('./harness');
+    const c = stubCashu({});
+    const Base = c.Wallet;
+    const seen = { invoices: 0, quotes: 0, melts: [], keys: [] };
+    const answer = (n, value) => {
+      if (n <= (o.fail || 0)) return Promise.reject(new Error('Load failed'));
+      if (n <= (o.fail || 0) + (o.hang || 0)) return new Promise(() => {});
+      return Promise.resolve(value);
+    };
+    c.Wallet = class extends Base {
+      getMintInfo() { return { isSupported: (n) => ({ supported: !!o.nut20 && n === 20 }) }; }
+      getFeesForProofs() { return 0; }
+      createLockedMintQuote(amount, pubkey) {
+        const n = ++seen.invoices;
+        seen.keys.push(pubkey);
+        return answer(n, { quote: 'inv' + n, request: 'lnbc80n1invoice' + n, pubkey, expiry: 9999999999 });
+      }
+      createMintQuoteBolt11() {
+        const n = ++seen.invoices;
+        return answer(n, { quote: 'inv' + n, request: 'lnbc80n1invoice' + n, expiry: 9999999999 });
+      }
+      createMeltQuoteBolt11() {
+        const n = ++seen.quotes;
+        return answer(n, { quote: 'melt' + n, amount: 8, fee_reserve: 0 });
+      }
+      send(amount, have) { return Promise.resolve({ keep: [], send: have }); }
+      meltProofsBolt11(q) { seen.melts.push(q.quote); return Promise.resolve({ quote: { state: 'PAID' }, change: [] }); }
+      checkMeltQuoteBolt11() { return Promise.resolve({ state: 'PAID' }); }
+    };
+    c.Mint = c.Wallet;
+    let made = 0;
+    c.createRandomSecretKey = () => new Uint8Array(32).fill(++made);
+    c.getPubKeyFromPrivKey = (sk) => Uint8Array.from([2].concat(new Array(32).fill(sk[0])));
+    return { cashu: c, seen };
+  };
+  const slowCtx = async (o, storage) => {
+    const { cashu, seen } = slowStub(o);
+    const ctx = load({ cashu, storage: storage || {} });
+    // the first connect asks the mint for an invoice of its own, to learn its node: not in these counts
+    ctx.W._nodeProbeDelay = [86400000, 86400000];
+    await ctx.W.connect('https://m.test', { remember: true });
+    await new Promise(r => setTimeout(r, 20));
+    ctx.W._askAgainMs = 30;
+    return { ctx, seen, read: (k, d) => JSON.parse(ctx.storage.getItem(k) || d) };
+  };
+
+  await test('an invoice the mint is slow to give is asked for again, and the first to answer is the invoice', async () => {
+    /* Every job leaves on a circuit of its own and now and then one goes
+     * nowhere: the request sat for a minute while the same mint answered
+     * another phone in two seconds. Asked again after a wait, on another
+     * circuit, with a key of its own. */
+    const { ctx, seen, read } = await slowCtx({ hang: 1, nut20: true });
+    const inv = await ctx.W.invoice(8);
+    if (seen.invoices !== 2) return 'the mint was asked ' + seen.invoices + ' time(s)';
+    if (inv.hash !== 'inv2' || inv.bolt11 !== 'lnbc80n1invoice2') return 'the invoice is not the one that answered: ' + JSON.stringify(inv);
+    const kept = read('foxy.cashu.quotes', '[]');
+    if (kept.length !== 1 || kept[0].quote !== 'inv2') return 'on file: ' + JSON.stringify(kept.map(q => q.quote));
+    if (seen.keys[0] === seen.keys[1]) return 'both askings carried the same key, which joins them at the mint';
+    return kept[0].pubkey === seen.keys[1] && !!kept[0].privkey ? null : 'the key on file is not the key the answering quote was asked with';
+  });
+
+  await test('an invoice the mint gives at once is asked for once, and one that fails at once fails', async () => {
+    const quick = await slowCtx({});
+    await quick.ctx.W.invoice(8);
+    await new Promise(r => setTimeout(r, 80));
+    if (quick.seen.invoices !== 1) return 'a quick invoice was asked for ' + quick.seen.invoices + ' times';
+    const broken = await slowCtx({ fail: 1 });
+    let error = null;
+    try { await broken.ctx.W.invoice(8); } catch (e) { error = e; }
+    await new Promise(r => setTimeout(r, 80));
+    if (!error) return 'a refusal was papered over with a second asking';
+    return eq(broken.seen.invoices, 1, 'askings after a failure that came at once');
+  });
+
+  await test('with both askings hung, an invoice is still one the caller can give up on; with both failed, it fails', async () => {
+    const dead = await slowCtx({ fail: 0, hang: 2 });
+    let settled = false;
+    dead.ctx.W.invoice(8).then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(r => setTimeout(r, 120));
+    if (settled || dead.seen.invoices !== 2) return 'two hung askings: settled ' + settled + ', asked ' + dead.seen.invoices;
+    // the first hangs and the second is refused: the refusal is not an answer while the first may still come
+    const mixed = slowStub({});
+    let n = 0;
+    mixed.cashu.Wallet.prototype.createMintQuoteBolt11 = function () {
+      n += 1;
+      return n === 1 ? new Promise(() => {}) : Promise.reject(new Error('Load failed'));
+    };
+    const ctx = load({ cashu: mixed.cashu });
+    ctx.W._nodeProbeDelay = [86400000, 86400000];
+    await ctx.W.connect('https://m.test', { remember: true });
+    ctx.W._askAgainMs = 30;
+    let done = false;
+    ctx.W.invoice(8).then(() => { done = true; }, () => { done = true; });
+    await new Promise(r => setTimeout(r, 120));
+    return done ? 'one asking failing ended it while the other was still out' : null;
+  });
+
+  await test('a fee quote the mint is slow to give is asked for again', async () => {
+    const { ctx, seen } = await slowCtx({ hang: 1 });
+    const fee = await ctx.W.quoteFee('lnbc80n1test');
+    if (!fee || fee.amount !== 8) return 'the quote: ' + JSON.stringify(fee);
+    return eq(seen.quotes, 2, 'askings');
+  });
+
+  await test('a payment whose fee quote hung goes on with the quote that answered, and pays once', async () => {
+    const { ctx, seen } = await slowCtx({ hang: 1 }, {
+      'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]),
+    });
+    let error = null;
+    try { await ctx.W.pay('lnbc80n1test'); } catch (e) { error = e; }
+    if (error) return 'the payment failed: ' + error.message;
+    if (seen.quotes !== 2) return 'the fee was asked for ' + seen.quotes + ' time(s)';
+    // the melt is never asked twice, and it is for the quote that came back
+    return JSON.stringify(seen.melts) === '["melt2"]' ? null : 'melts: ' + JSON.stringify(seen.melts);
+  });
+
   await test('an interrupted mint switch finishes with its quote\'s key', async () => {
     const log = [];
     const lock = { pubkey: '02' + 'cd'.repeat(32), privkey: '07'.repeat(32) };
@@ -1458,6 +1622,30 @@ const eq = (got, want, what) =>
     const issued = await claimWith([mintErr(20006, 'Invoice already paid or pending')], { quoteState: 'ISSUED' });
     if (!issued.error) return 'an ISSUED quote was claimed again';
     return eq(issued.seen.calls, 1, 'mint asked for an ISSUED quote');
+  });
+
+  await test('a melt refused for outputs already signed moves the counters on, and is not tried again', async () => {
+    /* A melt pays, so it is never repeated. But the change blanks it sent sit
+     * on counters the mint has signed before, and left there every later
+     * payment sends the same blanks and is refused the same way. */
+    let melts = 0;
+    const c = payStub('UNPAID', 'UNSPENT', () => mintErr(11008, 'Duplicate outputs'));
+    const Paying = c.Wallet;
+    c.Wallet = class extends Paying {
+      constructor(u, o) { super(u, o); this.keyChain = { getKeysets: () => [{ id: KS }] }; }
+      meltProofsBolt11(q, ps) { melts += 1; return super.meltProofsBolt11(q, ps); }
+    };
+    c.Mint = c.Wallet;
+    const ctx = load({ cashu: c, storage: { 'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]) } });
+    await ctx.W.connect('https://m.test', { remember: true });
+    await new Promise(r => setTimeout(r, 20));
+    const before = readCounters(ctx)[KS] || 0;
+    let error = null;
+    try { await ctx.W.pay('lnbc80n1test'); } catch (e) { error = e; }
+    await new Promise(r => setTimeout(r, 20));
+    if (!error) return 'the payment went through';
+    if (melts !== 1) return 'the mint was asked to melt ' + melts + ' times';
+    return eq((readCounters(ctx)[KS] || 0) - before, 10, 'counters moved on');
   });
 
   // ---- mint errors over the bridge -------------------------------------------
@@ -2014,9 +2202,56 @@ const eq = (got, want, what) =>
     if (await ctx.W.recoverIssued('q1') !== 0) return 'a second recovery added something';
     const log = read('foxy.cashu.log', '[]').filter(e => e.hash === 'q1');
     if (log.length !== 1 || log[0].sats !== 8 || log[0].memo !== 'lunch') return 'history: ' + JSON.stringify(log);
+    // money that is in the pile is a settled receive, not one still waiting
+    if (log[0].settled !== true || log[0].state !== 'success' || log[0].dir !== 'in') return 'the entry is not a settled receive: ' + JSON.stringify(log[0]);
     const asked = JSON.stringify(mint.restores.map(r => [r[0], r[1]]));
     if (asked !== '[[10,2]]') return 'restores: ' + asked;
     return eq(await ctx.W.balanceSats(), 8, 'balance after running the recovery again');
+  });
+
+  await test('a recovery adds nothing this wallet already holds', async () => {
+    /* The claim's answer did arrive and its proofs were kept; only the record
+     * of the invoice outlived it. The mint calls those proofs unspent, as it
+     * does everything this wallet holds, so "unspent" is not "missing": what a
+     * recovery adds is what is held nowhere here. Added again, the invoice is
+     * in the history twice and, wherever the pile does not catch the repeat,
+     * in the balance twice. */
+    const a = proof(4), b = proof(4);
+    const { ctx, mint, read } = await lostCtx({}, {
+      'foxy.cashu.quotes': JSON.stringify([{ quote: 'q1', amount: 8, mint: 'https://m.test', memo: 'lunch',
+                                             outputs: [{ keysetId: KS, start: 10, count: 2 }],
+                                             outputsMint: 'https://m.test' }]),
+      'foxy.cashu.proofs.https://m.test': JSON.stringify([a, b]),
+    });
+    mint.signed[10] = a; mint.signed[11] = b;
+    mint.quoteState = 'ISSUED';
+    if (await ctx.W.balanceSats() !== 8) return 'balance to begin with: ' + await ctx.W.balanceSats();
+    const got = await ctx.W.recoverIssued('q1');
+    if (got !== 0) return 'the recovery said it restored ' + got + ' sats that were in the pile all along';
+    if (read('foxy.cashu.log', '[]').some(e => e.hash === 'q1')) return 'and wrote the invoice into history again';
+    if (read('foxy.cashu.quotes', '[]').length) return 'the invoice is still on file';
+    return eq(await ctx.W.balanceSats(), 8, 'balance after the recovery');
+  });
+
+  await test('a move whose claim answer was lost is restored from the counters on its note', async () => {
+    /* The far mint issued and the answer never came. A move has no invoice
+     * row; its note is the only record there is, so the counters the claim
+     * reserved are written on the note as they are reserved. Without them the
+     * quote reads ISSUED for ever and the sats are reachable only by walking
+     * the seed. */
+    const { ctx, mint, read } = await lostCtx({ lose: ['drop'] }, {
+      'foxy.cashu.move': JSON.stringify({ to: 'https://m.test', from: 'https://a.test', quote: 'q7', amount: 8,
+                                          at: Date.now() }),
+    });
+    // connecting finishes what a note names, and so does this: whichever came first did it, once
+    await ctx.W.finishMove();
+    const asked = JSON.stringify(mint.restores.map(r => [r[0], r[1]]));
+    if (asked !== '[[10,2]]') return 'restores asked of the mint: ' + asked;
+    if (await ctx.W.balanceSats() !== 8) return 'balance after the recovery: ' + await ctx.W.balanceSats();
+    const log = read('foxy.cashu.log', '[]').filter(e => e.hash === 'q7');
+    if (log.length !== 1 || log[0].sats !== 8) return 'history: ' + JSON.stringify(log);
+    const note = read('foxy.cashu.move', 'null');
+    return (note && (!Array.isArray(note) || note.length)) ? 'the note is still on file: ' + JSON.stringify(note) : null;
   });
 
   await test('a claim refused for used counters records only the attempt the mint may have signed', async () => {
@@ -2168,6 +2403,24 @@ const eq = (got, want, what) =>
     mint.signed[20] = proof(8);
     await ctx.W.recoverSwaps();
     if (read('foxy.cashu.swaps', '[]').length !== 1) return 'the record was dropped';
+    return eq(await ctx.W.balanceSats(), 0, 'balance');
+  });
+
+  await test('a swap record whose outputs have all been spent since is dropped', async () => {
+    /* The mint signed, the answer was lost, and by the time anybody asks the
+     * outputs are gone: a token claimed already by whoever it was for. Nothing
+     * is left to restore and nothing is locked on the record, so it is
+     * finished. Kept, it is asked about on every connection for good, and
+     * whatever it holds stays out of the balance. */
+    const { ctx, mint, read } = await lostCtx({}, {
+      'foxy.cashu.swaps': swapRecord({ outputs: [{ keysetId: KS, start: 20, count: 1 }] }),
+    });
+    const gone = proof(8);
+    mint.signed[20] = gone;
+    mint.spent.add(gone.secret);
+    const got = await ctx.W.recoverSwaps();
+    if (got.length) return 'recoverSwaps added ' + JSON.stringify(got);
+    if (read('foxy.cashu.swaps', '[]').length) return 'the record is still on file: ' + ctx.storage.getItem('foxy.cashu.swaps');
     return eq(await ctx.W.balanceSats(), 0, 'balance');
   });
 
@@ -2567,7 +2820,7 @@ const eq = (got, want, what) =>
 
     await test('a seed scan does not adopt proofs held by a payment or inside a sent token', async () => {
       const { stubCashu } = require('./harness');
-      const held = proof(64), sent = proof(32), fresh = proof(8);
+      const held = proof(64), sent = proof(32), fresh = proof(8), chain = proof(128);
       const cashu = stubCashu();
       cashu.Wallet.prototype.checkMeltQuoteBolt11 = () => Promise.resolve({ state: 'PENDING' });
       cashu.getDecodedToken = (t) => {
@@ -2578,13 +2831,20 @@ const eq = (got, want, what) =>
         'foxy.cashu.melting': JSON.stringify([{ quote: 'q1', amount: 60, proofs: [held], mint: MINT,
           at: Math.floor(Date.now() / 1000), outputs: [] }]),
         'foxy.cashu.outtoken': JSON.stringify({ token: 'cashuAsent', sats: 32, mint: MINT, hash: 'token-1' }),
+        /* And a payment on its way out on chain. Its proofs are on its own
+         * record, not among the held melts, and the mint calls them unspent
+         * until the transaction is broadcast: the same trap by a newer road. */
+        'foxy.cashu.onchain.out': JSON.stringify([{ quote: 'oc1', address: 'bc1qexample', sats: 120, feeSats: 0,
+          proofs: [chain], at: Date.now(), mint: MINT, state: 'SENDING' }]),
       };
       const { W, storage: ls } = load({ storage, cashu });
       await W.connect(MINT);
-      const row = { url: MINT, host: 'm.test', state: 'done', proofs: [held, sent, fresh], counters: {}, partial: false, units: {} };
+      const row = { url: MINT, host: 'm.test', state: 'done', proofs: [held, sent, chain, fresh], counters: {}, partial: false, units: {} };
       const res = await W.adoptScan([row], { merge: true });
       const pile = JSON.parse(ls.getItem('foxy.cashu.proofs.' + MINT) || '[]');
       if (sumOf(pile) !== 8) return 'the pile holds ' + pile.map(p => p.amount).join('+') + ' sats';
+      const out = JSON.parse(ls.getItem('foxy.cashu.onchain.out') || '[]');
+      if (!(out[0] && out[0].proofs && out[0].proofs.length === 1)) return 'the payout no longer holds its proofs: ' + JSON.stringify(out);
       return eq(res && res.kept && res.kept[0] && res.kept[0].added, 8, 'sats reported as added');
     });
 
@@ -2935,6 +3195,8 @@ const eq = (got, want, what) =>
       const answer = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
       const ctx = loadReal({
         storage: o.storage,
+        // a circuit opened ahead of time, only where a test is about it
+        spare: o.spare,
         bridge: (w, m) => {
           if (m.action === 'mintRequest') {
             if (o.onMint) o.onMint(m);
@@ -2951,7 +3213,8 @@ const eq = (got, want, what) =>
         },
         before: (w) => {
           if (!phone.toSeed) phone.attach(w);
-          mint = o.mint || fakeMint(w, { versionByte: o.versionByte || 0, p2pk: !!o.p2pk, feePpk: o.feePpk, maxArray: o.maxArray });
+          mint = o.mint || fakeMint(w, { versionByte: o.versionByte || 0, p2pk: !!o.p2pk, feePpk: o.feePpk, maxArray: o.maxArray,
+                                         preimage: o.preimage });
           // the bundle's exports are getters, so the page gets a copy with one counted
           const B = w.FoxyBip39;
           realToSeed = B.mnemonicToSeedSync;
@@ -3097,7 +3360,284 @@ const eq = (got, want, what) =>
       if (checks[0].circuit !== refused.circuit) return 'the question left on another circuit than the refused swap';
       if (!told || told.sats !== 256) return 'said: ' + JSON.stringify(told);
       if (nsPile(P.storage).some(p => p.secret === big.secret)) return 'the spent proof is still in the pile';
+      // this seed made it and can make it again, so it is gone, not set aside as ecash no restore could bring back
+      if (JSON.parse(P.storage.getItem('foxy.cashu.quarantine') || '[]').length) return 'a piece this seed can rebuild was set aside as if it had been imported';
       return eq(await W.balanceSats(), 44, 'balance');
+    });
+
+    // ---- what is kept of a payment, to show somebody else --------------------
+
+    await test('a Lightning payment keeps the preimage the mint gives, and one with none keeps none', async () => {
+      /* The one receipt a payee cannot argue with: only somebody paid that
+       * invoice can know it. It was never kept. */
+      const PRE = 'c3'.repeat(32);
+      const P = nsPage({ preimage: PRE });
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(500, '')).hash);
+      const res = await W.pay((await W.invoice(50, '')).bolt11);
+      const row = JSON.parse(P.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.hash === res.hash)[0] || {};
+      if (row.preimage !== PRE) return 'the entry\'s proof of payment: ' + JSON.stringify(row.preimage);
+      // a mint that settles between two of its own users has none to give, and says null
+      const N = nsPage({ preimage: null });
+      await N.W.seedReady();
+      await N.W.connect(NS_MINT);
+      await N.W.claim((await N.W.invoice(500, '')).hash);
+      const res2 = await N.W.pay((await N.W.invoice(50, '')).bolt11);
+      const row2 = JSON.parse(N.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.hash === res2.hash)[0] || {};
+      if ('preimage' in row2 && row2.preimage) return 'a preimage was written where the mint gave none: ' + row2.preimage;
+      // and nothing that is not thirty-two bytes of hex is taken for one
+      const B = nsPage({ preimage: 'paid' });
+      await B.W.seedReady();
+      await B.W.connect(NS_MINT);
+      await B.W.claim((await B.W.invoice(500, '')).hash);
+      const res3 = await B.W.pay((await B.W.invoice(50, '')).bolt11);
+      const row3 = JSON.parse(B.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.hash === res3.hash)[0] || {};
+      return row3.preimage ? 'something that is not a preimage was kept as one: ' + row3.preimage : null;
+    });
+
+    await test('an invoice\'s payment hash is read from it, and kept on its record and on the entry once it is claimed', async () => {
+      // BOLT11's own example invoice, whose payment hash the specification gives
+      const EXAMPLE = 'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+      const HASH = '0001020304050607080900010203040506070809000102030405060708090102';
+      const { stubCashu } = require('./harness');
+      const c = stubCashu({});
+      const Base = c.Wallet;
+      c.Wallet = class extends Base {
+        getMintInfo() { return { isSupported: () => ({ supported: false }) }; }
+        createMintQuoteBolt11() { return Promise.resolve({ quote: 'qh', request: EXAMPLE, expiry: 9999999999 }); }
+        checkMintQuoteBolt11() { return Promise.resolve({ state: 'PAID' }); }
+        mintProofsBolt11(amount) { return Promise.resolve([proof(amount)]); }
+      };
+      c.Mint = c.Wallet;
+      const ctx = load({ cashu: c });
+      ctx.W._nodeProbeDelay = [86400000, 86400000];
+      await ctx.W.connect('https://m.test', { remember: true });
+      if (ctx.W.invoiceHash(EXAMPLE) !== HASH) return 'read from the example invoice: ' + ctx.W.invoiceHash(EXAMPLE);
+      if (ctx.W.invoiceHash('lnbc1notaninvoice') !== '' || ctx.W.invoiceHash('') !== '') return 'a hash was read from something that is not an invoice';
+      await ctx.W.invoice(250000);
+      const rec = JSON.parse(ctx.storage.getItem('foxy.cashu.quotes') || '[]')[0] || {};
+      if (rec.payHash !== HASH) return 'on the invoice\'s record: ' + JSON.stringify(rec.payHash);
+      await ctx.W.claim('qh');
+      const row = JSON.parse(ctx.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.hash === 'qh')[0] || {};
+      return row.payHash === HASH ? null : 'on the entry once claimed: ' + JSON.stringify(row.payHash);
+    });
+
+    await test('every send keeps the public values of what left, and they outlast the pieces', async () => {
+      const P = nsPage({});
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(500, '')).hash);
+      const made = await W.sendToken(100);
+      const pieces = W.tokenInfo(made.token).proofs;
+      const CT = P.window.CashuTS, enc = new TextEncoder();
+      const want = pieces.map(p => CT.hashToCurve(enc.encode(p.secret)).toHex(true)).sort().join();
+      const rec = (W.auditTrail(made.hash) || [])[0] || {};
+      if ((rec.ys || []).slice().sort().join() !== want) return 'the values kept are not those of the pieces sent: ' + JSON.stringify(rec.ys);
+      if (rec.lockedTo) return 'a plain token was marked as locked';
+      // claimed: the pieces go from the record, as they always did, and the values stay
+      await W.receiveToken(made.token);
+      W.forgetClaimedToken(made.token);
+      const after = (W.auditTrail(made.hash) || [])[0] || {};
+      if ((after.inputs || []).length) return 'a claimed plain token\'s pieces were kept';
+      if ((after.ys || []).slice().sort().join() !== want) return 'the values went with the pieces';
+      // and a payment over Lightning: the pieces the mint was given
+      const res = await W.pay((await W.invoice(50, '')).bolt11);
+      const melt = (W.auditTrail(res.hash) || [])[0] || {};
+      return (melt.ys || []).length && melt.ys.length === (melt.inputs || []).length ? null : 'a Lightning payment kept ' + JSON.stringify(melt.ys);
+    });
+
+    await test('the last hundred payments are kept in full, four hundred more as receipts, and never more than a megabyte in full', async () => {
+      /* In full is every piece, for working out where money went; a receipt
+       * is the figures and the public values, and nothing that spends. Five
+       * hundred in full would be most of the page's store. */
+      const full = (n, pad) => ({ at: 1000 + n, mint: NS_MINT, hash: 'old-' + n, sats: n, feeSats: 0, kind: 'token',
+        inputs: [{ amount: 8, id: '00ab', secret: 's' + n + (pad || ''), C: '02' + 'c'.repeat(64) }],
+        outputs: [{ amount: 4, id: '00ab', secret: 'o' + n, C: '02' + 'd'.repeat(64) }, { amount: 2, id: '00ab', secret: 'p' + n, C: '02' + 'e'.repeat(64) }],
+        ys: ['02' + String(n).padStart(64, '0')] });
+      const seeded = [];
+      for (let n = 0; n < 520; n++) seeded.push(full(n));
+      const P = nsPage({ storage: { 'foxy.cashu.audit': JSON.stringify(seeded) } });
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(500, '')).hash);
+      const made = await W.sendToken(100);
+      const list = W.auditTrail();
+      if (list.length !== 500) return list.length + ' records kept, wanted 500';
+      if (list[0].hash !== made.hash || list[0].slim) return 'the newest is not first and in full';
+      const inFull = list.filter(a => !a.slim).length;
+      if (inFull !== 100) return inFull + ' in full, wanted 100';
+      if (list.slice(0, 100).some(a => a.slim) || list.slice(100).some(a => !a.slim)) return 'the full ones are not the newest hundred';
+      const r = list[250];
+      if (r.inputs || r.outputs) return 'a receipt still holds pieces';
+      if (r.ins !== 1 || r.outs !== 2 || !(r.ys && r.ys.length === 1) || !(r.sats >= 0) || !r.hash || !r.at) return 'a receipt lost what it is for: ' + JSON.stringify(r);
+      if (/"secret"/.test(JSON.stringify(list.slice(100)))) return 'a secret is left in a receipt';
+      // big records: a megabyte in full and no more, however few that is
+      const big = [];
+      for (let n = 0; n < 12; n++) big.push(full(n, 'x'.repeat(200000)));
+      P.storage.setItem('foxy.cashu.audit', JSON.stringify(big));
+      await W.sendToken(50);
+      const now = W.auditTrail();
+      const chars = now.filter(a => !a.slim).reduce((t, a) => t + JSON.stringify(a).length, 0);
+      if (chars > 1000000) return chars + ' characters kept in full';
+      return now.length === 13 && now.filter(a => !a.slim).length >= 2 ? null : 'after the size cut: ' + now.length + ' records, ' + now.filter(a => !a.slim).length + ' in full';
+    });
+
+    await test('a locked payment keeps its pieces, and once the mint says spent, the signature they were spent with', async () => {
+      /* Locked to a key, a piece can be spent by that key's holder and by
+       * nobody else, and the mint says the signature it was spent with to
+       * anybody who asks about the piece. So "spent" here is "taken by them",
+       * in a form that can be shown to somebody else. */
+      let forge = false;
+      const P = nsPage({ p2pk: true, rewrite: (m, out) => {
+        if (!forge || new URL(m.url).pathname !== '/v1/checkstate') return out;
+        const body = JSON.parse(out.slice(out.indexOf('\n') + 1));
+        body.states.forEach(st => { if (st.witness) st.witness = JSON.stringify({ signatures: ['ab'.repeat(64)] }); });
+        return '200\n' + JSON.stringify(body);
+      } });
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(500, '')).hash);
+      await W.primeLocks();
+      const asked = W.decodeRequest(W.paymentRequest(21, { purpose: 'receive' }));
+      const made = await W.sendToken(21, { unit: 'sat', lockTo: asked.lockTo });
+      const rec = (W.auditTrail(made.hash) || [])[0] || {};
+      if (rec.lockedTo !== asked.lockTo) return 'the record does not say which key it was locked to: ' + JSON.stringify(rec.lockedTo);
+      if (await W.lockedReceipt(made.hash) !== null) return 'a receipt before anybody had spent it';
+      // the phone it was locked to takes it: here the same wallet, with the key the request kept
+      await W.receiveToken(made.token);
+      W.forgetClaimedToken(made.token);
+      const kept = (W.auditTrail(made.hash) || [])[0] || {};
+      if (!(kept.inputs || []).length) return 'a locked payment\'s pieces were dropped when it was claimed';
+      // a signature that is not by the key the pieces name proves nothing, and is not kept
+      forge = true;
+      if (await W.lockedReceipt(made.hash) !== null) return 'a signature by some other key was taken as the receipt';
+      forge = false;
+      const got = await W.lockedReceipt(made.hash);
+      if (!got || !Array.isArray(got.witness) || got.witness.length !== kept.inputs.length) return 'the receipt: ' + JSON.stringify(got);
+      const CT = P.window.CashuTS;
+      if (!kept.inputs.every((p, i) => CT.isP2PKSpendAuthorised(Object.assign({}, p, { witness: got.witness[i] })))) return 'a signature kept does not sign the piece beside it';
+      const stored = (W.auditTrail(made.hash) || [])[0] || {};
+      if (!stored.spent || stored.spent.witness.join() !== got.witness.join()) return 'the signature is not on the payment\'s record';
+      // a plain token has no such receipt: spent is only spent
+      const plain = await W.sendToken(40);
+      await W.receiveToken(plain.token);
+      if (await W.lockedReceipt(plain.hash) !== null) return 'a plain token was given a receipt';
+      // and the person can let it go: the pieces and the signature, with the public values left
+      if (W.forgetReceipt(made.hash) !== true) return 'the receipt would not be deleted';
+      const gone = (W.auditTrail(made.hash) || [])[0] || {};
+      if ((gone.inputs || []).length || gone.spent) return 'deleted, and still there: ' + JSON.stringify(Object.keys(gone));
+      if (!(gone.ys || []).length) return 'deleting the receipt took the public values with it';
+      return W.forgetReceipt(plain.hash) === false ? null : 'a plain token had a receipt to delete';
+    });
+
+    // ---- the circuit kept ready ---------------------------------------------
+
+    /* A page that opens a circuit ahead of time, as the app does, and the
+     * mint's own record of which circuit each request came by. */
+    const sparePage = async (o) => {
+      const log = onMintLog();
+      const P = nsPage(Object.assign({ spare: true, onMint: log.onMint }, o || {}));
+      const W = P.W;
+      // `later`: nothing is opened by itself, so a test can open one when it is ready to watch
+      W._spareAfterMs = (o && o.later) ? 86400000 : 0;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      const ready = async () => { for (let i = 0; i < 200 && !W._spare(); i++) await new Promise(r => setTimeout(r, 5)); return W._spare(); };
+      const by = (path, from) => log.seen.slice(from || 0).filter(x => x.path === path);
+      return { P, W, log, ready, by };
+    };
+
+    await test('a circuit is made ready ahead of time, and the next invoice leaves on it', async () => {
+      const { W, log, ready, by } = await sparePage();
+      const first = await ready();
+      if (!/^[0-9a-f]{32}$/.test(first)) return 'no circuit was made ready after connecting: ' + JSON.stringify(first);
+      // it is kept only because the mint answered on it: its keysets, asked for on that very circuit
+      if (!by('/v1/keysets').some(x => x.circuit === first)) return 'the mint was never asked anything on the circuit that was kept';
+      const mark = log.seen.length;
+      await W.invoice(21, '');
+      const made = by('/v1/mint/quote/bolt11', mark)[0];
+      if (!made || made.circuit !== first) return 'the invoice left on ' + (made && made.circuit) + ', not the circuit kept ready (' + first + ')';
+      // handed out once: the next one is another circuit, and it too was made ready first
+      const second = await ready();
+      if (!second || second === first) return 'no new circuit was made ready behind it: ' + JSON.stringify(second);
+      const mark2 = log.seen.length;
+      await W.invoice(34, '');
+      const again = by('/v1/mint/quote/bolt11', mark2)[0];
+      return again && again.circuit === second ? null : 'the second invoice left on ' + (again && again.circuit) + ', not ' + second;
+    });
+
+    await test('a fee quote and a payment\'s swap take the circuit kept ready; work nobody waits on does not', async () => {
+      const { W, log, ready, by } = await sparePage({ p2pk: true });
+      await W.claim((await W.invoice(4096, '')).hash);
+      const bolt11 = (await W.invoice(50, '')).bolt11;
+      // a sweep and a top-up are nobody's wait: each goes by a circuit of its own and the spare stays
+      const kept = await ready();
+      let mark = log.seen.length;
+      await W.sweepQuotes();
+      await W.tidyChange();
+      if (log.seen.slice(mark).some(x => x.circuit === kept)) return 'a sweep or a top-up went out on the circuit kept ready';
+      if (W._spare() !== kept) return 'the circuit kept ready was used up by work nobody was waiting on';
+      // the fee quote the confirmation screen shows
+      mark = log.seen.length;
+      const fee = await W.quoteFee(bolt11);
+      const quoted = by('/v1/melt/quote/bolt11', mark)[0];
+      if (!fee || !quoted || quoted.circuit !== kept) return 'the fee quote left on ' + (quoted && quoted.circuit) + ', not ' + kept;
+      // and a payment locked to the phone that asked, as a tap makes: a lock is always a swap
+      await W.primeLocks();
+      const asked = W.decodeRequest(W.paymentRequest(77, { purpose: 'receive' }));
+      const next = await ready();
+      if (!next || next === kept) return 'no circuit was ready for the payment';
+      mark = log.seen.length;
+      await W.sendToken(77, { unit: 'sat', lockTo: asked.lockTo });
+      const swap = by('/v1/swap', mark)[0];
+      if (!swap) return 'the payment needed no swap, so this proved nothing';
+      return swap.circuit === next ? null : 'the swap left on ' + swap.circuit + ', not ' + next;
+    });
+
+    await test('a circuit the mint did not answer on is not kept, and the invoice goes by one of its own', async () => {
+      // once armed, the mint's keysets come back as an error on every labelled circuit: two tries, then none is kept
+      let armed = false, warms = 0;
+      const { W, log, by } = await sparePage({ later: true, rewrite: (m, out) => {
+        if (armed && new URL(m.url).pathname === '/v1/keysets' && /^[0-9a-f]{32}$/.test(String(m.circuit || ''))) { warms += 1; return '500\n{}'; }
+        return out;
+      } });
+      await new Promise(r => setTimeout(r, 60));          // the connect's own questions are over
+      armed = true;
+      const kept = await W.warmMint();
+      if (kept !== false || W._spare()) return 'a circuit the mint never answered on was kept';
+      if (warms !== 2) return warms + ' tries at making one ready, wanted 2 and no more';
+      armed = false;
+      const mark = log.seen.length;
+      const inv = await W.invoice(21, '');
+      const made = by('/v1/mint/quote/bolt11', mark)[0];
+      return inv && inv.bolt11 && made && /^[0-9a-f]{32}$/.test(String(made.circuit)) ? null : 'the invoice was not made';
+    });
+
+    await test('the circuit kept ready is let go when it is old, when the mint is connected again, and when Foxy comes back', async () => {
+      const { P, W, ready } = await sparePage();
+      const first = await ready();
+      if (!first) return 'no circuit was made ready';
+      // five minutes on, Tor is about to retire it
+      const now = P.window.Date.now;
+      P.window.Date.now = () => now() + 6 * 60 * 1000;
+      const old = W._spare();
+      P.window.Date.now = now;
+      if (old) return 'a circuit six minutes old was still on offer';
+      // back from the background: what a suspended app had open is closed, so another is opened
+      W._resumed(0);
+      if (W._spare()) return 'the circuit from before the background was kept';
+      const second = await ready();
+      if (!second || second === first) return 'coming back to the front made no new circuit ready: ' + JSON.stringify(second);
+      // a connect is a new mint, or the same one afresh: the old circuit is not offered for it
+      const connecting = W.connect(NS_MINT);
+      await connecting;
+      const third = await ready();
+      return third && third !== second ? null : 'connecting kept the circuit that was ready before: ' + JSON.stringify(third);
     });
 
     await test('a sweep checks each outstanding invoice after a pause, each on its own circuit', async () => {
@@ -3562,6 +4102,74 @@ const eq = (got, want, what) =>
       const swapsSeen = log.seen.filter(x => x.path === '/v1/swap');
       const outs = swapsSeen.length ? ((swapsSeen[swapsSeen.length - 1].body || {}).outputs || []).length : -1;
       if (!(outs > 0 && outs <= 25)) return outs + ' outputs asked of a mint that takes 25';
+    });
+
+    await test('no top-up at a mint that charges more than a sat to swap a piece', async () => {
+      /* Small change is a convenience bought with a swap. At a sat it is
+       * worth it. At more, every put-away would pay the mint to rearrange
+       * the person's own money, so nothing is done and the reason is said. */
+      const log = onMintLog();
+      const P = nsPage({ feePpk: 2000, onMint: log.onMint });
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(4096, '')).hash);
+      const before = secretsOf(nsPile(P.storage));
+      const mark = log.seen.length;
+      const r = await W.tidyChange();
+      if (!r || r.split || !/charges/.test(String(r.skipped || ''))) return 'the top-up answered ' + JSON.stringify(r);
+      if (log.seen.slice(mark).some(x => x.path === '/v1/swap')) return 'a swap was made';
+      return secretsOf(nsPile(P.storage)) === before ? null : 'the pile changed';
+    });
+
+    await test('a backup that is a token is imported, and a token in another unit is not', async () => {
+      /* Import takes a token as well as the older JSON, and only the JSON was
+       * ever tried here. A backup is sats; another unit's ecash is received
+       * as a token, into a pile of its own. */
+      const P = nsPage({});
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      await W.claim((await W.invoice(300, '')).hash);
+      const made = await W.sendToken(64);
+      const left = await W.balanceSats();
+      const got = await W.importProofs(made.token);
+      if (got !== 64) return 'the import answered ' + got + ', wanted 64';
+      if (await W.balanceSats() !== left + 64) return 'balance after the import: ' + await W.balanceSats() + ', was ' + left;
+      const info = W.tokenInfo((await W.sendToken(32)).token);
+      const other = P.window.CashuTS.getEncodedToken({ mint: info.mint, unit: 'usd', proofs: info.proofs });
+      const no = await Promise.resolve().then(() => W.importProofs(other)).then(() => null, (e) => e);
+      return no && /sats only/.test(no.message) ? null : 'a token in another unit: ' + (no ? no.message : 'was imported');
+    });
+
+    await test('seed on the phone: secrets that arrive after the seed changed are not kept', async () => {
+      /* The phone derived them from the old seed, and its answer was still on
+       * the way when the seed was replaced. Kept, the next outputs this wallet
+       * makes are the old seed's: ecash the new words cannot rebuild. */
+      const P = nsPage({});
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      P.phone.hooks.wipe = () => true;
+      const mh = P.window.webkit.messageHandlers.foxy;
+      const post = mh.postMessage.bind(mh), answer = W._scanResult;
+      let asked = null, late = null;
+      mh.postMessage = (m) => { if (m.action === 'restoreSecrets' && !asked) asked = m.id; return post(m); };
+      W._scanResult = function (id, text, err) {
+        if (id === asked && !late) { late = [id, text, err]; return undefined; }
+        return answer.apply(this, arguments);
+      };
+      const fetching = W._fetchSecrets(P.mint.id, 600, 3).then(() => null, (e) => e);
+      for (let i = 0; i < 200 && !late; i++) await new Promise(r => setTimeout(r, 0));
+      if (!late) return 'the phone was not asked for the secrets';
+      const replaced = await W.seedForget();
+      const held = W._secretsHeld();
+      answer.apply(W, late);
+      const said = await fetching;
+      W._scanResult = answer; mh.postMessage = post;
+      if (replaced !== 'replaced') return 'the seed was not replaced: ' + replaced;
+      if (!said || !/seed changed/.test(said.message)) return 'the late answer was ' + (said ? 'refused with: ' + said.message : 'kept');
+      return eq(W._secretsHeld(), held, 'secrets held after the late answer');
     });
 
     await test('a top-up\'s fee goes on the payment before it, and the audit still adds up', async () => {

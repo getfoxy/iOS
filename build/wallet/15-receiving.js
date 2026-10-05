@@ -6,12 +6,21 @@
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       var w;
-      try { w = need(); } catch (e) { return Promise.reject(e); }
+      // on the circuit kept ready, when there is one (`needNow`)
+      try { w = needNow(); } catch (e) { return Promise.reject(e); }
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
-      var lock = quoteLock(w);
-      if (lock) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
-      return createQuote(w, amount, memo || '', lock).then(function (q) {
+      /* Asked again on another circuit after five seconds of nothing
+       * (`askedTwice`), each asking with a one-time key of its own, so the two
+       * quotes share nothing the mint could join them by. The first to answer
+       * is the invoice, and it is its key that is kept. The other, if it
+       * comes, is a quote nobody was shown. */
+      return askedTwice(w, 'the mint\u2019s invoice', function (via) {
+        var key = quoteLock(via);
+        if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
+        return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });
+      }).then(function (won) {
+        var q = won.got.q, lock = won.got.lock;
         var pending = load(K.quotes, []);
         pending.unshift({
           quote: q.quote, amount: amount, memo: memo || '', at: Date.now(),
@@ -22,6 +31,11 @@
           // NUT-20: the key the mint will want a signature from, in this same write
           pubkey: lock ? lock.pubkey : undefined,
           privkey: lock ? lock.privkey : undefined,
+          /* The invoice's payment hash. A payer's proof that they paid is a
+           * preimage that hashes to this, and the invoice itself is not kept
+           * once it is paid, so without this there was nothing here to hold
+           * such a proof against. */
+          payHash: invoicePaymentHash(q.request) || undefined,
         });
         /* The cap stays — an unbounded list is worse — but it used to drop the
          * oldest invoice in silence. If that one is paid later the sweep never
@@ -383,6 +397,8 @@
           state: 'success',
           memo: entry.memo || '',
           hash: quoteId,
+          // the invoice's payment hash, kept from when it was made
+          payHash: entry.payHash || undefined,
         });
         return sumProofs(fresh);
       });
@@ -581,6 +597,7 @@
               memo: memo,
               hash: quoteId,
               mint: here,
+              payHash: entry.payHash || undefined,
             });
             console.log('[foxy] invoice', short, 'was issued but its answer was lost — restored', got, 'sats from its counters');
             return got;
@@ -1045,6 +1062,8 @@
                   memo: '',
                   hash: entry.quote,
                   bolt11: entry.bolt11 || '',
+                  // the proof that this invoice was paid, as the mint now gives it (`preimageOf`)
+                  preimage: preimageOf(q) || undefined,
                   // where it was made, which is not always where the phone is now
                   mint: here,
                 });

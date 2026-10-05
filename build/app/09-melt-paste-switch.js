@@ -341,6 +341,20 @@
   }
 
   refuseSwitchWhileBusy() {
+    /* An invoice nobody has paid is let go, not waited for.
+     *
+     * A watched invoice used to count as a payment in progress, and it is
+     * not one: nothing has moved, and there is nothing to finish. It stopped
+     * a person switching mints until they found their way back to the
+     * invoice and closed it. The watch ends here. The invoice stays on file
+     * with its key, and if somebody pays it after all, it is collected the
+     * next time this phone is on that mint (the sweep). What still waits is
+     * money that is really moving: a swap, a payment, a token being claimed. */
+    if (this._watching || this._stopWatch) {
+      console.log('[foxy] mint switch: an unpaid invoice is let go; it stays on file and is collected if it is paid');
+      this._invoiceRun = (this._invoiceRun || 0) + 1;
+      this.stopReceive();
+    }
     if (!this.moneyBusy()) return false;
     console.log('[foxy] mint switch refused: a payment is in progress (' + this.busyWhy()
       + '), on ' + this.state.screen);

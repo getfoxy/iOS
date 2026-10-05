@@ -1001,6 +1001,14 @@
       this.tapReceiving(Number(ev.pct) || 0);
       return;
     }
+    /* The other phone speaks another version of the tap, so the two cannot
+     * talk (TAP-TO-PAY.md, *Versions*). Said, on whichever side can know it:
+     * a tap that just does nothing is the one outcome the version was added
+     * to prevent. */
+    if (ev.stage === 'version') {
+      this.tapVersionCard(ev.side);
+      return;
+    }
     /* Shaken: the button is pressed, with every rule the button has. Only on
      * a receive screen with an offer, and only when not already on the air —
      * a shake never puts the code card away and never touches a payer that
@@ -2312,6 +2320,23 @@
     });
   }
 
+
+  /* The card for a phone that speaks another version of the tap. A code on a
+   * screen is read by every version, so that is the way through for now, said
+   * from where this phone stands. Once in a quarter of a minute: phones held
+   * together try again, and the card would come up over and over. */
+  tapVersionCard(side) {
+    if (Date.now() < (this._tapVersionSaid || 0)) return;
+    this._tapVersionSaid = Date.now() + 15000;
+    console.log('[foxy] tap: the other phone speaks another version of the tap; saying so');
+    if (side === 'pay') { this.tapBuzz(false); this.hideConnecting(); }
+    this.blockedCard('tapVersion', {
+      tone: 'warn',
+      title: 'UPDATE FOXY TO TAP',
+      reason: 'The other phone has a different version of Foxy, so the two cannot tap.\nUpdate Foxy on both phones.',
+      chip: side === 'pay' ? 'For now, scan the code on their screen.' : 'For now, they can scan the code on this screen.',
+    });
+  }
 
   /* The receiver's half: they are stuck at another mint and this phone is not.
    *

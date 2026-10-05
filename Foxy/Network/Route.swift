@@ -112,14 +112,97 @@ enum Route {
     @discardableResult
     static func start(_ request: URLRequest, circuit: String? = nil,
                       _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask? {
+        // Foxy is being put away: nothing new leaves (the door, below)
+        guard !shut() else {
+            print("[foxy] route: a request to", request.url?.host ?? "?", "not sent; Foxy is being put away")
+            return nil
+        }
 #if canImport(Tor)
-        if TorService.isRunning { return startOnce(TorService.socksSession(circuit: circuit), request, done) }
+        if TorService.isRunning { return startOnce(TorService.socksSession(circuit: circuit), request, counted(done)) }
 #endif
         guard unprotected else { return nil }
         let task = clearSession.dataTask(with: request)
-        redirectGuard.collect(task, limit: largestAnswer, done)
+        redirectGuard.collect(task, limit: largestAnswer, counted(done))
         task.resume()
         return task
+    }
+
+    /* What is out on the route, and the door that stops more leaving.
+     *
+     * Putting Foxy away takes Tor off the network (TorService.backgrounded).
+     * A request out at that moment is cut, and one whose circuit Tor was
+     * still building is counted against the entry relay it was being built
+     * through, which Tor then trusts less. A phone came back from two such
+     * trips with a relay marked down each time, and from every trip with
+     * nothing out with all of them up; its invoices then took many seconds
+     * where another phone's took one. Only swaps and payments were waited
+     * for (FoxyBridge.moneyInFlight); a fee quote, a check of a piece or a
+     * circuit being warmed was not.
+     *
+     * So putting away waits for everything that is out, a few seconds at
+     * most (`leaving`, FoxyWebView.appEnteredBackground), and from the moment
+     * it stops waiting nothing new leaves: `start` answers nil, which every
+     * caller already reads as nothing sent.
+     *
+     * The door shuts for a few seconds, not until told otherwise. Tor refuses
+     * everything itself once it is off the network, so the door is needed
+     * only for the moment between; and a door that waited for a signal to
+     * open would be a wallet that never works again the day that signal is
+     * missed. Coming back opens it at once (FoxyWebView). */
+    static var out: Int { traffic.value }
+    private static let traffic = Locked(0)
+
+    /// `done`, counted: out from now until it is called.
+    private static func counted(_ done: @escaping (Data?, URLResponse?, Error?) -> Void)
+        -> (Data?, URLResponse?, Error?) -> Void {
+        traffic.exchange { $0 + 1 }
+        return { data, response, error in
+            traffic.exchange { max(0, $0 - 1) }
+            done(data, response, error)
+        }
+    }
+
+    /// How long the door stays shut. Parking Tor takes half a second from here.
+    static let shutFor: TimeInterval = 5
+    private static let shutUntil = Locked<TimeInterval>(0)
+    static func shut(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        now < shutUntil.value
+    }
+    static func shutDoor(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        shutUntil.value = now + shutFor
+    }
+    static func openDoor() {
+        shutUntil.value = 0
+    }
+
+    /// What putting Foxy away does next: wait, or leave the network after a moment.
+    enum Leaving: Equatable {
+        case wait
+        case leave(after: TimeInterval)
+    }
+
+    /// How long a swap or payment is waited for, and its change top-up: iOS
+    /// allows about thirty seconds in all.
+    static let waitForMoney: TimeInterval = 20
+    /// How long anything else is waited for once no money is moving.
+    static let waitForTheRest: TimeInterval = 3
+
+    /// The rule for putting Foxy away.
+    ///
+    /// `money`: swaps and payments not answered. `tidying`: the page's change
+    /// top-up. `out`: every request not answered, those included. `waited`:
+    /// since Foxy was put away. `onTheRest`: how long of that has been for
+    /// requests that move no money, since money last moved.
+    ///
+    /// Half a second after the last answer, for the page to write down what
+    /// came back; no wait at all when the time is up, since what is out is
+    /// about to be cut either way.
+    static func leaving(money: Int, tidying: Bool, out: Int,
+                        waited: TimeInterval, onTheRest: TimeInterval) -> Leaving {
+        if waited > waitForMoney { return .leave(after: money > 0 || tidying || out > 0 ? 0 : 0.5) }
+        if money > 0 || tidying { return .wait }
+        if out > 0 { return onTheRest > waitForTheRest ? .leave(after: 0) : .wait }
+        return .leave(after: 0.5)
     }
 
     /// A websocket to a Nostr relay, through Tor and nowhere else.

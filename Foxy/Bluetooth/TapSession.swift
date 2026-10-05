@@ -8,8 +8,8 @@ import CryptoKit
 /// exchange checked without Bluetooth. TapLink does nothing but carry bytes
 /// between this and the air.
 ///
-///   M1  payer → receiver   a promise about a key not yet shown
-///   M2  receiver → payer   the receiver's key and nonce
+///   M1  payer → receiver   its version, and a promise about a key not yet shown
+///   M2  receiver → payer   its version, and the receiver's key and nonce
 ///   M3  payer → receiver   the key it promised; the receiver checks it
 ///   M4  receiver → payer   the offer, sealed
 ///   M5  payer → receiver   the payment, sealed
@@ -38,6 +38,12 @@ final class TapSession {
         case result(String)
         /// Drop the link. The reason is for Foxy's own log, never the wire.
         case stop(String)
+        /// Drop the link, and say why on the screen: the other phone speaks
+        /// another version of this (`TapCrypto.version`), so nothing either
+        /// says next would be understood. 2 is a Foxy from before a version
+        /// was sent. `reply`, when there is one, goes on the wire first: it
+        /// is this phone's own version, so the other one can say the same.
+        case otherVersion(theirs: Int, reply: Data?)
         /// M7, at the payer: a token for the change owed.
         case change(String)
         /// M8, at the receiver: the payer's page has written that change down.
@@ -151,7 +157,7 @@ final class TapSession {
         guard role == .payer else { return .waiting }
         let commit = TapCrypto.commitment(publicKey: publicKey, nonce: myNonce)
         note("handshake: promising a key")
-        return .send(frame(.commit, commit))
+        return .send(frame(.commit, Data([TapCrypto.version]) + commit))
     }
 
     /// One message off the wire.
@@ -163,15 +169,46 @@ final class TapSession {
         switch (role, kind) {
 
         case (.receiver, .commit):
-            guard rest.count == 32 else { return .stop("a promise of the wrong size") }
-            theirCommit = rest
+            /* A promise with no version in front of it is a Foxy from before
+             * one was sent. It cannot be answered: what this side says next
+             * would not read at its end, nor its at this one. Told apart here,
+             * at the first message, where there is still something to say to
+             * the person holding the phone. */
+            if rest.count == 32 {
+                note("handshake: the payer is a Foxy from before the version was sent")
+                return .otherVersion(theirs: 2, reply: nil)
+            }
+            /* The version is read before anything else, whatever follows it:
+             * a later version may send a promise of another size, and the one
+             * thing every version has to be able to do with a message it
+             * cannot read is say which version it speaks. The answer is a
+             * hello with this phone's version and nothing after it. */
+            guard let theirs = rest.first else { return .stop("a promise of the wrong size") }
+            guard theirs == TapCrypto.version else {
+                note("handshake: the payer speaks version \(theirs), this phone \(TapCrypto.version)")
+                return .otherVersion(theirs: Int(theirs), reply: frame(.hello, Data([TapCrypto.version])))
+            }
+            guard rest.count == 1 + 32 else { return .stop("a promise of the wrong size") }
+            theirCommit = Data(rest.dropFirst())
             note("handshake: a payer promised a key")
-            return .send(frame(.hello, publicKey + myNonce))
+            return .send(frame(.hello, Data([TapCrypto.version]) + publicKey + myNonce))
 
         case (.payer, .hello):
-            guard rest.count == 32 + TapCrypto.nonceLength else { return .stop("a hello of the wrong size") }
-            theirKey = Data(rest.prefix(32))
-            theirNonce = Data(rest.suffix(TapCrypto.nonceLength))
+            // an older receiver stops at this phone's promise and never says hello; kept for the one that does
+            if rest.count == 32 + TapCrypto.nonceLength {
+                note("handshake: the receiver is a Foxy from before the version was sent")
+                return .otherVersion(theirs: 2, reply: nil)
+            }
+            // the version first, whatever its size: a receiver that cannot read this phone's promise answers with that alone
+            guard let theirs = rest.first else { return .stop("a hello of the wrong size") }
+            guard theirs == TapCrypto.version else {
+                note("handshake: the receiver speaks version \(theirs), this phone \(TapCrypto.version)")
+                return .otherVersion(theirs: Int(theirs), reply: nil)
+            }
+            guard rest.count == 1 + 32 + TapCrypto.nonceLength else { return .stop("a hello of the wrong size") }
+            let said = Data(rest.dropFirst())
+            theirKey = Data(said.prefix(32))
+            theirNonce = Data(said.suffix(TapCrypto.nonceLength))
             guard settle(receiverKey: theirKey, receiverNonce: theirNonce,
                          payerKey: publicKey, payerNonce: myNonce) else {
                 return .stop("that key is not a key")
@@ -198,7 +235,7 @@ final class TapSession {
         case (.receiver, .payment):
             guard let k = keys else { return .stop("a payment before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened) else {
                 return .stop("a payment that would not open")
             }
@@ -216,7 +253,7 @@ final class TapSession {
         case (.receiver, .paymentPart):
             guard let k = keys else { return .stop("part of a payment before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened) else {
                 return .stop("part of a payment that would not open")
             }
@@ -231,7 +268,7 @@ final class TapSession {
         case (.receiver, .paymentSize):
             guard let k = keys else { return .stop("a size before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8), let n = Int(text), n > 0 else {
                 return .stop("a size that would not open")
@@ -242,7 +279,7 @@ final class TapSession {
         case (.payer, .offer):
             guard let k = keys else { return .stop("an offer before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.receiverToPayer,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8) else {
                 return .stop("an offer that would not open")
@@ -254,7 +291,7 @@ final class TapSession {
         case (.payer, .change):
             guard let k = keys else { return .stop("change before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.receiverToPayer,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8) else {
                 return .stop("change that would not open")
@@ -266,7 +303,7 @@ final class TapSession {
         case (.receiver, .again):
             guard let k = keys else { return .stop("a repeat asked for before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8), let from = UInt64(text) else {
                 return .stop("a repeat request that would not open")
@@ -278,7 +315,7 @@ final class TapSession {
         case (.receiver, .changeTaken):
             guard let k = keys else { return .stop("a change receipt before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   TapCrypto.unpad(opened) != nil else {
                 return .stop("a change receipt that would not open")
             }
@@ -289,7 +326,7 @@ final class TapSession {
         case (.receiver, .quote):
             guard let k = keys else { return .stop("a quote before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.payerToReceiver,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8) else {
                 return .stop("a quote that would not open")
@@ -301,7 +338,7 @@ final class TapSession {
         case (.payer, .terms):
             guard let k = keys else { return .stop("terms before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.receiverToPayer,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8) else {
                 return .stop("terms that would not open")
@@ -313,7 +350,7 @@ final class TapSession {
         case (.payer, .asking):
             guard let k = keys else { return .stop("a wait before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.receiverToPayer,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   TapCrypto.unpad(opened) != nil else {
                 return .stop("a wait that would not open")
             }
@@ -324,7 +361,7 @@ final class TapSession {
         case (.payer, .result):
             guard let k = keys else { return .stop("a result before there was a key") }
             guard let opened = TapCrypto.open(rest, with: k.receiverToPayer,
-                                              counter: heardCounter, transcript: k.transcript),
+                                              counter: heardCounter, transcript: k.transcript, kind: first),
                   let body = TapCrypto.unpad(opened),
                   let text = String(data: body, encoding: .utf8) else {
                 return .stop("a result that would not open")
@@ -486,7 +523,8 @@ final class TapSession {
 
     private func sealed(_ kind: Kind, _ padded: Data, with key: SymmetricKey) -> Data? {
         guard let k = keys,
-              let box = TapCrypto.seal(padded, with: key, counter: sentCounter, transcript: k.transcript) else { return nil }
+              let box = TapCrypto.seal(padded, with: key, counter: sentCounter, transcript: k.transcript,
+                                       kind: kind.rawValue) else { return nil }
         let used = sentCounter
         sentCounter += 1
         let out = frame(kind, box)

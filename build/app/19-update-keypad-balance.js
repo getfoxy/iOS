@@ -61,9 +61,18 @@
    * finished thirty seconds before.
    * The quote stays on file and the sweep claims it if it is ever paid. */
   endReceiveAtHome() {
+    /* And an invoice still being asked for is let go when it answers.
+     *
+     * Back out of the invoice screen within a second, before the mint has
+     * answered, and there is no watch to stop yet. The answer then came a
+     * moment later, to a screen that was no longer there, and started one:
+     * switching mints was refused for "a payment in progress" that was an
+     * invoice nobody had ever seen, until home was reached a second time. The
+     * request is marked as an older one here, whether or not anything is
+     * being watched, so its answer is dropped (`openReceiveNow`). */
+    this._invoiceRun = (this._invoiceRun || 0) + 1;
     if (!this._watching && !this._stopWatch) return;
     console.log('[foxy] receive: home, so the invoice watch stops; the sweep has the quote');
-    this._invoiceRun = (this._invoiceRun || 0) + 1;
     this.stopReceive();
   }
 

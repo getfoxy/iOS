@@ -46,6 +46,17 @@ function page(state, o) {
       if (m.action === 'mintRequest') {
         const path = String(m.url || '');
         if (ctx && ctx.deaf) return answer(w, m.id, null, 'The Internet connection appears to be offline.');
+        /* A mint that remembers the payment's own signatures and none of the
+         * change's: `restoreOnly` is the set of blinded messages it answers for. */
+        if (ctx && ctx.restoreOnly && path.indexOf('/v1/restore') >= 0) {
+          const raw = mint.handle(m);
+          const cut = raw.indexOf('\n');
+          const body = JSON.parse(raw.slice(cut + 1));
+          const keep = (body.outputs || []).map((o) => ctx.restoreOnly.has(o.B_));
+          body.outputs = (body.outputs || []).filter((_, i) => keep[i]);
+          body.signatures = (body.signatures || []).filter((_, i) => keep[i]);
+          return answer(w, m.id, raw.slice(0, cut + 1) + JSON.stringify(body));
+        }
         if (state.kill && path.indexOf('/v1/swap') >= 0) {
           if (state.acts) { mint.handle(m); state.acted = true; }   // the mint swaps, or never sees it
           state.dead = true;
@@ -106,6 +117,11 @@ async function run() {
   ok(sent >= 21, 'the token holds what was asked for (' + sent + ' sats)');
   ok(after + sent + (made ? made.fee || 0 : 0) >= before - 2,
     'and nothing else went missing: ' + before + ' -> ' + after + ' held + ' + sent + ' in the token');
+  /* And nothing is counted twice. The swap's inputs are spent, so they are
+   * out of the pile; a pile that kept them passed the line above, which only
+   * asks whether anything is missing. */
+  ok(after + sent <= before,
+    'and what the swap spent is out of the pile: ' + after + ' held + ' + sent + ' in the token is no more than ' + before);
 
   // and it is a real locked token, claimable by the phone that asked
   let got = null;
@@ -154,6 +170,8 @@ async function run() {
     ok((await W2.balanceSats()) + sent2 >= before2 - 2,
       'with nothing else missing: ' + before2 + ' -> ' + (await W2.balanceSats())
       + ' held + ' + sent2 + ' in the token');
+    ok((await W2.balanceSats()) + sent2 <= before2,
+      'and the piece that paid it is out of the pile (' + (await W2.balanceSats()) + ' held)');
   }
 
   // ---- the app killed with the swap at the mint ----------------------------
@@ -232,6 +250,30 @@ async function run() {
     ok(held > 0 && sent === 21 && (await W.balanceSats()) === t.before - 21 && !W.heldSats() && !swapsOf(t.b).length,
       'the payment and its change both come back: ' + sent + ' in the token, ' + (await W.balanceSats()) + ' of '
       + t.before + ' held, ' + held + ' had been set aside');
+  }
+  {
+    /* The payment is back but its change is not: the mint answers for the locked
+     * outputs and has nothing to say for the counter range. Both halves or
+     * neither. Writing the payment alone would drop the record, and with it the
+     * only note that the change was ever owed. */
+    const t = await killedMidSend(21, true);
+    const rec = JSON.parse(t.kept['foxy.cashu.swaps'] || '[]')[0] || {};
+    const W = t.b.W;
+    await W.connect(MINT, { remember: true });
+    t.b.restoreOnly = new Set((rec.locked || []).map((r) => r.B_));
+    await W.recoverSwaps();
+    ok(!rowsOf(t.b).some((e) => e.dir === 'out') && swapsOf(t.b).length === 1,
+      'a payment found without its change is not written, and its record is kept ('
+      + rowsOf(t.b).filter((e) => e.dir === 'out').length + ' entries, ' + swapsOf(t.b).length + ' record)');
+    ok(W.heldSats() > 0 && (await W.balanceSats()) < t.before,
+      'and the pieces that went in stay out of the balance meanwhile (' + W.heldSats() + ' held)');
+    t.b.restoreOnly = null;
+    await W.recoverSwaps();
+    const out = rowsOf(t.b).filter((e) => e.dir === 'out');
+    ok(out.length === 1 && Number(out[0].sats) === 21 && !swapsOf(t.b).length && !W.heldSats()
+       && (await W.balanceSats()) === t.before - 21,
+      'once the mint answers for the change as well, both are written ('
+      + (await W.balanceSats()) + ' of ' + t.before + ')');
   }
   {
     const t = await killedMidSend(128, false);

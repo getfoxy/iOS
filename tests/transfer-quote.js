@@ -8,6 +8,11 @@
  * 41, because the transfer borrowed sweepQuote, whose
  * fixed figure is what a token is worth, not what should arrive. These checks
  * hold the two apart.
+ *
+ * The same pair of pretend mints answers the rest of what moves sats between
+ * mints: switching everything to another mint (moveQuote), sweeping a token
+ * from one (sweepQuote), the note a crossing leaves while it is under way, and
+ * when that note goes.
  */
 const { load, proof } = require('./harness');
 
@@ -27,11 +32,32 @@ function mints(reserve, o) {
       this.mintUrl = typeof url === 'string' ? url : (url && url.mintUrl);
       this.keysetId = '00b4cd27d8861a44';
       this.on = { countersReserved: () => {} };
+      /* What cashu-ts would pick to send an amount, with the fee on what it
+       * picks counted: the biggest pieces first, until they cover it, and
+       * nothing when the pile cannot. Only for a test that asks (`select`); a
+       * wallet that cannot be asked is given the plain sum instead. */
+      if (opts.select) {
+        this.selectProofsToSend = (list, amount, includeFees) => {
+          const pile = (list || []).slice().sort((x, y) => y.amount - x.amount);
+          const left = (picked) => picked.reduce((n, p) => n + p.amount, 0) - (includeFees ? this.getFeesForProofs(picked) : 0);
+          const send = [];
+          for (const p of pile) { if (left(send) >= amount) break; send.push(p); }
+          return left(send) >= amount ? { send, keep: pile.filter(p => send.indexOf(p) < 0) } : { send: [], keep: pile };
+        };
+      }
     }
     loadMint() { return Promise.resolve(); }
     getKeySets() { return Promise.resolve([{ id: this.keysetId, unit: 'sat' }]); }
     checkProofsStates(ps) { return Promise.resolve((ps || []).map(() => ({ state: 'UNSPENT' }))); }
-    checkMintQuoteBolt11() { return Promise.resolve({ state: 'UNPAID' }); }
+    /* What the mint calls a quote, and what it says to a claim of one. Unpaid
+     * unless a test says otherwise, and a mint that has not been paid, or has
+     * issued already, turns a claim away. */
+    checkMintQuoteBolt11() { return Promise.resolve({ state: opts.state || 'UNPAID' }); }
+    mintProofsBolt11() {
+      return Promise.reject(Object.assign(new Error(opts.state === 'ISSUED' ? 'Quote already issued' : 'Quote not paid'),
+        { status: 400, code: opts.state === 'ISSUED' ? 20002 : 20001 }));
+    }
+    checkMeltQuoteBolt11() { return Promise.resolve({ state: opts.meltState || 'UNPAID' }); }
     /* NUT-02's per-input fee, in parts per thousand. Zero at most mints, and
      * the reason padding a cross-mint payment is usually free. */
     getFeesForKeyset(count) { return Math.ceil((count * (opts.ppk || 0)) / 1000); }
@@ -184,6 +210,271 @@ async function run() {
       ahead.net === 50 && ahead.to === TO, JSON.stringify({ net: ahead.net, to: ahead.to }));
     check('and reports what the source will charge to spend proofs it has not issued yet',
       ahead.inPadSats === 33, ahead.inPadSats + ' sats, the same allowance at the other end');
+  }
+
+  /* ---- the amount that would fit -----------------------------------------
+   *
+   * An amount the fee cannot sit beside is refused, and the refusal says what
+   * would fit, so the screen can offer it instead of sending the person back to
+   * the keypad. What it offers has to be an amount the quote then allows: the
+   * fee is paid on the pieces the mint is made to spend, which change with the
+   * amount, so the figure is found by asking again lower, a sat at a time,
+   * until the same sum says yes.
+   */
+  {
+    const dear = mints(10, { ppk: 100, select: true });
+    const c = load({ cashu: dear.cashu });
+    const V = c.W;
+    c.storage.setItem('foxy.cashu.proofs.' + FROM,
+      JSON.stringify([256, 128, 64].map(a => proof(a))));
+    await V.connect(TO, { remember: true });
+
+    let over = null;
+    await V.transferQuote(FROM, 448).catch(e => { over = e; });
+    check('all that is held cannot be moved, and the refusal says what is held',
+      !!over && /costs up to \d+ with the fee, and you hold 448 at from\.test/.test(over.message) && over.foxyHave === 448,
+      over ? over.message : 'it was quoted');
+    const offered = over ? over.foxyFits : 0;
+    check('and offers something that fits, and not the whole', offered > 0 && offered < 448, String(offered));
+    const taken = await V.transferQuote(FROM, offered).then(p => p, e => ({ refused: e.message }));
+    check('the amount it offers is one the quote then allows', !!taken && !taken.refused && taken.net === offered,
+      taken && taken.refused ? 'refused: ' + taken.refused : JSON.stringify(taken && taken.net));
+    const above = await V.transferQuote(FROM, offered + 1).then(() => null, e => e);
+    check('and it is the most that is allowed: one more sat is refused again', !!above && /costs up to/.test(above.message),
+      above ? above.message : 'it was quoted');
+  }
+
+  /* ---- moving everything at one mint to another ---------------------------
+   *
+   * `moveQuote` is the mint switch: all that is held here is paid to the other
+   * mint as one Lightning payment, so the plan carries both quotes and the
+   * invoice the second mint wrote is the one the first is asked to pay. The two
+   * ends have to be two mints. A mint with nothing in it has nothing to pay
+   * for, so it is a change of address and no invoice is asked for.
+   */
+  {
+    const sw = mints(10);
+    const c = load({ cashu: sw.cashu });
+    const V = c.W;
+    c.storage.setItem('foxy.cashu.proofs.' + FROM,
+      JSON.stringify([64, 128, 256, 32, 16, 4].map(a => proof(a))));
+    await V.connect(FROM, { remember: true });
+
+    let same = '', respelled = '';
+    try { await V.moveQuote(FROM); } catch (e) { same = e.message; }
+    try { await V.moveQuote(FROM.toUpperCase() + '/'); } catch (e) { respelled = e.message; }
+    check('moving everything to the mint you are on is refused',
+      /already on that mint/.test(same), same || 'it was allowed');
+    check('and so is the same mint spelled another way',
+      /already on that mint/.test(respelled), respelled || 'it was allowed');
+    check('and refused before either mint is asked anything',
+      sw.asked.mint.length === 0 && sw.asked.melt.length === 0, JSON.stringify(sw.asked));
+
+    const plan = await V.moveQuote(TO);
+    check('the plan names both mints and carries both quotes, for the same invoice',
+      plan.from === FROM && plan.to === TO && !!plan.mintQuote && !!plan.meltQuote
+      && plan.meltQuote.request === plan.mintQuote.request, JSON.stringify({ from: plan.from, to: plan.to }));
+    check('what moves, and the fee it leaves behind, add up to all that is held',
+      plan.balance === 500 && plan.moving + plan.feeSats === 500 && plan.moving > 0, JSON.stringify(plan.moving));
+    check('the fee reserve fits inside what is held, and the invoice is for what moves',
+      plan.moving + plan.meltQuote.fee_reserve <= plan.balance && plan.mintQuote.amount === plan.moving,
+      JSON.stringify({ moving: plan.moving, reserve: plan.meltQuote.fee_reserve }));
+    check('an invoice too big for the fee beside it is asked again, smaller',
+      sw.asked.mint.length === 2 && sw.asked.mint[1].amount < sw.asked.mint[0].amount, JSON.stringify(sw.asked.mint));
+
+    // nothing at the mint it leaves: no invoice, no fee, only a change of address
+    const bare = mints(10);
+    const c0 = load({ cashu: bare.cashu });
+    await c0.W.connect(FROM, { remember: true });
+    const none = await c0.W.moveQuote(TO);
+    check('with nothing to move there is no invoice to ask for',
+      none.empty === true && none.moving === 0 && bare.asked.mint.length === 0, JSON.stringify(none));
+    const there = await c0.W.moveRun(none, () => {});
+    check('and carrying that plan out takes the phone there and says nothing moved',
+      !!there && there.sats === 0 && there.feeSats === 0 && there.mint === TO && c0.W.mintUrl === TO,
+      JSON.stringify(there) + ' on ' + c0.W.mintUrl);
+  }
+
+  /* ---- a token from another mint, brought home ----------------------------
+   *
+   * `sweepQuote` starts from what the token is worth and works out what can
+   * land after the fee, asking again with a smaller invoice when the first
+   * leaves no room for it. The plan it answers is the one `moveRun` carries
+   * out, and a mint's reserve learned once is the first guess the next time.
+   */
+  {
+    const sw = mints(10);
+    const c = load({ cashu: sw.cashu });
+    const V = c.W;
+    await V.connect(TO, { remember: true });
+
+    const asked = (list) => list.map(a => a.amount).join(',');
+    // a sweep that fails, or answers nothing, is said as a failed check and not thrown past the rest
+    const sweep = (w, from, sats) => w.sweepQuote(from, sats).then(p => p || { failed: 'no plan' }, e => ({ failed: e.message }));
+    const plan = await sweep(V, FROM, 100);
+    check('a sweep answers a plan naming both mints and what the token was worth',
+      !!plan && plan.from === FROM && plan.to === TO && plan.gross === 100 && plan.balance === 100,
+      JSON.stringify(plan));
+    check('it asked for less than the token, then for what the reserve left room for',
+      asked(sw.asked.mint) === '92,82' && asked(sw.asked.melt) === '92,82', asked(sw.asked.mint) + ' / ' + asked(sw.asked.melt));
+    check('what lands is the second invoice, and the fee is the rest of the token',
+      plan.moving === 82 && plan.net === 82 && plan.feeSats === 18 && plan.feeMax === 18,
+      JSON.stringify({ moving: plan.moving, net: plan.net, fee: plan.feeSats }));
+    check('the plan carries both quotes, for the same invoice, and the reserve is the route’s',
+      !!plan.mintQuote && !!plan.meltQuote && plan.mintQuote.amount === 82
+      && plan.meltQuote.request === plan.mintQuote.request && plan.reserve === 10,
+      JSON.stringify({ mint: plan.mintQuote && plan.mintQuote.amount, reserve: plan.reserve }));
+
+    // the reserve the mint asked for last time is the first guess this time
+    await sweep(V, FROM, 100);
+    check('the second sweep from that mint asks for the figure that fit, straight off',
+      asked(sw.asked.mint) === '92,82,82', asked(sw.asked.mint));
+
+    // a route that costs nothing to take fits on the first ask
+    const cheap = mints(0);
+    const c1 = load({ cashu: cheap.cashu });
+    await c1.W.connect(TO, { remember: true });
+    const easy = await sweep(c1.W, FROM, 100);
+    check('with no reserve the first invoice fits, and the token is spent but for the margin',
+      asked(cheap.asked.mint) === '92' && easy.moving === 92 && easy.feeSats === 8,
+      asked(cheap.asked.mint) + ' / ' + JSON.stringify({ moving: easy.moving, fee: easy.feeSats }));
+
+    let small = '', same = '';
+    try { await V.sweepQuote(FROM, 5); } catch (e) { small = e.message; }
+    try { await V.sweepQuote(TO, 100); } catch (e) { same = e.message; }
+    check('a token worth less than the fee to move it is refused', /more than the token is worth/.test(small), small || 'it was allowed');
+    check('and one from the mint you are on is not swept', /already from this mint/.test(same), same || 'it was allowed');
+  }
+
+  /* ---- the note of a crossing, written before the payment ------------------
+   *
+   * Between paying the far mint's invoice and claiming at the far end the sats
+   * are at that mint and nowhere else, and the note `moveRun` writes is the only
+   * way back to them. So a store that will not take the note stops the move
+   * before the payment is made, not after.
+   */
+  {
+    const full = mints(10);
+    const c = load({ cashu: full.cashu });
+    const V = c.W;
+    c.storage.setItem('foxy.cashu.proofs.' + FROM,
+      JSON.stringify([256, 128, 64].map(a => proof(a))));
+    await V.connect(FROM, { remember: true });
+    const plan = await V.transferQuote(FROM, 50, { to: TO });
+    const quotes = full.asked.melt.length;
+    const held = V.balanceAt(FROM);
+
+    // a phone whose store is full, for this one key
+    const proto = c.window.Storage.prototype;
+    const real = proto.setItem;
+    proto.setItem = function (k, v) {
+      if (String(k) === 'foxy.cashu.move') throw new c.window.DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      return real.call(this, k, v);
+    };
+    const err = await V.moveRun(plan, () => {}, { visit: true }).then(() => null, e => e);
+    proto.setItem = real;
+
+    check('a crossing whose note cannot be written is refused as storage, and as not sent',
+      !!err && err.storageFull === true && err.unsent === true, err ? String(err.message).slice(0, 80) : 'it went ahead');
+    check('and no payment was asked for: the mint was not even quoted a melt again',
+      full.asked.melt.length === quotes, full.asked.melt.length + ' melt quotes for ' + quotes);
+    check('nothing is on file as a crossing, and the sats are still where they were',
+      V.pendingMoves().length === 0 && V.balanceAt(FROM) === held, V.pendingMoves().length + ' note(s), ' + V.balanceAt(FROM) + ' of ' + held);
+  }
+
+  /* ---- a note for a payment that never was ---------------------------------
+   *
+   * `finishMove` claims every note it finds. A claim the mint turns away is not
+   * always a payment on its way: when the invoice was never paid, and nothing
+   * is held that could still pay it, the melt the note was written for did not
+   * happen, and the note goes. But only after its hour — a payment may be
+   * moments from landing — and not at all while a melt is held that could be
+   * the one.
+   */
+  {
+    const HOUR = 3600000;
+    const note = (id, age) => ({ to: TO, from: FROM, quote: id, amount: 40, lock: null,
+      request: 'lnbc' + id + 'n1pfoxytest', at: Date.now() - age });
+    const quotes = (c) => c.W.pendingMoves().map(n => n.quote).sort().join(',');
+    const beside = async (storage) => {
+      const c = load({ cashu: mints(10).cashu, storage });
+      await c.W.connect(FROM, { remember: true });
+      await new Promise(r => setTimeout(r, 20));      // connect's own catch-up
+      await c.W.finishMove();
+      return c;
+    };
+
+    const c = await beside({ 'foxy.cashu.move': JSON.stringify([note('q-new', 10 * 60000), note('q-old', 2 * HOUR)]) });
+    check('a crossing note whose invoice was never paid is dropped once it is an hour old',
+      !quotes(c).includes('q-old'), 'on file: ' + quotes(c));
+    check('and not before: one ten minutes old is kept, with its claim still to try',
+      quotes(c) === 'q-new', 'on file: ' + quotes(c));
+    check('and nothing arrived for either', c.W.balanceAt(TO) === 0 && c.W.balanceAt(FROM) === 0, c.W.balanceAt(TO) + ' at ' + TO);
+
+    // a melt held that could still pay the invoice keeps even an old note
+    const h = await beside({
+      'foxy.cashu.move': JSON.stringify([note('q-old', 2 * HOUR)]),
+      'foxy.cashu.melting': JSON.stringify([{ quote: 'm-held', mint: FROM, proofs: [proof(64)], amount: 40, bolt11: 'lnbcq-oldn1pfoxytest',
+        at: Math.floor(Date.now() / 1000) }]),
+    });
+    check('a note is kept as long as a melt is held that could be its payment',
+      quotes(h) === 'q-old' && h.W.pendingMelts().length === 1, 'notes ' + quotes(h) + ', holds ' + h.W.pendingMelts().length);
+  }
+
+  /* ---- the note goes when what it was for is settled -----------------------
+   *
+   * A melt that was given back was not paid and will not be, so nothing is on
+   * its way and its note is a note of nothing: left, every launch would ask the
+   * far mint to issue a quote nobody paid. The note names the invoice the melt
+   * pays, and only that melt's note goes. And a note for a quote the mint has
+   * already issued, with no record of which counters the claim used, cannot be
+   * claimed or restored; it goes too, rather than being asked about for ever.
+   */
+  {
+    const bolt = 'lnbc90n1pfoxytest';
+    const held = (extra) => Object.assign({ quote: 'm-held', mint: FROM, proofs: [proof(64)], amount: 90, feeReserve: 10,
+      bolt11: bolt, at: Math.floor(Date.now() / 1000) - 600, outputs: [] }, extra || {});
+    const note = (id, request) => ({ to: TO, from: FROM, quote: id, amount: 90, lock: null, request: request, at: Date.now() });
+    const ids = (c) => c.W.pendingMoves().map(n => n.quote).sort().join(',');
+
+    const given = mints(10, { meltState: 'FAILED' });
+    const c = load({ cashu: given.cashu, storage: {
+      'foxy.cashu.move': JSON.stringify([note('q-this', bolt), note('q-other', 'lnbc7n1pfoxytest')]),
+      'foxy.cashu.melting': JSON.stringify([held()]),
+    } });
+    await c.W.connect(FROM, { remember: true });
+    await new Promise(r => setTimeout(r, 20));
+    await c.W.sweepMelts();
+    check('a melt the mint says failed is given back, proofs and all',
+      c.W.pendingMelts().length === 0 && c.W.balanceAt(FROM) === 64, c.W.pendingMelts().length + ' held, ' + c.W.balanceAt(FROM) + ' sats back');
+    check('and the note of the crossing that melt was paying goes with it, and no other',
+      ids(c) === 'q-other', 'on file: ' + ids(c));
+
+    // a melt the mint has not settled is not given back, and keeps its note
+    const routing = mints(10, { meltState: 'PENDING' });
+    const r = load({ cashu: routing.cashu, storage: {
+      'foxy.cashu.move': JSON.stringify([note('q-this', bolt)]),
+      'foxy.cashu.melting': JSON.stringify([held({ at: Math.floor(Date.now() / 1000) })]),
+    } });
+    await r.W.connect(FROM, { remember: true });
+    await new Promise(done => setTimeout(done, 20));
+    await r.W.sweepMelts();
+    check('a melt still routing keeps its hold, and its note',
+      r.W.pendingMelts().length === 1 && ids(r) === 'q-this', r.W.pendingMelts().length + ' held; on file: ' + ids(r));
+
+    // issued at the far mint, with nothing on the note to say which counters it used
+    const gone = mints(10, { state: 'ISSUED' });
+    const g = load({ cashu: gone.cashu, storage: {
+      'foxy.cashu.move': JSON.stringify([note('q-issued', bolt)]),
+    } });
+    await g.W.connect(FROM, { remember: true });
+    await new Promise(done => setTimeout(done, 20));
+    await g.W.finishMove();
+    check('a crossing the far mint says it issued, with no counters on its note, is dropped',
+      g.W.pendingMoves().length === 0, 'on file: ' + ids(g));
+    check('and nothing is invented for it: no sats, no history',
+      g.W.balanceAt(TO) === 0 && g.W.balanceAt(FROM) === 0 && !g.storage.getItem('foxy.cashu.log'),
+      g.W.balanceAt(TO) + ' sats at ' + TO + '; log ' + g.storage.getItem('foxy.cashu.log'));
   }
 
   results.forEach(r => console.log(r));

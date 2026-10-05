@@ -214,14 +214,63 @@
         if (!tx.txid) return;
         this.toast(this.copyText(tx.txid) ? 'TXID Copied' : 'Could not copy');
       },
+      /* The proof that a Lightning payment was made: its preimage, which only
+       * somebody paid that invoice can know. Shown where the mint gave one;
+       * a payment between two wallets at one mint has none. Tap to copy, as
+       * the transaction id is. */
+      txPreimage: tx.preimage || '',
+      txHasPreimage: !!tx.preimage,
+      txCopyPreimage: () => {
+        if (!tx.preimage) return;
+        this.toast(this.copyText(tx.preimage) ? 'Proof of payment copied' : 'Could not copy');
+      },
+      /* And on a Lightning receive, the payment hash of the invoice: what a
+       * payer's proof of payment is held against. */
+      txPayHash: tx.payHash || '',
+      txHasPayHash: !!tx.payHash,
+      txCopyPayHash: () => {
+        if (!tx.payHash) return;
+        this.toast(this.copyText(tx.payHash) ? 'Payment hash copied' : 'Could not copy');
+      },
       /* What this payment consumed and produced: a count and a copy button.
        * The proofs themselves are hex, they are long, and the outputs of a
        * recent payment are live change with no business on screen. */
       txHasAudit: !!(audit && audit.length),
+      /* A record older than the last hundred is a receipt: the counts, and the
+       * public values of what left, with the pieces themselves let go. */
       txAuditLine: (audit && audit.length)
-        ? (audit[0].inputs || []).length + ' proofs in  \u00b7  '
-          + (audit[0].outputs || []).length + ' proofs out'
+        ? (audit[0].slim ? Number(audit[0].ins) || 0
+           : Math.max((audit[0].inputs || []).length, (audit[0].ys || []).length)) + ' proofs in  \u00b7  '
+          + (audit[0].slim ? Number(audit[0].outs) || 0 : (audit[0].outputs || []).length) + ' proofs out'
         : '',
+      /* A payment locked to the phone that asked for it, once the mint says
+       * its pieces are spent: they could only be spent by that phone's key,
+       * and the signature they were spent with is kept here. That is what
+       * shows somebody else who took the payment. The pieces are spent, so
+       * copying them hands over nothing. DELETE is the person's to press:
+       * a receipt is also a record of who was paid. */
+      txHasReceipt: !!(audit && audit[0] && audit[0].spent && (audit[0].inputs || []).length),
+      txReceiptLine: (audit && audit[0] && audit[0].spent)
+        ? 'Taken by the key it was locked to.' : '',
+      txReceiptCta: s.txReceiptCopied ? 'COPIED' : 'COPY RECEIPT',
+      txCopyReceipt: () => {
+        const a = audit && audit[0];
+        if (!a || !a.spent) return;
+        const text = JSON.stringify({
+          what: 'a Cashu payment locked to one key (NUT-11), and the signature its pieces were spent with (NUT-07)',
+          mint: a.mint, paid: a.at, sats: a.sats, lockedTo: a.lockedTo, spentSeenAt: a.spent.at,
+          proofs: (a.inputs || []).map((p, i) => ({ amount: p.amount, id: p.id, secret: p.secret, C: p.C,
+                                                    witness: a.spent.witness[i] })),
+        });
+        if (!this.copyText(text)) { this.toast('Could not copy', true); return; }
+        this.setState({ txReceiptCopied: true });
+        setTimeout(() => this.setState({ txReceiptCopied: false }), 1600);
+      },
+      txDeleteReceipt: () => {
+        const W = window.FoxyWallet;
+        if (!W || !W.forgetReceipt || !tx.hash) return;
+        if (W.forgetReceipt(tx.hash)) { this.toast('Receipt deleted'); this.setState({ txReceiptAt: 0 }); }
+      },
       txAuditCta: s.txAuditCopied ? 'COPIED' : 'COPY RECORD',
       txCopyAudit: () => {
         /* A record to share, not money. A proof's secret with its signature

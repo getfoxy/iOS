@@ -288,6 +288,75 @@
 
     clearAudit: function () { save(K.audit, []); return true; },
 
+    /* The proof that a locked payment was taken by the key it was locked to.
+     *
+     * A piece locked to a key can be spent by that key's holder and by nobody
+     * else, and a mint that has taken one keeps the signature it was spent
+     * with and says it to anybody who asks about the piece (NUT-07). So for a
+     * payment that was locked to the phone that asked for it, "spent" is not
+     * only spent: it is spent by them, and the signature shows it to a third
+     * person. Kept beside the pieces on the payment's record, checked here
+     * against each piece before it is believed.
+     *
+     * Asks the mint, on the circuit that payment's own checks use. Resolves
+     * { at, witness } once every piece is spent and signed for, and null
+     * while any is not, or when this is not a locked payment still on record
+     * in full, or there is no route. Never rejects. */
+    lockedReceipt: function (hash) {
+      var rec = load(K.audit, []).filter(function (a) {
+        return a && a.hash === hash && a.kind === 'token' && a.lockedTo && !a.slim;
+      })[0];
+      if (!rec) return Promise.resolve(null);
+      if (rec.spent) return Promise.resolve(rec.spent);
+      var pieces = (rec.inputs || []).filter(function (p) { return p && p.secret; });
+      var CT = window.CashuTS;
+      if (!pieces.length || !wallet || !routeOpen() || !CT || !CT.isP2PKSpendAuthorised) return Promise.resolve(null);
+      if (canonicalMint(String(rec.mint || '')) !== mintOf(wallet)) return Promise.resolve(null);
+      var w = onCircuit(wallet, 'token:' + hash);
+      return withTimeout(Promise.resolve().then(function () { return w.checkProofsStates(pieces); }),
+                         20000, 'the mint\u2019s word on a locked payment').then(function (states) {
+        if (!Array.isArray(states) || states.length !== pieces.length) return null;
+        var signed = [];
+        for (var i = 0; i < pieces.length; i++) {
+          var st = states[i] || {};
+          if (String(st.state || st.State || '').toUpperCase() !== 'SPENT') return null;
+          var said = st.witness;
+          if (typeof said !== 'string' || !said) return null;
+          // a signature by the key the piece names, or it proves nothing about who took it
+          try { if (!CT.isP2PKSpendAuthorised(Object.assign({}, pieces[i], { witness: said }))) return null; }
+          catch (e) { return null; }
+          signed.push(said);
+        }
+        var spent = { at: Math.floor(Date.now() / 1000), witness: signed };
+        save(K.audit, load(K.audit, []).map(function (a) {
+          return (a && a.hash === hash && a.kind === 'token' && a.lockedTo && !a.slim)
+            ? Object.assign({}, a, { spent: spent }) : a;
+        }));
+        console.log('[foxy] a locked payment was spent by the key it was locked to; the signature is kept with it');
+        return spent;
+      }).catch(function () { return null; });
+    },
+
+    /* Let a locked payment's receipt go: its pieces, the signature, and the
+     * token's own text. What is left is what every send keeps, the public
+     * values and the figures. The person's choice, and not undone: the mint
+     * may or may not still say the signature if it is asked again. */
+    forgetReceipt: function (hash) {
+      var hit = false;
+      save(K.audit, load(K.audit, []).map(function (a) {
+        if (!a || a.hash !== hash || a.kind !== 'token' || !a.lockedTo || a.slim) return a;
+        hit = true;
+        var kept = Object.assign({}, a, { inputs: [] });
+        delete kept.spent;
+        return kept;
+      }));
+      if (hit) {
+        var meta = load('foxy.txmeta', {});
+        if (meta[hash] && meta[hash].kept) { delete meta[hash].kept; save('foxy.txmeta', meta); }
+      }
+      return hit;
+    },
+
     /* Clear the local history. The mint keeps none, so this only removes what
      * this phone recorded — it does not touch any money. */
     /* Clear the history, and everything that only existed to go with it.
@@ -402,7 +471,8 @@
           if (!a || a.kind !== 'token') return a;
           var mine = (a.inputs || []).some(function (p) { return p && secrets[p.secret]; });
           if (mine) found = true;
-          return mine ? Object.assign({}, a, { inputs: [] }) : a;
+          // a locked payment's pieces stay: nobody here can spend them, and they are half of its receipt
+          return (mine && !a.lockedTo) ? Object.assign({}, a, { inputs: [] }) : a;
         }));
       }
       var last = load(K.outtok, null);
@@ -460,6 +530,8 @@
 
     /* The node that signed an invoice (invoicePayee), for the tests. */
     invoiceSigner: function (bolt11) { return invoicePayee(bolt11); },
+    /* The invoice's payment hash, or ''. */
+    invoiceHash: function (bolt11) { return invoicePaymentHash(bolt11); },
 
     /* Was this invoice made by the mint this wallet pays from? True only when
      * its signing node is that mint's known node (05-paying-this-mint.js). */
@@ -1841,7 +1913,11 @@
           return FoxyWallet.takeBackToken(text).then(function (r) {
             back += (r && r.sats) || 0;
             FoxyWallet.tag(h, { refused: false, takenBack: true });
-            try { amendTx(h, { takenBack: true }); } catch (x) {}
+            /* And no longer at risk. The entry kept `highRisk`, which is all
+             * the history reads, so a payment whose pieces were safely back
+             * went on saying HIGH RISK, refused, not returned, with a button
+             * to make it safe. `settleAtRisk` clears it for the same event. */
+            try { amendTx(h, { highRisk: false, takenBack: true }); } catch (x) {}
             console.log('[foxy] a payment they did not take is back in the wallet:', (r && r.sats) || 0, 'sats');
             if (typeof FoxyWallet._onTakenBack === 'function') {
               try { FoxyWallet._onTakenBack({ sats: (r && r.sats) || 0, hash: h }); } catch (x) {}

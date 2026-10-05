@@ -260,6 +260,51 @@ final class TapProtocolTests: XCTestCase {
         XCTAssertEqual(p.verdict(at: 1.1), .near(a, -30))
     }
 
+    /* Two tills side by side. The quiet link is opened to the first receiver
+     * heard, and it is the link "near" is said down, so that receiver shows
+     * CONNECT TO PAY. A phone then held to the other till left the link, and
+     * the card, where they were. The link moves when the other receiver has
+     * plainly been the nearer one for a second. */
+    func testAnotherReceiverPlainlyNearerIsARival() {
+        var p = TapProximity()
+        feed(&p, a, -57, from: 0, to: 1.2)       // the one the link is open to
+        feed(&p, b, -40, from: 0, to: 0.6)       // the one the phone is now held to
+        XCTAssertNil(p.rival(of: a, at: 0.6), "not before it has been heard for a second")
+        feed(&p, b, -40, from: 0.6, to: 1.2)
+        let found = p.rival(of: a, at: 1.2)
+        XCTAssertEqual(found?.id, b)
+        XCTAssertEqual(found?.median, -40)
+        XCTAssertEqual(found?.theirs, -57)
+        XCTAssertNil(p.rival(of: b, at: 1.2), "and the nearer one has no rival in the other")
+    }
+
+    func testTwoReceiversThatReadAlikeKeepTheLinkWhereItIs() {
+        var p = TapProximity()
+        feed(&p, a, -44, from: 0, to: 1.2)
+        feed(&p, b, -40, from: 0, to: 1.2)       // four decibels is two phones side by side, not a nearer one
+        XCTAssertNil(p.rival(of: a, at: 1.2))
+    }
+
+    func testAReceiverTooFarToBeToldAboutIsNoRival() {
+        var p = TapProximity()
+        feed(&p, a, -75, from: 0, to: 1.2)
+        feed(&p, b, -60, from: 0, to: 1.2)       // stronger, but nowhere near
+        XCTAssertNil(p.rival(of: a, at: 1.2))
+    }
+
+    /// The linked receiver's advertisements may stop arriving. Its last one
+    /// stands for a few seconds, and after that the link's own readings do.
+    func testALinkedReceiverNoLongerHeardIsMeasuredByWhatIsLeft() {
+        var p = TapProximity()
+        p.add(a, dbm: -42, at: 0)                 // heard once, near, and then no more
+        feed(&p, b, -40, from: 2.5, to: 3.7)
+        XCTAssertNil(p.rival(of: a, at: 3.7), "its last advertisement still stands, and they read alike")
+        p.addLinked(a, dbm: -62, at: 9.0)
+        p.addLinked(a, dbm: -62, at: 9.6)
+        feed(&p, b, -40, from: 8.5, to: 9.7)
+        XCTAssertEqual(p.rival(of: a, at: 9.7)?.id, b, "once that is old, the link's own reading says it is the far one")
+    }
+
     func testAClearlyCloserPhoneWins() {
         var p = TapProximity()
         feed(&p, a, -30, from: 0, to: 0.8)

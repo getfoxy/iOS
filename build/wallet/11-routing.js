@@ -3,6 +3,7 @@
     /* Every change, from the native side; and the answer to the calls below. */
     _privacy: function (p) {
       var next = (p && typeof p === 'object') ? p : {};
+      var wasUp = privacy.tor === 'up';
       privacy = {
         tor: String(next.tor || 'connecting'),
         progress: Number(next.progress) || 0,
@@ -48,6 +49,8 @@
         try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
+      // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
+      if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       return FoxyWallet.privacy();
     },
 
@@ -248,6 +251,9 @@
       return ready.then(function () {
         wallet = w;
         mintUrl = u;
+        // the circuit kept ready was for the mint before this one
+        dropSpare();
+        warmSpareSoon();
         // a locked payment a page that is gone never heard back about: out of the balance until the mint says
         try { holdUnanswered(u); } catch (eh) { console.warn('[foxy] could not hold an unanswered payment\u2019s pieces:', eh && eh.message); }
         /* What this mint is and what it will take, once, on connect.

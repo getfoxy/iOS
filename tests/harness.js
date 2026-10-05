@@ -58,6 +58,8 @@ function load(opts) {
   const W = w.FoxyWallet;
   if (!W) throw new Error('foxy-wallet.js did not define FoxyWallet');
   if (W.requireVpn) W.requireVpn(false);   // no gate in a test
+  // no circuit is opened ahead of time unless a test asks: it is a request to the mint nobody made
+  W._spareOff = !o.spare;
   if (phone) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
@@ -148,6 +150,8 @@ function loadReal(opts) {
   const W = w.FoxyWallet;
   if (!W) throw new Error('foxy-wallet.js did not define FoxyWallet');
   if (W.requireVpn) W.requireVpn(false);
+  // no circuit is opened ahead of time unless a test asks: it is a request to the mint nobody made
+  W._spareOff = !o.spare;
   if (o.bridge) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
@@ -192,6 +196,7 @@ function fakeMint(w, opts) {
   for (const [a, k] of Object.entries(pair.pubKeys)) pubs[a] = typeof k === 'string' ? k : hex(k);
   const quotes = {}, melts = {}, spent = new Set(), signed = new Map();
   const posted = [], change = [], spentSecrets = [];
+  const witnesses = {};
   // addresses paid into this wallet, and payouts on their way out (NUT-30)
   const chainIn = {}, chainOut = {};
   /* o.quoteFrom: the number this mint's quotes start from. Two mints in one
@@ -231,6 +236,8 @@ function fakeMint(w, opts) {
     const ys = (inputs || []).map((p) => yOf(p.secret));
     if (ys.some((y) => spent.has(y))) return false;
     ys.forEach((y) => spent.add(y));
+    // the signature a piece was spent with, kept to be said to whoever asks about the piece (NUT-07)
+    (inputs || []).forEach((p, i) => { if (p && p.witness) witnesses[ys[i]] = typeof p.witness === 'string' ? p.witness : JSON.stringify(p.witness); });
     (inputs || []).forEach((p) => { spentSecrets.push(String(p.secret)); taken += Number(p.amount) || 0; });
     return true;
   }
@@ -379,7 +386,8 @@ function fakeMint(w, opts) {
       return ok({ signatures: sign(body.outputs) });
     }
     if (p === '/v1/checkstate') {
-      return ok({ states: (body.Ys || []).map((Y) => ({ Y, state: spent.has(Y) ? 'SPENT' : 'UNSPENT', witness: null })) });
+      return ok({ states: (body.Ys || []).map((Y) => ({ Y, state: spent.has(Y) ? 'SPENT' : 'UNSPENT',
+                                                        witness: (spent.has(Y) && witnesses[Y]) || null })) });
     }
     if (p === '/v1/melt/quote/bolt11') {
       const q = { quote: quoteId(), amount: sats(body.request), fee_reserve: 10, state: 'UNPAID',
@@ -400,7 +408,7 @@ function fakeMint(w, opts) {
       record(body.outputs);
       const sigs = changeFor(body.outputs, paidIn - q.amount - 2);
       change.push(...sigs);
-      Object.assign(q, { state: 'PAID', payment_preimage: '00'.repeat(32), change: sigs });
+      Object.assign(q, { state: 'PAID', payment_preimage: o.preimage === undefined ? '00'.repeat(32) : o.preimage, change: sigs });
       return ok(q);
     }
     /* ---- on chain (NUT-30) -------------------------------------------------

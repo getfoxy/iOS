@@ -1,7 +1,7 @@
 import XCTest
 @testable import Foxy
 
-/// The whole v2 conversation, both sides run against each other in memory.
+/// The whole conversation, both sides run against each other in memory.
 /// No radio, so this is where the protocol is actually proved.
 final class TapSessionTests: XCTestCase {
 
@@ -369,7 +369,80 @@ final class TapSessionTests: XCTestCase {
         if case .stop = receiver.received(Data([0x05, 1, 2, 3])) {} else { XCTFail("a payment before any key") }
         if case .stop = receiver.received(Data([0x63, 1, 2])) {} else { XCTFail("a kind nobody knows") }
         if case .stop = receiver.received(Data()) {} else { XCTFail("nothing at all") }
-        if case .stop = receiver.received(Data([0x01, 1, 2])) {} else { XCTFail("a promise of the wrong size") }
+        if case .stop = receiver.received(Data([0x01, TapCrypto.version, 1, 2])) {} else { XCTFail("a promise of the wrong size") }
+        if case .stop = receiver.received(Data([0x01])) {} else { XCTFail("a promise with nothing in it") }
+    }
+
+    /// The version goes first, in the clear, in the first message each way.
+    func testEachSideSaysItsVersionFirst() {
+        let service = TapCrypto.newService()
+        let payer = TapSession(role: .payer, service: service)
+        let receiver = TapSession(role: .receiver, service: service)
+        guard case .send(let m1) = payer.begin() else { return XCTFail("no promise") }
+        XCTAssertEqual(Array(m1.prefix(2)), [0x01, TapCrypto.version])
+        XCTAssertEqual(m1.count, 2 + 32)
+        guard case .send(let m2) = receiver.received(m1) else { return XCTFail("no hello") }
+        XCTAssertEqual(Array(m2.prefix(2)), [0x02, TapCrypto.version])
+        XCTAssertEqual(m2.count, 2 + 32 + TapCrypto.nonceLength)
+    }
+
+    /// A Foxy from before a version was sent promises a key with nothing in
+    /// front of it. It is told apart at that first message, so the person can
+    /// be told why the two phones will not talk; it used to look like a tap
+    /// that did nothing.
+    func testAPhoneFromBeforeTheVersionIsToldApart() {
+        let service = TapCrypto.newService()
+        let receiver = TapSession(role: .receiver, service: service)
+        let oldPromise = Data([0x01]) + Data(repeating: 7, count: 32)
+        XCTAssertEqual(receiver.received(oldPromise), .otherVersion(theirs: 2, reply: nil))
+        XCTAssertNil(receiver.code, "and no key was agreed with it")
+
+        let payer = TapSession(role: .payer, service: service)
+        _ = payer.begin()
+        let oldHello = Data([0x02]) + Data(repeating: 7, count: 32 + TapCrypto.nonceLength)
+        XCTAssertEqual(payer.received(oldHello), .otherVersion(theirs: 2, reply: nil))
+        XCTAssertNil(payer.code)
+    }
+
+    /// A phone that speaks another version is answered with this phone's own,
+    /// and nothing else: the version is read before the size, so whatever a
+    /// later version puts after it, both phones learn why they cannot talk.
+    func testAnotherVersionIsAnsweredWithThisOne() {
+        let service = TapCrypto.newService()
+        let receiver = TapSession(role: .receiver, service: service)
+        let newer = TapCrypto.version + 1
+        let promise = Data([0x01, newer]) + Data(repeating: 7, count: 40)     // a size this version does not know
+        let said = receiver.received(promise)
+        XCTAssertEqual(said, .otherVersion(theirs: Int(newer), reply: Data([0x02, TapCrypto.version])))
+        XCTAssertNil(receiver.code)
+
+        // and the payer at the other end of such an answer reads it the same way
+        let payer = TapSession(role: .payer, service: service)
+        _ = payer.begin()
+        XCTAssertEqual(payer.received(Data([0x02, newer])), .otherVersion(theirs: Int(newer), reply: nil))
+        XCTAssertNil(payer.code)
+    }
+
+    /// The kind of a sealed message is in the clear, and is part of what was
+    /// sealed. Relabelled on the air, a message stops the link instead of
+    /// being read as something its sender never said.
+    func testASealedMessageRelabelledOnTheAirStopsTheLink() throws {
+        let service = TapCrypto.newService()
+        let payer = TapSession(role: .payer, service: service)
+        let receiver = TapSession(role: .receiver, service: service)
+        _ = hand(hand(hand(payer.begin(), to: receiver), to: payer), to: receiver)
+        let offer = try XCTUnwrap(receiver.sealOffer("{\"v\":2,\"req\":\"creqA\"}"))
+        guard case .offer = payer.received(offer) else { return XCTFail("no offer") }
+
+        // the payer asks to hear it again (M12); on the air it becomes "I kept the change" (M8)
+        var asked = try XCTUnwrap(payer.sealAgain())
+        XCTAssertEqual(asked[0], 0x0C)
+        asked[0] = 0x08
+        if case .stop(let why) = receiver.received(asked) {
+            XCTAssertTrue(why.contains("would not open"), why)
+        } else {
+            XCTFail("a question relabelled as a receipt for change was believed")
+        }
     }
 
     /// Everything after the handshake is padded to a size that says nothing

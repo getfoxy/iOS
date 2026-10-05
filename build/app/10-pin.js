@@ -149,14 +149,49 @@
     if (!o.noKeypad) paint();
 
     // the keypad
+    /* The whole cell takes the touch, not only the round key drawn in it.
+     *
+     * The keys were 66 high with 14 between them, and the 14 was dead: a thumb
+     * landing between two keys pressed neither. And they waited for a click,
+     * which iOS gives only for a touch that barely moves and ends alone, so a
+     * quick second key, or a thumb that slid a little, was a tap that did
+     * nothing. Now the cells meet edge to edge, a key takes the touch the
+     * moment it lands, and it turns orange while it is down so there is no
+     * doubt it was felt. */
     const pad = el('margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);'
-      + 'gap:14px;width:100%;max-width:300px');
+      + 'width:100%;max-width:336px;touch-action:manipulation;'
+      + '-webkit-user-select:none;user-select:none;-webkit-touch-callout:none');
     const key = (label, onTap, quiet) => {
-      const k = el('height:66px;border-radius:33px;display:flex;align-items:center;'
-        + 'justify-content:center;font-size:26px;font-weight:700;cursor:pointer;'
-        + (quiet ? 'color:rgba(245,241,236,.55);background:transparent'
-                 : 'color:var(--ink,#F5F1EC);background:rgba(245,241,236,.08)'), label);
-      k.addEventListener('click', onTap);
+      const k = el('height:80px;display:flex;align-items:center;justify-content:center;'
+        + 'cursor:pointer;-webkit-tap-highlight-color:transparent');
+      const rest = quiet ? 'transparent' : 'rgba(245,241,236,.08)';
+      const ink = quiet ? 'rgba(245,241,236,.55)' : 'var(--ink,#F5F1EC)';
+      const face = el('flex:1;margin:0 7px;height:66px;border-radius:33px;display:flex;align-items:center;'
+        + 'justify-content:center;font-size:26px;font-weight:700;pointer-events:none;'
+        + 'transition:background .1s ease;color:' + ink + ';background:' + rest, label);
+      k.appendChild(face);
+      // the empty corner is not a key
+      if (!label) return k;
+      let litAt = 0, dim = null, touched = false;
+      const lit = () => {
+        clearTimeout(dim);
+        litAt = Date.now();
+        face.style.background = 'var(--acc,#F2802E)';
+        face.style.color = '#fff';
+      };
+      // long enough to be seen, however quick the tap
+      const unlit = () => {
+        clearTimeout(dim);
+        dim = setTimeout(() => { face.style.background = rest; face.style.color = ink; },
+                         Math.max(0, 140 - (Date.now() - litAt)));
+      };
+      k.addEventListener('pointerdown', () => { touched = true; lit(); onTap(); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach((kind) => k.addEventListener(kind, unlit));
+      // a click with no touch before it (a pointer-less browser, a test): the same key press
+      k.addEventListener('click', () => {
+        if (touched) { touched = false; return; }
+        lit(); onTap(); unlit();
+      });
       return k;
     };
     for (let d = 1; d <= 9; d++) {

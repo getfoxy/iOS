@@ -389,6 +389,34 @@
     return ((x0 % m) + m) % m;
   }
 
+  /* A BOLT11 invoice's payment hash, as hex, or ''. Its `p` field: 52 words,
+   * 256 bits and four of padding. The payer's preimage hashes to this, so it
+   * is what ties a payment somebody says they made to an invoice this phone
+   * asked for. Tested against BOLT11's own example invoice. */
+  function invoicePaymentHash(bolt11) {
+    try {
+      var t = String(bolt11 || '').trim().toLowerCase().replace(/^lightning:/, '');
+      if (!/^ln(bc|tb|bcrt)/.test(t)) return '';
+      var sep = t.lastIndexOf('1');
+      if (sep < 1 || t.length - sep - 1 < 7 + 104 + 6) return '';
+      var words = [];
+      for (var i = sep + 1; i < t.length - 6; i++) {
+        var v = BECH32.indexOf(t.charAt(i));
+        if (v < 0) return '';
+        words.push(v);
+      }
+      var data = words.slice(0, words.length - 104);
+      var at = 7;
+      while (at + 3 <= data.length) {
+        var type = data[at], len = data[at + 1] * 32 + data[at + 2], start = at + 3;
+        if (start + len > data.length) return '';
+        if (type === 1 && len === 52) return hexOf(wordsToBytes(data.slice(start, start + len), false).slice(0, 32));
+        at = start + len;
+      }
+      return '';
+    } catch (e) { return ''; }
+  }
+
   /* The node that signed a BOLT11 invoice, as compressed public key hex, or
    * null. Its `n` field when it has one; otherwise recovered from the
    * signature, which BOLT11 makes over SHA-256 of the human-readable part and

@@ -75,8 +75,16 @@ ok(/sendStopWaiting: \(\) => \{[\s\S]{0,1600}?sendSlow: false, sendPhase: null/.
 
 const tidy = read('build/app/07-history-tokens-mints.js');
 const native = read('Foxy/FoxyWebView.swift');
-ok(/_putAway\(true\)/.test(native) && /FoxyWallet\._tidying/.test(native) && /timeIntervalSince\(began\) > 20/.test(native),
+const route = read('Foxy/Network/Route.swift');
+ok(/_putAway\(true\)/.test(native) && /FoxyWallet\._tidying/.test(native)
+   && /Route\.leaving\(money: money, tidying: tidying, out: out,/.test(native)
+   && /static let waitForMoney: TimeInterval = 20\n/.test(route)
+   && /if waited > waitForMoney \{ return \.leave\(/.test(route) && /if money > 0 \|\| tidying \{ return \.wait \}/.test(route),
    'and the phone holds Tor up while it runs, twenty seconds at most');
+ok(/Route\.shutDoor\(\)\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ after\) \{ park\(\) \}/.test(native)
+   && /guard !shut\(\) else \{[\s\S]{0,200}?return nil/.test(route)
+   && (native.match(/Route\.openDoor\(\)/g) || []).length >= 3,
+   'then nothing new leaves until Tor is off the network, and coming back opens the door');
 ok(/TIDY_AWAY_STOP = 12000;/.test(tidy)
    && /if \(this\._putAway && Date\.now\(\) - \(this\._putAwayAt \|\| 0\) > this\.TIDY_AWAY_STOP\) \{[\s\S]{0,200}?this\._tidyOwed = true;[\s\S]{0,140}?return;/.test(tidy),
    'no new swap starts after twelve seconds away, so none is cut off at twenty');

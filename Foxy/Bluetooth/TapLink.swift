@@ -17,6 +17,9 @@ enum TapStage: String {
     case shake
     /// The payer can hear a receiver within `nearbyDbm`: its screen says TAP TO PAY.
     case nearby
+    /// The phone at the other end speaks another version of the tap, so the
+    /// two cannot talk. Said to the page, which says it to the person.
+    case version
     case off, denied, unsupported
 }
 
@@ -738,6 +741,23 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
                     linkedCentral = nil
                     offerSent = false
                     advertise()
+                case .otherVersion(let theirs, let reply):
+                    /* Let go like any link that came to nothing, and back on
+                     * the air: the code on the screen still works, and the
+                     * next phone may be one this can talk to. The page is told,
+                     * because "it did not work" with nothing said is the one
+                     * outcome a version was added to prevent. And the payer is
+                     * told this phone's version first, where it can read it. */
+                    if let reply { push(reply, to: r.central) }
+                    made.stopped("the payer speaks version \(theirs) of the tap; this phone speaks \(TapCrypto.version)")
+                    handshakeTimer?.invalidate(); handshakeTimer = nil
+                    session = nil
+                    talkingTo = nil
+                    linked = false
+                    linkedCentral = nil
+                    offerSent = false
+                    onEvent(.version, String(theirs))
+                    advertise()
                 /* A receiver never hears change, a result or an asking — it is
                  * the one that sends all three — so these are the payer's half of
                  * the conversation arriving at the wrong door, and nothing to act
@@ -945,6 +965,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
      * deciding on advertisements exactly as it did before. Slower, and it
      * works. */
     private var warmOff = false
+    /// When the quiet link was last moved from one receiver to a nearer one.
+    private var movedAt: TimeInterval = 0
     private var lastLog: TimeInterval = 0
     private var lastLogDbm = 0
     private var lastLogWhy = ""
@@ -1204,6 +1226,33 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 retry("warm too long")
                 return
             }
+        }
+        /* The quiet link follows the receiver that is nearest. With two
+         * tills side by side it stayed with whichever was heard first, which
+         * went on being told "near" and showing CONNECT TO PAY while the phone
+         * was held to the other (`TapProximity.rival`). Not more than once in
+         * three seconds, so two tills that read alike cannot pass the card
+         * back and forth. */
+        if let warm = target, now - movedAt > 3,
+           let rival = proximity.rival(of: warm.identifier, at: now), let found = seen[rival.id],
+           let m = manager {
+            print("[tap] pay: another receiver is nearer (\(rival.median) dBm, against \(rival.theirs)); "
+                  + "the quiet link moves to it")
+            movedAt = now
+            // the first one's card comes down: its door is let go, and then the link
+            announce(false)
+            m.cancelPeripheralConnection(warm)
+            announced = nil; heardDoor = false; theirEarly = false; theirTurned = false
+            nearSince = 0
+            asking = false
+            target = found.peripheral
+            service = UUID(uuidString: found.service.uuidString)
+            warmReady = false
+            warmSince = now
+            warmReadings = 0
+            found.peripheral.delegate = self
+            m.connect(found.peripheral)
+            return
         }
         switch proximity.verdict(at: now) {
         case .nothing: warm(at: now)
@@ -1613,6 +1662,14 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             case .stop(let why):
                 made.stopped(why)
                 retry(why)
+            case .otherVersion(let theirs, _):
+                /* Said, and that phone left alone for a while as one that is
+                 * not a Foxy is: this phone cannot talk to it however often
+                 * it tries, and trying again at once would raise the same
+                 * card over and over while the phones are held together. */
+                made.stopped("the receiver speaks version \(theirs) of the tap; this phone speaks \(TapCrypto.version)")
+                onStage(.version)
+                retry("not a Foxy this phone can talk to (version \(theirs))")
             case .terms(let text):
                 /* They agreed the price and sent the request, now in sats. This
                  * is the offer the payment answers; nothing has left this phone

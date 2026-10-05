@@ -32,6 +32,11 @@ function page(storage) {
   const phone = nativePhone({ words: WORDS });
   const answers = [];
   const refuse = { keys: null };
+  /* What the phone says when asked for this page's addresses (`inboxOpen`), the
+   * payments handed to relays (`nostrSend`) and how many relays took them. */
+  const inbox = { text: '' };
+  const nostrSent = [];
+  const relays = { took: 2 };
   let mint = null;
   const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
   const ctx = loadReal({
@@ -40,6 +45,11 @@ function page(storage) {
       if (m.action === 'inboxAnswer') {
         answers.push({ answer: m.answer, status: m.status, text: String(m.text || '') });
         return reply(w, m.id, 'ok');
+      }
+      if (m.action === 'inboxOpen') return reply(w, m.id, inbox.text);
+      if (m.action === 'nostrSend') {
+        nostrSent.push({ target: m.target, body: String(m.body || '') });
+        return reply(w, m.id, String(relays.took));
       }
       if (m.action === 'mintRequest') return reply(w, m.id, mint.handle(m));
       const got = phone.answer(w, m);
@@ -60,7 +70,7 @@ function page(storage) {
       };
     },
   });
-  return Object.assign(ctx, { phone, answers, refuse, get mint() { return mint; } });
+  return Object.assign(ctx, { phone, answers, refuse, inbox, nostrSent, relays, get mint() { return mint; } });
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -357,6 +367,65 @@ async function run() {
     check('a payment arriving after a reload is still taken',
       said.length === 1 && said[0].status === 200,
       JSON.stringify(said) || '(no answer)');
+  }
+
+  /* ---- the addresses the phone hands out for a request ----------------------
+   *
+   * `openInbox` reads what the phone answers and keeps only what has the shape
+   * of an address. Either one alone is a way to be paid, so it is enough; only
+   * having neither leaves the request with nowhere to be paid. */
+  {
+    const onion = 'http://' + 'a'.repeat(55) + 'd.onion/' + 'b'.repeat(32);
+    const nostr = 'nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4mhxue69uhhy'
+      + 'tnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p';
+    const opened = (text) => {
+      ctx.inbox.text = text;
+      return W.openInbox().then((r) => r, (e) => ({ failed: e.message }));
+    };
+    const both = await opened(JSON.stringify({ onion: onion, nostr: nostr }));
+    check('an inbox with both addresses hands out both',
+      both && both.onion === onion && both.nostr === nostr, JSON.stringify(both));
+    const onlyOnion = await opened(JSON.stringify({ onion: onion }));
+    check('an inbox with only an onion address is still an inbox',
+      onlyOnion && onlyOnion.onion === onion && !onlyOnion.nostr && !onlyOnion.failed, JSON.stringify(onlyOnion));
+    const onlyNostr = await opened(JSON.stringify({ nostr: nostr }));
+    check('an inbox with only a relay address is still an inbox',
+      onlyNostr && onlyNostr.nostr === nostr && !onlyNostr.onion && !onlyNostr.failed, JSON.stringify(onlyNostr));
+    const oneBad = await opened(JSON.stringify({ onion: 'http://evil.example/x', nostr: nostr }));
+    check('an address of the wrong shape is left out, and the good one kept',
+      oneBad && oneBad.nostr === nostr && !oneBad.onion, JSON.stringify(oneBad));
+    const noneGood = await opened(JSON.stringify({ onion: 'http://evil.example/x', nostr: 'npub1nope' }));
+    check('with neither address fit to hand out it is refused',
+      !!(noneGood && noneGood.failed) && /no address/i.test(noneGood.failed), JSON.stringify(noneGood));
+    const rubbish = await opened('not json at all');
+    check('an answer that is not JSON is refused',
+      !!(rubbish && rubbish.failed) && /no address/i.test(rubbish.failed), JSON.stringify(rubbish));
+
+    /* ---- paying a request that names only a relay ---------------------------
+     *
+     * A request made by a phone with no onion to offer carries a Nostr address
+     * tagged as NIP-17 and nothing else. It has to read as payable, and paying
+     * it has to hand the payment to the phone's relay sender, addressed to
+     * that profile, for exactly what was asked. */
+    const asked = W.decodeRequest(W.paymentRequest(21, { deliverTo: { nostr: nostr }, purpose: 'receive' }));
+    check('a request that names only a relay address can be paid',
+      !!asked && asked.deliverable === true && !!asked.delivery && asked.delivery.kind === 'nostr'
+        && asked.delivery.target === nostr, JSON.stringify(asked && asked.delivery));
+    const held = await W.balanceSats();
+    const paid = await W.payRequest(asked).then((r) => r, (e) => ({ failed: e.message }));
+    check('paying it goes through', !!paid && !paid.failed && Number(paid.sats) === 21, JSON.stringify(paid).slice(0, 120));
+    check('and nobody says it was confirmed, since a relay taking it only means it was handed on',
+      !!paid && paid.confirmed === false, String(paid && paid.confirmed));
+    const sentTo = ctx.nostrSent;
+    check('the payment is handed to the relay sender once, for that profile',
+      sentTo.length === 1 && sentTo[0].target === nostr, JSON.stringify(sentTo.map((x) => x.target)));
+    const sent = sentTo.length ? JSON.parse(sentTo[0].body) : {};
+    const inBody = (sent.proofs || []).reduce((n, pr) => n + Number(pr.amount), 0);
+    check('and what is in it answers the request: its id, this mint, the 21 sats',
+      sent.id === asked.id && String(sent.mint).replace(/\/+$/, '') === MINT && inBody === 21,
+      JSON.stringify({ id: sent.id, mint: sent.mint, sats: inBody }));
+    check('those 21 sats have left the balance', (await W.balanceSats()) === held - 21,
+      held + ' -> ' + (await W.balanceSats()));
   }
 
   results.forEach((r) => console.log(r));

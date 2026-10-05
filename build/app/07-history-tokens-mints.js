@@ -1170,6 +1170,15 @@
     this.setState({ reqBusy: false, req: null, sendPhase: 'settled' });
     // paid by tap: remembered, so the same offer heard again is not paid again (26d-tap.js)
     if (req && req.viaTap && this.tapMarkPaid) this.tapMarkPaid(this._tapOfferNow, req);
+    /* A payment locked to them has a receipt to collect: the signature its
+     * pieces are spent with, which the mint says once they have swapped it
+     * in (`lockedReceipt`). A receiver with a route swaps at once, so a few
+     * seconds on is when to ask; one without has not yet, and the payment's
+     * own screen asks again whenever it is opened. */
+    if (r && r.hash && r.lockedTo && W.lockedReceipt && !(this.offlineNow && this.offlineNow())) {
+      const hash = r.hash;
+      setTimeout(() => { try { W.lockedReceipt(hash); } catch (e) {} }, 8000);
+    }
     /* Over-paid, so the receiver owes change back over this link. It has to
      * swap at the mint to make it, which takes seconds — and the payer was
      * letting the link go the moment the person got back to home, one second

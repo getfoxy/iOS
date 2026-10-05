@@ -47,7 +47,7 @@ function page(o) {
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
     },
-    before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true }); },
+    before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk }); },
   });
   ctx.deaf = !!opts.deaf;
   ctx.mint = mint;
@@ -165,6 +165,8 @@ async function run() {
   }), 'offline-take-2', 'tap');
   await settle();
   ok((await cart.W.balanceSats()) === 28, 'is paid 28 while offline', String(await cart.W.balanceSats()));
+  // the row as it was written when the payment landed, all three pieces in it
+  const wholeRow = (Object.values(rows(cart))[0] || {}).token;
 
   // and they show as change, because they can be spent as change
   const shown = cart.W.pieces().filter((r) => r.count > 0).map((r) => r.amount + 'x' + r.count).join(' ');
@@ -201,6 +203,18 @@ async function run() {
 
   /* Back online, the rest is swapped in — the 16, not the 28 the row once
    * was, which the mint would refuse as already spent and lose the 16 with. */
+  /* And the same when the row could not be rewritten as its pieces went (a
+   * full store, the app closing): it still names all three, and the list of
+   * what was signed away is all that says two of them are gone. The claim
+   * leaves those out before the mint is asked. Claimed whole, the mint says
+   * spent, the row is dropped for it, and the 16 goes with it. */
+  {
+    const put = rows(cart);
+    const id = Object.keys(put)[0];
+    put[id].token = wholeRow;
+    cart.storage.setItem('foxy.req.unclaimed', JSON.stringify(put));
+    ok(cart.W.tokenInfo(rows(cart)[id].token).proofs.length === 3, 'the row names all three pieces again, as if its rewrite had failed');
+  }
   cart.deaf = false;
   cart.W.setOffline(false);
   cart.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
@@ -215,6 +229,109 @@ async function run() {
   ok(arrival.sats === 28, 'and the payment’s entry still says 28 arrived', String(arrival.sats));
   const outs = log.filter((e) => e && e.dir === 'out' && e.sats === 12).length;
   ok(outs === 1, 'beside one payment of 12 out', String(outs));
+
+  /* ---- what a late claim does to the payment's entry -----------------------
+   *
+   * A payment that was spent from before it was claimed says what it was worth
+   * whole, because the entry is the payment that arrived. One nobody spent
+   * from has nothing to correct: its entry keeps the amount written when the
+   * payment landed. */
+  {
+    const till = page({ sharedMint: shared,
+      words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' });
+    await till.W.connect(MINT, null, null, { remember: true });
+    await till.W.primeLocks();
+    const askUntouched = till.W.decodeRequest(till.W.paymentRequest(28, { purpose: 'receive' })) || {};
+    till.deaf = true;
+    goOffline(till.W);
+    await till.W.connect(MINT, null, null, { remember: true });
+    const made = await payer.W.sendToken(28, { unit: 'sat', lockTo: askUntouched.lockTo });
+    const info = till.W.tokenInfo(made.token);
+    till.W._requestPaid(JSON.stringify({
+      id: askUntouched.id, mint: String(info.mint || '').replace(/\/+$/, ''), unit: 'sat',
+      proofs: info.proofs.map((pr) => Object.assign({ id: pr.id, amount: pr.amount, secret: pr.secret, C: pr.C },
+        pr.dleq ? { dleq: pr.dleq } : {})),
+    }), 'till-untouched', 'tap');
+    await settle();
+    ok(Object.keys(rows(till)).length === 1 && !('whole' in (rows(till)[askUntouched.id] || {})),
+      'a payment of 28 taken offline and not spent from', JSON.stringify(Object.keys(rows(till))));
+
+    till.deaf = false;
+    till.W.setOffline(false);
+    till.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    await till.W.connect(MINT, null, null, { remember: true });
+    await till.W.claimUnclaimed();
+    await settle();
+    ok(Object.keys(rows(till)).length === 0 && (await till.W.balanceSats()) === 28,
+      'is claimed whole with a route', String(await till.W.balanceSats()));
+    const entries = JSON.parse(till.storage.getItem('foxy.cashu.log') || '[]');
+    const arrived = entries.filter((e) => e && e.hash === 'req-' + askUntouched.id)[0] || {};
+    ok(arrived.sats === 28 && arrived.state === 'success',
+      'and its entry says 28 arrived, as it did before the claim', JSON.stringify({ sats: arrived.sats, state: arrived.state }));
+  }
+
+  /* ---- a sat too small to claim is let go, not carried for ever -------------
+   *
+   * At a mint that charges a sat a piece, the one piece left of a payment
+   * that was spent from is worth no more than the swap would cost. Claimed, the
+   * mint refuses it and the row stays; counted in the balance and asked about
+   * on every connection. It is let go instead, and the payment beside it is
+   * claimed as usual. */
+  {
+    const dear = page({ feePpk: 1000,
+      words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' });
+    await dear.W.connect(MINT, null, null, { remember: true });
+    await dear.W.claim((await dear.W.invoice(2000, '')).hash);
+    const shop = page({ sharedMint: dear.mint, feePpk: 1000,
+      words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' });
+    await shop.W.connect(MINT, null, null, { remember: true });
+    await shop.W.primeLocks();
+    const askDust = shop.W.decodeRequest(shop.W.paymentRequest(1, { purpose: 'receive' })) || {};
+    const askFull = shop.W.decodeRequest(shop.W.paymentRequest(2, { purpose: 'receive' })) || {};
+    shop.deaf = true;
+    goOffline(shop.W);
+    await shop.W.connect(MINT, null, null, { remember: true });
+    const take = async (askFor, sats, name) => {
+      const made = await dear.W.sendToken(sats, { unit: 'sat', lockTo: askFor.lockTo });
+      const info = shop.W.tokenInfo(made.token);
+      shop.W._requestPaid(JSON.stringify({
+        id: askFor.id, mint: String(info.mint || '').replace(/\/+$/, ''), unit: 'sat',
+        proofs: info.proofs.map((pr) => Object.assign({ id: pr.id, amount: pr.amount, secret: pr.secret, C: pr.C },
+          pr.dleq ? { dleq: pr.dleq } : {})),
+      }), name, 'tap');
+      await settle();
+    };
+    await take(askDust, 1, 'shop-dust');
+    await take(askFull, 2, 'shop-full');
+    ok(Object.keys(rows(shop)).length === 2, 'two payments are waiting at a mint that charges a sat a piece');
+
+    /* The 2 of the first goes on, signed here, and the 1 is what is left of it. */
+    const row = rows(shop)[askDust.id] || {};
+    const pieces = shop.W.tokenInfo(row.token);
+    const two = pieces.proofs.filter((pr) => Number(pr.amount) === 2);
+    const gave = await shop.W.forwardLocked(shop.window.CashuTS.getEncodedToken({
+      mint: String(pieces.mint || '').replace(/\/+$/, ''), unit: 'sat', proofs: two }))
+      .then((r) => r, (e) => ({ why: e && e.message }));
+    const left = shop.W.tokenInfo((rows(shop)[askDust.id] || {}).token || '');
+    ok(gave.sats === 2 && left && left.proofs.length === 1 && Number(left.proofs[0].amount) === 1,
+      'a payment of 3 is left with the one sat', JSON.stringify(gave.why || (left && left.proofs.map((pr) => pr.amount))));
+    const dust = left && left.proofs[0] ? left.proofs[0].secret : '';
+
+    shop.deaf = false;
+    shop.W.setOffline(false);
+    shop.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    await shop.W.connect(MINT, null, null, { remember: true });
+    await shop.W.claimUnclaimed();
+    await settle();
+    ok(!rows(shop)[askDust.id], 'the sat left is let go rather than kept to be asked about again',
+      JSON.stringify(Object.keys(rows(shop))));
+    ok(!dear.mint.spentSecrets.includes(dust), 'and the mint was never troubled with it');
+    ok(!rows(shop)[askFull.id], 'while the payment beside it is claimed');
+    ok((await shop.W.balanceSats()) === 2, 'leaving what that one was worth after the mint\u2019s fee',
+      String(await shop.W.balanceSats()));
+    await shop.W.claimUnclaimed();
+    ok(Object.keys(rows(shop)).length === 0, 'and nothing is left waiting', JSON.stringify(Object.keys(rows(shop))));
+  }
 
   console.log('\n' + (failed ? failed + ' spend-offline check(s) failed'
     : 'all spend-offline checks pass'));

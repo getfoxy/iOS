@@ -109,6 +109,43 @@ async function run() {
   ok(/locked to someone else/i.test(theirs),
     "A cannot sign away ecash locked to C's key", theirs);
 
+  /* ---- every piece has to be locked to this phone alone -------------------
+   *
+   * The key is looked up from the first piece, so a token whose first piece is
+   * ours and whose others are not would sign them all. A piece with a locktime
+   * can be taken back by whoever set it, and one that names a second key can be
+   * spent by that key too: signing either away hands on money that is not this
+   * phone's to give. Each is refused whole, and nothing is struck off. */
+  {
+    const askX = A.W.decodeRequest(A.W.paymentRequest(21, { purpose: 'receive' })) || {};
+    const lockedX = await A.W.sendToken(21, { unit: 'sat', lockTo: askX.lockTo });
+    const base = A.W.tokenInfo(lockedX.token);
+    ok(base.proofs.length > 1, 'a locked token of several pieces to alter', String(base.proofs.length));
+    const withTags = (extra) => {
+      const copy = base.proofs.map((pr) => Object.assign({}, pr));
+      const last = copy[copy.length - 1];
+      const j = JSON.parse(last.secret);
+      j[1].tags = (j[1].tags || []).concat(extra);
+      last.secret = JSON.stringify(j);
+      return A.window.CashuTS.getEncodedToken({
+        mint: String(base.mint || '').replace(/\/+$/, ''), proofs: copy, unit: 'sat',
+      });
+    };
+    const handedBefore = A.storage.getItem('foxy.req.handedon');
+    const timed = withTags([['locktime', String(Math.floor(Date.now() / 1000) + 7 * 86400)]]);
+    let timedWhy = '';
+    try { await A.W.forwardLocked(timed); } catch (e) { timedWhy = e.message; }
+    ok(/locked to someone else/i.test(timedWhy),
+      'a piece with a locktime among the others is not signed away', timedWhy || 'SIGNED');
+    const shared = withTags([['pubkeys', askC.lockTo]]);
+    let sharedWhy = '';
+    try { await A.W.forwardLocked(shared); } catch (e) { sharedWhy = e.message; }
+    ok(/locked to someone else/i.test(sharedWhy),
+      'nor is a piece that a second key can spend as well', sharedWhy || 'SIGNED');
+    ok(A.storage.getItem('foxy.req.handedon') === handedBefore,
+      'and neither refusal strikes anything off');
+  }
+
   // ---- and an unsigned locked token is still refused, as it always was ----
   let stranger = '';
   try { await A.W.receiveToken(lockedToC.token, { hash: 'not-mine' }); } catch (e) { stranger = e.message; }

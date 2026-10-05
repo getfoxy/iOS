@@ -1282,8 +1282,9 @@
         /* The mint is about to be asked, so the route has to be there — and
          * this job needs its own circuit, which is the other half of what
          * `need()` does and the reason the swap re-acquires rather than using
-         * the local view from above. */
-        try { w = need(); } catch (e) { return Promise.reject(e); }
+         * the local view from above. The one kept ready, when there is one:
+         * this is a swap somebody is standing and waiting for (`needNow`). */
+        try { w = needNow(); } catch (e) { return Promise.reject(e); }
         /* The swap's output ranges are on disk until the answer is in, and
          * cleared before anything else once it is: the token's proofs must never
          * be restorable as balance after the token exists. A lost answer used to

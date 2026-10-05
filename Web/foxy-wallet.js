@@ -687,6 +687,45 @@
     };
   }
 
+  /* A question asked again, on a circuit of its own, when the first has said
+   * nothing for five seconds. Resolves { got, w }: the answer, and the wallet
+   * view that got it, so whatever follows can go by the road that worked.
+   *
+   * Every job leaves on a Tor circuit of its own, and now and then one of
+   * them goes nowhere: the request sits until its clock runs out, a minute
+   * for an invoice, while the same mint answers the phone beside it in two
+   * seconds. Only for questions that cost nothing asked twice. A second
+   * invoice is a quote nobody is shown and nobody pays, and a second fee
+   * quote is a figure; each lapses at the mint by itself. Never a swap or a
+   * melt, which move money.
+   *
+   * An answer from either is the answer. A failure ends it at once while
+   * only one has been asked, as it always did; once two have, it takes both
+   * failing, and the error is the later one's. */
+  function askedTwice(w, what, ask) {
+    return new Promise(function (ok, no) {
+      var settled = false, second = false, failed = 0;
+      var yes = function (via) {
+        return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
+      };
+      var bad = function (e) {
+        failed += 1;
+        if (settled || (second && failed < 2)) return;
+        settled = true; clearTimeout(again); no(e);
+      };
+      var again = setTimeout(function () {
+        if (settled) return;
+        var other;
+        try { other = onCircuit(w); } catch (e) { other = null; }
+        if (!other) return;
+        second = true;
+        console.log('[foxy] ' + what + ' has not answered in 5s; asking again on another circuit');
+        Promise.resolve().then(function () { return ask(other); }).then(yes(other), bad);
+      }, FoxyWallet._askAgainMs || 5000);
+      Promise.resolve().then(function () { return ask(w); }).then(yes(w), bad);
+    });
+  }
+
   /* Each proof's state at the mint, as 'UNSPENT' / 'PENDING' / 'SPENT'. */
   function statesOf(w, list) {
     /* Asked again, on a circuit of its own, when the first has said nothing
@@ -962,6 +1001,19 @@
 
   function hexOf(bytes) {
     return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+
+  /* The Lightning preimage in a mint's answer about a payment (NUT-05), or ''.
+   *
+   * It is the one receipt a payee cannot argue with: only somebody who was
+   * paid that invoice can know it. The mint gives it once the payment has
+   * settled, in the melt's own answer or when the quote is asked about
+   * later. It was never kept. Thirty-two bytes of hex and nothing else is
+   * taken for one; a mint that settles a payment between two of its own
+   * users has none to give and says null. */
+  function preimageOf(answer) {
+    var p = answer && (answer.payment_preimage || (answer.quote && answer.quote.payment_preimage));
+    return (typeof p === 'string' && /^[0-9a-f]{64}$/i.test(p)) ? p.toLowerCase() : '';
   }
 
   function quoteLock(w) {
@@ -3369,6 +3421,97 @@
     return onCircuit(wallet);
   }
 
+  /* One circuit kept ready for whatever the person does next.
+   *
+   * Every job leaves on a circuit of its own, and a circuit takes a second or
+   * three to build after Foxy comes to the front. Now and then one goes
+   * nowhere at all: the request sits on it until its clock runs out, while
+   * the mint is answering the phone beside it. A swap sat on such a circuit
+   * for 56 seconds in front of two people holding their phones together.
+   *
+   * So one circuit is opened ahead of time, by asking the mint something it
+   * tells anybody (its keysets), and kept only once the mint has answered on
+   * it. The next job a person is waiting for takes it: an invoice, a fee
+   * quote, a payment, a token. That job starts on a road that has just been
+   * shown to reach the mint, and another is opened behind it.
+   *
+   * It is still one circuit to a job. The spare is handed out once and is
+   * then that job's alone; what the mint sees on it is a question about its
+   * keysets followed by the job, which is what a job's first connect looks
+   * like anyway. Work nobody is waiting on (sweeps, checks, top-ups) does not
+   * take it. It is let go after five minutes, when Tor would be retiring the
+   * circuit, when the mint changes, and when Foxy has been away. */
+  var spare = /** @type {?{ label: string, mint: string, at: number }} */ (null);
+  var sparing = /** @type {?Promise<boolean>} */ (null);
+  var SPARE_FOR_MS = 5 * 60 * 1000;
+
+  function spareReady() {
+    return !!(spare && wallet && spare.mint === mintOf(wallet) && Date.now() - spare.at < SPARE_FOR_MS);
+  }
+
+  function dropSpare() { spare = null; }
+
+  /* Open one, unless one is ready or on its way. Two tries at most, each on a
+   * circuit of its own and given eight seconds: a road that will not carry
+   * this is not one to keep. Resolves whether a spare is ready. Silent when
+   * it fails; the job that would have used it asks on a fresh circuit, as it
+   * always did. */
+  function warmSpare() {
+    if (FoxyWallet._spareOff || !wallet || !routeOpen() || !bridged()) return Promise.resolve(false);
+    if (spareReady()) return Promise.resolve(true);
+    if (sparing) return sparing;
+    spare = null;
+    var at = mintOf(wallet);
+    var tryOne = function (left) {
+      var label = newCircuitLabel(), began = Date.now();
+      var asked = FoxyWallet.nativeRequest({ endpoint: at + '/v1/keysets', method: 'GET',
+                                              foxyFresh: true, foxyCircuit: label });
+      var clock = new Promise(function (_, no) {
+        setTimeout(function () { no(new Error('no answer')); }, FoxyWallet._spareWaitMs || 8000);
+      });
+      return Promise.race([asked, clock]).then(function () {
+        // the mint changed, or the route went, while it was being opened
+        if (!wallet || mintOf(wallet) !== at || !routeOpen()) return false;
+        spare = { label: label, mint: at, at: Date.now() };
+        console.log('[foxy] a circuit to ' + hostOf(at) + ' is ready for what comes next, in '
+          + (Date.now() - began) + ' ms');
+        return true;
+      }, function () {
+        if (left > 0 && wallet && mintOf(wallet) === at && routeOpen()) return tryOne(left - 1);
+        console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
+        return false;
+      });
+    };
+    var run = tryOne(1);
+    sparing = run;
+    var free = function () { if (sparing === run) sparing = null; };
+    run.then(free, free);
+    return run;
+  }
+
+  /* A moment later, so it does not ride on the heels of the job that has just
+   * taken the last one. */
+  function warmSpareSoon() {
+    if (FoxyWallet._spareOff) return;
+    setTimeout(function () { warmSpare(); }, FoxyWallet._spareAfterMs === undefined ? 1500 : FoxyWallet._spareAfterMs);
+  }
+
+  /* The connected wallet for a job somebody is waiting on: on the spare
+   * circuit when one is ready, and on a new one of its own when not. */
+  function viewNow(w) {
+    if (!spareReady()) { dropSpare(); warmSpareSoon(); return onCircuit(w); }
+    var label = /** @type {{ label: string }} */ (spare).label;
+    dropSpare();
+    warmSpareSoon();
+    return onLabel(w, label);
+  }
+
+  function needNow() {
+    assertRoute();
+    if (!wallet) throw new Error('No mint connected yet. Call FoxyWallet.connect() first.');
+    return viewNow(wallet);
+  }
+
   /* Each job at a mint leaves from its own Tor exit.
    *
    * A mint sees the exit every request comes from. All of a mint's requests
@@ -3586,15 +3729,75 @@
    * outputs are live change, and also already in the proof list — this is a
    * duplicate of money the wallet holds, not a new copy of a secret.
    *
-   * Capped at 30, and cleared whenever history is. */
+   * The last hundred in full, and four hundred more as receipts; cleared
+   * whenever history is.
+   *
+   * In full is every piece, for working out where money went: about seven
+   * kilobytes a payment and twenty for one that refills the small change, so
+   * five hundred of those would be most of the page's whole store, and a
+   * store that is full refuses the writes that money depends on. It is held
+   * to a megabyte as well as to a hundred.
+   *
+   * A receipt is what proves something and nothing that spends: when, where,
+   * how much, the payment's id, and the public value of each piece that left
+   * (`ys`). A mint knows a piece by that value and by nothing else, so with
+   * it anybody can ask whether the piece was spent, and nobody can spend it.
+   * Every send keeps them from the start, because the pieces of a sent token
+   * are dropped from here once it is claimed and these have to outlast them. */
+  var AUDIT_FULL = 100, AUDIT_ALL = 500, AUDIT_FULL_CHARS = 1000000;
+
+  /* The value a mint knows a piece by (NUT-00's Y), or ''. */
+  function lookupOf(p) {
+    try {
+      var CT = window.CashuTS;
+      if (!CT || !CT.hashToCurve || !p || typeof p.secret !== 'string') return '';
+      return String(CT.hashToCurve(new TextEncoder().encode(p.secret)).toHex(true));
+    } catch (e) { return ''; }
+  }
+
+  function slimAudit(a) {
+    if (!a || a.slim) return a;
+    var out = /** @type {any} */ ({ at: a.at, mint: a.mint, hash: a.hash, sats: a.sats, feeSats: a.feeSats,
+                                    kind: a.kind, slim: true,
+                                    ins: (a.inputs || []).length || (a.ys || []).length,
+                                    outs: (a.outputs || []).length });
+    if (a.ys && a.ys.length) out.ys = a.ys;
+    if (a.lockedTo) out.lockedTo = a.lockedTo;
+    return out;
+  }
+
+  /* Newest first: in full while there is room for it, receipts after that. */
+  function shapeAudit(list) {
+    var chars = 0, full = 0;
+    return (list || []).slice(0, AUDIT_ALL).map(function (a) {
+      if (!a || a.slim) return a;
+      var size = JSON.stringify(a).length;
+      if (full >= AUDIT_FULL || chars + size > AUDIT_FULL_CHARS) return slimAudit(a);
+      full += 1; chars += size;
+      return a;
+    });
+  }
+
   function logAudit(entry) {
     try {
       var list = load(K.audit, []);
-      list.unshift(Object.assign({
+      var rec = /** @type {any} */ (Object.assign({
         at: Math.floor(Date.now() / 1000),
         mint: String(mintUrl || '').replace(/\/+$/, ''),
       }, entry));
-      save(K.audit, list.slice(0, 30));
+      // what left this wallet, by the values the mint knows it by
+      if (!rec.ys) rec.ys = (rec.inputs || []).map(lookupOf).filter(Boolean);
+      /* A token whose every piece is locked to one key: said on the record,
+       * because those pieces are kept once it is claimed, where a plain
+       * token's are dropped. Nobody but that key's holder could ever spend
+       * them, and once the mint says they are spent, the signature they were
+       * spent with is the proof of who took the payment (`lockedReceipt`). */
+      if (rec.kind === 'token' && rec.inputs && rec.inputs.length) {
+        var keys = rec.inputs.map(lockedTo);
+        if (keys[0] && keys.every(function (k) { return k === keys[0]; })) rec.lockedTo = keys[0];
+      }
+      list.unshift(rec);
+      save(K.audit, shapeAudit(list));
     } catch (e) {
       // an audit record is never worth failing a payment over
       console.warn('[foxy] could not record the audit trail:', e && e.message);
@@ -5696,6 +5899,34 @@
       var x2 = x0 - q * x1; x0 = x1; x1 = x2;
     }
     return ((x0 % m) + m) % m;
+  }
+
+  /* A BOLT11 invoice's payment hash, as hex, or ''. Its `p` field: 52 words,
+   * 256 bits and four of padding. The payer's preimage hashes to this, so it
+   * is what ties a payment somebody says they made to an invoice this phone
+   * asked for. Tested against BOLT11's own example invoice. */
+  function invoicePaymentHash(bolt11) {
+    try {
+      var t = String(bolt11 || '').trim().toLowerCase().replace(/^lightning:/, '');
+      if (!/^ln(bc|tb|bcrt)/.test(t)) return '';
+      var sep = t.lastIndexOf('1');
+      if (sep < 1 || t.length - sep - 1 < 7 + 104 + 6) return '';
+      var words = [];
+      for (var i = sep + 1; i < t.length - 6; i++) {
+        var v = BECH32.indexOf(t.charAt(i));
+        if (v < 0) return '';
+        words.push(v);
+      }
+      var data = words.slice(0, words.length - 104);
+      var at = 7;
+      while (at + 3 <= data.length) {
+        var type = data[at], len = data[at + 1] * 32 + data[at + 2], start = at + 3;
+        if (start + len > data.length) return '';
+        if (type === 1 && len === 52) return hexOf(wordsToBytes(data.slice(start, start + len), false).slice(0, 32));
+        at = start + len;
+      }
+      return '';
+    } catch (e) { return ''; }
   }
 
   /* The node that signed a BOLT11 invoice, as compressed public key hex, or
@@ -8392,6 +8623,7 @@
     /* Every change, from the native side; and the answer to the calls below. */
     _privacy: function (p) {
       var next = (p && typeof p === 'object') ? p : {};
+      var wasUp = privacy.tor === 'up';
       privacy = {
         tor: String(next.tor || 'connecting'),
         progress: Number(next.progress) || 0,
@@ -8437,6 +8669,8 @@
         try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
+      // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
+      if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       return FoxyWallet.privacy();
     },
 
@@ -8637,6 +8871,9 @@
       return ready.then(function () {
         wallet = w;
         mintUrl = u;
+        // the circuit kept ready was for the mint before this one
+        dropSpare();
+        warmSpareSoon();
         // a locked payment a page that is gone never heard back about: out of the balance until the mint says
         try { holdUnanswered(u); } catch (eh) { console.warn('[foxy] could not hold an unanswered payment\u2019s pieces:', eh && eh.message); }
         /* What this mint is and what it will take, once, on connect.
@@ -10302,12 +10539,21 @@
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       var w;
-      try { w = need(); } catch (e) { return Promise.reject(e); }
+      // on the circuit kept ready, when there is one (`needNow`)
+      try { w = needNow(); } catch (e) { return Promise.reject(e); }
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
-      var lock = quoteLock(w);
-      if (lock) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
-      return createQuote(w, amount, memo || '', lock).then(function (q) {
+      /* Asked again on another circuit after five seconds of nothing
+       * (`askedTwice`), each asking with a one-time key of its own, so the two
+       * quotes share nothing the mint could join them by. The first to answer
+       * is the invoice, and it is its key that is kept. The other, if it
+       * comes, is a quote nobody was shown. */
+      return askedTwice(w, 'the mint\u2019s invoice', function (via) {
+        var key = quoteLock(via);
+        if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
+        return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });
+      }).then(function (won) {
+        var q = won.got.q, lock = won.got.lock;
         var pending = load(K.quotes, []);
         pending.unshift({
           quote: q.quote, amount: amount, memo: memo || '', at: Date.now(),
@@ -10318,6 +10564,11 @@
           // NUT-20: the key the mint will want a signature from, in this same write
           pubkey: lock ? lock.pubkey : undefined,
           privkey: lock ? lock.privkey : undefined,
+          /* The invoice's payment hash. A payer's proof that they paid is a
+           * preimage that hashes to this, and the invoice itself is not kept
+           * once it is paid, so without this there was nothing here to hold
+           * such a proof against. */
+          payHash: invoicePaymentHash(q.request) || undefined,
         });
         /* The cap stays — an unbounded list is worse — but it used to drop the
          * oldest invoice in silence. If that one is paid later the sweep never
@@ -10679,6 +10930,8 @@
           state: 'success',
           memo: entry.memo || '',
           hash: quoteId,
+          // the invoice's payment hash, kept from when it was made
+          payHash: entry.payHash || undefined,
         });
         return sumProofs(fresh);
       });
@@ -10877,6 +11130,7 @@
               memo: memo,
               hash: quoteId,
               mint: here,
+              payHash: entry.payHash || undefined,
             });
             console.log('[foxy] invoice', short, 'was issued but its answer was lost — restored', got, 'sats from its counters');
             return got;
@@ -11341,6 +11595,8 @@
                   memo: '',
                   hash: entry.quote,
                   bolt11: entry.bolt11 || '',
+                  // the proof that this invoice was paid, as the mint now gives it (`preimageOf`)
+                  preimage: preimageOf(q) || undefined,
                   // where it was made, which is not always where the phone is now
                   mint: here,
                 });
@@ -11428,7 +11684,8 @@
         return Promise.reject(new Error('That is not a Lightning invoice.'));
       }
       var w;
-      try { w = need(); } catch (e) { return Promise.reject(e); }
+      // on the circuit kept ready, when there is one (`needNow`)
+      try { w = needNow(); } catch (e) { return Promise.reject(e); }
 
       /* An invoice with no amount on it, and the amount the person typed.
        *
@@ -11456,26 +11713,33 @@
       if (!carries && typeof w.mintInfo !== 'object' && typeof w.getMintInfo !== 'function') {
         return Promise.reject(new Error('Foxy could not ask this mint whether it pays invoices with no amount.'));
       }
-      var quoteFor = function () {
-        if (carries) return w.createMeltQuoteBolt11(inv);
+      var quoteFor = function (via) {
+        if (carries) return via.createMeltQuoteBolt11(inv);
         var info = null;
-        try { info = w.getMintInfo ? w.getMintInfo() : null; } catch (e) { info = null; }
+        try { info = via.getMintInfo ? via.getMintInfo() : null; } catch (e) { info = null; }
         var can = false;
         try { can = !!(info && info.supportsAmountless && info.supportsAmountless('bolt11', 'sat')); }
         catch (e) { can = false; }
         if (!can) {
-          throw new Error(hostOf(mintOf(w)) + ' does not pay invoices that name no amount. '
+          throw new Error(hostOf(mintOf(via)) + ' does not pay invoices that name no amount. '
             + 'Ask for one with the amount on it, or move to a mint that does.');
         }
-        return w.createMeltQuoteBolt11(inv, asked * 1000);
+        return via.createMeltQuoteBolt11(inv, asked * 1000);
       };
 
       // Every other mint call is wrapped; this one was not, so a dead circuit
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      return withTimeout(Promise.resolve().then(quoteFor), 30000, 'the mint\u2019s fee quote')
-        .then(function (quote) {
+      /* And asked again on another circuit after five seconds of nothing
+       * (`askedTwice`): a quote commits to nothing, so two cost nothing. The
+       * payment then goes by the circuit that answered. The split and the
+       * melt are never asked twice, and a road that would not carry a quote
+       * is no road to send them down. */
+      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote')
+        .then(function (won) {
+        var quote = won.got;
+        w = won.w;
         stage('quote');
         var owed = satsOf(quote.amount) + satsOf(quote.fee_reserve);
         var at = mintOf(w);
@@ -11561,7 +11825,7 @@
            * failed — so the proofs are held and the sweep settles them
            * against the mint later. */
           /* The payment went: drop the hold, keep the change, log it. */
-          function landed(change, restored) {
+          function landed(change, restored, preimage) {
             /* The change before the hold goes: a pile that cannot be written
              * throws (W6) and leaves the hold, which sweepMelts settles as PAID
              * with the change restored from its recorded outputs. */
@@ -11587,6 +11851,8 @@
               memo: '',
               hash: quote.quote,
               bolt11: inv,
+              // the proof that this invoice was paid, when the mint gave one (`preimageOf`)
+              preimage: preimage || undefined,
             });
             logAudit({
               hash: quote.quote,
@@ -11667,7 +11933,7 @@
             if (state === 'UNPAID' || state === 'FAILED') throw notSent();
 
             // it landed: the hold is no longer needed
-            return landed(res.change || []);
+            return landed(res.change || [], false, preimageOf(res));
           }).catch(function (e) {
             // the payment may still have gone through; its change could not be verified
             if (badSignatures(e)) reportBadSignatures(hostOf(at), 'pay');
@@ -11700,17 +11966,19 @@
             var answered = mintRefused(e);
             return withTimeout(w.checkMeltQuoteBolt11(quote.quote), 20000, 'the payment\u2019s state')
               .then(function (q) {
-                return { state: String((q && q.state) || '').toUpperCase(), change: (q && q.change) || [] };
-              }, function () { return { state: 'UNKNOWN', change: [] }; })
+                return { state: String((q && q.state) || '').toUpperCase(), change: (q && q.change) || [],
+                         preimage: preimageOf(q) };
+              }, function () { return { state: 'UNKNOWN', change: [], preimage: '' }; })
               .then(function (r) {
                 // FAILED is the mint's verdict on a payment it tried; UNPAID only counts once it answered
                 if (r.state === 'FAILED' || (r.state === 'UNPAID' && answered)) throw notSent(msg);
                 if (r.state === 'PAID') {
                   // change as proofs if the answer carried them; otherwise from the reserved counters
                   var usable = (r.change || []).filter(function (p) { return p && p.secret; });
-                  if (usable.length) return landed(usable);
+                  if (usable.length) return landed(usable, false, r.preimage);
                   return recoverMeltChange(w, meltOutputs, at)
-                    .then(function (proofs) { return landed(proofs, true); }, function () { return landed([]); });
+                    .then(function (proofs) { return landed(proofs, true, r.preimage); },
+                          function () { return landed([], false, r.preimage); });
                 }
                 function stillHeld() {
                   console.warn('[foxy] melt outcome unknown (' + (r.state || 'no answer') + '), proofs stay held:', msg.slice(0, 80));
@@ -14177,8 +14445,9 @@
         /* The mint is about to be asked, so the route has to be there — and
          * this job needs its own circuit, which is the other half of what
          * `need()` does and the reason the swap re-acquires rather than using
-         * the local view from above. */
-        try { w = need(); } catch (e) { return Promise.reject(e); }
+         * the local view from above. The one kept ready, when there is one:
+         * this is a swap somebody is standing and waiting for (`needNow`). */
+        try { w = needNow(); } catch (e) { return Promise.reject(e); }
         /* The swap's output ranges are on disk until the answer is in, and
          * cleared before anything else once it is: the token's proofs must never
          * be restorable as balance after the token exists. A lost answer used to
@@ -14877,6 +15146,75 @@
 
     clearAudit: function () { save(K.audit, []); return true; },
 
+    /* The proof that a locked payment was taken by the key it was locked to.
+     *
+     * A piece locked to a key can be spent by that key's holder and by nobody
+     * else, and a mint that has taken one keeps the signature it was spent
+     * with and says it to anybody who asks about the piece (NUT-07). So for a
+     * payment that was locked to the phone that asked for it, "spent" is not
+     * only spent: it is spent by them, and the signature shows it to a third
+     * person. Kept beside the pieces on the payment's record, checked here
+     * against each piece before it is believed.
+     *
+     * Asks the mint, on the circuit that payment's own checks use. Resolves
+     * { at, witness } once every piece is spent and signed for, and null
+     * while any is not, or when this is not a locked payment still on record
+     * in full, or there is no route. Never rejects. */
+    lockedReceipt: function (hash) {
+      var rec = load(K.audit, []).filter(function (a) {
+        return a && a.hash === hash && a.kind === 'token' && a.lockedTo && !a.slim;
+      })[0];
+      if (!rec) return Promise.resolve(null);
+      if (rec.spent) return Promise.resolve(rec.spent);
+      var pieces = (rec.inputs || []).filter(function (p) { return p && p.secret; });
+      var CT = window.CashuTS;
+      if (!pieces.length || !wallet || !routeOpen() || !CT || !CT.isP2PKSpendAuthorised) return Promise.resolve(null);
+      if (canonicalMint(String(rec.mint || '')) !== mintOf(wallet)) return Promise.resolve(null);
+      var w = onCircuit(wallet, 'token:' + hash);
+      return withTimeout(Promise.resolve().then(function () { return w.checkProofsStates(pieces); }),
+                         20000, 'the mint\u2019s word on a locked payment').then(function (states) {
+        if (!Array.isArray(states) || states.length !== pieces.length) return null;
+        var signed = [];
+        for (var i = 0; i < pieces.length; i++) {
+          var st = states[i] || {};
+          if (String(st.state || st.State || '').toUpperCase() !== 'SPENT') return null;
+          var said = st.witness;
+          if (typeof said !== 'string' || !said) return null;
+          // a signature by the key the piece names, or it proves nothing about who took it
+          try { if (!CT.isP2PKSpendAuthorised(Object.assign({}, pieces[i], { witness: said }))) return null; }
+          catch (e) { return null; }
+          signed.push(said);
+        }
+        var spent = { at: Math.floor(Date.now() / 1000), witness: signed };
+        save(K.audit, load(K.audit, []).map(function (a) {
+          return (a && a.hash === hash && a.kind === 'token' && a.lockedTo && !a.slim)
+            ? Object.assign({}, a, { spent: spent }) : a;
+        }));
+        console.log('[foxy] a locked payment was spent by the key it was locked to; the signature is kept with it');
+        return spent;
+      }).catch(function () { return null; });
+    },
+
+    /* Let a locked payment's receipt go: its pieces, the signature, and the
+     * token's own text. What is left is what every send keeps, the public
+     * values and the figures. The person's choice, and not undone: the mint
+     * may or may not still say the signature if it is asked again. */
+    forgetReceipt: function (hash) {
+      var hit = false;
+      save(K.audit, load(K.audit, []).map(function (a) {
+        if (!a || a.hash !== hash || a.kind !== 'token' || !a.lockedTo || a.slim) return a;
+        hit = true;
+        var kept = Object.assign({}, a, { inputs: [] });
+        delete kept.spent;
+        return kept;
+      }));
+      if (hit) {
+        var meta = load('foxy.txmeta', {});
+        if (meta[hash] && meta[hash].kept) { delete meta[hash].kept; save('foxy.txmeta', meta); }
+      }
+      return hit;
+    },
+
     /* Clear the local history. The mint keeps none, so this only removes what
      * this phone recorded — it does not touch any money. */
     /* Clear the history, and everything that only existed to go with it.
@@ -14991,7 +15329,8 @@
           if (!a || a.kind !== 'token') return a;
           var mine = (a.inputs || []).some(function (p) { return p && secrets[p.secret]; });
           if (mine) found = true;
-          return mine ? Object.assign({}, a, { inputs: [] }) : a;
+          // a locked payment's pieces stay: nobody here can spend them, and they are half of its receipt
+          return (mine && !a.lockedTo) ? Object.assign({}, a, { inputs: [] }) : a;
         }));
       }
       var last = load(K.outtok, null);
@@ -15049,6 +15388,8 @@
 
     /* The node that signed an invoice (invoicePayee), for the tests. */
     invoiceSigner: function (bolt11) { return invoicePayee(bolt11); },
+    /* The invoice's payment hash, or ''. */
+    invoiceHash: function (bolt11) { return invoicePaymentHash(bolt11); },
 
     /* Was this invoice made by the mint this wallet pays from? True only when
      * its signing node is that mint's known node (05-paying-this-mint.js). */
@@ -16430,7 +16771,11 @@
           return FoxyWallet.takeBackToken(text).then(function (r) {
             back += (r && r.sats) || 0;
             FoxyWallet.tag(h, { refused: false, takenBack: true });
-            try { amendTx(h, { takenBack: true }); } catch (x) {}
+            /* And no longer at risk. The entry kept `highRisk`, which is all
+             * the history reads, so a payment whose pieces were safely back
+             * went on saying HIGH RISK, refused, not returned, with a button
+             * to make it safe. `settleAtRisk` clears it for the same event. */
+            try { amendTx(h, { highRisk: false, takenBack: true }); } catch (x) {}
             console.log('[foxy] a payment they did not take is back in the wallet:', (r && r.sats) || 0, 'sats');
             if (typeof FoxyWallet._onTakenBack === 'function') {
               try { FoxyWallet._onTakenBack({ sats: (r && r.sats) || 0, hash: h }); } catch (x) {}
@@ -17174,11 +17519,15 @@
      * change, so the real cost is usually lower and never higher. */
     quoteFee: function (bolt11) {
       assertRoute();
-      var w = wallet && onCircuit(wallet);
-      if (!w || !bolt11) return Promise.resolve(null);
-      return withTimeout(w.createMeltQuoteBolt11(String(bolt11)), 20000,
-        'the mint\u2019s fee quote')
-        .then(function (q) {
+      if (!wallet || !bolt11) return Promise.resolve(null);
+      // on the circuit kept ready, when there is one
+      var w = viewNow(wallet);
+      // asked again on another circuit after five seconds of nothing (`askedTwice`)
+      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', function (via) {
+        return via.createMeltQuoteBolt11(String(bolt11));
+      }), 20000, 'the mint\u2019s fee quote')
+        .then(function (won) {
+          var q = won.got;
           return {
             amount: satsOf(q.amount) || 0,
             feeReserve: satsOf(q.fee_reserve) || 0,
@@ -17444,28 +17793,18 @@
     /* Open the road to the mint before it is needed.
      *
      * An invoice is one request, and most of its two to three seconds is not
-     * the mint thinking: it is a Tor stream being opened and a TLS handshake
-     * on it, after the connection from the last request has gone idle or the
-     * app has been in the background. The amount is not known until NEXT, so
-     * the invoice itself cannot be asked for early — but the connection can
-     * be made while the amount is typed, on the same circuit the invoice will
-     * use, by asking the mint something it tells anybody.
-     * Never answered from the cache, or nothing would be opened. At most once
-     * in twenty seconds, and silent if it fails: the invoice asks properly. */
-    warmMint: function () {
-      var w = wallet;
-      if (!w || !routeOpen()) return Promise.resolve(false);
-      var now = Date.now();
-      if (now - (FoxyWallet._warmedAt || 0) < 20000) return Promise.resolve(false);
-      FoxyWallet._warmedAt = now;
-      var began = Date.now();
-      return FoxyWallet.nativeRequest({ endpoint: mintOf(w) + '/v1/keysets', method: 'GET', foxyFresh: true })
-        .then(function () {
-          console.log('[foxy] mint warmed for the invoice to come, in ' + (Date.now() - began) + ' ms');
-          return true;
-        }, function () { return false; });
-    },
-    _warmedAt: 0,
+     * the mint thinking: it is a circuit being built and a connection made on
+     * it. The amount is not known until NEXT, so the invoice itself cannot be
+     * asked for early, but the road can be opened while the amount is typed.
+     *
+     * This asked the mint for its keysets on no circuit in particular, from
+     * when every request to a mint shared one. Each job has had a circuit of
+     * its own since, so the invoice left on a new one and what had been
+     * warmed was a road it did not take. It is the circuit kept ready that is
+     * opened now, and the invoice takes that one (`warmSpare`, `needNow`). */
+    warmMint: function () { return warmSpare(); },
+    /* For the tests: whether a circuit is ready, and its label. */
+    _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 
     nativeRequest: function (opts) {
       var o = opts || {};
@@ -18003,6 +18342,12 @@
     _resumed: function (away) {
       // secrets from the phone that no operation used do not outlive a trip to the background
       clearNativeSecrets(false, false);
+      /* Nor does the circuit kept ready: iOS closes what a suspended app had
+       * open, so it is opened again now, as Foxy comes to the front, on the
+       * guess that the person is about to pay or be paid. With Tor still
+       * coming back this does nothing, and Tor coming up asks again. */
+      dropSpare();
+      warmSpareSoon();
       if (FoxyWallet._onResume) {
         FoxyWallet._onResume(Number(away) || 0);
         return;

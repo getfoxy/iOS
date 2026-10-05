@@ -344,6 +344,11 @@
            * until the mint has broadcast — it answers `outpoint: null` before
            * that — and empty for every other rail. */
           txid: meta.txid || '',
+          /* A Lightning payment's preimage, when the mint gave one: the proof
+           * that the invoice was paid, for the detail screen. */
+          preimage: t.preimage || '',
+          // and on a receive, the payment hash of the invoice this phone made
+          payHash: t.payHash || '',
         });
         // Anyone address-shaped is saved to the book on sight, once.
         //

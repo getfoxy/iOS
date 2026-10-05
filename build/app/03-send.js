@@ -16,6 +16,25 @@
   // a scanned invoice with no amount drops you into the same keypad as receive
   openTx(t) {
     this.setState(p => ({ screen: 'txDetail', stack: p.stack.concat([p.screen]), tx: t }));
+    this.receiptCheck(t);
+  }
+
+  /* A payment locked to the phone that asked for it, looked at: the mint is
+   * asked whether its pieces were spent, and by whose signature
+   * (`lockedReceipt`). Once, as the screen opens; the answer is kept on the
+   * payment's record, and the screen is drawn again when it changes anything.
+   * Only where there is something to ask about and a way to ask. */
+  receiptCheck(t) {
+    const W = window.FoxyWallet;
+    if (!t || t.dir !== 'out' || !t.hash || !W || !W.lockedReceipt || !W.auditTrail) return;
+    if (this.offlineNow && this.offlineNow()) return;
+    const rec = (W.auditTrail(t.hash) || [])[0];
+    if (!rec || !rec.lockedTo || rec.slim || rec.spent || !(rec.inputs || []).length) return;
+    W.lockedReceipt(t.hash).then((got) => {
+      if (got && this.state.screen === 'txDetail' && this.state.tx && this.state.tx.hash === t.hash) {
+        this.setState({ txReceiptAt: got.at });
+      }
+    }, () => {});
   }
 
   /* What `sats` of this entry were worth in cents when it settled, or null

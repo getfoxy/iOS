@@ -432,6 +432,29 @@ async function run() {
     ok(!t.rx.told.length, 'and it is not said again on every later pass', JSON.stringify(t.rx.told.map((x) => x.state)));
   }
 
+  /* every job is in somebody's hands: a pass that looks at none takes the phone nowhere */
+  {
+    const t = await carry();
+    const mh = t.rx.window.webkit.messageHandlers.foxy;
+    const post = mh.postMessage.bind(mh);
+    let held = null;
+    // the walk's first question to a mint is kept back, so the walk is under way and going nowhere
+    mh.postMessage = (m) => { if (m.action === 'mintRequest' && !held) { held = m; return null; } return post(m); };
+    const walking = t.rx.W.carryHome(t.id, t.terms.plan, () => {});
+    for (let i = 0; i < 400 && !held; i++) await new Promise((r) => setTimeout(r, 0));
+    const at = canon(t.rx.W.mintUrl), hits = t.rx.hits.length;
+    const passed = await t.rx.W.carryResume();
+    ok(!!held && at === THEIR && Array.isArray(passed) && !passed.length
+       && canon(t.rx.W.mintUrl) === THEIR && t.rx.hits.length === hits,
+       'a pass that finds its only job already being walked looks at nothing, and does not take the phone home from under the walk',
+       'at ' + at + ' before, ' + canon(t.rx.W.mintUrl) + ' after; ' + (t.rx.hits.length - hits) + ' question(s) asked of a mint');
+    mh.postMessage = post;
+    if (held) post(held);
+    await walking.then(null, () => null);
+    ok(canon(t.rx.W.mintUrl) === HOME && !jobs(t.rx).length && t.rx.W.balanceAt(HOME) >= t.sats,
+       'and the walk it left alone brings the payment home', canon(t.rx.W.mintUrl) + ', ' + t.rx.W.balanceAt(HOME) + ' at home');
+  }
+
   /* ---- 6: a refusal with nothing sent back leaves the ecash at risk ---------
    *
    * The receiver hears the payment and says no, and no refund locked to the
@@ -556,6 +579,19 @@ async function run() {
        made.err || ('asked ' + want + ', sent ' + total + ' in ' + out.length + ' pieces: ' + (total - fee(out.length)) + ' after a fee of ' + fee(out.length)));
     ok(!made.err && total - fee(out.length) - want === Number(made.over || 0), 'and what it says is over is what is over',
        made.err || ('over ' + made.over + ', really ' + (total - fee(out.length) - want)));
+    /* And the pile afterwards: the loose pieces that went are out of it, and
+     * the ones that did not go are still in it. Nothing above looks at what
+     * was left behind, so a pile that kept what it sent, or kept only what it
+     * sent, passed. */
+    const after = JSON.parse(p.storage.getItem(key) || '[]');
+    const went = {};
+    out.forEach((pr) => { went[pr.secret] = true; });
+    const looseOut = pile.filter((pr) => went[pr.secret]);
+    const sumOf = (l) => l.reduce((n, pr) => n + Number(String(pr.amount)), 0);
+    ok(!made.err && looseOut.length > 0 && !after.some((pr) => went[pr.secret])
+       && sumOf(after) === held - sumOf(looseOut) && after.length === pile.length - looseOut.length,
+       'and the pile holds the loose pieces that stayed, and none that went',
+       made.err || (sumOf(looseOut) + ' of ' + held + ' loose sats went; ' + sumOf(after) + ' are still in the pile'));
   }
 
   /* ---- 8: what waits at one mint is that mint's, and is asked about there ---

@@ -31,6 +31,21 @@ enum TapCrypto {
     static let nonceLength = 16
     static let keyLength = 32
 
+    /// The version of the wire. It goes first in M1 and M2, in the clear, and
+    /// into the transcript, so two phones that speak different versions learn
+    /// it at the first message and can say so. Without it a change to the
+    /// wire looks, to both people, like a tap that simply did not work.
+    ///
+    ///     2   the commitment handshake. No version was sent, and a sealed
+    ///         message was bound to its handshake but not to its own kind.
+    ///     3   the version byte, and every sealed message bound to its kind.
+    ///
+    /// The labels below still say "v2". They name the shape of the handshake,
+    /// which has not changed, and the doors' labels have to stay as they are:
+    /// they are how any two Foxys find each other, whatever they speak, and a
+    /// phone that cannot be found cannot be told to update.
+    static let version: UInt8 = 3
+
     // MARK: The service, and the two characteristics under it
 
     /// A fresh service UUID, new for every invoice. Nothing about it is Foxy's:
@@ -92,9 +107,12 @@ enum TapCrypto {
     /// Everything both sides have seen, in one hash. It is the salt for the
     /// keys and the associated data for every sealed message, so a message
     /// from one handshake cannot be replayed into another.
-    static func transcript(service: UUID, r: Data, p: Data, nr: Data, np: Data) -> Data {
+    static func transcript(version: UInt8 = TapCrypto.version,
+                           service: UUID, r: Data, p: Data, nr: Data, np: Data) -> Data {
         var h = SHA256()
         h.update(data: transcriptLabel)
+        // the version both sides said, so neither can be talked down to another
+        h.update(data: Data([version]))
         h.update(data: bytes(of: service))
         h.update(data: r)
         h.update(data: p)
@@ -149,9 +167,21 @@ enum TapCrypto {
         return (try? ChaChaPoly.Nonce(data: b)) ?? ChaChaPoly.Nonce()
     }
 
-    static func seal(_ message: Data, with key: SymmetricKey, counter: UInt64, transcript th: Data) -> Data? {
+    /// What a sealed message is bound to: the handshake it belongs to, and
+    /// the kind of message it is.
+    ///
+    /// The kind travels in the clear in front of the sealed bytes, because the
+    /// other side needs it to know which key to open with. It was left out of
+    /// this, so somebody able to change bytes on the air could relabel one
+    /// sealed message as another kind going the same way, and it still opened:
+    /// a payer's "say that again" read as "I kept the change", say. Bound
+    /// here, a relabelled message is one that will not open.
+    private static func bound(_ th: Data, _ kind: UInt8) -> Data { th + Data([kind]) }
+
+    static func seal(_ message: Data, with key: SymmetricKey, counter: UInt64, transcript th: Data,
+                     kind: UInt8) -> Data? {
         guard let box = try? ChaChaPoly.seal(message, using: key,
-                                             nonce: nonce(counter), authenticating: th) else { return nil }
+                                             nonce: nonce(counter), authenticating: bound(th, kind)) else { return nil }
         /* Copied, so what comes back starts at zero.
          *
          * A SealedBox's `ciphertext` is a slice of its combined buffer and
@@ -163,11 +193,13 @@ enum TapCrypto {
         return Data(box.ciphertext) + Data(box.tag)
     }
 
-    /// nil when it has been touched, when the counter is wrong, or when it
+    /// nil when it has been touched, when the counter is wrong, when it is
+    /// not the kind it says it is, or when it
     /// belongs to another handshake. The caller drops the link and says
     /// nothing about which: there is nothing useful to tell anybody, and an
     /// error that distinguishes them is an oracle.
-    static func open(_ sealed: Data, with key: SymmetricKey, counter: UInt64, transcript th: Data) -> Data? {
+    static func open(_ sealed: Data, with key: SymmetricKey, counter: UInt64, transcript th: Data,
+                     kind: UInt8) -> Data? {
         guard sealed.count > 16 else { return nil }
         /* Copies, not slices.
          *
@@ -179,7 +211,7 @@ enum TapCrypto {
         let body = Data(sealed[sealed.startIndex..<(sealed.endIndex - 16)])
         let tag = Data(sealed[(sealed.endIndex - 16)..<sealed.endIndex])
         guard let box = try? ChaChaPoly.SealedBox(nonce: nonce(counter), ciphertext: body, tag: tag) else { return nil }
-        return try? ChaChaPoly.open(box, using: key, authenticating: th)
+        return try? ChaChaPoly.open(box, using: key, authenticating: bound(th, kind))
     }
 
     // MARK: Padding

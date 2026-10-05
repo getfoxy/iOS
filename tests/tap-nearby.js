@@ -31,7 +31,7 @@ function method(sig) {
   if (at < 0) throw new Error('missing ' + sig);
   return block(at + 3);
 }
-const methods = new Function('return {' + ['tapHeard(ev) {', 'ctpParts(edge, withX) {', 'showTapNearby(edge) {', 'hideTapNearby() {', 'showConnectRecv(edge) {', 'hideConnectRecv() {', 'syncConnectRecv() {', 'tapDropPayer() {'].map(method).join(',\n') + '}')();
+const methods = new Function('return {' + ['tapHeard(ev) {', 'ctpParts(edge, withX) {', 'showTapNearby(edge) {', 'hideTapNearby() {', 'showConnectRecv(edge) {', 'hideConnectRecv() {', 'syncConnectRecv() {', 'tapDropPayer() {', 'tapVersionCard(side) {'].map(method).join(',\n') + '}')();
 
 /* A page with a body and, sometimes, the balance pill. */
 function dom(pillBottom) {
@@ -230,6 +230,30 @@ const near = { side: 'pay', stage: 'nearby' };
   d2.tapDropPayer();
   ok(stops === 1 && d2.state.tapCardOff === true, 'with no code up it is only the card going away');
   global.window = { FoxyWallet: {} };
+}
+
+// ---- a phone that speaks another version of the tap ------------------------
+{
+  dom(0);
+  const cards = [];
+  const rx = app({ screen: 'confirm' }, false);
+  rx.blockedCard = (kind, over) => cards.push(Object.assign({ kind }, over));
+  rx.tapHeard({ side: 'receive', stage: 'version', code: '2' });
+  const c = cards[0] || {};
+  ok(cards.length === 1 && c.kind === 'tapVersion' && c.title === 'UPDATE FOXY TO TAP'
+     && /different version of Foxy/.test(c.reason) && c.chip === 'For now, they can scan the code on this screen.',
+     'a payer that speaks another version: the receiver says so, and that its code can still be scanned', JSON.stringify(c));
+  rx.tapHeard({ side: 'receive', stage: 'version', code: '2' });
+  ok(cards.length === 1, 'and it is not said again while the phones are still held together');
+
+  const said = [];
+  const payer = app();
+  payer.blockedCard = (kind, over) => said.push(Object.assign({ kind }, over));
+  payer.tapHeard({ side: 'pay', stage: 'version' });
+  ok(said.length === 1 && said[0].kind === 'tapVersion' && said[0].chip === 'For now, scan the code on their screen.'
+     && payer.hidden === 1 && payer.state.tapStage === 'searching',
+     'a receiver that speaks another version: the payer says so, the connecting screen goes, and nothing else moves',
+     JSON.stringify({ card: said[0] && said[0].chip, hidden: payer.hidden, stage: payer.state.tapStage }));
 }
 
 console.log(failed ? failed + ' tap-nearby check(s) failed' : '\nall tap-nearby checks pass');

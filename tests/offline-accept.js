@@ -240,6 +240,48 @@ async function run() {
     online(W);
   }
 
+  /* ---- plain ecash with a signature that is wrong, scanned with no route ----
+   *
+   * Where a person can be asked to take plain ecash on trust, they are asked
+   * only about ecash that might be good. A piece from this mint whose DLEQ is
+   * there and does not verify was never made by it, so nobody is put the
+   * question: it is refused first, in words about the signatures. The same
+   * token with its own signatures is the control, so the refusal is shown to
+   * be about them. */
+  {
+    online(W);
+    const plain = await W.sendToken(9, { unit: 'sat' });
+    const real = W.tokenInfo(plain.token);
+    const wrongDleq = lockedBits.proofs[0].dleq;
+    const tokenOf = (proofs) => ctx.window.CashuTS.getEncodedToken({
+      mint: String(real.mint || '').replace(/\/+$/, ''), unit: 'sat', proofs: proofs });
+    const damaged = tokenOf(real.proofs.map((pr) => Object.assign({}, pr, { dleq: wrongDleq })));
+    ok(real.proofs.every((pr) => !!pr.dleq) && !!wrongDleq,
+      'the plain token carries the mint\u2019s signatures, and there is a wrong one to put in their place');
+
+    const asked = [];
+    W.onOfflineOffer((info) => { asked.push(info); return Promise.resolve(true); });
+    offline(W);
+    const had = await W.balanceSats();
+    const rowsBefore = Object.keys(JSON.parse(ctx.window.localStorage.getItem('foxy.req.unclaimed') || '{}')).length;
+    const bad = await W.receiveToken(damaged).then((r) => r, (e) => ({ why: e && e.message }));
+    ok(!!bad && !bad.kept && /signatures do not match/i.test(String(bad.why)),
+      'plain ecash whose signatures do not verify is refused, and says so', JSON.stringify(bad).slice(0, 160));
+    ok(asked.length === 0, 'and the person is not asked to take it on trust', JSON.stringify(asked));
+    ok((await W.balanceSats()) === had
+        && Object.keys(JSON.parse(ctx.window.localStorage.getItem('foxy.req.unclaimed') || '{}')).length === rowsBefore,
+      'and nothing is counted or written down', String(await W.balanceSats()) + ' vs ' + had);
+
+    W.onOfflineOffer((info) => { asked.push(info); return Promise.resolve(false); });
+    const good = await W.receiveToken(plain.token).then((r) => r, (e) => ({ why: e && e.message }));
+    ok(asked.length === 1 && asked[0].scanned === true && asked[0].sats === 9,
+      'the same token with its own signatures does put the question', JSON.stringify(asked));
+    ok(!!good && !good.kept && /not taken/i.test(String(good.why)), 'and a no takes nothing',
+      JSON.stringify(good).slice(0, 120));
+    W.onOfflineOffer(null);
+    online(W);
+  }
+
   /* ---- a payment already claimed, shown again with no route ----------------
    *
    * Offline, a lock this phone's words derive was the whole test, and that
