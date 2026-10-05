@@ -147,6 +147,21 @@ operation:
   proof rather than carrying it, and the amounts can still add up while that is
   true, so the ledger check cannot see it.
 
+**The books, in `harness.js`.** Every page `loadReal` makes is asked one more
+question as its suite ends, whatever the suite was about: do its history
+entries still account for the ecash it holds, one mint at a time, to the sat?
+It is the sum the history screen's card does (ADDS UP, DOES NOT ADD UP). A
+test asks whether the thing it is about happened; this asks whether anything
+else did, in every suite that drives the real wallet. What is compared is the
+change since the page was made, and a page with money on its way is not
+judged. A test that puts ecash in or takes it out behind the wallet's back
+says so (`rebook(ctx)` after the step, or `noBooks(ctx, why)`). Its first run
+found entries filed under whichever mint the phone was on at that moment
+instead of the mint the money moved at, change still called owed on a payment
+that had been taken whole, a refund written over change that had already come
+back, and a piece let go as too small to claim that left its payment written
+a sat short. `FOXY_BOOKS=0` turns it off.
+
 **`interleave.js`** runs the money operations against each other and against
 failures, in schedules nobody wrote by hand: a funded wallet on the page as it
 ships, then pairs of the operations the proof lock wraps, started together so

@@ -137,6 +137,11 @@ others.
 | 72 | The PIN pad takes a touch anywhere in a key's cell, the moment it lands, once, and shows it | `10-pin.js:pinOverlay` | `tests/pin-pad.js` |
 | 73 | Tor leaves the network only once every request is back, a payment waited for twenty seconds and anything else three; from then nothing new leaves, and the door opens again by itself | `Route.swift:leaving`/`shutDoor`, `FoxyWebView.swift:appEnteredBackground` | `FoxyTests/RouteTests.swift` (putting Foxy away); on a phone `DEVICE-TESTS.md` §22k |
 | 74 | An invoice nobody has paid does not stop a switch of mints: it is let go, stays on file and is claimed when it is paid; a swap or payment under way still does | `09-melt-paste-switch.js:refuseSwitchWhileBusy` | `tests/switch-guard.js` |
+| 75 | An entry for money that moved is filed at the mint it moved at, not the one the phone happens to be on: a payment landing while a transfer has the phone at another mint | `03-seed-counters-logs.js:logTx`, and the entries of `claim`, `pay`, `sendToken`, `receiveToken`, `reclaimToken`, `_requestPaid` | `tests/interleave.js` (80 schedules, by the books in `tests/harness.js`) |
+| 76 | Ecash taken after a refusal is a payment of all of it, and change it was owed is no longer called owed | `20-helpers.js:_settleAtRiskOnce` | `tests/crossings.js` 6 (by the books) |
+| 77 | A payment sent back on top of change that had already come back cost nothing, and its entry says so | `19-bill-split.js:changeSettled` (`refund`), `15-paid-wake-keyboard.js` | `tests/crossings.js` (refused twice, over the link; by the books) |
+| 78 | A waiting payment whose last piece is too small to claim is written as what was handed on of it | `20-helpers.js:claimUnclaimed` | `tests/spend-offline.js` (a sat too small to claim; a payment spent from, then claimed) |
+| 79 | In every suite that drives the real wallet, each page's entries account for what it holds when the suite ends, one mint at a time, to the sat | `tests/harness.js` (the books) | 27 suites; rows 75 to 78 were found by it |
 
 Rows 15 and 16 are the ones to spend time on: they are the weakest proofs of
 the strongest claims. Row 12 was one of them until §22b was run.
