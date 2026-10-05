@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  debug-url-scheme.plist — the foxy:// scheme, in Debug builds only.
+
+  project.yml points INFOPLIST_FILE at this file for the Debug configuration and
+  at nothing for Release, so a Release Foxy registers no URL scheme at all.
+  GENERATE_INFOPLIST_FILE stays on either way: Xcode merges the INFOPLIST_KEY_
+  settings in project.yml into whatever this file holds, so the camera and
+  Face ID strings, the launch screen and the scene manifest are unaffected — this
+  file adds one key and says nothing else.
+
+  What the scheme is for, and why it is not in a shipped build, is in
+  WebHostController.receiveDeepLink (Foxy/FoxyWebView.swift). It lives here rather
+  than under Foxy/ because everything under Foxy/ is a source of the app, and a
+  plist there would be copied into every build's bundle, Release included.
+
+  It is deliberately NOT a document type, a universal link or an
+  LSApplicationQueriesSchemes entry: it is one scheme, handled by one function
+  that exists in one configuration.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>io.getfoxi.foxy.debug</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>foxy</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Foxy's App Store privacy manifest. tools/smoke.py (check 21) keeps it honest.
+
+  It also covers the two linked libraries, which ship no manifest of their own
+  and are not on Apple's list of SDKs that must: Tor.framework (the Tor pod, a
+  dynamic framework built by CocoaPods, with Tor's C library inside) and
+  IPtProxy (obfs4 and Snowflake, Go, linked statically into the Foxy binary).
+  nm -u on both: stat, fstat, lstat (IPtProxy also fstatat) and
+  mach_absolute_time. No NSUserDefaults, no disk-space or keyboard APIs.
+-->
+<plist version="1.0">
+<dict>
+	<!-- no tracking, no tracking domains -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<!-- nothing collected: no accounts, no analytics, no crash reporting SDK -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1: the remembered Tor transport and when it last worked
+				     (TorTransport.swift), and the Debug launch arguments
+				     (-FoxyForceTransport, -FoxyKeychainTest, ...). Read and
+				     written by Foxy only. -->
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- C617.1: file metadata inside the app container only. Foxy:
+				     attributesOfItem for the sizes of the staged web files
+				     (FoxyWebView.swift). Tor: stat/fstat/lstat on its data
+				     directory and cached consensus in Application Support.
+				     IPtProxy: stat/fstat/fstatat/lstat on the transports' state
+				     directory (Go's os package). -->
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- 35F9.1: elapsed time between events in the app, never sent
+				     off the device. mach_absolute_time is Tor's monotonic clock
+				     (timeouts, circuit ages) and the Go runtime's clock in
+				     IPtProxy. Foxy's Swift does not call it. -->
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

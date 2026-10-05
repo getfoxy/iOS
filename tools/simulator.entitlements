@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Simulator builds only (tools/sim-build.sh). A device build signs with a
+     real team and gets its entitlements from Xcode; this file is never used
+     there. -->
+<dict>
+	<key>application-identifier</key>
+	<string>FOXYSIM.io.getfoxi.foxy</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>FOXYSIM.io.getfoxi.foxy</string>
+	</array>
+</dict>
+</plist>
