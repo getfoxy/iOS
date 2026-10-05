@@ -1,0 +1,13 @@
+{
+  "name": "foxy-vendor-cashu-ts",
+  "private": true,
+  "description": "Pinned inputs for rebuilding Web/cashu-ts.js",
+  "dependencies": {
+    "@cashu/cashu-ts": "4.11.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.4.0",
+    "@scure/bip32": "2.4.0",
+    "esbuild": "0.25.0"
+  }
+}

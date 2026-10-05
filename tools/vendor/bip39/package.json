@@ -1,0 +1,9 @@
+{
+  "name": "foxy-vendor-bip39",
+  "private": true,
+  "description": "Pinned inputs for rebuilding Web/bip39.js",
+  "dependencies": {
+    "@scure/bip39": "2.4.0",
+    "esbuild": "0.25.0"
+  }
+}

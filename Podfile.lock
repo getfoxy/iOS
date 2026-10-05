@@ -1,0 +1,20 @@
+PODS:
+  - Tor (409.11.2):
+    - Tor/CTor (= 409.11.2)
+  - Tor/Core (409.11.2)
+  - Tor/CTor (409.11.2):
+    - Tor/Core
+
+DEPENDENCIES:
+  - Tor (from `Vendor/TorPod`)
+
+EXTERNAL SOURCES:
+  Tor:
+    :path: Vendor/TorPod
+
+SPEC CHECKSUMS:
+  Tor: 347d797096f41189fa7b36c614ac8a52de9a6fd7
+
+PODFILE CHECKSUM: 5ce106182ef790b42ec001cd1d04d69cbfabcc71
+
+COCOAPODS: 1.16.2

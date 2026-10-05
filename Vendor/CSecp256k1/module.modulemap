@@ -1,0 +1,11 @@
+// libsecp256k1's public header, as a Swift module (import CSecp256k1).
+// Foxy's own file, not upstream's, so it sits outside Vendor/secp256k1, whose
+// files are exactly the tag's (Vendor/secp256k1.sha256). project.yml puts this
+// folder on SWIFT_INCLUDE_PATHS and compiles the C sources into Foxy.app.
+module CSecp256k1 [system] {
+    header "../secp256k1/include/secp256k1.h"
+    header "../secp256k1/include/secp256k1_ecdh.h"
+    header "../secp256k1/include/secp256k1_extrakeys.h"
+    header "../secp256k1/include/secp256k1_schnorrsig.h"
+    export *
+}

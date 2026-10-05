@@ -1,0 +1,9 @@
+{
+  "name": "foxy-checks",
+  "private": true,
+  "description": "Test-only dependencies for sh tools/check-all.sh. Nothing here ships in the app.",
+  "devDependencies": {
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3"
+  }
+}

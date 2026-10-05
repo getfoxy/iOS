@@ -1,0 +1,56 @@
+# Tor for Foxy, built by tools/build-tor.sh from signed sources. Not edited by hand:
+# rebuild, and this file is rewritten. Smoke check 18 compares Vendor/TorPod against it.
+#
+# Tor 0.4.9.12 with OpenSSL 3.6.4, libevent 2.1.13 and xz 5.8.4, for iOS arm64 and the arm64 simulator.
+# sources (name, tag, commit, primary key of the tag's signer):
+#   xz        v5.8.4                 d3e650e63c110e830fd5391e7f8b45df0b91d3da 3690C240CE51B4670D30AD1C38EE757D69184620
+#   openssl   openssl-3.6.4          d3c1b1169b3569ff3069e5b399f47b2b28e03d79 B146647E45A7B33947AB226B2A2C87D161692D40
+#   libevent  release-2.1.13-stable  79ddfb460847999b807cba76d04e73891f29c6ee 2133BC600AB133E1D826D173FE43009C4607B1FB
+#   tor       tor-0.4.9.12           78923280eed3eff6a77910bba59ecc1fa2244e02 B74417EDDF22AC9F9E90F49142E86A2A11F48D36
+# toolchain: Xcode 26.3 (Build version 17C529), Apple clang version 17.0.0 (clang-1700.6.4.2), iOS SDK 26.2
+#            autoconf (GNU Autoconf) 2.73; automake (GNU automake) 1.19; glibtool (GNU libtool) 2.6.2; /private/tmp/foxy-autotools/bin/autopoint (GNU gettext-tools) 1.0; perl 5.34.1
+# A rebuild with this toolchain makes these bytes: bash tools/build-tor.sh --verify
+#
+# tor.xcframework: the SHA-256 of its listing (every file's hash and every link, sorted)
+8cc5d7e99ef06ca507728df6c61b7732d33c0dd488f2597cf6449046a5567c1a  tor.xcframework
+ee2365e2270b61e831ceaf6d89db79263d914023960d6a55e2a56ad3186b6be4  tor.xcframework/ios-arm64-simulator/tor.framework/Versions/A/tor
+dbedbbfeed978d9b136135a99e4aef2be051cd8e7d154fe51d144e4e2fa5ac7c  tor.xcframework/ios-arm64/tor.framework/Versions/A/tor
+# the Objective-C wrapper, Tor.framework 727f628a (v409.11.2), compiled into Foxy by CocoaPods
+12ca2ee9832ba3a29d9f471c640b7d1766d434071757d562998dce5186ff75fa  Tor/Classes/CTor/TORLogging.h
+c718d2e091b6488ef619602ed1e683ee1f68b18348caf9fe58a05b4192bb95ca  Tor/Classes/CTor/TORLogging.m
+d633d4152d9c6c9310f60f5b6f48559d161a752f24d0b348488c62b554f30834  Tor/Classes/CTor/TORThread.h
+8daa6768a9318f7844660466272012476f2df0ebdce130cefdd2c6c61bcbd5e0  Tor/Classes/CTor/TORThread.m
+431804b657f97495fb9eec5629448b46ef9ec89c51e5ceccbb04521aac3cdc13  Tor/Classes/CTor/TORX25519KeyPair.h
+ac21eaec95e863d1371b05840c748280e192e25711c46bf60d2b4f0040c70c13  Tor/Classes/CTor/TORX25519KeyPair.m
+75c21f26c8eb0c97a74b3f7ff94d60a9ffe75f4b08f98cd85768a02c8bf9622f  Tor/Classes/Core/NSBundle+GeoIP.h
+2de80a67045d986c6521d55c0935d7b11636117622ac666a6b01b7604842a464  Tor/Classes/Core/NSBundle+GeoIP.m
+f6d595b5b290ecd4738ba5b444f9d28e111e63be0df0bb4e87d0c2509660aa45  Tor/Classes/Core/NSCharacterSet+PredefinedSets.h
+9b0b39f10f38c97ec2b0550f53f4ee8bb56d81534ec7ddac7999b0838ceb6c0c  Tor/Classes/Core/NSCharacterSet+PredefinedSets.m
+a5a8c8d33657b5c63c9812668deae94e99239d8978fcbdd113497032d6c49bd4  Tor/Classes/Core/TORAuthKey.h
+30d9cc0cbebdb93e66e4646e6c3ee6bc7f24b452540cdcd2ec9532117d416076  Tor/Classes/Core/TORAuthKey.m
+891d92c39d4e20597535b4733083ce2e64cad1ace440d53ae2fd1a07a1a0e000  Tor/Classes/Core/TORCircuit.h
+da32ad9e6114a0e237361a748fb7737c6d22c5d1843503b1f4e12c3c4002764e  Tor/Classes/Core/TORCircuit.m
+46854137c94d49fcb4ec00f2225825566b5bd9a4ca91a1ebe05608f8f907184d  Tor/Classes/Core/TORConfiguration.h
+51602265cc65e6d207ded41661f869b3f036585d08f246ae52a53f441320ed3d  Tor/Classes/Core/TORConfiguration.m
+b3506d24f1cf30ab5dba5545145c651fd4b794e6746d03cf03b265d324556a0e  Tor/Classes/Core/TORControlCommand.h
+4e1b0c99cbea325dc94a5e99877c975615e4f734062e93128d6229db00d80d5e  Tor/Classes/Core/TORControlReplyCode.h
+0524b978c1ebbc70a96eea3c0f0e750a6356ecc2b76ba82644901f08c9606a5c  Tor/Classes/Core/TORController.h
+c49aea0df45981b0b09f3bac7cc35a5b43d5b872daaa0581846d0693bfd2cbdc  Tor/Classes/Core/TORController.m
+9d7124c528587af1dc1e42b217fd6582fd404219f628d27471b1f3358858cf11  Tor/Classes/Core/TORNode.h
+106d3e628a74b98504fde580aba9840f1c2e6385f987612fa03e99d72cbba939  Tor/Classes/Core/TORNode.m
+d8fa009c729166a2e987e73bc69220cf8dc186e82076051c519c479d92eab8f6  Tor/Classes/Core/TOROnionAuth.h
+909c2ce1ac5c0d2310297c727290da9a430cd21296b9643c8dd8a78999eb6be3  Tor/Classes/Core/TOROnionAuth.m
+# the pod's other files: its podspec and licence, Tor.framework's patch and header fixer, and the signing keys
+d1f65715c637ab4040863a1b0e467d4165ef761b15b4cfd5b59c34abef5cc91d  LICENSE
+331fdf2dd64e04b1ef8568d784fe28b1c2216e6fe31df8d9c76229066a7e75ff  Tor.podspec
+78b92bc2736fe455e5e7fbe6d46370d6c9306c57a3296819fc8835ceb1e10a1a  fix_includes.pl
+02fd15a92653a94c8c67a486219fc320a19fa71b98495d643e5a71df16974a50  keys/gnu-autoconf-zack-weinberg.asc
+f4f631ea81855463f227b8d134b13c257dbd3f3c50d555e60829e23edd4005f8  keys/gnu-automake-kamila-szewczyk.asc
+f1708702af80b5b49d9d754e3612dbed68f9681ff135997f0762ec43197be4e8  keys/gnu-gettext-bruno-haible.asc
+34ad59863df0a60fc6918c356d271124edd14e8bdaf55efdab58b1ab7f24f5dc  keys/gnu-libtool-ileana-dumitrescu.asc
+7f5e252d7f5f06e1f6bb11dc4bc32fc819fd8437b65a8c457f1f1d3af4e5fefb  keys/gnu-m4-eric-blake.asc
+2b6512f0a734d252de59841a868d4d9a9fe22cca6824fae0f4c49fd5b8d66903  keys/libevent-nick-mathewson.asc
+56e106cd1c44bdb117aec24795f6dfbecaa9bfa0a2901b85331f0059aad16d53  keys/openssl.asc
+fb56865dc9df28f69d3780e9008a3ce02bc842ffd82d21a6c58b8477b6f08ae1  keys/tor-david-goulet.asc
+7b44485541eefe7cecb8bcf30682904bb6c3d70aae21bbfffc5fca742cb6f56f  keys/xz-lasse-collin.asc
+338f0b32031b0dd1c5c71454d2d5fe28e1f62584c257fd52f9ea4d8d81768c79  mmap-cache.patch
