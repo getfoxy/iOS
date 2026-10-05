@@ -629,6 +629,66 @@ async function run() {
     stop();
   }
 
+  /* ---- 9: ecash this phone took, offered to it again ----------------------
+   *
+   * A payment landed and its "paid" never reached the payer, who showed the
+   * same payment as a code. Scanned by the phone that had the money, the mint
+   * says spent. The refusal is marked as this phone's own doing, so the
+   * screen can say YOU ALREADY HAVE THIS PAYMENT; its wording is unchanged,
+   * because the claims that read "already spent" to drop a row still must. */
+  {
+    const seed = page();
+    await fund(seed, HOME, 2000);
+    const rx = page({ mints: seed.mints, words: OTHER_WORDS });
+    await rx.W.connect(HOME, null, null, { remember: true });
+    const made = await seed.W.sendToken(300, { unit: 'sat' });
+    const first = await rx.W.receiveToken(made.token).then((r) => r, (e) => ({ err: e.message }));
+    const again = await rx.W.receiveToken(made.token).then(() => null, (e) => e);
+    ok(!first.err && !!again && again.foxyMine === true && again.foxyTakenSats === first.sats && Date.now() - again.foxyTakenAt < 60000,
+       'a token this phone swapped in, offered again, is refused and marked as its own', first.err || (again ? JSON.stringify({ mine: again.foxyMine, sats: again.foxyTakenSats }) : 'it was taken twice'));
+    ok(!!again && /already spent|nothing to take/i.test(again.message), 'the refusal keeps its wording, which the late claims read', again ? again.message : '');
+    const kept = rx.storage.getItem('foxy.cashu.taken') || '';
+    const secrets = (seed.W.tokenInfo(made.token).proofs || []).map((pr) => String(pr.secret));
+    const rows = read(rx, 'foxy.cashu.taken', []);
+    ok(rows.length === 1 && Object.keys(rows[0]).sort().join() === 'at,f,sats' && secrets.length > 0 && !secrets.some((x) => kept.indexOf(x) >= 0),
+       'what is remembered is a fingerprint, an amount and a time, and no secret', kept.slice(0, 80));
+    // somebody else's doing is not this phone's
+    const other = page({ mints: seed.mints, words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' });
+    await other.W.connect(HOME, null, null, { remember: true });
+    const second = await seed.W.sendToken(200, { unit: 'sat' });
+    await other.W.receiveToken(second.token);
+    const theirs = await rx.W.receiveToken(second.token).then(() => null, (e) => e);
+    ok(!!theirs && !theirs.foxyMine && /already spent|nothing to take/i.test(theirs.message), 'a token somebody else took is refused without the mark', theirs ? String(theirs.message).slice(0, 60) : 'it was taken');
+    ok(rx.W.balanceAt(HOME) === first.sats, 'and the balance holds it once', rx.W.balanceAt(HOME) + ' of ' + first.sats);
+  }
+  {
+    // the tap's own road: paid over the link, taken, then the same payment scanned as a code
+    const seed = page();
+    await fund(seed, THEIR, 2000);
+    const rx = page({ mints: seed.mints, words: OTHER_WORDS });
+    await rx.W.connect(THEIR, null, null, { remember: true });
+    await rx.W.primeLocks();
+    const payer = page({ mints: seed.mints, storage: dump(seed) });
+    await payer.W.connect(THEIR, null, null, { remember: true });
+    await payer.W.primeLocks();
+    const L = { up: true, log: [], payer, receiver: rx };
+    payer.link = L; rx.link = L;
+    let body = '';
+    const heard = rx.W._requestPaid;
+    rx.W._requestPaid = function (b) { body = String(b); return heard.apply(this, arguments); };
+    const ask = rx.W.decodeRequest(rx.W.paymentRequest(300, { purpose: 'receive' })) || {};
+    const paid = await payer.W.payRequest(Object.assign({}, ask, { sats: 300, unit: 'sat', viaTap: true, theirRoute: true }), () => {}, { overpayOk: true })
+      .then((r) => ({ made: r }), (e) => ({ err: e.message }));
+    await settle(800);
+    let code = '';
+    try { const j = JSON.parse(body); code = rx.window.CashuTS.getEncodedToken({ mint: j.mint, proofs: j.proofs, unit: j.unit || 'sat' }); } catch (e) {}
+    const had = rx.W.balanceAt(THEIR);
+    const again = code ? await rx.W.receiveToken(code).then(() => null, (e) => e) : null;
+    ok(!!paid.made && had >= 300 && !!again && again.foxyMine === true && rx.W.balanceAt(THEIR) === had,
+       'a payment taken over the link, then scanned as a code by the same phone, is marked as already its own and adds nothing',
+       paid.err || (again ? 'mine ' + again.foxyMine + ', ' + rx.W.balanceAt(THEIR) + ' held' : 'no code, or it was taken twice'));
+  }
+
   console.log(failed ? '\n' + failed + ' crossing check(s) failed' : '\nall crossing checks pass');
   process.exit(failed ? 1 : 0);
 }

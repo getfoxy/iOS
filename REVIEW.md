@@ -127,6 +127,8 @@ others.
 | 62 | The balance on screen counts what is waiting at that mint and at no other | `07-request-delivery.js:unclaimedSats`, `12-reading-and-price.js:balanceSats` | `tests/crossings.js` 8 |
 | 63 | An invoice is asked about, and claimed, only at the mint that made it | `15-receiving.js:watch` (`madeAt`), `_claimOnce` | `tests/crossings.js` 8 |
 | 64 | A Lightning address or LNURL is paid only when the invoice it resolves to is for exactly the amount asked, to the millisat (`msatOf`), and for the description it sent (LUD-06). Compared in rounded sats, an address server could return up to half a sat more than asked and be paid | `16-sending.js:payLnurl`, `20-helpers.js:msatOf` | `tests/run.js` "a lightning address invoice must match the amount asked for to the millisat" |
+| 65 | A receiver put away with a tap payment in hand still answers it, and a payer back in front waits for that answer instead of reading a refused question as the payment failing | `TAP-TO-PAY.md`, `FoxyBridge+Delivery.swift:closeInboxForBackground`, `FoxyBridge+Tap.swift` (`tapAnswerKeys`), `TapLink.swift:askAgain` | `tools/smoke.py` check 44; not yet run on two phones |
+| 66 | Ecash this phone has already swapped in, offered to it again, is said to be already here, and is not taken twice; what is remembered of it holds no secret | `03-seed-counters-logs.js:noteTaken`/`mineIfTaken`, `11-cards.js:claimFailed` | `tests/crossings.js` 9, `tests/cards-logic.js` |
 
 Rows 15 and 16 are the ones to spend time on: they are the weakest proofs of
 the strongest claims. Row 12 was one of them until §22b was run.

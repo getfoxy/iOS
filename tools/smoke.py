@@ -2870,6 +2870,33 @@ if bad43:
 else:
     ok('tap to pay: the paying phone only listens, and the receiver is on the air only when TAP is pressed')
 
+# 44. A payment that came over the tap link is answered by the page, even when
+# the receiver was put away for a moment in between. The onion's answers and
+# the tap's wait in one table; leaving the foreground emptied all of it, the
+# page's "taken" then had nothing to travel on, and the payer was told the
+# receiver's wallet had not answered, for money the receiver held.
+bad44 = []
+deliv44 = open(os.path.join('Foxy', 'Bridge', 'FoxyBridge+Delivery.swift'), encoding='utf8').read()
+m44 = re.search(r'func closeInboxForBackground\(\) \{(.*?)\n    \}\n', deliv44, re.S)
+if not m44:
+    bad44.append('closeInboxForBackground was not found, so what it clears could not be read')
+else:
+    if 'inboxAnswers.removeAll()' in m44.group(1):
+        bad44.append('leaving the foreground throws away the answer to a tap payment that is still being taken')
+    if 'tapAnswerKeys.contains' not in m44.group(1):
+        bad44.append('leaving the foreground no longer keeps the answers that belong to the tap link')
+if 'self.tapAnswerKeys.insert(key)' not in tap43bridge:
+    bad44.append('a tap payment\'s answer is not marked as the tap link\'s, so the background would clear it')
+link44 = open(os.path.join('Foxy', 'Bluetooth', 'TapLink.swift'), encoding='utf8').read()
+# and the payer does not take a refused "say it again" for the payment failing, nor ask twice
+if 'if againOut {' not in link44 or link44.count('made.sealAgain()') != 1:
+    bad44.append('the payer gives up, or asks under a second counter, when its question after a return is refused')
+if bad44:
+    for m in bad44:
+        fail(m)
+else:
+    ok('tap to pay: a receiver put away mid-payment still answers, and a payer back in front waits for it')
+
 print()
 if skipped:
     # said on its own line, just above the verdict, so check-all's last three lines show it

@@ -299,6 +299,24 @@
      * as different answers. It also means the diary line names what happened
      * rather than saying netLost for a lock that has nothing to do with the
      * network. */
+    /* Already here. The mint says spent and this phone is who spent it: a
+     * payment that landed while its "paid" did not reach the payer, shown to
+     * this phone again as a code. Not a warning, and nothing to do. The two
+     * offline refusals of the same thing say it in the same card. */
+    if ((e && e.foxyMine) || /already took that ecash|already has that ecash|already been paid this ecash/.test(low)) {
+      const at = Number(e && e.foxyTakenAt) || 0;
+      const sats = Math.round(Number(e && e.foxyTakenSats) || 0);
+      const when = (at > 0 && this.tapAgoWords) ? ' ' + this.tapAgoWords(at) : '';
+      this.blockedCard('tokenMine', {
+        title: 'YOU ALREADY HAVE THIS PAYMENT',
+        reason: 'This phone took this ecash' + when + '.'
+          + (sats > 0 ? ' ' + this.group(sats) + ' sats, in your balance.' : ' It is in your balance.'),
+        chip: 'Nothing more to do. It was not taken twice.',
+        retry: '', back: '', tone: 'ask',
+      });
+      return;
+    }
+
     if (/already spent|token already|already claimed|somebody took/.test(low)) {
       this.blockedCard('tokenSpent', {
         title: 'TOKEN ALREADY REDEEMED',

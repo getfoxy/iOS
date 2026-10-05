@@ -168,7 +168,17 @@ extension FoxyBridge {
         guard inbox != nil else { return }
         inbox?.close()
         inbox = nil
-        inboxAnswers.removeAll()
+        /* The onion's answers go with its address. A tap's does not.
+         *
+         * Both wait in the one table, and emptying it here threw away the
+         * answer to a payment that had just arrived over the tap link: the
+         * page took the money a few seconds later, said so, and was told no
+         * payment was waiting on that answer. The link was still up, and
+         * twenty-five seconds on it carried this phone's own give-up to the
+         * payer, "their wallet did not answer in time", for money this phone
+         * had in its balance. The payer deletes its only copy of a payment on
+         * this answer, so it has to be the page's. */
+        inboxAnswers = inboxAnswers.filter { tapAnswerKeys.contains($0.key) }
         print("[foxy] onion inbox closing: Foxy is leaving the foreground")
     }
 

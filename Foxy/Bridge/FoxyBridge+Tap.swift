@@ -101,7 +101,9 @@ extension FoxyBridge {
                      * read back out here. */
                     guard let self else { return }
                     let key = MintCircuit.label(nil)
-                    self.inboxAnswers[key] = { status, said in
+                    self.tapAnswerKeys.insert(key)
+                    self.inboxAnswers[key] = { [weak self] status, said in
+                        self?.tapAnswerKeys.remove(key)
                         var why = ""
                         if let d = said.data(using: .utf8),
                            let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
@@ -112,7 +114,9 @@ extension FoxyBridge {
                      * a page that answers very late finds nothing rather than
                      * writing a second M6. */
                     DispatchQueue.main.asyncAfter(deadline: .now() + TapRx.resultWait + 5) {
-                        [weak self] in self?.inboxAnswers[key] = nil
+                        [weak self] in
+                        self?.inboxAnswers[key] = nil
+                        self?.tapAnswerKeys.remove(key)
                     }
                     self.evaluate("window.FoxyWallet && window.FoxyWallet._requestPaid"
                                   + " && window.FoxyWallet._requestPaid("

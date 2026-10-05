@@ -43,6 +43,10 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// a payment may be crossing to one of them. See handleInboxClose(hold:).
     var retiringInboxes: [OnionInbox] = []
     var inboxAnswers: [String: OnionInbox.Answer] = [:]
+    /// Which of those answers are for a payment that came over the tap link
+    /// and not to an onion address. They outlive a trip to the background
+    /// (`closeInboxForBackground`).
+    var tapAnswerKeys: Set<String> = []
     /// The Nostr key the same request is also paid to, for the wallets that
     /// cannot reach an onion (NostrInbox). Made and thrown away with it.
     var nostrInbox: NostrInbox?

@@ -1670,6 +1670,26 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             print("[tap] pay: a piece would not go —", error.localizedDescription)
             outgoing.removeAll()
             if ackOut { ackOut = false; print("[tap] pay: the word that the change was kept did not get through") }
+            /* The payment is with them already, and this was only the
+             * question "what became of it" (`askAgain`). A phone that has
+             * itself just been put away cannot take a write for a moment, and
+             * can still send its answer unasked a moment later: treating the
+             * refusal as "gone" showed the payer a code to scan for a payment
+             * the receiver went on to take. So nothing is given up here. The
+             * wait `askAgain` set is still running, their answer ends it if
+             * it comes, and that clock is the one that gives up.
+             *
+             * Not asked a second time: every sealed message takes the next
+             * counter, this one took one and may not have arrived, and a
+             * question sealed under the one after would not open at their
+             * end and would stop a link that can still carry the answer
+             * (TapSession, `again`). */
+            if againOut {
+                againOut = false
+                if sendDone != nil { print("[tap] pay: they could not take the question; still waiting for their answer") }
+                if closingAfterWrites { closingAfterWrites = false; stop() }
+                return
+            }
             if sendDone != nil { finishSend(.lost("That phone stopped taking the payment.")) }
             if closingAfterWrites { closingAfterWrites = false; stop() }
             return
@@ -1678,6 +1698,7 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             ackOut = false
             print("[tap] pay: the receiver was told the change was kept")
         }
+        if againOut, outgoing.isEmpty { againOut = false }
         if closingAfterWrites, outgoing.isEmpty {
             closingAfterWrites = false
             stop()
@@ -1763,6 +1784,9 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var paymentSent = false
     private var askedAgainAt: TimeInterval = 0
     private var againTimer: Timer?
+    /// The question is on its way and nothing else is: a write that fails now
+    /// is the question failing, not the payment (`didWriteValueFor`).
+    private var againOut = false
     func askAgain() {
         dispatchPrecondition(condition: .onQueue(.main))
         let now = ProcessInfo.processInfo.systemUptime
@@ -1770,8 +1794,11 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
               let made = session, let p = target, p.state == .connected else { return }
         askedAgainAt = now
         incoming = TapProtocol.Bytes()
+        // only when nothing else is waiting to be written: then a refusal is this question's
+        let alone = outgoing.isEmpty && !writing
         guard let sealed = made.sealAgain() else { return }
         print("[tap] pay: back in front with a payment handed over; asking the receiver to say it again")
+        againOut = alone
         write(sealed, to: p)
         guard sendDone != nil else { return }
         againTimer?.invalidate()

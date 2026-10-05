@@ -1569,6 +1569,53 @@
     return ('0000000' + h1.toString(36)).slice(-7) + ('0000000' + h2.toString(36)).slice(-7);
   }
 
+  /* Ecash this phone has swapped in, by fingerprint, for a while.
+   *
+   * A payment can land here while its "paid" never reaches the payer: both
+   * phones put away for a moment, the answer sent to an app that iOS had
+   * suspended. The payer then shows the same payment as a code, and scanned
+   * here the mint says spent, which is true and says nothing of by whom. The
+   * card read "claimed already, by someone else or by this wallet", to a
+   * person holding the phone that had the money. This is how the phone knows
+   * it was itself: the fingerprint of what it took, the amount and when.
+   * No secret is kept (`piecesFingerprint`). Two hundred, thirty days. */
+  var TAKEN_KEEP_MS = 30 * 24 * 3600 * 1000;
+  function takenList() {
+    var l = load(K.taken, []);
+    var now = Date.now();
+    return (Array.isArray(l) ? l : []).filter(function (r) {
+      return r && typeof r.f === 'string' && now - (Number(r.at) || 0) < TAKEN_KEEP_MS;
+    });
+  }
+  function noteTaken(list, sats) {
+    var f = piecesFingerprint(list);
+    if (!f || !(Array.isArray(list) && list.length)) return;
+    var l = takenList().filter(function (r) { return r.f !== f; });
+    l.push({ f: f, at: Date.now(), sats: Math.max(0, Math.round(Number(sats) || 0)) });
+    // `save`, and a refusal ignored: the money is in the pile either way, and this is only for the wording of a card
+    save(K.taken, l.slice(-200));
+  }
+  function takenBefore(list) {
+    if (!(Array.isArray(list) && list.length)) return null;
+    var f = piecesFingerprint(list);
+    return takenList().filter(function (r) { return r.f === f; })[0] || null;
+  }
+  /* The same refusal, marked as this phone's own doing when it is.
+   *
+   * Marked, not reworded: the claim on a reconnect and the request's own
+   * claim both read "already spent" in the message to learn that a token is
+   * gone and its row can go (`claimUnclaimed`, `_requestPaid`). The screen
+   * reads the mark (`claimFailed`). */
+  function mineIfTaken(e, list) {
+    if (!e || typeof e !== 'object') return e;
+    var text = String(e.message || e.detail || '');
+    if (!/already spent|token already|already claimed/i.test(text) && Number(e.code) !== 11001) return e;
+    var rec = takenBefore(list);
+    if (!rec) return e;
+    try { e.foxyMine = true; e.foxyTakenAt = rec.at; e.foxyTakenSats = rec.sats; } catch (x) {}
+    return e;
+  }
+
   /* Change an entry already written, by hash. A payment that is logged before
    * it is sent — because the window where nothing is known is exactly the one
    * history must not be silent for — is finished here rather than logged twice

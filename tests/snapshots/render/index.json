@@ -924,6 +924,11 @@
   "markup": "d77f2485a4b6136ee7fb350c65dc6a6eafb872b91bd0157be0dbe8a5f3a56c87",
   "vals": "fb1266994fd2126707d23da979513185890b738405e677bd2107b950d954aee6"
  },
+ "card: claim failed, ecash this phone already took": {
+  "file": "244-card-claim-failed-ecash-this-phone-already-took.html",
+  "markup": "9a4ecb66b4d9c746027f8f0f2b921886f5e6951690c739927f7bdd73e4f967cc",
+  "vals": "fb1266994fd2126707d23da979513185890b738405e677bd2107b950d954aee6"
+ },
  "card: claim failed, locked": {
   "file": "174-card-claim-failed-locked.html",
   "markup": "b4537b41ded09e430c53c211b1dc253fb2e4321427689189641e619a9ae0f16c",

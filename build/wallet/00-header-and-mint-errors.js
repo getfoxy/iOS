@@ -109,6 +109,7 @@
     move: 'foxy.cashu.move',         // transfers between mints, mid-flight: a list
     carry: 'foxy.cashu.carry',       // payments taken at a payer's mint, to be brought home
     atRisk: 'foxy.cashu.atrisk',     // ecash another phone has seen and refused: in the pile, flagged, until swapped
+    taken: 'foxy.cashu.taken',       // fingerprints of ecash this phone has swapped in, to say so when it is offered again
     mints: 'foxy.cashu.mints',       // every mint this device has connected to
     mintsUsed: 'foxy.cashu.mints.used', // the same, never pruned: a switch back to one is not scanned
     mintNodes: 'foxy.cashu.mint.nodes', // each mint's Lightning node, from invoices it made

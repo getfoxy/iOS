@@ -394,7 +394,7 @@ like the others. Nothing secret crosses them and no handshake is needed.
 ## A payer or receiver that goes away mid-payment
 
 iOS delivers nothing to a suspended app and keeps nothing for it, while the
-Bluetooth link itself stays up. Three things follow from that.
+Bluetooth link itself stays up. Six things follow from that.
 
 - **M12, "say that again".** A payer that returns to the foreground with a
   payment handed over asks the receiver to repeat whatever it sealed from a
@@ -412,6 +412,31 @@ Bluetooth link itself stays up. Three things follow from that.
   offer STOP WAITING after thirteen seconds (it was eight: a tap answered in
   nine showed the button for a second and then the confirmation, which
   confused more than it helped).
+
+- **A receiver put away with a payment in hand still answers it.** The page's
+  answer to a tap payment waits in the same table as the answers for an onion
+  address, and leaving the foreground emptied that table with the address. The
+  page then took the money and had nothing to say so on; the link, still up,
+  carried the receiver's own give-up instead, "their wallet did not answer in
+  time", for money the receiver held. The tap's answers are kept across the
+  background now (`tapAnswerKeys`, `closeInboxForBackground`).
+- **A refused "say that again" is not the payment failing.** A receiver that
+  has itself just been put away cannot take a write for a moment. The payer
+  used to read that refusal as "gone" and show a code to scan; it now goes on
+  waiting out the six seconds, and the receiver's answer ends the wait if it
+  comes. It does not ask twice: a second question would be sealed under the
+  next counter, would not open at the other end, and would stop a link that
+  can still carry the answer.
+
+- **The receiver knows its own.** The answer can still be lost: a payer that
+  stays suspended for more than the two seconds the receiver keeps the link
+  after answering never hears it, and shows the payment as a code. Scanned by
+  the phone that already took it, the mint says spent, which says nothing of
+  by whom. The wallet remembers a fingerprint of what it has swapped in
+  (`noteTaken`; no secret is kept) and marks that refusal as its own, and the
+  card reads YOU ALREADY HAVE THIS PAYMENT, with the amount and when, in
+  place of "claimed already, by someone else or by this wallet". An online
+  payer needs none of this: its code screen asks the mint and turns to paid.
 
 The history audit names change that has not been collected (payer: SCAN
 CHANGE) or handed over (receiver: SHOW QR CODE), marks those payments in red,

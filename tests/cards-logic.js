@@ -204,6 +204,45 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     delete window.FoxyWallet;
   }
 
+  /* Ecash this phone already took, offered to it again.
+   *
+   * A payment landed and its "paid" did not reach the payer, who showed the
+   * same payment as a code. Scanned on the phone that had the money, the card
+   * said the token was claimed "by someone else, or by this wallet". The
+   * wallet marks the refusal when the ecash is its own (`mineIfTaken`), and
+   * the card says so. */
+  {
+    document.body.innerHTML = '';
+    app._blockedEl = null; app._blockedKind = null; app._cardQueue = [];
+    const seen = [];
+    const spy = Object.assign({}, app, {
+      isBadSignatures: () => false,
+      group: n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','),
+      tapAgoWords: () => '20 seconds ago',
+      blockedCard(kind, over) { seen.push(Object.assign({ kind: kind }, over)); },
+    });
+    window.FoxyWallet = { reason: e => String((e && e.message) || e) };
+    const mine = Object.assign(new Error('That token is already spent, so there was nothing to take. Nothing was taken from you.'),
+      { foxyMine: true, foxyTakenAt: Date.now() - 20000, foxyTakenSats: 1156 });
+    spy.claimFailed(mine);
+    const c = seen[0] || {};
+    check('ecash this phone took, scanned again: YOU ALREADY HAVE THIS PAYMENT',
+      c.kind === 'tokenMine' && c.title === 'YOU ALREADY HAVE THIS PAYMENT', JSON.stringify([c.kind, c.title]));
+    check('it says when, how much, and that it is in the balance',
+      c.reason === 'This phone took this ecash 20 seconds ago. 1,156 sats, in your balance.', String(c.reason));
+    check('and that nothing was taken twice, as a calm card with nothing to retry',
+      /not taken twice/.test(c.chip || '') && c.tone === 'ask' && !c.retry, JSON.stringify([c.chip, c.tone, c.retry]));
+    spy.claimFailed(new Error('That token is already spent, so there was nothing to take. Nothing was taken from you.'));
+    check('a token somebody else took is still TOKEN ALREADY REDEEMED',
+      (seen[1] || {}).kind === 'tokenSpent' && (seen[1] || {}).title === 'TOKEN ALREADY REDEEMED', JSON.stringify(seen[1] || {}));
+    spy.claimFailed(new Error('This phone already has that ecash.'));
+    spy.claimFailed(new Error('You have already been paid this ecash.'));
+    check('the two offline refusals of ecash already here say the same thing',
+      (seen[2] || {}).kind === 'tokenMine' && (seen[3] || {}).kind === 'tokenMine'
+        && (seen[2] || {}).reason === 'This phone took this ecash. It is in your balance.', JSON.stringify([seen[2], seen[3]].map(x => x && x.reason)));
+    delete window.FoxyWallet;
+  }
+
   results.forEach(r => console.log(r));
   const failed = results.filter(r => r.startsWith('FAIL')).length;
   console.log(failed ? failed + ' card check(s) failed' : 'all card checks pass');

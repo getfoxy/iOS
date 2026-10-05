@@ -831,6 +831,8 @@
         var got = sumProofs(fresh);
         addProofs(fresh, intoMint, intoWallet, unit);
         guard.done();
+        // remembered, so the same ecash offered again is said to be this phone's (`mineIfTaken`)
+        try { noteTaken(tok.proofs, got); } catch (eT) {}
         if (unit !== 'sat') {
           /* History in the token's unit. sats and feeSats are 0 because no
            * sats moved; amount and feeAmount carry the figures in `unit`. */
@@ -913,6 +915,9 @@
                     tok.amount !== got ? '(' + (tok.amount - got) + ' to the mint fee)' : '');
         return { sats: got, unit: 'sat', amount: got, mint: tok.mint, host: hostOf(tok.mint), switched: switched,
                  hash: entry.hash, changeDue: noteOwed };
+      }).then(null, function (e) {
+        // spent, and by this phone: marked so the screen can say that, whether the check found it or the swap was refused
+        throw mineIfTaken(e, tok.proofs);
       });
     },
 

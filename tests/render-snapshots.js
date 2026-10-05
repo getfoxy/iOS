@@ -467,6 +467,8 @@ function cards() {
     chip: 'Your 32 sats are still yours.',
     retry: 'SHOW THEM A TOKEN', go() {}, shut: { label: 'CLOSE', tap() {} } }));
   add('card: claim failed, already spent', (a) => a.claimFailed(new Error('Token already spent')));
+  add('card: claim failed, ecash this phone already took', (a) => a.claimFailed(Object.assign(new Error('Token already spent'),
+    { foxyMine: true, foxyTakenAt: 0, foxyTakenSats: 1156 })));
   add('card: claim failed, locked', (a) => a.claimFailed(new Error('P2PK: locked to another key')));
   add('card: claim failed, the network, again', (a) => a.claimFailed(new Error('timed out'), () => {}));
   add('card: claim failed, invalid signatures', (a) => a.claimFailed(new Error('DLEQ verification failed')));
