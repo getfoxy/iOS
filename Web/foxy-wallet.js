@@ -13198,6 +13198,20 @@
       return s;
     },
 
+    /* The bill's record, finished or not.
+     *
+     * `splitPending` answers "is anything still owed", so it hides a bill the
+     * moment its last share lands. The collecting screen has to see that
+     * share land: it read `splitPending`, got nothing, and left the last
+     * payer unticked with the money already in history (a share paid by its
+     * invoice while Foxy was away, collected by the sweep on return). The
+     * record stays on file until the all-paid screen is dismissed
+     * (`splitClear`), and this is how that screen reads it. */
+    splitRecord: function () {
+      var s = load(K.split, null);
+      return (s && s.rows && s.rows.length) ? s : null;
+    },
+
     /* Settle every row the split's own watcher missed.
      *
      * Each share is watched with a poll, and a poll can die — backgrounded,

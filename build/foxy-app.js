@@ -9044,7 +9044,7 @@ class Component extends DCLogic {
       this._spWatching = list.map(inv => inv.hash).join(',');
       this._spWatchedAt = Date.now();
       this._spStops = list.map((inv, i) => paidBy[i] ? (() => {})
-        : W.watch(inv.hash, () => this.spMarkPaid(i, inv.hash), { timeoutMs: 3600000 }));
+        : W.watch(inv.hash, () => { this.spMarkPaid(i, inv.hash); this.spPaidOnScreen(i); }, { timeoutMs: 3600000 }));
       // and watched again before that hour is up: a bill on a table outlasts it
       this.splitWatchLater();
     }).catch(e => {
@@ -9091,7 +9091,7 @@ class Component extends DCLogic {
    * by hand. Only from the payer screen showing that very
    * share; a share opened from the waiting list goes back there instead
    * (requestPaidHere). With every share paid it is EVERYONE HAS PAID. */
-  spAdvanceAfterPaid(idx) {
+  spAdvanceAfterPaid(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
     const n = this.spOthers();
@@ -9100,7 +9100,7 @@ class Component extends DCLogic {
     for (let i = 0; i < n; i++) if (!paid[i]) { next = i; break; }
     // a fresh screen arms afresh
     this._tapPaidHere = false;
-    console.log('[foxy] split: share ' + (idx + 1) + ' paid by tap; '
+    console.log('[foxy] split: share ' + (idx + 1) + ' paid ' + (how || 'by tap') + '; '
       + (next < 0 ? 'everyone has paid' : 'on to payer ' + (next + 1)));
     this.setState(next < 0
       ? { screen: 'spAllPaid', spFromWaiting: false, spCopied: -1, spShared: -1, tapShownCode: '', tapRecvStage: '' }
@@ -9125,13 +9125,22 @@ class Component extends DCLogic {
    * history load. */
   spSyncPaid() {
     const W = window.FoxyWallet;
-    const led = W && W.splitPending && W.splitPending();
+    /* The record whether or not it is finished (`splitRecord`). It was
+     * `splitPending`, which answers nothing once every row is paid: the last
+     * share settled by the sweep was the one share this could never tick. */
+    const led = W && (W.splitRecord ? W.splitRecord() : (W.splitPending && W.splitPending()));
     if (!led || !led.rows) return;
     const n = this.spOthers();
     const paid = this.spPaidArr();
-    let moved = false;
-    led.rows.slice(0, n).forEach((r, i) => { if (r.paid && !paid[i]) { paid[i] = true; moved = true; } });
-    if (!moved) return;
+    /* A finished record stays on file until its all-paid screen is dismissed,
+     * so it may be an earlier bill's. Only the bill this screen is collecting
+     * ticks anything: its rows are these invoices. */
+    const finished = led.rows.every(r => r.paid);
+    const mine = this.state.spInvoices || [];
+    const here = (r, i) => !finished || (!!r.bolt11 && r.bolt11 === mine[i]);
+    const landed = [];
+    led.rows.slice(0, n).forEach((r, i) => { if (r.paid && !paid[i] && here(r, i)) { paid[i] = true; landed.push(i); } });
+    if (!landed.length) return;
     const done = paid.every(Boolean);
     this.setState(p => ({
       spPaid: paid,
@@ -9139,6 +9148,22 @@ class Component extends DCLogic {
       screen: done && p.screen === 'spWaiting' ? 'spAllPaid' : p.screen,
     }));
     if (done && this.haptic) this.haptic('success');
+    landed.forEach(i => this.spPaidOnScreen(i));
+  }
+
+  /* A share paid by its invoice while its own screen was up: the screen says
+   * so, as it does for a share paid over the tap (`spAdvanceAfterPaid`).
+   *
+   * It did nothing. The tally was marked and the payer's code stayed where it
+   * was, so the person holding the phone saw no sign of the payment until
+   * they went to the list. Back to the list when the share was opened from
+   * it, otherwise on to the next payer; with every share paid it is EVERYONE
+   * HAS PAID. */
+  spPaidOnScreen(idx) {
+    const s = this.state;
+    if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
+    if (s.spFromWaiting) { this.setState({ screen: 'spWaiting', spFromWaiting: false }); return; }
+    this.spAdvanceAfterPaid(idx, 'by its invoice');
   }
 
   /* Pick up a bill left half-collected.

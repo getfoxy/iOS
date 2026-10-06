@@ -51,6 +51,7 @@ const methods = new Function('return {' + [
   'nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {',
   'walletReady(w) {',
   'spSyncPaid() {', 'spPaidArr() {', 'spOthers() {', 'spWaysN() {',
+  'spPaidOnScreen(idx) {', 'spAdvanceAfterPaid(idx, how) {',
   // the change tidy, and the move it must stay out of (07-history-tokens-mints.js)
   'tidyChangeLater(more) {', 'movingMints() {',
 ].map(method).join(',\n') + '}')();
@@ -115,14 +116,20 @@ function app(over) {
   return a;
 }
 
-function splitWallet(over) {
+/* The wallet's two answers about a bill, as 19-bill-split.js gives them:
+ * `splitPending` is nothing once every row is paid, and `splitRecord` is the
+ * record until its screen is dismissed. A stub that answered a finished bill
+ * from `splitPending` hid the last-share bug below from this file. */
+function splitWallet(over, paid) {
+  const rows = () => [
+    { hash: 'h1', bolt11: 'lnbc1', sats: 1000, paid: paid ? !!paid[0] : true },
+    { hash: 'h2', bolt11: 'lnbc2', sats: 1000, paid: paid ? !!paid[1] : false },
+  ];
   return Object.assign({
     watched: [],
     splitReconcile() { return Promise.resolve(0); },
-    splitPending() { return { done: false, ways: 3, total: 3000, rows: [
-      { hash: 'h1', bolt11: 'lnbc1', sats: 1000, paid: true },
-      { hash: 'h2', bolt11: 'lnbc2', sats: 1000, paid: false },
-    ] }; },
+    splitRecord() { const r = rows(); return { done: r.every(x => x.paid), ways: 3, total: 3000, rows: r }; },
+    splitPending() { const r = this.splitRecord(); return r.rows.every(x => x.paid) ? null : r; },
     watch(hash, cb, opts) { this.watched.push({ hash: hash, timeoutMs: opts && opts.timeoutMs }); return () => {}; },
     splitMarkPaid() {},
   }, over || {});
@@ -147,16 +154,70 @@ async function run() {
       a.state.spPaid[1] === false && a.state.screen === 'spWaiting', JSON.stringify(a.state));
   }
   {
-    // the last share landing that way ends the screen, as the watcher's does
+    /* And the wallet itself gives those two answers (19-bill-split.js), which
+     * is what the stub above copies. */
+    const { loadReal } = require('./harness');
+    const real = loadReal({ bridge: () => {} }).W;
+    real.splitSave({ ways: 3, total: 3000, at: 1, rows: [
+      { hash: 'q1', bolt11: 'lnbc1', sats: 1000, paid: false }, { hash: 'q2', bolt11: 'lnbc2', sats: 1000, paid: false }] });
+    real.splitMarkPaid('q1');
+    const half = real.splitPending();
+    check('the wallet: a bill half collected is pending, and its record says who paid',
+      !!half && half.rows[0].paid === true && half.rows[1].paid === false && real.splitRecord().rows.length === 2, JSON.stringify(half));
+    real.splitMarkPaid('q2');
+    const whole = real.splitRecord();
+    check('the wallet: with the last share paid nothing is pending, and the record is still there, finished',
+      real.splitPending() === null && !!whole && whole.done === true && whole.rows.every(r => r.paid), JSON.stringify(whole));
+    real.splitClear();
+    check('the wallet: and it is gone once the bill is cleared', real.splitRecord() === null);
+  }
+  {
+    /* The last share landing that way ends the screen, as the watcher's does.
+     * The wallet says nothing is pending by then, which is why the screen
+     * reads the record: read from `splitPending`, the last payer of every
+     * bill settled this way stayed unticked, with the money in history. */
     const a = app();
-    a.state = { screen: 'spWaiting', spWays: 3, spPaid: [true, false] };
-    global.window = { FoxyWallet: splitWallet({ splitPending() {
-      return { done: false, ways: 3, total: 3000, rows: [
-        { hash: 'h1', sats: 1000, paid: true }, { hash: 'h2', sats: 1000, paid: true }] };
-    } }) };
+    a.state = { screen: 'spWaiting', spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    global.window = { FoxyWallet: splitWallet(null, [true, true]) };
+    check('a finished bill is nothing pending, and still a record', window.FoxyWallet.splitPending() === null && !!window.FoxyWallet.splitRecord());
     a.spSyncPaid();
     check('the last share landing that way finishes the bill',
       a.state.screen === 'spAllPaid' && a.state.spPaid.every(Boolean), JSON.stringify(a.state));
+  }
+  {
+    // a finished record left on file is an earlier bill's: it ticks nothing on the one being collected now
+    const a = app();
+    a.state = { screen: 'spWaiting', spWays: 3, spPaid: [false, false], spInvoices: ['lnbc8', 'lnbc9'] };
+    global.window = { FoxyWallet: splitWallet(null, [true, true]) };
+    a.spSyncPaid();
+    check('an earlier bill’s finished record ticks nothing on this one',
+      a.state.spPaid.every(x => !x) && a.state.screen === 'spWaiting', JSON.stringify(a.state));
+    const b = app();
+    b.state = { screen: 'spShares', spWays: 3, spPaid: [], spInvoices: [] };
+    b.spSyncPaid();
+    check('nor on one whose invoices are not made yet', (b.state.spPaid || []).every(x => !x) && b.state.screen === 'spShares', JSON.stringify(b.state));
+  }
+  {
+    /* Paid by its invoice while its own code was on screen: the screen moves,
+     * as it does for a share paid over the tap. It stayed where it was. */
+    const a = app();
+    a.state = { screen: 'spPayer', spIdx: 1, spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    global.window = { FoxyWallet: splitWallet(null, [true, true]) };
+    a.spSyncPaid();
+    check('the last payer’s own screen becomes EVERYONE HAS PAID', a.state.screen === 'spAllPaid' && a.state.spPaid.every(Boolean), JSON.stringify(a.state));
+    const b = app();
+    b.state = { screen: 'spPayer', spIdx: 0, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    global.window = { FoxyWallet: splitWallet() };               // row 1 paid, row 2 not
+    b.spSyncPaid();
+    check('an earlier payer’s screen moves on to the next one still owed', b.state.screen === 'spPayer' && b.state.spIdx === 1, JSON.stringify(b.state));
+    const c = app();
+    c.state = { screen: 'spPayer', spIdx: 0, spFromWaiting: true, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    c.spSyncPaid();
+    check('a share opened from the list goes back to the list', c.state.screen === 'spWaiting' && c.state.spFromWaiting === false && c.state.spPaid[0] === true, JSON.stringify(c.state));
+    const d = app();
+    d.state = { screen: 'spPayer', spIdx: 1, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    d.spSyncPaid();
+    check('and a screen showing a different share stays on it', d.state.screen === 'spPayer' && d.state.spIdx === 1 && d.state.spPaid[0] === true, JSON.stringify(d.state));
   }
   {
     // a tally that has not moved must not redraw the screen under the person
