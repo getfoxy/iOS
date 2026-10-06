@@ -760,8 +760,12 @@
       });
       return;
     }
-    // with money on it, this phone has to be at the card's mint to take it off
-    if (fc.balance > 0 && !this.fcReady('Moving a card')) return;
+    /* Whichever mint this phone is at. The money comes off the card at the
+     * card's own mint, and this phone is taken there for as long as the move
+     * lasts (`fcMoveQuote`) and put back after (`fcMoveEnd`). It was refused
+     * from any other mint with a card whose button opened this phone's own
+     * list of mints: a person at the mint they wanted the card moved to was
+     * sent to switch away from it, and round again. */
     if (fc.balance > 0 && this.fcOverLimit(fc.balance)) return;
     // through the one way into that list, which clears every other question it can be asking
     this.goSwitchMint({ fcPick: true });
@@ -815,7 +819,11 @@
     if (!W || !m) return;
     const put = (more) => { if (this.state.fcMove) this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) }); };
     put({ quoting: true, err: '' });
-    W.cardMoveQuote(m.from, m.to, m.sats, { quoteOnly: true, pieces: (this.state.fc || {}).count }).then((plan) => {
+    // to the card's mint first, where this phone is not there already: a visit, not a change of this phone's own mint
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    this._fcVisit = Promise.resolve()
+      .then(() => (bare(W.mintUrl) === bare(m.from) ? null : W.connect(m.from, null, null, { remember: false })));
+    this._fcVisit.then(() => W.cardMoveQuote(m.from, m.to, m.sats, { quoteOnly: true, pieces: (this.state.fc || {}).count })).then((plan) => {
       // what leaves the card, less what lands, is the most the crossing can cost
       put({ quoting: false, plan, lands: plan.net, fee: Math.max(0, m.sats - plan.net) });
     }, (e) => {
@@ -852,8 +860,9 @@
     };
   }
 
+  /* CANCEL on the confirmation: nothing has moved, and the phone goes back to the mint it was at. */
   fcMoveCancel() {
-    this.setState(p => ({ fcMove: null, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+    this.fcMoveEnd(null);
   }
 
   fcMoveGo() {
@@ -988,8 +997,14 @@
     if (card) this.fcShow(card);
     this.fcLoud();
     const home = () => { this.refreshBalance(); this.loadHistory(); };
-    if (W && was && String(W.mintUrl || '').replace(/\/+$/, '') !== was) W.connect(was).then(home, home);
-    else home();
+    // after a visit that is still being made (CANCEL pressed while it was): put back from where that leaves it
+    const visit = this._fcVisit || Promise.resolve();
+    this._fcVisit = null;
+    const put = () => {
+      if (W && was && String(W.mintUrl || '').replace(/\/+$/, '') !== was) W.connect(was).then(home, home);
+      else home();
+    };
+    visit.then(put, put);
   }
 
   /* Everything off the card and on again, which is the only way its pieces

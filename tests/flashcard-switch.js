@@ -34,6 +34,9 @@ const at = (c, mint) => {
   catch (e) { return 0; }
 };
 
+/* The mint this phone has chosen as its own, which a visit to another does not change. */
+const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cashu.mint')) || '').replace(/\/+$/, ''); } catch (e) { return ''; } };
+
 (async () => {
   const H = await funded({ second: true }, 6000);
   const W = H.W;
@@ -231,6 +234,45 @@ const at = (c, mint) => {
     ok(c.balance() === 1980 && app.state.fc.mint === MINT && U.W.cardOwed().length === 0, 'from the right one, a tap finishes the move: the card is at that mint with its money', String(c.balance()));
     face(app).press('DONE');
     app.showMelt = melt0;
+
+    /* ---- pressed with this phone at the mint the card is going to ------------- */
+    await U.W.connect(MINT2, null, null, { remember: true });
+    await app.refreshBalance();
+    const mine = { at1: at(U, MINT), at2: at(U, MINT2) };
+    const heldThere = c.balance();
+    app.fcSwitchMint();
+    ok(!face(app) && app.state.screen === 'switchMint' && app.state.fcPick === true,
+       'pressed with this phone at another mint, it asks which mint all the same: nobody is sent to switch first', (face(app) && face(app).title) || app.state.screen);
+    app.fcSwitchPick(MINT2);
+    await until('the cost to be known from there', () => app.state.fcMove && app.state.fcMove.fee != null);
+    ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT && own(U) === MINT2,
+       'the phone is taken to the card’s mint for the asking, as a visit: its own mint is still the one it chose', U.W.mintUrl + ' / ' + own(U));
+    app.fcMoveSpec().secondary.go();
+    await until('CANCEL to put the phone back', () => app.state.screen === 'flashcard' && !app.state.fcMove && String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
+    ok(c.balance() === heldThere && at(U, MINT) === mine.at1 && at(U, MINT2) === mine.at2, 'CANCEL puts it back where it was, and nothing has moved');
+    app.fcSwitchMint();
+    app.fcSwitchPick(MINT2);
+    await until('the cost to be known again', () => app.state.fcMove && app.state.fcMove.fee != null);
+    app.fcMoveSpec().go();
+    pad(app).type('1234');
+    await until('the card to be moved from there', () => face(app) && face(app).title === 'MOVED');
+    await settle();
+    ok(app.state.fc.mint === MINT2 && c.balance() === app.state.fc.balance && c.balance() > 0 && c.balance() < heldThere && U.W.cardOwed().length === 0,
+       'and MOVE moves it: the card is at this phone’s mint with its money', heldThere + ' became ' + c.balance());
+    ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT2 && own(U) === MINT2 && at(U, MINT2) === mine.at2 && at(U, MINT) >= mine.at1,
+       'the phone ends at the mint it was at, with its own money there untouched', at(U, MINT) + ' / ' + at(U, MINT2));
+    face(app).press('DONE');
+    // back, for what follows: the card and the phone at the first mint
+    app.fcSwitchMint();
+    app.fcSwitchPick(MINT);
+    await until('the cost back to be known', () => app.state.fcMove && app.state.fcMove.fee != null);
+    app.fcMoveSpec().go();
+    pad(app).type('1234');
+    await until('the card to be moved back', () => face(app) && face(app).title === 'MOVED');
+    await settle();
+    face(app).press('DONE');
+    await U.W.connect(MINT, null, null, { remember: true });
+    await app.refreshBalance();
 
     /* ---- an empty card ------------------------------------------------------- */
     const blank = newCard(U);

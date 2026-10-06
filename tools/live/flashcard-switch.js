@@ -19,8 +19,9 @@
  * Twice over: first the wallet's own steps, called one by one (A, B), then the
  * screens (build/app/26f-flashcard.js, as tests/flashcard-ui-kit.js makes them
  * drivable) with SWITCH MINT pressed, a PIN typed and the card tapped (C), the
- * card put away before its second tap and the money put on later (D), and a
- * card with nothing on it (E).
+ * card put away before its second tap and the money put on later (D), SWITCH
+ * MINT pressed with the phone at the mint the card is going to (F), and a card
+ * with nothing on it (E).
  *
  * What is held to: every sat is somewhere it can be named (the card, the
  * phone at one mint, the phone at the other, or a fee), the phone's own
@@ -254,6 +255,46 @@ async function run() {
   face(app).press('DONE');
   app.showMelt = melt0;
 
+  console.log('\nF. pressed with the phone at the mint the card is going to, ' + names.cdk + ' to ' + names.nutshell);
+  await W.connect(NUT);
+  await app.refreshBalance();
+  app.setState({ fc: null });
+  app.fcRead();
+  await wait(app, 'the card to be read from the other mint', () => !!app.state.fc && app.state.fc.balance > 0);
+  const heldF = app.state.fc.balance;
+  const ownF = { cdk: at(b, CDK), nut: at(b, NUT) };
+  app.fcSwitchMint();
+  ok('F: it asks which mint all the same: nobody is sent to switch first', !face(app) && app.state.screen === 'switchMint' && app.state.fcPick === true, (face(app) && face(app).title) || app.state.screen);
+  app.fcSwitchPick(NUT);
+  await wait(app, 'the cost to be known from there', () => app.state.fcMove && (app.state.fcMove.fee != null || !!app.state.fcMove.err));
+  ok('F: the phone is taken to the card’s mint for the asking', bare(W.mintUrl) === bare(CDK) && !app.state.fcMove.err, app.state.fcMove.err || W.mintUrl);
+  app.fcMoveSpec().secondary.go();
+  await wait(app, 'CANCEL to put the phone back', () => app.state.screen === 'flashcard' && !app.state.fcMove && bare(W.mintUrl) === bare(NUT));
+  ok('F: CANCEL puts it back, and nothing has moved', at(b, CDK) === ownF.cdk && at(b, NUT) === ownF.nut);
+  app.fcSwitchMint();
+  app.fcSwitchPick(NUT);
+  await wait(app, 'the cost to be known again', () => app.state.fcMove && (app.state.fcMove.fee != null || !!app.state.fcMove.err));
+  app.fcMoveSpec().go();
+  pad(app).type(PIN);
+  await wait(app, 'the card to be moved from there', () => face(app) && face(app).title === 'MOVED', 240000);
+  await wait(app, 'the phone to be where it was', () => bare(W.mintUrl) === bare(NUT) && !app.state.fcMove);
+  ok('F: MOVE moves it: the card is at the phone’s mint with its money', bare(app.state.fc.mint) === bare(NUT) && app.state.fc.balance > 0 && app.state.fc.balance < heldF && W.cardOwed().length === 0, heldF + ' became ' + app.state.fc.balance);
+  ok('F: and the phone’s own money at both mints was not used', at(b, CDK) >= ownF.cdk && at(b, NUT) >= ownF.nut, (at(b, CDK) - ownF.cdk) + ' and ' + (at(b, NUT) - ownF.nut) + ' sats up');
+  face(app).press('DONE');
+  // back at the first mint, for what follows
+  await W.connect(CDK);
+  app.setState({ fc: null });
+  app.fcRead();
+  await wait(app, 'the card to be read again', () => !!app.state.fc && app.state.fc.balance > 0);
+  app.fcSwitchMint();
+  app.fcSwitchPick(CDK);
+  await wait(app, 'the cost back to be known', () => app.state.fcMove && (app.state.fcMove.fee != null || !!app.state.fcMove.err));
+  app.fcMoveSpec().go();
+  pad(app).type(PIN);
+  await wait(app, 'the card to be moved back', () => face(app) && face(app).title === 'MOVED', 240000);
+  await wait(app, 'the phone to be back', () => bare(W.mintUrl) === bare(CDK) && !app.state.fcMove);
+  face(app).press('DONE');
+
   console.log('\nE. a card with nothing on it');
   await card.tap();
   await W.cardWithdraw(card, { pin: PIN });
@@ -276,8 +317,8 @@ async function run() {
   console.log('\nwhere every sat is');
   console.log('    at the start: ' + total + ' (the card and the phone together)');
   console.log('    now:          ' + now + ' = the card ' + end.balance + ', the phone ' + at(b, CDK) + ' at ' + names.cdk + ' and ' + at(b, NUT) + ' at ' + names.nutshell);
-  console.log('    gone in fees: ' + (total - now) + ' over four crossings, a payment and two withdrawals (the mints’ input fees and the Lightning fees)');
-  ok('nothing is unaccounted for: what is not held was a fee, and it is small', total - now >= 0 && total - now < 300, String(total - now));
+  console.log('    gone in fees: ' + (total - now) + ' over six crossings, a payment and two withdrawals (the mints’ input fees and the Lightning fees)');
+  ok('nothing is unaccounted for: what is not held was a fee, and it is small', total - now >= 0 && total - now < 400, String(total - now));
   ok('nothing is left owed or unanswered', W.cardOwed().length === 0 && W.cardTaken().length === 0);
   const trouble = b.rec.error.filter((l) => !/card:/.test(l));
   ok('and the wallet logged no errors', trouble.length === 0, trouble.slice(0, 2).join(' | '));
