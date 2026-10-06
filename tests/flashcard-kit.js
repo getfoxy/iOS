@@ -23,6 +23,22 @@ function page(o) {
         return reply(w, m.id, (ctx.fate && ctx.fate(m)) || mint.handle(m));
       }
       if (m.action === 'inboxAnswer') return reply(w, m.id, 'ok');
+      /* The phone's NFC, as Foxy/Flashcard/CardLink.swift answers: `ctx.nfc`
+       * is the card that will be tapped (or null for none, or 'off' for a
+       * phone that cannot read one), `ctx.sheet` every line the sheet showed. */
+      if (m.action === 'cardBegin') {
+        ctx.sheet.push('begin: ' + m.text);
+        if (ctx.nfc === 'off') return reply(w, m.id, null, 'NFC is not available on this phone');
+        if (!ctx.nfc) return reply(w, m.id, null, 'the session was cancelled');
+        ctx.nfc.tap();
+        return reply(w, m.id, 'ok');
+      }
+      if (m.action === 'cardSend') {
+        if (!ctx.nfc || ctx.nfc === 'off') return reply(w, m.id, null, 'no card');
+        return ctx.nfc.send(m.apdu).then((r) => reply(w, m.id, r), () => reply(w, m.id, null, 'the tag was lost'));
+      }
+      if (m.action === 'cardSay') { ctx.sheet.push('say: ' + m.text); return reply(w, m.id, 'ok'); }
+      if (m.action === 'cardEnd') { ctx.sheet.push(m.error ? 'error: ' + m.error : 'end: ' + m.text); return reply(w, m.id, 'ok'); }
       const got = phone.answer(w, m);
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
@@ -30,6 +46,8 @@ function page(o) {
     before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk }); },
   });
   ctx.deaf = !!opts.deaf;
+  ctx.nfc = null;
+  ctx.sheet = [];
   ctx.mint = mint;
   ctx.phone = phone;
   ctx.W._nodeProbeDelay = [86400000, 86400000];

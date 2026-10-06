@@ -110,6 +110,28 @@ const ok = (good, name, detail) => {
   const b = await W.cardLook(doomed);
   ok(b.info.pin === 'blocked' && b.info.tries === 0 && b.key === doomed.key, 'but it still says what it is, for the phone that can take its money back');
 
+  /* ---- a tap, through the phone ------------------------------------------- */
+  {
+    const tapped = newCard(P);
+    P.nfc = tapped;
+    P.sheet.length = 0;
+    const got = await W.cardSession('Hold the card to the top of the phone', (link) => W.cardLook(link));
+    ok(got.key === tapped.key && P.sheet.join(' | ') === 'begin: Hold the card to the top of the phone | end: Done',
+       'a tap opens the phone\u2019s sheet, reads the card through it and closes it', P.sheet.join(' | '));
+    P.sheet.length = 0;
+    const refused = await W.cardSession('Hold the card', (link) => W.cardSetLimit(link, { pin: '1234', sats: 1 })).then(() => null, (e) => e);
+    ok(refused && refused.card === 'no-pin' && /^begin: Hold the card \| error: /.test(P.sheet.join(' | ')),
+       'what the card refuses is said on the sheet as it closes, and comes back as it was', P.sheet.join(' | '));
+    P.sheet.length = 0;
+    // set once the tap has begun: the card arriving is what clears what it was told before
+    const left = await W.cardSession('Hold the card', (link) => { tapped.leaveAfter(3); return W.cardLook(link); }).then(() => null, (e) => e);
+    ok(left && left.card === 'gone' && /error: The card was taken away too soon/.test(P.sheet.join(' | ')), 'a card taken away mid-tap is said so', P.sheet.join(' | '));
+    P.nfc = null;
+    ok((await why(W.cardSession('Hold the card', (link) => W.cardLook(link)))) === 'cancelled', 'a sheet dismissed with no card is a tap that was not made');
+    P.nfc = 'off';
+    ok((await why(W.cardSession('Hold the card', (link) => W.cardLook(link)))) === 'no-nfc', 'and a phone that cannot read a card says that');
+  }
+
   console.log('\n' + (failed ? failed + ' flashcard-setup check(s) failed' : 'all flashcard-setup checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

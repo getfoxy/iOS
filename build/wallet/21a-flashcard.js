@@ -297,3 +297,36 @@
       }, Promise.resolve()).then(function () { return out; });
     },
 
+    /* ---- a tap ------------------------------------------------------------
+     *
+     * One tap of a card on this phone: iOS's NFC session, opened with a line
+     * of text for its sheet, and a `link` the functions above talk through
+     * while it is open (Foxy/Flashcard/CardLink.swift). `fn(link)` is what to
+     * do with the card; when it settles, the sheet is closed with a word of
+     * how it went, and its result or its error is this call's.
+     *
+     * `link.say(text)` changes the sheet's line as the tap goes on. The PIN
+     * is not this function's business: whoever calls has it, passes it to the
+     * card through the functions above, and lets go of it.
+     *
+     * Rejects with `card: 'cancelled'` when the sheet was dismissed or timed
+     * out with no card, and `card: 'no-nfc'` on a phone that cannot read one. */
+    cardSession: function (text, fn) {
+      var link = {
+        send: function (apdu) { return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000); },
+        say: function (line) { return bridgeAsk('cardSay', { text: String(line || '') }, 5000).then(null, function () {}); },
+      };
+      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 70000).then(function () {
+        return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
+          return bridgeAsk('cardEnd', { text: 'Done' }, 5000).then(function () { return r; }, function () { return r; });
+        }, function (e) {
+          var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
+          return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
+        });
+      }, function (e) {
+        var why = String((e && e.message) || '');
+        if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
+        throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');
+      });
+    },
+
