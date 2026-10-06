@@ -7,7 +7,14 @@
 
     /* What a card says with no PIN (`cardLook`). Rejects with `card` on the
      * error naming why: not-a-card, gone. */
-    cardLook: function (link) { return cardLook(link); },
+    cardLook: function (link) {
+      return cardLook(link).then(function (card) {
+        // a card this phone can take back: what is on it now is written down for the day it is lost
+        var mine = cardsOnFile()[card.key];
+        if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces);
+        return card;
+      });
+    },
 
     /* A new card made this phone's: a PIN, and the record that says which mint
      * its money is at and who may take it back.
@@ -87,6 +94,92 @@
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
+
+    /* The same, for a screen: what each held when last seen, and when it can
+     * be taken back. Newest first. */
+    cardsList: function () {
+      var all = cardsOnFile();
+      var now = Math.floor(Date.now() / 1000);
+      return Object.keys(all).map(function (key) {
+        var row = all[key] || {};
+        var pieces = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
+        var sats = 0, first = 0, last = 0;
+        Object.keys(pieces).forEach(function (n) {
+          var x = pieces[n];
+          sats += Math.round(Number(x.amount) || 0);
+          if (x.date) { first = first ? Math.min(first, x.date) : x.date; last = Math.max(last, x.date); }
+        });
+        return { key: key, mint: row.mint || '', at: row.at || 0, seen: row.seen || 0, sats: sats,
+                 date: last, due: !!first && first <= now, takenBack: row.takenBack || 0 };
+      }).sort(function (a, b) { return (b.seen || b.at) - (a.seen || a.at); });
+    },
+
+    /* A lost or blocked card's money, taken back with no card.
+     *
+     * Every piece this phone knew to be on the card names this phone's key as
+     * the one that may spend it once its date has passed. So: the pieces
+     * whose date has passed, asked of the mint, and those still unspent are
+     * signed with that key (the phone derives it from its words) and swapped
+     * in like any signed piece. What the card was given by somebody else
+     * after this phone last read it (a receiver's change) is not known here
+     * and is not taken back.
+     *
+     * Resolves { sats, hash, later }: `later` is what is not due yet.
+     * Rejects with `card`: unknown, other-mint, no-route, too-soon. */
+    cardTakeBack: function (cardKey) {
+      var row = cardsOnFile()[cardKey];
+      if (!row || !row.refundKey || !(row.refundIndex >= 0)) return Promise.reject(cardError('unknown', 'This phone cannot take that card back: it did not set it up.'));
+      var w;
+      try { w = need(); } catch (e) { return Promise.reject(e); }
+      if (canonicalMint(row.mint) !== mintOf(w)) {
+        return Promise.reject(cardError('other-mint', 'That card\u2019s money is at ' + hostOf(row.mint) + '. Switch to it first.', { mint: canonicalMint(row.mint) }));
+      }
+      if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
+      var now = Math.floor(Date.now() / 1000);
+      var pieces = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
+      var due = [], later = 0, soonest = 0;
+      Object.keys(pieces).forEach(function (nonce) {
+        var x = pieces[nonce];
+        if (!x || !x.date) return;
+        if (x.date > now) { later += Math.round(Number(x.amount) || 0); soonest = soonest ? Math.min(soonest, x.date) : x.date; return; }
+        try {
+          due.push({ id: x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
+        } catch (e) {}
+      });
+      if (!due.length) {
+        return Promise.reject(later > 0
+          ? cardError('too-soon', 'That card can be taken back after its date.', { date: soonest, sats: later })
+          : cardError('nothing', 'Nothing is known to be left on that card.'));
+      }
+      var CT = window.CashuTS;
+      var asking = onCircuit(w, 'card:' + cardKey.slice(-16));
+      return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(due); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
+        .then(function (states) {
+          var live = due.filter(function (pr, i) {
+            var st = (states && states[i]) || {};
+            return String(st.state || st.State || '').toUpperCase() === 'UNSPENT';
+          });
+          if (!live.length) return { sats: 0, hash: '', later: later };
+          return nativeJson('p2pkKey', { index: row.refundIndex }, 60000).then(function (j) {
+            var key = String((j && j.privkey) || '').toLowerCase();
+            if (!/^[0-9a-f]{64}$/.test(key) || String((j && j.pubkey) || '').toLowerCase() !== row.refundKey) {
+              throw cardError('no-key', 'This phone\u2019s words do not give the key that card was set up with.');
+            }
+            var signed = CT.signP2PKProofs(live, key);
+            var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
+            if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
+            var taken = { id: 'cardback-' + piecesFingerprint(signed), token: CT.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' }),
+                          sats: 0, worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
+            mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
+            return cardSwapTaken(taken).then(function (got) {
+              var all = cardsOnFile();
+              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
+              console.log('[foxy] card: ' + got.sats + ' sats taken back from a card with this phone\u2019s own key');
+              return { sats: got.sats, hash: taken.id, later: later };
+            });
+          });
+        });
+    },
 
     /* ---- money onto a card --------------------------------------------------
      *
