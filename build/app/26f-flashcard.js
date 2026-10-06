@@ -1089,6 +1089,16 @@
     });
   }
 
+  /* What has been done with this card, as this phone knows it: the history
+   * screen, with only the entries that name it. A card keeps no list of its
+   * own, so a payment it made at somebody else's phone is not here. */
+  fcHistory() {
+    const fc = this.state.fc;
+    if (!fc || !fc.key) return;
+    this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]), histCard: fc.key, histFilter: 'all' }));
+    this.loadHistory();
+  }
+
   /* flashcard: the card that was tapped, or the invitation to tap one. */
   /** @param {RenderContext} c */
   renderFlashcard(c) {
@@ -1146,33 +1156,28 @@
       : fc.locked ? ['Locked' + (word ? ' \u00b7 ' + word : ''), AMBER]
       : [word, (fc.check === 'off' || fc.check === 'other') ? AMBER : ON_CARD];
 
-    const facts = [];
+    /* The card's limit, laid out as a confirmation lays out a payment's
+     * details: the name over the value. It is what one PIN entry may spend,
+     * and says so: the card has no clock, so it cannot count a day. Its mint
+     * and what it holds are in the pill above, as home's are. */
+    const fields = [];
     if (fc && fc.hasRecord) {
-      // its address, as the card has it: a name made from it would read the same for a look-alike
-      facts.push({ label: 'Mint', value: String(fc.mint).replace(/^https?:\/\//, ''), ink: 'var(--ink)' });
-      facts.push({ label: 'Holds', value: fc.count + ' piece' + (fc.count === 1 ? '' : 's') + ' · ' + fc.room + ' place' + (fc.room === 1 ? '' : 's') + ' free', ink: 'var(--ink)' });
-      facts.push(!fc.recoverable
-        ? { label: 'If lost', value: 'Not recoverable: this card is cash', ink: 'var(--ink)' }
-        : past ? { label: 'If lost', value: 'Its date has passed. Take it back from CARDS YOU LOADED.', ink: RED }
-        : near ? { label: 'If lost', value: 'Renew by ' + this.fcDay(fc.first), ink: AMBER }
-        : fc.mine ? { label: 'If lost', value: fc.last ? 'This phone can take it back after ' + this.fcDay(fc.last) : 'This phone can take it back, a year after it is loaded', ink: 'var(--ink)' }
-        : { label: 'If lost', value: 'The phone that loaded it can take it back' + (fc.last ? ' after ' + this.fcDay(fc.last) : ''), ink: 'var(--ink)' });
-      facts.push({ label: 'Limit', value: fc.limit ? 'One PIN entry can spend ' + this.fcSats(fc.limit) : 'No limit', ink: 'var(--ink)' });
+      fields.push(this.cfRow('LIMIT', fc.limit ? this.fcPrice(fc.limit) + ' PER PIN ENTRY' : 'NONE'));
+    }
+    // a card in the last month before its date: said where the money waiting for a card is said, and renewed from there
+    if (on && fc && near && !past && fc.balance > 0) {
+      notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }
 
-    /* The smaller things to do with a card, as round buttons like home's:
-     * a lock for its PIN, a dial for its limit, and, in its last month, the
-     * arrow that goes round for RENEW. */
+    /* The two smaller things to do with a card, in home's SCAN and PASTE
+     * slots under ADD FUNDS and WITHDRAW: a lock for its PIN, a dial for its
+     * limit. */
     const links = !usable ? [] : [
-      { label: 'CHANGE\nPIN', ink: 'var(--ink)', says: 'var(--ink)', tap: () => this.fcChangePin(),
+      { label: 'CHANGE PIN', ink: 'var(--ink)', tap: () => this.fcChangePin(), spin: 'rotate(180deg)',
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
-      { label: 'SET\nLIMIT', ink: 'var(--ink)', says: 'var(--ink)', tap: () => this.fcSetLimit(),
+      { label: 'SET LIMIT', ink: 'var(--ink)', tap: () => this.fcSetLimit(), spin: 'none',
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
-      // the menu's own SWITCH arrows: the card to another mint, its money with it
-      { label: 'SWITCH\nMINT', ink: 'var(--ink)', says: 'var(--ink)', tap: () => this.fcSwitchMint(),
-        path: 'M7.5 4.5 4 8l3.5 3.5M4 8h12.5a3.5 3.5 0 0 1 0 7H15M16.5 19.5 20 16l-3.5-3.5' },
-    ].concat((near && !past && fc.balance > 0) ? [{ label: 'RENEW\n\u00a0', ink: AMBER, says: AMBER, tap: () => this.fcRenew(),
-        path: 'M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.4 4.6v4.2h4.2M12 7.6V12l3 1.8' }] : []);
+    ];
 
     const px = this.px ? this.px() : 0;
     return {
@@ -1186,12 +1191,20 @@
       fcRows: rows,
       /* Dollars first and the sats under them, as on home. With no price to
        * say dollars at, the sats are the figure and there is no second line. */
+      /* Home's own pill, for a card that has a mint: the mint by the name this
+       * phone knows it by, and what the card holds. */
+      fcPill: !!fc && !!fc.hasRecord,
+      fcPillMint: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '') : '',
+      fcPillLetter: (fc && fc.hasRecord) ? (String(this.mintNameOf(fc.mint) || '?').slice(0, 1).toUpperCase() || '?') : '',
       fcBalance: !fc ? '' : px > 0 ? '$ ' + this.usd((fc.balance / 1e8) * px) : '\u20bf ' + this.group(fc.balance),
       fcShowAlt: !!fc && px > 0,
       fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(fc.balance) : '',
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
-      fcFacts: facts,
+      fcFields: fields,
+      // what has been done with this card, on this phone: only for a card that is one (it has a key and a record)
+      fcHistoryVis: (fc && fc.hasRecord) ? 'visible' : 'hidden',
+      fcHistory: () => this.fcHistory(),
       fcNew: fresh,
       fcNewLine: (fc && fc.pin === 'set' && !fc.hasRecord)
         ? 'Its set-up was cut short. Finish it to put money on it.'

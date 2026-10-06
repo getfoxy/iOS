@@ -749,6 +749,8 @@
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
         // 'card' is a move the screens say themselves; 'card payment' is announced like any other (16-history-lists.js)
         try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund) ? 'card' : 'card payment' }); } catch (x) {}
+        // and names the card, as a load's entry does: the card's own history is read from that (26f-flashcard.js)
+        try { amendTx(row.id, { card: row.card }); } catch (x1) {}
         return { sats: (r && r.sats) || 0 };
       }, function (e) {
         var text = String((e && e.message) || '');

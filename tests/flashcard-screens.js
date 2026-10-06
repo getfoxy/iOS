@@ -66,8 +66,11 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   v = vals(holder);
   ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
      'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
-  ok(v.fcFacts.map((f) => f.label).join() === 'Mint,Holds,If lost,Limit' && v.fcFacts[2].value === 'Not recoverable: this card is cash' && v.fcFacts[3].value === 'No limit',
-     'and the screen says where its money is, what it holds, what happens if it is lost, and its limit', v.fcFacts.map((f) => f.value).join(' / '));
+  ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0'
+     && v.fcFields.map((f) => f.label + ' ' + f.value).join() === 'LIMIT NONE',
+     'and the screen says its mint and what it holds in home’s own pill, and its limit under it', v.fcPillMint + ' | ' + v.fcBalance + ' / ' + v.fcFields.map((f) => f.label + ' ' + f.value).join());
+  ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT' && v.fcHistoryVis === 'visible' && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function',
+     'with ADD FUNDS and WITHDRAW, CHANGE PIN and SET LIMIT under them, and its history at the top');
 
   /* ---- add funds -------------------------------------------------------------- */
   c.tap();
@@ -200,7 +203,7 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   c.tap();
   pad(holder).type('1234');
   await until('the limit to be set', () => holder.state.fc.limit === 700);
-  ok(vals(holder).fcFacts[3].value === 'One PIN entry can spend ₿700', 'and the card says its limit', vals(holder).fcFacts[3].value);
+  ok(vals(holder).fcFields[0].value === '₿700 PER PIN ENTRY', 'and the card says its limit, and that it is for one PIN entry', vals(holder).fcFields[0].value);
   till.state.screen = 'confirm';
   till.asking = 900;
   R.nfc = c;
@@ -282,8 +285,7 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   rc.tap();
   card(holder).press('RECOVERABLE');
   await until('the second card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
-  ok(holder.state.fc.mine && holder.state.fc.recoverable && /This phone can take it back/.test(vals(holder).fcFacts[2].value),
-     'chosen recoverable, it is this phone\u2019s to take back', vals(holder).fcFacts[2].value);
+  ok(holder.state.fc.mine && holder.state.fc.recoverable, 'chosen recoverable, it is this phone\u2019s to take back');
   card(holder).press('LATER');
   rc.tap();
   holder.fcAdd();
@@ -292,20 +294,21 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   pad(holder).type('4321');
   await until('1,024 to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
   card(holder).press('DONE');
-  ok(vals(holder).fcLinks.map((k) => k.label.replace(/\s+/g, ' ').trim()).join() === 'CHANGE PIN,SET LIMIT,SWITCH MINT', 'with a year to run there is nothing to renew');
+  const renewLine = (vv) => vv.fcNotes.filter((n) => /must be renewed by/.test(n.text))[0];
+  ok(!renewLine(vals(holder)), 'with a year to run there is nothing to renew');
   const real = H.window.Date.now.bind(H.window.Date);
   const realHere = Date.now;
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(350 * 86400000);
   v = vals(holder);
-  ok(v.fcLinks.map((k) => k.label.replace(/\s+/g, ' ').trim()).join() === 'CHANGE PIN,SET LIMIT,SWITCH MINT,RENEW' && /^Renew by /.test(v.fcFacts[2].value),
-     'in its last month the screen says RENEW, and by when', v.fcFacts[2].value);
+  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcLinks.length === 2,
+     'in its last month the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
   pad(holder).type('4321');
   await until('the card to be renewed', () => card(holder) && card(holder).title === 'ON THE CARD');
-  ok(rc.balance() === 1024 && vals(holder).fcLinks.length === 3 && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
+  ok(rc.balance() === 1024 && !renewLine(vals(holder)) && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
      && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).every((e) => holder.seen[e.hash]),
      'renewed in one tap: the same 1,024, a year on, its two entries not announced', card(holder).reason);
   card(holder).press('DONE');

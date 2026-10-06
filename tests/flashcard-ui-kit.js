@@ -52,7 +52,7 @@ function appOn(ctx, start) {
   a.showMelt = (label) => { a.melts.push(label); a.melting = true; };
   a.hideMelt = () => { a.melting = false; };
   a.money = (sats) => ({ main: '\u20bf ' + a.group(sats), sub: '' });
-  a.cfRow = (label, value) => ({ label, value });
+  a.cfRow = (label, value, o) => ({ label, value, sub: (o && o.sub) || '', basis: (o && o.half) ? '50%' : '100%' });
   a.balNow = () => ({ sats: a.have || 0 });
   a.refreshBalance = () => ctx.W.balanceSats().then((n) => { a.have = n; });
   a.loadHistory = () => {};

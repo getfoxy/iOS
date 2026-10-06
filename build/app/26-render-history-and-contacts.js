@@ -4,6 +4,11 @@
   renderHistory(c) {
     const { s, sc } = c;
     const hf = s.histFilter || 'all';
+    /* One card's entries, when this screen was opened from that card's own
+     * (26f-flashcard.js): only then, read from where it was opened and not
+     * from a flag left behind, so the ordinary history can never come up
+     * filtered. */
+    const ofCard = (sc === 'history' && s.histCard && (s.stack || [])[(s.stack || []).length - 1] === 'flashcard') ? String(s.histCard) : '';
     /* A running balance on every settled row: what the wallet held after that
      * payment, walked back from the balance now. The list is newest first, so
      * a receive is taken off on the way down and a send (with its fee) put
@@ -79,7 +84,7 @@
     }
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => hf === 'all' || t.dir === hf).map(t => ({
+      items: g.items.filter(t => (hf === 'all' || t.dir === hf) && (!ofCard || t.card === ofCard)).map(t => ({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
@@ -125,7 +130,8 @@
         amtText: (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
         amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
         // dollars at today's price, and the sats that actually add up
-        balText: 'BAL ' + (this.px()
+        // the wallet's running balance, which is not a card's: left off a card's own list
+        balText: ofCard ? '' : 'BAL ' + (this.px()
           ? this.stageMoney(Math.max(0, balOf.get(t) || 0)) + ' \u00b7 \u20bf ' + this.group(Math.max(0, balOf.get(t) || 0))
           : '\u20bf ' + this.group(Math.max(0, balOf.get(t) || 0))),
         // the collecting screen, not a transaction detail, while a bill is open
@@ -143,8 +149,12 @@
       })),
     })).filter(g => g.items.length);
     return {
-      historyEmptySub: s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
+      historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
+        : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
       isHistory: sc === 'history',
+      histTitle: ofCard ? 'CARD HISTORY' : 'HISTORY',
+      // clearing history is the whole wallet's, not one card's
+      histClearVis: ofCard ? 'hidden' : 'visible',
       historyMint: (window.FoxyWallet && window.FoxyWallet.mintHost
         && window.FoxyWallet.mintHost()) || 'MINT',
       // switching from here comes back here, showing that mint's activity
@@ -162,10 +172,10 @@
       filterOut: () => this.setState({ histFilter: 'out' }),
       historyGroups: histGroups,
       historyEmpty: histGroups.length === 0,
-      histAuditShown: !!auditTitle && hf === 'all',
+      histAuditShown: !!auditTitle && hf === 'all' && !ofCard,
       histAuditTitle: auditTitle,
       histAuditBody: auditBody,
-      histAuditAction: auditAction && !!auditTitle && hf === 'all',
+      histAuditAction: auditAction && !!auditTitle && hf === 'all' && !ofCard,
       histAuditCta: showChange ? 'SHOW QR CODE' : 'SCAN CHANGE',
       histAuditGo: () => (showChange && A.toShow ? this.openTx(A.toShow)
         : this.setState(p => ({ screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send' }))),

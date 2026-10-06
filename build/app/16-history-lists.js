@@ -301,6 +301,8 @@
           party: meta.address || who,
           note: meta.note || '',
           hash: t.hash,
+          // the card an entry is for (26f-flashcard.js), so one card's entries can be shown on their own
+          card: t.card || '',
           dir: t.dir,
           sats: t.sats,
           fee: t.feeSats,
