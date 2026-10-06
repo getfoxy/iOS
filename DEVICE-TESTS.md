@@ -1483,6 +1483,61 @@ an invoice. Debug build, diary pulled afterwards.
    every return connects; RECEIVE makes an invoice after each. Nothing says
    Foxy is not connected to Tor once the home screen is up.
 
+### G. A card that holds ecash
+
+None of this has run on a card. The wallet, the screens and the applet have
+been driven together with no card in the loop (tests/flashcard-*.js, and the
+simulator against the applet in a JavaCard simulator); what is left is what
+only a card, a radio and a hand can show. Needs a card with the applet on it
+(the card repository's FORK.md), a phone whose build carries the NFC
+entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
+
+#### 23a. A new card
+
+1. MENU, FLASHCARD, TAP CARD, and hold a new card to the top of the phone.
+   **Pass:** the phone's own sheet says to hold the card, then the screen
+   shows NO PIN YET and a balance of 0. Note how long the read takes.
+2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
+   to it at all, and times out.
+3. SET UP THIS CARD, a PIN twice, RECOVERABLE, tap. **Pass:** THE CARD IS
+   READY; the screen says this phone can take it back and names this
+   phone's mint.
+
+#### 23b. Money on, and off
+
+1. ADD FUNDS, an amount, the PIN, tap when asked. **Pass:** ON THE CARD with
+   the new balance; the phone's balance is down by the amount and what the
+   mint charges; HISTORY has one entry, To card, and no second confirmation.
+2. Add again with a wrong PIN. **Pass:** WRONG PIN with the tries left; a line
+   on the FLASHCARD screen says the money is waiting; TRY AGAIN with the right
+   PIN puts it on.
+3. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** IN YOUR WALLET; the card reads
+   0 on the next tap.
+
+#### 23c. Paying another phone
+
+1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
+   **Pass:** the sheet says to keep the card there, then the ordinary paid
+   screen; the card holds what it held less the amount and the cost of its
+   change. Time it from tap to paid: this is the number that decides whether
+   the card is usable at a till.
+2. The same, lifting the card away the moment the sheet first changes.
+   **Pass:** one of two ends, and never a third: nothing was taken and the
+   screen says so, or the payment stands and TAP THE CARD AGAIN asks for the
+   change to be put back, which a second tap and the PIN does.
+3. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
+   right PIN no longer opens it. On the holder's phone the card reads BLOCKED.
+
+#### 23d. What a card cannot be made to do
+
+1. With the card blocked, wait for nothing: a year is its date. Check instead
+   that CARDS YOU LOADED lists it with its date, and that taking it back
+   before then says NOT YET.
+2. Put Foxy away in the middle of a tap. **Pass:** the sheet goes; on return
+   nothing is half-done that the next tap does not finish.
+3. On a build without the entitlement: TAP CARD. **Pass:** NO CARD READER,
+   and nothing else.
+
 ---
 
 ## Getting a log off somebody else's phone
