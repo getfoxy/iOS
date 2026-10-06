@@ -1,4 +1,4 @@
-<!-- overlay: an amount to withdraw from a card -->
+<!-- overlay: a card’s PIN, to pay, after a wrong one -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -496,14 +496,20 @@
 </div>
 </div>
 <!-- on document.body -->
-<div style="position: fixed; inset: 0px; z-index: 2147483647; background: var(--bg,#050505); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 76px 26px 26px; box-sizing: border-box; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
-<div style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink,#F5F1EC); text-align: center;">WITHDRAW</div>
-<div style="margin-top: 10px; font-size: 17px; font-weight: 500; line-height: 1.4; color: rgba(245, 241, 236, 0.6); text-align: center; text-wrap: pretty;">The card holds ₿2,048.</div>
-<div style="display: flex; gap: 14px; margin-top: 38px; height: 44px; align-items: center;">
-<div style="font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: rgba(245, 241, 236, 0.3);">₿ 0</div>
+<div style="position: fixed; inset: 0px; z-index: 2147483647; background: var(--bg,#050505); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 118px 26px 26px; box-sizing: border-box; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
+<div style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink,#F5F1EC); text-align: center;">CARD PIN</div>
+<div style="margin-top: 10px; font-size: 17px; font-weight: 500; line-height: 1.4; color: rgba(245, 241, 236, 0.6); text-align: center; text-wrap: pretty;">To pay $0.43 (₿500). The card’s owner types its PIN here.</div>
+<div style="display: flex; gap: 14px; margin-top: 38px; height: 18px; align-items: center;">
+<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
 </div>
-<div style="margin-top: 18px; min-height: 22px; font-size: 16px; font-weight: 700; color: rgb(255, 92, 92); text-align: center;">
+<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
 </div>
+<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
+</div>
+<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
+</div>
+</div>
+<div style="margin-top: 18px; min-height: 22px; font-size: 16px; font-weight: 700; color: rgb(255, 92, 92); text-align: center;">Wrong PIN. 2 tries left.</div>
 <div style="margin-top: auto; display: grid; grid-template-columns: repeat(3,1fr); width: 100%; max-width: 336px; touch-action: manipulation; -webkit-user-select: none; user-select: none;">
 <div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
 <div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">1</div>
@@ -543,7 +549,11 @@
 <div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: rgba(245, 241, 236, 0.55); background: transparent;">⌫</div>
 </div>
 </div>
-<div style="margin-top: 16px; width: 100%; max-width: 300px; height: 60px; border-radius: 30px; background: var(--acc,#F2802E); color: rgb(255, 255, 255); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer;">NEXT</div>
-<div style="margin-top: 10px; width: 100%; max-width: 300px; height: 52px; border-radius: 26px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 800; letter-spacing: 0.02em; color: var(--ink,#F5F1EC); cursor: pointer; border: 1.5px solid rgba(245, 241, 236, 0.2);">ALL OF IT (₿2,048)</div>
-<div style="margin-top: 8px; height: 46px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; color: rgba(245, 241, 236, 0.5); cursor: pointer;">CANCEL</div>
+<div style="margin-top: 16px; align-self: stretch; margin-left: 2px; margin-right: 2px; height: 60px; border-radius: 30px; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.02em; background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; white-space: nowrap; background-color: rgba(245, 241, 236, 0.14); background-image: none; box-shadow: none; color: rgba(245, 241, 236, 0.4); cursor: default;" data-pin-cta="1" data-pin-ready="0">PAY $0.43</div>
+<div style="position: absolute; left: 22px; top: 56px; width: 52px; height: 52px; border-radius: 50%; border-top: 1px solid var(--lift-edge,rgba(255,255,255,.14)); box-shadow: inset 0 2px 0 var(--lift-edge,rgba(255,255,255,.14)),inset 0 -3px 0 var(--sink-edge,rgba(0,0,0,.5)),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; justify-content: center; cursor: pointer;" data-pin-back="1" role="button" aria-label="Back">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink,#F5F1EC)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M19.5 12H5m0 0 6-6m-6 6 6 6">
+</path>
+</svg>
+</div>
 </div>

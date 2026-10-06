@@ -1,9 +1,9 @@
-<!-- amount, cardWd -->
+<!-- amount, a card’s limit, in sats, with no limit under NEXT -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
 <div data-foxy-app="1" data-foxy-theme="true" style="width: 100%; height: 100%; position: relative;">
-<div data-foxy-theme="dark" style="height: 100%; position: relative; box-sizing: border-box; transition: padding .16s ease; --acc-set: #E8622A; --acc-lt-set: #F79A3C; --acc-dk-set: #C24A1B; --acc-rgb-set: 232,98,42; padding-bottom: 0px;">
+<div data-foxy-theme="dark" style="height: 100%; position: relative; box-sizing: border-box; padding-bottom: 0px; transition: padding .16s ease; --acc-set: #E8622A; --acc-lt-set: #F79A3C; --acc-dk-set: #C24A1B; --acc-rgb-set: 232,98,42;">
 <input type="text" tabindex="-1" aria-hidden="true" autocomplete="off" autocapitalize="off" spellcheck="false" style="position: fixed; left: 0px; bottom: 0px; width: 1px; height: 1px; padding: 0px; border: 0px; outline: none; opacity: 0; font-size: 16px; background: transparent; color: transparent; caret-color: transparent; pointer-events: none; z-index: -1;">
 <div data-template="entry" style="height: 100%; display: flex; flex-direction: column; background: var(--bg); font-family: SatSymbol, Figtree, system-ui, sans-serif; animation: foxyIn .22s ease;">
 <div style="background: var(--bg); padding: 56px 22px 0px; box-sizing: border-box; flex: 0 0 auto; display: flex; flex-direction: column;">
@@ -27,20 +27,20 @@
 </div>
 <div style="flex: 1 1 0%; min-height: 0px; display: flex; flex-direction: column; align-items: center; padding: 0px;">
 <div style="flex: 0 0 auto; padding: 3px 24px 16px; font-size: 22px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); text-align: center;">
-<span class="sc-interp">How much to withdraw?</span>
+<span class="sc-interp">The most one PIN entry can spend?</span>
 </div>
 <div style="flex: 0 0 auto; align-self: stretch; height: 1px; background: rgba(var(--ink-rgb),.1); margin: 0px 24px 7px;">
 </div>
-<div style="margin-top: auto; font-size: 54px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.04; color: rgb(255, 92, 92);">
-<span class="sc-interp">$ 3.00</span>
+<div style="margin-top: auto; font-size: 54px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.04; color: var(--acc);">
+<span class="sc-interp">₿ 5,000</span>
 </div>
 <div style="min-height: 30px; margin-top: 6px; font-size: 22px; font-weight: 600; letter-spacing: 0.01em; color: rgba(var(--ink-rgb),.45);">
-<span class="sc-interp">₿ 4,688</span>
+<span class="sc-interp">$ 3.20</span>
 </div>
 <div style="flex: 0 0 auto; height: 78px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 9px; padding: 0px 28px; box-sizing: border-box;">
-<div style="height: 24px; display: flex; align-items: center; justify-content: center; opacity: 1; transition: opacity .18s ease;">
+<div style="height: 24px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .18s ease;">
 <div style="font-size: 18px; font-weight: 800; letter-spacing: 0.01em; color: rgb(255, 92, 92); white-space: nowrap;">
-<span class="sc-interp">MORE THAN THE CARD HOLDS</span>
+<span class="sc-interp">MORE THAN YOUR BALANCE</span>
 </div>
 </div>
 <div style="display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .18s ease; padding: 0px 4px;">
@@ -108,9 +108,9 @@
 <div style="flex: 0 0 auto; height: 14px;">
 </div>
 <div style="flex: 0 0 auto; align-self: stretch; padding: 7px 28px 26px; box-sizing: border-box;">
-<div style="height: 60px; border-radius: 30px; background-color: rgba(var(--ink-rgb),.14); background-image: linear-gradient(100deg, rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0) 66%), none, none, none; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat; background-size: 200% 100%, auto, auto, 150%; background-position: -130% 0px, center center, center center, 50% 34%; animation: none; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.02em; color: rgba(var(--ink-rgb),.4); cursor: pointer; opacity: 1; transition: opacity .22s ease; box-shadow: none;" class="scp7">NEXT</div>
+<div style="height: 60px; border-radius: 30px; background-color: var(--acc); background-image: linear-gradient(100deg, rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0) 66%), radial-gradient(120% 84% at 26% 0%, rgba(255, 240, 220, 0.26), rgba(255, 240, 220, 0) 62%), linear-gradient(168deg, rgba(247, 154, 60, 0.62), rgba(232, 98, 42, 0.72) 48%, rgba(194, 74, 27, 0.78)), url(&quot;foxy-fur.webp&quot;); background-repeat: no-repeat, no-repeat, no-repeat, no-repeat; background-size: 200% 100%, auto, auto, 150%; background-position: -130% 0px, center center, center center, 50% 34%; animation: shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; opacity: 1; transition: opacity .22s ease; box-shadow: inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34);" class="scp7">NEXT</div>
 <div style="margin-top: 10px; height: 56px; border-radius: 28px; background: var(--surface); border: 1.5px solid rgba(var(--ink-rgb),.18); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 18px; font-weight: 800; letter-spacing: 0.03em; color: var(--ink); cursor: pointer;" class="scp3">
-<span class="sc-interp">ALL OF IT (₿0)</span>
+<span class="sc-interp">NO LIMIT</span>
 </div>
 </div>
 </div>

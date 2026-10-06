@@ -4956,12 +4956,15 @@ class Component extends DCLogic {
     });
   }
 
-  /* `o.amount` turns the same pad into one for a number of sats: the figure
-   * where the dots were, any amount above zero where four digits were asked.
-   * `o.alt` is a second answer under the button ({ label, tap }), for a pad
-   * with a choice that is not a number: ALL OF IT, NO LIMIT. Both are the
-   * FLASHCARD screens' (26f-flashcard.js), which ask for a card's PIN and for
-   * amounts with the pad a person has just learnt. */
+  /* Three things a card's PIN pad asks of this one (26f-flashcard.js), none
+   * of which the lock uses:
+   *   `o.warn`  a line already in red when the pad comes up: a wrong PIN, said
+   *             on the pad that asks for it again;
+   *   `o.back`  a back button at the top left, where every screen's is, in
+   *             place of CANCEL at the bottom;
+   *   `o.gate`  the button is grey and does nothing until four digits are in,
+   *             because it says what the PIN will do ("PAY $0.43") and must
+   *             not look ready before it is. */
   pinOverlay(opts) {
     const o = opts || {};
     if (this._pinEl) this._pinEl.remove();
@@ -4977,7 +4980,8 @@ class Component extends DCLogic {
     // delete prompts (2147483600) and the Tor gate (2147483602) included.
     const root = el('position:fixed;inset:0;z-index:2147483647;background:var(--bg,#050505);'
       + 'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;'
-      + 'padding:76px 26px 26px;box-sizing:border-box;'
+      // under the back button's row, where there is one
+      + 'padding:' + (o.back ? '118px' : '76px') + ' 26px 26px;box-sizing:border-box;'
       + 'font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
 
     const title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
@@ -4988,7 +4992,7 @@ class Component extends DCLogic {
     root.appendChild(sub);
 
     // the dots
-    const dots = el('display:flex;gap:14px;margin-top:38px;height:' + (o.amount ? '44px' : '18px') + ';align-items:center');
+    const dots = el('display:flex;gap:14px;margin-top:38px;height:18px;align-items:center');
     root.appendChild(dots);
 
     const note = el('margin-top:18px;min-height:22px;font-size:16px;font-weight:700;'
@@ -5000,12 +5004,6 @@ class Component extends DCLogic {
 
     const paint = () => {
       dots.textContent = '';
-      if (o.amount) {
-        dots.appendChild(el('font-size:40px;font-weight:800;letter-spacing:-0.03em;line-height:1;'
-          + 'color:' + (entry ? 'var(--ink,#F5F1EC)' : 'rgba(245,241,236,.3)'),
-          '\u20bf ' + this.group(Number(entry) || 0)));
-        return;
-      }
       const n = Math.max(entry.length, 4);
       for (let i = 0; i < n; i++) {
         const filled = i < entry.length;
@@ -5015,6 +5013,9 @@ class Component extends DCLogic {
       }
     };
     if (!o.noKeypad) paint();
+    /* Whether the button may be pressed (`o.gate`), drawn with every key. Set
+     * once the button exists, further down. */
+    let ready = () => {};
 
     // the keypad
     /* The whole cell takes the touch, not only the round key drawn in it.
@@ -5067,7 +5068,7 @@ class Component extends DCLogic {
         if (entry.length >= MAXLEN) return;
         entry += String(d);
         note.textContent = '';
-        paint();
+        paint(); ready();
         this.haptic && this.haptic('light');
       }));
     }
@@ -5082,7 +5083,7 @@ class Component extends DCLogic {
     pad.appendChild(key('\u232B', () => {
       entry = entry.slice(0, -1);
       note.textContent = '';
-      paint();
+      paint(); ready();
     }, true));
     /* No keypad when a face is the only way in: there is no PIN to type, and
      * a dead keypad on a lock screen reads as a wallet that will not open. */
@@ -5093,20 +5094,42 @@ class Component extends DCLogic {
       + 'background:var(--acc,#F2802E);color:#fff;display:flex;align-items:center;'
       + 'justify-content:center;font-size:19px;font-weight:800;letter-spacing:0.02em;'
       + 'cursor:pointer', o.cta || 'CONTINUE');
+    if (o.gate) {
+      cta.setAttribute('data-pin-cta', '1');
+      /* The SET AMOUNT screen's NEXT, to the pixel: the same width, height,
+       * type and fur when it can be pressed, and the same grey when it
+       * cannot (build/markup.html, `next`). */
+      cta.style.cssText = 'margin-top:16px;align-self:stretch;margin-left:2px;margin-right:2px;height:60px;'
+        + 'border-radius:30px;display:flex;align-items:center;justify-content:center;'
+        + 'font-family:SatSymbol,Sora,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.02em;'
+        + 'background-repeat:no-repeat,no-repeat,no-repeat;background-size:auto,auto,150% auto;'
+        + 'background-position:center,center,50% 34%;white-space:nowrap';
+      const FUR = 'radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),'
+        + 'linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),'
+        + "url('foxy-fur.webp')";
+      ready = () => {
+        const on = entry.length >= 4;
+        cta.style.backgroundColor = on ? 'var(--acc,#E8622A)' : 'rgba(245,241,236,.14)';
+        cta.style.backgroundImage = on ? FUR : 'none';
+        cta.style.boxShadow = on
+          ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(232,98,42,.34)' : 'none';
+        cta.style.color = on ? '#fff' : 'rgba(245,241,236,.4)';
+        cta.style.cursor = on ? 'pointer' : 'default';
+        cta.setAttribute('data-pin-ready', on ? '1' : '0');
+      };
+      ready();
+    }
     cta.addEventListener('click', () => {
       // with no keypad the button IS the face: it asks again
       if (o.noKeypad) { if (o.face) o.face(); return; }
-      if (o.amount && !(Number(entry) > 0)) {
-        note.textContent = 'Type an amount.';
-        return;
-      }
-      if (!o.amount && entry.length < 4) {
-        note.textContent = 'At least four digits.';
+      if (entry.length < 4) {
+        // a gated button says nothing: it is grey, and that is the saying
+        if (!o.gate) note.textContent = 'At least four digits.';
         return;
       }
       const value = entry;
       entry = '';
-      paint();
+      paint(); ready();
       o.onSubmit(value, (message) => { note.textContent = message; });
     });
     root.appendChild(cta);
@@ -5129,21 +5152,29 @@ class Component extends DCLogic {
       }
     }
 
-    if (o.alt && o.alt.label) {
-      const alt = el('margin-top:10px;width:100%;max-width:300px;height:52px;'
-        + 'border-radius:26px;border:1.5px solid rgba(245,241,236,.2);'
-        + 'display:flex;align-items:center;justify-content:center;font-size:17px;'
-        + 'font-weight:800;letter-spacing:0.02em;color:var(--ink,#F5F1EC);cursor:pointer', o.alt.label);
-      alt.addEventListener('click', () => { if (o.alt.tap) o.alt.tap(); });
-      root.appendChild(alt);
-    }
-
     if (o.onCancel) {
       const back = el('margin-top:8px;height:46px;display:flex;align-items:center;'
         + 'justify-content:center;font-size:17px;font-weight:700;'
         + 'color:rgba(245,241,236,.5);cursor:pointer', 'CANCEL');
       back.addEventListener('click', () => { root.remove(); this._pinEl = null; o.onCancel(); });
       root.appendChild(back);
+    }
+
+    /* Back, at the top left, as on every screen: the same round button, in
+     * the same place. Added last so the pad's own parts keep their order. */
+    if (o.back) {
+      const b = el('position:absolute;left:22px;top:56px;width:52px;height:52px;border-radius:50%;'
+        + 'background:linear-gradient(180deg,var(--lift,#2A2B2E),var(--sink,#151618)),var(--chip,#1C1D20);'
+        + 'border-top:1px solid var(--lift-edge,rgba(255,255,255,.14));'
+        + 'box-shadow:inset 0 2px 0 var(--lift-edge,rgba(255,255,255,.14)),inset 0 -3px 0 var(--sink-edge,rgba(0,0,0,.5)),0 8px 16px rgba(0,0,0,.34);'
+        + 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;cursor:pointer');
+      b.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink,#F5F1EC)" '
+        + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12H5m0 0 6-6m-6 6 6 6"></path></svg>';
+      b.setAttribute('data-pin-back', '1');
+      b.setAttribute('role', 'button');
+      b.setAttribute('aria-label', 'Back');
+      b.addEventListener('click', () => { root.remove(); this._pinEl = null; o.back(); });
+      root.appendChild(b);
     }
 
     document.body.appendChild(root);
@@ -11653,8 +11684,14 @@ class Component extends DCLogic {
     const btcAvailUsd = balLive.sats * this.satUsd();
     // on chain as well: its keypad took any figure and left the refusal to
     // the confirmation, a screen and a fee quote later
-    const capped = s.flow === 'send' || s.flow === 'onchain';
-    const sendCapUsd = capped ? btcAvailUsd : 0;
+    /* A card's amounts are typed on the same keypad (26f-flashcard.js), and
+     * two of them have a ceiling it can say under the figure: adding to a
+     * card is out of this phone's balance, and withdrawing is out of what the
+     * card holds. */
+    const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardWd';
+    const sendCapUsd = !capped ? 0
+      : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
     const overLimit = s.flow === 'send' && sendEnteredUsd > SEND_DAY_LIMIT + 0.005;
@@ -11677,7 +11714,8 @@ class Component extends DCLogic {
      * block, with its own words. */
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
-    const sendHeld = (sendOver && !overLimit && this.heldBlocks) ? this.heldBlocks(overBySats) : '';
+    // what is held with the mint is this phone's balance; a card's is its own
+    const sendHeld = (sendOver && !overLimit && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }
 
@@ -12057,10 +12095,23 @@ class Component extends DCLogic {
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to add to your card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
+        : s.flow === 'cardLimit' ? 'The most one PIN entry can spend?'
         : s.flow === 'receive' ? 'How much to receive?'
         : 'How much to send?',
       hideSkip: true,
+      /* A second answer under NEXT, for the two card questions that have one
+       * that is not a number: everything on the card, and no limit at all
+       * (26f-flashcard.js). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
+      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
+        : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
+      amtAltTap: () => {
+        if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
+        else if (this.state.flow === 'cardLimit') this.fcLimitPin(0);
+      },
       next: () => {
+        // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
+        if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }
         /* Over the balance already has its own line under the amount
@@ -12152,7 +12203,8 @@ class Component extends DCLogic {
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
-      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
+      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT'
+        : s.flow === 'cardWd' ? 'MORE THAN THE CARD HOLDS' : 'MORE THAN YOUR BALANCE',
     };
   }
 
@@ -17696,6 +17748,22 @@ class Component extends DCLogic {
 
   fcSats(n) { return '₿' + this.group(Math.round(Number(n) || 0)); }
 
+  /* An amount for a button or a sentence: dollars where this phone has a
+   * price to say them at, the sats where it has not, and the sats too for an
+   * amount under half a cent, which in dollars would read as nothing. */
+  fcPrice(n) {
+    const sats = Math.round(Number(n) || 0);
+    const usd = (sats / 1e8) * ((this.px && this.px()) || 0);
+    return usd >= 0.005 ? '$' + this.usd(usd) : this.fcSats(sats);
+  }
+
+  /* The same with the sats after it: "$1.28 (₿1,499)". */
+  fcBoth(n) {
+    const sats = Math.round(Number(n) || 0);
+    const usd = (sats / 1e8) * ((this.px && this.px()) || 0);
+    return usd >= 0.005 ? '$' + this.usd(usd) + ' (' + this.fcSats(sats) + ')' : this.fcSats(sats);
+  }
+
   /* A piece's date, as a day. Written out here and not left to the phone's
    * region, so the same card reads the same on every phone. */
   fcDay(secs) {
@@ -17703,10 +17771,17 @@ class Component extends DCLogic {
     return d.getDate() + ' ' + this.FC_MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   }
 
+  /* FLASHCARD in the menu asks for the card at once: the phone's own sheet
+   * comes up with no screen of ours to read first. A card tapped, and the
+   * screen is that card. The sheet dismissed, and what is left is the screen
+   * with no card on it, which is where the cards this phone loaded are
+   * listed: a lost card cannot be tapped, and that list is how its money is
+   * taken back. */
   goFlashcard() {
     // a card read on an earlier visit is not shown again: it may be somebody else's
     this._fcCard = null;
     this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
+    this.fcRead();
   }
 
   /* ---- one tap ------------------------------------------------------------
@@ -17756,7 +17831,11 @@ class Component extends DCLogic {
     if (b) b.style.visibility = step === 'hold' ? 'visible' : 'hidden';
   }
 
-  /* A card's PIN, on the pad the lock uses. `o`: title, subtitle, warn. */
+  /* A card's PIN, on the pad the lock uses. `o`: title, subtitle, warn, and
+   * `cta`, what the button says: it names the thing the PIN is for ("PAY
+   * $0.43"), and it cannot be pressed until four digits are in. The way out
+   * is a back button at the top left, where every screen's is; `o.onBack`
+   * runs after it. */
   fcAskPin(o, then) {
     const opt = o || {};
     this.pinOverlay({
@@ -17764,29 +17843,55 @@ class Component extends DCLogic {
       subtitle: opt.subtitle || '',
       warn: opt.warn || '',
       cta: opt.cta || 'NEXT',
-      onCancel: () => { if (opt.onCancel) opt.onCancel(); },
+      gate: true,
+      back: () => { if (opt.onBack) opt.onBack(); },
       onSubmit: (pin) => { this.pinDismiss(); then(pin); },
     });
   }
 
-  /* An amount of sats, on the same pad. `o.most` is the most that can be
-   * typed, with `o.mostSays` to say why not; `o.alt` a second answer. */
-  fcAskSats(o, then) {
-    const opt = o || {};
-    this.pinOverlay({
-      amount: true,
-      title: opt.title || 'AMOUNT',
-      subtitle: opt.subtitle || '',
-      cta: opt.cta || 'NEXT',
-      alt: opt.alt ? { label: opt.alt.label, tap: () => { this.pinDismiss(); opt.alt.tap(); } } : null,
-      onCancel: () => {},
-      onSubmit: (value, warn) => {
-        const sats = Math.round(Number(value) || 0);
-        if (opt.most != null && sats > opt.most) { warn(opt.mostSays || 'That is too much.'); return; }
-        this.pinDismiss();
-        then(sats);
-      },
-    });
+  /* An amount for a card, typed where every other amount in Foxy is typed:
+   * the SET AMOUNT screen, with its dollars first, its swap to sats, its 00
+   * key, the back button at the top and NEXT at the bottom. `flow` says which
+   * question is being asked ('cardAdd', 'cardWd', 'cardLimit'); NEXT comes
+   * back through `fcAmountNext`. */
+  fcAmount(flow) {
+    this.setState(p => ({
+      // one keypad at a time: asked from another card question's keypad, this takes its place
+      screen: 'amount', stack: p.screen === 'amount' ? p.stack : p.stack.concat([p.screen]), flow,
+      // dollars, as the receive flow starts; sats where there is no price to say dollars at
+      amount: '', unit: this.px() ? 'USD' : 'SATS',
+      asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
+    }));
+  }
+
+  fcAmountNext() {
+    const flow = String(this.state.flow);
+    const fc = this.state.fc;
+    const sats = this.wantedSats();
+    if (!fc) { this.back(); return; }
+    if (!(sats > 0)) { this.toast('Type an amount first.', true); return; }
+    /* In sats, whatever the screen was typed in. The line under the figure
+     * says the same thing in red, but it is worked out in dollars and has
+     * nothing to say with no price. */
+    const have = Math.floor(this.balNow().sats || 0);
+    if (flow === 'cardAdd' && sats > have) { this.toast('You have ' + this.fcBoth(have) + '.', true); return; }
+    if (flow === 'cardWd' && sats > fc.balance) { this.toast('The card holds ' + this.fcBoth(fc.balance) + '.', true); return; }
+    /* The PIN pad goes up over the keypad, which stays where it is: back
+     * from the pad is back to the amount, still typed. The keypad is left
+     * only when the PIN has been given (`fcLeaveAmount`). */
+    if (flow === 'cardAdd') this.fcAddPin(sats);
+    else if (flow === 'cardWd') this.fcWithdrawPin(sats);
+    else if (flow === 'cardLimit') this.fcLimitPin(sats);
+  }
+
+  /* Off the keypad and back to the card's own screen, once an amount has
+   * been taken from it. */
+  fcLeaveAmount() {
+    if (this.state.screen !== 'amount' || !/^card/.test(String(this.state.flow))) return;
+    this.setState(p => ({
+      screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1),
+      flow: 'receive', amount: '', unit: 'USD',
+    }));
   }
 
   /* ---- what went wrong, as a card --------------------------------------------
@@ -17921,7 +18026,8 @@ class Component extends DCLogic {
   fcPayAsk(sats) {
     this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: 'To pay ' + this.fcSats(sats) + '. The card’s owner types its PIN here.',
+      subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
+      cta: 'PAY ' + this.fcPrice(sats),
     }, (pin) => this.fcPayRun(sats, pin));
   }
 
@@ -17966,7 +18072,8 @@ class Component extends DCLogic {
     const owed = this.fcOwed().reduce((n, r) => n + r.sats, 0);
     this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: owed > 0 ? 'To put ' + this.fcSats(owed) + ' on the card.' : 'To write to the card.',
+      subtitle: owed > 0 ? 'To put ' + this.fcBoth(owed) + ' on the card.' : 'To write to the card.',
+      cta: owed > 0 ? 'PUT ' + this.fcPrice(owed) + ' ON CARD' : 'WRITE TO CARD',
     }, (pin) => this.fcWriteRun(pin, opt));
   }
 
@@ -18133,16 +18240,15 @@ class Component extends DCLogic {
    * no longer. A tap that fails leaves them owed to the card. */
   fcAdd() {
     if (!this.fcReady('Adding funds')) return;
-    const fc = this.state.fc;
-    const have = Math.floor(this.balNow().sats || 0);
-    this.fcAskSats({
-      title: 'ADD FUNDS',
-      subtitle: 'You have ' + this.fcSats(have) + '. The card has room for ' + fc.room + ' more piece' + (fc.room === 1 ? '' : 's') + '.',
-      most: have, mostSays: 'You have ' + this.fcSats(have) + '.',
-    }, (sats) => this.fcAskPin({
+    this.fcAmount('cardAdd');
+  }
+
+  fcAddPin(sats) {
+    this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: 'To add ' + this.fcSats(sats) + ' to the card.',
-    }, (pin) => this.fcAddRun(sats, pin)));
+      subtitle: 'To add ' + this.fcBoth(sats) + ' to the card.',
+      cta: 'ADD ' + this.fcPrice(sats) + ' TO CARD',
+    }, (pin) => { this.fcLeaveAmount(); this.fcAddRun(sats, pin); });
   }
 
   fcAddRun(sats, pin) {
@@ -18173,30 +18279,30 @@ class Component extends DCLogic {
     if (!fc || !fc.limit || !(sats > fc.limit)) return false;
     this.blockedCard('fc-limit', {
       tone: 'warn', title: 'OVER THE CARD\u2019S LIMIT',
-      reason: 'One PIN entry can spend ' + this.fcSats(fc.limit) + ' of this card. Take the limit off first, or move less.',
+      reason: 'One PIN entry can spend ' + this.fcBoth(fc.limit) + ' of this card. Take the limit off first, or move less.',
       retry: 'SET LIMIT', go: () => this.fcSetLimit(), shut: { label: 'CANCEL' },
     });
     return true;
   }
 
-  /* ---- withdraw ------------------------------------------------------------ */
+  /* ---- withdraw --------------------------------------------------------------
+   * An amount on the keypad, or ALL OF IT, which is the button under its
+   * NEXT (23-render-home-and-amount.js). */
   fcWithdraw() {
     if (!this.fcReady('Withdrawing')) return;
     const fc = this.state.fc;
     if (!(fc.balance > 0)) { this.toast('There is nothing on this card.', true); return; }
-    const pin = (sats) => {
-      if (this.fcOverLimit(sats || fc.balance)) return;
-      this.fcAskPin({
-        title: 'ENTER PIN TO WITHDRAW',
-        subtitle: (sats ? this.fcSats(sats) : 'Everything') + ' from the card to this phone.',
-      }, (p) => this.fcWithdrawRun(sats, p));
-    };
-    this.fcAskSats({
-      title: 'WITHDRAW',
-      subtitle: 'The card holds ' + this.fcSats(fc.balance) + '.',
-      most: fc.balance, mostSays: 'The card holds ' + this.fcSats(fc.balance) + '.',
-      alt: { label: 'ALL OF IT (' + this.fcSats(fc.balance) + ')', tap: () => pin(0) },
-    }, (sats) => pin(sats));
+    this.fcAmount('cardWd');
+  }
+
+  fcWithdrawPin(sats) {
+    const fc = this.state.fc;
+    if (!fc || this.fcOverLimit(sats || fc.balance)) return;
+    this.fcAskPin({
+      title: 'ENTER PIN TO WITHDRAW',
+      subtitle: (sats ? this.fcBoth(sats) : 'Everything') + ' from the card to this phone.',
+      cta: sats ? 'WITHDRAW ' + this.fcPrice(sats) : 'WITHDRAW ALL',
+    }, (p) => { this.fcLeaveAmount(); this.fcWithdrawRun(sats, p); });
   }
 
   fcWithdrawRun(sats, pin) {
@@ -18245,24 +18351,26 @@ class Component extends DCLogic {
     this.fcAskPin({ title: 'CURRENT PIN', subtitle: 'The card’s PIN as it is now.' }, (old) => fresh(old, ''));
   }
 
+  /* An amount on the keypad, or NO LIMIT, the button under its NEXT. */
   fcSetLimit() {
-    const fc = this.state.fc;
-    if (!fc) return;
+    if (!this.state.fc) return;
+    this.fcAmount('cardLimit');
+  }
+
+  fcLimitPin(sats) {
     const W = this.fcW();
-    const run = (sats) => this.fcAskPin({
+    this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: sats ? 'To let one PIN entry spend up to ' + this.fcSats(sats) + '.' : 'To take the limit off.',
-    }, (pin) => this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { pin, sats }); })
-      .then((card) => {
-        this.fcShow(card);
-        this.toast(sats ? 'Limit set.' : 'No limit.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetLimit() })));
-    this.fcAskSats({
-      title: 'SET LIMIT',
-      subtitle: 'The most a till can take for one typing of the PIN.'
-        + (fc.limit ? ' Now ' + this.fcSats(fc.limit) + '.' : ''),
-      alt: { label: 'NO LIMIT', tap: () => run(0) },
-    }, (sats) => run(sats));
+      subtitle: sats ? 'To let one PIN entry spend up to ' + this.fcBoth(sats) + '.' : 'To take the limit off.',
+      cta: sats ? 'SET LIMIT' : 'REMOVE LIMIT',
+    }, (pin) => {
+      this.fcLeaveAmount();
+      this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { pin, sats }); })
+        .then((card) => {
+          this.fcShow(card);
+          this.toast(sats ? 'Limit set.' : 'No limit.');
+        }, (e) => this.fcFailed(e, { again: () => this.fcSetLimit() }));
+    });
   }
 
   /* Everything off the card and on again, which is the only way its pieces
@@ -18274,7 +18382,8 @@ class Component extends DCLogic {
     if (this.fcOverLimit(fc.balance)) return;
     this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: 'To renew ' + this.fcSats(fc.balance) + ' for another year.',
+      subtitle: 'To renew ' + this.fcBoth(fc.balance) + ' for another year.',
+      cta: 'RENEW',
     }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), body: 'This takes longer than a payment. Keep the card there.' },
       (link, on) => W.cardRenew(link, { pin, on }))
       .then((r) => {
@@ -18361,7 +18470,9 @@ class Component extends DCLogic {
     /* What this phone owes cards, first and in the warning colour: it is the
      * one thing on this screen that is waiting on the person. */
     const notes = !on ? [] : this.fcOwed().map(r => ({
-      text: this.fcSats(r.sats) + ' is waiting to go onto ' + this.fcName(r.key) + '. Tap the card to finish.',
+      // the card on screen is "this card"; any other is named, since its name is shown nowhere else
+      text: this.fcSats(r.sats) + ' is waiting to go onto '
+        + ((fc && fc.key === r.key) ? 'this card. Press here, then tap it.' : this.fcName(r.key) + '. Press here, then tap that card.'),
       tap: () => this.fcWriteAsk({}),
     }));
 
@@ -18369,7 +18480,8 @@ class Component extends DCLogic {
       name: this.fcName(r.key),
       sub: r.takenBack ? 'Taken back'
         : r.sats ? this.fcSats(r.sats) + ' when last seen' : 'Empty when last seen',
-      text: r.takenBack ? '' : (r.due && r.sats > 0) ? 'TAKE BACK' : r.date ? 'after ' + this.fcDay(r.date) : '',
+      // only what can be done; the date it waits for is said when the row is opened
+      text: (!r.takenBack && r.due && r.sats > 0) ? 'TAKE BACK' : '',
       ink: (r.due && r.sats > 0 && !r.takenBack) ? 'var(--acc-ink)' : DIM,
       tap: () => this.fcRowCard(r),
     }));
@@ -18380,54 +18492,66 @@ class Component extends DCLogic {
     const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
     const past = near && fc.first <= now;
 
-    const chip = !fc ? ['', DIM, 'transparent']
-      : blocked ? ['BLOCKED', RED, 'rgba(255,92,92,.14)']
-      : fc.pin === 'none' ? ['NO PIN YET', AMBER, 'rgba(247,147,26,.14)']
-      : !fc.hasRecord ? ['NOT FINISHED', AMBER, 'rgba(247,147,26,.14)']
-      : fc.locked ? ['LOCKED', AMBER, 'rgba(247,147,26,.14)']
-      : ['PIN SET', 'rgba(var(--ink-rgb),.7)', 'rgba(var(--ink-rgb),.08)'];
-
-    const check = !fc ? ['', DIM]
-      : fc.check === 'asking' ? ['Checking with the mint…', DIM]
-      : fc.check === 'ok' ? ['Checked with the mint', DIM]
-      : fc.check === 'off' ? ['Not checked: no connection', AMBER]
-      : fc.check === 'other' ? ['Not checked: this phone is at another mint', AMBER]
-      : (fc.check && fc.check.spent) ? ['The mint says ' + this.fcSats(fc.check.spent) + ' of this is already spent', RED]
-      : ['', DIM];
+    /* One line of status, engraved at the card's top right. The card's own
+     * state comes first where it is not the ordinary one (a card that is
+     * blocked, new, or locked), and otherwise the mint's word on what it says
+     * it holds. The card is drawn dark whatever the app's theme, so its inks
+     * are its own. */
+    const ON_CARD = 'rgba(255,255,255,.46)';
+    const word = !fc ? ''
+      : fc.check === 'asking' ? 'Checking with the mint\u2026'
+      : fc.check === 'ok' ? 'Checked with the mint'
+      : fc.check === 'off' ? 'Not checked: no connection'
+      : fc.check === 'other' ? 'Not checked: another mint'
+      : '';
+    const check = !fc ? ['', ON_CARD]
+      : blocked ? ['Blocked', RED]
+      : (fc.check && fc.check.spent) ? ['The mint says ' + this.fcSats(fc.check.spent) + ' is already spent', RED]
+      : fc.pin === 'none' ? ['No PIN yet', AMBER]
+      : !fc.hasRecord ? ['Not finished', AMBER]
+      : fc.locked ? ['Locked' + (word ? ' \u00b7 ' + word : ''), AMBER]
+      : [word, (fc.check === 'off' || fc.check === 'other') ? AMBER : ON_CARD];
 
     const facts = [];
     if (fc && fc.hasRecord) {
       // its address, as the card has it: a name made from it would read the same for a look-alike
-      facts.push({ label: 'MINT', value: String(fc.mint).replace(/^https?:\/\//, ''), ink: 'var(--ink)' });
-      facts.push({ label: 'HOLDS', value: fc.count + ' piece' + (fc.count === 1 ? '' : 's') + ' · ' + fc.room + ' place' + (fc.room === 1 ? '' : 's') + ' free', ink: 'var(--ink)' });
+      facts.push({ label: 'Mint', value: String(fc.mint).replace(/^https?:\/\//, ''), ink: 'var(--ink)' });
+      facts.push({ label: 'Holds', value: fc.count + ' piece' + (fc.count === 1 ? '' : 's') + ' · ' + fc.room + ' place' + (fc.room === 1 ? '' : 's') + ' free', ink: 'var(--ink)' });
       facts.push(!fc.recoverable
-        ? { label: 'IF LOST', value: 'Not recoverable: this card is cash', ink: 'var(--ink)' }
-        : past ? { label: 'IF LOST', value: 'Its date has passed. Take it back from CARDS YOU LOADED.', ink: RED }
-        : near ? { label: 'IF LOST', value: 'Renew by ' + this.fcDay(fc.first), ink: AMBER }
-        : fc.mine ? { label: 'IF LOST', value: fc.last ? 'This phone can take it back after ' + this.fcDay(fc.last) : 'This phone can take it back, a year after it is loaded', ink: 'var(--ink)' }
-        : { label: 'IF LOST', value: 'The phone that loaded it can take it back' + (fc.last ? ' after ' + this.fcDay(fc.last) : ''), ink: 'var(--ink)' });
-      facts.push({ label: 'LIMIT', value: fc.limit ? 'One PIN entry can spend ' + this.fcSats(fc.limit) : 'No limit', ink: 'var(--ink)' });
+        ? { label: 'If lost', value: 'Not recoverable: this card is cash', ink: 'var(--ink)' }
+        : past ? { label: 'If lost', value: 'Its date has passed. Take it back from CARDS YOU LOADED.', ink: RED }
+        : near ? { label: 'If lost', value: 'Renew by ' + this.fcDay(fc.first), ink: AMBER }
+        : fc.mine ? { label: 'If lost', value: fc.last ? 'This phone can take it back after ' + this.fcDay(fc.last) : 'This phone can take it back, a year after it is loaded', ink: 'var(--ink)' }
+        : { label: 'If lost', value: 'The phone that loaded it can take it back' + (fc.last ? ' after ' + this.fcDay(fc.last) : ''), ink: 'var(--ink)' });
+      facts.push({ label: 'Limit', value: fc.limit ? 'One PIN entry can spend ' + this.fcSats(fc.limit) : 'No limit', ink: 'var(--ink)' });
     }
 
+    /* The smaller things to do with a card, as round buttons like home's:
+     * a lock for its PIN, a dial for its limit, and, in its last month, the
+     * arrow that goes round for RENEW. */
     const links = !usable ? [] : [
-      { label: 'CHANGE PIN', ink: DIM, tap: () => this.fcChangePin() },
-      { label: 'SET LIMIT', ink: DIM, tap: () => this.fcSetLimit() },
-    ].concat((near && !past && fc.balance > 0) ? [{ label: 'RENEW', ink: AMBER, tap: () => this.fcRenew() }] : []);
+      { label: 'CHANGE PIN', ink: 'var(--ink)', says: 'var(--ink)', tap: () => this.fcChangePin(),
+        path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
+      { label: 'SET LIMIT', ink: 'var(--ink)', says: 'var(--ink)', tap: () => this.fcSetLimit(),
+        path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
+    ].concat((near && !past && fc.balance > 0) ? [{ label: 'RENEW', ink: AMBER, says: AMBER, tap: () => this.fcRenew(),
+        path: 'M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.4 4.6v4.2h4.2M12 7.6V12l3 1.8' }] : []);
 
     const px = this.px ? this.px() : 0;
     return {
       isFlashcard: on,
-      fcSub: fc ? this.fcName(fc.key) + (fc.mine ? ' · this phone can take it back' : '')
-        : 'Ecash on a card, spent with a tap and a PIN.',
+      // a card that has been read says what it is on its own face
+      fcSub: fc ? '' : 'Ecash on a card, spent with a tap and a PIN.',
       fcNone: on && !fc,
       fcHas: !!fc,
       fcNotes: notes,
       fcHasRows: rows.length > 0,
       fcRows: rows,
-      fcBalance: fc ? '₿ ' + this.group(fc.balance) : '',
-      fcShowAlt: !!fc && px > 0 && fc.balance > 0,
-      fcBalanceAlt: (fc && px > 0) ? '$ ' + this.usd((fc.balance / 1e8) * px) : '',
-      fcChip: chip[0], fcChipInk: chip[1], fcChipBg: chip[2],
+      /* Dollars first and the sats under them, as on home. With no price to
+       * say dollars at, the sats are the figure and there is no second line. */
+      fcBalance: !fc ? '' : px > 0 ? '$ ' + this.usd((fc.balance / 1e8) * px) : '\u20bf ' + this.group(fc.balance),
+      fcShowAlt: !!fc && px > 0,
+      fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(fc.balance) : '',
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       fcFacts: facts,
@@ -18442,7 +18566,6 @@ class Component extends DCLogic {
       fcUsable: usable,
       fcLinks: links,
       fcTap: () => this.fcRead(),
-      fcTapLabel: fc ? 'TAP ANOTHER CARD' : 'TAP CARD',
       fcAdd: () => this.fcAdd(),
       fcWithdraw: () => this.fcWithdraw(),
       fcSetUp: () => this.fcSetUp(),

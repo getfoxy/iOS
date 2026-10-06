@@ -40,7 +40,7 @@ function appOn(ctx, start) {
   a.toast = (m) => a.toasts.push(m);
   a.group = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   a.haptic = () => {};
-  a.px = () => 0;
+  a.px = () => a.price || 0;
   a.usd = (v) => v.toFixed(2);
   a.BLOCKED_INFO = () => null;
   a.offlineNow = () => !!a.offline;
@@ -54,7 +54,14 @@ function appOn(ctx, start) {
   a.closeReceive = () => { a.state.screen = 'home'; };
   a.noteReceived = () => {};
   a.txIsNew = (h) => { const fresh = !a.seen[h]; a.seen[h] = true; return fresh; };
-  a.wantedSats = () => a.asking || 0;
+  // the SET AMOUNT screen's own sum (12-receive.js), for the card's amounts; the till's is the invoice's
+  a.wantedSats = () => {
+    if (a.state.screen !== 'amount' || !/^card/.test(String(a.state.flow))) return a.asking || 0;
+    const val = parseFloat(a.state.amount) || 0;
+    if (a.state.unit === 'SATS') return Math.round(val);
+    return a.px() ? Math.round(val / a.px() * 1e8) : 0;
+  };
+  a.back = () => { const st = a.state.stack; a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1); };
   return a;
 }
 
@@ -76,10 +83,15 @@ function pad(a) {
   const find = (text) => leaves(root).filter((d) => d.textContent === text)[0];
   return {
     title: kids[0].textContent, sub: kids[1].textContent, note: kids[3].textContent, figure: kids[2].textContent,
-    type(digits, cta) {
+    // what its button says, and whether it can be pressed yet
+    cta: root.querySelector('[data-pin-cta]').textContent,
+    ready: root.querySelector('[data-pin-cta]').getAttribute('data-pin-ready') === '1',
+    hasCancel: !!find('CANCEL'),
+    type(digits) {
       String(digits).split('').forEach((d) => click(find(d).parentNode));
-      click(find(cta || 'NEXT'));
+      click(root.querySelector('[data-pin-cta]'));
     },
+    back() { click(root.querySelector('[data-pin-back]')); },
     press(label) { click(find(label)); },
     has(label) { return !!find(label); },
   };
@@ -99,6 +111,8 @@ function card(a) {
 const stage = (ctx) => { const el = ctx.window.document.getElementById('foxy-stage'); return el ? el.getAttribute('data-stage') : ''; };
 const vals = (a) => a.renderFlashcard({ s: a.state, sc: a.state.screen });
 const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
+/* An amount typed on the SET AMOUNT screen, in sats, and NEXT pressed. */
+const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
 
 (async () => {
   const H = await funded({}, 6000);
@@ -110,9 +124,11 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 
   /* ---- MENU > FLASHCARD, and a new card ------------------------------------ */
   holder.goFlashcard();
+  ok(H.sheet.length === 1 && /^begin: Hold the card/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
+  await settle();
   let v = vals(holder);
-  ok(holder.state.screen === 'flashcard' && v.isFlashcard && v.fcNone && !v.fcHas && v.fcRows.length === 0 && v.fcNotes.length === 0,
-     'the screen opens asking for a card, with nothing else on it');
+  ok(holder.state.screen === 'flashcard' && v.isFlashcard && v.fcNone && !v.fcHas && v.fcRows.length === 0 && v.fcNotes.length === 0 && !card(holder),
+     'the sheet dismissed, what is left is the screen with no card on it, and nothing over it');
   H.nfc = null;
   holder.fcRead();
   await settle();
@@ -121,15 +137,16 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   holder.fcRead();
   await until('the new card to be read', () => !!holder.state.fc);
   v = vals(holder);
-  ok(v.fcHas && v.fcNew && !v.fcUsable && v.fcChip === 'NO PIN YET' && v.fcBalance === '₿ 0' && !stage(H),
-     'a card out of its packet reads as new, with one thing to do', v.fcChip);
+  ok(v.fcHas && v.fcNew && !v.fcUsable && v.fcCheck === 'No PIN yet' && v.fcBalance === '₿ 0' && v.fcSub === '' && !stage(H),
+     'a card out of its packet reads as new, with one thing to do', v.fcCheck);
   ok(H.sheet.join(' / ').indexOf('begin: Hold the card to the top of the phone') >= 0 && H.sheet.indexOf('say: Reading the card') >= 0 && H.sheet.indexOf('end: Done') >= 0,
      'and the phone’s own sheet was told what was happening', H.sheet.slice(-3).join(' / '));
 
   holder.fcSetUp();
   ok(pad(holder).title === 'CHOOSE A PIN', 'setting it up starts with a PIN');
+  ok(pad(holder).ready === false && !pad(holder).hasCancel, 'its button is grey until there is a PIN to give, and the way out is the back button at the top');
   pad(holder).type('123');
-  ok(pad(holder).note === 'At least four digits.' && pad(holder).title === 'CHOOSE A PIN', 'of four digits or more');
+  ok(pad(holder).title === 'CHOOSE A PIN' && pad(holder).ready === false && pad(holder).note === '', 'three digits and the button still does nothing');
   pad(holder).type('4');
   ok(pad(holder).title === 'TYPE IT AGAIN', 'typed twice');
   pad(holder).type('1235');
@@ -142,20 +159,26 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   card(holder).press('RECOVERABLE');
   await until('the card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
   v = vals(holder);
-  ok(v.fcUsable && !v.fcNew && v.fcChip === 'PIN SET' && holder.state.fc.mine && holder.state.fc.recoverable,
+  ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && holder.state.fc.mine && holder.state.fc.recoverable,
      'one tap later it is this phone’s card, with a PIN, and recoverable');
-  ok(v.fcFacts.map((f) => f.label).join() === 'MINT,HOLDS,IF LOST,LIMIT' && /This phone can take it back/.test(v.fcFacts[2].value) && v.fcFacts[3].value === 'No limit',
+  ok(v.fcFacts.map((f) => f.label).join() === 'Mint,Holds,If lost,Limit' && /This phone can take it back/.test(v.fcFacts[2].value) && v.fcFacts[3].value === 'No limit',
      'and the screen says where its money is, what it holds, what happens if it is lost, and its limit', v.fcFacts.map((f) => f.value).join(' / '));
 
   /* ---- add funds -------------------------------------------------------------- */
   c.tap();
   card(holder).press('ADD FUNDS');
-  ok(pad(holder) && pad(holder).title === 'ADD FUNDS' && /You have ₿6,000/.test(pad(holder).sub), 'ADD FUNDS asks how much, and says what there is', pad(holder) && pad(holder).sub);
-  pad(holder).type('99999');
-  ok(pad(holder).title === 'ADD FUNDS' && pad(holder).note === 'You have ₿6,000.', 'more than the phone holds is refused on the pad');
-  pad(holder).type('2000');
-  ok(pad(holder).title === 'CARD PIN' && /add ₿2,000/.test(pad(holder).sub), 'then the card’s PIN', pad(holder).sub);
+  ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'SATS' && holder.state.stack.slice(-1)[0] === 'flashcard',
+     'ADD FUNDS asks how much on the SET AMOUNT screen (in sats here: this phone has no price to say dollars at)');
+  keyIn(holder, 99999);
+  ok(!pad(holder) && holder.state.screen === 'amount' && holder.toasts.indexOf('You have ₿6,000.') >= 0, 'more than the phone holds goes no further');
+  keyIn(holder, 2000);
+  ok(pad(holder).title === 'CARD PIN' && /add ₿2,000/.test(pad(holder).sub) && pad(holder).cta === 'ADD ₿2,000 TO CARD' && holder.state.screen === 'amount',
+     'then the card\u2019s PIN, on a pad whose button says what it will do', pad(holder).cta);
+  pad(holder).back();
+  ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.amount === '2000', 'back from the PIN is back to the amount, still typed');
+  holder.fcAmountNext();
   pad(holder).type('1234');
+  ok(holder.state.screen === 'flashcard', 'the PIN given, the keypad is left for the card\u2019s own screen');
   await until('the money to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
   ok(c.balance() === 2000 && /₿2,000 went onto the card. It now holds ₿2,000\./.test(card(holder).reason) && holder.state.fc.balance === 2000,
      'and 2,000 sats are on it, and the screen says so', card(holder).reason);
@@ -167,14 +190,20 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 
   // a wrong PIN: the pieces are made and wait, and the screen says so wherever it is opened
   c.tap();
+  // with a price, the keypad opens in dollars and the button says dollars
+  holder.price = 100000;
   holder.fcAdd();
-  pad(holder).type('500');
+  ok(holder.state.unit === 'USD', 'where the phone has a price, the amount is asked in dollars first');
+  holder.state.amount = '0.50';
+  holder.fcAmountNext();
+  ok(pad(holder).cta === 'ADD $0.50 TO CARD' && /add \$0\.50 \(₿500\)/.test(pad(holder).sub), 'and half a dollar typed is 500 sats asked for', pad(holder).cta + ' | ' + pad(holder).sub);
+  holder.price = 0;
   pad(holder).type('9999');
   await until('the wrong PIN to be said', () => card(holder) && card(holder).title === 'WRONG PIN');
   ok(card(holder).reason === '2 tries left.' && card(holder).has('TRY AGAIN') && c.balance() === 2000 && H.W.cardOwed().length === 1,
      'a wrong PIN at the tap: said with the tries left, and the 500 is kept for the card', card(holder).reason);
   v = vals(holder);
-  ok(v.fcNotes.length === 1 && /₿500 is waiting to go onto CARD/.test(v.fcNotes[0].text), 'the screen carries a line for it', v.fcNotes[0] && v.fcNotes[0].text);
+  ok(v.fcNotes.length === 1 && /₿500 is waiting to go onto this card/.test(v.fcNotes[0].text), 'the screen carries a line for it', v.fcNotes[0] && v.fcNotes[0].text);
   c.tap();
   card(holder).press('TRY AGAIN');
   ok(pad(holder).title === 'CARD PIN' && /put ₿500 on the card/.test(pad(holder).sub), 'TRY AGAIN asks for the PIN, not for the amount again', pad(holder).sub);
@@ -188,7 +217,11 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   R.nfc = c;
   c.tap();
   till.payByCard();
-  ok(pad(till).title === 'CARD PIN' && /To pay ₿1,000/.test(pad(till).sub), 'CARD on the receive screen asks for the card’s PIN, with the amount', pad(till).sub);
+  ok(pad(till).title === 'CARD PIN' && /To pay ₿1,000/.test(pad(till).sub) && pad(till).cta === 'PAY ₿1,000' && !pad(till).hasCancel,
+     'CARD on the receive screen asks for the card’s PIN, on a button that says PAY and the amount', pad(till).cta);
+  pad(till).back();
+  ok(!pad(till) && till.state.screen === 'confirm', 'back from it is back to the invoice');
+  till.payByCard();
   pad(till).type('0000');
   await until('the till to say the PIN was wrong', () => card(till) && card(till).title === 'WRONG PIN');
   ok(card(till).reason === '2 tries left. Nothing was taken.' && (await R.W.balanceSats()) === 0 && c.balance() === 2500 && till.state.screen === 'confirm',
@@ -256,8 +289,9 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   holder.fcRead();
   await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === c.balance());
   holder.fcSetLimit();
-  ok(pad(holder).title === 'SET LIMIT' && pad(holder).has('NO LIMIT'), 'SET LIMIT asks for an amount, or none');
-  pad(holder).type('700');
+  ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit', 'SET LIMIT asks for an amount on the same keypad');
+  keyIn(holder, 700);
+  ok(pad(holder).cta === 'SET LIMIT', 'and its PIN pad says so');
   c.tap();
   pad(holder).type('1234');
   await until('the limit to be set', () => holder.state.fc.limit === 700);
@@ -288,20 +322,25 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   const hadBefore = holder.have;
   const onCard = c.balance();
   holder.fcWithdraw();
-  ok(pad(holder).title === 'WITHDRAW' && pad(holder).has('ALL OF IT (₿' + holder.group(onCard) + ')'), 'WITHDRAW offers an amount, or all of it');
-  pad(holder).press('ALL OF IT (₿' + holder.group(onCard) + ')');
-  ok(!pad(holder) && card(holder) && card(holder).title === 'OVER THE CARD’S LIMIT' && card(holder).has('SET LIMIT'),
+  ok(holder.state.screen === 'amount' && holder.state.flow === 'cardWd', 'WITHDRAW asks on the same keypad, with ALL OF IT under its NEXT');
+  keyIn(holder, onCard + 1);
+  ok(!pad(holder) && holder.toasts.indexOf('The card holds ₿' + holder.group(onCard) + '.') >= 0, 'more than the card holds goes no further');
+  holder.fcWithdrawPin(0);            // ALL OF IT
+  ok(!pad(holder) && card(holder) && card(holder).title === 'OVER THE CARD\u2019S LIMIT' && card(holder).has('SET LIMIT'),
      'a card holding more than its limit will not be emptied in one go, and the screen says so before the PIN', card(holder) && card(holder).reason);
   card(holder).press('SET LIMIT');
-  pad(holder).press('NO LIMIT');
+  ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.stack.filter((x) => x === 'amount').length === 0,
+     'SET LIMIT from there is one keypad, not one on top of another');
+  holder.fcLimitPin(0);               // NO LIMIT
+  ok(pad(holder).cta === 'REMOVE LIMIT', 'NO LIMIT asks the PIN to take it off');
   c.tap();
   pad(holder).type('4321');
   await until('the limit to be off', () => holder.state.fc.limit === 0);
-  ok(holder.toasts.indexOf('No limit.') >= 0, 'SET LIMIT from there takes the limit off');
+  ok(holder.toasts.indexOf('No limit.') >= 0 && holder.state.screen === 'flashcard', 'and it is off');
   holder.fcWithdraw();
   c.tap();
-  pad(holder).press('ALL OF IT (₿' + holder.group(onCard) + ')');
-  ok(pad(holder).title === 'ENTER PIN TO WITHDRAW', 'then: ENTER PIN TO WITHDRAW');
+  holder.fcWithdrawPin(0);
+  ok(pad(holder).title === 'ENTER PIN TO WITHDRAW' && pad(holder).cta === 'WITHDRAW ALL', 'then: ENTER PIN TO WITHDRAW', pad(holder).cta);
   pad(holder).type('4321');
   await until('the money to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
   await settle();
@@ -318,7 +357,7 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
   holder.fcRead();
   await until('the card to be read', () => !!holder.state.fc);
   holder.fcAdd();
-  pad(holder).type('1024');
+  keyIn(holder, 1024);
   c.tap();
   pad(holder).type('4321');
   await until('1,024 to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
@@ -343,7 +382,10 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 
   // a year later the card is lost
   move(800 * 86400000);
+  H.nfc = null;                         // the card is lost: nothing answers the sheet
+  holder.state.screen = 'home'; holder.state.stack = [];
   holder.goFlashcard();
+  await settle();
   v = vals(holder);
   ok(v.fcRows[0].text === 'TAKE BACK' && v.fcRows[0].sub === '₿1,024 when last seen', 'past its date the list offers to take it back', v.fcRows[0].text);
   v.fcRows[0].tap();

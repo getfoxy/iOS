@@ -320,10 +320,23 @@
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to add to your card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
+        : s.flow === 'cardLimit' ? 'The most one PIN entry can spend?'
         : s.flow === 'receive' ? 'How much to receive?'
         : 'How much to send?',
       hideSkip: true,
+      /* A second answer under NEXT, for the two card questions that have one
+       * that is not a number: everything on the card, and no limit at all
+       * (26f-flashcard.js). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
+      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
+        : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
+      amtAltTap: () => {
+        if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
+        else if (this.state.flow === 'cardLimit') this.fcLimitPin(0);
+      },
       next: () => {
+        // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
+        if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }
         /* Over the balance already has its own line under the amount
@@ -415,6 +428,7 @@
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
-      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
+      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT'
+        : s.flow === 'cardWd' ? 'MORE THAN THE CARD HOLDS' : 'MORE THAN YOUR BALANCE',
     };
   }

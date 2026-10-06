@@ -475,8 +475,14 @@
     const btcAvailUsd = balLive.sats * this.satUsd();
     // on chain as well: its keypad took any figure and left the refusal to
     // the confirmation, a screen and a fee quote later
-    const capped = s.flow === 'send' || s.flow === 'onchain';
-    const sendCapUsd = capped ? btcAvailUsd : 0;
+    /* A card's amounts are typed on the same keypad (26f-flashcard.js), and
+     * two of them have a ceiling it can say under the figure: adding to a
+     * card is out of this phone's balance, and withdrawing is out of what the
+     * card holds. */
+    const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardWd';
+    const sendCapUsd = !capped ? 0
+      : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
     const overLimit = s.flow === 'send' && sendEnteredUsd > SEND_DAY_LIMIT + 0.005;
@@ -499,6 +505,7 @@
      * block, with its own words. */
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
-    const sendHeld = (sendOver && !overLimit && this.heldBlocks) ? this.heldBlocks(overBySats) : '';
+    // what is held with the mint is this phone's balance; a card's is its own
+    const sendHeld = (sendOver && !overLimit && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }

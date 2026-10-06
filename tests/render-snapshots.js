@@ -254,6 +254,10 @@ function representative() {
   const KEY_C = '02' + 'c3'.repeat(30) + '77ab';
   const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
     hasRecord: true, limit: 0, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+  // the card's three amounts, on the keypad every amount is typed on
+  add('amount, adding to a card', at('amount', { flow: 'cardAdd', amount: '5', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
+  add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
+  add('amount, a card\u2019s limit, in sats, with no limit under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
   add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({
     cardOwed: () => [{ id: 'o1', card: KEY_A, sats: 1000, kind: 'load' }, { id: 'o2', card: KEY_A, sats: 24, kind: 'change' }],
@@ -542,8 +546,7 @@ function cards() {
   add('overlay: PIN entry', (a) => a.pinOverlay({ title: 'ENTER YOUR PIN', subtitle: 'To turn the lock off.', cta: 'TURN OFF', onCancel() {}, onSubmit() {} }));
   add('overlay: PIN set-up', (a) => a.pinSetup(() => {}));
   // the same pad asking for a card's PIN, and for an amount with a second answer (26f-flashcard.js)
-  add('overlay: a card\u2019s PIN, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay \u20bf1,180. The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.' }, () => {}));
-  add('overlay: an amount to withdraw from a card', (a) => a.fcAskSats({ title: 'WITHDRAW', subtitle: 'The card holds \u20bf2,048.', alt: { label: 'ALL OF IT (\u20bf2,048)', tap() {} } }, () => {}));
+  add('overlay: a card\u2019s PIN, to pay, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay $0.43 (\u20bf500). The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.', cta: 'PAY $0.43' }, () => {}));
   add('stage: hold the card to the phone', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('hold'); });
   add('stage: keep the card there', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('mint'); });
   add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },

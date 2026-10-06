@@ -100,12 +100,15 @@
     });
   }
 
-  /* `o.amount` turns the same pad into one for a number of sats: the figure
-   * where the dots were, any amount above zero where four digits were asked.
-   * `o.alt` is a second answer under the button ({ label, tap }), for a pad
-   * with a choice that is not a number: ALL OF IT, NO LIMIT. Both are the
-   * FLASHCARD screens' (26f-flashcard.js), which ask for a card's PIN and for
-   * amounts with the pad a person has just learnt. */
+  /* Three things a card's PIN pad asks of this one (26f-flashcard.js), none
+   * of which the lock uses:
+   *   `o.warn`  a line already in red when the pad comes up: a wrong PIN, said
+   *             on the pad that asks for it again;
+   *   `o.back`  a back button at the top left, where every screen's is, in
+   *             place of CANCEL at the bottom;
+   *   `o.gate`  the button is grey and does nothing until four digits are in,
+   *             because it says what the PIN will do ("PAY $0.43") and must
+   *             not look ready before it is. */
   pinOverlay(opts) {
     const o = opts || {};
     if (this._pinEl) this._pinEl.remove();
@@ -121,7 +124,8 @@
     // delete prompts (2147483600) and the Tor gate (2147483602) included.
     const root = el('position:fixed;inset:0;z-index:2147483647;background:var(--bg,#050505);'
       + 'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;'
-      + 'padding:76px 26px 26px;box-sizing:border-box;'
+      // under the back button's row, where there is one
+      + 'padding:' + (o.back ? '118px' : '76px') + ' 26px 26px;box-sizing:border-box;'
       + 'font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
 
     const title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
@@ -132,7 +136,7 @@
     root.appendChild(sub);
 
     // the dots
-    const dots = el('display:flex;gap:14px;margin-top:38px;height:' + (o.amount ? '44px' : '18px') + ';align-items:center');
+    const dots = el('display:flex;gap:14px;margin-top:38px;height:18px;align-items:center');
     root.appendChild(dots);
 
     const note = el('margin-top:18px;min-height:22px;font-size:16px;font-weight:700;'
@@ -144,12 +148,6 @@
 
     const paint = () => {
       dots.textContent = '';
-      if (o.amount) {
-        dots.appendChild(el('font-size:40px;font-weight:800;letter-spacing:-0.03em;line-height:1;'
-          + 'color:' + (entry ? 'var(--ink,#F5F1EC)' : 'rgba(245,241,236,.3)'),
-          '\u20bf ' + this.group(Number(entry) || 0)));
-        return;
-      }
       const n = Math.max(entry.length, 4);
       for (let i = 0; i < n; i++) {
         const filled = i < entry.length;
@@ -159,6 +157,9 @@
       }
     };
     if (!o.noKeypad) paint();
+    /* Whether the button may be pressed (`o.gate`), drawn with every key. Set
+     * once the button exists, further down. */
+    let ready = () => {};
 
     // the keypad
     /* The whole cell takes the touch, not only the round key drawn in it.
@@ -211,7 +212,7 @@
         if (entry.length >= MAXLEN) return;
         entry += String(d);
         note.textContent = '';
-        paint();
+        paint(); ready();
         this.haptic && this.haptic('light');
       }));
     }
@@ -226,7 +227,7 @@
     pad.appendChild(key('\u232B', () => {
       entry = entry.slice(0, -1);
       note.textContent = '';
-      paint();
+      paint(); ready();
     }, true));
     /* No keypad when a face is the only way in: there is no PIN to type, and
      * a dead keypad on a lock screen reads as a wallet that will not open. */
@@ -237,20 +238,42 @@
       + 'background:var(--acc,#F2802E);color:#fff;display:flex;align-items:center;'
       + 'justify-content:center;font-size:19px;font-weight:800;letter-spacing:0.02em;'
       + 'cursor:pointer', o.cta || 'CONTINUE');
+    if (o.gate) {
+      cta.setAttribute('data-pin-cta', '1');
+      /* The SET AMOUNT screen's NEXT, to the pixel: the same width, height,
+       * type and fur when it can be pressed, and the same grey when it
+       * cannot (build/markup.html, `next`). */
+      cta.style.cssText = 'margin-top:16px;align-self:stretch;margin-left:2px;margin-right:2px;height:60px;'
+        + 'border-radius:30px;display:flex;align-items:center;justify-content:center;'
+        + 'font-family:SatSymbol,Sora,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.02em;'
+        + 'background-repeat:no-repeat,no-repeat,no-repeat;background-size:auto,auto,150% auto;'
+        + 'background-position:center,center,50% 34%;white-space:nowrap';
+      const FUR = 'radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),'
+        + 'linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),'
+        + "url('foxy-fur.webp')";
+      ready = () => {
+        const on = entry.length >= 4;
+        cta.style.backgroundColor = on ? 'var(--acc,#E8622A)' : 'rgba(245,241,236,.14)';
+        cta.style.backgroundImage = on ? FUR : 'none';
+        cta.style.boxShadow = on
+          ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(232,98,42,.34)' : 'none';
+        cta.style.color = on ? '#fff' : 'rgba(245,241,236,.4)';
+        cta.style.cursor = on ? 'pointer' : 'default';
+        cta.setAttribute('data-pin-ready', on ? '1' : '0');
+      };
+      ready();
+    }
     cta.addEventListener('click', () => {
       // with no keypad the button IS the face: it asks again
       if (o.noKeypad) { if (o.face) o.face(); return; }
-      if (o.amount && !(Number(entry) > 0)) {
-        note.textContent = 'Type an amount.';
-        return;
-      }
-      if (!o.amount && entry.length < 4) {
-        note.textContent = 'At least four digits.';
+      if (entry.length < 4) {
+        // a gated button says nothing: it is grey, and that is the saying
+        if (!o.gate) note.textContent = 'At least four digits.';
         return;
       }
       const value = entry;
       entry = '';
-      paint();
+      paint(); ready();
       o.onSubmit(value, (message) => { note.textContent = message; });
     });
     root.appendChild(cta);
@@ -273,21 +296,29 @@
       }
     }
 
-    if (o.alt && o.alt.label) {
-      const alt = el('margin-top:10px;width:100%;max-width:300px;height:52px;'
-        + 'border-radius:26px;border:1.5px solid rgba(245,241,236,.2);'
-        + 'display:flex;align-items:center;justify-content:center;font-size:17px;'
-        + 'font-weight:800;letter-spacing:0.02em;color:var(--ink,#F5F1EC);cursor:pointer', o.alt.label);
-      alt.addEventListener('click', () => { if (o.alt.tap) o.alt.tap(); });
-      root.appendChild(alt);
-    }
-
     if (o.onCancel) {
       const back = el('margin-top:8px;height:46px;display:flex;align-items:center;'
         + 'justify-content:center;font-size:17px;font-weight:700;'
         + 'color:rgba(245,241,236,.5);cursor:pointer', 'CANCEL');
       back.addEventListener('click', () => { root.remove(); this._pinEl = null; o.onCancel(); });
       root.appendChild(back);
+    }
+
+    /* Back, at the top left, as on every screen: the same round button, in
+     * the same place. Added last so the pad's own parts keep their order. */
+    if (o.back) {
+      const b = el('position:absolute;left:22px;top:56px;width:52px;height:52px;border-radius:50%;'
+        + 'background:linear-gradient(180deg,var(--lift,#2A2B2E),var(--sink,#151618)),var(--chip,#1C1D20);'
+        + 'border-top:1px solid var(--lift-edge,rgba(255,255,255,.14));'
+        + 'box-shadow:inset 0 2px 0 var(--lift-edge,rgba(255,255,255,.14)),inset 0 -3px 0 var(--sink-edge,rgba(0,0,0,.5)),0 8px 16px rgba(0,0,0,.34);'
+        + 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;cursor:pointer');
+      b.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink,#F5F1EC)" '
+        + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12H5m0 0 6-6m-6 6 6 6"></path></svg>';
+      b.setAttribute('data-pin-back', '1');
+      b.setAttribute('role', 'button');
+      b.setAttribute('aria-label', 'Back');
+      b.addEventListener('click', () => { root.remove(); this._pinEl = null; o.back(); });
+      root.appendChild(b);
     }
 
     document.body.appendChild(root);
