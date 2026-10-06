@@ -355,7 +355,7 @@
     var at = Date.now();
     all[card.key] = { at: at, nonces: card.pieces.map(function (x) { return String(x.nonce); }) };
     var keys = Object.keys(all).sort(function (a, b) { return (Number(all[a].at) || 0) - (Number(all[b].at) || 0); });
-    while (keys.length > 20) delete all[keys.shift()];
+    while (keys.length > 20) { var oldest = keys.shift(); if (oldest !== undefined) delete all[oldest]; }
     save(CARD_CHECKED, all);
     return at;
   }
