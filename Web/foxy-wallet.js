@@ -9250,6 +9250,46 @@
    * the row's own id, so an answer that was lost and found again finishes
    * that entry and no other. Rejects with `card: 'spent'` when the mint says
    * the pieces are gone and it was not this phone that took them. */
+  /* What moving `have` sats off a card and out of its mint will take in all
+   * at the most, for a plan asked before the card is touched
+   * (`transferQuote`'s `quoteOnly`): the money is not in this phone yet, so
+   * that plan counts the invoice and the route's reserve and nothing this
+   * mint charges for the card's own pieces.
+   *
+   * Three things it charges: its fee to swap the card's `pieces` pieces into
+   * this phone, its fee on the pieces cut for the payment, and its fee on the
+   * pieces that are spent to cut them. The last depends on which pieces are
+   * picked, and the picking is not the same twice (cashu-ts tries at random),
+   * so it is counted at its most: the whole pile as it will be, this phone's
+   * own pieces and the ones that swap will make, shaped as any receipt's are.
+   *
+   * Over is the side to be wrong on. A figure that is over costs nobody
+   * anything: what the payment does not use stays in this phone. A figure
+   * that is under is found out after the card's first tap has emptied it.
+   * It was the plan's own figure, which counts the fee for swapping this
+   * phone's pile as it is now: the screen showed "FEE: UP TO 20", the card
+   * was emptied, and the move stopped for a fee of 23, "more than was shown"
+   * (tools/live/flashcard-switch.js, from Nutshell 0.21.0 at 100 ppk).
+   *
+   * Asked from a mint this phone is not connected to, the allowance a
+   * cross-mint tap makes for money that has not arrived (`inPadSats`). */
+  function cardMoveAhead(from, have, pieces, plan) {
+    var off = 0;
+    try {
+      var w = need();
+      if (String(mintOf(w)).replace(/\/+$/, '') !== from) throw new Error('not at that mint');
+      off = feeForInputs(w, Math.max(1, Math.round(Number(pieces) || 1)));
+      var mine = proofs(from);
+      var made = shapeOutputs(mine, Math.max(0, have - off), mintArrayCap(w) - 16);
+      var base = satsOf(plan.meltQuote.amount) + plan.reserve;
+      // the payment's own pieces: one for each binary place the amount has, and four to spare (`meltNeed`)
+      var cut = feeForInputs(w, base.toString(2).length + 4);
+      return off + base + cut + feeForInputs(w, mine.length + made.length);
+    } catch (e) {
+      return plan.gross + off + (plan.inPadSats || 0);
+    }
+  }
+
   function cardSwapTaken(row, again) {
     return FoxyWallet.receiveToken(row.token, { hash: row.id, memo: row.memo || 'card',
                                                 keptSats: row.all ? undefined : row.sats,
@@ -18731,13 +18771,20 @@
      * top, out of whatever else is at that mint. A card's money pays its own
      * way: the amount is taken down until what leaves is no more than what
      * came off the card, and what is left over is a few sats in this phone at
-     * the mint it left. Resolves a plan for `moveRun`; `plan.net` lands. */
+     * the mint it left. Resolves a plan for `moveRun`; `plan.net` lands.
+     *
+     * `opts.quoteOnly` asks before the card is touched, for the figure a
+     * person agrees to: `sats` is then the card's balance and `opts.pieces`
+     * how many pieces that is, and the plan's `gross` is what will have left
+     * the card by the end, the swap that takes it off included. */
     cardMoveQuote: function (fromUrl, toUrl, sats, opts) {
       var have = Math.round(Number(sats) || 0);
       var tries = 0;
       var ask = function (n) {
         if (!(n > 0)) return Promise.reject(cardError('too-little', 'That is too little to move by Lightning: the fee would take it all.'));
         return FoxyWallet.transferQuote(fromUrl, n, Object.assign({ to: toUrl }, opts || {})).then(function (plan) {
+          // asked before the card is touched, what leaves is worked out as it will be (`cardMoveAhead`)
+          if (opts && opts.quoteOnly) plan.gross = cardMoveAhead(String(fromUrl || '').replace(/\/+$/, ''), have, opts.pieces, plan);
           var over = plan.gross - have;
           if (!(over > 0)) return plan;
           if (tries >= 6) throw cardError('too-little', 'That is too little to move by Lightning: the fee would take it all.');

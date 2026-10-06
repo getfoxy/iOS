@@ -700,6 +700,46 @@
    * the row's own id, so an answer that was lost and found again finishes
    * that entry and no other. Rejects with `card: 'spent'` when the mint says
    * the pieces are gone and it was not this phone that took them. */
+  /* What moving `have` sats off a card and out of its mint will take in all
+   * at the most, for a plan asked before the card is touched
+   * (`transferQuote`'s `quoteOnly`): the money is not in this phone yet, so
+   * that plan counts the invoice and the route's reserve and nothing this
+   * mint charges for the card's own pieces.
+   *
+   * Three things it charges: its fee to swap the card's `pieces` pieces into
+   * this phone, its fee on the pieces cut for the payment, and its fee on the
+   * pieces that are spent to cut them. The last depends on which pieces are
+   * picked, and the picking is not the same twice (cashu-ts tries at random),
+   * so it is counted at its most: the whole pile as it will be, this phone's
+   * own pieces and the ones that swap will make, shaped as any receipt's are.
+   *
+   * Over is the side to be wrong on. A figure that is over costs nobody
+   * anything: what the payment does not use stays in this phone. A figure
+   * that is under is found out after the card's first tap has emptied it.
+   * It was the plan's own figure, which counts the fee for swapping this
+   * phone's pile as it is now: the screen showed "FEE: UP TO 20", the card
+   * was emptied, and the move stopped for a fee of 23, "more than was shown"
+   * (tools/live/flashcard-switch.js, from Nutshell 0.21.0 at 100 ppk).
+   *
+   * Asked from a mint this phone is not connected to, the allowance a
+   * cross-mint tap makes for money that has not arrived (`inPadSats`). */
+  function cardMoveAhead(from, have, pieces, plan) {
+    var off = 0;
+    try {
+      var w = need();
+      if (String(mintOf(w)).replace(/\/+$/, '') !== from) throw new Error('not at that mint');
+      off = feeForInputs(w, Math.max(1, Math.round(Number(pieces) || 1)));
+      var mine = proofs(from);
+      var made = shapeOutputs(mine, Math.max(0, have - off), mintArrayCap(w) - 16);
+      var base = satsOf(plan.meltQuote.amount) + plan.reserve;
+      // the payment's own pieces: one for each binary place the amount has, and four to spare (`meltNeed`)
+      var cut = feeForInputs(w, base.toString(2).length + 4);
+      return off + base + cut + feeForInputs(w, mine.length + made.length);
+    } catch (e) {
+      return plan.gross + off + (plan.inPadSats || 0);
+    }
+  }
+
   function cardSwapTaken(row, again) {
     return FoxyWallet.receiveToken(row.token, { hash: row.id, memo: row.memo || 'card',
                                                 keptSats: row.all ? undefined : row.sats,

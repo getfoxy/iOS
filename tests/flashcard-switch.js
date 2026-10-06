@@ -129,6 +129,28 @@ const at = (c, mint) => {
   ok(cards.length >= 4 && cards.every((e) => (W.tagsFor(e.hash).to === 'card') || e.memo === 'card'),
      'every entry of money to or from the phone’s own card is marked as one', cards.map((e) => e.memo + ':' + e.sats).join(' '));
 
+  /* ---- a mint that charges for inputs: the figure shown first is a ceiling ---- */
+  for (const ppk of [100, 1000]) {
+    const F = await funded({ second: true, feePpk: ppk }, 6000);
+    const c = newCard(F);
+    await F.W.cardSetUp(c, { pin: '1234' });
+    c.tap();
+    await F.W.cardAdd(c, { sats: 2000, pin: '1234' });
+    c.tap();
+    const seen = await F.W.cardLook(c);
+    // as the screen asks it: the card's balance, and how many pieces that is
+    const first = await F.W.cardMoveQuote(MINT, MINT2, seen.balance, { quoteOnly: true, pieces: seen.pieces.length });
+    const shown = seen.balance - first.net;
+    c.tap();
+    const took = await F.W.cardWithdraw(c, { pin: '1234' });
+    const real = await F.W.cardMoveQuote(MINT, MINT2, took.sats);
+    const cost = seen.balance - real.net;         // off the card's balance, as a person counts it: the swap off it too
+    ok(took.sats < seen.balance && cost <= shown && real.gross <= took.sats,
+       'at ' + ppk + ' ppk the fee shown before the card is touched is not under what it then costs', 'shown up to ' + shown + ', costs up to ' + cost + ' (' + (seen.balance - took.sats) + ' of it to take the pieces off)');
+    // over by no more than the fee on this phone's own pieces, which the payment may or may not pick
+    ok(shown - cost <= Math.ceil(ppk * 120 / 1000), 'and over it by no more than the fee on a pile of pieces', String(shown - cost));
+  }
+
   /* ---- the screens: SWITCH MINT, as a person meets it -------------------------- */
   {
     const U = await funded({ second: true }, 6000);

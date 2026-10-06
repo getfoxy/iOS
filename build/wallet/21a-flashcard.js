@@ -296,13 +296,20 @@
      * top, out of whatever else is at that mint. A card's money pays its own
      * way: the amount is taken down until what leaves is no more than what
      * came off the card, and what is left over is a few sats in this phone at
-     * the mint it left. Resolves a plan for `moveRun`; `plan.net` lands. */
+     * the mint it left. Resolves a plan for `moveRun`; `plan.net` lands.
+     *
+     * `opts.quoteOnly` asks before the card is touched, for the figure a
+     * person agrees to: `sats` is then the card's balance and `opts.pieces`
+     * how many pieces that is, and the plan's `gross` is what will have left
+     * the card by the end, the swap that takes it off included. */
     cardMoveQuote: function (fromUrl, toUrl, sats, opts) {
       var have = Math.round(Number(sats) || 0);
       var tries = 0;
       var ask = function (n) {
         if (!(n > 0)) return Promise.reject(cardError('too-little', 'That is too little to move by Lightning: the fee would take it all.'));
         return FoxyWallet.transferQuote(fromUrl, n, Object.assign({ to: toUrl }, opts || {})).then(function (plan) {
+          // asked before the card is touched, what leaves is worked out as it will be (`cardMoveAhead`)
+          if (opts && opts.quoteOnly) plan.gross = cardMoveAhead(String(fromUrl || '').replace(/\/+$/, ''), have, opts.pieces, plan);
           var over = plan.gross - have;
           if (!(over > 0)) return plan;
           if (tries >= 6) throw cardError('too-little', 'That is too little to move by Lightning: the fee would take it all.');

@@ -18521,7 +18521,7 @@ class Component extends DCLogic {
     if (!W || !m) return;
     const put = (more) => { if (this.state.fcMove) this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) }); };
     put({ quoting: true, err: '' });
-    W.cardMoveQuote(m.from, m.to, m.sats, { quoteOnly: true }).then((plan) => {
+    W.cardMoveQuote(m.from, m.to, m.sats, { quoteOnly: true, pieces: (this.state.fc || {}).count }).then((plan) => {
       // what leaves the card, less what lands, is the most the crossing can cost
       put({ quoting: false, plan, lands: plan.net, fee: Math.max(0, m.sats - plan.net) });
     }, (e) => {
