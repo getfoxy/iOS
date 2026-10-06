@@ -299,7 +299,7 @@ ok(/if \(writing \|\| !outgoing\.isEmpty\), let t = target, t\.state == \.connec
      'after the warning, a Bluetooth screen: APPROVE asks the phone and moves on whatever iOS says, REJECT moves on without asking');
   ok(/"bluetoothAsk": FoxyBridge\.handleBluetoothAsk/.test(read('Foxy/Bridge/FoxyBridge.swift'))
      && /final class BluetoothAsk: NSObject, CBCentralManagerDelegate/.test(read('Foxy/Bridge/FoxyBridge+Tap.swift'))
-     && /`bluetoothAsk`/.test(read('THREAT-MODEL.md')),
+     && /`bluetoothAsk`/.test(read('docs/THREAT-MODEL.md')),
      'the phone answers that question with one action, and the threat model lists it');
 }
 ok(/function changeAllowance\(owed\) \{/.test(read('build/wallet/07-request-delivery.js'))
