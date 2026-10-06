@@ -85,6 +85,7 @@ check "card logic"     1 node tests/cards-logic.js
 check "pin pad"        1 node tests/pin-pad.js
 check "flashcard vectors" 1 node tests/flashcard-vectors.js
 check "flashcard model" 1 node tests/flashcard-model.js
+check "flashcard setup" 1 node tests/flashcard-setup.js
 check "switch guard"   1 node tests/switch-guard.js
 check "transfer quote"  1 node tests/transfer-quote.js
 check "on-chain flow"  1 node tests/onchain-flow.js
