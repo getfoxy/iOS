@@ -12,8 +12,6 @@
  * the money is where the screen says it is.
  *
  * The render snapshots pin how these look. This pins what they do. */
-const fs = require('fs');
-const path = require('path');
 const { funded, newCard, history, OTHER_WORDS } = require('./flashcard-kit');
 
 let failed = 0;
@@ -22,97 +20,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js']
-  .map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
-
-/* The four parts as a class over this page's window, and an app of it with
- * the rest of the app class stood in for: state, navigation, and the few
- * helpers the parts call. */
-function appOn(ctx, start) {
-  const Parts = new Function('window', 'document', 'localStorage', 'return class {\n' + PARTS + '\n};')(
-    ctx.window, ctx.window.document, ctx.window.localStorage);
-  const a = new Parts();
-  a.state = Object.assign({ screen: 'home', stack: [], fc: null, invoice: '', invoiceIsAddress: false }, start || {});
-  a.setState = (x) => { Object.assign(a.state, typeof x === 'function' ? x(a.state) : x); };
-  a.forceUpdate = () => {};
-  a.toasts = [];
-  a.seen = {};
-  a.toast = (m) => a.toasts.push(m);
-  a.group = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  a.haptic = () => {};
-  a.px = () => a.price || 0;
-  a.usd = (v) => v.toFixed(2);
-  a.BLOCKED_INFO = () => null;
-  a.offlineNow = () => !!a.offline;
-  a.offlineNo = (what) => a.toasts.push(what + ' needs a connection.');
-  a.mintName = () => 'Test';
-  a.mintNameOf = () => 'Test';
-  a.goSwitchMint = () => { a.state.screen = 'switchMint'; };
-  a.balNow = () => ({ sats: a.have || 0 });
-  a.refreshBalance = () => ctx.W.balanceSats().then((n) => { a.have = n; });
-  a.loadHistory = () => {};
-  a.closeReceive = () => { a.state.screen = 'home'; };
-  a.noteReceived = () => {};
-  a.txIsNew = (h) => { const fresh = !a.seen[h]; a.seen[h] = true; return fresh; };
-  // the SET AMOUNT screen's own sum (12-receive.js), for the card's amounts; the till's is the invoice's
-  a.wantedSats = () => {
-    if (a.state.screen !== 'amount' || !/^card/.test(String(a.state.flow))) return a.asking || 0;
-    const val = parseFloat(a.state.amount) || 0;
-    if (a.state.unit === 'SATS') return Math.round(val);
-    return a.px() ? Math.round(val / a.px() * 1e8) : 0;
-  };
-  a.back = () => { const st = a.state.stack; a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1); };
-  return a;
-}
-
-const tick = () => new Promise((r) => setTimeout(r, 0));
-/* Wait for something to be true of the screen, a few thousand turns at most. */
-async function until(what, cond) {
-  for (let i = 0; i < 6000; i++) { if (cond()) return true; await tick(); }
-  ok(false, 'waited for: ' + what);
-  return false;
-}
-const leaves = (root) => Array.from(root.querySelectorAll('div')).filter((d) => d.childElementCount === 0);
-const click = (el) => el.dispatchEvent(new (el.ownerDocument.defaultView.Event)('click', { bubbles: true }));
-
-/* The pad that is up: its title, its subtitle, its red line, and its keys. */
-function pad(a) {
-  const root = a._pinEl;
-  if (!root || !root.parentNode) return null;
-  const kids = Array.from(root.children);
-  const find = (text) => leaves(root).filter((d) => d.textContent === text)[0];
-  return {
-    title: kids[0].textContent, sub: kids[1].textContent, note: kids[3].textContent, figure: kids[2].textContent,
-    // what its button says, and whether it can be pressed yet
-    cta: root.querySelector('[data-pin-cta]').textContent,
-    ready: root.querySelector('[data-pin-cta]').getAttribute('data-pin-ready') === '1',
-    hasCancel: !!find('CANCEL'),
-    type(digits) {
-      String(digits).split('').forEach((d) => click(find(d).parentNode));
-      click(root.querySelector('[data-pin-cta]'));
-    },
-    back() { click(root.querySelector('[data-pin-back]')); },
-    press(label) { click(find(label)); },
-    has(label) { return !!find(label); },
-  };
-}
-/* The card that is up: its title, its words, and its buttons by their label. */
-function card(a) {
-  const root = a._blockedEl;
-  if (!root || !root.parentNode) return null;
-  // past the glow and the mark in the circle (! or \u00d7; the asking card's is a drawing)
-  const texts = leaves(root).map((d) => d.textContent).filter((t) => t && t !== '!' && t !== '\u00d7');
-  return {
-    title: texts[0], reason: texts[1], all: texts.join(' | '),
-    press(label) { click(leaves(root).filter((d) => d.textContent === label)[0]); },
-    has(label) { return texts.indexOf(label) >= 0; },
-  };
-}
-const stage = (ctx) => { const el = ctx.window.document.getElementById('foxy-stage'); return el ? el.getAttribute('data-stage') : ''; };
-const vals = (a) => a.renderFlashcard({ s: a.state, sc: a.state.screen });
-const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
-/* An amount typed on the SET AMOUNT screen, in sats, and NEXT pressed. */
-const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
+const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flashcard-ui-kit');
 
 (async () => {
   const H = await funded({}, 6000);
@@ -384,20 +292,20 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   pad(holder).type('4321');
   await until('1,024 to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
   card(holder).press('DONE');
-  ok(vals(holder).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT', 'with a year to run there is nothing to renew');
+  ok(vals(holder).fcLinks.map((k) => k.label.replace(/\s+/g, ' ').trim()).join() === 'CHANGE PIN,SET LIMIT,SWITCH MINT', 'with a year to run there is nothing to renew');
   const real = H.window.Date.now.bind(H.window.Date);
   const realHere = Date.now;
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(350 * 86400000);
   v = vals(holder);
-  ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT,RENEW' && /^Renew by /.test(v.fcFacts[2].value),
+  ok(v.fcLinks.map((k) => k.label.replace(/\s+/g, ' ').trim()).join() === 'CHANGE PIN,SET LIMIT,SWITCH MINT,RENEW' && /^Renew by /.test(v.fcFacts[2].value),
      'in its last month the screen says RENEW, and by when', v.fcFacts[2].value);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
   pad(holder).type('4321');
   await until('the card to be renewed', () => card(holder) && card(holder).title === 'ON THE CARD');
-  ok(rc.balance() === 1024 && vals(holder).fcLinks.length === 2 && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
+  ok(rc.balance() === 1024 && vals(holder).fcLinks.length === 3 && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
      && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).every((e) => holder.seen[e.hash]),
      'renewed in one tap: the same 1,024, a year on, its two entries not announced', card(holder).reason);
   card(holder).press('DONE');
@@ -443,6 +351,7 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   card(till).press('CLOSE');
   ok(!stage(R), 'and a phone that cannot read a card says that, with nothing left on screen');
 
+  failed += until.failed;
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

@@ -6,12 +6,17 @@
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep,
+      mintPickers: !s.trStep && !s.fcPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
-      mintTitle: s.trStep === 'from' ? 'FROM WHICH MINT?'
+      /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
+       * `fcPick` says so, and like trStep it is named by whoever opens the
+       * list and cleared by every other way in. */
+      mintTitle: s.fcPick ? 'TO WHICH MINT?'
+        : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.trStep === 'from' ? 'Move money between the mints you use.'
+      mintNowLine: s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
+        : s.trStep === 'from' ? 'Move money between the mints you use.'
         : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
         : 'Connected to ' + (this.mintHost() || 'no mint')
         // balances in other units, which no sat figure on this screen includes
@@ -45,9 +50,15 @@
             border: here ? 'rgba(var(--acc-rgb),.75)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
             tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
+              : s.fcPick ? (() => this.fcSwitchPick(m.url))
               : s.trStep ? (() => this.trPick(m.url)) : here ? (() => {}) : (() => this.justSwitch(m.url)),
           };
         };
+        if (s.fcPick) {
+          // every mint but the one the card is at
+          const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
+          return all.filter(m => m.url.replace(/\/+$/, '') !== at).map(m => row(m, false));
+        }
         if (s.trStep === 'from') {
           // only mints with something at them can be moved from
           return all.filter(m => this.mintPile(m.url).sats > 0).map(m => row(m, false));

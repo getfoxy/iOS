@@ -20,7 +20,7 @@
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trSats: 0, trPlan: null, trFee: null, trErr: '',
+      trStep: 'from', trFrom: '', trTo: '', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false,
     }));
   }
 

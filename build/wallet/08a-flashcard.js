@@ -397,7 +397,17 @@
         if (stopped) { left.push(row.id); return null; }
         var pieces;
         // a row that does not fit this card here (another mint's, say) is passed over, and the rows after it still go on
-        try { pieces = cardPiecesOf(row.token, card); } catch (e) { misfit = misfit || e; left.push(row.id); return null; }
+        try {
+          /* Of the card's own mint, by the token's own word. A keyset's short
+           * name says nothing of whose it is, and a card moved to another
+           * mint must not be handed what was made for it at the first. */
+          var at = (FoxyWallet.tokenInfo(row.token) || {}).mint || '';
+          if (at && card.record && card.record.mint && canonicalMint(at) !== canonicalMint(card.record.mint)) {
+            throw cardError('other-mint', 'That ecash is at ' + hostOf(at) + ', and this card is at ' + hostOf(card.record.mint) + '.',
+                            { mint: canonicalMint(at) });
+          }
+          pieces = cardPiecesOf(row.token, card);
+        } catch (e) { misfit = misfit || e; left.push(row.id); return null; }
         var each = Promise.resolve();
         pieces.forEach(function (piece) {
           each = each.then(function () {
@@ -520,6 +530,48 @@
           }, function () {});
       });
     }, Promise.resolve()).then(function () { return gone; });
+  }
+
+  /* The record a card is given (SET_CARD): its unit, the key that may take
+   * its pieces back or none, and its mint's address as text. Throws where the
+   * address is one a card cannot hold. */
+  function cardRecordHex(refundKey, mint) {
+    var at = String(mint || '');
+    if (!at || at.length > 96 || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
+    var hex = '';
+    for (var i = 0; i < at.length; i++) hex += cardByte(at.charCodeAt(i));
+    return '00' + (refundKey || new Array(67).join('0')) + cardByte(at.length) + hex;
+  }
+
+  /* A card on its way to another mint, told so.
+   *
+   * Money moved for a card is filed as owed to it at the mint it was moved
+   * to (`cardPrepare`, `moving`). When that card is next written, at that
+   * mint, its record is changed first. Only an empty card: the card itself
+   * refuses to change mints under unspent pieces, and it is not asked to. So
+   * a card never holds ecash of a mint it does not name, and a move cut short
+   * before its second tap is finished by any later one. The PIN has been
+   * verified in this tap. Answers whether it changed. */
+  function cardRepointFor(t, card) {
+    var w = wallet;
+    if (!w || !card || !card.record) return Promise.resolve(false);
+    var here = mintOf(w);
+    if (canonicalMint(card.record.mint) === here) return Promise.resolve(false);
+    var mine = cardStore(CARD_OWED).filter(function (r) {
+      return r && r.card === card.key && r.repoint && r.mint && canonicalMint(r.mint) === here;
+    });
+    if (!mine.length) return Promise.resolve(false);
+    if (card.pieces.length) {
+      return Promise.reject(cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.'));
+    }
+    var record;
+    try { record = cardRecordHex(card.record.refundKey, here); } catch (e) { return Promise.reject(e); }
+    return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its new mint').then(function () {
+      console.log('[foxy] card: moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here));
+      // as the card now has it: what is written next is checked against this
+      card.record.mint = here;
+      return true;
+    });
   }
 
   /* Whether this mint's ecash can go on a card at all, asked before any is

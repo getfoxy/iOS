@@ -258,6 +258,12 @@ function representative() {
   add('amount, adding to a card', at('amount', { flow: 'cardAdd', amount: '5', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
   add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
   add('amount, a card\u2019s limit, in sats, with no limit under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
+  // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
+  add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
+  const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, sats: 2048, plan: null, fee: null, lands: 0, err: '', busy: false }, over || {});
+  add('fcMoveConfirm, asking what it costs', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE() }, { wallet: CARDS() }));
+  add('fcMoveConfirm, with its cost', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE({ fee: 22, lands: 2026 }) }, { wallet: CARDS() }));
+  add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
   // cards are cash for now (FC_RECOVERABLE), so the list of cards to take back is not drawn: the money waiting is
   add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({

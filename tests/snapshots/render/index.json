@@ -234,6 +234,26 @@
   "markup": "9ce3d9c7e399af6cd2e2b41ce2a032c33708082675308ef37cab0a952146197f",
   "vals": "c420d5160591927e79d4cd8c8e15d77c585d324fd7fec7bd6b510589d505d4d4"
  },
+ "switchMint, asking which mint a card moves to": {
+  "file": "273-switchmint-asking-which-mint-a-card-moves-to.html",
+  "markup": "c96f986402d40f12abf224084379620b68fe5620c19b0db1db09e916da146cf7",
+  "vals": "362ec5bafc507931a81588936f2e409a34545822632bac3bbece13c8864047b8"
+ },
+ "fcMoveConfirm, asking what it costs": {
+  "file": "274-fcmoveconfirm-asking-what-it-costs.html",
+  "markup": "b062a0f16bf912f8d84db58a2855e46a9a0f75b806918a2838fbce9ecbd3428f",
+  "vals": "33d4ba9668ae6e06fc9cb0e849d0be5242655b740755deb93f199299d5397b13"
+ },
+ "fcMoveConfirm, with its cost": {
+  "file": "275-fcmoveconfirm-with-its-cost.html",
+  "markup": "fda5af593be0a417c4c0e596982a656b77dcf55a496d9847010060a45414f8dd",
+  "vals": "abcf87db1074a6794d19e5150bfcd9ed98d2ca42c9a02ef2c96e8f00bc7c7e6c"
+ },
+ "fcMoveConfirm, too little to move": {
+  "file": "276-fcmoveconfirm-too-little-to-move.html",
+  "markup": "b473cd98ac2a0adda00210c7fc18abd783ee3574ac71088594c70f1235bd6284",
+  "vals": "0fd74992391e350b36678550206a35d802b69b58dd28927e5fe38c8fdd101a54"
+ },
  "flashcard, nothing tapped": {
   "file": "250-flashcard-nothing-tapped.html",
   "markup": "8c5b6fed6b894359dd1adc01acc83f4f1f94ea7d5ce413165d12d51664f43d37",
@@ -246,8 +266,8 @@
  },
  "flashcard, a card of this phone’s, read": {
   "file": "252-flashcard-a-card-of-this-phone-s-read.html",
-  "markup": "0c85700888358141505d32e1ce1e160673eb2251f4a3896a35c8bfed2c1c9377",
-  "vals": "9f539743c261cbcc479c4085986b81fde2d6959000b9f0606f3c0c18c6eb7263"
+  "markup": "318f054663c5743a092d9fa63b6e4586ec11c553b5aafd5585d9023aa78b3502",
+  "vals": "417d84e1a9abc90f5a6afebfffac36f617896e88544df9d37c7b5680919626f8"
  },
  "flashcard, a new card": {
   "file": "253-flashcard-a-new-card.html",
@@ -261,13 +281,13 @@
  },
  "flashcard, a cash card the mint says is spent": {
   "file": "255-flashcard-a-cash-card-the-mint-says-is-spent.html",
-  "markup": "0fe6dc3d192abd0e71c0d750ddf49d64795fd3292cba5606c1f7c1f449e5130e",
-  "vals": "abd954cdc026a1126b741280da632e6c059c6351ba44b0b0d4e6c1c2047ef13f"
+  "markup": "3b94144260998d95c912aa3f2432bd6c99ddb9e7ebccc023146c7879eb8352fe",
+  "vals": "adfcc9037e8fa1a864b4872ecf8c96b3fb86eb72aebd1719508fb510fd72e0a4"
  },
  "flashcard, somebody else’s card, past its date, no connection": {
   "file": "256-flashcard-somebody-else-s-card-past-its-date-no-connection.html",
-  "markup": "b3a228dfd60a8ffacd8d2aaf32857c6ebfb3d02737a65d3aed03ec08ea84f8b3",
-  "vals": "b8cb5f588463c0fe80a63a5dc4873c69afb369020c2355b14501d439f8fbcdd6"
+  "markup": "7719807aadea82683b218bebb85796f0a53a0f42c6f686b1eedb8547e4de7f18",
+  "vals": "3da5a5489b9eea519c3cf267c416ad0777cf2bf63316bdd5bf05bf22a708c29c"
  },
  "home, working offline": {
   "file": "217-home-working-offline.html",
@@ -481,7 +501,7 @@
  },
  "sendType, a valid address, keyboard up": {
   "file": "082-sendtype-a-valid-address-keyboard-up.html",
-  "markup": "0ffdcebacd63f667ebd4163c4479b65e2916cd1b9309018242d780fcee99052c",
+  "markup": "887d700324aa8a0c2946231dc299544544c7d2e9620cfc63f72a4c4d93b343ea",
   "vals": "11a5b31fa03554c0af5895f8debf9cc267a15ecaa2615931ec8b7596d8d3fd18"
  },
  "sendScan, camera on": {
