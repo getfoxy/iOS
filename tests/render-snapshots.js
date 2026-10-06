@@ -259,6 +259,7 @@ function representative() {
   add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
   add('amount, a card\u2019s limit, in sats, with no limit under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
+  // cards are cash for now (FC_RECOVERABLE), so the list of cards to take back is not drawn: the money waiting is
   add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({
     cardOwed: () => [{ id: 'o1', card: KEY_A, sats: 1000, kind: 'load' }, { id: 'o2', card: KEY_A, sats: 24, kind: 'change' }],
     cardsList: () => [

@@ -17738,6 +17738,18 @@ class Component extends DCLogic {
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // how near its date a card's own phone starts saying RENEW
   FC_RENEW_DAYS = 30;
+  /* Cards are cash, for now.
+   *
+   * The card and the wallet can do more: a card set up as recoverable names a
+   * key of the phone that loaded it, and that phone can take its money back
+   * a year later if the card is lost or blocked. It is switched off here, in
+   * the one place that offers it: a new card is set up as cash with nothing
+   * asked, the list of cards this phone could take back is not shown, and
+   * with no list there is no screen for a card that has not been tapped.
+   * True brings all three back as they were (tests/flashcard-screens.js runs
+   * both ways). A card set up as recoverable by anything else still reads
+   * and pays as what it is. */
+  FC_RECOVERABLE = false;
 
   fcW() {
     const W = window.FoxyWallet;
@@ -17774,15 +17786,22 @@ class Component extends DCLogic {
 
   /* FLASHCARD in the menu asks for the card at once: the phone's own sheet
    * comes up with no screen of ours to read first. A card tapped, and the
-   * screen is that card. The sheet dismissed, and what is left is the screen
-   * with no card on it, which is where the cards this phone loaded are
-   * listed: a lost card cannot be tapped, and that list is how its money is
-   * taken back. */
+   * screen is that card. The sheet dismissed, and the person is where they
+   * were: there is no screen for no card.
+   *
+   * Except where cards can be taken back (FC_RECOVERABLE): a lost card
+   * cannot be tapped, so the screen with no card on it is opened first and
+   * stays when the sheet goes, with the cards this phone loaded listed on it. */
   goFlashcard() {
     // a card read on an earlier visit is not shown again: it may be somebody else's
     this._fcCard = null;
-    this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
-    this.fcRead();
+    if (this.FC_RECOVERABLE) {
+      this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
+      this.fcRead();
+      return;
+    }
+    if (this.state.fc) this.setState({ fc: null });
+    this.fcRead(true);
   }
 
   /* ---- one tap ------------------------------------------------------------
@@ -17914,9 +17933,11 @@ class Component extends DCLogic {
     if (kind === 'waiting') { this.fcChecking(e && e.id, opt); return; }
     const cards = {
       'wrong-pin': () => Object.assign({ tone: 'warn', title: 'WRONG PIN',
-        reason: ((e.tries === 1) ? '1 try left.' : (e.tries + ' tries left.')) + safe }, again),
+        reason: ((e.tries === 1) ? '1 try left.' : (e.tries + ' tries left.')) + safe,
+        // the last one is said for what it is: the card blocks itself for good
+        chip: e.tries === 1 ? 'One more wrong PIN blocks this card for good.' : '' }, again),
       'blocked': () => ({ title: 'CARD BLOCKED',
-        reason: 'Too many wrong PINs. Its owner can take the money back with their own phone.' }),
+        reason: 'Too many wrong PINs. This card can no longer pay.' }),
       'not-enough': () => ({ tone: 'warn', title: 'NOT ENOUGH ON THE CARD',
         reason: 'It holds ' + this.fcSats(e.balance) + '.' + safe }),
       'other-mint': () => ({ tone: 'warn', title: 'A DIFFERENT MINT', reason: said }),
@@ -18125,17 +18146,23 @@ class Component extends DCLogic {
 
   /* ---- MENU > FLASHCARD: reading a card ---------------------------------- */
 
-  fcRead() {
+  /* `open`: the card's screen is opened by what is read (the menu's way in). */
+  fcRead(open) {
     const W = this.fcW();
     if (!W) return;
     this.fcTap({}, (link) => W.cardLook(link))
-      .then((card) => this.fcShow(card), (e) => this.fcFailed(e, { again: () => this.fcRead() }));
+      .then((card) => this.fcShow(card, open), (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
-  /* What a card said, kept for the screen. Only on the FLASHCARD screen: a
-   * payer's card read at the till is not left on show in the menu. */
-  fcShow(card) {
-    if (!card || !card.key || this.state.screen !== 'flashcard') return;
+  /* What a card said, kept for the screen. Only on the FLASHCARD screen, or
+   * on the way to it (`open`): a payer's card read at the till is not left
+   * on show in the menu. */
+  fcShow(card, open) {
+    if (!card || !card.key) return;
+    if (this.state.screen !== 'flashcard') {
+      if (!open) return;
+      this.setState(p => ({ screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
+    }
     const W = this.fcW();
     const dates = (card.pieces || []).map(x => x.date).filter(Boolean);
     this._fcCard = card;
@@ -18204,34 +18231,41 @@ class Component extends DCLogic {
       subtitle: 'So a mistyped digit does not become the card’s PIN.',
     }, (b) => {
       if (a !== b) { first('Those did not match. Start again.'); return; }
-      this.fcSetUpKind(a);
+      // cash, with nothing asked; or the one choice, where there is one to make
+      if (this.FC_RECOVERABLE) this.fcSetUpKind(a); else this.fcSetUpRun(a, false);
     }));
     first('');
   }
 
+  fcSetUpRun(pin, recoverable) {
+    const W = this.fcW();
+    this.fcTap({ body: 'Setting it up at ' + this.mintName() + '.' }, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable }); })
+      .then((card) => {
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        /* What cash means, said once, where the card becomes one: there is
+         * nobody to ask for it back. Its PIN is part of that. The card
+         * blocks itself for good after three wrong ones in a row, and what
+         * is on a blocked cash card can be spent by nobody. */
+        this.blockedCard('fc-ready', {
+          tone: 'ask', title: 'THE CARD IS READY',
+          reason: recoverable
+            ? 'It holds nothing yet. What you put on it can be taken back by this phone a year later, if the card is lost.'
+            : 'It holds nothing yet. It is cash: whoever has the card and its PIN has the money.',
+          chip: recoverable ? '' : 'Lose the card, forget its PIN, or type it wrong three times in a row, and the money on it is gone.',
+          retry: 'ADD FUNDS', go: () => this.fcAdd(), shut: { label: 'LATER' },
+        });
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
+  }
+
   fcSetUpKind(pin) {
-    const run = (recoverable) => {
-      const W = this.fcW();
-      this.fcTap({ body: 'Setting it up at ' + this.mintName() + '.' }, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable }); })
-        .then((card) => {
-          this.fcShow(card);
-          this.haptic && this.haptic('success');
-          this.blockedCard('fc-ready', {
-            tone: 'ask', title: 'THE CARD IS READY',
-            reason: recoverable
-              ? 'It holds nothing yet. What you put on it can be taken back by this phone a year later, if the card is lost.'
-              : 'It holds nothing yet. It is cash: whoever has the card and its PIN has the money.',
-            retry: 'ADD FUNDS', go: () => this.fcAdd(), shut: { label: 'LATER' },
-          });
-        }, (e) => this.fcFailed(e, { again: () => this.fcSetUpKind(pin) }));
-    };
     this.blockedCard('fc-kind', {
       tone: 'ask', title: 'IF THE CARD IS LOST',
       reason: 'RECOVERABLE: this phone can take the money back after a year.\n'
         + 'LIKE CASH: lose the card and the money is gone. Choose it for a gift.',
       chip: 'Its money will be at ' + this.mintName() + '.',
-      retry: 'RECOVERABLE', go: () => run(true),
-      shut: { label: 'LIKE CASH', tap: () => run(false) },
+      retry: 'RECOVERABLE', go: () => this.fcSetUpRun(pin, true),
+      shut: { label: 'LIKE CASH', tap: () => this.fcSetUpRun(pin, false) },
     });
   }
 
@@ -18309,7 +18343,8 @@ class Component extends DCLogic {
   fcWithdrawRun(sats, pin) {
     const W = this.fcW();
     const said = (r) => {
-      this.fcGone();
+      // the card as it reads now, where the tap lasted long enough to read it; otherwise its screen goes
+      if (r && r.card) this.fcShow(r.card); else this.fcGone();
       this.haptic && this.haptic('success');
       this.blockedCard('fc-out', {
         tone: 'ask', title: 'IN YOUR WALLET',
@@ -18333,6 +18368,8 @@ class Component extends DCLogic {
   fcGone() {
     this._fcCard = null;
     if (this.state.fc) this.setState({ fc: null });
+    // with no list of cards to show, the screen with no card on it is not one to be left on
+    if (!this.FC_RECOVERABLE && this.state.screen === 'flashcard') this.back();
   }
 
   /* ---- its PIN, its limit, its date ------------------------------------------ */
@@ -18477,7 +18514,7 @@ class Component extends DCLogic {
       tap: () => this.fcWriteAsk({}),
     }));
 
-    const rows = (!W || fc) ? [] : W.cardsList().map(r => ({
+    const rows = (!W || fc || !this.FC_RECOVERABLE) ? [] : W.cardsList().map(r => ({
       name: this.fcName(r.key),
       sub: r.takenBack ? 'Taken back'
         : r.sats ? this.fcSats(r.sats) + ' when last seen' : 'Empty when last seen',
@@ -18561,9 +18598,13 @@ class Component extends DCLogic {
         ? 'Its set-up was cut short. Finish it to put money on it.'
         : 'This card is new. Give it a PIN to put money on it.',
       fcBlocked: blocked,
-      fcBlockedLine: (fc && fc.mine)
+      /* A blocked card's money: gone, where the card is cash; the loader's to
+       * take back, where it is not (and here, where this phone can). */
+      fcBlockedLine: (fc && !fc.recoverable)
+        ? 'Too many wrong PINs. This card is cash, so what is on it cannot be got back.'
+        : (fc && fc.mine && this.FC_RECOVERABLE)
         ? 'Too many wrong PINs. This phone can take its money back after its date, from CARDS YOU LOADED.'
-        : 'Too many wrong PINs. Only the phone that loaded it can take its money back.',
+        : 'Too many wrong PINs. Only the phone that loaded it can take its money back, after its date.',
       fcUsable: usable,
       fcLinks: links,
       fcTap: () => this.fcRead(),

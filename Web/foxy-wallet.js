@@ -18684,7 +18684,15 @@
      * `opts.on(step)` is told 'reading', 'signing', 'mint', 'change', 'done',
      * for the screen. Resolves { sats, hash, change: { sats, written } }. */
     cardPay: function (link, opts) { return cardTake(link, opts || {}, 'card'); },
-    cardWithdraw: function (link, opts) { return cardTake(link, Object.assign({ all: !(opts && opts.sats) }, opts || {}), 'from card'); },
+    /* A withdrawal ends by reading the card once more, for its holder's
+     * screen (`card` on the result). Only this one: a till being paid learns
+     * no more of a card than it needs. A card that has left by then is no
+     * failure: the money moved, and the result simply has no card on it. */
+    cardWithdraw: function (link, opts) {
+      return cardTake(link, Object.assign({ all: !(opts && opts.sats) }, opts || {}), 'from card').then(function (r) {
+        return FoxyWallet.cardLook(link).then(function (card) { r.card = card; return r; }, function () { return r; });
+      });
+    },
 
     /* A card's money given a new date, in one tap: all of it off the card and
      * on again. The pieces that come back carry a date a year from now, which

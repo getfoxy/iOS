@@ -126,16 +126,13 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   holder.goFlashcard();
   ok(H.sheet.length === 1 && /^begin: Hold the card/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
   await settle();
-  let v = vals(holder);
-  ok(holder.state.screen === 'flashcard' && v.isFlashcard && v.fcNone && !v.fcHas && v.fcRows.length === 0 && v.fcNotes.length === 0 && !card(holder),
-     'the sheet dismissed, what is left is the screen with no card on it, and nothing over it');
-  H.nfc = null;
-  holder.fcRead();
-  await settle();
-  ok(!stage(H) && !card(holder) && !holder.state.fc, 'the sheet dismissed with no card: back on the screen, and no card over it');
+  ok(holder.state.screen === 'home' && !holder.state.fc && !card(holder) && !stage(H),
+     'the sheet dismissed: the person is where they were, with nothing over it and no screen for no card');
   H.nfc = c;
-  holder.fcRead();
+  holder.goFlashcard();
   await until('the new card to be read', () => !!holder.state.fc);
+  ok(holder.state.screen === 'flashcard' && holder.state.stack.slice(-1)[0] === 'home', 'a card tapped, and the screen is that card; back from it is where they were');
+  let v;
   v = vals(holder);
   ok(v.fcHas && v.fcNew && !v.fcUsable && v.fcCheck === 'No PIN yet' && v.fcBalance === '₿ 0' && v.fcSub === '' && !stage(H),
      'a card out of its packet reads as new, with one thing to do', v.fcCheck);
@@ -152,16 +149,16 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   pad(holder).type('1235');
   ok(pad(holder).title === 'CHOOSE A PIN' && /did not match/.test(pad(holder).note), 'and two that differ start it again', pad(holder).note);
   pad(holder).type('1234');
-  pad(holder).type('1234');
-  ok(!pad(holder) && card(holder) && card(holder).title === 'IF THE CARD IS LOST' && card(holder).has('RECOVERABLE') && card(holder).has('LIKE CASH'),
-     'then the one choice: recoverable, or like cash', card(holder) && card(holder).title);
   c.tap();
-  card(holder).press('RECOVERABLE');
+  pad(holder).type('1234');
+  ok(!pad(holder) && !card(holder), 'cards are cash for now: nothing is asked about what happens if one is lost');
   await until('the card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
+  ok(/It is cash/.test(card(holder).reason) && /forget its PIN, or type it wrong three times/.test(card(holder).all),
+     'and what cash means is said where the card becomes one', card(holder).all);
   v = vals(holder);
-  ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && holder.state.fc.mine && holder.state.fc.recoverable,
-     'one tap later it is this phone’s card, with a PIN, and recoverable');
-  ok(v.fcFacts.map((f) => f.label).join() === 'Mint,Holds,If lost,Limit' && /This phone can take it back/.test(v.fcFacts[2].value) && v.fcFacts[3].value === 'No limit',
+  ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
+     'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
+  ok(v.fcFacts.map((f) => f.label).join() === 'Mint,Holds,If lost,Limit' && v.fcFacts[2].value === 'Not recoverable: this card is cash' && v.fcFacts[3].value === 'No limit',
      'and the screen says where its money is, what it holds, what happens if it is lost, and its limit', v.fcFacts.map((f) => f.value).join(' / '));
 
   /* ---- add funds -------------------------------------------------------------- */
@@ -344,21 +341,46 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   pad(holder).type('4321');
   await until('the money to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
   await settle();
-  ok(c.balance() === 0 && (await H.W.balanceSats()) === hadBefore + onCard && holder.state.fc === null,
-     'all of it is in the phone, the card is empty, and the screen asks for a tap again', card(holder).reason);
+  ok(c.balance() === 0 && (await H.W.balanceSats()) === hadBefore + onCard && holder.state.fc && holder.state.fc.balance === 0 && holder.state.screen === 'flashcard',
+     'all of it is in the phone, and the screen is still the card, reading empty', card(holder).reason);
   const out = history(H).filter((e) => e.memo === 'from card')[0];
   ok(out && holder.seen[out.hash] === true, 'and its entry is not announced a second time');
   card(holder).press('DONE');
 
-  /* ---- the cards this phone loaded, and its last month ------------------------ */
+  /* ---- with the switch on: cards that can be taken back -----------------------
+   * Off, as it ships: no list, and a card that leaves the screen takes the
+   * screen with it. On, for the rest of this suite: the choice at set-up, the
+   * list of cards this phone loaded, RENEW in a card's last month, and a lost
+   * card's money taken back. */
+  ok(vals(holder).fcRows.length === 0 && vals(holder).fcHasRows === false, 'as it ships, there is no list of cards to take back');
+  holder.fcGone();
+  ok(holder.state.screen === 'home' && !holder.state.fc, 'and a card that is no longer known takes its screen with it');
+  holder.FC_RECOVERABLE = true;
+  const cashCard = c;
+  const rc = newCard(H);
+  H.nfc = null;
+  holder.goFlashcard();
+  await settle();
   v = vals(holder);
-  ok(v.fcHasRows && v.fcRows.length === 1 && v.fcRows[0].sub === 'Empty when last seen', 'the card is listed, as empty when last seen', v.fcRows[0] && v.fcRows[0].sub);
-  c.tap();
+  ok(holder.state.screen === 'flashcard' && v.fcNone && v.fcRows.length === 0, 'switched on, the sheet dismissed leaves the screen where lost cards are listed');
+  H.nfc = rc;
   holder.fcRead();
-  await until('the card to be read', () => !!holder.state.fc);
+  await until('the second card to be read', () => !!holder.state.fc);
+  holder.fcSetUp();
+  pad(holder).type('4321');
+  pad(holder).type('4321');
+  ok(!pad(holder) && card(holder) && card(holder).title === 'IF THE CARD IS LOST' && card(holder).has('RECOVERABLE') && card(holder).has('LIKE CASH'),
+     'and set-up has its one choice: recoverable, or like cash', card(holder) && card(holder).title);
+  rc.tap();
+  card(holder).press('RECOVERABLE');
+  await until('the second card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
+  ok(holder.state.fc.mine && holder.state.fc.recoverable && /This phone can take it back/.test(vals(holder).fcFacts[2].value),
+     'chosen recoverable, it is this phone\u2019s to take back', vals(holder).fcFacts[2].value);
+  card(holder).press('LATER');
+  rc.tap();
   holder.fcAdd();
   keyIn(holder, 1024);
-  c.tap();
+  rc.tap();
   pad(holder).type('4321');
   await until('1,024 to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
   card(holder).press('DONE');
@@ -370,12 +392,12 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   v = vals(holder);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT,RENEW' && /^Renew by /.test(v.fcFacts[2].value),
      'in its last month the screen says RENEW, and by when', v.fcFacts[2].value);
-  c.tap();
+  rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
   pad(holder).type('4321');
   await until('the card to be renewed', () => card(holder) && card(holder).title === 'ON THE CARD');
-  ok(c.balance() === 1024 && vals(holder).fcLinks.length === 2 && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
+  ok(rc.balance() === 1024 && vals(holder).fcLinks.length === 2 && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
      && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).every((e) => holder.seen[e.hash]),
      'renewed in one tap: the same 1,024, a year on, its two entries not announced', card(holder).reason);
   card(holder).press('DONE');
@@ -397,6 +419,7 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
   ok((await H.W.balanceSats()) === beforeBack + 1024 && /₿1,024 from the card/.test(card(holder).reason) && !stage(H), 'and 1,024 sats are back with no card', card(holder).reason);
   card(holder).press('DONE');
   ok(vals(holder).fcRows[0].sub === 'Taken back', 'the list says so');
+  ok(cashCard.balance() === 0, 'and the cash card was never in it');
   H.window.Date.now = real;
   Date.now = realHere;
 

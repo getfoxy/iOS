@@ -1499,9 +1499,11 @@ entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
    shows NO PIN YET and a balance of 0. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
    to it at all, and times out.
-3. SET UP THIS CARD, a PIN twice, RECOVERABLE, tap. **Pass:** THE CARD IS
-   READY; the screen says this phone can take it back and names this
-   phone's mint.
+3. SET UP THIS CARD, a PIN twice, tap. Nothing is asked about a lost card:
+   cards are cash for now. **Pass:** THE CARD IS READY, saying it is cash and
+   that a lost card, a forgotten PIN or three wrong PINs in a row lose what
+   is on it; the screen's If lost row reads "Not recoverable: this card is
+   cash" and names this phone's mint.
 
 #### 23b. Money on, and off
 
@@ -1530,9 +1532,9 @@ entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
 
 #### 23d. What a card cannot be made to do
 
-1. With the card blocked, wait for nothing: a year is its date. Check instead
-   that CARDS YOU LOADED lists it with its date, and that taking it back
-   before then says NOT YET.
+1. With the card blocked (23c), read it on the holder's phone. **Pass:** the
+   card's face says BLOCKED and the line under it says what is on it cannot
+   be got back. Do this with a card holding a few sats and no more.
 2. Put Foxy away in the middle of a tap. **Pass:** the sheet goes; on return
    nothing is half-done that the next tap does not finish.
 3. On a build without the entitlement: TAP CARD. **Pass:** NO CARD READER,
