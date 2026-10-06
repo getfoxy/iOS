@@ -1169,25 +1169,20 @@
     const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
     const past = near && fc.first <= now;
 
-    /* One line of status, engraved at the card's top right. The card's own
-     * state comes first where it is not the ordinary one (a card that is
-     * blocked, new, or locked), and otherwise the mint's word on what it says
-     * it holds. The card is drawn dark whatever the app's theme, so its inks
-     * are its own. */
+    /* One line on the card's own face, for what is true of the card itself
+     * and is not the ordinary state: blocked, new, locked, or holding pieces
+     * the mint says are spent. How fresh the mint's word is, is said once,
+     * under the screen's title (`verified`, below); it was said here as well.
+     * The card is drawn dark whatever the app's theme, so its inks are its
+     * own. */
     const ON_CARD = 'rgba(255,255,255,.46)';
-    const word = !fc ? ''
-      : fc.check === 'asking' ? 'Checking with the mint\u2026'
-      : fc.check === 'ok' ? 'Checked with the mint'
-      : fc.check === 'off' ? 'Not checked: no connection'
-      : fc.check === 'other' ? 'Not checked: another mint'
-      : '';
     const check = !fc ? ['', ON_CARD]
       : blocked ? ['Blocked', RED]
       : (fc.check && fc.check.spent) ? ['The mint says ' + this.fcSats(fc.check.spent) + ' is already spent', RED]
       : fc.pin === 'none' ? ['No PIN yet', AMBER]
       : !fc.hasRecord ? ['Not finished', AMBER]
-      : fc.locked ? ['Locked' + (word ? ' \u00b7 ' + word : ''), AMBER]
-      : [word, (fc.check === 'off' || fc.check === 'other') ? AMBER : ON_CARD];
+      : fc.locked ? ['Locked', AMBER]
+      : ['', ON_CARD];
 
     /* The card's mint and what it holds are in the pill, as home's are. Its
      * limit is not said on this screen: SET LIMIT is where it is seen and

@@ -96,7 +96,7 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   ok(added && holder.seen[added.hash] === true && H.W.cardOwed().length === 0, 'its entry is one the app will not announce a second time, and nothing is left owed');
   card(holder).press('DONE');
   await until('the mint’s word on the card', () => holder.state.fc.check === 'ok');
-  ok(vals(holder).fcCheck === 'Checked with the mint', 'the mint is asked about what the card says it holds');
+  ok(vals(holder).fcCheck === '' && vals(holder).fcVerified === 'Verified Just Now', 'the mint is asked about what the card says it holds, and the screen says so once, under its title');
 
   /* ---- under the title: how fresh the mint's word on the card is -------------- */
   {

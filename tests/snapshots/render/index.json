@@ -86,7 +86,7 @@
  },
  "screen sendType": {
   "file": "026-screen-sendtype.html",
-  "markup": "eec0b5c32ef9b143dfc6c0a8039e0c7c4e978279b5dc372c6a5cbfffc0682f2f",
+  "markup": "f892596f6b47dcba31d301a053446261a946f5fabfbf70ea5770a2c9cacc354d",
   "vals": "62b21c29c9980cad38242767e6e9b44443e687c7e3b8226a904f72d593933c17"
  },
  "screen spAllPaid": {
@@ -241,17 +241,17 @@
  },
  "fcMoveConfirm, asking what it costs": {
   "file": "274-fcmoveconfirm-asking-what-it-costs.html",
-  "markup": "b062a0f16bf912f8d84db58a2855e46a9a0f75b806918a2838fbce9ecbd3428f",
+  "markup": "368a773430e1fe977231d62b07fcf3c88d1427b25d33330e3fac82b29b8a5894",
   "vals": "5a19b6dbe2561b52496fbfb330a2e66f4648e68f8aaf06a96c0da6cbf18b7504"
  },
  "fcMoveConfirm, with its cost": {
   "file": "275-fcmoveconfirm-with-its-cost.html",
-  "markup": "fda5af593be0a417c4c0e596982a656b77dcf55a496d9847010060a45414f8dd",
+  "markup": "5808b37f9a31d2a65894d27872f1f57938bf7987b04a6fb882989c7c63b23326",
   "vals": "1341a9664af657880816d573beebec91bc0235d92f88a86580d2212ecad78f59"
  },
  "fcMoveConfirm, too little to move": {
   "file": "276-fcmoveconfirm-too-little-to-move.html",
-  "markup": "b473cd98ac2a0adda00210c7fc18abd783ee3574ac71088594c70f1235bd6284",
+  "markup": "a0baa1894e94e03f6d2d30084d70613d6b2301bf8ec3f74c414e0b98de67406d",
   "vals": "eba3e74e8efa0de8f33d9bcecae790ba2aade9da68ae5a750ab61861e58569d2"
  },
  "flashcard, nothing tapped": {
@@ -266,8 +266,8 @@
  },
  "flashcard, a card of this phone’s, read": {
   "file": "252-flashcard-a-card-of-this-phone-s-read.html",
-  "markup": "343fbf9162ebf249cdcbe2c8fa03635eb67c77d95e72fff87085a520a96a3787",
-  "vals": "c5535da0e4aaf7d4fb063dde767ac54b4f30b09fe2a5c2b8ba5d7895ca4e351b"
+  "markup": "3ed240acd7b8c3ef095477a8739eaee50b09fb86d1044e83bc68693335ed07d9",
+  "vals": "c660abb944071f43d7129d8b497f0e14865be3cc9d486c383ed5ad93485563e7"
  },
  "flashcard, a new card": {
   "file": "253-flashcard-a-new-card.html",
@@ -276,18 +276,18 @@
  },
  "flashcard, a blocked card": {
   "file": "254-flashcard-a-blocked-card.html",
-  "markup": "ff59c0570a65310ce780ba53619f7ac213782e14c145ee94ecaa011ead48c30c",
+  "markup": "37d747b7d95de389f2570764ea164901066e868ff731a534dcbc19859a036c1d",
   "vals": "5a76ec4d09e08d75907d64776cb37202ce602f584fbbba6dcd346b459f660061"
  },
  "flashcard, a cash card the mint says is spent": {
   "file": "255-flashcard-a-cash-card-the-mint-says-is-spent.html",
-  "markup": "2564a01d78600b08d728aed13a5c5a95974c7c60364e8e9f39a638c7364393ee",
+  "markup": "e459e7fb522241945b70fc8e71e7bfbf949937aac00e15f3f040bd5b949432ea",
   "vals": "89382b7c5c6b1b9cc2e5bc1f1cf0fe76ba93b222097f1d3a9524ea59ee68e63c"
  },
  "flashcard, somebody else’s card, past its date, no connection": {
   "file": "256-flashcard-somebody-else-s-card-past-its-date-no-connection.html",
-  "markup": "5b04312f871304a6634c2f89653f9e38d43b5a738bf913c2b1376052ffc890b2",
-  "vals": "57045957df3b513d481be3636ce6090e3ae4bdf65cf54645031bda70fa2b2605"
+  "markup": "aacac6e1fc3396dc18a38fbc48d7935173e34a830c97149567d023c3f9462923",
+  "vals": "5a097bfea09d827dc4a8f613c974e3854ab3196923b94d3f118f6df65de81aa3"
  },
  "home, working offline": {
   "file": "217-home-working-offline.html",
@@ -321,17 +321,17 @@
  },
  "sendtype, working offline": {
   "file": "230-sendtype-working-offline.html",
-  "markup": "eec0b5c32ef9b143dfc6c0a8039e0c7c4e978279b5dc372c6a5cbfffc0682f2f",
+  "markup": "f892596f6b47dcba31d301a053446261a946f5fabfbf70ea5770a2c9cacc354d",
   "vals": "31cddc42a413e973d6f9b80617ba5aac7e8697210ff0500e7dac905bc23f2cf8"
  },
  "priceconfirm, their bitcoin price": {
   "file": "242-priceconfirm-their-bitcoin-price.html",
-  "markup": "a29562a444de5790474a2c3f1175fe81b3e57388b29b2fde7fb47b38328a2ace",
+  "markup": "a9d1ae4e76fd49efdf26f05cc0c6b770a37e45a17b28810fd2e890abbae0551d",
   "vals": "cb3e5806eefb19266c18391020591f7c713c7b63d66324e98824bb27de426b6f"
  },
  "crossconfirm, they use another mint": {
   "file": "243-crossconfirm-they-use-another-mint.html",
-  "markup": "f65ffbf9d00b730833bb7c5afecc5faff60836c35baf87695537cb95cd04648f",
+  "markup": "d238fbfb97f1371466841a6dff1d0e47a1e6fd211971b253f407b94a180ac241",
   "vals": "75ead95dc31ecd07659beca23ac42de0a556f7cc5f2f1988ca681a426b6f0269"
  },
  "amount, receive in dollars, working offline": {
@@ -496,12 +496,12 @@
  },
  "sendType, an address being typed": {
   "file": "081-sendtype-an-address-being-typed.html",
-  "markup": "0963e672ec7284069031b485b0e98ce4ea31a060924e8ae84bb49952ca46af90",
+  "markup": "22553a34ad615532e46f43e44495714198627a5dc941f2714ffda363741c1d11",
   "vals": "8d472ba777a62cb4dc4e4c7f6261cd5932dc9056124204a9147d8393e699945a"
  },
  "sendType, a valid address, keyboard up": {
   "file": "082-sendtype-a-valid-address-keyboard-up.html",
-  "markup": "887d700324aa8a0c2946231dc299544544c7d2e9620cfc63f72a4c4d93b343ea",
+  "markup": "e73ca46ca6745508b3dfce2297ac0d732e84454da8cc382e37dc33bdedea8aa5",
   "vals": "8252088b5d526b55d6f8434fe77bbf76581e659aea4318dc9d550dc47602466f"
  },
  "sendScan, camera on": {
@@ -551,32 +551,32 @@
  },
  "reqOffer, a payment request": {
   "file": "093-reqoffer-a-payment-request.html",
-  "markup": "d913733a4ef4f27b17fd7022d32aac15c76bc74a5f7dc2d4b539f542a7198f0d",
+  "markup": "0fa26a393f2f32396fdb5ad01af12a665f543264e93a040bee0a17a591b544ca",
   "vals": "343d1cdce9b6fa9f95a7eb2a7b83813f7d8d0a91f1e09e99e407c08c033bb31e"
  },
  "reqOffer, in person (no transport)": {
   "file": "208-reqoffer-in-person-no-transport.html",
-  "markup": "f5531bb35cc1b77dec8224870a1339ae73860ac9f64d103cfda806a18ac1ec95",
+  "markup": "4119dac0e40ab9c0391ddbd571ce22502e38a67948dc03b0c48951fd5b5cc67a",
   "vals": "a2e46db2a1a665285ffac1bd817950eae2f2e5c355cdfd096b6aebe83802292f"
  },
  "reqOffer, busy, no details": {
   "file": "094-reqoffer-busy-no-details.html",
-  "markup": "7e86c8e9c9bb086f564d04eb99c01e6d60128e747c689fc04a9c248e5d87ebf6",
+  "markup": "29e5ca021be12a9ce32efca40cdc21c2672606a881ecf12804a7c79673d9f8fb",
   "vals": "5008db7f883d1692ec6d57dcc6729ea9f84d7dd497a21319092b788d0ac8ecda"
  },
  "sendConfirm, lightning address, a quoted fee, a note": {
   "file": "095-sendconfirm-lightning-address-a-quoted-fee-a-note.html",
-  "markup": "72bbab11a91ca9c562ba78bd12776140896bc64613a99f36cde175badf227097",
+  "markup": "b8b53fad81cf84af7d0b6c7f123342aadf43f1a119cd50a6e741ee65110532e8",
   "vals": "bd55c1b08e3c31ee014ef06a6420a42d152a6269a9945c441aeb7b7274fb5de0"
  },
  "sendConfirm, an invoice, quoting": {
   "file": "096-sendconfirm-an-invoice-quoting.html",
-  "markup": "ed1acaa1b00d9bc9b7569845600ab7b3774c1aee8b315bb6bc56f0d289d27226",
+  "markup": "54458ceca0b44f82f31b647ddd7c3634512eedd736314a5d1396d1e9b2267034",
   "vals": "20b828910cbc764d75f9c1bc7e0a5136f7f4dd9e7d8c94243222b24b42876012"
  },
  "depConfirm, by card": {
   "file": "098-depconfirm-by-card.html",
-  "markup": "853372ee4627097ece4363c06b9a585e25c486fa9681da54822a82295eaa0660",
+  "markup": "b67197eb3b3a3300b017eaf2c58d2f3658f1ce5ee26dec4a691e2f0123bc8794",
   "vals": "3119de91a3f4da918eb856f35365185d33c618cc56c10e10ecdade9445e2af21"
  },
  "blocked screen sendFail": {
@@ -606,22 +606,22 @@
  },
  "history, every kind of entry": {
   "file": "104-history-every-kind-of-entry.html",
-  "markup": "751c003d665668b24c044d76574991470a24782ec8d6bd9397e21579230d6514",
+  "markup": "7288d54b0ad19d3c13c6593b3f6c33bb6939d6df24d9c99b2a178189e2944353",
   "vals": "a309956178e3f3d68b280626c6e5e0f371941297e20e886f80f00b03897b3974"
  },
  "history, done, pending and failed": {
   "file": "203-history-done-pending-and-failed.html",
-  "markup": "56402b2355492ab818d36239a8ae5cf3e536d826c0c168e17242c3962969c609",
+  "markup": "b4ea65f87229da5d275946e26b0bb9a5cb171b649fecdc172d956ce227dfcda1",
   "vals": "a7d27ac8c400c11778eac2c595e8cd58fb1d9d2ec885c084a1a7879086ca5ba2"
  },
  "history, a sent token not yet redeemed": {
   "file": "206-history-a-sent-token-not-yet-redeemed.html",
-  "markup": "2538b72620bddef3688f0b1acf076d1dff634e103d8d87cb2274416de20ff540",
+  "markup": "9f606e2e7cebe4543666decbd34e6b414935e2fee92741f45d0ed3e0574540e1",
   "vals": "893b57c4fce7c1b0a9c8cf251dfdfced40344b9fb0869238a049c6d0da52a32d"
  },
  "history, a payment at risk beside an ordinary pending one": {
   "file": "231-history-a-payment-at-risk-beside-an-ordinary-pending-one.html",
-  "markup": "a2c90f5f152acdd3c3cbd96b1e5fbf94489cd50983eba152cb8450037e0bc481",
+  "markup": "6e21f5d39e7bb66ec2feb5aa609092357c3acb0aba60ea730c7d7dae2cd88fcf",
   "vals": "98a4cc123c33ad588e44e0ecdb255f37aa9cf5c697e2e1420f9e7635c1b02894"
  },
  "txDetail, a payment at risk": {
@@ -651,7 +651,7 @@
  },
  "history, outgoing only": {
   "file": "105-history-outgoing-only.html",
-  "markup": "5286ded10130a3c0350a5769e27e8147e0db5d864881bd786791c43132e6adff",
+  "markup": "7b6209b14468c30d6fc9478303158e845fa2fe19773b212942a0c0b6021be69e",
   "vals": "bb08e15abbc63577560455a70360aab2141ae1603f0fafe309466bf855a43ca2"
  },
  "history, incoming, none match": {
