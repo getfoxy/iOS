@@ -43,6 +43,13 @@
       + '<div style="position:absolute;left:50%;top:50%;width:3px;height:10px;margin:-10px 0 0 -1.5px;border-radius:2px;background:#13333C;transform-origin:50% 100%;animation:hand 3s linear infinite"></div>'
       + '<div style="position:absolute;left:50%;top:50%;width:3px;height:7px;margin:-7px 0 0 -1.5px;border-radius:2px;background:#13333C;transform-origin:50% 100%;transform:rotate(90deg)"></div>'
       + '</div></div>',
+    /* A card held to the phone: its outline, its chip, and the contactless
+     * mark breathing beside it (the FLASHCARD screens, 26f-flashcard.js). */
+    card: '<div style="position:relative;width:150px;height:96px;border-radius:14px;border:3px dashed #13333C;background:rgba(255,255,255,.45);animation:offlineFade 2.4s ease-in-out infinite">'
+      + '<div style="position:absolute;left:16px;top:30px;width:30px;height:24px;border-radius:5px;border:3px solid #13333C;box-sizing:border-box"></div>'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="#13333C" stroke-width="2.2" stroke-linecap="round" style="position:absolute;right:14px;top:24px;width:44px;height:44px">'
+      + '<path d="M7.75 9A3.5 3.5 0 0 1 7.75 15M9.25 6.4A6.5 6.5 0 0 1 9.25 17.6M10.75 3.8A9.5 9.5 0 0 1 10.75 20.2"></path></svg>'
+      + '</div>',
     mints: (function () {
       var bank = '<svg viewBox="0 0 64 64" fill="none" style="width:64px;height:64px"><path d="M6 22 32 8l26 14z" fill="#13333C"></path><rect x="8" y="24" width="48" height="4" rx="1" fill="#13333C"></rect><rect x="12" y="31" width="6" height="19" rx="1.5" fill="#13333C"></rect><rect x="23" y="31" width="6" height="19" rx="1.5" fill="#13333C"></rect><rect x="35" y="31" width="6" height="19" rx="1.5" fill="#13333C"></rect><rect x="46" y="31" width="6" height="19" rx="1.5" fill="#13333C"></rect><rect x="6" y="52" width="52" height="5" rx="1.5" fill="#13333C"></rect></svg>';
       var side = function (name) {
@@ -145,6 +152,8 @@
       wrap.appendChild(u);
     }
     b.textContent = o.button || 'CANCEL';
+    // found by a screen that takes its button away part-way through (26f-flashcard.js)
+    b.setAttribute('data-stage-button', '1');
     b.addEventListener('click', () => {
       if (!o.keep) this.hideStage(kind);
       if (typeof o.go === 'function') o.go();

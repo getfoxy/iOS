@@ -85,6 +85,54 @@ function later(c, ms) {
     ok(b2.sats === 824 && (await bal(H)) === h0 + 824, 'read by its holder’s phone after it was paid with, a card is taken back change and all', String(b2.sats));
   }
 
+  /* ---- the last week before a card's date ---------------------------------
+   * A stranger's phone stops taking a piece a week before its date. The phone
+   * that loaded the card is not a stranger to it, and must still be able to
+   * empty it and to give its money a new date. */
+  {
+    const DAY = 24 * 3600 * 1000;
+    const c3 = newCard(H);
+    await H.W.cardSetUp(c3, { pin: '1234', recoverable: true });
+    c3.tap();
+    await H.W.cardAdd(c3, { sats: 1024, pin: '1234' });
+    const date0 = H.W.cardsList().filter((c) => c.key === c3.key)[0].date;
+    const undoH = later(H, 362 * DAY), undoR = later(R, 362 * DAY);
+    c3.tap();
+    const looked = await H.W.cardLook(c3);
+    ok(H.W.cardIsMine(looked) === true && R.W.cardIsMine(looked) === false, 'a card knows no owner, and each phone knows whether it is its own');
+    c3.tap();
+    ok((await why(R.W.cardPay(c3, { sats: 100, pin: '1234' }))) === 'renew' && c3.balance() === 1024,
+       'three days before its date another phone will not be paid by it, and nothing is signed');
+    c3.tap();
+    const renewed = await H.W.cardRenew(c3, { pin: '1234' });
+    const date1 = H.W.cardsList().filter((c) => c.key === c3.key)[0].date;
+    ok(renewed.sats === 1024 && renewed.left === 0 && c3.balance() === 1024 && date1 > date0 + 300 * 24 * 3600,
+       'its own phone renews it in one tap: the same 1,024 on the card, dated a year on', renewed.sats + ' ' + (date1 - date0));
+    c3.tap();
+    const p3 = await R.W.cardPay(c3, { sats: 100, pin: '1234' });
+    ok(p3.sats === 100, 'and renewed, it pays');
+    c3.tap();
+    const h1 = await bal(H);
+    const out = await H.W.cardWithdraw(c3, { pin: '1234' });
+    ok(out.sats === 924 && (await bal(H)) === h1 + 924 && c3.balance() === 0, 'its own phone empties what is left', String(out.sats));
+    ok(H.W.cardsList().filter((c) => c.key === c3.key)[0].sats === 0, 'and its list no longer says the card holds what it has spent',
+       String(H.W.cardsList().filter((c) => c.key === c3.key)[0].sats));
+    undoH(); undoR();
+
+    // past its date: the card's own key is no longer asked, and the phone says which road is open
+    const c4 = newCard(H);
+    await H.W.cardSetUp(c4, { pin: '1234', recoverable: true });
+    c4.tap();
+    await H.W.cardAdd(c4, { sats: 512, pin: '1234' });
+    const undo4 = later(H, YEAR);
+    c4.tap();
+    ok((await why(H.W.cardWithdraw(c4, { pin: '1234' }))) === 'past-date' && c4.balance() === 512,
+       'past its date the card is not asked to sign: its phone is told to take it back instead');
+    const b4 = await H.W.cardTakeBack(c4.key);
+    undo4();
+    ok(b4.sats === 512, 'which it does, with no card', String(b4.sats));
+  }
+
   console.log('\n' + (failed ? failed + ' flashcard-takeback check(s) failed' : 'all flashcard-takeback checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

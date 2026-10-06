@@ -157,9 +157,10 @@
         : s.tapArmed ? 'var(--acc)' : 'var(--ink)',
       tapArmInk: ['off', 'denied', 'unsupported'].indexOf(s.tapRecvStage) >= 0 ? 'rgba(var(--ink-rgb),.45)'
         : '#050505',
-      /* CARD: a FLASHcard payment, which is planned and not built. The
-       * button is where TAP was; TAP is the emblem in the middle of the QR. */
-      cardPay: () => this.toast('FLASHcard payments are coming.'),
+      /* CARD: paid by a card that holds ecash, its PIN typed on this phone
+       * (26f-flashcard.js). The button is where TAP was; TAP is the emblem in
+       * the middle of the QR. */
+      cardPay: () => this.payByCard(),
       scanToReceive: () => this.scanTokenToReceive(),
     };
   }

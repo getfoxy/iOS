@@ -245,6 +245,28 @@ function representative() {
     { amount: 2048, count: 2, want: 8 },
   ]) }));
   add('change, nothing held', at('change', {}, { wallet: PIECES([]) }));
+  /* FLASHCARD: the invitation to tap, and a card as each kind reads. Dates are
+   * fixed and far off, so no view turns on today's date; the state that does
+   * (RENEW, in a card's last month) is tests/flashcard-screens.js's. */
+  const CARDS = (over) => Object.assign({ cardSession: () => Promise.resolve(), cardOwed: () => [], cardsList: () => [] }, over || {});
+  const KEY_A = '02' + 'a1'.repeat(30) + 'c3d4';
+  const KEY_B = '03' + 'b2'.repeat(30) + '9f0e';
+  const KEY_C = '02' + 'c3'.repeat(30) + '77ab';
+  const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
+    hasRecord: true, limit: 0, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+  add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
+  add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({
+    cardOwed: () => [{ id: 'o1', card: KEY_A, sats: 1000, kind: 'load' }, { id: 'o2', card: KEY_A, sats: 24, kind: 'change' }],
+    cardsList: () => [
+      { key: KEY_A, mint: MINT, sats: 2048, date: 4102444800, due: false, takenBack: 0 },
+      { key: KEY_B, mint: MINT, sats: 1024, date: 1700000000, due: true, takenBack: 0 },
+      { key: KEY_C, mint: MINT, sats: 512, date: 1700000000, due: true, takenBack: 1700000500000 },
+    ] }) }));
+  add('flashcard, a card of this phone\u2019s, read', at('flashcard', { fc: FC({ limit: 5000 }) }, { wallet: CARDS() }));
+  add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
+  add('flashcard, a blocked card', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
+  add('flashcard, a cash card the mint says is spent', at('flashcard', { fc: FC({ recoverable: false, mine: false, first: 0, last: 0, check: { spent: 1024 } }) }, { wallet: CARDS() }));
+  add('flashcard, somebody else\u2019s card, past its date, no connection', at('flashcard', { fc: FC({ mine: false, first: 1700000000, last: 1700000000, check: 'off', locked: true }) }, { wallet: CARDS() }));
   add('home, working offline', at('home', { series: SERIES, range: '1D' }, { wallet: OFFLINE }));
   add('home, a secure connection', at('home', { series: SERIES, range: '1D' }, { wallet: ONLINE }));
   add('sendhow, working offline', at('sendHow', { flow: 'send' }, { wallet: OFFLINE }));
@@ -519,6 +541,20 @@ function cards() {
   add('overlay: the seed phrase', (a) => a.showSeed());
   add('overlay: PIN entry', (a) => a.pinOverlay({ title: 'ENTER YOUR PIN', subtitle: 'To turn the lock off.', cta: 'TURN OFF', onCancel() {}, onSubmit() {} }));
   add('overlay: PIN set-up', (a) => a.pinSetup(() => {}));
+  // the same pad asking for a card's PIN, and for an amount with a second answer (26f-flashcard.js)
+  add('overlay: a card\u2019s PIN, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay \u20bf1,180. The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.' }, () => {}));
+  add('overlay: an amount to withdraw from a card', (a) => a.fcAskSats({ title: 'WITHDRAW', subtitle: 'The card holds \u20bf2,048.', alt: { label: 'ALL OF IT (\u20bf2,048)', tap() {} } }, () => {}));
+  add('stage: hold the card to the phone', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('hold'); });
+  add('stage: keep the card there', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('mint'); });
+  add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },
+    { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
+  add('card: a card\u2019s wrong PIN', (a) => a.fcFailed({ card: 'wrong-pin', tries: 2, message: 'Wrong PIN. 2 tries left.' }, { taken: true, again() {} }));
+  add('card: a blocked card', (a) => a.fcFailed({ card: 'blocked', message: 'x' }, { taken: true }));
+  add('card: not enough on the card', (a) => a.fcFailed({ card: 'not-enough', balance: 900, message: 'The card holds 900 sats.' }, { taken: true }));
+  add('card: a card payment not made, no mint', (a) => a.fcFailed({ card: 'no-route', message: 'x' }, { taken: true, again() {} }));
+  add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
+  add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
+  add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
   v.push(['importSeed, the words on the phone', at('importSeed', {})]);
   v.push(['importSeed, on the phone, a finished scan', at('importSeed', {
     rsCandidate: 'candidate-1',

@@ -312,6 +312,9 @@
       txChangeNet: (tx.dir === 'in' ? '+' : '\u2212') + this.money(tx.sats, this.txFiat(tx, tx.sats)).main,
       txChangeState: tx.changeState === 'never came' ? 'The change never arrived.'
         : tx.changeState === 'never sent' ? 'The change could not be sent, so it was all kept.'
+        : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))
+          ? 'Their change was made and is waiting for their card. It is locked to that card: '
+            + 'MENU \u203a FLASHCARD, and tap the card, to put it back.'
         : tx.changeState === 'not handed' ? 'Their change was made and could not be handed over. '
           + 'Show them the token below: it is locked to their phone, so only they can take it.'
         : tx.changeState === 'owed' ? 'Waiting for the change.'

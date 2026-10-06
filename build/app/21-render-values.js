@@ -52,6 +52,8 @@
       errors: 'M12 4.2 3.2 19.2h17.6L12 4.2zM12 10v4M12 16.6v.6',
       // lines on a page, the last one short
       logs: 'M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11.5h6M9 14.5h6M9 17.5h3',
+      // a payment card: its outline, the stripe across it, a short line of print
+      card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
       // three coins of different sizes: the pieces themselves, not a wallet
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
@@ -219,6 +221,9 @@
        * exact amount at all — the one question an offline payer has and no other
        * screen answers. */
       { label: 'YOUR CHANGE', path: MENU_ICON.change, tap: shut(() => this.goChange()) },
+      /* A card that holds ecash: what is on it, money on and off it, and the
+       * cards this phone can take back (26f-flashcard.js). */
+      { label: 'FLASHCARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard()) },
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
       { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
@@ -377,6 +382,7 @@
       ...this.renderTxDetail(c),
       ...this.renderContacts(c),
       ...this.renderMints(c),
+      ...this.renderFlashcard(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),
       ...this.renderBackup(c),

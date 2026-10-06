@@ -100,6 +100,12 @@
     });
   }
 
+  /* `o.amount` turns the same pad into one for a number of sats: the figure
+   * where the dots were, any amount above zero where four digits were asked.
+   * `o.alt` is a second answer under the button ({ label, tap }), for a pad
+   * with a choice that is not a number: ALL OF IT, NO LIMIT. Both are the
+   * FLASHCARD screens' (26f-flashcard.js), which ask for a card's PIN and for
+   * amounts with the pad a person has just learnt. */
   pinOverlay(opts) {
     const o = opts || {};
     if (this._pinEl) this._pinEl.remove();
@@ -126,11 +132,11 @@
     root.appendChild(sub);
 
     // the dots
-    const dots = el('display:flex;gap:14px;margin-top:38px;height:18px;align-items:center');
+    const dots = el('display:flex;gap:14px;margin-top:38px;height:' + (o.amount ? '44px' : '18px') + ';align-items:center');
     root.appendChild(dots);
 
     const note = el('margin-top:18px;min-height:22px;font-size:16px;font-weight:700;'
-      + 'color:#FF5C5C;text-align:center', '');
+      + 'color:#FF5C5C;text-align:center', o.warn || '');
     root.appendChild(note);
 
     let entry = '';
@@ -138,6 +144,12 @@
 
     const paint = () => {
       dots.textContent = '';
+      if (o.amount) {
+        dots.appendChild(el('font-size:40px;font-weight:800;letter-spacing:-0.03em;line-height:1;'
+          + 'color:' + (entry ? 'var(--ink,#F5F1EC)' : 'rgba(245,241,236,.3)'),
+          '\u20bf ' + this.group(Number(entry) || 0)));
+        return;
+      }
       const n = Math.max(entry.length, 4);
       for (let i = 0; i < n; i++) {
         const filled = i < entry.length;
@@ -228,7 +240,11 @@
     cta.addEventListener('click', () => {
       // with no keypad the button IS the face: it asks again
       if (o.noKeypad) { if (o.face) o.face(); return; }
-      if (entry.length < 4) {
+      if (o.amount && !(Number(entry) > 0)) {
+        note.textContent = 'Type an amount.';
+        return;
+      }
+      if (!o.amount && entry.length < 4) {
         note.textContent = 'At least four digits.';
         return;
       }
@@ -255,6 +271,15 @@
           && W.faceInsteadOfPin && W.faceInsteadOfPin()) {
         face.style.display = 'flex';
       }
+    }
+
+    if (o.alt && o.alt.label) {
+      const alt = el('margin-top:10px;width:100%;max-width:300px;height:52px;'
+        + 'border-radius:26px;border:1.5px solid rgba(245,241,236,.2);'
+        + 'display:flex;align-items:center;justify-content:center;font-size:17px;'
+        + 'font-weight:800;letter-spacing:0.02em;color:var(--ink,#F5F1EC);cursor:pointer', o.alt.label);
+      alt.addEventListener('click', () => { if (o.alt.tap) o.alt.tap(); });
+      root.appendChild(alt);
     }
 
     if (o.onCancel) {

@@ -233,6 +233,8 @@
     catch (e) { return ((h % 12) || 12) + ':' + mm + (h < 12 ? ' AM' : ' PM'); }
   }
 
+  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed' };
+
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
   txWho(t) {
@@ -241,6 +243,8 @@
     if (m) return m[0];
     // the row clearing history leaves behind: the balance that was there
     if (t.memo === 'opening') return 'Balance carried forward';
+    // the wallet's own words for money that moved by a card (08a-flashcard.js)
+    if (this.CARD_MEMOS[t.memo]) return this.CARD_MEMOS[t.memo];
     if (t.memo && t.memo.trim() && t.memo !== 'Foxy') return t.memo.trim();
     return t.dir === 'in' ? 'Received' : 'Sent';
   }
@@ -465,6 +469,13 @@
          * in the list, where it belongs; it just does not interrupt anybody. */
         const tags = W.tagsFor(t.hash) || {};
         if (tags.change) { this.txIsNew(t.hash); return; }
+        /* Money moved between this phone and a card somebody was holding to
+         * it: a top-up, a withdrawal, a renewal, a lost card taken back. The
+         * FLASHCARD screens say how each went, at the moment it did, and a
+         * confirmation screen a second later would say it twice. A payment
+         * taken from a card is not this: it is tagged apart and announced like
+         * any other. */
+        if (tags.to === 'card') { this.txIsNew(t.hash); return; }
         /* Still on its way to somebody. The entry exists because the token
          * does; the payment has not happened yet, and announcing it is how the
          * payer came to see a confirmation of withdrawal while the receiver was

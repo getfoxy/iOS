@@ -289,6 +289,13 @@
    * taken in payment (some mints stop honouring the card's own key then). */
   var CARD_DATE_AHEAD = 365 * 24 * 3600;
   var CARD_DATE_MARGIN = 7 * 24 * 3600;
+  /* The margin is a stranger's: it is what keeps a receiver from taking a
+   * piece its loader could take back days later. The phone that holds the
+   * card's refund key is that loader, and has nobody to guard against but the
+   * clock: ten minutes, so a swap begun before the date is not answered after
+   * it. Without this a holder could not empty or renew their own card in its
+   * last week, which is the week they are told to. */
+  var CARD_OWN_MARGIN = 10 * 60;
 
   function cardStore(key) {
     var l = load(key, []);
@@ -374,19 +381,27 @@
 
   /* Which of a card's pieces can pay, at this mint, now: of a keyset this
    * mint has, and not within a week of its date. */
-  function cardUsable(card, w) {
+  function cardUsable(card, w, own) {
     var ids = keysetIdsFor(w);
     var now = Math.floor(Date.now() / 1000);
+    var margin = own ? CARD_OWN_MARGIN : CARD_DATE_MARGIN;
     var out = /** @type {{ pieces: any[], stale: number, foreign: number }} */ ({ pieces: [], stale: 0, foreign: 0 });
     card.pieces.forEach(function (x) {
       if (ids.indexOf(x.keyset) < 0) { out.foreign += x.amount; return; }
-      if (x.date && x.date < now + CARD_DATE_MARGIN) { out.stale += x.amount; return; }
+      if (x.date && x.date < now + margin) { out.stale += x.amount; return; }
       var proof = /** @type {any} */ (cardProofOf(x, card.key, card.record.refundKey));
       proof.slot = x.i;
       proof.date = x.date;
       out.pieces.push(proof);
     });
     return out;
+  }
+
+  /* Whether this phone is the one that may take this card back: the refund
+   * key the card names is the one on file here for it. */
+  function cardMine(card) {
+    var row = cardsOnFile()[card.key];
+    return !!(row && row.refundKey && card.record && row.refundKey === card.record.refundKey);
   }
 
   /* Why this card cannot be used here at all, as an error, or null. */
@@ -434,18 +449,42 @@
    * is added to whenever the card is loaded or read here, and never trimmed
    * by a read that shows less: a piece that is gone from the card has been
    * spent, and the mint will say so. */
-  function cardRemember(card, pieces) {
+  function cardRemember(card, pieces, whole) {
     var all = cardsOnFile();
     var row = all[card.key];
     if (!row) return;
     var seen = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
+    var here = {};
     (pieces || []).forEach(function (x) {
-      if (x && x.nonce) seen[x.nonce] = { keyset: x.keyset, amount: x.amount, C: x.C, date: x.date || 0 };
+      if (!x || !x.nonce) return;
+      here[x.nonce] = true;
+      seen[x.nonce] = { keyset: x.keyset, amount: x.amount, C: x.C, date: x.date || 0 };
     });
+    /* `whole`: these are all the card holds, so anything else on file has
+     * left it. Marked, not forgotten: a piece the card signed for and nobody
+     * swapped is still unspent at the mint, the card will never sign for it
+     * again, and this row is the only road by which it comes back. What a
+     * screen says the card holds leaves the marked ones out (`cardsList`). */
+    if (whole) cardLeft(seen, Object.keys(seen).filter(function (n) { return !here[n]; }));
     row.pieces = seen;
     row.seen = Date.now();
     all[card.key] = row;
     if (!save(CARDS, all)) console.warn('[foxy] card: what is on a card could not be written down; it can be taken back only from what was known before');
+  }
+
+  function cardLeft(seen, nonces) {
+    nonces.forEach(function (n) { if (seen[n] && !seen[n].gone) seen[n].gone = Date.now(); });
+  }
+
+  /* Pieces this phone has just had its own card sign for: off the card, as
+   * far as any screen is concerned, from this moment. */
+  function cardSpentHere(cardKey, nonces) {
+    var all = cardsOnFile();
+    var row = all[cardKey];
+    if (!row || !row.pieces || typeof row.pieces !== 'object') return;
+    cardLeft(row.pieces, nonces);
+    row.seen = Date.now();
+    save(CARDS, all);
   }
 
   /* Swap a row of TAKEN at the mint, by the ordinary receive. The entry is
@@ -459,7 +498,8 @@
                                                 grossSats: row.all ? undefined : row.worth })
       .then(function (r) {
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
-        try { FoxyWallet.tag(row.id, { to: row.memo === 'from card' ? 'card' : 'card payment' }); } catch (x) {}
+        // 'card' is a move the screens say themselves; 'card payment' is announced like any other (16-history-lists.js)
+        try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund) ? 'card' : 'card payment' }); } catch (x) {}
         return { sats: (r && r.sats) || 0 };
       }, function (e) {
         var text = String((e && e.message) || '');
@@ -494,13 +534,16 @@
     try { w = need(); } catch (e2) { return Promise.reject(e2); }
     if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint, so the card was not asked for anything.'));
     var t = cardTalk(link);
-    var card, picked, worth, fee, row, result;
+    var card, picked, worth, fee, row, result, own;
     on('reading');
     return cardLook(link).then(function (c) {
       card = c;
       var no = cardUnusable(card, w);
       if (no) throw no;
-      var usable = cardUsable(card, w);
+      own = cardMine(card);
+      // this phone's own card, read: what is on it now is written down, as at any other read
+      if (own) cardRemember(card, card.pieces, true);
+      var usable = cardUsable(card, w, own);
       var have = usable.pieces;
       if (o.all) {
         picked = have;
@@ -512,7 +555,11 @@
         }
       }
       if (!picked || !picked.length) {
-        if (usable.stale > 0 && card.balance >= want) throw cardError('renew', 'This card must be renewed by its owner before it can pay.', { stale: usable.stale });
+        if (usable.stale > 0 && card.balance >= want) {
+          throw own
+            ? cardError('past-date', 'This card\u2019s date has passed. Its money comes back to this phone with TAKE IT BACK, and needs no card.', { stale: usable.stale })
+            : cardError('renew', 'This card must be renewed by its owner before it can pay.', { stale: usable.stale });
+        }
         throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       }
       worth = sumProofs(picked);
@@ -529,6 +576,7 @@
       on('signing');
       return cardSign(t, card, picked, pin);
     }).then(function (signed) {
+      if (own) cardSpentHere(card.key, signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
       var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
       row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: worth - fee - want,
               all: !!o.all, card: card.key, memo: memo, at: Date.now() };

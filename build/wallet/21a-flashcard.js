@@ -11,7 +11,7 @@
       return cardLook(link).then(function (card) {
         // a card this phone can take back: what is on it now is written down for the day it is lost
         var mine = cardsOnFile()[card.key];
-        if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces);
+        if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces, true);
         return card;
       });
     },
@@ -106,7 +106,9 @@
         var sats = 0, first = 0, last = 0;
         Object.keys(pieces).forEach(function (n) {
           var x = pieces[n];
-          sats += Math.round(Number(x.amount) || 0);
+          // off the card when this phone last read it; kept on file only for the taking back
+          if (!x || x.gone) return;
+          sats += satsOf(x.amount);
           if (x.date) { first = first ? Math.min(first, x.date) : x.date; last = Math.max(last, x.date); }
         });
         return { key: key, mint: row.mint || '', at: row.at || 0, seen: row.seen || 0, sats: sats,
@@ -141,7 +143,10 @@
       Object.keys(pieces).forEach(function (nonce) {
         var x = pieces[nonce];
         if (!x || !x.date) return;
-        if (x.date > now) { later += Math.round(Number(x.amount) || 0); soonest = soonest ? Math.min(soonest, x.date) : x.date; return; }
+        if (x.date > now) {
+          if (!x.gone) { later += satsOf(x.amount); soonest = soonest ? Math.min(soonest, x.date) : x.date; }
+          return;
+        }
         try {
           due.push({ id: x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
         } catch (e) {}
@@ -237,7 +242,7 @@
         wrote = r;
         return cardLook(link);
       }).then(function (card) {
-        if (card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces);
+        if (card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
         return { card: card, sats: wrote.sats, left: wrote.left.length, why: wrote.why || '' };
       });
     },
@@ -281,6 +286,56 @@
     cardPay: function (link, opts) { return cardTake(link, opts || {}, 'card'); },
     cardWithdraw: function (link, opts) { return cardTake(link, Object.assign({ all: !(opts && opts.sats) }, opts || {}), 'from card'); },
 
+    /* A card's money given a new date, in one tap: all of it off the card and
+     * on again. The pieces that come back carry a date a year from now, which
+     * is the only way a piece's date changes: it is part of the piece. At a
+     * mint that charges for inputs this costs what a withdrawal and a top-up
+     * cost. A tap cut short between the two leaves the money in this phone
+     * and the pieces for the card owed to it, as with any top-up.
+     * Resolves { sats, left, card } as `cardWrite` does. */
+    cardRenew: function (link, opts) {
+      var o = opts || {};
+      var hashes = [];
+      var failed = function (e) { if (e && typeof e === 'object') e.hashes = hashes; throw e; };
+      return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on }).then(function (got) {
+        hashes.push(got.hash);
+        if (typeof o.on === 'function') { try { o.on('writing'); } catch (e) {} }
+        return cardLook(link).then(function (card) { return FoxyWallet.cardPrepare(card, got.sats); });
+      }).then(function (made) {
+        hashes.push(made.hash);
+        return FoxyWallet.cardWrite(link, { pin: o.pin });
+      }).then(function (r) { return Object.assign({ hashes: hashes }, r); }, failed);
+    },
+
+    /* The mint's word on the pieces a card shows as unspent. A card is a
+     * list of pieces and a promise not to sign twice; a copy of it, or a card
+     * whose money was taken back, lists pieces the mint has already seen
+     * spent. Resolves { sats, spent }: what the card says it holds, and how
+     * much of that the mint says is gone. Rejects `other-mint`, `no-route`. */
+    cardCheck: function (card) {
+      var w;
+      try { w = need(); } catch (e) { return Promise.reject(e); }
+      if (!card || !card.pieces || !card.pieces.length) return Promise.resolve({ sats: 0, spent: 0 });
+      if (canonicalMint(card.record.mint) !== mintOf(w)) {
+        return Promise.reject(cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '.', { mint: canonicalMint(card.record.mint) }));
+      }
+      if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
+      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey); });
+      var asking = onCircuit(w, 'card:' + card.key.slice(-16));
+      return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
+        .then(function (states) {
+          var spent = 0;
+          proofs.forEach(function (pr, i) {
+            var st = (states && states[i]) || {};
+            if (String(st.state || st.State || '').toUpperCase() === 'SPENT') spent += satsOf(pr.amount);
+          });
+          return { sats: card.balance, spent: spent };
+        }, function () { throw cardError('no-route', 'The mint did not answer.'); });
+    },
+
+    /* Whether this phone is the one that can take this card back. */
+    cardIsMine: function (card) { return !!(card && card.key && card.record && cardMine(card)); },
+
     /* Signed pieces the mint has not answered for yet: [{ id, sats, card }]. */
     cardTaken: function () {
       return cardStore(CARD_TAKEN).map(function (r) { return { id: r.id, sats: r.sats, card: r.card }; });
@@ -310,7 +365,13 @@
      * card through the functions above, and lets go of it.
      *
      * Rejects with `card: 'cancelled'` when the sheet was dismissed or timed
-     * out with no card, and `card: 'no-nfc'` on a phone that cannot read one. */
+     * out with no card, and `card: 'no-nfc'` on a phone that cannot read one.
+     *
+     * `cardStop` takes the sheet down from the page's side: a session waiting
+     * for a card then ends as cancelled, and one in the middle of a card as
+     * the card having gone. */
+    cardStop: function () { return bridgeAsk('cardEnd', { error: 'Cancelled' }, 5000).then(null, function () {}); },
+
     cardSession: function (text, fn) {
       var link = {
         send: function (apdu) { return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000); },
