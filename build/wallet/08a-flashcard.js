@@ -336,6 +336,41 @@
     return Array.isArray(l) ? l : [];
   }
 
+  /* When this phone last had the mint's word that a card's pieces were good,
+   * and which pieces that word was about: { <card key>: { at, nonces } }.
+   *
+   * Kept so a phone with no connection can say how old its last word on a
+   * card is ("verified 2 hours ago"), and only for the pieces it was about: a
+   * card that holds anything newer has not been verified, however lately the
+   * rest was. Twenty cards, the oldest dropped. Nothing but that line reads
+   * it, so a write that does not land costs the line and nothing else. */
+  var CARD_CHECKED = 'foxy.flashcard.checked';
+  function cardCheckedAll() {
+    var o = load(CARD_CHECKED, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+  function cardCheckedNote(card) {
+    if (!card || !card.key || !card.pieces || !card.pieces.length) return 0;
+    var all = cardCheckedAll();
+    var at = Date.now();
+    all[card.key] = { at: at, nonces: card.pieces.map(function (x) { return String(x.nonce); }) };
+    var keys = Object.keys(all).sort(function (a, b) { return (Number(all[a].at) || 0) - (Number(all[b].at) || 0); });
+    while (keys.length > 20) delete all[keys.shift()];
+    save(CARD_CHECKED, all);
+    return at;
+  }
+  /* When, for the card as it is now: every piece on it was among those the
+   * mint vouched for. Nought when any was not, or the card was never asked
+   * about here. */
+  function cardCheckedAt(card) {
+    if (!card || !card.key || !card.pieces || !card.pieces.length) return 0;
+    var note = cardCheckedAll()[card.key];
+    if (!note || !Array.isArray(note.nonces) || !(Number(note.at) > 0)) return 0;
+    var had = {};
+    note.nonces.forEach(function (n) { had[String(n)] = true; });
+    return card.pieces.every(function (x) { return had[String(x.nonce)]; }) ? Number(note.at) : 0;
+  }
+
   /* The fields of a locked piece's secret: its nonce, the key it is locked
    * to, its date and its refund key ('' and 0 where it has none). Null for
    * anything that is not such a secret. */

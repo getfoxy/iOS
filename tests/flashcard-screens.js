@@ -70,6 +70,9 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
      'and the screen says its mint and what it holds in home’s own pill, and nothing under it', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT' && v.fcHistoryVis === 'visible' && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function',
      'with ADD FUNDS and WITHDRAW, CHANGE PIN and SET LIMIT under them, and its history at the top');
+  ok(v.fcDesign === 'FL1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1' && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
+     'the card is drawn in the design FL1, as is one that names a design this build cannot draw; every design has a code of three characters', v.fcDesign);
+  ok(v.fcVerified === 'Verified Just Now' && v.fcVerifiedShown === true, 'and under its title, that it is verified: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
 
   /* ---- add funds -------------------------------------------------------------- */
   c.tap();
@@ -94,6 +97,42 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   card(holder).press('DONE');
   await until('the mint’s word on the card', () => holder.state.fc.check === 'ok');
   ok(vals(holder).fcCheck === 'Checked with the mint', 'the mint is asked about what the card says it holds');
+
+  /* ---- under the title: how fresh the mint's word on the card is -------------- */
+  {
+    ok(vals(holder).fcVerified === 'Verified Just Now' && H.W.cardCheckedAt(holder._fcCard) > 0, 'asked just now, the screen says so under its title', vals(holder).fcVerified);
+    // two hours on, with no connection: the card is read, the mint cannot be asked, and the screen says how old its word is
+    const realW = H.window.Date.now.bind(H.window.Date);
+    const realN = Date.now;
+    const shift = (ms) => { H.window.Date.now = () => realW() + ms; Date.now = () => realN() + ms; };
+    const reread = async () => {
+      c.tap();
+      holder.setState({ fc: null });
+      holder.fcRead();
+      await until('the card to be read again', () => !!holder.state.fc && holder.state.fc.check !== 'asking');
+    };
+    shift(2 * 3600000 + 60000);
+    H.deaf = true;
+    await reread();
+    ok(holder.state.fc.check === 'off' && vals(holder).fcVerified === 'Verified 2 Hours Ago', 'with no connection two hours later, it says when it was last verified', vals(holder).fcVerified);
+    // a phone that never had the mint's word on these pieces cannot say it has
+    const kept = H.storage.getItem('foxy.flashcard.checked');
+    H.storage.setItem('foxy.flashcard.checked', '{}');
+    await reread();
+    ok(vals(holder).fcVerified === 'Not Verified', 'and a phone that never asked about these pieces says the card is not verified', vals(holder).fcVerified);
+    // nor one whose word was about other pieces than the card holds now
+    const other = JSON.parse(kept);
+    Object.keys(other).forEach((k) => { other[k].nonces = other[k].nonces.slice(1); });
+    H.storage.setItem('foxy.flashcard.checked', JSON.stringify(other));
+    await reread();
+    ok(vals(holder).fcVerified === 'Not Verified', 'nor one whose word did not cover every piece on it', vals(holder).fcVerified);
+    H.storage.setItem('foxy.flashcard.checked', kept);
+    H.deaf = false;
+    H.window.Date.now = realW; Date.now = realN;
+    await reread();
+    await until('the mint to be asked again', () => holder.state.fc.check === 'ok');
+    ok(vals(holder).fcVerified === 'Verified Just Now', 'and with the connection back it is verified again', vals(holder).fcVerified);
+  }
 
   // a wrong PIN: the pieces are made and wait, and the screen says so wherever it is opened
   c.tap();

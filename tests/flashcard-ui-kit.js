@@ -52,6 +52,17 @@ function appOn(ctx, start) {
   a.showMelt = (label) => { a.melts.push(label); a.melting = true; };
   a.hideMelt = () => { a.melting = false; };
   a.money = (sats) => ({ main: '\u20bf ' + a.group(sats), sub: '' });
+  // as the app's own (09-melt-paste-switch.js)
+  a.agoWords = (ms) => {
+    const n = Number(ms) || 0;
+    if (n < 90 * 1000) return 'a moment ago';
+    const mins = Math.floor(n / 60000);
+    if (mins < 60) return mins + ' minute' + (mins === 1 ? '' : 's') + ' ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + ' hour' + (hours === 1 ? '' : 's') + ' ago';
+    const days = Math.floor(hours / 24);
+    return days + ' day' + (days === 1 ? '' : 's') + ' ago';
+  };
   a.cfRow = (label, value, o) => ({ label, value, sub: (o && o.sub) || '', basis: (o && o.half) ? '50%' : '100%' });
   a.balNow = () => ({ sats: a.have || 0 });
   a.refreshBalance = () => ctx.W.balanceSats().then((n) => { a.have = n; });

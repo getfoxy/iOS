@@ -443,9 +443,15 @@
             var st = (states && states[i]) || {};
             if (String(st.state || st.State || '').toUpperCase() === 'SPENT') spent += satsOf(pr.amount);
           });
-          return { sats: card.balance, spent: spent };
+          // every piece good: written down with the time, for a phone that later has no connection to ask again
+          return { sats: card.balance, spent: spent, at: spent > 0 ? 0 : cardCheckedNote(card) };
         }, function () { throw cardError('no-route', 'The mint did not answer.'); });
     },
+
+    /* When this phone last had the mint's word that everything now on this
+     * card was good, in milliseconds; nought when it never had (`cardCheck`
+     * writes it down). */
+    cardCheckedAt: function (card) { return cardCheckedAt(card); },
 
     /* Ecash found for this card (`cardAdopt`), asked of the mint: what was on
      * a card once and spent is struck off. Resolves how many rows went. */

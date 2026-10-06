@@ -500,12 +500,24 @@
    * is something only the mint knows. */
   fcCheck(card) {
     const W = this.fcW();
-    const put = (check) => {
+    /* With the mint's word goes when it was given: now, or, where the mint
+     * could not be asked, when this phone last had it for these same pieces
+     * (`cardCheckedAt`). The screen says that under its title. */
+    const put = (check, at) => {
       if (!this.state.fc || this.state.fc.key !== card.key || this._fcCard !== card) return;
-      this.setState({ fc: Object.assign({}, this.state.fc, { check }) });
+      this.setState({ fc: Object.assign({}, this.state.fc, { check, checkedAt: Number(at) || 0 }) });
     };
-    W.cardCheck(card).then((r) => put(r.spent > 0 ? { spent: r.spent } : 'ok'),
-                           (e) => put((e && e.card) === 'other-mint' ? 'other' : 'off'));
+    const before = () => { try { return W.cardCheckedAt ? W.cardCheckedAt(card) : 0; } catch (e) { return 0; } };
+    W.cardCheck(card).then((r) => put(r.spent > 0 ? { spent: r.spent } : 'ok', r.spent > 0 ? 0 : (r.at || Date.now())),
+                           (e) => put((e && e.card) === 'other-mint' ? 'other' : 'off', before()));
+  }
+
+  /* How long ago, as a title says it: "Just Now", "2 Hours Ago" (`agoWords`,
+   * with its words capitalised). */
+  fcAgo(ms) {
+    const n = Math.max(0, Number(ms) || 0);
+    if (n < 90 * 1000) return 'Just Now';
+    return String(this.agoWords(n)).replace(/\b[a-z]/g, (c) => c.toUpperCase());
   }
 
   /* Whether money can be moved on or off the card that is on screen, said
@@ -1089,6 +1101,27 @@
     });
   }
 
+  /* The designs a card's face can be drawn in, each by a code of three
+   * characters (capital letters and digits).
+   *
+   * A card maker takes a code nobody has taken and adds its drawing; the
+   * codes taken are listed here and in the card repository's
+   * docs/CARD-DESIGNS.md, so that anybody can see which are. FL1 is the first
+   * Flash design, and the one design drawn so far (build/markup.html, the
+   * card on the FLASHCARD screen). A card does not yet say which design it
+   * is, so every card is drawn as FC_DESIGN. */
+  FC_DESIGNS = {
+    FL1: { name: 'Flash, first design', by: 'Flash' },
+  };
+  FC_DESIGN = 'FL1';
+
+  /* The design to draw a card in: the one it names, where it names one this
+   * build can draw, and FC_DESIGN otherwise. */
+  fcDesignOf(card) {
+    const code = String((card && card.design) || '').toUpperCase();
+    return (/^[A-Z0-9]{3}$/.test(code) && this.FC_DESIGNS[code]) ? code : this.FC_DESIGN;
+  }
+
   /* What has been done with this card, as this phone knows it: the history
    * screen, with only the entries that name it. A card keeps no list of its
    * own, so a payment it made at somebody else's phone is not here. */
@@ -1174,9 +1207,26 @@
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
     ];
 
+    /* Under the title: how fresh the mint's word on this card is. Just now,
+     * where it has just been asked; how long ago, on a phone that cannot ask
+     * and has asked before about these same pieces; not verified, where it
+     * never has, or where the mint says some of it is spent. A card with
+     * nothing on it has nothing a mint could dispute. */
+    const DIMMED = 'rgba(var(--ink-rgb),.62)';
+    const nowMs = Date.now();
+    const verified = (!fc || fresh || blocked || !fc.hasRecord) ? ['', DIMMED]
+      : fc.check === 'asking' ? ['Verifying\u2026', DIMMED]
+      : (fc.check && fc.check.spent) ? ['Not Verified', RED]
+      : (fc.check === 'ok' || !(fc.count > 0)) ? ['Verified ' + this.fcAgo(fc.checkedAt ? nowMs - fc.checkedAt : 0), DIMMED]
+      : fc.checkedAt ? ['Verified ' + this.fcAgo(nowMs - fc.checkedAt), DIMMED]
+      : ['Not Verified', AMBER];
+
     const px = this.px ? this.px() : 0;
     return {
       isFlashcard: on,
+      fcVerified: verified[0], fcVerifiedInk: verified[1], fcVerifiedShown: !!verified[0],
+      // which design the card on screen is drawn in (FC_DESIGNS)
+      fcDesign: this.fcDesignOf(fc),
       // a card that has been read says what it is on its own face
       fcSub: fc ? '' : 'Ecash on a card, spent with a tap and a PIN.',
       fcNone: on && !fc,
