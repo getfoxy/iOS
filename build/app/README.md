@@ -29,7 +29,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `20-split-values.js` | 388 | `spEven`, `spSharesArr`, `spSlots`, `spPaidArr`, `spNextUnpaid`, `spInitials`, `splitVals`, `goSendScanFromSplit` |
 | `21-render-values.js` | 511 | `renderVals`, `renderValsBase`, `renderFieldLog`, `renderContext` |
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
-| `23-render-home-and-amount.js` | 434 | `renderHome`, `torBannerVals`, `renderAmount` |
+| `23-render-home-and-amount.js` | 435 | `renderHome`, `torBannerVals`, `renderAmount` |
 | `24-render-receive-and-send.js` | 726 | `renderReceive`, `renderPaid`, `renderSend`, `renderSent`, `renderToken`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
 | `25-render-confirm-and-blocked.js` | 78 | `renderConfirmShell`, `renderBlocked` |
 | `26-render-history-and-contacts.js` | 502 | `renderHistory`, `renderTxDetail`, `renderContacts` |

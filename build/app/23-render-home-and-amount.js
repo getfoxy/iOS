@@ -428,7 +428,8 @@
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
-      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT'
-        : s.flow === 'cardWd' ? 'MORE THAN THE CARD HOLDS' : 'MORE THAN YOUR BALANCE',
+      sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
+      // withdrawing from a card, the ceiling is the card's and the line says so
+      ...(s.flow === 'cardWd' ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
     };
   }
