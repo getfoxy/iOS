@@ -39,6 +39,7 @@ function makeCard(opts) {
     verified: false, spentThisPin: 0, selected: false,
   };
   let leaveIn = -1, gone = false;
+  let leaveAt = null;        // { ins, nth }: gone when the nth command of that instruction arrives
   const sent = [];
 
   const amountOf = (slot) => parseInt(slot.data.substr(16, 8), 16);
@@ -205,11 +206,23 @@ function makeCard(opts) {
       if (leaveIn === 0) { gone = true; return Promise.reject(new Error('the card is not there')); }
       if (leaveIn > 0) leaveIn -= 1;
       const a = String(apdu).toLowerCase();
+      if (leaveAt && a.slice(0, 2) === 'b0' && a.slice(2, 4) === leaveAt.ins) {
+        leaveAt.nth -= 1;
+        if (leaveAt.nth <= 0) { gone = true; leaveAt = null; return Promise.reject(new Error('the card is not there')); }
+      }
       sent.push(a);
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left. */
-    tap() { gone = false; leaveIn = -1; s.verified = false; s.spentThisPin = 0; s.selected = false; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; s.verified = false; s.spentThisPin = 0; s.selected = false; },
+    /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
+    leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
+    /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
+    copy() {
+      const twin = makeCard({ window: o.window, key: priv });
+      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, spentThisPin: 0, selected: false });
+      return twin;
+    },
     /* It leaves the field after `n` more commands have been answered. */
     leaveAfter(n) { leaveIn = n; },
     secretOf: (i) => secretOf(s.slots[i]),
