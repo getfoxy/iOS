@@ -464,7 +464,6 @@ img[data-logo-lt]{display:none !important;}
 </sc-for>
 </sc-if>
 <sc-if value="{{ fcHas }}">
-<div style="flex:none;display:flex;flex-direction:row;flex-wrap:wrap;align-items:flex-start"><sc-for list="{{ fcFields }}" as="r"><div style="flex:0 0 {{ r.basis }};box-sizing:border-box"><div style="font-size:18px;font-weight:600;letter-spacing:0.045em;color:rgba(var(--ink-rgb),.45);margin-top:6px;text-align:center">{{ r.label }}</div><div style="margin-top:3px;font-size:22px;font-weight:800;letter-spacing:-0.022em;line-height:1.25;color:{{ r.ink }};text-align:center;word-break:break-word">{{ r.value }}</div><div style="min-height:{{ r.subH }};font-size:18px;font-weight:600;letter-spacing:0.03em;color:rgba(var(--ink-rgb),.45);margin-top:2px;text-align:center">{{ r.sub }}</div></div></sc-for></div>
 <sc-if value="{{ fcNew }}"><div style="flex:none;padding:3px 0 6px;font-size:18px;font-weight:600;color:rgba(var(--ink-rgb),.55);text-align:center;text-wrap:pretty">{{ fcNewLine }}</div></sc-if>
 <sc-if value="{{ fcBlocked }}"><div style="flex:none;border-radius:20px;background:rgba(255,92,92,.1);border:1.5px solid rgba(255,92,92,.45);box-sizing:border-box;padding:16px 18px;font-size:17px;font-weight:600;line-height:1.45;color:#FF5C5C;text-wrap:pretty">{{ fcBlockedLine }}</div></sc-if>
 </sc-if>

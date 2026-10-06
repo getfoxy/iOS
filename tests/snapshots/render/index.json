@@ -2,1186 +2,1186 @@
  "home (first render)": {
   "file": "000-home-first-render.html",
   "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
-  "vals": "3b2ffcb8d6a2b239b2908dc2614f2f3275c63cddce0d69c87a0faac88b602d5c"
+  "vals": "1897ff4d4569a31b6ed5849f34aced6dcfadc0cf6fc5b6a5bd868ba2aaa62657"
  },
  "screen amount": {
   "file": "002-screen-amount.html",
   "markup": "5fffb9164f8f768178b52c56271058c119c8d737b6b78eff95eacf25cd93495c",
-  "vals": "7b3c6c0cd14f065efb314d169e107805989dd041c873d817a4278b782d413bc3"
+  "vals": "07e5dde9f245c8d0dc3511f2108d27e7ca9753e702426580f085d9c83d90be2c"
  },
  "screen bkStart": {
   "file": "005-screen-bkstart.html",
   "markup": "d536dcf06280156c2f22d780c0793d913f3b181360b0b9fca697dad9049faa78",
-  "vals": "ef85e7eb4790be7e03306e40587f8a90752072daa021dfcee1fc11ad7184e6ca"
+  "vals": "b258c8b7c5b72a1269eb74f917f10a104c86be47f3064831568179500d3b0c97"
  },
  "screen change": {
   "file": "221-screen-change.html",
   "markup": "5e108aab1c792c23965738305252deaa983e8c54c09463ad8ede0c7a6c1326a5",
-  "vals": "8bbeebb3b4ce5ea20b213bf7597b81bf965b3cae854030a529323a2e49d01994"
+  "vals": "86e2467d1405a285020e02d1f9fa50c6d3dbf24740742ae1b18809cde19b3345"
  },
  "screen confirm": {
   "file": "010-screen-confirm.html",
   "markup": "5e299e49b89d03d31f8ff602b8cfafb2ce0447162b0da9ab237fb1ed4b3063d1",
-  "vals": "aa5473e7cfc9b0aea52ccb8316adab4abaf2de9443da65d02f3e3adab0b7f51f"
+  "vals": "7da32ed6ac1f3ec06b38ac9c517eb9621dfea4fbf7f64970a57c301c02d22204"
  },
  "screen contacts": {
   "file": "011-screen-contacts.html",
   "markup": "361f313c53c50fef85d6a3da5d21db2a52c9ab244c8476ca39ccdc7fa94080a2",
-  "vals": "93a16c87fcde9971f9ee20c4fc20ffc41e71b9330c83ea7f0cd44c29a2706ddc"
+  "vals": "e5608147d12dc536ef462aa84d004e886bd04072f8993305ba970b375223f45e"
  },
  "screen fieldLog": {
   "file": "211-screen-fieldlog.html",
   "markup": "dfe6a6fdad3b7a6a731f1943bbc37ce32b3b04144cfb1a1a35f454ffb248c535",
-  "vals": "b3bd6be047dee1fcd41177eed6d05960e1b2df13ca56af7a4c10e879ea16ca05"
+  "vals": "ef2782ea9da955a83b9e6fb08fa9e04b406228feb9e7fd80e00f736b55728b06"
  },
  "screen flashcard": {
   "file": "249-screen-flashcard.html",
   "markup": "2a9a48e76419ab23732d9eddc2b2817b4f9640654839bb81c872448bf5aa2f5a",
-  "vals": "c0bdef5d8db253f32b9be32fb944f5482a20c85e704f08f6494bdb63560f5288"
+  "vals": "3e436575028acc3a0144387cf6899f1cd3f64f9e23adbeb7d1e6617d16638984"
  },
  "screen history": {
   "file": "012-screen-history.html",
   "markup": "d8536e92bf9cc0d0a4bb756bcad954fd2273891b96d876ae6b6e218a67d9d6d6",
-  "vals": "f1d743fc11be3353a75ed78ec55f3dfd40103b2c5399a01c847e4d80e8a3fbf2"
+  "vals": "9ca9815fbdf5dc94214f3129de2e289061853313ad6e45c07b3bd5d745af2de1"
  },
  "screen home": {
   "file": "013-screen-home.html",
   "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
-  "vals": "3b2ffcb8d6a2b239b2908dc2614f2f3275c63cddce0d69c87a0faac88b602d5c"
+  "vals": "1897ff4d4569a31b6ed5849f34aced6dcfadc0cf6fc5b6a5bd868ba2aaa62657"
  },
  "screen importSeed": {
   "file": "014-screen-importseed.html",
   "markup": "ecbcba79653c984efb358a797dfbbe8e455aa806858ef35770f00b63411ba53a",
-  "vals": "44d0ba6627c71133e88b6eb454ae4605bcabaa64f5877a26cdf89c87eb1da055"
+  "vals": "7b9f562120779d2f93e613b8094a3d25d4f61b4811209e24d07f6617b2936541"
  },
  "screen newMint": {
   "file": "015-screen-newmint.html",
   "markup": "92dc03eab220df0acf0dc630a5d00ed8daf0f0ebf6da52d7c698244e9d79205f",
-  "vals": "6ae0d94d4bf4fe369eb6f99513fedab0741c3b5a3bb67731ad8147b76d45e053"
+  "vals": "6b56bc8c23536e2099b2c3b2eaa7e4eb10934a11167a2e38f7e68e6597ba91a4"
  },
  "screen paid": {
   "file": "017-screen-paid.html",
   "markup": "d4208f6a2a03bc9161a2a0456cdc49bc45bcaf11f1bee289b81a48a87bc782ae",
-  "vals": "9e45fb1c68e1518aa996706e698ac510ec228000b56ea84cbbb0f1303890dd7d"
+  "vals": "69f0bfbedaef75d4325c58aa4be6e8472f947b042b2c298d7e4b998267aa45be"
  },
  "screen rsConfirm": {
   "file": "019-screen-rsconfirm.html",
   "markup": "9413dbd505cd1a7996e65303e714092ea1bed074b0ef4b0e378b1d2970531ca2",
-  "vals": "93140fbade2e28bdece14fe4feba3f4e1b51451cfc1e716642ef4365863da210"
+  "vals": "ae11f47a5699c2f96c4406e1760218b5dbdd274b7862591aaa8cca76c9bea807"
  },
  "screen sendDone": {
   "file": "022-screen-senddone.html",
   "markup": "accc77c90d8d7d7acdec776ae80af542c28422fb88a5d516cd2f4fd14e489661",
-  "vals": "1abda7636c857d28567525e91dbd333a450576f079d383a0af9b220d08719f91"
+  "vals": "477049b52959375472803b21b6b736e245612eb2dfe52eb87f445cc02409e0f5"
  },
  "screen sendHow": {
   "file": "023-screen-sendhow.html",
   "markup": "7f10ee091441eeeb468427d912fa89e4dde7f11cade3182ab143b5a24c63a04b",
-  "vals": "db8340f9f562d89db40f529fe6a18b03938da1cf92e8f903b6bb2c9b14dd3b5d"
+  "vals": "869c3045627b0cc20cf5f4ba29ac5586b7175629a75fb451c35615d980584b3f"
  },
  "screen sendScan": {
   "file": "025-screen-sendscan.html",
   "markup": "a60b0ef7f978ce6ba6d3d8e0608797bd9b252f57e8c59ec8c15ffcdb9b211696",
-  "vals": "60d2e7eee1c3bc0ec78a2144f04a5a4c7ba2033633342b96156f2b17871729ee"
+  "vals": "c4f10d068a0dc47787e0e04ce21062c7b63c76f92b5c7d1c1f92d53b6116be32"
  },
  "screen sendType": {
   "file": "026-screen-sendtype.html",
   "markup": "eec0b5c32ef9b143dfc6c0a8039e0c7c4e978279b5dc372c6a5cbfffc0682f2f",
-  "vals": "bb4c707df8d253b6f9957f21b63d891d0476b5873d5505f0b26df2e8757a0c49"
+  "vals": "d1c1fb1aad722f04af1324f045a47d1dae54ef3f423764ffc87d3eaba1188382"
  },
  "screen spAllPaid": {
   "file": "027-screen-spallpaid.html",
   "markup": "550651a7741f69a44551f9b585e0960e76dc5289024e38837fc4f76e76f58660",
-  "vals": "32f0d5e78e45bacf6c507da66902652b210e37a1c872eb213adc9f1c205c88cf"
+  "vals": "106fcdd4b74d8e38b382875db02a4f3a2d2901a1f43b41fa75b03b64c094ab58"
  },
  "screen spAmount": {
   "file": "028-screen-spamount.html",
   "markup": "ec5f737ac648c236bfea9cdbb7ba3be849c4899abf6145896cc800eff8f77935",
-  "vals": "1a62f70f21bc715fed180ad9f4c63aa38804f81656c993a9e9043bfcea8b7197"
+  "vals": "2cf68d7f7f77c391197e74e36fe570e63c4e350f48d86512f31770f7a91da1d6"
  },
  "screen spAssign": {
   "file": "029-screen-spassign.html",
   "markup": "0cfd5b908fffd95a88371f4b427b35788f384d3e9923abcbbe0f16ce9ed4188a",
-  "vals": "5bf1c4aae393604e9058d18f8d6e03cbb44f4372f00c1f19d2cb4eadef14e82d"
+  "vals": "73439c616475fb31ace62b46aac34f8e3d6131da96f7f8ed9abf0adfc51844fe"
  },
  "screen spPayer": {
   "file": "030-screen-sppayer.html",
   "markup": "af59af0e4126a0c810cbb919bcbc07053013957221d9336f8d1cd4039bf51a35",
-  "vals": "b3ba61918d1ea80e5f3bfee13c5d62e376867c2dcfdad7b62df5b1890c43d9f9"
+  "vals": "83c134abb5c768ef01a6a8dacaba5acffbdb7248528d8508107740f813e4fb1a"
  },
  "screen spShares": {
   "file": "031-screen-spshares.html",
   "markup": "2361b1b9ada9c465db79c21356dc04766029d212af6fe2dad1afe4ac3e26140c",
-  "vals": "87c2a0c7ec792ddf6b294ffc4239d2374e5dd9f4d82d68b8970b5c00ca9562a9"
+  "vals": "f6d4c5d977560490e4387654a2d608e652c764b71bafbd455bfd038bab8cc0a7"
  },
  "screen spWaiting": {
   "file": "032-screen-spwaiting.html",
   "markup": "deae6fe201f984ce18b70d71ec1527d5e97c8b859ab89820e9ff29ca3ff06abf",
-  "vals": "162ca9fb92e207eed54e8ce14d6b74f483c5c2c1c845f985cf2a58651e956aa8"
+  "vals": "64013e12be2813bb8b1596171f867e399443b8c5958ee650ebfdd72d27f0d0bf"
  },
  "screen spWays": {
   "file": "033-screen-spways.html",
   "markup": "196d35297f1d33fd7213644f5b1b60bc04e9785b087cc732802c507f510ce6e1",
-  "vals": "d4afa535e3dcc1f0353e496f6174af2832ebed3621cd93e5397775f58b87f8aa"
+  "vals": "4381648af76c8217bacc0d0f51d3265d0237547f7c9040e8e3d890fca51c3ff2"
  },
  "screen switchMint": {
   "file": "034-screen-switchmint.html",
   "markup": "c34776310f3701b12b4cdaad08ac714b92936488c1d7fc75ab88048665074c5b",
-  "vals": "bef4c4b81cdbbaa38032eac4e932c67dec51990c1056bd2d02faf36b98579419"
+  "vals": "68a03924c8fc63339aa65cd59596399cbd14f47cf579f118777b19baa6e10ee4"
  },
  "screen tokenOut": {
   "file": "035-screen-tokenout.html",
   "markup": "557215ddb37d75bb9951123f7c77a5bf05863a4e1ca217e08dd9e7c1ee51b47b",
-  "vals": "279d6a4816fc23c223de43806158f0e6c8a57ee9bb7c49cd2aa2f147f55d8394"
+  "vals": "e103c4c237fecf0b75d2669990628dd99a5408e2fd848714f744c403c2b85271"
  },
  "screen txDetail": {
   "file": "036-screen-txdetail.html",
   "markup": "c5c0485bdc4d358ca8190f7af79acf358d764d2b479d0c33686a8a1128711f86",
-  "vals": "0910792c747f4b4f7a7fa6cc2747bf03703e2d436fd15f32d4174808ff6f0ef4"
+  "vals": "f8e4b1222ba551bfdc105ebeeea7037462265761f5f663f6904737dab843bacb"
  },
  "popup addConfirmOpen": {
   "file": "037-popup-addconfirmopen.html",
   "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
-  "vals": "3b2ffcb8d6a2b239b2908dc2614f2f3275c63cddce0d69c87a0faac88b602d5c"
+  "vals": "1897ff4d4569a31b6ed5849f34aced6dcfadc0cf6fc5b6a5bd868ba2aaa62657"
  },
  "popup noteOpen": {
   "file": "038-popup-noteopen.html",
   "markup": "697d5ac3215bb82fe8a11d0302a2dc5d226f1c57f842af91c3532ae02032e7a1",
-  "vals": "4703bd415ec468d26dd614c159e991da5d53e26dada0ea8f1c0517013296ecd7"
+  "vals": "377c78b06320a5b4a1be3f88b252f83989c62028920cc37fa9c7079e47bbe7c6"
  },
  "popup rangeOpen": {
   "file": "039-popup-rangeopen.html",
   "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
-  "vals": "3b2ffcb8d6a2b239b2908dc2614f2f3275c63cddce0d69c87a0faac88b602d5c"
+  "vals": "1897ff4d4569a31b6ed5849f34aced6dcfadc0cf6fc5b6a5bd868ba2aaa62657"
  },
  "popup removeConfirmOpen": {
   "file": "040-popup-removeconfirmopen.html",
   "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
-  "vals": "3b2ffcb8d6a2b239b2908dc2614f2f3275c63cddce0d69c87a0faac88b602d5c"
+  "vals": "1897ff4d4569a31b6ed5849f34aced6dcfadc0cf6fc5b6a5bd868ba2aaa62657"
  },
  "home, a balance and a chart": {
   "file": "041-home-a-balance-and-a-chart.html",
   "markup": "1893e26ae94e6aaa6abf541e0b873895b670d23d14291fbf38db27256cf13392",
-  "vals": "86007df0035dcb817ef2cd68014150a3892ce7412332622ec7207ee24d747b64"
+  "vals": "8a8fa1b39694432bc95055903b91348a2dfa92cda6f553a9f48ee39dac7df54e"
  },
  "home, balance hidden": {
   "file": "042-home-balance-hidden.html",
   "markup": "305fe7939bad4147888b7df72f693b150d4959d7b2fce1e94e4e8b578fb4ab67",
-  "vals": "dfda5c5c93572db6410c649d2cd7bfe2cfcd7f9c045288158a79bd550d38bb01"
+  "vals": "2971601c37ca3ce1fe97ab09a5998dbedcc7c2516b062d9895ca06f397687887"
  },
  "home, the menu open": {
   "file": "043-home-the-menu-open.html",
   "markup": "f6b892dad005843140300dd9a212e8cea110bb641a5041a0e249ba76671353cf",
-  "vals": "9465566cd5cbf14832a5cbb1084cb6956d9c9ef18e2c3b2f8083e3099ac96717"
+  "vals": "70c1452d33861cb09aaa5fca600c3578c056da8c4d5893c2de0ad3a0b815b905"
  },
  "home, price collapsed": {
   "file": "044-home-price-collapsed.html",
   "markup": "1b63df2f5518efc06542456440d70e6697e81540d2dcc92c9a7a57e7098975bd",
-  "vals": "f8f81e5bffd7ca2cd89d13ec231e5dad3ea46ad01d7b49b01453de00b3b23050"
+  "vals": "2e6ef301fd3dbe86064942a3cba2c66b2a83238916e0892b7cf5c0879ab45c10"
  },
  "home, price removed": {
   "file": "045-home-price-removed.html",
   "markup": "a74215e0c7161bf39faef4b12c01ab600f54f7c4f84ae62b7c881354f02e9fdf",
-  "vals": "314c8fea76f3bfc79b861cb74a2a48ad827c69ac0a6cf17d786cd62c92a49e7f"
+  "vals": "02297e8a42f7d2f90b5c171ee8d657ac55ba142c3c17532f77188574a3567683"
  },
  "home, balance loading, no price": {
   "file": "046-home-balance-loading-no-price.html",
   "markup": "26f64620821ddbd199ccc6938bc8c05f2e849c403b770ac0fa644660d2ff72d8",
-  "vals": "1c370c274bad98a25eea83e3a415902413f29076a33008187ebe27cfa2f9daaa"
+  "vals": "0f28c8cba153df84827e26777c722e2cf51de3596f421e139b0b8ac95101c14f"
  },
  "home, a credit counting up": {
   "file": "047-home-a-credit-counting-up.html",
   "markup": "97a28ebdde334d9d91cc60d7f0fac20ca635a431ad1b4f764efc9bc4446d5a58",
-  "vals": "8d3ebb856d1b1e91163690c7f2e76615e60a904542004ac0b33375b9a63e9ee6"
+  "vals": "6887eb277d93b82201d2212dea640dddb89f2995856361edc554683835f5c9e7"
  },
  "home, backup prompt due": {
   "file": "048-home-backup-prompt-due.html",
   "markup": "a6c94de09a0610c308b974183f6fc26976fead2f88978ecd75263fb2498eeb48",
-  "vals": "ed5ae3aaa1c4ecc40e866e1350bad3d6b922bb10f8e61cb801b08d8933ef6209"
+  "vals": "46c1a2c20afabe11630c945c3cd07a6fce16fb7e8f527df24c63a81e855c1733"
  },
  "home, the PIN set": {
   "file": "050-home-the-pin-set.html",
   "markup": "f6b892dad005843140300dd9a212e8cea110bb641a5041a0e249ba76671353cf",
-  "vals": "9465566cd5cbf14832a5cbb1084cb6956d9c9ef18e2c3b2f8083e3099ac96717"
+  "vals": "70c1452d33861cb09aaa5fca600c3578c056da8c4d5893c2de0ad3a0b815b905"
  },
  "change, a full pool": {
   "file": "222-change-a-full-pool.html",
   "markup": "c6abcfd09c20c2075edb9163b3bcfb7d8f0e3ad4865354819bad3b5c711179db",
-  "vals": "62dafae0833206226e254e59434378c6e88af279178c0c7fb8046baf6e7452cf"
+  "vals": "2c4838c04de09af92c3a891d672f25948a3ed7eb45d7eab58db5cc9230dee8f3"
  },
  "change, short of small pieces": {
   "file": "223-change-short-of-small-pieces.html",
   "markup": "bc58d387b55a4d5c75b7f2a4c59912d5464eb6c78929e5a5b3da9d196a198150",
-  "vals": "83ec53b2737df2d0c7a78e88497d2d9a472aa45a1afb0c30872d266a3e0ca187"
+  "vals": "26f2a0b00cdcce5e091991cd29d0c65a6d65d0350beb407c1f85036c8546ae28"
  },
  "change, nothing held": {
   "file": "224-change-nothing-held.html",
   "markup": "5e108aab1c792c23965738305252deaa983e8c54c09463ad8ede0c7a6c1326a5",
-  "vals": "77ecf2b1a23b585af6fa57a0223ad79b1fb95443ee87235c21eaf0e0938bebc0"
+  "vals": "27c3d552dce3dd637eb636398311256a8cde7c69e2df9bfa033d08f694a04c27"
  },
  "amount, adding to a card": {
   "file": "269-amount-adding-to-a-card.html",
   "markup": "9fc1ce2e82d4de1439ff068328b4ba0f8077181737ce1fcf63260cc8b33c83a2",
-  "vals": "111d65d07e3d27594703887c725ff5cecb34afb7ee81396c02cb34999b36d112"
+  "vals": "d6548220f68c0c606c6a61e945405a83e07d50f6f37873eec5ee0d87f6eb962d"
  },
  "amount, withdrawing from a card, with all of it under NEXT": {
   "file": "270-amount-withdrawing-from-a-card-with-all-of-it-under-next.html",
   "markup": "05ecec304012144526c60f00ca4fd74cfeca6e921150fb4add9313abcb6c6c0e",
-  "vals": "40e070df575a95ceca5bcb5e9c30d2907ae8785ef6890f95ece8ee868e90e5b4"
+  "vals": "aab306cce8f4c9e46cda9e6fcd143a1652b4973edc9a19804e29acfd7288e028"
  },
  "amount, a card’s limit, in sats, with no limit under NEXT": {
   "file": "271-amount-a-card-s-limit-in-sats-with-no-limit-under-next.html",
   "markup": "9ce3d9c7e399af6cd2e2b41ce2a032c33708082675308ef37cab0a952146197f",
-  "vals": "58f528903fcae8c74a343b6849795ca8f8790331bf12eac20f9a9b7e103ea81a"
+  "vals": "da7759a5e21172eccb5ce30fb62bf0b90c4b5638476cd368c84d24ca5438aa0b"
  },
  "switchMint, asking which mint a card moves to": {
   "file": "273-switchmint-asking-which-mint-a-card-moves-to.html",
   "markup": "c96f986402d40f12abf224084379620b68fe5620c19b0db1db09e916da146cf7",
-  "vals": "39e598d3008eaa5c28b2218a6ad1d30a05c3a62e60c2ab54632908ad5555d102"
+  "vals": "0abbfd4f79ba12905fd3f4c264a57bed46e13e500e74a4219f86ee6cb0a84cf6"
  },
  "fcMoveConfirm, asking what it costs": {
   "file": "274-fcmoveconfirm-asking-what-it-costs.html",
   "markup": "b062a0f16bf912f8d84db58a2855e46a9a0f75b806918a2838fbce9ecbd3428f",
-  "vals": "a75f29a063fe6d64f9f9837e1245aaa06a7859c5083a69c30dd90f3b3d75ee18"
+  "vals": "227da346a0e49e75dff3f1d3f84616a8869cbe67d52467006351372abb3ac019"
  },
  "fcMoveConfirm, with its cost": {
   "file": "275-fcmoveconfirm-with-its-cost.html",
   "markup": "fda5af593be0a417c4c0e596982a656b77dcf55a496d9847010060a45414f8dd",
-  "vals": "0d7f9c5191512ee6323891d894cdbb56dc61c5d2b766cb0b08c85f185de19b6d"
+  "vals": "c4058aac3c2f0ceba04ff8de39c1857ff11fdef41962f60540ca1bb3287cf698"
  },
  "fcMoveConfirm, too little to move": {
   "file": "276-fcmoveconfirm-too-little-to-move.html",
   "markup": "b473cd98ac2a0adda00210c7fc18abd783ee3574ac71088594c70f1235bd6284",
-  "vals": "d57ee257b4f25874bbfec6aca78e8d9afccc92f0f4c98339a8fa2b5d6b475e73"
+  "vals": "f7a972070ee8edffe21801bff5e18c0dd0b7d288083d6a3ae59f196b76bd65eb"
  },
  "flashcard, nothing tapped": {
   "file": "250-flashcard-nothing-tapped.html",
   "markup": "2a9a48e76419ab23732d9eddc2b2817b4f9640654839bb81c872448bf5aa2f5a",
-  "vals": "404c18fd45b36d0b2d66bb09742607c600d65de0939ac3816944b2d86ebe5118"
+  "vals": "06771339daccd7cdf417629a05309eeebf3e3dafa2d6d6f13150799e4a097cb7"
  },
  "flashcard, cards loaded and money waiting for one": {
   "file": "251-flashcard-cards-loaded-and-money-waiting-for-one.html",
   "markup": "2af6b660ee407a01ca49ca49846251915b9fa1b5552c17db0f7d3a42e30541d6",
-  "vals": "b31ba90cecab5a6abc7d21d17ef43b9d0c5ac2824bd3cb8fc1fac15c24febece"
+  "vals": "acbe040950f422126f5a80d0d10c55d6505bd6a16497dedce67665b7dd19f027"
  },
  "flashcard, a card of this phone’s, read": {
   "file": "252-flashcard-a-card-of-this-phone-s-read.html",
-  "markup": "ba5fb46670b1986e303cc3c67fe34a408c1e2a4b8fbf7bcc4cc80b07daf2b8b0",
-  "vals": "c7c67c6f14a98f7d97c6b5917518210d144d6e79dcbf9e22b0d08171aa7dc17d"
+  "markup": "64bb350e8f00c435b2d0bbc23a3ddb0cf63518a4785dd2d4e3dc323c37e9afc4",
+  "vals": "5fc0ba52e9b1d54b3a64654863351316934695a9c5ce794beb93fc63c4f6bcf5"
  },
  "flashcard, a new card": {
   "file": "253-flashcard-a-new-card.html",
-  "markup": "6c8f66faa63c7f576cf51b079788c2aad0812b3fd4ba93ba74a83f035e14b540",
-  "vals": "fd1a691ebcf5203640a01f55c1a788c6e237ed9e570dd93074be4f1654700e95"
+  "markup": "20a21b4eb81c1ab8dfb08b2ce8786283cb5f6222bb487654be5493dc89802416",
+  "vals": "35ed9aad65e8c28dfe6131b678da5a4754a35a219854faed15132d2cd0ef1366"
  },
  "flashcard, a blocked card": {
   "file": "254-flashcard-a-blocked-card.html",
-  "markup": "fbf461f97ff75c8f1a8288b94cbcf83ec01add1fb82951eb116a1b297cb3ae9b",
-  "vals": "beb7feb697391573f60feb8cee3431e92543db65131b9edc345a45ac0cac476b"
+  "markup": "b442cf590fbacf47d17fb334da1255f490860b8bb901f1f2eeb3039aa5bb40e8",
+  "vals": "f7c773b6261852116f70a82a7faf040ca003c63b6061eed12cb3d326690bf374"
  },
  "flashcard, a cash card the mint says is spent": {
   "file": "255-flashcard-a-cash-card-the-mint-says-is-spent.html",
-  "markup": "4663ac3c3334324ad3a70e38b62b00bf233737843d16db479c82a8fc04ef208f",
-  "vals": "7eae171efeac3c53eb231fc91400ffab0238b1d9020c4c86cc49a7df8e868f6f"
+  "markup": "d460b76b70191a79d100160fcd6d114dc8d9d4cc2cf4be6a908eb7349c5a378c",
+  "vals": "82aef2b711608d56db7590945f181e2a402c69e0533acf2858ff9b2113969d0f"
  },
  "flashcard, somebody else’s card, past its date, no connection": {
   "file": "256-flashcard-somebody-else-s-card-past-its-date-no-connection.html",
-  "markup": "722167a2b457bd2aff85fb110af6bf030df34ee15e1f433a6e855386b41dab51",
-  "vals": "8d7942c07e920f52ed7647e9f1817f069d88219ee12f64d075886495e2b5dfc7"
+  "markup": "5a4a3e1c858a368b1b35c51f4ef9eb97265af6328d22ef9a0b349209e93c7fe3",
+  "vals": "c476ecb0f868f25258e49b7afc4e62e80bc629c182025eba4187907cfb31183d"
  },
  "home, working offline": {
   "file": "217-home-working-offline.html",
   "markup": "723ed16c652e7ccc34c8e0851ababf11f37aad358eebb567e7bd55edbe73137e",
-  "vals": "8bb332cca3b95558e1e75ce0b9eeae755be04e418d765b6d6079631d715b8981"
+  "vals": "8ac6e3eb8524fa79a2d5fd2405532d8b677a405f5117cdf8a584187eef8fa2f8"
  },
  "home, a secure connection": {
   "file": "218-home-a-secure-connection.html",
   "markup": "76aa3aa7873c2aee8ac007272c0b35113f155e41183cdad64192093c21476302",
-  "vals": "bc87e96da74a1693fa8bb20af86e0e2cd296b2f90ca4f5a0bd023f861a55612c"
+  "vals": "81cab225175758eeb044d1a20dbbe730d9a25d8051b5ae3b54a8970ad670af92"
  },
  "sendhow, working offline": {
   "file": "219-sendhow-working-offline.html",
   "markup": "41ed8c24a2b5991f8dfc0592cd1d2cf28184a390361570dfd9bc1b2096e868fb",
-  "vals": "1be53dc319574facbeb3d642aafb337b5b574dab1c9b8a337c8f39faea5dc9c5"
+  "vals": "bf354d66ad0ea154e985dd0c0227a2577556a57f91a4b4c75c3cdd9be575fa2f"
  },
  "sendhow, with a connection": {
   "file": "220-sendhow-with-a-connection.html",
   "markup": "7f10ee091441eeeb468427d912fa89e4dde7f11cade3182ab143b5a24c63a04b",
-  "vals": "046163dafdf7207c153be9ef098f673a3d838f9b0e1c6bcfebb3eb145fd0feb8"
+  "vals": "27f42b0598c05911c020b9e176db0c504cbe89ae86f59f138171bdcc67be0f4f"
  },
  "switchMint, working offline, one mint on file": {
   "file": "225-switchmint-working-offline-one-mint-on-file.html",
   "markup": "741c4ce334963cfacd0cda7a77675c5bda1651ae3a07a69f17edfb4ff1d35c16",
-  "vals": "d17d937300dd84ff0c4cd1724da0370c8964f3b2cc4da7f892ff1750e91ee387"
+  "vals": "6bdffd25c9ef3574d8d44269577e65da1f408372824f8671c0dffcdbad7b2dde"
  },
  "confirm, working offline, cashu only": {
   "file": "229-confirm-working-offline-cashu-only.html",
   "markup": "00e9f89992580931995e6d0f9a5bbf7f581ea8869e982d056929b456843645b8",
-  "vals": "96b27827820d388a36bbd221e942aa410d3c4f9b17f97cd90683550c120852a6"
+  "vals": "281ad535e6ab6fa90ee7017a27fe223fd428ccf6a05492a52cd22ad05504c8ab"
  },
  "sendtype, working offline": {
   "file": "230-sendtype-working-offline.html",
   "markup": "eec0b5c32ef9b143dfc6c0a8039e0c7c4e978279b5dc372c6a5cbfffc0682f2f",
-  "vals": "29b08a92e9b84537e3b24c120cb575169ab5a0a65d867ba15acb266871aaecfb"
+  "vals": "7f91afc2cd66e640d10297c0d05ff3a4d4b5ea00c99ee7fc195bd314d22809fe"
  },
  "priceconfirm, their bitcoin price": {
   "file": "242-priceconfirm-their-bitcoin-price.html",
   "markup": "a29562a444de5790474a2c3f1175fe81b3e57388b29b2fde7fb47b38328a2ace",
-  "vals": "0122bf1a4728a9111ba0b9a3ec798d6e7b9b98f59b67fb1cfeadf56e0e88f4e7"
+  "vals": "9dc491d275c32d37480c24270087a4812c44826a8e08726e636954469f4a53ce"
  },
  "crossconfirm, they use another mint": {
   "file": "243-crossconfirm-they-use-another-mint.html",
   "markup": "f65ffbf9d00b730833bb7c5afecc5faff60836c35baf87695537cb95cd04648f",
-  "vals": "52290ca9046f9b83a453292c1faf563fcca102ec73d935aff2043db68d07c6a5"
+  "vals": "98d571197636c609c33723c3c2681139dc19475efdd00a3ea5e19bdbb94a8500"
  },
  "amount, receive in dollars, working offline": {
   "file": "234-amount-receive-in-dollars-working-offline.html",
   "markup": "7fd07cdf0ad51c55ddf5af6f007ea31473006ce586bcb50491c3adc9a898737f",
-  "vals": "a6486a08183fc0eaecb1ff6c7a4b20c4da1fce69504135b055b5fa76175030b2"
+  "vals": "05d943b7290424a0e38556131b0dc1d829c4f0d17e3bd53d8efbd53c68255d60"
  },
  "amount, receive in sats, working offline": {
   "file": "235-amount-receive-in-sats-working-offline.html",
   "markup": "973b16f058170e1d4f338530ff021098366e237bfce006557e0583c4f1b9b2dd",
-  "vals": "9fd5d913201500a351eb0acd6b003bae353afc412d9e8f2af7fed66dd7b1fff6"
+  "vals": "07a921ffaaec335371a61ce2680c3b7cb2231ef8b2900377206d6a049dfdc9f0"
  },
  "home, the Tor warning": {
   "file": "051-home-the-tor-warning.html",
   "markup": "c82fe37b45488d5495054b6c75a08149c72f25cd95639cf36952820253fb66e3",
-  "vals": "e8c6b6bba3411b9675551ee3b3d37dbeb0adbf25c0fee9b4b7722151ff307789"
+  "vals": "47338fb8e48ece17bb80d1583882f57a5db6aa83e9a055cb6c3a416d59fe670a"
  },
  "home, light theme, orange accent": {
   "file": "052-home-light-theme-orange-accent.html",
   "markup": "b4214aa65cc65e1ffd7f11b8496e463b4039d1c20ebc9dccb10f172f9aea1ebc",
-  "vals": "393943ad84a5fed29fb6b131d19669f164e72390b3f3c77767ec6e2899b72980"
+  "vals": "f0a84ad321a3e0a40d30c739aae5abbc80b154a784c4b26d069af604e9a18eb3"
  },
  "home, with the keyboard up": {
   "file": "053-home-with-the-keyboard-up.html",
   "markup": "4f20e33b26f9b6be228e86313988c9c8df4871ab4093ed772869732a4f96e8dd",
-  "vals": "6c417b74a060cd74a0b22644f240406aa88293d9577c06d3c416c12b8713cded"
+  "vals": "12f2e3898686fe2de5283e71f02c5589a032f2399b7f64275f781cec8bc08b13"
  },
  "home, a toast": {
   "file": "054-home-a-toast.html",
   "markup": "cee5a9c300f4668d46bbff86d194f798e77e44737f4cd728dc3805c1b0b755ea",
-  "vals": "5af3590e054963b0109c6b8f5fb0fb9f05f75973cec28850e886bb66d1b4ac4e"
+  "vals": "6268c2c28530dc820a9a7e9a709d6a4b95d3a0075a256a3ba51f5abe78775ea9"
  },
  "home, an amber toast": {
   "file": "055-home-an-amber-toast.html",
   "markup": "0a9495cb7ab7a9c900ec3c47e42f7221b67cba449fc02fab51f7cd6fe4e5ba6c",
-  "vals": "a962108ee812614a29aa00240c1ff24cc827e1111a4d94a9909b754385362ce0"
+  "vals": "55dae82d0217177048fc91b38b22b0542afdca9541a3c8e5513366847d8ac906"
  },
  "amount, receive, dollars": {
   "file": "056-amount-receive-dollars.html",
   "markup": "e4dcf2bcf7b1436f58ce842f42ce02b8ce53216ad7ae19282e7969b2cc2a95a6",
-  "vals": "7c79afc5916050c261c94557c86a330ca1d2835fccb354b1c60a4eee46559c1a"
+  "vals": "419d350f5a139dfeefc72c2e7e6eb0158555ddb52cee1026ee744eb413974166"
  },
  "amount, receive, empty": {
   "file": "057-amount-receive-empty.html",
   "markup": "c6b9f3c60ca434d039116496115064359c9a66d594979ffc13721549dcdf856c",
-  "vals": "1fc74835ebb25bca01e7920ed453ba1ff8d06f95c1957c19e185bb7dfbf72c05"
+  "vals": "b9cfc477494549560f7b0055a89f64fe6d2e40b84881c02ee1ce3b0e739d135d"
  },
  "amount, send, sats": {
   "file": "058-amount-send-sats.html",
   "markup": "e175da4ea764ebdf5cf907c168116e30841426c1131b3aaf877ec05d2e8d60d7",
-  "vals": "cbabb0c041ff9d1050cd948bf3ad0c03471e0f7170e0bb1e94c514792693fa45"
+  "vals": "941b782b6094ffe92f56d5672cd112e4ddf850d65d6a833750f1dba2f8b6676f"
  },
  "amount, send, more than the balance": {
   "file": "059-amount-send-more-than-the-balance.html",
   "markup": "31f3a173bc6b164a568dbd7d849ae569c0de48f7f4d79791ca51610ad4e51809",
-  "vals": "b0393f7f94158c8360faea3b44d2844e3616945bb8d61b1388487869d9e1a52f"
+  "vals": "2d0c3fc26552164432ff8e8fb8ee82fccb9b8c1604abc58e47bef81313b5d30e"
  },
  "amount, send, an invoice": {
   "file": "061-amount-send-an-invoice.html",
   "markup": "38fef9a9f79b27252e414069ca04897e15009f39fa0415621758978e890b4464",
-  "vals": "62b5eeae1af7492ee4cb9557c51ed42957e28436f7f13a0b1cfa902e400ec0a3"
+  "vals": "ba9a513ae85b80bf1de09386078e90c00cbe9d470b5390bcd92ac3ef14f9b0b9"
  },
  "amount, make an ecash token": {
   "file": "062-amount-make-an-ecash-token.html",
   "markup": "6e0ceb04d72e32e52fb4ed834ce928649d6981fa6fe29b8d596a0e52bafbd9bf",
-  "vals": "4df89a75a0a19cb4cb361fbefdf6108aba8269ebe270f2354a87fe05eca011c2"
+  "vals": "ccbcad60f7be9c784301019b99335cf0ecf1464cbc5bcb7a7be19f1d6d05bb6b"
  },
  "amount, deposit": {
   "file": "065-amount-deposit.html",
   "markup": "1fbc543c8de48009a7688aa31eca0a77335550f77a40157b5df2fc5614dc33b9",
-  "vals": "260c4f6b00d13454dd7593b8d4e52dbd15dff8424b0e497d1e5beb7921b89b2f"
+  "vals": "8bf3c8900989ae9ca9b3818773d9dd65c9815376cc1ec0479d023ac8d4936da1"
  },
  "amount, cardAdd": {
   "file": "066-amount-cardadd.html",
   "markup": "e815b6017a03ec4ce5ca1c4ccb1bf913eccb9b739a84e538e5503fd7531d0a49",
-  "vals": "a4516b06c7e654b2c62d978077f7bec648aa442fad52de99988619ba5c4de732"
+  "vals": "bb70737539a39d556342a793428fffab5ff48881fe1193d2dbe3b5296602c718"
  },
  "amount, cardWd": {
   "file": "067-amount-cardwd.html",
   "markup": "453a3d7c52a32b83e77c8fd41236f20b7e6d37aa111e7e88b9cef2a56441abe0",
-  "vals": "2a2a4eac2e74561c155a23b9905654123c5616ebdd10580198b593925f7547f5"
+  "vals": "302988a1db84694864dcc8ca7abf03ba088dc93b89b8bf6572cb6ac77573b974"
  },
  "amount, withdraw": {
   "file": "068-amount-withdraw.html",
   "markup": "7c54593f3d2584b76dd831f994fdd35cf776426a840761eea12fe4641c077202",
-  "vals": "e7a9e84dd28c308ea91aee9d6373482d55b7824205e4e1d1137e907c87976eae"
+  "vals": "e3725ea6d2469453a6531040e8798dc242acbd72980de7ba238b2dc12ac57af1"
  },
  "amount, no price": {
   "file": "069-amount-no-price.html",
   "markup": "ce26fc04bd7d29450d49bb54f40a19baeceaaa0cd9694a1286518e4d45cb93d7",
-  "vals": "4b950b2cc540a4db568b992232e67db9df84130e8af1812dfc741c559f0fce77"
+  "vals": "5fe82bb3971ab7d5acc11a103d4141a6933c3e15ff1bef7348e146c4244a45db"
  },
  "amount, satUsd set": {
   "file": "070-amount-satusd-set.html",
   "markup": "8ef3aab8cf8edc7f4c28f04b6966c4a3b1b585ff5b157eb7a16732d5afebdd57",
-  "vals": "575989874894b5f873cf67c28083adecef488377194139b7054e7403c2b8fc21"
+  "vals": "42f308a37128868d34e6fc2e062b107a045f630191393287d40c67ba0244bccc"
  },
  "confirm, an invoice and a note": {
   "file": "071-confirm-an-invoice-and-a-note.html",
   "markup": "b03dcfe1648e761e07a0b9a14f347686ae5d3d0094b85213e4da699a91790cd6",
-  "vals": "e1fb01ae73021c053f3bf070369424be31eff6a45273b4e0ff847194a422b764"
+  "vals": "61f4dbf692cb88d5ad91c6c644b0d570ada70f313c9a35b5324b72a388e36b34"
  },
  "confirm, a payer tapped, the code up": {
   "file": "212-confirm-a-payer-tapped-the-code-up.html",
   "markup": "a1361c48a84558870046cb68d0f63d445dc18cb0f41da31cd779f97008b320b3",
-  "vals": "7f78bab4ad2dcfa29fe04f0ddcee20b7fa2abea093af6e5f48eb77df0e83c459"
+  "vals": "9763cbca9273550416a392e15858c01c3c3df096832eb4bbc2bb90296ea80c4b"
  },
  "confirm, on the air, tap here": {
   "file": "214-confirm-on-the-air-tap-here.html",
   "markup": "64ecc68af4f6617abc5fc66c5411d822a00267f9bb9a7ad9bb16351587eafb51",
-  "vals": "662618665b5580703c7229697e8af120ac8668bbc6f0b22eefd66099447ea618"
+  "vals": "bb6f63646bd2e5387a39061d8d1700016ff867e09ca18211e737b7028ceec5ae"
  },
  "confirm, on the air, a payer connecting": {
   "file": "215-confirm-on-the-air-a-payer-connecting.html",
   "markup": "b7dc838c0b1ea76f26380abde25735a8d64df9930c3115cbb1ec8562a2d5e841",
-  "vals": "18d0df3b3c28541edc05c735e2e36253f088571285c28c3f2197c2d2017a1f4f"
+  "vals": "e36d34c028c3b258128b6ef23b7cca7aba500735a9961078f03b0efbd68fd257"
  },
  "confirm, paid by Cashu": {
   "file": "205-confirm-paid-by-cashu.html",
   "markup": "0b467e2f0eea6cf27ad5ad3c1d1ee3fa81720de217d0497b7ccb5af6e6861a2d",
-  "vals": "ac79715dbfe7a8a26425d76219b74491a697c9e1ecf1f6cb2a48be842a12f959"
+  "vals": "c4b94d4a0d03437b894abf38a9d59b62b603749756a8820babf1dbdcd56ea8f8"
  },
  "confirm, any amount, no invoice yet": {
   "file": "072-confirm-any-amount-no-invoice-yet.html",
   "markup": "70fb7c49c379431dd9b8cd6d8b494c594d344aae287c486da5464e2b0923e7a6",
-  "vals": "9f875085beda62ed45b848c30340979fc6c3abea8177e368175a6b279e843bdf"
+  "vals": "19951ef94adc7cb8c3a1c52234110762670f2f0cdf6959e768aa17cd2e2783b6"
  },
  "confirm, dollars": {
   "file": "073-confirm-dollars.html",
   "markup": "cc3ef47f38312c04b218fb4a80000eb2c6a308484de9891e2cb9de467df629a4",
-  "vals": "8a0ec9f6b0184474f8c45de47fa57acf2ababdf4f254fbf36607e2974e9248e7"
+  "vals": "0c3d7ec5a2dd6323ce6086a996859837e653f2b2f5120976c58a591fd42c5b38"
  },
  "confirm, no wallet": {
   "file": "074-confirm-no-wallet.html",
   "markup": "1f7caf0a6e4d16a21e87349c60ac7cc78b7c037232ef73bfe5d395aacdb95619",
-  "vals": "776455006ac19b86544904f7e93c10a5e9aece5ca464d3b380b6d2e70a08aac9"
+  "vals": "04589b0b5f2fda40c993efa1877c9820b7c48fa15ccbea7f9d6af1e2bc82d7cc"
  },
  "paid, received, live": {
   "file": "075-paid-received-live.html",
   "markup": "c0cbdbe2acf0d2ebdfe005187dfffb7b9a0f9067b5d85ac022b8e10da7460752",
-  "vals": "000b93b079c41607ed149c5567204d6a748a38d52b44de21625a815538264f78"
+  "vals": "9b5d1c3563b24e8a426aa9fba2ddc1d8fd78da25f867e09c08dddd31bd1b73b2"
  },
  "paid, received, cash": {
   "file": "076-paid-received-cash.html",
   "markup": "b39b76751bf0def2e52fe8ffa559846947fb89279b2df96db490c1784e57e0b2",
-  "vals": "092d859fb99577351f033b4c309499bb1f769f5c0318b15671d6a00a70619216"
+  "vals": "b604beac6d4846f593e054a0b1fa335c1b13a79fd81a66d1dca5ec954aadc312"
  },
  "paid, sent with a fee": {
   "file": "077-paid-sent-with-a-fee.html",
   "markup": "31be404b299da9d6598c7e569ea52d30565721c97daa4850aec90eb06e3ea53d",
-  "vals": "d1b6199b783fa6a2556476ad0a80b4f54c63093799f0d2229bf98146f2081d50"
+  "vals": "4a337938b84cc341f84056bab5d04e296707ac0a7681fef4908f66c1fd53d1d0"
  },
  "paid, sent to an address": {
   "file": "078-paid-sent-to-an-address.html",
   "markup": "04e59d00c1b9206c2b7a8e913072ae4de3f9ceea799ff7193d986a7a32b6ed01",
-  "vals": "5f896b3c19f72ed6bd1eb9816531d57e15887c991e48337fc995700c8d702f8c"
+  "vals": "36c9d8b7e7e5d36db2a506c1ef5d46b8fce9f7d75c2d39916eb230d1ebd3bd52"
  },
  "sendHow, camera on": {
   "file": "079-sendhow-camera-on.html",
   "markup": "6c8dde6eb622114c367f2ddbfd99c62871e40c6392cf779e47f25e4269484a59",
-  "vals": "af3e85f22bc6ced8e40256f55206ff6a3b129497422d5b8b6dd3ec0451a6334e"
+  "vals": "91ae9f9d9b7a84b9c38524b1ef26883a43986eb4ba8d1644a0abff4ca44dbb6a"
  },
  "sendType, an address being typed": {
   "file": "081-sendtype-an-address-being-typed.html",
   "markup": "0963e672ec7284069031b485b0e98ce4ea31a060924e8ae84bb49952ca46af90",
-  "vals": "789c9e3bc3f5babc947cd8d19c878f3149132a9cc844f83bd6d685cbad4b6468"
+  "vals": "6398b302ff55b2d13892bc0198af8a30f92a50b4a151a1b0a9c87418e197b61a"
  },
  "sendType, a valid address, keyboard up": {
   "file": "082-sendtype-a-valid-address-keyboard-up.html",
   "markup": "887d700324aa8a0c2946231dc299544544c7d2e9620cfc63f72a4c4d93b343ea",
-  "vals": "01c12292bcc730fa1443d4d6725ae971e8decd13735830699f20d7f1056e8890"
+  "vals": "29e6b51f8fd8f321cdfcd2648dfcac70cb805dda61cd8acda5f262eb6facc2c3"
  },
  "sendScan, camera on": {
   "file": "083-sendscan-camera-on.html",
   "markup": "91bfa358ceeb0ce45bb40fdda15614960b05ab35746441ebd569048daa27eea3",
-  "vals": "dc8228eca12db2d7e39d068a8c1d189b97a0a3ca2d61bf34d99649fe1c018bf3"
+  "vals": "03e49cf05dcb400e7cdce5f37d6a692d13d6ae84cad8d8b59f98302e742581dc"
  },
  "sendDone, sending": {
   "file": "085-senddone-sending.html",
   "markup": "8e8af0db0776e91602bf49b05a1db6723b1868c2d203732da7acd3af47e25624",
-  "vals": "22804d388b137d06de514a590237259344be01d9c41b042c458c8824b59bb29f"
+  "vals": "ea5e8ae7a0cf371ad511ad4fb5ae92c47f10dfd4f40cfc8d30e0225a6d067ae3"
  },
  "sendDone, on-chain": {
   "file": "086-senddone-on-chain.html",
   "markup": "39ee213a963a07226dcf623c745977a10295db16dac6ced020d78607d73cca11",
-  "vals": "e77222e009158730579169b67ee210769148a9a8931a70f648ea61f2bd221107"
+  "vals": "7786d105d33e1ac3591151b89a208869842e5fe0a8571c043478153d0e08175e"
  },
  "sendDone, done with a fee": {
   "file": "087-senddone-done-with-a-fee.html",
   "markup": "348ddd4f19eca385c387c31d51b4ab5687769926fba9be7e6c21bf01f087c085",
-  "vals": "8d249428131a697e1c04ec98afe1e4a5091b066c4b49f717b5f17d21addb791d"
+  "vals": "36b6a9a05b02123aea375c4eb6da9572c832e321fb015d335e2fb63866ba0962"
  },
  "sendDone, settled, leaving": {
   "file": "088-senddone-settled-leaving.html",
   "markup": "3f2dbb68243ec59a7c449f8c0fce4e49adf578074163d53ba7aca94f4f2008ee",
-  "vals": "91b2b6704abfa54cba0bc8a0fc05312de89e988f04a41ee3a297b4c681e22b17"
+  "vals": "4f8bb66871003418bf2f92a9daf0bb4fd7370aea35a8274d8e883d686954f559"
  },
  "sendDone, receive pending": {
   "file": "090-senddone-receive-pending.html",
   "markup": "43181cbe32c2937ea70b615b8ec0af47946d912d58891d453bb3cf5f7ed3866c",
-  "vals": "d0de0b67fdfd6b69ab011a2b6e35e22fdaefc684acc782e2d0fed3ff0eee8215"
+  "vals": "5c63aac72f302105762b426317915465ff49c7353c73c98f7f89aa69cc22882d"
  },
  "tokenOut, a token with a fee": {
   "file": "091-tokenout-a-token-with-a-fee.html",
   "markup": "33b4f7dc496d733753152cc5defcbc87cc1e80b10546ebe083e053a953ac1f4b",
-  "vals": "deb6125320f9c6264d8e773bf229f0a1cb2e1f6d9f62e4983128b3a0764210b0"
+  "vals": "35641fb7ffd0b6db463a95df0b35bddac5227b6426df92ada2c72228e6d990b1"
  },
  "tokenOut, from the last token": {
   "file": "092-tokenout-from-the-last-token.html",
   "markup": "db7b6b16461313e37e1a68eacfb80a2edef902ac7362ed1c0d7da623d382e71a",
-  "vals": "65dc82239d8e58d804b5ac560740be956d9d213da3f79f3a94a075ebc07f7e3e"
+  "vals": "bb15be4ff1ebe4e256258259c398f8753fdadca6facf5108d9e4ef2fea1bb583"
  },
  "tokenOut, paying someone at this mint": {
   "file": "201-tokenout-paying-someone-at-this-mint.html",
   "markup": "999183d7da0c845a60137970b69fc96b8f1b76d0c49a06ee2f7b625875726d0b",
-  "vals": "0478a900ca7555d0b5fbaeb37b269abbd05130aead0c3fe9acc4581f0c0dff58"
+  "vals": "639f309f4b56fa8196f7a79a59869cf0e0cd6c62e387132c23881cb691e91ebe"
  },
  "reqOffer, a payment request": {
   "file": "093-reqoffer-a-payment-request.html",
   "markup": "d913733a4ef4f27b17fd7022d32aac15c76bc74a5f7dc2d4b539f542a7198f0d",
-  "vals": "fd43fc101bd4bd52820924537d0bb46654adf70f0a499c9dbfbc968190cb5e11"
+  "vals": "6315b4d8bfe4947cdd0750548b4869bf690e01966b1179731d79e5d8bc817219"
  },
  "reqOffer, in person (no transport)": {
   "file": "208-reqoffer-in-person-no-transport.html",
   "markup": "f5531bb35cc1b77dec8224870a1339ae73860ac9f64d103cfda806a18ac1ec95",
-  "vals": "9e9c871b935e2b17b9fe7938d56720b018f963d9bb0fc1cbe148404d087d70c8"
+  "vals": "f4e617173fe587364fa66f42d0cc54920626a95252ed509eb89973889a558d2f"
  },
  "reqOffer, busy, no details": {
   "file": "094-reqoffer-busy-no-details.html",
   "markup": "7e86c8e9c9bb086f564d04eb99c01e6d60128e747c689fc04a9c248e5d87ebf6",
-  "vals": "23771bfb6fd35be08f36e59ed89a435b2d710588e3b4977c8af6b4b8ca6e1c7f"
+  "vals": "64b516372cca35d218fc14d9150b6c2f22212e69e437fc62385de61ed9807cbc"
  },
  "sendConfirm, lightning address, a quoted fee, a note": {
   "file": "095-sendconfirm-lightning-address-a-quoted-fee-a-note.html",
   "markup": "72bbab11a91ca9c562ba78bd12776140896bc64613a99f36cde175badf227097",
-  "vals": "b861f8ef7249b391ce2c03f37a6c660155444abbbc9095331d0a1592760eaa94"
+  "vals": "cef74a12caecbfc6a1d6db531687591b17dffb02c99b9928484e9a50fcaaf5e7"
  },
  "sendConfirm, an invoice, quoting": {
   "file": "096-sendconfirm-an-invoice-quoting.html",
   "markup": "ed1acaa1b00d9bc9b7569845600ab7b3774c1aee8b315bb6bc56f0d289d27226",
-  "vals": "662d6c11321cb49ab4171a312ec568154b23ebacfb1546cc2c7d9dfff112fa23"
+  "vals": "c72e7efb4ac07620fdf161c004208749e3785b9ac7938395883a75628cb7df32"
  },
  "depConfirm, by card": {
   "file": "098-depconfirm-by-card.html",
   "markup": "853372ee4627097ece4363c06b9a585e25c486fa9681da54822a82295eaa0660",
-  "vals": "33e1b04536f55fd2119093efc0e548ff783531808aaad2e00b4ba66975616ffb"
+  "vals": "78cc29d9cf17b59b444253af2a4d626ea5b0d72815021175c4d254ec829a536a"
  },
  "blocked screen sendFail": {
   "file": "099-blocked-screen-sendfail.html",
   "markup": "0d833a22c0ed8868b3c6727cdf063ff47365c318c73482b84f2ab7eca6ca9adc",
-  "vals": "4b19d4d5adaecd178aead8cc0e83f81d92498ef738668cf0e8cecdd25555db7d"
+  "vals": "669c8ae523b64228125c30b8a75aac079da676d4dd335df7807ea7d6f394401d"
  },
  "blocked screen mintRefused": {
   "file": "100-blocked-screen-mintrefused.html",
   "markup": "eb6e797712994a3a36383ad62eaa79a8683adc2c47a947cd1cadecd0ca1e9367",
-  "vals": "3507bb058891410cb86b254c8f325e048f39d4913037aae0dff234218b874345"
+  "vals": "ba16267aa5d53cec444f66757d5640625c9b2effbeef55433127d46f112b03e1"
  },
  "blocked screen netLost": {
   "file": "101-blocked-screen-netlost.html",
   "markup": "d888dbe79fb6ceecefa71153f59110bb015e44a84fb51241646f0f5df2c7ce60",
-  "vals": "c99fbf4240a8cbd365f4bf68efc34d0b54b41e37433dc699cf0705d185575537"
+  "vals": "90b0386dae53fbdce01fb69c4781ec9b73b3633922afc29b752a1bf1611aa06a"
  },
  "blocked screen lnNoRoute": {
   "file": "102-blocked-screen-lnnoroute.html",
   "markup": "d3446d0c65d1651d1ffcf70798a41cd0fede7a09e93ffdd8be459a56f7b02fd9",
-  "vals": "d402d4419930d6eeb538a4d48a5878539b03b4264f5b2a2e67955537916f34fc"
+  "vals": "fbf65f5925fa6654ce59d1299d4dd259923a37bdf9440af152cc2efd529ccefd"
  },
  "blocked screen badAddress": {
   "file": "103-blocked-screen-badaddress.html",
   "markup": "e11c9dcd3c1ef5823364534db78904cbf0bb97661549bd22cba938d00d24653a",
-  "vals": "9c06ad959e8c939135752b9926a1df1074e3b33e32fc9f0b6c9bd78ff0db4bfa"
+  "vals": "f4b37c2fbcaae4b2e9670a4668e542f5effb25ab3f471010c312e0afed717469"
  },
  "history, every kind of entry": {
   "file": "104-history-every-kind-of-entry.html",
   "markup": "751c003d665668b24c044d76574991470a24782ec8d6bd9397e21579230d6514",
-  "vals": "c43e4e0eb7ef10738c09a97d3a7546912da2672be5eed62043623291a078e544"
+  "vals": "76137e54272acb6b6cc264d36caaedab43dc2f90b8bb996ca4cfdc44848ab529"
  },
  "history, done, pending and failed": {
   "file": "203-history-done-pending-and-failed.html",
   "markup": "56402b2355492ab818d36239a8ae5cf3e536d826c0c168e17242c3962969c609",
-  "vals": "ab95214e9987a44092d81c0fa4f188716caadd6d0b3b3b61e17a777a26f455b5"
+  "vals": "f4e0e42201f8cb1788ed26a30fbaf7323f160c3aea7e334f60ff547df53156bd"
  },
  "history, a sent token not yet redeemed": {
   "file": "206-history-a-sent-token-not-yet-redeemed.html",
   "markup": "2538b72620bddef3688f0b1acf076d1dff634e103d8d87cb2274416de20ff540",
-  "vals": "1bc1dfa17b145b91da7413f30bd8de38f1a2a14e30448902fae470e106b77d9f"
+  "vals": "e6259f6db2cd057e66c1064f79274aa79324e03f60bf944c2f94efb93f97a9e9"
  },
  "history, a payment at risk beside an ordinary pending one": {
   "file": "231-history-a-payment-at-risk-beside-an-ordinary-pending-one.html",
   "markup": "a2c90f5f152acdd3c3cbd96b1e5fbf94489cd50983eba152cb8450037e0bc481",
-  "vals": "5a41a6ac225d45fbf4911ad1ae3e4812b5f0423bc9191db52462b7077cdddc7c"
+  "vals": "860e972650ea285756b2b5db4d8bcd50c04e7e430312882824705add0159ac7c"
  },
  "txDetail, a payment at risk": {
   "file": "232-txdetail-a-payment-at-risk.html",
   "markup": "99cefecb29a0c2ce718bfae68470a93cd2a8e40fda50f99f80bd71ec0ae3ef07",
-  "vals": "4a6f0864a43aefdb075a418507ead625cd407457344b710c17189a349001b0ae"
+  "vals": "e942abe4d993a1b8ddb6b64169d3b993c807754c0ab463063fb92aa30f19e50a"
  },
  "txDetail, paid with change back": {
   "file": "236-txdetail-paid-with-change-back.html",
   "markup": "766502c085e634cb702f893b2aa3d3bc9bf09355be4fba4d1629832bad3a78a2",
-  "vals": "fb9490cea54dbcb41ded73c4bd393f70a91bac55c55ba3bb7e35f3bfa13e2955"
+  "vals": "3545da3f58ccccb5c99c99a09a361f63d120734173587ad678814f719ccf968e"
  },
  "txDetail, received with change given": {
   "file": "237-txdetail-received-with-change-given.html",
   "markup": "0cfa424bd43dc5660c6493b103010f4bad49b44d7f78c705e0d771ef2cd14515",
-  "vals": "dd11e99f10fcbcd1d81d133cb9fda994091daa8e2fa995d81f562c120ad5fdd5"
+  "vals": "47c2c4219cfcffc066fb64e74d34de15ab4d082be7563876cf7153c4808f1456"
  },
  "txDetail, the change never came": {
   "file": "238-txdetail-the-change-never-came.html",
   "markup": "a37d8843995223c0cf7977cf24e19813151c5841b5f0e9695bd1d55b36553ba2",
-  "vals": "f96e8655ca814c87de4011bf4133495432a829d55c6352025dacc05f0e41dfb2"
+  "vals": "247b8c6317364c2cc297b0b2e1b6705b3f9daefec889fe6e48fbd0ce6c2f67d5"
  },
  "home, a payment at risk is still out there": {
   "file": "233-home-a-payment-at-risk-is-still-out-there.html",
   "markup": "ec290070bc9da7c303634773bc092f5b8d5e942078f534d43d07b1f4675e4cb8",
-  "vals": "93172e982e2a23e4b2f18853ab3368ea03679a2e9865d305e9b3916f6c9a620a"
+  "vals": "5a92ddd611d43b6dfdd205f58f14732797450d7e2c32fc51f979468ae008f77f"
  },
  "history, outgoing only": {
   "file": "105-history-outgoing-only.html",
   "markup": "5286ded10130a3c0350a5769e27e8147e0db5d864881bd786791c43132e6adff",
-  "vals": "275b99abf1f5db2988bad6537fca83669c2ec0680d6921ab2239bc4df9f501ed"
+  "vals": "8b5d6a69adf550e7ed045d6ca423f2c24e2bab7c9447d5ec4d25f5bfc1219c10"
  },
  "history, incoming, none match": {
   "file": "106-history-incoming-none-match.html",
   "markup": "2b761c9fd3655e4065ed9b104d47581134829f115f08669e75dbf30657fc9cfe",
-  "vals": "7d38704116b639d24c87ef3e31cd9b287f0836a40dc8d9ef842cb27544ae00c9"
+  "vals": "51d2f9937d97431ebe294d55fb8d85060e994689f025dbe49dbbfc27d83c440d"
  },
  "history, a fresh wallet": {
   "file": "107-history-a-fresh-wallet.html",
   "markup": "4ff4d2845da9b9af041e968d3b1210a925e15077d2b6ce408cbab5626cf41feb",
-  "vals": "539af1730f9de5b7e8e889ed85387428f1751055dc50ec186f892f2c09c38d52"
+  "vals": "79931c55215ad93e8e67c85856491b76c08d6013138e42dfdbd1718928947a23"
  },
  "txDetail, received, a note, a token, an audit record": {
   "file": "108-txdetail-received-a-note-a-token-an-audit-record.html",
   "markup": "81f3cd46cb16f0464dbd0c643420efbaf7c764b6003a2053ac8c200dd0ef7bf3",
-  "vals": "b814728dab8cc2864b3be6081dc5bd24bfe235163268cf1b35d4093fe5b07cd1"
+  "vals": "6d724f60e66b72a476db468d318d949f888e14a7a84e802024f3393556aae847"
  },
  "txDetail, sent, pending, a fee": {
   "file": "109-txdetail-sent-pending-a-fee.html",
   "markup": "6359c7a652ea376fcb2881db5327063315b7511a5316443c74902ad0fce2598e",
-  "vals": "e9a872fed1c3396b0f47013c4fb5dea192d3bc3253cc43d6dd57d769ef84c391"
+  "vals": "60e5275e4e027ba685b0838743eefbcf91a69be7f66f1cdd690015d484f27565"
  },
  "txDetail, a Lightning send with its proof of payment": {
   "file": "245-txdetail-a-lightning-send-with-its-proof-of-payment.html",
   "markup": "3c3cf45cbcf63df16dfc0113e40bc6334c160677951a048fdb1e08c053c4f60d",
-  "vals": "394f4e7b0293e776af3de614b79a18bb4b4d3e247af5707bb3cf9d1f7427e634"
+  "vals": "3ebbb512ab6b29a57f53ceeec26c3b8fdfd3424b1bba5da5262eced1d3218ad8"
  },
  "txDetail, a Lightning receive with its payment hash": {
   "file": "246-txdetail-a-lightning-receive-with-its-payment-hash.html",
   "markup": "ad14c00581ee6f4cbdff29dd47a2ab2acbfc1aa695d25ecebfc748ce22cfc664",
-  "vals": "1ba6ba3b46529aefb08e7ff76f500762b986be2c0abe4e4fd521b90d7a6654a7"
+  "vals": "7e7d9ea3a39f55cf71dde1be542b0e9c8424b9dd23ddaec88e175fb996c7a6d0"
  },
  "txDetail, a locked payment with its receipt": {
   "file": "247-txdetail-a-locked-payment-with-its-receipt.html",
   "markup": "0d028112be43015b5590cfa5fff561585b209f71e69f44268d154fdb671b2ee2",
-  "vals": "1c116f53520fd81197278c17508a77f9816a25c2c1683d4d57b0d3f8f28e4da5"
+  "vals": "546466c9db9f4e0636bb37df1df949c4ce2087ca8a3e0a16fda639ed4d09ebcf"
  },
  "txDetail, a payment older than the last hundred, as a receipt": {
   "file": "248-txdetail-a-payment-older-than-the-last-hundred-as-a-receipt.html",
   "markup": "777868eff4a7cba4d209a95117c59526f9b7576e6c52639f474f015abe7133fb",
-  "vals": "197868bd39efe51d245366190db8d365415d8d847125ebf6aba51bd267760e96"
+  "vals": "0150f9ad4fba54b732128904171b2cd0683de3c659f91f3434e47167b20a5d9e"
  },
  "txDetail, another unit": {
   "file": "110-txdetail-another-unit.html",
   "markup": "b573e59f1d4a33eb57496bc277833f2fd9c74ef02e4ba711c9473e033c8f0ac8",
-  "vals": "746d81ed59c8b223b0f2eab1f13c44f49291a28ff15f6b8655390c49988025f2"
+  "vals": "ae1e95e99a7c9832a6bd0d986e09d7a86185fcfca9bc7f9dc9ae87526f74ccf5"
  },
  "txDetail, cash": {
   "file": "111-txdetail-cash.html",
   "markup": "1a53bcc7260347e30cd650e681373e778e90d989d48163df2be9202f176ef965",
-  "vals": "467d7dceab6ac8d9cb5aaacbe5d5816120b6903d0b928ed16584ee645f3cd04b"
+  "vals": "a3858368ee66a4b257c23a3b3b1d7738b16329438f88fa26e88b88b1f5715d85"
  },
  "txDetail, an ecash receive": {
   "file": "112-txdetail-an-ecash-receive.html",
   "markup": "4bac3b00cee525a0fca6ea65eef5a322b9bff1409bac54d22853f79dea4d3967",
-  "vals": "39e5a117811cf380fe383754672eb87846dc284323dcebc76966f27decdd6050"
+  "vals": "035708e4780fd3c7711f7b874ff3e555ba95205a929b1ab142e8c267e6c00f1a"
  },
  "contacts, a list": {
   "file": "113-contacts-a-list.html",
   "markup": "c622f3000e28a947129c82a8da533a0a9a1435d406aa0de732c8c2b5f8cfdea0",
-  "vals": "380270ab28fe0ad46bbbff4ded9dc4bdddaad6b589645da83fef61c359eaa2e7"
+  "vals": "f36b585dfe56333e9d0287a2862001e6d561db45107f5d2cd1e312a030ed7797"
  },
  "contacts, searching, a match": {
   "file": "114-contacts-searching-a-match.html",
   "markup": "a168c2c3ec9f9db0d87c30292067ae6b4cb1f44a559dd9fbd1170958d370e394",
-  "vals": "64b9413a79f38722b524637ca95850aee4c1641bd6443917b6d142e3ddb4fd2c"
+  "vals": "844b3eecb439f3ac2047e478b152b0e635f3c0276442de7a3e892e0e265304d6"
  },
  "contacts, searching, a handle nobody saved": {
   "file": "115-contacts-searching-a-handle-nobody-saved.html",
   "markup": "5952dd34d32c17bad61984f69483bd82997ef9b71438d8e4bfaefe3b96521afa",
-  "vals": "e7444534348fe55818e85c5c1ff72e0ec283f88ef6f16f0379b3d66361e9eb00"
+  "vals": "83f9a4e34bf29c335d3fde951b692f2cea6d69ea0b0a405e9aabca5ef534754d"
  },
  "contacts, searching, no match": {
   "file": "116-contacts-searching-no-match.html",
   "markup": "2bd2f37213dd513459644b1dc26d0906871da18aeeeb1bdc5cf148fe0b19018d",
-  "vals": "a5e413b3e27667a3b5905cbc0dcebaeda0e4d3394d3d218c7e9e2eec107caacb"
+  "vals": "675fc63ef10592bf06df83a58a9efd4b4a477698b22fd5af81541f1840e55961"
  },
  "contacts, a fresh wallet, not live": {
   "file": "117-contacts-a-fresh-wallet-not-live.html",
   "markup": "f930e0fdbf7760fbf62f75e76a105581b7d371652d763f24ce4207c779f280de",
-  "vals": "15fb1e2d585f05fe249aa130a95097a45ac8f2f25051f8ddec0fed15efd141b6"
+  "vals": "2e99ce463c0fdf12b99b7d399522e1cbe76a86e5a0708e68e6368b33b82effc5"
  },
  "switchMint, one connecting, one not answering": {
   "file": "118-switchmint-one-connecting-one-not-answering.html",
   "markup": "6279b0900a510482b67344ec2ebe5b2d7c5169533db01dc13037c5ea2646293a",
-  "vals": "ed167c25425819cc402e7c9f6ccaf042a2f39d987d5ccec40fe6eceb1594b76f"
+  "vals": "a7b9665a04a2457042a93b804557b8c834a80f9d45cfc65f138c83e962577bee"
  },
  "switchMint, no wallet": {
   "file": "119-switchmint-no-wallet.html",
   "markup": "5d441c6eb5f22e4892dc7be03becb4e03820610fa9bee3745a281fa96a782c2a",
-  "vals": "bef4c4b81cdbbaa38032eac4e932c67dec51990c1056bd2d02faf36b98579419"
+  "vals": "68a03924c8fc63339aa65cd59596399cbd14f47cf579f118777b19baa6e10ee4"
  },
  "newMint, a quote with a fee range": {
   "file": "120-newmint-a-quote-with-a-fee-range.html",
   "markup": "b1b4c089c8f1294713406b3fdec36b9edf6ad84f6e2259210659c0a330b89ba0",
-  "vals": "755e1c8096d09831121707e43ed138031bcaa44be580fee3a296c61f352ba410"
+  "vals": "4f12786973376573ba91b68ce4b89925dfa8893644bedfdcc7571c38c5342bab"
  },
  "newMint, one fee, redeeming": {
   "file": "121-newmint-one-fee-redeeming.html",
   "markup": "963a3e94bc1d04039668a83cd7e142a92a6a973bd5f6639caba2238b82932c67",
-  "vals": "0665634e6b9f8be4f954d52375f7365d6965518d6ea20c17d25ca84836f97578"
+  "vals": "ff03d9ab24dbc5a9575d8dbe26340fe575b39004680f272ad0fd26fa1bde548c"
  },
  "newMint, an error": {
   "file": "122-newmint-an-error.html",
   "markup": "5f75a957757526e0b72a42928f33b34be51e792edeb5a1bc528181fcffd06593",
-  "vals": "1dd55f53bbcba276df25651b04b9dabeedb7eda25c8327eb6ea5dc1f8e9fe653"
+  "vals": "7487bcf6a4a6b1f9c55fe82727121eaa7fbc630f7a04e35afda2b3bfcbd74664"
  },
  "newMint, waiting for the fee": {
   "file": "123-newmint-waiting-for-the-fee.html",
   "markup": "4106c2b52add6fb0211bf36e78003b338e9aae94565e2970d1c573ee5c8652c3",
-  "vals": "6e4e6996ad1a1cc25fdaf1ee8047ec550d8c80bd9f2c8c7866fee5d9f06408ff"
+  "vals": "1bad3a82babd70a30d63050e88be91a6146f24495d5eff650afe598280226742"
  },
  "newMint, too small to move": {
   "file": "204-newmint-too-small-to-move.html",
   "markup": "05f184d120ea9091adeb5c01f955f58405cfbacc9f15acc39f0284d77719ee4f",
-  "vals": "aa99e8aafe10ef65773e4f9314fd4efabcaed03eb14bc22da2b4a2c26e4385c8"
+  "vals": "90ab6a5996ff3f387012da917fdd978b7e4b52d37999e4953c25e598971c8dc5"
  },
  "newMint, dollar ecash": {
   "file": "124-newmint-dollar-ecash.html",
   "markup": "b9af4ea96b2821885b8aade79f8c51542fefc0a6c3f9eeb90b4679fbd3d23f8e",
-  "vals": "570a15164edeac4eaffdb62db44e1b703935cd17d58c5e28b458a9ee141008e6"
+  "vals": "6e372bbc3db135d9e16ec7e964a4b855fc0d2630be2a20fd0968e01a1d5d2c8f"
  },
  "newMint, nothing yet": {
   "file": "125-newmint-nothing-yet.html",
   "markup": "26635e26419ac9565b8540951809933920edaf4659b97f14214454d325593e54",
-  "vals": "8cc49d8df44f370f4c0675b5fc7190710fe37486deda0d23e741618988a9a55d"
+  "vals": "e4c83b118a3036eff05b241156dc372ce858aeb9f8cc8dc15159cfe952258f6e"
  },
  "importSeed, a finished scan, every kind of row": {
   "file": "198-importseed-a-finished-scan-every-kind-of-row.html",
   "markup": "df0752ef84188ee3ea39aea88de8f96b0b5d6d4e6f8501bf1dfb0e1b7e411e72",
-  "vals": "40a9f7e9473e77eb6aca422a9cd92f9f2187af11be8327c3b34da423bffecb64"
+  "vals": "5ceffc4ba4a40caa7b118e78fb1c81a1c4ea9a56ef25cfb42846cd4adf5504b3"
  },
  "importSeed, looking": {
   "file": "127-importseed-looking.html",
   "markup": "31f4691ebfd9d7a1020a495eb734bcb568eea5e917aabf5b74eff5b82b49a416",
-  "vals": "8465f8ead378830192f4f44a510db2ae4a87641a2920953477c2c8bcb29d6ccb"
+  "vals": "317996de89480aa6ff6803bdf45d1232c99d7b41505a963c898d054a98ef3eaa"
  },
  "importSeed, an error": {
   "file": "199-importseed-an-error.html",
   "markup": "3f7d17dbf024e7e77e606cf83bbfffa0ac97f702e925dd971cd3d251c81380ed",
-  "vals": "79bc9890860b131f1fb5fb085833450bc81507fbefdd18d1076ae1a2e84bf8cc"
+  "vals": "e4176494e93b899906033715e2ab1f94f0c5aebff24e0a8de3f4b3de81696879"
  },
  "rsConfirm, a pick": {
   "file": "129-rsconfirm-a-pick.html",
   "markup": "cb45e7981e29317ace2b00ffd99e0e6329f32f481f173488efe120c2c3e1f575",
-  "vals": "1de15fe21145935a22353a2fc21faf519887eb71dbd31fca43a893168b81a2af"
+  "vals": "beb5b0182a4299d9970982cd75a880d7599d94a42db812414a83910762856c30"
  },
  "rsConfirm, units, working": {
   "file": "130-rsconfirm-units-working.html",
   "markup": "e093e22449eb2a3f687df1fab5828230e34d6d82cf7fec0d3465d2a263b6c4f9",
-  "vals": "ce3d2fa22c6d7cbc24251c9582f3843061b6a5e886f442e122f26bf487eec723"
+  "vals": "a649f037a7014f0abafefcacac6de2374244f5f0b2e64186e3d7047ff7bf8bd9"
  },
  "bkStart": {
   "file": "131-bkstart.html",
   "markup": "efb8e2656ba78da653946da54b6b31150ca619f1a001880c98e2ffbd84e07722",
-  "vals": "9facfe0b14c3bf92382422b7862e4eeee71ed26d70555c8f06ef5000a8bcd933"
+  "vals": "cc6512b35eb6fc5fafd4714e41cf71600d7316ae1bdf8795898319a92c8d8ac8"
  },
  "spAmount, an amount": {
   "file": "137-spamount-an-amount.html",
   "markup": "f47de4dcd70762b51bc10fe0223da83b8b8354979f18be245c1deb4fa5178b6e",
-  "vals": "a848767b6ca98f3bf2903372b940126e1213bbf1b439916da9af46ac05c5d332"
+  "vals": "d12002eabf7a27ba6a617914714e080a816ef9b934accb4ffa07c1726a93bef6"
  },
  "spAmount, too small": {
   "file": "138-spamount-too-small.html",
   "markup": "4eb6a6a2f82123b7ce6cd19d58879ed77f406b51a9812a031bfa8f8d635ad75d",
-  "vals": "d833f503cf7e825bee917f154a917bf8d5b7e89750a52c5232e2a2e0ab156e42"
+  "vals": "3cc07311f0f183e94da50124b7cc12f1a38ced2ee18c583d720c9126d1bcfe49"
  },
  "spWays, three": {
   "file": "139-spways-three.html",
   "markup": "bfbd9ee7bb544aed59ca34ca12827526c60b1611b40ce6d2fb6db8333cdeb061",
-  "vals": "fc6fa172557167a4e13ad797c8584d179f6003e01d35a6372802835e0a401780"
+  "vals": "6e1d3da2286164a2dc068b1f7c9a40807ef9adca797ff0eff66c80e94523a11d"
  },
  "spWays, two": {
   "file": "140-spways-two.html",
   "markup": "edf2f96c290bc04798c76429d98690a5198ffa890e88ac17ee8138d5364f6146",
-  "vals": "90a0a2f8b9b68c5778013234de51371b1e41f6348569de4ca95fbe52508644ca"
+  "vals": "a3350fb85c21cbcb0e7102f15808e55085af9861c988c23f14af6998c787e76b"
  },
  "spShares, even": {
   "file": "141-spshares-even.html",
   "markup": "b1eda44dae6e3aa28f2469120f639bb185fbddb287de0fae1bffb38d027ea8eb",
-  "vals": "e5ca5b578432ff9cdaaa62079e1ffe88484cc1fb6795e430e41d6af6fcf2475c"
+  "vals": "12d7fa9c76b920c77747c4bb0fdf2d16255d89ce6a09de44ac11cb3540f4c510"
  },
  "spShares, uneven, one assigned": {
   "file": "142-spshares-uneven-one-assigned.html",
   "markup": "ee739472fe129fb0b47bc16421d11ac34e0d36042584dfbb7482eb99ce558e41",
-  "vals": "e6735cd9c44412dcc20935f1175d003259e45d40d091210138f586102cddaa4d"
+  "vals": "57f47f1747a24c4aad833eab57334cdb71eea810a302b390093a21e6f8f1c14f"
  },
  "spShares, editing a share": {
   "file": "143-spshares-editing-a-share.html",
   "markup": "d85ed5f28ced31ff07a747dfb9d71fb6d0092462b14dfc9d5f7f3de44374c6c2",
-  "vals": "14a3c7f28dfee06b02166cd85a6403c4bae27ccd7e4edb8c406b35f87dfaae0f"
+  "vals": "d4c92b75824f4e75d28d598e32b42c8c4efe14e448de28e972a4f51397bb9e66"
  },
  "spShares, editing yours": {
   "file": "144-spshares-editing-yours.html",
   "markup": "1f2d0ade10b86fb5aa05e1e42d2c2879898a67378a24ab08922d3b9bca7ca8ba",
-  "vals": "25c2049a1fbf3a4ee23cc094fbc0f8700c67da4f4b8a92c2c9e8c5d13b6c54ad"
+  "vals": "eed67e8883d70b311a9d20cc33d4bcaffdaea7e2c3325be041d62196a249911d"
  },
  "spPayer, a QR, an invoice, copied": {
   "file": "145-sppayer-a-qr-an-invoice-copied.html",
   "markup": "2107bf0121ada4b5d600d31cf60fff86de914bea65110eadb039d69b62ada78f",
-  "vals": "ce04c8c3534e7db36abfd628ee7570fe867a360ef5a42bce5fddeb84cb1d6a9f"
+  "vals": "eb171d3ecd055e3e4405bcafa339c0ceb246dddf8314d7119ec7233a24de83fc"
  },
  "spPayer, a QR, paid by Cashu": {
   "file": "207-sppayer-a-qr-paid-by-cashu.html",
   "markup": "1e4f472c6ee41133a50e891bfdd6d18faab379d742d6b45e28b76596716b0f01",
-  "vals": "61c8afedaf205a9322480dd0e4c3cda3a5e64f819f7b65f5cf8b8b16273fa9d1"
+  "vals": "81badedf83902c37fc32c953cacfc041122561232dd360fd4fd8c9f3baf1195d"
  },
  "spPayer, the last, a contact, from waiting": {
   "file": "146-sppayer-the-last-a-contact-from-waiting.html",
   "markup": "c90b213e72d6ef4c5ae2caf88aaddaba4b344768ff3e89086dbfd69ea07eefc5",
-  "vals": "578447c28ea3feeaf990ddf2561ed21fdd24cd3190b94adc9052064037247bf7"
+  "vals": "12d68ca62bccb1c162f1c3d1c013ac786a8917ef0a3189ce86eae5ea645085cd"
  },
  "spPayer, a payer tapped, the code up": {
   "file": "213-sppayer-a-payer-tapped-the-code-up.html",
   "markup": "a6d9b9cb4ea9a26bee254af04f550c38304a1f3bfb33d23585e4922c35b8e4a2",
-  "vals": "270a62086a01bdc7de7a47532a8a2e8ffa8aebca20f98f652e57434f33a0c4da"
+  "vals": "a0b4743ccd6d4d31c52a3b89f88b693a6904fbdf2f92e7b6cf9fdc9e746c15b1"
  },
  "spPayer, on the air, tap here": {
   "file": "216-sppayer-on-the-air-tap-here.html",
   "markup": "31f4084449e45336f61e580131a0eb6c58938489c81feee8bdf1fc3d0c7986e2",
-  "vals": "554e667c4a2e84f46ab0f21c435479cafdef061b37e8840a5e1c8ad390d2afab"
+  "vals": "0e132809d5caf08cad7452a854a943fdb07b1b20cf2c9f54fa2544fc62753c2e"
  },
  "spAssign, contacts, one taken": {
   "file": "147-spassign-contacts-one-taken.html",
   "markup": "c2eafcc8e4f3823f7864fa250cb00b71f18bc7a1558e71e0fb57f2c763a1ccab",
-  "vals": "2dbf37494211d99caa34fb86c289339a97ae8702616ecff11a0367995de57aff"
+  "vals": "95c43aa98edd3e53d17d43954f533e9bbe4d3664ee8c6bac6c2f2da21861313a"
  },
  "spWaiting, one of two paid": {
   "file": "148-spwaiting-one-of-two-paid.html",
   "markup": "dc800c2dec985d47505d6e6e97b30a2948ce23c41f41d1676b0cc5916762d633",
-  "vals": "380a768becb7a89e888fd6e5d8be8a781f819b8cdbde7261c26999c63ba95af5"
+  "vals": "ecc6f330ffcfd34752ce6a222c11351052c78590512b7596a4f3e07795f9d0cf"
  },
  "spWaiting, one left of one": {
   "file": "149-spwaiting-one-left-of-one.html",
   "markup": "9bc0fd81e09e31497e774e904ab64503b262a840dcd811adb25443c46bc619f7",
-  "vals": "8c6bf3bf365e22b438764bb5939c6b85c8195fcf10740d4612816285e8b9ce7e"
+  "vals": "57925edd4ebb1e74ab59982561b3c9285dbfcf3a8665f252d6154dad39701c29"
  },
  "spAllPaid": {
   "file": "150-spallpaid.html",
   "markup": "ff623a81f51ea66f4efe4a4d46a9231f9804bdbe969af9cf7e599fd54f40099b",
-  "vals": "76ea73893d46cf95a92d70b990cd763d9266f286febe8559c6ca55c8054cf8b3"
+  "vals": "67ff894d8e04edad84db6ff14505bf336bd0e3a5621e3215b2da6a56f9cbaaf2"
  },
  "note sheet, a note": {
   "file": "155-note-sheet-a-note.html",
   "markup": "97e91912220068aca7ef0d4b30e3070a6e569da7f718400976e6e2a6eb2e3086",
-  "vals": "3e15ccf031f183e78fe3a32c91e4db9055820462de3067eadb6d73677d537115"
+  "vals": "ff898edd1e4b3fb57d4d93a315a4ae974fb1d7800cd4eca72acab4092e2499ff"
  },
  "backup ask": {
   "file": "157-backup-ask.html",
   "markup": "729675fb2eacda4f729aedbaabf75ba68dd2adb1e6b8b5b3461e057208ef3bb0",
-  "vals": "d1fb8d812e2e083ebb6a74aba499ce8920e04b494cb5cc39524b6118c95fc5a1"
+  "vals": "c9eb0682b172ca33c861de21b6f1f120da076406d134c14eccacd2fb65218bd1"
  },
  "settings groups open": {
   "file": "160-settings-groups-open.html",
   "markup": "ffba120bed07a254fe772925a56cf3d9d0edff33c83fd95c1a993b32dd48e750",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: sendFail": {
   "file": "161-card-sendfail.html",
   "markup": "4e9a0010fb64910deea27cb9592c207666c50f53fdbd4e1415d08fd84d2a71b8",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: mintRefused": {
   "file": "162-card-mintrefused.html",
   "markup": "931146b93db2db3374b48e13fbfbac2003338b4ad5a225db03de7f5b0f064eb2",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: netLost": {
   "file": "163-card-netlost.html",
   "markup": "e0142ab1dded550a4c8755d4453b50ffbd32452a858d1ae8a18e92122b8354c2",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: lnNoRoute": {
   "file": "164-card-lnnoroute.html",
   "markup": "b265f01190bc29065f371087e2872e531bf5384b1b5214a02c930740ce5e3f52",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: badAddress": {
   "file": "165-card-badaddress.html",
   "markup": "798e7043b390650236bdb3590843cbe7e921540de58a6a58a0301bc9d78dbb07",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: blocked, a retry and a second button": {
   "file": "166-card-blocked-a-retry-and-a-second-button.html",
   "markup": "564386e9bdb791ea798a572f9b190e77ac4eb66d68e13d0a07d252897215bc8a",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: the Tor banner explains itself": {
   "file": "209-card-the-tor-banner-explains-itself.html",
   "markup": "b98f2a0e2eff836e4e09e2185460a6fe23383d7739be788d9ed883ec3bfd6f87",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: secure Foxy, three ways": {
   "file": "210-card-secure-foxy-three-ways.html",
   "markup": "978b84322d2b1921a7c0f2f07e23ca361df9212f0f3207d2114552be0cbd6a26",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: paying another user of this mint": {
   "file": "202-card-paying-another-user-of-this-mint.html",
   "markup": "47991632dd78b5d5957b31acef2e0782415fd8dd3b9d3f64593c0166e3395601",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: invalid signatures at a claim": {
   "file": "167-card-invalid-signatures-at-a-claim.html",
   "markup": "bd33760e79732791ed82a465d222ef00e94684bf8ba5e413be7a53038924428d",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: invalid signatures at a payment": {
   "file": "168-card-invalid-signatures-at-a-payment.html",
   "markup": "9a966a40490f21428cbc96ab2481917bf66704cf60d1f8a742df7b8a49af2467",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: invalid signatures, elsewhere": {
   "file": "169-card-invalid-signatures-elsewhere.html",
   "markup": "0cf44a770ee0e5dc355d4b9e44b77126fde3873549b0f2a9c8ac741b5d345ce4",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: paid, not collected, bad signatures": {
   "file": "170-card-paid-not-collected-bad-signatures.html",
   "markup": "a96b64a89f3c31f9702599e716f282e6bf2a5bb69e26d60f5034c54598dc7172",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: paid, not collected, refused": {
   "file": "171-card-paid-not-collected-refused.html",
   "markup": "e175884b15fa6cf35f2b2b073718c1cea2c06018b2693da9707ab4a79d3593ef",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: paid, not collected yet": {
   "file": "172-card-paid-not-collected-yet.html",
   "markup": "a2e4d4a67d36b8d539bc90b2fb0656c9fc6c9114feecbd865faa24e7125ee1c3",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: both offline, high risk": {
   "file": "226-card-both-offline-high-risk.html",
   "markup": "8fbaae0748097b41659ec562861211805647e15f289bfdd6dc8a681fd4c7d8ac",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: both offline, a small amount": {
   "file": "227-card-both-offline-a-small-amount.html",
   "markup": "964cd849e7992079426c290528ab617f2c13d77c4f2eb81829606481af5f72a0",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a trusted payment was taken back": {
   "file": "228-card-a-trusted-payment-was-taken-back.html",
   "markup": "c04ad2693796c3cfe9dee98d22e8978777fe938ea3aef7d8cc5a077d5d94ced5",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: no exact change, both offline": {
   "file": "239-card-no-exact-change-both-offline.html",
   "markup": "972c7c805f5fbe701f8e83fa55ef612ca34d149bda585bd28568bc831db0df6b",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: no exact change, change comes back": {
   "file": "240-card-no-exact-change-change-comes-back.html",
   "markup": "563b7e8b3b86edb6c4d14bb277df94eb95f3a1aca6b6ffe712be897d593c1c37",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: they did not take it": {
   "file": "241-card-they-did-not-take-it.html",
   "markup": "be49c39d874b38dae39fbaaef093afd9906b3c6e493f4863e5b86b8529abfa22",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: claim failed, already spent": {
   "file": "173-card-claim-failed-already-spent.html",
   "markup": "d77f2485a4b6136ee7fb350c65dc6a6eafb872b91bd0157be0dbe8a5f3a56c87",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: claim failed, ecash this phone already took": {
   "file": "244-card-claim-failed-ecash-this-phone-already-took.html",
   "markup": "9a4ecb66b4d9c746027f8f0f2b921886f5e6951690c739927f7bdd73e4f967cc",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: claim failed, locked": {
   "file": "174-card-claim-failed-locked.html",
   "markup": "b4537b41ded09e430c53c211b1dc253fb2e4321427689189641e619a9ae0f16c",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: claim failed, the network, again": {
   "file": "175-card-claim-failed-the-network-again.html",
   "markup": "fc6a419754e2bcbff6b12c1c3e18c52a0df0b0d81a0e9477b7d786b91e1eaf0f",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: claim failed, invalid signatures": {
   "file": "176-card-claim-failed-invalid-signatures.html",
   "markup": "0cf44a770ee0e5dc355d4b9e44b77126fde3873549b0f2a9c8ac741b5d345ce4",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: the mint holds your bitcoin": {
   "file": "177-card-the-mint-holds-your-bitcoin.html",
   "markup": "0d06a6ac3e46329f35d63ba37d2dd6a4e309c718c8d239e36befc13a853dc848",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a test mint": {
   "file": "178-card-a-test-mint.html",
   "markup": "44a897a14d3dbfd4b08d4f89f07e58978bc91f5a72fe47e67c94569612b374e2",
-  "vals": "8b8d235c5f3b382b7bf44abedd4adc9c06dd5ab5ffa42f202f0324251a29f041"
+  "vals": "bc295524d2b55a7a06f1f9fa68d47eb055cc37bd29b8aadd94a51ceb473c733e"
  },
  "card: mint not answering": {
   "file": "179-card-mint-not-answering.html",
   "markup": "4cbe72bc41c8fa265ea9d3f997c775abeccd255a7dd60a356a56f794b3efb3ca",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a lot at one mint": {
   "file": "180-card-a-lot-at-one-mint.html",
   "markup": "d6497a7c49791d8b87d8acedc6f2fdc1f5c1adae362a01a7cac37160e4919108",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: this iPhone has no passcode": {
   "file": "200-card-this-iphone-has-no-passcode.html",
   "markup": "ee7deb65202982b538d67110f85fa6ee392ddd19876ef37a316388db74a4c022",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: ecash set aside": {
   "file": "182-card-ecash-set-aside.html",
   "markup": "2bb5615214cfa7c6ccd945ee9bb0bac622f0fd7c46ab2857c6a209aa7b71fdff",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: ecash set aside, no mint known": {
   "file": "183-card-ecash-set-aside-no-mint-known.html",
   "markup": "50b69e318d25d7e934b2241bced43906639e5328fe3965af4be2710c9962b0db",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: unclaimed ecash before clearing history": {
   "file": "184-card-unclaimed-ecash-before-clearing-history.html",
   "markup": "e98d6686a45a3fa3817dd48a79bef09e59b6faf19265ec03c04b8685f41a1b34",
-  "vals": "377ba0a94f92307a17bb16c914b77910460fd3de52c80ddf696c03ac25335c0d"
+  "vals": "8ac984846fc5a0f80a4cd305548387210a06c108492b34066d26e1d0dd9169c5"
  },
  "price error bar": {
   "file": "186-price-error-bar.html",
   "markup": "85c1fac0c4471312d960be4a8375cb7d14e3e96980a4ee2b786b651518a323c6",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "sheet: type a mint": {
   "file": "187-sheet-type-a-mint.html",
   "markup": "3e7f5a245b02c63325658282d1eae4c626ec1d8dc780da249471e7abed7ccd73",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "sheet: a note": {
   "file": "188-sheet-a-note.html",
   "markup": "5b968c2e404f6eca83c8809e6372f14d7350116cb82c28f6879a2e102ffe0caa",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "sheet: a token note": {
   "file": "189-sheet-a-token-note.html",
   "markup": "5b968c2e404f6eca83c8809e6372f14d7350116cb82c28f6879a2e102ffe0caa",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "loader: melt": {
   "file": "190-loader-melt.html",
   "markup": "6761ae32fa8d219bb997d192fa54c53259362f8555568ac7053e2be4c1fdd733",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "overlay: the seed phrase": {
   "file": "191-overlay-the-seed-phrase.html",
   "markup": "0d55fcdcd2760d0ae9c2a271b3cec76cd42939e2437ab5c22025bff96d158b34",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "overlay: PIN entry": {
   "file": "193-overlay-pin-entry.html",
   "markup": "2476359cdf551628b66282029dd83c3e3a51369b2d80f110244a194467efe332",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "overlay: PIN set-up": {
   "file": "194-overlay-pin-set-up.html",
   "markup": "8fb4170e3a7424fe15f962140e74f27efbeaf15adbe8c500324a7d18991ffeba",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "overlay: a card’s PIN, to pay, after a wrong one": {
   "file": "272-overlay-a-card-s-pin-to-pay-after-a-wrong-one.html",
   "markup": "5ded061735ac98d26047e59ae634235724affac45189216467712cfc3ae2e63c",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "stage: hold the card to the phone": {
   "file": "259-stage-hold-the-card-to-the-phone.html",
   "markup": "430b0cb802fc7d0a9b8306e2941a3f64206062278452ae227e4b2630559b20b5",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "stage: keep the card there": {
   "file": "260-stage-keep-the-card-there.html",
   "markup": "ea2025b6ef414092950d7055f49e9dc351e5a06fe8021637474def6b0328f541",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "stage: checking a card payment": {
   "file": "261-stage-checking-a-card-payment.html",
   "markup": "1d439c20a383791c574b67e8a423b85f5f22c8b32c401ca09cc6fa54ab5f0534",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a card’s wrong PIN": {
   "file": "262-card-a-card-s-wrong-pin.html",
   "markup": "2199dda08255cdaaf4b713db0d9b66f8e363fc1c949749a610c3de9c4dec09f6",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a blocked card": {
   "file": "263-card-a-blocked-card.html",
   "markup": "c9a10d29cc82cda4edde39c341dd04dcd2c1a702813456500c85a91b594a5f71",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: not enough on the card": {
   "file": "264-card-not-enough-on-the-card.html",
   "markup": "dd9c1a04b79133167a76a7f7ce9496f50144df63ad86d61c8a9d960b210986eb",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: a card payment not made, no mint": {
   "file": "265-card-a-card-payment-not-made-no-mint.html",
   "markup": "c70bef605f5950b1f57ad4c7ec59c7fed39599b16cc03600fb59d7a59c27bf61",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: change waiting for a card": {
   "file": "266-card-change-waiting-for-a-card.html",
   "markup": "1b94c343f97c1244190fac818fad3f91943634b38f30ee400fa026d1c4ff08de",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: how a lost card is treated": {
   "file": "267-card-how-a-lost-card-is-treated.html",
   "markup": "3b6841effbd2a7ccf8d5d22d55a739937b68ac412d71c4b61742eacb794413ef",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "card: take a lost card back": {
   "file": "268-card-take-a-lost-card-back.html",
   "markup": "d16e57089684880bbe9ecd5a56930c141f5f72921972cc8e78757b0e82a884ed",
-  "vals": "7eaeb38521f5d31c01a74acc610030f160520ea6a1e3a6c283e8a4c285aab7e7"
+  "vals": "789ff3742c95880ee66e5ff432afa774ce4568d2b8b6e3644aad28c995ac2033"
  },
  "importSeed, the words on the phone": {
   "file": "196-importseed-the-words-on-the-phone.html",
   "markup": "4f0fd9e64c547eca3f801641c1b92564ab2fc0f8515fed6a6f7cc896057ba491",
-  "vals": "fac4fd668873cbcc96046fe6e56c1de3dcb1be0f58a5fad089cbda4a611ec9e6"
+  "vals": "ca1706634fdf0d2fc9dadaf060cdb4ae944e48570ea0e6347652100407036a7d"
  },
  "importSeed, on the phone, a finished scan": {
   "file": "197-importseed-on-the-phone-a-finished-scan.html",
   "markup": "3e54af43feb36a06b23b3cd6d515a13922e2ef370a5b2aae3492ffbdb78ed6dd",
-  "vals": "bea484325f2bd06ce368f2a5797a01db1eb437056323db728245672c3f64cea0"
+  "vals": "69e77662d6da807d1667a07c1e377bdbf528e0c0567e19b11327f9467123d652"
  }
 }

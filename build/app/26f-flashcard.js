@@ -1156,14 +1156,9 @@
       : fc.locked ? ['Locked' + (word ? ' \u00b7 ' + word : ''), AMBER]
       : [word, (fc.check === 'off' || fc.check === 'other') ? AMBER : ON_CARD];
 
-    /* The card's limit, laid out as a confirmation lays out a payment's
-     * details: the name over the value. It is what one PIN entry may spend,
-     * and says so: the card has no clock, so it cannot count a day. Its mint
-     * and what it holds are in the pill above, as home's are. */
-    const fields = [];
-    if (fc && fc.hasRecord) {
-      fields.push(this.cfRow('LIMIT', fc.limit ? this.fcPrice(fc.limit) + ' PER PIN ENTRY' : 'NONE'));
-    }
+    /* The card's mint and what it holds are in the pill, as home's are. Its
+     * limit is not said on this screen: SET LIMIT is where it is seen and
+     * changed. */
     // a card in the last month before its date: said where the money waiting for a card is said, and renewed from there
     if (on && fc && near && !past && fc.balance > 0) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
@@ -1201,7 +1196,6 @@
       fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(fc.balance) : '',
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
-      fcFields: fields,
       // what has been done with this card, on this phone: only for a card that is one (it has a key and a record)
       fcHistoryVis: (fc && fc.hasRecord) ? 'visible' : 'hidden',
       fcHistory: () => this.fcHistory(),

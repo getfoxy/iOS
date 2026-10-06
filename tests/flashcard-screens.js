@@ -66,9 +66,8 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   v = vals(holder);
   ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
      'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
-  ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0'
-     && v.fcFields.map((f) => f.label + ' ' + f.value).join() === 'LIMIT NONE',
-     'and the screen says its mint and what it holds in home’s own pill, and its limit under it', v.fcPillMint + ' | ' + v.fcBalance + ' / ' + v.fcFields.map((f) => f.label + ' ' + f.value).join());
+  ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
+     'and the screen says its mint and what it holds in home’s own pill, and nothing under it', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT' && v.fcHistoryVis === 'visible' && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function',
      'with ADD FUNDS and WITHDRAW, CHANGE PIN and SET LIMIT under them, and its history at the top');
 
@@ -203,7 +202,7 @@ const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flash
   c.tap();
   pad(holder).type('1234');
   await until('the limit to be set', () => holder.state.fc.limit === 700);
-  ok(vals(holder).fcFields[0].value === '₿700 PER PIN ENTRY', 'and the card says its limit, and that it is for one PIN entry', vals(holder).fcFields[0].value);
+  ok(holder.state.fc.limit === 700, 'and the card has its limit', String(holder.state.fc.limit));
   till.state.screen = 'confirm';
   till.asking = 900;
   R.nfc = c;
