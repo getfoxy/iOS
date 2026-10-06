@@ -17833,6 +17833,8 @@ class Component extends DCLogic {
         reason: 'The mint says this card’s money was already spent.' }),
       'no-nfc': () => ({ tone: 'warn', title: 'NO CARD READER', reason: 'This phone cannot read a card.' }),
       'full': () => ({ tone: 'warn', title: 'THE CARD IS FULL', reason: said }),
+      'misfit': () => ({ tone: 'warn', title: 'NOT AT THIS MINT', reason: said, chip: 'Nothing was taken.' }),
+      'misfit-kept': () => ({ tone: 'warn', title: 'KEPT FOR THE CARD', reason: said }),
       'locked': () => ({ tone: 'warn', title: 'THE CARD IS LOCKED', reason: 'Nothing more can be written to it. It can still pay.' }),
       'too-soon': () => ({ tone: 'warn', title: 'NOT YET',
         reason: e.date ? 'This card can be taken back after ' + this.fcDay(e.date) + '.' : said }),
@@ -18042,6 +18044,8 @@ class Component extends DCLogic {
       check: (card.pieces || []).length ? 'asking' : 'none',
     } });
     if ((card.pieces || []).length) this.fcCheck(card);
+    // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
+    if (W && W.cardOwedCheck) W.cardOwedCheck(card).then((gone) => { if (gone) this.forceUpdate(); }, () => {});
   }
 
   /* The mint's word on what the card says it holds. A card is a list of

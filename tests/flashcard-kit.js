@@ -43,7 +43,8 @@ function page(o) {
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
     },
-    before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk }); },
+    // versionByte 1: a mint whose keysets have the long names (NUT-02's second kind)
+    before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte }); },
   });
   ctx.deaf = !!opts.deaf;
   ctx.nfc = null;

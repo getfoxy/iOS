@@ -87,9 +87,40 @@
     return hex;
   }
 
-  /* The ecash a slot is: the proof a mint would be shown, without its witness. */
-  function cardProofOf(slot, cardKey, refundKey) {
-    return { id: slot.keyset, amount: slot.amount, C: slot.C,
+  /* ---- which of the mint's keysets a piece is of ------------------------------
+   *
+   * A place on the card has eight bytes for it. A mint's older keysets are
+   * named by exactly eight (sixteen hex, starting 00). Its newer ones are
+   * named by thirty-three (starting 01), and NUT-02 gives those a short form
+   * for exactly this: the first eight bytes, which mean something only beside
+   * that mint's own list of keysets. So the card holds the short form, and the
+   * phone, which has the list, turns it back into the whole name before a
+   * mint is shown the piece.
+   *
+   * It turns back only when exactly one of the mint's keysets begins that
+   * way. None, and the piece is of some other mint's keys; two, and the mint
+   * has made the short form mean two things, and a piece that could be of
+   * either is not guessed at. */
+  function cardShortId(id) {
+    var h = String(id || '').toLowerCase();
+    if (/^[0-9a-f]{16}$/.test(h)) return h;
+    if (/^01[0-9a-f]{64}$/.test(h)) return h.slice(0, 16);
+    return '';
+  }
+
+  function cardFullId(w, short) {
+    var want = String(short || '').toLowerCase();
+    if (!/^[0-9a-f]{16}$/.test(want)) return '';
+    var found = keysetIdsFor(w).map(function (id) { return String(id).toLowerCase(); })
+      .filter(function (id) { return cardShortId(id) === want; });
+    return found.length === 1 ? found[0] : '';
+  }
+
+  /* The ecash a slot is: the proof a mint would be shown, without its witness.
+   * `id` is the keyset's whole name where the caller has a mint to ask
+   * (`cardFullId`); without it, the eight bytes as the card holds them. */
+  function cardProofOf(slot, cardKey, refundKey, id) {
+    return { id: id || slot.keyset, amount: slot.amount, C: slot.C,
              secret: cardSecret(slot.nonce, cardKey, slot.date, refundKey) };
   }
 
@@ -330,9 +361,15 @@
     if (!tok || !Array.isArray(tok.proofs) || !tok.proofs.length) throw cardError('misfit', 'That is not ecash for a card.');
     return tok.proofs.map(function (pr) {
       var parts = cardSecretParts(pr.secret);
-      var id = String(pr.id || '').toLowerCase();
+      // the eight bytes the card will hold, which must lead back to this keyset and no other
+      var id = cardShortId(pr.id);
       if (!parts || parts.key !== card.key) throw cardError('misfit', 'That ecash is not locked to this card.');
-      if (!cardHexOk(id, 8)) throw cardError('misfit', 'This mint\u2019s keys are a kind the card cannot hold yet.');
+      if (!id) throw cardError('misfit', 'This mint\u2019s keys are a kind the card cannot hold yet.');
+      if (String(pr.id).length > 16 && cardFullId(wallet, id) !== String(pr.id).toLowerCase()) {
+        throw cardError('misfit', keysetIdsFor(wallet).map(function (k) { return String(k).toLowerCase(); }).indexOf(String(pr.id).toLowerCase()) < 0
+          ? 'That ecash is of another mint than the one this phone is at.'
+          : 'Two of this mint\u2019s sets of keys would read the same on a card, so none of their ecash is put on one.');
+      }
       var built = '';
       try { built = cardSecret(parts.nonce, card.key, parts.date, card.record.refundKey); } catch (e) { built = ''; }
       if (built !== String(pr.secret)) throw cardError('misfit', 'That ecash is not written the way this card writes it.');
@@ -350,7 +387,7 @@
     if (!mine.length) return Promise.resolve({ sats: 0, done: [], left: [] });
     var onCard = {};
     card.slots.forEach(function (x) { if (x.state === 'unspent') onCard[x.nonce] = true; });
-    var done = [], left = [], sats = 0, stopped = null;
+    var done = [], left = [], sats = 0, stopped = null, misfit = null;
     var walk = t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
       // a locked card frees nothing, and may still have room
       if (!(e && e.card === 'locked')) throw e;
@@ -359,7 +396,8 @@
       walk = walk.then(function () {
         if (stopped) { left.push(row.id); return null; }
         var pieces;
-        try { pieces = cardPiecesOf(row.token, card); } catch (e) { stopped = e; left.push(row.id); return null; }
+        // a row that does not fit this card here (another mint's, say) is passed over, and the rows after it still go on
+        try { pieces = cardPiecesOf(row.token, card); } catch (e) { misfit = misfit || e; left.push(row.id); return null; }
         var each = Promise.resolve();
         pieces.forEach(function (piece) {
           each = each.then(function () {
@@ -372,27 +410,143 @@
           sats += Math.round(Number(row.sats) || 0);
           // off the list as each lands, so a card that leaves now owes only what is left
           mustSave(CARD_OWED, cardStore(CARD_OWED).filter(function (r) { return !(r && r.id === row.id); }));
+          // written: marked on the token's own note, so it is never taken for one that was not (`cardAdopt`)
+          try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x0) {}
           if (row.kind === 'change' && row.forHash) { try { amendTx(row.forHash, { changeState: 'given back', changeKept: true }); } catch (x) {} }
         }, function (e) { stopped = e; left.push(row.id); });
       });
     });
     return walk.then(function () {
       if (stopped && !done.length) throw stopped;
-      return { sats: sats, done: done, left: left, why: stopped ? (stopped.card || 'refused') : '' };
+      var why = stopped || misfit;
+      return { sats: sats, done: done, left: left, why: why ? (why.card || 'refused') : '' };
     });
+  }
+
+  /* Ecash this phone made for this card that is not on file as owed to it.
+   *
+   * It should never happen and it did: the pieces were made at the mint,
+   * locked to the card, and the step after that threw before they were filed
+   * (a mint whose keysets the card could not then hold). The token was still
+   * written down, as every token this phone makes is, on its own note. But
+   * nothing knew it was the card's, and only the card can spend it.
+   *
+   * So when a card is read, the tokens this phone still holds the text of are
+   * looked through for any locked to exactly this card's key, in the card's
+   * own words, that have never been written onto a card; and each is filed
+   * as owed to it, to go on at the next tap with its PIN. Answers how many. */
+  function cardAdopt(card) {
+    if (!card || !card.key) return 0;
+    var meta = load('foxy.txmeta', {});
+    if (!meta || typeof meta !== 'object') return 0;
+    /* Of the card's own mint, and no other. A card's key alone does not say
+     * whose ecash a token is: a card set up again at another mint keeps its
+     * key, and what was made for it at the first is not money it can hold at
+     * the second. The card's record names its mint; a card with no record
+     * yet is owed nothing. */
+    var home = (card.record && card.record.mint) ? canonicalMint(card.record.mint) : '';
+    if (!home) return 0;
+    var before = cardStore(CARD_OWED);
+    // a row adopted for this card from some other mint (an older rule filed them) is taken off the list again
+    var owed = before.filter(function (r) {
+      if (!r || !r.adopted || r.card !== card.key) return true;
+      var at = r.mint || '';
+      // a row filed before rows said their mint: the token says it
+      if (!at) { try { at = (FoxyWallet.tokenInfo(r.token) || {}).mint || ''; } catch (e) { at = ''; } }
+      return !at || canonicalMint(at) === home;
+    });
+    var filed = {};
+    owed.forEach(function (r) { if (r) { filed[r.id] = true; if (r.token) filed[r.token] = true; } });
+    var found = 0, sats = 0;
+    Object.keys(meta).forEach(function (hash) {
+      var note = meta[hash];
+      if (!note || typeof note.token !== 'string' || !note.token || note.carded) return;
+      if (filed[hash] || filed[note.token]) return;
+      var tok = null;
+      try { tok = FoxyWallet.tokenInfo(note.token); } catch (e) { tok = null; }
+      if (!tok || !Array.isArray(tok.proofs) || !tok.proofs.length) return;
+      if (!tok.mint || canonicalMint(tok.mint) !== home) return;
+      var mine = tok.proofs.every(function (pr) {
+        var parts = cardSecretParts(pr.secret);
+        return !!parts && parts.key === card.key;
+      });
+      if (!mine) return;
+      owed.push({ id: hash, card: card.key, token: note.token, sats: sumProofs(tok.proofs), kind: 'load', forHash: hash, at: Date.now(),
+                  adopted: true, mint: home });
+      filed[hash] = true;
+      found += 1;
+      sats += sumProofs(tok.proofs);
+      try { amendTx(hash, { memo: 'to card', card: card.key }); } catch (x) {}
+      try { FoxyWallet.tag(hash, { to: 'card' }); } catch (x2) {}
+    });
+    if (found || owed.length !== before.length) mustSave(CARD_OWED, owed);
+    if (found) console.warn('[foxy] card: ' + sats + ' sats made for this card were not on file as owed to it; filed now, to be written at the next tap');
+    return found;
+  }
+
+  /* Rows that were found and filed (`cardAdopt`), asked of the mint before
+   * they are trusted. Finding goes by what this phone wrote down, and a token
+   * written onto a card before such things were marked looks the same as one
+   * that never was. The mint knows: pieces it has seen spent were on a card
+   * once and are nobody's now, and their row is struck off and marked so it
+   * is not found again. With no route nothing is asked and nothing changes.
+   * Resolves how many rows went. */
+  function cardOwedPrune(card) {
+    var w = wallet;
+    if (!w || !card || !card.key || !routeOpen()) return Promise.resolve(0);
+    var here = mintOf(w);
+    var rows = cardStore(CARD_OWED).filter(function (r) {
+      return r && r.adopted && r.card === card.key && (!r.mint || canonicalMint(r.mint) === here);
+    });
+    if (!rows.length) return Promise.resolve(0);
+    var gone = 0;
+    return rows.reduce(function (chain, row) {
+      return chain.then(function () {
+        var tok = null;
+        try { tok = FoxyWallet.tokenInfo(row.token); } catch (e) { tok = null; }
+        if (!tok || !Array.isArray(tok.proofs) || !tok.proofs.length) return null;
+        return withTimeout(Promise.resolve().then(function () { return onCircuit(w, 'card:' + card.key.slice(-16)).checkProofsStates(tok.proofs); }),
+                           30000, 'the mint\u2019s word on ecash found for a card')
+          .then(function (states) {
+            var spent = tok.proofs.every(function (pr, i) {
+              var st = (states && states[i]) || {};
+              return String(st.state || st.State || '').toUpperCase() === 'SPENT';
+            });
+            if (!spent) return;
+            mustSave(CARD_OWED, cardStore(CARD_OWED).filter(function (r) { return !(r && r.id === row.id); }));
+            try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x) {}
+            gone += 1;
+            console.log('[foxy] card: ecash found for a card had been on it and spent already; struck off');
+          }, function () {});
+      });
+    }, Promise.resolve()).then(function () { return gone; });
+  }
+
+  /* Whether this mint's ecash can go on a card at all, asked before any is
+   * made: the keyset new pieces will be of must have a short form that leads
+   * back to it and to no other. An error, or null. */
+  function cardMintMisfit(w) {
+    var id = String((w && w.keysetId) || '').toLowerCase();
+    if (!id) return null;                     // not known yet: the pieces themselves are checked
+    var short = cardShortId(id);
+    if (!short) return cardError('misfit', 'This mint\u2019s keys are a kind the card cannot hold yet.');
+    if (cardFullId(w, short) !== id) {
+      return cardError('misfit', 'Two of this mint\u2019s sets of keys would read the same on a card, so none of their ecash is put on one.');
+    }
+    return null;
   }
 
   /* Which of a card's pieces can pay, at this mint, now: of a keyset this
    * mint has, and not within a week of its date. */
   function cardUsable(card, w, own) {
-    var ids = keysetIdsFor(w);
     var now = Math.floor(Date.now() / 1000);
     var margin = own ? CARD_OWN_MARGIN : CARD_DATE_MARGIN;
     var out = /** @type {{ pieces: any[], stale: number, foreign: number }} */ ({ pieces: [], stale: 0, foreign: 0 });
     card.pieces.forEach(function (x) {
-      if (ids.indexOf(x.keyset) < 0) { out.foreign += x.amount; return; }
+      var id = cardFullId(w, x.keyset);
+      if (!id) { out.foreign += x.amount; return; }
       if (x.date && x.date < now + margin) { out.stale += x.amount; return; }
-      var proof = /** @type {any} */ (cardProofOf(x, card.key, card.record.refundKey));
+      var proof = /** @type {any} */ (cardProofOf(x, card.key, card.record.refundKey, id));
       proof.slot = x.i;
       proof.date = x.date;
       out.pieces.push(proof);

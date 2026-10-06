@@ -3,7 +3,7 @@
 
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey) { return cardSecret(nonce, cardKey, date, refundKey); },
-    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, piece: cardPieceBytes, proof: cardProofOf },
+    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId },
 
     /* What a card says with no PIN (`cardLook`). Rejects with `card` on the
      * error naming why: not-a-card, gone. */
@@ -12,6 +12,8 @@
         // a card this phone can take back: what is on it now is written down for the day it is lost
         var mine = cardsOnFile()[card.key];
         if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces, true);
+        // anything this phone made for this card and lost track of is found again here (`cardAdopt`)
+        try { cardAdopt(card); } catch (e) { console.warn('[foxy] card: looking for ecash made for this card failed:', (e && e.message) || e); }
         return card;
       });
     },
@@ -148,7 +150,8 @@
           return;
         }
         try {
-          due.push({ id: x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
+          // of a keyset this mint no longer lists, a piece is asked about by the eight bytes there are
+          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
         } catch (e) {}
       });
       if (!due.length) {
@@ -211,17 +214,28 @@
        * are freed at the write, so they count as room. */
       var room = card.info.empty + card.info.spent;
       if (piecesFor(want) + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
+      /* Whether this mint's ecash fits a card, asked before any is made. It
+       * was asked after: the pieces were made, locked to the card, found not
+       * to fit, and the error left them filed nowhere. */
+      var misfit = cardMintMisfit(w);
+      if (misfit) return Promise.reject(misfit);
       var recoverable = !!card.record.refundKey;
       var date = recoverable ? Math.floor(Date.now() / 1000) + CARD_DATE_AHEAD : 0;
       return FoxyWallet.sendToken(want, { unit: 'sat', lockTo: card.key, lockUntil: date || undefined,
                                           refundTo: recoverable ? card.record.refundKey : undefined, purpose: 'card' })
         .then(function (made) {
-          // what the token must be for the card to take it: checked now, while it is only a row here
-          cardPiecesOf(made.token, card);
+          /* Filed first, whatever else is true of it. From this line the
+           * pieces exist, only this card can spend them, and this row is how
+           * they reach it: nothing that can throw comes before it. */
           var row = { id: made.hash, card: card.key, token: made.token, sats: made.sats, kind: 'load', forHash: made.hash, at: Date.now() };
           mustSave(CARD_OWED, cardStore(CARD_OWED).concat([row]));
           try { amendTx(made.hash, { memo: 'to card', card: card.key }); } catch (x) {}
           try { FoxyWallet.tag(made.hash, { to: 'card' }); } catch (x2) {}
+          // what the token must be for the card to take it. Not so, it stays owed, and the error says that it is kept
+          try { cardPiecesOf(made.token, card); } catch (e) {
+            throw cardError('misfit-kept', String((e && e.message) || 'That ecash does not fit this card.')
+              + ' It is kept for the card: nothing is lost, and it cannot be written yet.', { sats: made.sats, hash: made.hash });
+          }
           if (recoverable) cardRemember(card, cardPiecesOf(made.token, card));
           console.log('[foxy] card: ' + made.sats + ' sats made for a card; to be written at the next tap');
           return { id: row.id, sats: made.sats, hash: made.hash };
@@ -237,7 +251,10 @@
       var wrote;
       return cardLook(link).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
-        return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN').then(function () { return cardWriteOwed(t, card); });
+        // what was found for this card is asked of the mint before any of it is written
+        return cardOwedPrune(card).then(null, function () { return 0; }).then(function () {
+          return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+        }).then(function () { return cardWriteOwed(t, card); });
       }).then(function (r) {
         wrote = r;
         return cardLook(link);
@@ -320,7 +337,7 @@
         return Promise.reject(cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '.', { mint: canonicalMint(card.record.mint) }));
       }
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
-      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey); });
+      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset)); });
       var asking = onCircuit(w, 'card:' + card.key.slice(-16));
       return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
         .then(function (states) {
@@ -332,6 +349,10 @@
           return { sats: card.balance, spent: spent };
         }, function () { throw cardError('no-route', 'The mint did not answer.'); });
     },
+
+    /* Ecash found for this card (`cardAdopt`), asked of the mint: what was on
+     * a card once and spent is struck off. Resolves how many rows went. */
+    cardOwedCheck: function (card) { return cardOwedPrune(card); },
 
     /* Whether this phone is the one that can take this card back. */
     cardIsMine: function (card) { return !!(card && card.key && card.record && cardMine(card)); },
