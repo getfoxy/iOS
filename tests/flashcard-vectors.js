@@ -38,8 +38,8 @@ for (const p of V.pieces) {
   const proof = Object.assign(W.cardParse.proof(slot, V.cardKey, V.refundKey), { witness: JSON.stringify({ signatures: [p.signature] }) });
   ok(CT.schnorrVerifyMessage(p.signature, proof.secret, V.cardKey) === true,
      'date ' + p.date + ': the card’s signature is good for that secret, as NUT-11 checks one');
-  ok(CT.schnorrVerifyMessage(p.signature, proof.secret.replace('SIG_INPUTS', 'SIG_ALL'), V.cardKey) === false,
-     'date ' + p.date + ': and for no other text');
+  ok(CT.schnorrVerifyMessage(p.signature, proof.secret.replace('"tags":[', '"tags":[["sigflag","SIG_INPUTS"]' + (p.date ? ',' : '')), V.cardKey) === false,
+     'date ' + p.date + ': and for no other text, the upstream card\u2019s among them');
   let parsed = null;
   try { parsed = CT.parseP2PKSecret(proof.secret); } catch (e) { parsed = { why: e.message }; }
   ok(parsed && !parsed.why, 'date ' + p.date + ': the library reads the secret as a P2PK one', parsed && parsed.why);
@@ -55,6 +55,22 @@ for (const p of V.pieces) {
   const past = p.date !== 0 && p.date * 1000 < Date.now();
   if (!past) ok(spendable === true, 'date ' + p.date + ': the library says the card may spend it', String(spendable));
   else ok(typeof spendable === 'boolean', 'date ' + p.date + ': past its date, the library answers (it says ' + spendable + '; mints differ)');
+}
+
+/* The library's own pieces. A card is loaded with an ordinary locked send, so
+ * the secrets that send makes must be ones the card builds: the text the
+ * library writes, rebuilt here from its nonce alone, must be that text. */
+for (const [name, opt, date] of [
+  ['locked to one key', { pubkey: V.cardKey }, 0],
+  ['locked with a date and a refund key', { pubkey: V.cardKey, locktime: 1900000000, refundKeys: [V.refundKey] }, 1900000000],
+  ['locked with the largest date', { pubkey: V.cardKey, locktime: 4294967295, refundKeys: [V.refundKey] }, 4294967295],
+]) {
+  const made = new ctx.window.TextDecoder().decode(CT.OutputData.createSingleP2PKData(opt, 16, '0059534ce0bfa19a').secret);
+  let nonce = '';
+  try { nonce = JSON.parse(made)[1].nonce; } catch (e) {}
+  let mine = '';
+  try { mine = W.cardSecret(nonce, V.cardKey, date, V.refundKey); } catch (e) { mine = 'threw: ' + e.message; }
+  ok(mine === made, 'a piece the library makes, ' + name + ', is one the card builds', mine === made ? '' : made + ' / ' + mine);
 }
 
 // what a wallet must refuse to build

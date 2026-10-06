@@ -8562,7 +8562,14 @@
    * after it. The card signs SHA-256 of that text and nothing else, so the
    * text below IS the wire format: no spaces, this order, lowercase hex, the
    * date in decimal. tests/fixtures/flashcard-vectors.json is the applet's own
-   * output, and tests/flashcard-vectors.js holds this to it byte for byte. */
+   * output, and tests/flashcard-vectors.js holds this to it byte for byte.
+   *
+   * It is also, to the character, what cashu-ts writes for a piece locked to
+   * one key (with or without a locktime and one refund key). That is on
+   * purpose, and the same test holds it: a card is loaded with an ordinary
+   * locked send, and the pieces that send makes are the pieces the card can
+   * sign for. An update to the library that wrote the text another way would
+   * make pieces no card could spend, and fails that test first. */
   var CARD_FORMAT = 2;
   var CARD_SLOT_BYTES = 82;
   var CARD_PIECE_BYTES = 81;
@@ -8580,10 +8587,10 @@
     if (!cardHexOk(nonce, 32)) throw new Error('That is not a card piece: its nonce is not 32 bytes.');
     if (!cardHexOk(cardKey, 33) || !/^0[23]/.test(cardKey)) throw new Error('That is not a card’s key.');
     if (!(when >= 0 && when <= 4294967295 && Math.floor(when) === when)) throw new Error('That is not a date a card can hold.');
-    var text = '["P2PK",{"nonce":"' + nonce + '","data":"' + cardKey + '","tags":[["sigflag","SIG_INPUTS"]';
+    var text = '["P2PK",{"nonce":"' + nonce + '","data":"' + cardKey + '","tags":[';
     if (when) {
       if (!cardHexOk(refundKey, 33) || !/^0[23]/.test(refundKey)) throw new Error('A piece with a date needs the key that can take it back.');
-      text += ',["locktime","' + String(when) + '"],["refund","' + refundKey + '"]';
+      text += '["locktime","' + String(when) + '"],["refund","' + refundKey + '"]';
     }
     return text + ']}]';
   }
