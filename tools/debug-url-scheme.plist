@@ -8,7 +8,8 @@
   GENERATE_INFOPLIST_FILE stays on either way: Xcode merges the INFOPLIST_KEY_
   settings in project.yml into whatever this file holds, so the camera and
   Face ID strings, the launch screen and the scene manifest are unaffected — this
-  file adds one key and says nothing else.
+  file adds the scheme, and repeats the one key every configuration has
+  (tools/app.plist: the card applet Foxy may speak to over NFC).
 
   What the scheme is for, and why it is not in a shipped build, is in
   WebHostController.receiveDeepLink (Foxy/FoxyWebView.swift). It lives here rather
@@ -21,6 +22,12 @@
 -->
 <plist version="1.0">
 <dict>
+	<!-- the card applet Foxy may speak to over NFC: the same key, and the same
+	     one name, as tools/app.plist, which every other configuration uses -->
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>F0464F58594341524401</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -103,7 +103,10 @@
    * is a model of the card (tests/flashcard-card.js), which is held to the
    * applet's own answers. So the same code that pays on a phone is what the
    * tests run. */
-  var CARD_AID = 'f0464f585943415244';
+  /* The applet's own name, whole: its package's nine bytes and 01. Chosen by
+   * the whole name and not by its first nine bytes, which a card may or may
+   * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
+  var CARD_AID = 'f0464f58594341524401';
   var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16',
                    spend: '20', load: '30', clear: '31', setCard: '32', setLimit: '33',
                    verify: '40', setPin: '41', changePin: '42' };

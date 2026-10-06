@@ -66,6 +66,11 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     var tapPayId: String?
     /// The first install's Bluetooth question while it is on screen (handleBluetoothAsk).
     var bluetoothAsk: BluetoothAsk?
+    /// A card held to the phone (FoxyBridge+Flashcard.swift): the one session
+    /// open, and whether this app's applet has answered that it was chosen in
+    /// it. `CardReader`: NFC on a phone, its stand-in in the simulator.
+    var cardLink: CardReader?
+    var cardSelected = false
     /* How the payer's page answers for change it was handed: held from the moment
      * M7 arrives until the page says whether it kept it. One at a time, because a
      * link carries one change message. */
@@ -404,6 +409,11 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "tapPayStop": FoxyBridge.handleTapPayStop,
         "bluetoothAsk": FoxyBridge.handleBluetoothAsk,
         "tapSend": FoxyBridge.handleTapSend,
+        // A card that holds ecash, held to the phone (FoxyBridge+Flashcard.swift)
+        "cardBegin": FoxyBridge.handleCardBegin,
+        "cardSend": FoxyBridge.handleCardSend,
+        "cardSay": FoxyBridge.handleCardSay,
+        "cardEnd": FoxyBridge.handleCardEnd,
         // A shake of the phone presses TAP (TAP-TO-PAY.md)
         "shakeStart": FoxyBridge.handleShakeStart,
         "shakeStop": FoxyBridge.handleShakeStop,

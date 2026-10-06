@@ -433,7 +433,7 @@
    * one tap that writes both. The mint is this phone's, shown and not chosen. */
   fcSetUp() {
     if (!this.state.fc) return;
-    if (this.offlineNow()) { this.offlineNo('Setting up a card'); return; }
+    // no mint is asked: the card is told this phone's mint and given a key from this phone's words
     const first = (warn) => this.fcAskPin({
       title: 'CHOOSE A PIN',
       subtitle: 'Four to eight digits. The card asks for it every time it pays.',

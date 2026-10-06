@@ -63,6 +63,7 @@ The bridge exposes exactly these actions:
 - tap to pay, an invoice or a payment request handed over Bluetooth: `tapReceiveStart`, `tapReceiveStop`, `tapPayStart`, `tapPayStop`, `tapSend`, `tapChange`, and `bluetoothAsk`, the first install's Bluetooth question, `tapChangeKept`, `tapAsking`, `tapChangeDue`, `tapQuote`, `tapTerms`
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
 - `shakeStart`, `shakeStop`: whether a shake of the phone presses TAP, armed only on the receive screen (TAP-TO-PAY.md)
+- a card that holds ecash, held to the phone: `cardBegin`, `cardSend`, `cardSay`, `cardEnd`
 
 Haptics arrive as a separate `{haptic}` message with no action. The review-era
 `open`, `vpn`, `path` and `torcheck` are gone. `open` handed https links to
@@ -150,6 +151,10 @@ answer for a third of them.
 | `shakeStart` | shake flag | sets a flag: while it is set, a shake the system recognises (the shake-to-undo gesture, heard by the host controller) is told to the page as a `shake` stage, and the page presses TAP itself, subject to every rule the button has. No sensor of Foxy's own, nothing over the air; cleared when the page goes |
 | `shakeStop` | — | clears it |
 | `awake` | screen only | holds the screen lit (receive, tap and gate screens); dropped when Foxy leaves the foreground |
+| `cardBegin` | card session | opens the phone's NFC sheet with one line of the page's text on it (one line, printable, 120 characters). One session at a time: a session left open is closed first. Answers when a card is there, or why not; iOS ends it after a minute, when the sheet is dismissed, and when Foxy leaves the foreground |
+| `cardSend` | card session + card commands | one command to the card and its answer back, as hex. Carried only if it is the command that chooses Foxy's own applet by its whole name, or one of that applet's fifteen instructions after the applet has answered that it was chosen; anything else is refused with nothing sent, so a page that had been got at cannot talk to a bank card or a passport held to the phone. Nothing sent or answered is kept or logged: one of the commands is the card's PIN |
+| `cardSay` | card session | changes the one line of text on the sheet, under the same limits |
+| `cardEnd` | card session | closes the sheet, with a word or with a reason; also how the page takes down a sheet still waiting for a card |
 
 Two things the table does not check, and does not pretend to: each action's own
 argument checks (`FoxyTests/NativeSeedTests.swift` and `CounterRangeCheckTests`

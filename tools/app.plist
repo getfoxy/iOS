@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  app.plist — the one Info.plist key that cannot be written as a build setting.
+
+  project.yml points INFOPLIST_FILE at this file for every configuration (Debug
+  points at debug-url-scheme.plist, which holds the same key and one more).
+  GENERATE_INFOPLIST_FILE stays on, and Xcode merges the INFOPLIST_KEY_ settings
+  in project.yml into whatever this file holds, so the usage strings, the launch
+  screen and the scene manifest come from there as before.
+
+  The key is the list of card applets Foxy may speak to over NFC, by name. iOS
+  hands the app a card only if the card answers to one of these names, so a
+  bank card or a passport held to the phone is never Foxy's to talk to. There
+  is one name: the applet on a Foxy card (the card repository's build.xml), its
+  package's nine bytes and 01. Foxy/Flashcard/CardGate.swift holds the same
+  name and checks every command against it, and FoxyTests holds the two equal.
+
+  It declares no URL scheme, no document type and no queried scheme: a Release
+  Foxy registers none (tests/deep-links.js).
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>F0464F58594341524401</string>
+	</array>
+</dict>
+</plist>

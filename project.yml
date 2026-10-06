@@ -68,6 +68,18 @@ targets:
         # Tap to pay (TAP-TO-PAY.md). Asked the first time an invoice screen opens,
         # or TAP TO PAY is tapped; without it iOS kills the app on first use.
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Foxy uses Bluetooth so a phone held next to yours can pay your invoice.
+        # A card that holds ecash, read over NFC (Foxy/Flashcard). iOS asks no
+        # question for NFC, but refuses to open a session without this string.
+        INFOPLIST_KEY_NFCReaderUsageDescription: Foxy reads a card held to the phone, to be paid by it or to put money on it.
+        # The one key that cannot be an INFOPLIST_KEY_ setting, because it is a
+        # list: the card applet Foxy may speak to. Debug names a file of its own
+        # below, which holds the same key and the foxy:// scheme.
+        INFOPLIST_FILE: tools/app.plist
+        # NFC Tag Reading is a capability a free Apple team cannot sign, so the
+        # entitlement that claims it comes from the environment, like the team:
+        # `export FOXY_ENTITLEMENTS=tools/flashcard.entitlements` in local.env.
+        # Unset, Foxy builds as before and the card screens say NO CARD READER.
+        CODE_SIGN_ENTITLEMENTS: ${FOXY_ENTITLEMENTS}
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_UIImageName: FoxySplash
         INFOPLIST_KEY_UILaunchScreen_UIImageRespectsSafeAreaInsets: NO
@@ -87,8 +99,8 @@ targets:
         # WebHostController.receiveDeepLink). A URL that can drive a wallet to a
         # send screen is an attack surface and any app on the phone can open a
         # registered scheme, so it is registered in this configuration and no
-        # other: Release names no INFOPLIST_FILE here and so declares no
-        # CFBundleURLTypes. GENERATE_INFOPLIST_FILE stays on in both, and Xcode
+        # other: Release names no INFOPLIST_FILE here, takes tools/app.plist
+        # from the settings above, and so declares no CFBundleURLTypes. GENERATE_INFOPLIST_FILE stays on in both, and Xcode
         # merges the INFOPLIST_KEY_ settings above into this file, so the usage
         # strings, the launch screen and the scene manifest are the same either
         # way. The file is under tools/ rather than Foxy/ because everything

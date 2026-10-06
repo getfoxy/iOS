@@ -35,6 +35,7 @@ const BRIDGE = read('Foxy/Bridge/FoxyBridge.swift');
 const SEED = read('Foxy/Bridge/NativeSeedBridge.swift');
 const DELIVERY = read('Foxy/Bridge/FoxyBridge+Delivery.swift');
 const TAP = read('Foxy/Bridge/FoxyBridge+Tap.swift');
+const CARD = read('Foxy/Bridge/FoxyBridge+Flashcard.swift');
 const DOC = read('THREAT-MODEL.md');
 
 /* The tokens the table may use, and the Swift each one means. A token with no
@@ -81,6 +82,12 @@ const TOKENS = {
    * on screen by then and the person's answer still has to go somewhere. What it
    * must not do — and what this pins — is find some other way to tell them. */
   'one link': /payer\.send\(text\)|\.sendChange\(|answer\(kept\)|\.sendAsking\(|\.expectChange\(|\.sendQuote\(|\.sendTerms\(/,
+  /* A card held to the phone (FoxyBridge+Flashcard.swift). All four actions
+   * act on the one session the bridge holds and on nothing else; and the one
+   * that carries a command to the card reads it first (CardGate), so only
+   * Foxy's own applet is ever spoken to. */
+  'card session': /self\.cardLink/,
+  'card commands': /CardGate\.allows\(/,
   // a flag, and nothing else: a shake is told to the page as a stage while it is set (TAP-TO-PAY.md)
   'shake flag': /self\.shakeArmed = true/,
   // the one URL iOS provides for an app's own Settings page, and nothing else
@@ -100,7 +107,7 @@ for (const m of BRIDGE.matchAll(/"([A-Za-z][A-Za-z0-9]*)": FoxyBridge\.([A-Za-z]
 
 /* A Swift function body, by brace matching from its declaration. */
 function body(name) {
-  for (const source of [BRIDGE, SEED, DELIVERY, TAP]) {
+  for (const source of [BRIDGE, SEED, DELIVERY, TAP, CARD]) {
     const at = source.search(new RegExp('\\n {4}(?:private )?(?:static )?func ' + name + '\\('));
     if (at < 0) continue;
     let depth = 0;

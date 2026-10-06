@@ -291,6 +291,11 @@ function link(hash, opts) {
   ok(/configs:\s*(?:#[^\n]*\n\s*)*Debug:\s*(?:#[^\n]*\n\s*)*INFOPLIST_FILE: tools\/debug-url-scheme\.plist/.test(yml),
     'project.yml names the URL-scheme plist under Debug only');
   ok(!/^\s*Release:/m.test(yml), 'project.yml gives Release no configuration of its own to hold one');
+  // every other configuration's plist: one key, the card applet's name, and no scheme
+  const base = fs.readFileSync(path.join(ROOT, 'tools', 'app.plist'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  ok(/^\s*INFOPLIST_FILE: tools\/app\.plist$/m.test(yml) && !/CFBundleURL|LSApplicationQueriesSchemes|CFBundleDocumentTypes/.test(base)
+     && (base.match(/<key>/g) || []).length === 1,
+    'and the plist Release does use registers no scheme: it holds one key, and that is not one');
   ok(/<string>foxy<\/string>/.test(plist) && /CFBundleURLSchemes/.test(plist),
     'and that plist is what registers foxy://');
 }
