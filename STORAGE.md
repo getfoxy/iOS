@@ -112,6 +112,10 @@ answers, and so do its counters (below, "Migration").
 | `foxy.custody.told` | mints whose "the mint holds your bitcoin" card has been shown | no | which mints you use |
 | `foxy.mint.health` | per mint: when it last answered, and consecutive failures with the first and latest time. A failure counts only while Tor is up and something else answered over it in the last three minutes | no | which mints you use, and when |
 | `foxy.nopasscode.off` | THIS IPHONE HAS NO PASSCODE turned off with DON'T SHOW AGAIN | no | no |
+| `foxy.flashcard.owed` | ecash made for a card and not yet written onto it, as tokens locked to that card's key (a top-up cut short, change a payer's card left before taking, money moved for a card). Only the card can spend them, and this is the only copy until a tap writes them | no | **yes**: the tokens; which card and mint |
+| `foxy.flashcard.taken` | pieces a card has signed for that the mint has not swapped yet, as tokens. The card marks them spent and will not sign again, so this is the only copy of the right to spend them until the swap lands | no | **yes**: the tokens |
+| `foxy.flashcard.cards` | the cards this phone loaded as recoverable: each card's key, and for each piece its amount, its date and whether it was still there at the last read. Read to list them and to take a lost card's money back after its date. Not written for a cash card | no | which cards you loaded, and how much |
+| `foxy.flashcard.checked` | per card (twenty at most): when the mint last said every piece on it was good, and which pieces that was about. Only read to say "verified 2 hours ago" on a phone with no connection | no | which cards this phone has read |
 | `foxy.mint.spread` | when A LOT AT ONE MINT was last shown, and whether it was turned off | no | no |
 
 *Removed:* `foxyTheme` (light or dark) was listed here. Nothing in the current

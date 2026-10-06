@@ -1494,27 +1494,38 @@ entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
 
 #### 23a. A new card
 
-1. MENU, FLASHCARD, TAP CARD, and hold a new card to the top of the phone.
-   **Pass:** the phone's own sheet says to hold the card, then the screen
-   shows NO PIN YET and a balance of 0. Note how long the read takes.
+1. MENU, FLASHCARD, and hold a new card to the top of the phone. There is no
+   screen between the menu and the phone's own sheet. **Pass:** the sheet
+   says to hold the card, then the FLASHCARD screen shows the card with NO
+   PIN YET on its face, CARD BALANCE with one line saying the card is new,
+   and SET UP THIS CARD. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
    to it at all, and times out.
 3. SET UP THIS CARD, a PIN twice, tap. Nothing is asked about a lost card:
    cards are cash for now. **Pass:** THE CARD IS READY, saying it is cash and
    that a lost card, a forgotten PIN or three wrong PINs in a row lose what
-   is on it; the screen's If lost row reads "Not recoverable: this card is
-   cash" and names this phone's mint.
+   is on it. LATER, and the screen is home's shape: history and a cross at
+   the top with FLASHCARD and "Verified Just Now" between them, the card,
+   and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
+   over ADD FUNDS, WITHDRAW, CHANGE PIN and SET LIMIT.
 
 #### 23b. Money on, and off
 
 1. ADD FUNDS, an amount, the PIN, tap when asked. **Pass:** ON THE CARD with
-   the new balance; the phone's balance is down by the amount and what the
-   mint charges; HISTORY has one entry, To card, and no second confirmation.
-2. Add again with a wrong PIN. **Pass:** WRONG PIN with the tries left; a line
+   the new balance; the pill shows it; the phone's balance is down by the
+   amount and what the mint charges; HISTORY has one entry, To card, and no
+   second confirmation.
+2. Tap the balance in the pill, then go back and tap the history button at
+   the top left. **Pass:** both open CARD HISTORY with that one entry and no
+   others; tapping the mint's tile in the pill does nothing.
+3. Add again with a wrong PIN. **Pass:** WRONG PIN with the tries left; a line
    on the FLASHCARD screen says the money is waiting; TRY AGAIN with the right
    PIN puts it on.
-3. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** IN YOUR WALLET; the card reads
-   0 on the next tap.
+4. With the card loaded, turn on airplane mode, wait a few minutes, and read
+   it again. **Pass:** under the title it says when it was last verified
+   ("Verified 5 Minutes Ago"), not "Just Now". Turn airplane mode off.
+5. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** IN YOUR WALLET; the pill
+   reads 0 on the next tap.
 
 #### 23c. Paying another phone
 
@@ -1533,12 +1544,13 @@ entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the
-   card's face says BLOCKED and the line under it says what is on it cannot
-   be got back. Do this with a card holding a few sats and no more.
+   card's face says BLOCKED and the line under the balance says what is on it
+   cannot be got back; there are no buttons under it. Do this with a card
+   holding a few sats and no more.
 2. Put Foxy away in the middle of a tap. **Pass:** the sheet goes; on return
    nothing is half-done that the next tap does not finish.
-3. On a build without the entitlement: TAP CARD. **Pass:** NO CARD READER,
-   and nothing else.
+3. On a build without the entitlement: MENU, FLASHCARD. **Pass:** NO CARD
+   READER, and nothing else.
 
 ---
 
