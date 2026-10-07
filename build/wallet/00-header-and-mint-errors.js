@@ -289,6 +289,23 @@
    * claims (`claimUnclaimed`): one walk each, shared. */
   var carrying = null;
   var claimingLate = null;
+  /* While that walk has the wallet at another mint.
+   *
+   * Ecash from another mint is claimed at that mint, and for those seconds
+   * `wallet` and `mintUrl` are the other mint's. Whatever a person started
+   * then was done there: a bill made at one mint was filed against the mint
+   * being visited, its quotes were asked of a mint that never issued them,
+   * and the tap offer named the wrong mint (from a phone log: a split begun
+   * five seconds after a route came back, with two payments to claim
+   * elsewhere). `claimAway` is a promise that settles when the phone is home
+   * again; what a person starts waits on it (`homeFirst`), and the walk's own
+   * calls, marked by `walkCalling` for the length of the call, do not. */
+  var claimAway = null;
+  var walkCalling = false;
+  function homeFirst(run) {
+    if (!claimAway) return run();
+    return claimAway.then(function () { return homeFirst(run); });
+  }
   /* Crossings this page is in the middle of, by quote, and payments being
    * brought home, by job. `finishMove` and `carryResume` leave them alone:
    * a connect in the middle of a move ran the catch-up, which claimed the

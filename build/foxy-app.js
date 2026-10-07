@@ -4629,6 +4629,15 @@ class Component extends DCLogic {
   refreshBalance() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return Promise.resolve();
+    /* Not while a late claim has the wallet at another mint (`awayClaiming`):
+     * the balance read then is that mint's, and it went on the home screen
+     * under this one's name. Read when the phone is home, once. */
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._balWhenHome) {
+        this._balWhenHome = W.whenHome().then(() => { this._balWhenHome = null; return this.refreshBalance(); });
+      }
+      return this._balWhenHome;
+    }
     if (this.watchHeld) this.watchHeld();
     // the figure that is actually the person's, which is local and instant
     /* With the change that is on its way back. An over-payment leaves the
@@ -8740,6 +8749,13 @@ class Component extends DCLogic {
   loadHistory() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return;
+    // nor the history, which is read mint by mint (`refreshBalance`)
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._histWhenHome) {
+        this._histWhenHome = W.whenHome().then(() => { this._histWhenHome = null; this.loadHistory(); });
+      }
+      return;
+    }
     // change made and never handed over belongs on its payment's entry
     W._onHistoryChanged = () => { clearTimeout(this._histAgainT); this._histAgainT = setTimeout(() => this.loadHistory(), 50); };
     // change that was being shown as a code has been taken: the screen showing it comes down
@@ -9036,6 +9052,12 @@ class Component extends DCLogic {
         ways: this.spWaysN(),
         total: this.state.spTotal,
         at: Date.now(),
+        /* The mint that issued these, as the invoices say it. `splitSave`
+         * used to fill this in from wherever the wallet was at the moment of
+         * saving, and a late claim had it at another mint for those seconds:
+         * the bill was filed against a mint that had never heard of its
+         * quotes, and the check on return refused to ask the one that had. */
+        mint: (list[0] && list[0].mint) || undefined,
         rows: list.map((inv, k) => ({
           hash: inv.hash, bolt11: inv.bolt11, sats: inv.sats,
           label: 'Split ' + (k + 2) + ' of ' + this.spWaysN(), paid: !!paidBy[k],

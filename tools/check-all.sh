@@ -75,6 +75,7 @@ check "forward locked" 1 node tests/forward-locked.js
 check "offline ui"     1 node tests/offline-ui.js
 check "locked send lost" 1 node tests/locked-send-lost.js
 check "crossings"      1 node tests/crossings.js
+check "away claim"     1 node tests/away-claim.js
 check "carry cards"    1 node tests/carry-cards.js
 check "offline hostile" 1 node tests/offline-hostile.js
 check "counter refusal" 1 node tests/counter-refusal.js

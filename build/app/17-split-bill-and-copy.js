@@ -44,6 +44,12 @@
         ways: this.spWaysN(),
         total: this.state.spTotal,
         at: Date.now(),
+        /* The mint that issued these, as the invoices say it. `splitSave`
+         * used to fill this in from wherever the wallet was at the moment of
+         * saving, and a late claim had it at another mint for those seconds:
+         * the bill was filed against a mint that had never heard of its
+         * quotes, and the check on return refused to ask the one that had. */
+        mint: (list[0] && list[0].mint) || undefined,
         rows: list.map((inv, k) => ({
           hash: inv.hash, bolt11: inv.bolt11, sats: inv.sats,
           label: 'Split ' + (k + 2) + ' of ' + this.spWaysN(), paid: !!paidBy[k],

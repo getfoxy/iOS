@@ -52,6 +52,7 @@ const methods = new Function('return {' + [
   'walletReady(w) {',
   'spSyncPaid() {', 'spPaidArr() {', 'spOthers() {', 'spWaysN() {',
   'spPaidOnScreen(idx) {', 'spAdvanceAfterPaid(idx, how) {',
+  'spMakeInvoices() {',
   // the change tidy, and the move it must stay out of (07-history-tokens-mints.js)
   'tidyChangeLater(more) {', 'movingMints() {',
 ].map(method).join(',\n') + '}')();
@@ -498,6 +499,32 @@ async function run() {
     check('put away, the waits are all short, the follow-ons included',
       seen.length >= 3 && seen.every((ms) => ms <= 6000),
       JSON.stringify(seen));
+  }
+
+  /* A bill is filed against the mint its invoices came from.
+   *
+   * `splitSave` filled the mint in from wherever the wallet was when the bill
+   * was saved. A late claim had the wallet at another mint for the seconds
+   * between asking for the invoices and getting them, so the bill was filed
+   * against a mint that had never heard of its quotes: two "quote not found"
+   * and, from then on, a check that refused to ask the mint that had issued
+   * them (from a phone log; the wallet's side is tests/away-claim.js). */
+  {
+    const a = app({ spSharesArr() { return [1000, 1000]; }, px() { return 100000; }, showPriceError() {}, spMarkPaid() {} });
+    a.state = { screen: 'spPayer', spWays: 2, spPaid: [], spTotal: 2000 };
+    let saved = null;
+    const W = Object.assign(splitWallet(), {
+      expiry: { split: 3600 },
+      mintUrl: 'https://visited.test',                     // where the wallet is when the bill is saved
+      invoice(sats) { return Promise.resolve({ hash: 'q1', bolt11: 'lnbc1', sats: sats, mint: 'https://issued.test' }); },
+      splitSave(rec) { saved = rec; return rec; },
+    });
+    global.window = { FoxyWallet: W };
+    a.spMakeInvoices();
+    await flush();
+    check('a bill is saved with the mint its invoices say issued them, wherever the wallet is by then',
+      !!saved && saved.mint === 'https://issued.test' && saved.rows.length === 1 && saved.rows[0].hash === 'q1',
+      JSON.stringify(saved && { mint: saved.mint, rows: saved.rows.length }));
   }
 
   results.forEach(r => console.log(r));

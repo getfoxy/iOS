@@ -142,6 +142,7 @@ others.
 | 77 | A payment sent back on top of change that had already come back cost nothing, and its entry says so | `19-bill-split.js:changeSettled` (`refund`), `15-paid-wake-keyboard.js` | `tests/crossings.js` (refused twice, over the link; by the books) |
 | 78 | A waiting payment whose last piece is too small to claim is written as what was handed on of it | `20-helpers.js:claimUnclaimed` | `tests/spend-offline.js` (a sat too small to claim; a payment spent from, then claimed) |
 | 79 | In every suite that drives the real wallet, each page's entries account for what it holds when the suite ends, one mint at a time, to the sat | `tests/harness.js` (the books) | 27 suites; rows 75 to 78 were found by it |
+| 80 | What a person starts while a late claim has the wallet at another mint is done at the phone's own mint, once it is home: a request, an invoice, a fee quote, a token, a payment, a mint chosen. A bill is filed against the mint its invoices came from | `20-helpers.js:claimUnclaimed` (`claimAway`, `homeFirst`), `99-proof-lock-and-export.js`, `15-receiving.js:invoice`, `17-split-bill-and-copy.js:spMakeInvoices` | `tests/away-claim.js`, `tests/watch-rearm.js` (a bill is saved with its invoices' mint) |
 
 Rows 15 and 16 are the ones to spend time on: they are the weakest proofs of
 the strongest claims. Row 12 was one of them until §22b was run.

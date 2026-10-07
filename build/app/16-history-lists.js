@@ -248,6 +248,13 @@
   loadHistory() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return;
+    // nor the history, which is read mint by mint (`refreshBalance`)
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._histWhenHome) {
+        this._histWhenHome = W.whenHome().then(() => { this._histWhenHome = null; this.loadHistory(); });
+      }
+      return;
+    }
     // change made and never handed over belongs on its payment's entry
     W._onHistoryChanged = () => { clearTimeout(this._histAgainT); this._histAgainT = setTimeout(() => this.loadHistory(), 50); };
     // change that was being shown as a code has been taken: the screen showing it comes down
