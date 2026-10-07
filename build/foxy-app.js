@@ -9725,9 +9725,39 @@ class Component extends DCLogic {
     + '[data-snow] i>i>i{width:100%;height:100%;border-radius:50%;opacity:0;'
     + 'background:radial-gradient(circle at 34% 30%,#FFF 0%,#E4EEF6 45%,rgba(190,212,230,.55) 100%);'
     + 'animation:foxySnowFade linear infinite}'
-    + '@media (prefers-reduced-motion: reduce){[data-snow]{display:none}}';
+    /* And where it lands on something, it settles. The panel on the home
+     * screen has a top edge, round at both corners, for the snow to gather on
+     * (`data-snow-cap`, in the markup at the top of the panel): a drift that
+     * rises along the edge and clumps that swell on it, each on its own
+     * clock, and a band across the whole width that creeps down round both
+     * corners to where they end. From nothing to settled in about half a
+     * minute, once, and it stays until the screen is left. */
+    + '@keyframes foxySnowPile{0%{transform:scale(.9,0)}100%{transform:scale(1,1)}}'
+    + '@keyframes foxySnowClump{0%{transform:scale(0)}100%{transform:scale(1)}}'
+    + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
+    + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
+
+  /* Snow that settles (`data-snow-cap`) is held at nothing while the launch
+   * screen is in front and started when it lifts: gathered where nobody
+   * could see it, it has already fallen by the time they can. Nothing is
+   * written to the page; the clocks themselves are held and let go. */
+  syncSnowCap() {
+    const G = window.FoxyGate;
+    const covered = !!(G && G.visible && G.visible());
+    if (!covered && !this._snowCapHeld) return;          // falling or settled: left alone
+    /** @type {Animation[]} */
+    const clocks = [];
+    document.querySelectorAll('[data-snow-cap], [data-snow-cap] i').forEach((el) => {
+      if (el.getAnimations) el.getAnimations().forEach((a) => clocks.push(a));
+    });
+    this._snowCapHeld = covered;
+    clocks.forEach((a) => {
+      try { a.currentTime = 0; if (covered) a.pause(); else a.play(); } catch (e) {}
+    });
+  }
 
   syncSnow() {
+    this.syncSnowCap();
     const layer = document.querySelector('[data-snow="home"]');
     if (!layer || layer.firstChild) return;            // made once, then left alone
     if (!this._snowCss) {
