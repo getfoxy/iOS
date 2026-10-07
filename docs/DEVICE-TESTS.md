@@ -1172,10 +1172,16 @@ payment is still unclaimed is refused with "A payment or swap is still settling"
    then 1 s, 2 s, 4 s…
 3. While it says wait, enter the right PIN. It must be refused.
 4. Force-quit Foxy (swipe it away), open it again, enter a wrong PIN.
+5. With USE FACE ID off in the menu, remove the PIN and set it again. Lock and
+   return, twice.
+6. Turn USE FACE ID on. Lock and return; then again, cancelling the Face ID
+   prompt.
 
 **Pass:** 3 refused without unlocking. 4 still waits, and the count did not
 reset. After the wait, the right PIN unlocks. Face ID, if on, unlocks and
-clears the count.
+clears the count. 5 asks nothing about Face ID while the PIN is set, and every
+return shows the PIN pad with no Face ID prompt and no USE FACE ID button. 6
+opens by face; cancelled, the PIN pad is there and the PIN opens it.
 
 #### 5d. The PIN comes back
 

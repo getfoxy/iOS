@@ -108,7 +108,7 @@ answers, and so do its counters (below, "Migration").
 | `foxy.backed.up` | the seed has been written down and verified | no | no |
 | `foxy.pin.v1` | the PIN's salt, round count (120,000) and iterated SHA-256 hash — never the PIN | no | guessable offline; see `THREAT-MODEL.md` §7 |
 | `foxy.pin.tries` | wrong PINs since the last right one, and when the last miss was | no | no |
-| `foxy.pin.bio` | Face ID or Touch ID turned on for the lock | no | no |
+| `foxy.pin.bio` | written by older versions only: whether a face might stand in for the PIN. Read by nothing now (the menu's USE FACE ID decides), and removed the next time a PIN is set or removed | no | no |
 | `foxy.custody.told` | mints whose "the mint holds your bitcoin" card has been shown | no | which mints you use |
 | `foxy.mint.health` | per mint: when it last answered, and consecutive failures with the first and latest time. A failure counts only while Tor is up and something else answered over it in the last three minutes | no | which mints you use, and when |
 | `foxy.nopasscode.off` | THIS IPHONE HAS NO PASSCODE turned off with DON'T SHOW AGAIN | no | no |

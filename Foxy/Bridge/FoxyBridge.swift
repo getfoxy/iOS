@@ -790,7 +790,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
 
     /// The page picks one of these, never its own words: a prompt whose
     /// text a script wrote could ask for Face ID for anything.
-    static let biometricReasons = ["Unlock Foxy", "Use Face ID to unlock Foxy?", "Leave POS mode"]
+    static let biometricReasons = ["Unlock Foxy", "Leave POS mode"]
 
     static func biometricReason(_ asked: Any?) -> String {
         let text = asked as? String ?? ""

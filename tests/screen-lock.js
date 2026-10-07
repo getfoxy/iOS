@@ -3,16 +3,17 @@
  *
  *     node tests/screen-lock.js
  *
- * Foxy has two settings people both call Face ID, and until it was fixed neither
+ * Foxy had two settings people both call Face ID, and until it was fixed neither
  * locked the screen:
  *
- *   - `secureChoice` is the menu's Face ID row, and it guards the SEED in
- *     the keychain, so a face was asked when money was SPENT and never for
+ *   - `secureChoice` is the menu's USE FACE ID switch, and it guards the SEED
+ *     in the keychain, so a face was asked when money was SPENT and never for
  *     looking;
- *   - `pinBio` only put a Face ID button on the PIN's lock screen, so it did
- *     nothing at all without a PIN. It is `faceInsteadOfPin` now, and it is
- *     kept rather than folded into the other one: it is the only thing that
- *     says whether a face may open a screen a PIN is already on.
+ *   - `pinBio`, later `faceInsteadOfPin`, was asked once as a PIN was set and
+ *     kept by itself with no switch for it. It is gone: a phone that said yes
+ *     to it opened by face with the PIN screen never showing, under a menu
+ *     whose USE FACE ID was off, and only removing the PIN undid it. The
+ *     switch is the one thing that says whether a face opens the screen.
  *
  * And `pinLock()` opened with `if (!W.pinIsSet()) return`. So on a
  * phone — Face ID on, no PIN — killing Foxy and opening it again showed the
@@ -83,58 +84,44 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
     ok(W.screenLocked() === true, 'both together, still locked');
   }
 
-  /* ---- a face instead of the PIN --------------------------------------
+  /* ---- one switch, and no answer kept beside it ------------------------
    *
-   * The second Face ID setting, renamed from `pinBio` and kept.
-   * It answers a question the seed's guard does not: a PIN is on the screen
-   * already — may a face be shown instead of typing it? Somebody sets a PIN
-   * because a face is the one key that can be taken from them while they hold
-   * the phone, so this must not follow secureChoice. Off unless they said yes.
-   *
-   * The stored key stays 'foxy.pin.bio' so no install has to be migrated.
-   *
-   * Web/foxy-wallet.js is joined from build/wallet/*.js, so until it is joined
-   * again these read the old name and there is nothing to test. Say so once
-   * rather than throwing over every case. */
-  const renamed = typeof wallet({}).W.faceInsteadOfPin === 'function';
-  ok(renamed, 'faceInsteadOfPin is on the wallet (join Web/foxy-wallet.js again if not)');
-  if (renamed) {
+   * There was a second Face ID setting, `faceInsteadOfPin`, stored under
+   * 'foxy.pin.bio' and asked once as a PIN was set. Nothing in the menu showed
+   * it, so the menu could say Face ID was off while a face opened Foxy. The
+   * switch (`secureChoice`, read by `faceLock`) is all there is now. */
   {
     const { W } = wallet({});
-    ok(W.faceInsteadOfPin() === false,
-       'a face does not open a PIN screen unless they asked for it',
-       'faceInsteadOfPin() = ' + W.faceInsteadOfPin());
-    ok(W.pinBio === undefined, 'and the old name is gone rather than left as a second way in');
+    ok(W.faceInsteadOfPin === undefined && W.pinBio === undefined,
+       'no second Face ID setting is on the wallet, under either name it had');
   }
   {
-    // Face ID guards the seed, and they were never asked about the PIN screen
-    const { W } = wallet(Object.assign({ 'foxy.secure.choice': '"device"' }, PIN));
-    ok(W.faceLock() === true && W.faceInsteadOfPin() === false,
-       'a face on the keychain does not silently become a way past the PIN');
+    // the phone in the report: a PIN, the switch off, and the yes it gave at set-up
+    const { W } = wallet(Object.assign({ 'foxy.secure.choice': '"none"', 'foxy.pin.bio': 'true' }, PIN));
+    ok(W.faceLock() === false && W.screenLocked() === true,
+       'a yes an older Foxy kept does not make a face a way in while the switch is off');
   }
   {
-    // the answer an existing install already gave, under the key it gave it in
-    const yes = wallet(Object.assign({ 'foxy.pin.bio': 'true' }, PIN));
-    ok(yes.W.faceInsteadOfPin() === true,
-       'an install that said yes keeps its Face ID shortcut without being migrated');
-    const no = wallet(Object.assign({ 'foxy.pin.bio': 'false' }, PIN));
-    ok(no.W.faceInsteadOfPin() === false, 'and one that said no keeps its answer too');
+    const { W } = wallet(Object.assign({ 'foxy.secure.choice': '"device"', 'foxy.pin.bio': 'false' }, PIN));
+    ok(W.faceLock() === true,
+       'and a no it kept does not hold a face back once the switch is on');
   }
   {
-    const { W, window: win } = wallet(PIN);
-    W.faceInsteadOfPin(true);
-    ok(win.localStorage.getItem('foxy.pin.bio') === 'true' && W.faceInsteadOfPin() === true,
-       'it is still written where it was read, so nothing needs migrating either way',
-       String(win.localStorage.getItem('foxy.pin.bio')));
-    W.faceInsteadOfPin(false);
-    ok(W.faceInsteadOfPin() === false, 'and it can be taken off again');
+    // the leftover is not left to be read by something later
+    const set = wallet({ 'foxy.pin.bio': 'true' });
+    set.W.pinSet('4917');
+    ok(set.window.localStorage.getItem('foxy.pin.bio') === null,
+       'setting a PIN removes the answer an older Foxy kept',
+       String(set.window.localStorage.getItem('foxy.pin.bio')));
+    const gone = wallet(Object.assign({ 'foxy.pin.bio': 'true' }, PIN));
+    gone.W.pinClear();
+    ok(gone.window.localStorage.getItem('foxy.pin.bio') === null && gone.W.pinIsSet() === false,
+       'and so does removing one');
   }
   {
-    // it says nothing about the screen on its own: with no PIN, faceLock rules
     const { W } = wallet({ 'foxy.secure.choice': '"none"', 'foxy.pin.bio': 'true' });
     ok(W.screenLocked() === false,
-       'a Face ID shortcut past a PIN that is not set is not a lock by itself');
-  }
+       'with no PIN and the switch off, that old answer locks nothing either');
   }
 
   // ---- the passcode may stand in for a face ---------------------------
@@ -170,18 +157,169 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
     ok(/if \(o\.noKeypad\) \{ if \(o\.face\) o\.face\(\); return; \}/.test(app),
        'and its button asks for the face again instead of submitting nothing');
 
-    /* Which of the two settings the lock reads, and when. With no PIN the
-     * face IS the lock (faceLock); with a PIN it is a shortcut past it, and
-     * only where they asked for one (faceInsteadOfPin). Reading faceLock in
-     * both places would open a screen that today only the PIN opens. */
-    ok(!!lock && /byFaceAlone \? W\.faceLock && W\.faceLock\(\)\s*\n?\s*: W\.faceInsteadOfPin && W\.faceInsteadOfPin\(\)/.test(lock[1]),
-       'the lock asks faceLock when a face is all there is, and faceInsteadOfPin when a PIN is set');
-    ok(!!lock && !/W\.pinBio/.test(lock[1]), 'and nothing still reads the old name');
-    ok(/W\.faceInsteadOfPin && W\.faceInsteadOfPin\(\)\) \{\s*\n?\s*face\.style\.display = 'flex';/.test(app),
-       'the USE FACE ID button on the PIN screen is drawn only where they asked for it');
-    ok(/W\.faceInsteadOfPin\(answer === 'yes'\);/.test(app),
-       'and setting a PIN is where that answer is given');
-    ok(!/\bpinBio\b/.test(app), 'the old name is gone from the app as well');
+    /* The lock reads the menu's switch and nothing else, PIN or no PIN. */
+    ok(!!lock && /const wanted = W\.faceLock && W\.faceLock\(\);/.test(lock[1]),
+       'the lock asks faceLock whether a face is wanted, whether or not a PIN is set');
+    ok(/&& W\.faceLock && W\.faceLock\(\)\) \{\s*\n?\s*face\.style\.display = 'flex';/.test(app),
+       'and the USE FACE ID button on the PIN screen follows the same switch');
+    ok(!/faceInsteadOfPin|\bpinBio\b/.test(app), 'nothing in the app reads a second setting');
+    ok(!/Use Face ID to unlock Foxy\?/.test(app),
+       'and no question about a face is put as a PIN is set');
+    const bridge = fs.readFileSync(path.join(ROOT, 'Foxy', 'Bridge', 'FoxyBridge.swift'), 'utf8');
+    ok(/static let biometricReasons = \["Unlock Foxy", "Leave POS mode"\]/.test(bridge),
+       'so the phone has no such prompt left to show');
+  }
+
+  /* ---- the lock, run -------------------------------------------------------
+   *
+   * pinLock, pinOverlay and the PIN set-up from build/foxy-app.js, mounted on
+   * the real wallet, with the phone's answer to a face decided here.
+   *
+   * The report: somebody set a PIN, let the phone scan their face when asked,
+   * and from then on Foxy opened by face — the PIN screen never showed — while
+   * the menu's USE FACE ID stayed off. Removing the PIN was the only way out. */
+  {
+    const src = fs.readFileSync(path.join(ROOT, 'build', 'foxy-app.js'), 'utf8');
+    const method = (sig) => {
+      const start = src.indexOf('\n  ' + sig);
+      if (start < 0) throw new Error('missing ' + sig);
+      let i = src.indexOf('{', start), depth = 0;
+      for (; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) break; }
+      }
+      return src.slice(start + 3, i + 1);
+    };
+    const body = ['pinOverlay(opts) {', 'pinDismiss() {', 'pinSetup(onDone) {',
+                  'pinConfirmWarning(pin, onDone) {', 'pinTry(pin) {', 'pinLock() {']
+      .map(method).join(',\n');
+    /* `face` is what the phone answers when a face is asked: 'yes', 'no' or
+     * 'unavailable'. */
+    const mount = (storage, face) => {
+      const m = wallet(storage);
+      const faces = [];
+      m.window.webkit.messageHandlers.foxy.postMessage = (msg) => {
+        if (msg.action !== 'biometric') return;
+        faces.push(msg);
+        m.W._scans[msg.id].ok(face);
+      };
+      const toasts = [], cards = [];
+      const app = Object.assign(m.window.eval('(function () { return {' + body + '}; })()'), {
+        haptic() {}, toast: (t) => toasts.push(t), blockedCard: (k, c) => cards.push(c),
+      });
+      const root = () => app._pinEl;
+      const pad = () => root() && Array.from(root().children).find(d => d.style.display === 'grid');
+      const button = (label) => root() && Array.from(root().children).find(d => d.textContent === label);
+      const type = (pin) => {
+        pin.split('').forEach(d => Array.from(pad().children).find(c => c.textContent === d)
+          .dispatchEvent(new m.window.Event('pointerdown', { bubbles: true })));
+        button('UNLOCK').dispatchEvent(new m.window.Event('click', { bubbles: true }));
+      };
+      return { app, W: m.W, window: m.window, faces, toasts, cards, root, pad, button, type };
+    };
+    const settle = () => new Promise(r => setTimeout(r, 5));
+    const realPin = (extra) => {
+      const made = wallet({});
+      made.W.pinSet('4917');
+      return Object.assign({ 'foxy.pin.v1': made.window.localStorage.getItem('foxy.pin.v1') }, extra);
+    };
+
+    // a PIN, the switch off: the pad, and no face
+    for (const [what, extra] of [
+      ['USE FACE ID off', { 'foxy.secure.choice': '"none"' }],
+      ['nobody asked about Face ID', {}],
+      ['USE FACE ID off and the yes an older Foxy kept', { 'foxy.secure.choice': '"none"', 'foxy.pin.bio': 'true' }],
+    ]) {
+      const t = mount(realPin(extra), 'yes');
+      t.app.pinLock();
+      await settle();
+      ok(t.faces.length === 0 && t.app._pinLocked === true && !!t.pad(),
+         'a PIN, ' + what + ': the PIN pad is up and no face is asked',
+         t.faces.length + ' asked, locked ' + t.app._pinLocked);
+      const face = t.button('USE FACE ID');
+      ok(!!face && face.style.display === 'none', '  and no USE FACE ID button is offered on it',
+         face ? face.style.display : 'no button');
+      t.type('0000');
+      ok(t.app._pinLocked === true, '  a wrong PIN leaves it locked');
+      t.type('4917');
+      ok(t.app._pinLocked === false && !t.root(), '  and the PIN opens it');
+    }
+
+    // a PIN, the switch on: a face first, and the PIN behind it
+    {
+      const t = mount(realPin({ 'foxy.secure.choice': '"device"' }), 'yes');
+      t.app.pinLock();
+      ok(t.faces.length === 1 && t.faces[0].reason === 'Unlock Foxy' && t.faces[0].passcode === false,
+         'a PIN, USE FACE ID on: a face is asked as the lock comes up, biometrics only',
+         JSON.stringify(t.faces));
+      await settle();
+      ok(t.app._pinLocked === false && !t.root(), '  and the face opens Foxy');
+    }
+    {
+      const t = mount(realPin({ 'foxy.secure.choice': '"device"', 'foxy.pin.bio': 'false' }), 'no');
+      t.app.pinLock();
+      await settle();
+      ok(t.faces.length === 1 && t.app._pinLocked === true && !!t.pad(),
+         'a face that will not scan leaves the PIN pad, still locked');
+      const face = t.button('USE FACE ID');
+      ok(!!face && face.style.display === 'flex', '  with a USE FACE ID button to ask again',
+         face ? face.style.display : 'no button');
+      face.dispatchEvent(new t.window.Event('click', { bubbles: true }));
+      await settle();
+      ok(t.faces.length === 2 && t.app._pinLocked === true, '  which asks, and a second no changes nothing');
+      t.type('4917');
+      ok(t.app._pinLocked === false && !t.root(), '  and the PIN opens it');
+    }
+    {
+      const t = mount(realPin({ 'foxy.secure.choice': '"device"' }), 'unavailable');
+      t.app.pinLock();
+      await settle();
+      ok(t.app._pinLocked === true && !!t.pad(),
+         'a phone that cannot check a face does not open a screen a PIN is on');
+    }
+
+    // no PIN, the switch on: the face is the lock, and the passcode may stand in
+    {
+      const t = mount({ 'foxy.secure.choice': '"device"' }, 'yes');
+      t.app.pinLock();
+      ok(t.faces.length === 1 && t.faces[0].passcode === true && !t.pad(),
+         'no PIN, USE FACE ID on: the face is the lock, with the passcode behind it and no keypad',
+         JSON.stringify(t.faces));
+      await settle();
+      ok(t.app._pinLocked === false, '  and it opens');
+    }
+
+    // setting a PIN asks nothing about a face, and keeps nothing about one
+    for (const [what, extra, on] of [
+      ['USE FACE ID off', { 'foxy.secure.choice': '"none"' }, false],
+      ['nobody asked about Face ID', {}, false],
+      ['USE FACE ID on', { 'foxy.secure.choice': '"device"' }, true],
+    ]) {
+      const t = mount(extra, 'yes');
+      let done = null;
+      t.app.pinConfirmWarning('4917', (v) => { done = v; });
+      t.cards[0].go();
+      await settle();
+      ok(t.W.pinIsSet() === true && done === true && t.faces.length === 0,
+         'setting a PIN with ' + what + ' asks for no face', t.faces.length + ' asked');
+      ok(t.toasts.join('|') === 'PIN set' && t.window.localStorage.getItem('foxy.pin.bio') === null
+         && t.W.faceLock() === on,
+         '  and leaves the switch as it was, with nothing kept beside it',
+         t.toasts.join('|') + ' / faceLock ' + t.W.faceLock());
+    }
+
+    // what the PIN is said to be for, at the moment it is chosen
+    {
+      const off = mount({ 'foxy.secure.choice': '"none"' }, 'yes');
+      off.app.pinSetup();
+      ok(/You will enter this every time you open Foxy\./.test(off.root().textContent),
+         'choosing a PIN with USE FACE ID off says it is entered at every opening');
+      const on = mount({ 'foxy.secure.choice': '"device"' }, 'yes');
+      on.app.pinSetup();
+      ok(/It opens Foxy when Face ID does not\./.test(on.root().textContent)
+         && !/every time/.test(on.root().textContent),
+         'and with it on, that it opens Foxy when a face does not');
+    }
   }
 
   /* ---- the menu says what the tap does, not what is on ------------------

@@ -248,11 +248,11 @@
         + 'cursor:pointer;display:none', 'USE FACE ID');
       face.addEventListener('click', o.face);
       root.appendChild(face);
-      /* Shown only where a face stands in for a PIN that is there to type —
-       * and never beside a CTA that is already the same button (noKeypad, the
-       * face-alone lock, where the face IS the way in). */
+      /* Shown only where the menu's USE FACE ID is on and there is a PIN to
+       * type beside it — and never beside a CTA that is already the same
+       * button (noKeypad, the face-alone lock, where the face IS the way in). */
       if (W && W.biometric && !o.noKeypad
-          && W.faceInsteadOfPin && W.faceInsteadOfPin()) {
+          && W.faceLock && W.faceLock()) {
         face.style.display = 'flex';
       }
     }
@@ -279,7 +279,10 @@
     const W = window.FoxyWallet;
     this.pinOverlay({
       title: 'CHOOSE A PIN',
-      subtitle: 'Four digits or more. You will enter this every time you open Foxy.',
+      // true to the menu's switch: with USE FACE ID on, a face opens Foxy first
+      subtitle: W && W.faceLock && W.faceLock()
+        ? 'Four digits or more. It opens Foxy when Face ID does not.'
+        : 'Four digits or more. You will enter this every time you open Foxy.',
       cta: 'NEXT',
       onCancel: () => { if (onDone) onDone(false); },
       onSubmit: (first) => {
@@ -327,24 +330,11 @@
         try {
           W.pinSet(pin);
           this.toast('PIN set');
-          /* May a face be shown instead of these digits?
-           *
-           * A device with biometrics is asked once, here. This is the only
-           * place the answer is given, so setting a PIN again is how it is
-           * changed — nothing else writes it, and the menu's Face ID row must
-           * not: that row is the SEED's guard, and somebody can want a face on
-           * the keychain and still want the PIN typed to get in
-           * (faceInsteadOfPin, 22-screen-lock.js).
-           *
-           * 'unavailable' is a phone that cannot check a face at all, and
-           * leaves the answer alone rather than writing a no. */
-          if (W.biometric && W.faceInsteadOfPin) {
-            W.biometric('Use Face ID to unlock Foxy?').then(answer => {
-              if (answer === 'unavailable') return;
-              W.faceInsteadOfPin(answer === 'yes');
-              if (answer === 'yes') this.toast('Face ID will unlock Foxy');
-            }).catch(() => {});
-          }
+          /* Nothing is asked about a face here. It was, once, and the answer
+           * was kept where no switch showed it: a face then opened Foxy with
+           * the PIN screen never appearing, under a menu that said Face ID
+           * was off. MENU > USE FACE ID is the one place a face is turned on
+           * or off (faceLock, 22-screen-lock.js). */
           if (onDone) onDone(true);
         } catch (e) {
           this.toast(W.reason(e), true);
@@ -384,13 +374,14 @@
    * ID row sets `secureChoice`, which guards the
    * SEED, so a face was asked when money was spent and never for looking.
    *
-   * Two settings decide what this screen accepts, and they are not the same
-   * question (22-screen-lock.js):
+   * One setting decides whether a face is offered, the menu's USE FACE ID
+   * (`faceLock()`, 22-screen-lock.js), and whether a PIN is set decides what
+   * the face is:
    *
-   *   no PIN     `faceLock()` — the face is the lock, so it is offered, and
-   *              the phone's own passcode may stand in for it
-   *   a PIN      `faceInsteadOfPin()` — the PIN is the lock and a face is a
-   *              shortcut past it, offered only where they asked for one */
+   *   no PIN     the face is the lock, and the phone's own passcode may
+   *              stand in for it
+   *   a PIN      the face is the quick way in and the PIN is the way in when
+   *              it will not scan; with USE FACE ID off, only the PIN opens */
   pinLock() {
     const W = window.FoxyWallet;
     if (!W || !W.screenLocked || !W.screenLocked()) return;
@@ -427,8 +418,8 @@
      * unlock the phone can open Foxy anyway. With a PIN set, that PIN is the
      * way in and Face ID stays biometrics-only. */
     const tryFace = (auto) => {
-      const wanted = byFaceAlone ? W.faceLock && W.faceLock()
-                                 : W.faceInsteadOfPin && W.faceInsteadOfPin();
+      // the menu's switch, whether or not a PIN stands behind the face
+      const wanted = W.faceLock && W.faceLock();
       if (!W.biometric || !wanted) return;
       W.biometric('Unlock Foxy', byFaceAlone).then(answer => {
         if (answer === 'unavailable' && byFaceAlone) {
