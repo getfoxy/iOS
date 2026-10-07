@@ -37,8 +37,14 @@ const badge = (() => {
   if (!m) throw new Error('QR_BADGE is not in the app');
   return Number(m[1]) / Number(m[2]);
 })();
-const frameEcc = (/TOKEN_QR = \{[^}]*ecc: '(\w)'/.exec(app) || [])[1];
-const fragment = Number((/TOKEN_QR = \{[^}]*fragment: (\d+)/.exec(app) || [])[1]);
+/* The two kinds of animated code: a token's, with nothing drawn on it, and a
+ * dense request's, with the TAP button in its middle. */
+const setting = (name) => ({
+  ecc: (new RegExp(name + " = \\{[^}]*ecc: '(\\w)'").exec(app) || [])[1],
+  fragment: Number((new RegExp(name + ' = \\{[^}]*fragment: (\\d+)').exec(app) || [])[1]),
+});
+const TOKEN_QR = setting('TOKEN_QR');
+const REQ_QR = setting('REQ_QR');
 
 /* What the wallet itself would try, in its own order (20-helpers.js). */
 const LEVELS = ['M', 'L'];
@@ -56,7 +62,12 @@ function hidden(text, ecc) {
   const raw = /^(ln(bc|tb|bcrt)|lnurl1|ur:)/i.test(text) ? text.toUpperCase() : text;
   let q = null;
   for (const level of (ecc ? [ecc] : LEVELS)) {
-    try { const t = qrcode(0, level); t.addData(raw); t.make(); q = t; ecc = level; break; }
+    // as the wallet draws it (20-helpers.js `qr`): the compact mode, where every character is one it has
+    try {
+      const t = qrcode(0, level);
+      if (/^[0-9A-Z $%*+\-./:]+$/.test(raw)) t.addData(raw, 'Alphanumeric'); else t.addData(raw);
+      t.make(); q = t; ecc = level; break;
+    }
     catch (e) { q = null; }
   }
   if (!q) return null;
@@ -93,13 +104,35 @@ for (const [name, text] of Object.entries(RAILS)) {
 }
 
 /* And the animated frames, which are what a long token and a dense request
- * both become. */
-const frame = 'UR:BYTES/145-3/' + 'LQAHRPHDSSFDGDIHFHWZAOFTAYFWBTDSTBSAKKCAFEDMOEGTBDBWFEHTIYEEBWAXCPNYGWFEHDGEDPCPEOFYFPGYPY'.repeat(3).slice(0, fragment - 15);
-const f = hidden(frame, frameEcc);
-check('an animated frame survives the badge',
-  !!f && f.pct <= BUDGET[frameEcc] / 2,
-  f ? 'ecc ' + frameEcc + ', ' + f.modules + ' modules, badge hides ' + f.pct.toFixed(1) +
-      '% of ' + BUDGET[frameEcc] + '%' : 'it does not fit');
+ * both become. Real ones, made by the wallet from something long: the frame
+ * this measured was a made-up one of 200 characters, where a real frame of a
+ * 200-byte fragment is 444, so it passed a code more than twice as dense as
+ * the one it looked at. */
+const { loadReal } = require('./harness');
+const W = loadReal({ bridge: () => {} }).W;
+const long = 'cashuB' + 'o2FteCJodHRwczovL21pbnQubWluaWJpdHMuY2FzaC9CaXRjb2luYXVjc2F0YXSB'.repeat(60);
+const frameOf = (set) => String(W.animatedQr(long, set.fragment).next());
+
+/* The request's: the TAP button is drawn on it, so it has to survive that,
+ * in the 240-point box the receive screen has on the smallest phone. */
+const rf = hidden(frameOf(REQ_QR), REQ_QR.ecc);
+check('a request\u2019s animated frame survives the button in its middle',
+  !!rf && rf.pct <= BUDGET[REQ_QR.ecc] / 2,
+  rf ? 'ecc ' + REQ_QR.ecc + ', ' + rf.modules + ' modules, the button hides ' + rf.pct.toFixed(1) +
+      '% of ' + BUDGET[REQ_QR.ecc] + '%' : 'it does not fit');
+
+/* The token's: nothing is drawn on it, which is what lets it carry the
+ * lightest correction. Held to the markup, since a badge put back over a
+ * frame at this level is a code that cannot be read. */
+const markup = fs.readFileSync(path.join(root, 'build', 'markup.html'), 'utf8');
+const tokenLine = markup.split('\n').filter((l) => /data-token-qr="1"/.test(l))[0] || '';
+check('nothing is drawn on a token\u2019s animated code',
+  /data-token-qr="1"[^>]*>\s*<sc-if value="\{\{ tokenQrBadge \}\}">/.test(tokenLine)
+  && /tokenQrBadge: \(\(\) => \{[\s\S]{0,400}tokenQrAnimates\(tk\)/.test(app),
+  'its badge is drawn only while the code is a still one');
+const tf = hidden(frameOf(TOKEN_QR), TOKEN_QR.ecc);
+check('a token\u2019s animated frame fits at the correction it is given',
+  !!tf, tf ? 'ecc ' + TOKEN_QR.ecc + ', ' + tf.modules + ' modules for a fragment of ' + TOKEN_QR.fragment : 'it does not fit');
 
 /* Module size is the other half of it: correction does not help a camera that
  * cannot see the modules in the first place. */
@@ -108,11 +141,14 @@ for (const [name, text] of Object.entries(RAILS)) {
   if (h) check(name + ' is drawn large enough to see', h.pt >= 3,
     h.pt.toFixed(2) + ' points per module (3 is the floor)');
 }
-if (f) check('an animated frame is drawn large enough to see', f.pt >= 3,
-  f.pt.toFixed(2) + ' points per module');
+if (rf) check('a request\u2019s animated frame is drawn large enough to see', rf.pt >= 3,
+  rf.pt.toFixed(2) + ' points per module in that box');
+/* The token's code has the screen's width to itself: 300 points on the
+ * smallest phone, where the request's box is 240. */
+if (tf) check('a token\u2019s animated frame is drawn large enough to see', 300 / (tf.modules + 8) >= 3,
+  (300 / (tf.modules + 8)).toFixed(2) + ' points per module in 300');
 
 /* Nothing may be drawn on a code that moves, and the rings did. */
-const markup = fs.readFileSync(path.join(root, 'build', 'markup.html'), 'utf8');
 check('nothing sweeps across a code', !/qrRing/.test(markup),
   'the expanding rings are gone');
 

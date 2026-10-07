@@ -408,7 +408,7 @@ function densityDrives() {
     && /qrDense\(text\) \{[\s\S]{0,400}W\.qrTooDense\(t\)/.test(app),
     'syncReqQr asks qrDense, which asks qrTooDense once per request');
   check('and the frames it draws are the ones the token screen already uses',
-    /syncReqQr\(\)[\s\S]{0,1600}W\.animatedQr\(text, this\.TOKEN_QR\.fragment\)/.test(app),
+    /syncReqQr\(\)[\s\S]{0,1600}W\.animatedQr\(text, this\.REQ_QR\.fragment\)/.test(app),
     'the same UR frames cashu.me and Foxy both read');
   check('the image it writes into is on the receive screen',
     /data-req-qr="1"/.test(markup), 'markup.html');

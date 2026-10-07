@@ -231,28 +231,35 @@
 
   /* The ECASH TOKEN screen's QR code, animated for a token of more than two
    * proofs (FoxyWallet.tokenQrAnimates): one code for such a token was too
-   * dense for some cameras. Frames of at most 200 bytes at error
-   * correction L, a new one every 200 ms, the same UR frames cashu.me shows, so
-   * cashu.me and Foxy read them (06-animated-qr.js). The code is drawn as large
-   * as the screen allows, so bigger frames stay easy to read and a token takes
-   * fewer of them (fewer frames scan faster). Each frame is drawn straight into the image, not
-   * through a render; renderToken shows the latest one. */
-  /* The frames carry heavy error correction, because something is drawn on
-   * top of them.
+   * dense for some cameras. A new frame every 200 ms, the same UR frames
+   * cashu.me shows, so cashu.me and Foxy read them (06-animated-qr.js). The
+   * code is drawn as large as the screen allows. Each frame is drawn straight
+   * into the image, not through a render; renderToken shows the latest one. */
+  /* Nothing is drawn on a token's animated code, so its frames carry the
+   * lightest error correction and two and a half times the data.
    *
-   * Every QR in Foxy has the badge in its middle, and the badge covers modules
-   * the reader needs. A frame at 'L' can lose 7% of its codewords; the badge
-   * was taking 12% of them, and a blot in one place is worse than that figure
-   * suggests because it destroys whole codewords in a few blocks rather than
-   * one here and there. So the animated codes — tokens, and requests too dense
-   * for one code — could not be read at all, while a Lightning invoice beside
-   * them scanned first time, because an invoice is a single code at 'M'.
+   * Every code in Foxy had the badge in its middle, and the badge covers
+   * modules a reader needs: a frame at 'L' can lose 7% of its codewords and
+   * the badge took 12%, so the frames were raised to 'Q' to be read at all.
+   * That paid for a picture with half of every frame. A frame that is missed
+   * is made up by the ones after it (that is what the fountain is for), which
+   * a still code has no way to do; so the badge stays on still codes and
+   * comes off the ones that move (`tokenQrBadge`), and the frames go back to
+   * 'L'. With the compact mode asked for (`FoxyWallet.qr`), a fragment of
+   * 500 is 89 modules where one of 200 was 97: fewer frames, and each
+   * drawn larger. tests/qr-readable.js holds both. */
+  TOKEN_QR = { fragment: 500, everyMs: 200, ecc: 'L' };
+
+  /* A request too dense for one code is animated too, and that code has the
+   * TAP button in its middle, which is a control and stays. So these frames
+   * keep the heavy correction the button needs.
    *
-   * 'Q' is 25%, and it costs a fragment this size 65 modules against 53 — 3.3
-   * points each in that box, still above the 3 that phone cameras want.
-   * tests/qr-readable.js holds both ends of that: what the badge covers, and
-   * what the level allows. */
-  TOKEN_QR = { fragment: 200, everyMs: 200, ecc: 'Q' };
+   * And are smaller. A fragment of 200 made a frame of 97 modules, which is
+   * 2.3 points each in the 240-point box this screen has on the smallest
+   * phone, under the 3 a camera wants; the test meant to hold that line
+   * measured a frame less than half as long as a real one. At 150, in the
+   * compact mode, a frame is 69 modules and 3.1 points. */
+  REQ_QR = { fragment: 150, everyMs: 200, ecc: 'Q' };
 
   /* How much of a code the badge in its middle hides, as a fraction of the
    * width of the whole box. The markup draws it at 50 points inside 240. */
@@ -372,10 +379,10 @@
     }
     if (!animate || this._reqQr) return;
     console.log('[foxy] the request is too dense for one code on a small screen; animating it');
-    const frames = W.animatedQr(text, this.TOKEN_QR.fragment);
+    const frames = W.animatedQr(text, this.REQ_QR.fragment);
     const run = { text: text, src: '', timer: 0 };
     const tick = () => {
-      const src = W.qr(frames.next(), { ecc: this.TOKEN_QR.ecc });
+      const src = W.qr(frames.next(), { ecc: this.REQ_QR.ecc });
       if (!src) return;
       run.src = src;
       const img = document.querySelector('[data-req-qr]');
@@ -383,7 +390,7 @@
     };
     this._reqQr = run;
     tick();
-    run.timer = setInterval(tick, this.TOKEN_QR.everyMs);
+    run.timer = setInterval(tick, this.REQ_QR.everyMs);
   }
 
   /* Small change on hand, so most tokens need no swap and are heard about as

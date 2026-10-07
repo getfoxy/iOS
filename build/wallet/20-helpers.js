@@ -198,12 +198,21 @@
       // upper case packs into QR's denser alphanumeric mode; readers lower-case these
       var bech32 = /^(ln(bc|tb|bcrt)|lnurl1|ur:)/i.test(raw);
       var payload = bech32 ? raw.toUpperCase() : raw;
+      /* And that mode asked for by name, where every character is one it has.
+       *
+       * `addData` with no mode is byte mode (Web/qrcode.js), eight bits a
+       * character, so the upper-casing above bought nothing for as long as
+       * this did not say which mode it was for: a 268-character invoice was
+       * drawn at 65 modules and is 57 in the mode it was upper-cased for, and
+       * an animated frame was 97 and is 81. Every reader of QR codes reads
+       * this mode. */
+      var compact = /^[0-9A-Z $%*+\-./:]+$/.test(payload);
       var q = null;
       var levels = o.ecc ? [o.ecc] : ['M', 'L'];
       for (var li = 0; li < levels.length; li++) {
         try {
           var t = window.qrcode(0, levels[li]);
-          t.addData(payload);
+          if (compact) t.addData(payload, 'Alphanumeric'); else t.addData(payload);
           t.make();
           q = t;
           break;
