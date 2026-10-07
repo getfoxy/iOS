@@ -9798,7 +9798,16 @@ class Component extends DCLogic {
     + '[data-snow] i>i>i{width:100%;height:100%;border-radius:50%;opacity:0;'
     + 'background:radial-gradient(circle at 34% 30%,#FFF 0%,#E4EEF6 45%,rgba(190,212,230,.55) 100%);'
     + 'animation:foxySnowFade linear infinite}'
-    + '@media (prefers-reduced-motion: reduce){[data-snow]{display:none}}';
+    /* And where it lands on something, it settles. A card on its own screen
+     * has a top edge for the snow to gather on (`data-snow-cap`, in the
+     * markup beside the card): a drift that rises along the edge and clumps
+     * that swell on it, each on its own clock, from nothing when the screen
+     * opens to a full cap half a minute later. Once, and it stays. */
+    + '@keyframes foxySnowPile{0%{transform:scale(.9,0)}100%{transform:scale(1,1)}}'
+    + '@keyframes foxySnowClump{0%{transform:scale(0)}100%{transform:scale(1)}}'
+    // and it lies along the whole edge and creeps down round both corners, to where they end
+    + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
+    + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
 
   syncSnow() {
     const layer = document.querySelector('[data-snow="home"]');

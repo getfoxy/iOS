@@ -36,7 +36,7 @@
  },
  "screen flashcard": {
   "file": "249-screen-flashcard.html",
-  "markup": "fb3dbab5089f7383d8e07054143d88aadc421e13afc61b11673c43eef7f4a155",
+  "markup": "739bc37f7241e5c7a5481107029c0a87e3b9eaf3051c63230960b9c2f940d025",
   "vals": "46d212aaeae4d2cce28d83a1e5e4848b48987173751c21612aee60eb3b236573"
  },
  "screen history": {
@@ -256,37 +256,37 @@
  },
  "flashcard, nothing tapped": {
   "file": "250-flashcard-nothing-tapped.html",
-  "markup": "fb3dbab5089f7383d8e07054143d88aadc421e13afc61b11673c43eef7f4a155",
+  "markup": "739bc37f7241e5c7a5481107029c0a87e3b9eaf3051c63230960b9c2f940d025",
   "vals": "53a26a99b110bfbdcdcc8c9353c6afd53051ad064b12f21e73571089a5dd3ef5"
  },
  "flashcard, cards loaded and money waiting for one": {
   "file": "251-flashcard-cards-loaded-and-money-waiting-for-one.html",
-  "markup": "ab28d45b1776774a90d7f88897e5b59b5c66f126319958238f995e544d7a2ed9",
+  "markup": "7a3928d0c4d66edb0e6a8ae5f53345ecda63cfdb925baa7946bd57cc3cbcd501",
   "vals": "5617ed783a03f450fa939dc532b105bfb69c33ad0c0a95a844786c1253ab260a"
  },
  "flashcard, a card of this phone’s, read": {
   "file": "252-flashcard-a-card-of-this-phone-s-read.html",
-  "markup": "3ed240acd7b8c3ef095477a8739eaee50b09fb86d1044e83bc68693335ed07d9",
+  "markup": "9340bdbca7cda9b627084b5e19c33bf5cb6fbac2f855e98410d9f1d302d2c8ba",
   "vals": "67717f9cb4a04687d804d4fb6845c01e3b8e42bb11525f5ca1885767e4b53595"
  },
  "flashcard, a new card": {
   "file": "253-flashcard-a-new-card.html",
-  "markup": "0d3d0deaed17d36573333b57239d2aa3b99c272f1bf6b6de7b7d863174d2e568",
+  "markup": "ec1dd3f26313142b09ea1645e075cbb5a3ffd1f0e93bfd0d47cbd00f8cbcbd0b",
   "vals": "0944c3b25c3625e6fd7505d49d07a446a9cdd7323a18f86b905a5dbe655a209e"
  },
  "flashcard, a blocked card": {
   "file": "254-flashcard-a-blocked-card.html",
-  "markup": "37d747b7d95de389f2570764ea164901066e868ff731a534dcbc19859a036c1d",
+  "markup": "60be63d64612ba263404d89872125232e0f45c70b86bde2a238c574882a30e08",
   "vals": "1e082856caa1d53f851af83e355ca6c32ccfe07b87bfddfd23de1b9bf90fa439"
  },
  "flashcard, a cash card the mint says is spent": {
   "file": "255-flashcard-a-cash-card-the-mint-says-is-spent.html",
-  "markup": "e459e7fb522241945b70fc8e71e7bfbf949937aac00e15f3f040bd5b949432ea",
+  "markup": "1e9802d949122a049c03c01db00790bab41a21a25d8431f8a7b77a38eff565e5",
   "vals": "240966f72e198133469c04fbdb208a34d8bc385d22442ec182aad2317e345b3f"
  },
  "flashcard, somebody else’s card, past its date, no connection": {
   "file": "256-flashcard-somebody-else-s-card-past-its-date-no-connection.html",
-  "markup": "aacac6e1fc3396dc18a38fbc48d7935173e34a830c97149567d023c3f9462923",
+  "markup": "0efcd356daf9e4b5bd35eff18eafc68485c0788192d716c6b0f35c89716380d3",
   "vals": "59add965d9aad50923161ef207077b685e10f9166192a50a9ac61a2eaf9eef40"
  },
  "home, working offline": {
