@@ -1050,6 +1050,19 @@ else:
 # and the carry-over of hosts a wallet already used happens once.
 bridge25 = open(os.path.join('Foxy', 'Bridge', 'FoxyBridge.swift'), encoding='utf8').read()
 route25 = open(os.path.join('Foxy', 'Network', 'Route.swift'), encoding='utf8').read()
+# A VPN's tunnel with nothing under it is no network: the path monitor's answer
+# goes through NetworkKind, which says "none" for a path of tunnels alone. Called
+# a network, it had a phone with Wi-Fi and cellular off send a swap into the tunnel.
+kind25_path = os.path.join('Foxy', 'Network', 'NetworkKind.swift')
+kind25 = open(kind25_path, encoding='utf8').read() if os.path.exists(kind25_path) else ''
+if 'NetworkKind.of(satisfied: path.status == .satisfied' not in route25 \
+        or 'path.availableInterfaces.map { $0.name }' not in route25 \
+        or 'kind = "other"' in route25 \
+        or not re.search(r'if !interfaces\.isEmpty && interfaces\.allSatisfy\(isTunnel\) \{ return "none" \}', kind25) \
+        or '"utun"' not in kind25:
+    fail('the network kind: a path made only of VPN tunnels is no longer called no network (Route.swift, NetworkKind.swift)')
+else:
+    ok('a VPN tunnel with nothing under it counts as no network')
 mint_case = bridge_handler(bridge25, 'mintRequest')
 prompts25 = open(os.path.join('Foxy', 'Bridge', 'NativePrompts.swift'), encoding='utf8').read() \
     if os.path.exists(os.path.join('Foxy', 'Bridge', 'NativePrompts.swift')) else ''

@@ -66,9 +66,7 @@ enum OrbotLink {
             }
             return false
         }
-        let found = scoped.keys.sorted().first { name in
-            ["utun", "ipsec", "ppp", "tun", "tap"].contains { name.hasPrefix($0) }
-        }
+        let found = scoped.keys.sorted().first { NetworkKind.isTunnel($0) }
         if found != saidTunnel || !saidOnce {
             saidTunnel = found; saidOnce = true
             print("[foxy] tunnel:", found.map { "on \($0), of \(scoped.keys.sorted().joined(separator: " "))" }
