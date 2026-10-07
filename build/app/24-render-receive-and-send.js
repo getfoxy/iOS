@@ -401,6 +401,15 @@
       // only when the mint actually charged for the swap
       tokenHasFee: !!s.tokenOutFee,
       tokenFee: this.money(s.tokenOutFee || 0).main,
+      /* The badge in the middle of the token's code: on a still code, which
+       * has the correction to spare for it, and not on one that moves
+       * (TOKEN_QR, 07-history-tokens-mints.js). */
+      tokenQrBadge: (() => {
+        if (sc !== 'tokenOut') return true;
+        const W = window.FoxyWallet;
+        const tk = s.tokenOut || ((W && W.lastToken && W.lastToken() || {}).token);
+        return !(tk && W && W.tokenQrAnimates && W.tokenQrAnimates(tk));
+      })(),
       // falls back to what is on file, so navigating away cannot lose it
       tokenOutQr: (() => {
         /* Only on its own screen. It was drawn on every render of every

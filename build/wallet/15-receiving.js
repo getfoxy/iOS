@@ -5,6 +5,11 @@
     invoice: function (sats, memo) {
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
+      // not at a mint a late claim is visiting: asked once the phone is home (`claimAway`)
+      if (claimAway) {
+        var self = this, args = arguments;
+        return homeFirst(function () { return FoxyWallet.invoice.apply(self, args); });
+      }
       var w;
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
@@ -64,6 +69,10 @@
           bolt11: q.request,
           hash: q.quote,
           sats: amount,
+          /* The mint that issued it, for whoever files it (a bill's rows are
+           * quote ids: `splitSave`). The wallet may be somewhere else by the
+           * time this is read. */
+          mint: mintOf(w),
           // the mint sets the window, not us — often minutes, not hours
           expiresIn: q.expiry ? Math.max(60, q.expiry - Math.floor(Date.now() / 1000)) : 900,
           qr: FoxyWallet.qr(q.request),

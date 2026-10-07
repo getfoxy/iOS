@@ -5,6 +5,7 @@
    * None of these calls another (checked), so none can wait on itself. The
    * callers that do call them — moveRun, sweepQuotes, splitReconcile,
    * payLnurl, finishMove — stay unwrapped and wait their turn on each call. */
+  var HOME_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -38,6 +39,9 @@
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {
       var self = this, args = arguments;
+      /* Read now, while the caller is still on the stack: the late-claim walk
+       * marks its own call for exactly that long (`walkCalling`). */
+      var own = walkCalling;
       /* A payment that found some of its ecash spent elsewhere has taken it out
        * of the pile and says so with foxyAgain (retryWithoutSpent): it is made
        * again from what is left, inside the same turn of the lock. At most
@@ -52,14 +56,28 @@
           throw e;
         });
       };
-      return withProofs(name, function () { return attempt(3); }).catch(function (e) {
-        // invalid signatures, from whichever operation met them
-        if (badSignatures(e)) {
-          reportBadSignatures(hostOf(mintUrl || ''),
-            name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
-        }
-        throw e;
-      });
+      var turn = function () {
+        return withProofs(name, function () { return attempt(3); }).catch(function (e) {
+          // invalid signatures, from whichever operation met them
+          if (badSignatures(e)) {
+            reportBadSignatures(hostOf(mintUrl || ''),
+              name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
+          }
+          throw e;
+        });
+      };
+      /* What a person starts waits for a late claim to bring the wallet home
+       * (`claimAway`): in the gaps between that walk's claims the lock is
+       * free and the wallet is somebody else's mint, and a payment made then
+       * was made there, from that mint's pile.
+       *
+       * Only these. The sweeps a connect starts belong at whatever mint was
+       * connected to, the visit's included, and are left to run there. Nor
+       * the walk's own claim, which is what the visit is for; nor change
+       * for an overpayment, which is made where the payment was just taken. */
+      var changeBack = name === 'sendToken' && args[1] && args[1].purpose === 'change';
+      if (!HOME_FIRST[name] || own || changeBack) return turn();
+      return homeFirst(turn);
     };
   });
 

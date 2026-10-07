@@ -339,15 +339,12 @@ enum Route {
     private static let pathMonitor: NWPathMonitor = {
         let m = NWPathMonitor()
         m.pathUpdateHandler = { path in
-            let kind: String
-            if path.status == .satisfied {
-                if path.usesInterfaceType(.wifi) { kind = "wifi" }
-                else if path.usesInterfaceType(.cellular) { kind = "cellular" }
-                else if path.usesInterfaceType(.wiredEthernet) { kind = "wired" }
-                else { kind = "other" }
-            } else {
-                kind = "none"
-            }
+            // a VPN's tunnel with nothing under it is not a network (NetworkKind)
+            let kind = NetworkKind.of(satisfied: path.status == .satisfied,
+                                      wifi: path.usesInterfaceType(.wifi),
+                                      cellular: path.usesInterfaceType(.cellular),
+                                      wired: path.usesInterfaceType(.wiredEthernet),
+                                      interfaces: path.availableInterfaces.map { $0.name })
 #if targetEnvironment(simulator)
             Route.networkLock.lock()
             Route.simPath = kind

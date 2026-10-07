@@ -20,6 +20,8 @@
      * The reserve is a ceiling. Whatever routing does not use comes back as
      * change, so the real cost is usually lower and never higher. */
     quoteFee: function (bolt11) {
+      // a quote from the mint a late claim is visiting is a quote for the wrong pile (`claimAway`)
+      if (claimAway) return homeFirst(function () { return FoxyWallet.quoteFee(bolt11); });
       assertRoute();
       if (!wallet || !bolt11) return Promise.resolve(null);
       // on the circuit kept ready, when there is one

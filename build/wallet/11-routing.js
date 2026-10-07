@@ -194,6 +194,16 @@
     connect: function (url, _unusedInvoiceKey, _unusedAdminKey, opts) {
       // storage from a newer Foxy: nothing that could change it runs (see the header)
       if (storageNewer) throw new Error(STORAGE_NEWER);
+      /* A mint somebody chose waits for a late claim to come home.
+       *
+       * That walk goes back to where it started when it is done (`claimAway`),
+       * and a switch made while it was away was undone by that: the phone
+       * on the old mint, with the new one saved as its own. Visits, which are
+       * what the walk itself makes, do not wait. */
+      if (claimAway && !(opts && opts.remember === false)) {
+        var self = this, args = arguments;
+        return homeFirst(function () { return FoxyWallet.connect.apply(self, args); });
+      }
       var u = canonicalMint(url || load(K.mint, '') || '');
       var bad = mintUrlProblem(u);
       if (bad) return Promise.reject(new Error(bad));

@@ -36,7 +36,7 @@ const SEED = read('Foxy/Bridge/NativeSeedBridge.swift');
 const DELIVERY = read('Foxy/Bridge/FoxyBridge+Delivery.swift');
 const TAP = read('Foxy/Bridge/FoxyBridge+Tap.swift');
 const CARD = read('Foxy/Bridge/FoxyBridge+Flashcard.swift');
-const DOC = read('THREAT-MODEL.md');
+const DOC = read('docs/THREAT-MODEL.md');
 
 /* The tokens the table may use, and the Swift each one means. A token with no
  * pattern is documentation: named in a row, not checked here, and listed as

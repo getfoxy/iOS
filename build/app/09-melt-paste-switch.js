@@ -648,6 +648,15 @@
   refreshBalance() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return Promise.resolve();
+    /* Not while a late claim has the wallet at another mint (`awayClaiming`):
+     * the balance read then is that mint's, and it went on the home screen
+     * under this one's name. Read when the phone is home, once. */
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._balWhenHome) {
+        this._balWhenHome = W.whenHome().then(() => { this._balWhenHome = null; return this.refreshBalance(); });
+      }
+      return this._balWhenHome;
+    }
     if (this.watchHeld) this.watchHeld();
     // the figure that is actually the person's, which is local and instant
     /* With the change that is on its way back. An over-payment leaves the

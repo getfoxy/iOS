@@ -395,4 +395,4 @@ Two things worth knowing about that "when":
 | `TODO-LATER.md` | decided and deferred work |
 | `TOOLCHAIN.md` | the compiler and tool versions behind the byte-for-byte rebuilds |
 | `Web/VENDOR.md`, `Vendor/README.md`, `tools/vendor/README.md` | where every bundled library and native component came from, and how it is checked |
-| `REVIEW.md`, `README.md` | the reviewer's front door, and the index of every document |
+| `REVIEW.md`, `docs/README.md` | the reviewer's front door, and the index of every document |

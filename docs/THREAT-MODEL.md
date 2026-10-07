@@ -214,7 +214,9 @@ What bounds the bridge:
     256 keysets. An early `seedSecrets` action, which answered any counter, is
     gone. The BIP-39 seed is kept in native memory until the unlock is
     forgotten, the page goes, Foxy goes to the background, or the saved seed is
-    written or deleted.
+    written or deleted. Put away, it serves the top-up that runs then and is
+    dropped when that is over, twenty seconds at most; a return ends it at
+    once (`SEED-HANDLING.md`, `SeedVault.putAway`).
   - **What it does not stop:** a script in the page can still reserve
     counters and receive their secrets, which is enough to spend outputs made
     from them, and can open the seed screens, whose read of the words needs

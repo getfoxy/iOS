@@ -290,6 +290,23 @@
    * claims (`claimUnclaimed`): one walk each, shared. */
   var carrying = null;
   var claimingLate = null;
+  /* While that walk has the wallet at another mint.
+   *
+   * Ecash from another mint is claimed at that mint, and for those seconds
+   * `wallet` and `mintUrl` are the other mint's. Whatever a person started
+   * then was done there: a bill made at one mint was filed against the mint
+   * being visited, its quotes were asked of a mint that never issued them,
+   * and the tap offer named the wrong mint (from a phone log: a split begun
+   * five seconds after a route came back, with two payments to claim
+   * elsewhere). `claimAway` is a promise that settles when the phone is home
+   * again; what a person starts waits on it (`homeFirst`), and the walk's own
+   * calls, marked by `walkCalling` for the length of the call, do not. */
+  var claimAway = null;
+  var walkCalling = false;
+  function homeFirst(run) {
+    if (!claimAway) return run();
+    return claimAway.then(function () { return homeFirst(run); });
+  }
   /* Crossings this page is in the middle of, by quote, and payments being
    * brought home, by job. `finishMove` and `carryResume` leave them alone:
    * a connect in the middle of a move ran the catch-up, which claimed the
@@ -9521,6 +9538,11 @@
 
     get connected() { return !!wallet; },
     get mintUrl() { return mintUrl; },
+    /* Whether a late claim has the wallet at another mint just now, and a
+     * promise for when it is home (`claimAway`). For the screens: a balance
+     * read in between is the other mint's. */
+    awayClaiming: function () { return !!claimAway; },
+    whenHome: function () { return homeFirst(function () { return Promise.resolve(); }); },
 
     /* Where a fresh install points itself. Nothing asks; boot just connects. */
     defaultMint: 'https://mint.minibits.cash/Bitcoin',
@@ -9787,6 +9809,16 @@
     connect: function (url, _unusedInvoiceKey, _unusedAdminKey, opts) {
       // storage from a newer Foxy: nothing that could change it runs (see the header)
       if (storageNewer) throw new Error(STORAGE_NEWER);
+      /* A mint somebody chose waits for a late claim to come home.
+       *
+       * That walk goes back to where it started when it is done (`claimAway`),
+       * and a switch made while it was away was undone by that: the phone
+       * on the old mint, with the new one saved as its own. Visits, which are
+       * what the walk itself makes, do not wait. */
+      if (claimAway && !(opts && opts.remember === false)) {
+        var self = this, args = arguments;
+        return homeFirst(function () { return FoxyWallet.connect.apply(self, args); });
+      }
       var u = canonicalMint(url || load(K.mint, '') || '');
       var bad = mintUrlProblem(u);
       if (bad) return Promise.reject(new Error(bad));
@@ -11513,6 +11545,11 @@
     invoice: function (sats, memo) {
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
+      // not at a mint a late claim is visiting: asked once the phone is home (`claimAway`)
+      if (claimAway) {
+        var self = this, args = arguments;
+        return homeFirst(function () { return FoxyWallet.invoice.apply(self, args); });
+      }
       var w;
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
@@ -11572,6 +11609,10 @@
           bolt11: q.request,
           hash: q.quote,
           sats: amount,
+          /* The mint that issued it, for whoever files it (a bill's rows are
+           * quote ids: `splitSave`). The wallet may be somewhere else by the
+           * time this is read. */
+          mint: mintOf(w),
           // the mint sets the window, not us — often minutes, not hours
           expiresIn: q.expiry ? Math.max(60, q.expiry - Math.floor(Date.now() / 1000)) : 900,
           qr: FoxyWallet.qr(q.request),
@@ -14167,6 +14208,20 @@
       return s;
     },
 
+    /* The bill's record, finished or not.
+     *
+     * `splitPending` answers "is anything still owed", so it hides a bill the
+     * moment its last share lands. The collecting screen has to see that
+     * share land: it read `splitPending`, got nothing, and left the last
+     * payer unticked with the money already in history (a share paid by its
+     * invoice while Foxy was away, collected by the sweep on return). The
+     * record stays on file until the all-paid screen is dismissed
+     * (`splitClear`), and this is how that screen reads it. */
+    splitRecord: function () {
+      var s = load(K.split, null);
+      return (s && s.rows && s.rows.length) ? s : null;
+    },
+
     /* Settle every row the split's own watcher missed.
      *
      * Each share is watched with a poll, and a poll can die — backgrounded,
@@ -16047,12 +16102,21 @@
       // upper case packs into QR's denser alphanumeric mode; readers lower-case these
       var bech32 = /^(ln(bc|tb|bcrt)|lnurl1|ur:)/i.test(raw);
       var payload = bech32 ? raw.toUpperCase() : raw;
+      /* And that mode asked for by name, where every character is one it has.
+       *
+       * `addData` with no mode is byte mode (Web/qrcode.js), eight bits a
+       * character, so the upper-casing above bought nothing for as long as
+       * this did not say which mode it was for: a 268-character invoice was
+       * drawn at 65 modules and is 57 in the mode it was upper-cased for, and
+       * an animated frame was 97 and is 81. Every reader of QR codes reads
+       * this mode. */
+      var compact = /^[0-9A-Z $%*+\-./:]+$/.test(payload);
       var q = null;
       var levels = o.ecc ? [o.ecc] : ['M', 'L'];
       for (var li = 0; li < levels.length; li++) {
         try {
           var t = window.qrcode(0, levels[li]);
-          t.addData(payload);
+          if (compact) t.addData(payload, 'Alphanumeric'); else t.addData(payload);
           t.make();
           q = t;
           break;
@@ -16441,6 +16505,12 @@
       try {
         var CT = window.CashuTS;
         if (!CT || !CT.PaymentRequest || !mintUrl) return '';
+        /* None while a late claim has the wallet at another mint: it would
+         * name that mint, and ask to be paid there (`claimAway`). This cannot
+         * wait, being called in the middle of a render, so it answers as it
+         * does when a request cannot be made yet, and the next render after
+         * the phone is home makes one. */
+        if (claimAway) return '';
         var o = opts || {};
         var id = new Uint8Array(4);
         (window.crypto || window.msCrypto).getRandomValues(id);
@@ -16803,6 +16873,25 @@
        * (tools/live/offline-cross-scenarios.js `one-side-b`). A visit, now. */
       var startedAt = canonicalMint(mintUrl || '');
       var carried = false;
+      /* Away from the first claim that is somewhere else until the phone is
+       * home again, and for all of that nothing a person starts is done at
+       * the mint being visited (`claimAway`, `homeFirst`). Settled whichever
+       * way the walk ends: a phone that could not get home is no reason to
+       * hold every payment after it. */
+      var back = null;
+      var leave = function () {
+        if (claimAway) return;
+        claimAway = new Promise(function (res) { back = res; });
+        console.log('[foxy] a late claim is at another mint; what is started now waits until the phone is back on',
+                    hostOf(startedAt));
+      };
+      var arrive = function () {
+        if (!back) return;
+        var done = back;
+        back = null;
+        claimAway = null;
+        done();
+      };
       /* The ones taken on trust go first. They are the only rows somebody
        * else can still spend, so they do not wait behind ecash that is locked
        * to this phone and safe where it is. */
@@ -16855,8 +16944,15 @@
            * this phone kept and, failing those, walks the seed for the lock the
            * token carries — which is how a payment that arrived on a phone that
            * is now gone is still claimable from the twelve words. */
+          var where = '';
+          try { where = canonicalMint(String((FoxyWallet.tokenInfo(claimText) || {}).mint || '')); } catch (eWhere) {}
+          if (startedAt && where && where !== startedAt) leave();
           // the same entry the arrival wrote, finished rather than doubled
-          return FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true })
+          var claim;
+          walkCalling = true;
+          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
+          finally { walkCalling = false; }
+          return claim
             .then(function (r) {
               took += (r && r.sats) || 0;
               // one taken to be carried home is this phone's now, at their mint: its job says so
@@ -16950,7 +17046,7 @@
         return took;
       });
       claimingLate = walk;
-      var freeWalk = function () { claimingLate = null; };
+      var freeWalk = function () { claimingLate = null; arrive(); };
       walk.then(freeWalk, freeWalk);
       return walk;
     },
@@ -19049,6 +19145,8 @@
      * The reserve is a ceiling. Whatever routing does not use comes back as
      * change, so the real cost is usually lower and never higher. */
     quoteFee: function (bolt11) {
+      // a quote from the mint a late claim is visiting is a quote for the wrong pile (`claimAway`)
+      if (claimAway) return homeFirst(function () { return FoxyWallet.quoteFee(bolt11); });
       assertRoute();
       if (!wallet || !bolt11) return Promise.resolve(null);
       // on the circuit kept ready, when there is one
@@ -20042,6 +20140,7 @@
    * None of these calls another (checked), so none can wait on itself. The
    * callers that do call them — moveRun, sweepQuotes, splitReconcile,
    * payLnurl, finishMove — stay unwrapped and wait their turn on each call. */
+  var HOME_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -20075,6 +20174,9 @@
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {
       var self = this, args = arguments;
+      /* Read now, while the caller is still on the stack: the late-claim walk
+       * marks its own call for exactly that long (`walkCalling`). */
+      var own = walkCalling;
       /* A payment that found some of its ecash spent elsewhere has taken it out
        * of the pile and says so with foxyAgain (retryWithoutSpent): it is made
        * again from what is left, inside the same turn of the lock. At most
@@ -20089,14 +20191,28 @@
           throw e;
         });
       };
-      return withProofs(name, function () { return attempt(3); }).catch(function (e) {
-        // invalid signatures, from whichever operation met them
-        if (badSignatures(e)) {
-          reportBadSignatures(hostOf(mintUrl || ''),
-            name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
-        }
-        throw e;
-      });
+      var turn = function () {
+        return withProofs(name, function () { return attempt(3); }).catch(function (e) {
+          // invalid signatures, from whichever operation met them
+          if (badSignatures(e)) {
+            reportBadSignatures(hostOf(mintUrl || ''),
+              name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
+          }
+          throw e;
+        });
+      };
+      /* What a person starts waits for a late claim to bring the wallet home
+       * (`claimAway`): in the gaps between that walk's claims the lock is
+       * free and the wallet is somebody else's mint, and a payment made then
+       * was made there, from that mint's pile.
+       *
+       * Only these. The sweeps a connect starts belong at whatever mint was
+       * connected to, the visit's included, and are left to run there. Nor
+       * the walk's own claim, which is what the visit is for; nor change
+       * for an overpayment, which is made where the payment was just taken. */
+      var changeBack = name === 'sendToken' && args[1] && args[1].purpose === 'change';
+      if (!HOME_FIRST[name] || own || changeBack) return turn();
+      return homeFirst(turn);
     };
   });
 

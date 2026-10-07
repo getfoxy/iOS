@@ -90,6 +90,82 @@ final class SeedVaultTests: XCTestCase {
         XCTAssertNil(SeedVault.takeUnlock(forScreen: false, now: Date().addingTimeInterval(31)))
     }
 
+    /// The seed in memory serves the work Foxy does as it is put away, and
+    /// nothing after it.
+    ///
+    /// It was forgotten the instant Foxy left and read again for the
+    /// small-change top-up. Behind Face ID that read cannot be made from the
+    /// background (-25308), so on a phone that protects its seed the top-up
+    /// never ran (from a phone log).
+    func testASeedPutAwayServesTheWorkOfLeavingAndNothingAfter() throws {
+        let seed = try NUT13.seed(mnemonic: words)
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        func visit() {
+            SeedVault.forgetNativeSeed()
+            SeedVault.keep(seed, readAt: SeedVault.epochNow)
+        }
+
+        XCTAssertTrue(SeedVault.leavingCovers(keptAt: at, now: at))
+        XCTAssertTrue(SeedVault.leavingCovers(keptAt: at, now: at.addingTimeInterval(SeedVault.leavingSeconds - 1)))
+        XCTAssertFalse(SeedVault.leavingCovers(keptAt: at, now: at.addingTimeInterval(SeedVault.leavingSeconds)))
+        XCTAssertFalse(SeedVault.leavingCovers(keptAt: at, now: at.addingTimeInterval(-1)), "a clock that went backwards covers nothing")
+        XCTAssertLessThanOrEqual(SeedVault.leavingSeconds, 30, "iOS allows about thirty seconds in the background")
+
+        // a visit holds the seed; put away, it is there for the top-up
+        visit()
+        XCTAssertTrue(SeedVault.kept(now: at)?.sameBytes(as: seed) == true)
+        SeedVault.putAway(now: at)
+        XCTAssertTrue(SeedVault.kept(now: at.addingTimeInterval(5))?.sameBytes(as: seed) == true, "for the work of leaving")
+        // and a read begun before Foxy left keeps nothing for the visit after it
+        XCTAssertNotEqual(SeedVault.epochNow, 0)
+        // out of time, it is gone, and stays gone when the clock is asked again
+        XCTAssertNil(SeedVault.kept(now: at.addingTimeInterval(SeedVault.leavingSeconds)))
+        XCTAssertNil(SeedVault.kept(now: at.addingTimeInterval(1)), "dropped, not waiting for an earlier time")
+
+        // the work is over, or Foxy is back in front: nothing is kept, so the next read asks
+        visit()
+        SeedVault.putAway(now: at)
+        SeedVault.endLeaving()
+        XCTAssertNil(SeedVault.kept(now: at.addingTimeInterval(1)))
+
+        // a read that was waiting on Face ID when Foxy left does not put a seed back
+        visit()
+        let before = SeedVault.epochNow
+        SeedVault.putAway(now: at)
+        SeedVault.endLeaving()
+        SeedVault.keep(seed, readAt: before)
+        XCTAssertNil(SeedVault.kept(now: at), "its epoch has passed")
+
+        // a visit that never read the seed leaves with none
+        SeedVault.forgetNativeSeed()
+        SeedVault.putAway(now: at)
+        XCTAssertNil(SeedVault.kept(now: at))
+
+        // everything that forgets the seed forgets this one too
+        let forgets: [(String, () -> Void)] = [
+            ("forgetNativeSeed", SeedVault.forgetNativeSeed),
+            ("forgetUnlock", SeedVault.forgetUnlock),
+            ("pageWillLoad", SeedVault.pageWillLoad),
+        ]
+        for (name, forget) in forgets {
+            visit()
+            SeedVault.putAway(now: at)
+            forget()
+            XCTAssertNil(SeedVault.kept(now: at.addingTimeInterval(1)), name)
+        }
+
+        // and being put away still gives up the unlock and the typed words, as it did
+        let unlock = LAContext()
+        SeedVault.noteUnlock(unlock)
+        _ = try SeedCandidates.shared.add(words)
+        visit()
+        SeedVault.noteUnlock(unlock)
+        SeedVault.putAway(now: at)
+        XCTAssertNil(SeedVault.takeUnlock(forScreen: false), "no approval is carried into the background")
+        XCTAssertEqual(SeedCandidates.shared.count, 0, "nor words typed for a restore")
+        SeedVault.forgetNativeSeed()
+    }
+
     /// M7: a write that reported a problem is a success when the keychain holds the words after all.
     func testAWriteWhoseReadBackFailedIsASuccessIfTheWordsAreThere() {
         var reads = 0

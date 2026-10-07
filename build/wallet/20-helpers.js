@@ -198,12 +198,21 @@
       // upper case packs into QR's denser alphanumeric mode; readers lower-case these
       var bech32 = /^(ln(bc|tb|bcrt)|lnurl1|ur:)/i.test(raw);
       var payload = bech32 ? raw.toUpperCase() : raw;
+      /* And that mode asked for by name, where every character is one it has.
+       *
+       * `addData` with no mode is byte mode (Web/qrcode.js), eight bits a
+       * character, so the upper-casing above bought nothing for as long as
+       * this did not say which mode it was for: a 268-character invoice was
+       * drawn at 65 modules and is 57 in the mode it was upper-cased for, and
+       * an animated frame was 97 and is 81. Every reader of QR codes reads
+       * this mode. */
+      var compact = /^[0-9A-Z $%*+\-./:]+$/.test(payload);
       var q = null;
       var levels = o.ecc ? [o.ecc] : ['M', 'L'];
       for (var li = 0; li < levels.length; li++) {
         try {
           var t = window.qrcode(0, levels[li]);
-          t.addData(payload);
+          if (compact) t.addData(payload, 'Alphanumeric'); else t.addData(payload);
           t.make();
           q = t;
           break;
@@ -592,6 +601,12 @@
       try {
         var CT = window.CashuTS;
         if (!CT || !CT.PaymentRequest || !mintUrl) return '';
+        /* None while a late claim has the wallet at another mint: it would
+         * name that mint, and ask to be paid there (`claimAway`). This cannot
+         * wait, being called in the middle of a render, so it answers as it
+         * does when a request cannot be made yet, and the next render after
+         * the phone is home makes one. */
+        if (claimAway) return '';
         var o = opts || {};
         var id = new Uint8Array(4);
         (window.crypto || window.msCrypto).getRandomValues(id);
@@ -954,6 +969,25 @@
        * (tools/live/offline-cross-scenarios.js `one-side-b`). A visit, now. */
       var startedAt = canonicalMint(mintUrl || '');
       var carried = false;
+      /* Away from the first claim that is somewhere else until the phone is
+       * home again, and for all of that nothing a person starts is done at
+       * the mint being visited (`claimAway`, `homeFirst`). Settled whichever
+       * way the walk ends: a phone that could not get home is no reason to
+       * hold every payment after it. */
+      var back = null;
+      var leave = function () {
+        if (claimAway) return;
+        claimAway = new Promise(function (res) { back = res; });
+        console.log('[foxy] a late claim is at another mint; what is started now waits until the phone is back on',
+                    hostOf(startedAt));
+      };
+      var arrive = function () {
+        if (!back) return;
+        var done = back;
+        back = null;
+        claimAway = null;
+        done();
+      };
       /* The ones taken on trust go first. They are the only rows somebody
        * else can still spend, so they do not wait behind ecash that is locked
        * to this phone and safe where it is. */
@@ -1006,8 +1040,15 @@
            * this phone kept and, failing those, walks the seed for the lock the
            * token carries — which is how a payment that arrived on a phone that
            * is now gone is still claimable from the twelve words. */
+          var where = '';
+          try { where = canonicalMint(String((FoxyWallet.tokenInfo(claimText) || {}).mint || '')); } catch (eWhere) {}
+          if (startedAt && where && where !== startedAt) leave();
           // the same entry the arrival wrote, finished rather than doubled
-          return FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true })
+          var claim;
+          walkCalling = true;
+          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
+          finally { walkCalling = false; }
+          return claim
             .then(function (r) {
               took += (r && r.sats) || 0;
               // one taken to be carried home is this phone's now, at their mint: its job says so
@@ -1101,7 +1142,7 @@
         return took;
       });
       claimingLate = walk;
-      var freeWalk = function () { claimingLate = null; };
+      var freeWalk = function () { claimingLate = null; arrive(); };
       walk.then(freeWalk, freeWalk);
       return walk;
     },

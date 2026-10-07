@@ -888,6 +888,8 @@ final class WebHostController: UIViewController {
     @objc private func cameToFront() {
         // before the page hears it is back: requests may leave again
         parkRun += 1
+        // and the seed kept for the putting-away before it is not there for this visit
+        SeedVault.endLeaving()
         Route.openDoor()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.bridge.tapWoke()
@@ -941,8 +943,10 @@ final class WebHostController: UIViewController {
     @objc private func appEnteredBackground() {
         backgroundedAt = Date()
         coverScreen()
-        // a seed kept for the native actions, or typed words, do not sit in memory while Foxy is away
-        SeedVault.forgetNativeSeed()
+        /* Typed words and the unlock do not sit in memory while Foxy is away,
+         * and the seed stays only for the work of being put away (the top-up
+         * below): until that is over, twenty seconds at most (SeedVault.leaving). */
+        SeedVault.putAway()
         // nor does a seed screen stay up, to be found over the PIN lock on return
         SeedScreens.closeAll()
         /* The connection diary, written here because this is where a force-quit
@@ -960,8 +964,12 @@ final class WebHostController: UIViewController {
         bridge.closeInboxForBackground()
         // Tor off the network before iOS suspends Foxy (TorService.backgrounded).
         // The background task holds the moment Tor's answer takes.
+        parkRun += 1
+        let run = parkRun
         var task = UIBackgroundTaskIdentifier.invalid
-        let finish = {
+        let finish = { [weak self] in
+            // the seed kept for this putting-away goes with it, whichever way it ends (iOS calling time included)
+            if let self, run == self.parkRun { SeedVault.endLeaving() }
             guard task != .invalid else { return }
             UIApplication.shared.endBackgroundTask(task)
             task = .invalid
@@ -987,8 +995,6 @@ final class WebHostController: UIViewController {
          * door opens (appBecameActive). `parkRun` is which putting-away this
          * is: one that was overtaken by a return, and then by another
          * putting-away, must not park Tor under the second one's payment. */
-        parkRun += 1
-        let run = parkRun
         let began = Date()
         var said = false, saidRest = false
         var restSince: Date?
@@ -1031,6 +1037,8 @@ final class WebHostController: UIViewController {
                 } else if out > 0 {
                     print("[foxy] tor: \(out) request(s) still out; leaving the network anyway")
                 }
+                // the work of being put away is over, and the seed kept for it goes now
+                SeedVault.endLeaving()
                 // nothing new from here; what the page starts now is told it was not sent
                 Route.shutDoor()
                 DispatchQueue.main.asyncAfter(deadline: .now() + after) { park() }
@@ -1056,6 +1064,8 @@ final class WebHostController: UIViewController {
          * for. */
         // back: a putting-away still waiting stops here, and requests may leave again
         parkRun += 1
+        // and the seed kept for it is dropped: a visit reads its own, through Face ID
+        SeedVault.endLeaving()
         Route.openDoor()
         let wentAway = backgroundedAt != nil
         if !wentAway {

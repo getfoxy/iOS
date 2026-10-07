@@ -4,6 +4,11 @@
 
     get connected() { return !!wallet; },
     get mintUrl() { return mintUrl; },
+    /* Whether a late claim has the wallet at another mint just now, and a
+     * promise for when it is home (`claimAway`). For the screens: a balance
+     * read in between is the other mint's. */
+    awayClaiming: function () { return !!claimAway; },
+    whenHome: function () { return homeFirst(function () { return Promise.resolve(); }); },
 
     /* Where a fresh install points itself. Nothing asks; boot just connects. */
     defaultMint: 'https://mint.minibits.cash/Bitcoin',

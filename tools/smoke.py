@@ -1050,6 +1050,19 @@ else:
 # and the carry-over of hosts a wallet already used happens once.
 bridge25 = open(os.path.join('Foxy', 'Bridge', 'FoxyBridge.swift'), encoding='utf8').read()
 route25 = open(os.path.join('Foxy', 'Network', 'Route.swift'), encoding='utf8').read()
+# A VPN's tunnel with nothing under it is no network: the path monitor's answer
+# goes through NetworkKind, which says "none" for a path of tunnels alone. Called
+# a network, it had a phone with Wi-Fi and cellular off send a swap into the tunnel.
+kind25_path = os.path.join('Foxy', 'Network', 'NetworkKind.swift')
+kind25 = open(kind25_path, encoding='utf8').read() if os.path.exists(kind25_path) else ''
+if 'NetworkKind.of(satisfied: path.status == .satisfied' not in route25 \
+        or 'path.availableInterfaces.map { $0.name }' not in route25 \
+        or 'kind = "other"' in route25 \
+        or not re.search(r'if !interfaces\.isEmpty && interfaces\.allSatisfy\(isTunnel\) \{ return "none" \}', kind25) \
+        or '"utun"' not in kind25:
+    fail('the network kind: a path made only of VPN tunnels is no longer called no network (Route.swift, NetworkKind.swift)')
+else:
+    ok('a VPN tunnel with nothing under it counts as no network')
 mint_case = bridge_handler(bridge25, 'mintRequest')
 prompts25 = open(os.path.join('Foxy', 'Bridge', 'NativePrompts.swift'), encoding='utf8').read() \
     if os.path.exists(os.path.join('Foxy', 'Bridge', 'NativePrompts.swift')) else ''
@@ -1658,8 +1671,36 @@ if 'foxyNativeSecrets' in host31:
     problems31.append('the page is still told whether native secrets are on, a flag it no longer reads')
 if 'SeedVault.forgetNativeSeed()' not in bridge31.split('func pageGone()', 1)[-1][:400]:
     problems31.append('the seed kept for the native secrets outlives the page')
-if 'SeedVault.forgetNativeSeed()' not in host31.split('func appEnteredBackground()', 1)[-1][:400]:
+# Put away, the seed in memory serves the top-up that runs then, and nothing
+# after it: behind Face ID the keychain cannot be read from the background, and
+# a top-up that had to read it never ran. Everything else that leaving dropped
+# is still dropped at once, the time is bounded by the clock as well as by the
+# work, and a return ends it.
+away31 = host31.split('func appEnteredBackground()', 1)[-1]
+away31 = away31.split('@objc private func appBecameActive()', 1)[0]
+if 'SeedVault.putAway()' not in away31[:700]:
     problems31.append('the seed kept for the native secrets stays while Foxy is in the background')
+put31 = re.search(r'static func putAway\(now: Date = Date\(\)\) \{(.*?)\n    \}', store31, re.S)
+if not put31 or not all(x in put31.group(1) for x in ('unlock = nil', 'nativeSeed = nil', 'nativeSeedEpoch += 1',
+                                                      'SeedCandidates.shared.forgetAll()')):
+    problems31.append('putting Foxy away no longer gives up the unlock, the visit\'s seed and the typed words at once')
+secs31 = re.search(r'static let leavingSeconds: TimeInterval = (\d+)', store31)
+kept31 = re.search(r'static func kept\(now: Date = Date\(\)\) -> NUT13\.Seed\? \{(.*?)\n    \}', store31, re.S)
+if not secs31 or not (0 < int(secs31.group(1)) <= 30) or not kept31 \
+        or 'leavingCovers(keptAt: last.at, now: now)' not in kept31.group(1) or 'leaving = nil' not in kept31.group(1):
+    problems31.append('the seed kept for being put away is not bounded by the clock (thirty seconds is what iOS allows)')
+if away31.count('SeedVault.endLeaving()') < 2:
+    problems31.append('the seed kept for being put away is not dropped when that work ends, or when iOS calls time')
+for back31, reach31 in (('func appBecameActive()', 2500), ('func cameToFront()', 600)):
+    if 'SeedVault.endLeaving()' not in host31.split(back31, 1)[-1][:reach31]:
+        problems31.append('a return to Foxy (' + back31 + ') finds the seed kept for the putting-away before it')
+for name31 in ('forgetUnlock', 'pageWillLoad'):
+    body31 = re.search(r'static func ' + name31 + r'\(\) \{(.*?)\n    \}', store31, re.S)
+    if not body31 or 'leaving = nil' not in body31.group(1):
+        problems31.append(name31 + ' keeps the seed that was kept for being put away')
+gone31 = re.search(r'static func forgetNativeSeed\(keepingCandidate kept: String\?\) \{(.*?)\n    \}', store31, re.S)
+if not gone31 or 'leaving = nil' not in gone31.group(1):
+    problems31.append('forgetting the seed keeps the one that was kept for being put away')
 forget31 = re.search(r'static func forgetUnlock\(\) \{(.*?)\n    \}', store31, re.S)
 if not forget31 or 'nativeSeed = nil' not in forget31.group(1):
     problems31.append('forgetting the unlock keeps the seed the native secrets use')

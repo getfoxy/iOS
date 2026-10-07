@@ -931,7 +931,10 @@ in front of payments and a receiver's answers.
   below target, six at a time. Nothing runs in the foreground: `tidyChangeNow`
   only notes that one is owed, `putAway(true)` starts it, no new swap starts
   after twelve seconds away, and the phone keeps Tor on the network for
-  twenty (`FoxyWebView.appEnteredBackground`, `moneyInFlight`). Anything else
+  twenty (`FoxyWebView.appEnteredBackground`, `moneyInFlight`), and the seed
+  in memory for as long: behind Face ID it cannot be read again from the
+  background, and a top-up that had to read it never ran
+  (`SEED-HANDLING.md`, `SeedVault.putAway`). Anything else
   that is out, a fee quote or a check of a piece, is waited for three seconds
   more, and from then no request leaves until Foxy is back (`Route.leaving`,
   `Route.shutDoor`): a request the page starts in that moment is told it was

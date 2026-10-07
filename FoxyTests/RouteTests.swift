@@ -296,4 +296,28 @@ final class MintCircuitTests: XCTestCase {
         }
         XCTAssertEqual(MintCircuit.label(42).count, 32)
     }
+
+    /// A VPN left on with Wi-Fi and cellular off is no network.
+    ///
+    /// Its tunnel stays up with nothing under it and the path reads as
+    /// satisfied; called "other", it was a network, and a phone in that state
+    /// sent a swap into the tunnel and stalled the payment after it (from a
+    /// phone log).
+    func testATunnelWithNothingUnderItIsNoNetwork() {
+        func kind(_ wifi: Bool, _ cellular: Bool, _ wired: Bool, _ names: [String], satisfied: Bool = true) -> String {
+            NetworkKind.of(satisfied: satisfied, wifi: wifi, cellular: cellular, wired: wired, interfaces: names)
+        }
+        XCTAssertEqual(kind(true, false, false, ["en0"]), "wifi")
+        XCTAssertEqual(kind(true, false, false, ["utun4", "en0"]), "wifi", "Wi-Fi under a VPN")
+        XCTAssertEqual(kind(false, true, false, ["utun4", "pdp_ip0"]), "cellular", "cellular under a VPN")
+        XCTAssertEqual(kind(false, false, true, ["en5"]), "wired")
+        XCTAssertEqual(kind(false, false, false, ["utun4"]), "none", "the VPN's tunnel and nothing else")
+        XCTAssertEqual(kind(false, false, false, ["utun4", "ipsec0"]), "none")
+        XCTAssertEqual(kind(false, false, false, ["pan0"]), "other", "tethered over Bluetooth is a network")
+        XCTAssertEqual(kind(false, false, false, ["utun4", "pan0"]), "other")
+        XCTAssertEqual(kind(false, false, false, []), "other", "nothing named is not an accusation")
+        XCTAssertEqual(kind(true, true, true, ["en0"], satisfied: false), "none")
+        for name in ["utun0", "utun12", "ipsec1", "ppp0", "tun0", "tap0"] { XCTAssertTrue(NetworkKind.isTunnel(name), name) }
+        for name in ["en0", "pdp_ip0", "pan0", "bridge100", "awdl0", "lo0"] { XCTAssertFalse(NetworkKind.isTunnel(name), name) }
+    }
 }

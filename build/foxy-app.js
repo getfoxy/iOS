@@ -2065,28 +2065,35 @@ class Component extends DCLogic {
 
   /* The ECASH TOKEN screen's QR code, animated for a token of more than two
    * proofs (FoxyWallet.tokenQrAnimates): one code for such a token was too
-   * dense for some cameras. Frames of at most 200 bytes at error
-   * correction L, a new one every 200 ms, the same UR frames cashu.me shows, so
-   * cashu.me and Foxy read them (06-animated-qr.js). The code is drawn as large
-   * as the screen allows, so bigger frames stay easy to read and a token takes
-   * fewer of them (fewer frames scan faster). Each frame is drawn straight into the image, not
-   * through a render; renderToken shows the latest one. */
-  /* The frames carry heavy error correction, because something is drawn on
-   * top of them.
+   * dense for some cameras. A new frame every 200 ms, the same UR frames
+   * cashu.me shows, so cashu.me and Foxy read them (06-animated-qr.js). The
+   * code is drawn as large as the screen allows. Each frame is drawn straight
+   * into the image, not through a render; renderToken shows the latest one. */
+  /* Nothing is drawn on a token's animated code, so its frames carry the
+   * lightest error correction and two and a half times the data.
    *
-   * Every QR in Foxy has the badge in its middle, and the badge covers modules
-   * the reader needs. A frame at 'L' can lose 7% of its codewords; the badge
-   * was taking 12% of them, and a blot in one place is worse than that figure
-   * suggests because it destroys whole codewords in a few blocks rather than
-   * one here and there. So the animated codes — tokens, and requests too dense
-   * for one code — could not be read at all, while a Lightning invoice beside
-   * them scanned first time, because an invoice is a single code at 'M'.
+   * Every code in Foxy had the badge in its middle, and the badge covers
+   * modules a reader needs: a frame at 'L' can lose 7% of its codewords and
+   * the badge took 12%, so the frames were raised to 'Q' to be read at all.
+   * That paid for a picture with half of every frame. A frame that is missed
+   * is made up by the ones after it (that is what the fountain is for), which
+   * a still code has no way to do; so the badge stays on still codes and
+   * comes off the ones that move (`tokenQrBadge`), and the frames go back to
+   * 'L'. With the compact mode asked for (`FoxyWallet.qr`), a fragment of
+   * 500 is 89 modules where one of 200 was 97: fewer frames, and each
+   * drawn larger. tests/qr-readable.js holds both. */
+  TOKEN_QR = { fragment: 500, everyMs: 200, ecc: 'L' };
+
+  /* A request too dense for one code is animated too, and that code has the
+   * TAP button in its middle, which is a control and stays. So these frames
+   * keep the heavy correction the button needs.
    *
-   * 'Q' is 25%, and it costs a fragment this size 65 modules against 53 — 3.3
-   * points each in that box, still above the 3 that phone cameras want.
-   * tests/qr-readable.js holds both ends of that: what the badge covers, and
-   * what the level allows. */
-  TOKEN_QR = { fragment: 200, everyMs: 200, ecc: 'Q' };
+   * And are smaller. A fragment of 200 made a frame of 97 modules, which is
+   * 2.3 points each in the 240-point box this screen has on the smallest
+   * phone, under the 3 a camera wants; the test meant to hold that line
+   * measured a frame less than half as long as a real one. At 150, in the
+   * compact mode, a frame is 69 modules and 3.1 points. */
+  REQ_QR = { fragment: 150, everyMs: 200, ecc: 'Q' };
 
   /* How much of a code the badge in its middle hides, as a fraction of the
    * width of the whole box. The markup draws it at 50 points inside 240. */
@@ -2206,10 +2213,10 @@ class Component extends DCLogic {
     }
     if (!animate || this._reqQr) return;
     console.log('[foxy] the request is too dense for one code on a small screen; animating it');
-    const frames = W.animatedQr(text, this.TOKEN_QR.fragment);
+    const frames = W.animatedQr(text, this.REQ_QR.fragment);
     const run = { text: text, src: '', timer: 0 };
     const tick = () => {
-      const src = W.qr(frames.next(), { ecc: this.TOKEN_QR.ecc });
+      const src = W.qr(frames.next(), { ecc: this.REQ_QR.ecc });
       if (!src) return;
       run.src = src;
       const img = document.querySelector('[data-req-qr]');
@@ -2217,7 +2224,7 @@ class Component extends DCLogic {
     };
     this._reqQr = run;
     tick();
-    run.timer = setInterval(tick, this.TOKEN_QR.everyMs);
+    run.timer = setInterval(tick, this.REQ_QR.everyMs);
   }
 
   /* Small change on hand, so most tokens need no swap and are heard about as
@@ -3750,6 +3757,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this.setState({ everReceived: true });
     if (!W.backedUp || W.backedUp() || this.state.dismissedBackup) return;
+    if (this.backupAskedLately()) return;
 
     // Wait for home. The prompt was rising over the payment confirmation,
     // stacking one thing to read on top of another and burying the amount
@@ -3758,15 +3766,40 @@ class Component extends DCLogic {
     let waited = 0;
     const raise = () => {
       if (W.backedUp() || this.state.dismissedBackup) return;
+      // another arrival may have raised it while this one waited for home
+      if (this.backupAskedLately()) return;
       if (this.state.screen !== 'home') {
         waited += 900;
         if (waited > 90000) return;
         this._bkAskT = setTimeout(raise, 900);
         return;
       }
+      this.backupAskedNow();
       this.setState({ bkAskOpen: true });
     };
     this._bkAskT = setTimeout(raise, 1400);
+  }
+
+  /* BACK UP YOUR BITCOIN, once in a day.
+   *
+   * It rose after every payment until the words were written down, which is
+   * the right thing to say and the wrong number of times to say it: somebody
+   * taking payments all afternoon pressed DO THIS LATER after each one. Now
+   * it is said once and not again for twenty-four hours, counted from when
+   * it was raised and kept across launches. A clock that has gone backwards
+   * does not silence it. The line on the home screen is still there in
+   * between. */
+  BACKUP_ASK_EVERY_MS = 86400000;
+
+  backupAskedLately() {
+    let at = 0;
+    try { at = Number(localStorage.getItem('foxy.backup.asked')) || 0; } catch (e) {}
+    const since = Date.now() - at;
+    return at > 0 && since >= 0 && since < this.BACKUP_ASK_EVERY_MS;
+  }
+
+  backupAskedNow() {
+    try { localStorage.setItem('foxy.backup.asked', String(Date.now())); } catch (e) {}
   }
 
   /* Check the phrase was actually written down: the phone's own quiz, with
@@ -4626,6 +4659,15 @@ class Component extends DCLogic {
   refreshBalance() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return Promise.resolve();
+    /* Not while a late claim has the wallet at another mint (`awayClaiming`):
+     * the balance read then is that mint's, and it went on the home screen
+     * under this one's name. Read when the phone is home, once. */
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._balWhenHome) {
+        this._balWhenHome = W.whenHome().then(() => { this._balWhenHome = null; return this.refreshBalance(); });
+      }
+      return this._balWhenHome;
+    }
     if (this.watchHeld) this.watchHeld();
     // the figure that is actually the person's, which is local and instant
     /* With the change that is on its way back. An over-payment leaves the
@@ -8797,6 +8839,13 @@ class Component extends DCLogic {
   loadHistory() {
     const W = window.FoxyWallet;
     if (!W || !W.connected) return;
+    // nor the history, which is read mint by mint (`refreshBalance`)
+    if (W.awayClaiming && W.awayClaiming()) {
+      if (!this._histWhenHome) {
+        this._histWhenHome = W.whenHome().then(() => { this._histWhenHome = null; this.loadHistory(); });
+      }
+      return;
+    }
     // change made and never handed over belongs on its payment's entry
     W._onHistoryChanged = () => { clearTimeout(this._histAgainT); this._histAgainT = setTimeout(() => this.loadHistory(), 50); };
     // change that was being shown as a code has been taken: the screen showing it comes down
@@ -9102,6 +9151,12 @@ class Component extends DCLogic {
         ways: this.spWaysN(),
         total: this.state.spTotal,
         at: Date.now(),
+        /* The mint that issued these, as the invoices say it. `splitSave`
+         * used to fill this in from wherever the wallet was at the moment of
+         * saving, and a late claim had it at another mint for those seconds:
+         * the bill was filed against a mint that had never heard of its
+         * quotes, and the check on return refused to ask the one that had. */
+        mint: (list[0] && list[0].mint) || undefined,
         rows: list.map((inv, k) => ({
           hash: inv.hash, bolt11: inv.bolt11, sats: inv.sats,
           label: 'Split ' + (k + 2) + ' of ' + this.spWaysN(), paid: !!paidBy[k],
@@ -9117,7 +9172,7 @@ class Component extends DCLogic {
       this._spWatching = list.map(inv => inv.hash).join(',');
       this._spWatchedAt = Date.now();
       this._spStops = list.map((inv, i) => paidBy[i] ? (() => {})
-        : W.watch(inv.hash, () => this.spMarkPaid(i, inv.hash), { timeoutMs: 3600000 }));
+        : W.watch(inv.hash, () => { this.spMarkPaid(i, inv.hash); this.spPaidOnScreen(i); }, { timeoutMs: 3600000 }));
       // and watched again before that hour is up: a bill on a table outlasts it
       this.splitWatchLater();
     }).catch(e => {
@@ -9164,7 +9219,7 @@ class Component extends DCLogic {
    * by hand. Only from the payer screen showing that very
    * share; a share opened from the waiting list goes back there instead
    * (requestPaidHere). With every share paid it is EVERYONE HAS PAID. */
-  spAdvanceAfterPaid(idx) {
+  spAdvanceAfterPaid(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
     const n = this.spOthers();
@@ -9173,7 +9228,7 @@ class Component extends DCLogic {
     for (let i = 0; i < n; i++) if (!paid[i]) { next = i; break; }
     // a fresh screen arms afresh
     this._tapPaidHere = false;
-    console.log('[foxy] split: share ' + (idx + 1) + ' paid by tap; '
+    console.log('[foxy] split: share ' + (idx + 1) + ' paid ' + (how || 'by tap') + '; '
       + (next < 0 ? 'everyone has paid' : 'on to payer ' + (next + 1)));
     this.setState(next < 0
       ? { screen: 'spAllPaid', spFromWaiting: false, spCopied: -1, spShared: -1, tapShownCode: '', tapRecvStage: '' }
@@ -9198,13 +9253,22 @@ class Component extends DCLogic {
    * history load. */
   spSyncPaid() {
     const W = window.FoxyWallet;
-    const led = W && W.splitPending && W.splitPending();
+    /* The record whether or not it is finished (`splitRecord`). It was
+     * `splitPending`, which answers nothing once every row is paid: the last
+     * share settled by the sweep was the one share this could never tick. */
+    const led = W && (W.splitRecord ? W.splitRecord() : (W.splitPending && W.splitPending()));
     if (!led || !led.rows) return;
     const n = this.spOthers();
     const paid = this.spPaidArr();
-    let moved = false;
-    led.rows.slice(0, n).forEach((r, i) => { if (r.paid && !paid[i]) { paid[i] = true; moved = true; } });
-    if (!moved) return;
+    /* A finished record stays on file until its all-paid screen is dismissed,
+     * so it may be an earlier bill's. Only the bill this screen is collecting
+     * ticks anything: its rows are these invoices. */
+    const finished = led.rows.every(r => r.paid);
+    const mine = this.state.spInvoices || [];
+    const here = (r, i) => !finished || (!!r.bolt11 && r.bolt11 === mine[i]);
+    const landed = [];
+    led.rows.slice(0, n).forEach((r, i) => { if (r.paid && !paid[i] && here(r, i)) { paid[i] = true; landed.push(i); } });
+    if (!landed.length) return;
     const done = paid.every(Boolean);
     this.setState(p => ({
       spPaid: paid,
@@ -9212,6 +9276,22 @@ class Component extends DCLogic {
       screen: done && p.screen === 'spWaiting' ? 'spAllPaid' : p.screen,
     }));
     if (done && this.haptic) this.haptic('success');
+    landed.forEach(i => this.spPaidOnScreen(i));
+  }
+
+  /* A share paid by its invoice while its own screen was up: the screen says
+   * so, as it does for a share paid over the tap (`spAdvanceAfterPaid`).
+   *
+   * It did nothing. The tally was marked and the payer's code stayed where it
+   * was, so the person holding the phone saw no sign of the payment until
+   * they went to the list. Back to the list when the share was opened from
+   * it, otherwise on to the next payer; with every share paid it is EVERYONE
+   * HAS PAID. */
+  spPaidOnScreen(idx) {
+    const s = this.state;
+    if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
+    if (s.spFromWaiting) { this.setState({ screen: 'spWaiting', spFromWaiting: false }); return; }
+    this.spAdvanceAfterPaid(idx, 'by its invoice');
   }
 
   /* Pick up a bill left half-collected.
@@ -12617,6 +12697,15 @@ class Component extends DCLogic {
       // only when the mint actually charged for the swap
       tokenHasFee: !!s.tokenOutFee,
       tokenFee: this.money(s.tokenOutFee || 0).main,
+      /* The badge in the middle of the token's code: on a still code, which
+       * has the correction to spare for it, and not on one that moves
+       * (TOKEN_QR, 07-history-tokens-mints.js). */
+      tokenQrBadge: (() => {
+        if (sc !== 'tokenOut') return true;
+        const W = window.FoxyWallet;
+        const tk = s.tokenOut || ((W && W.lastToken && W.lastToken() || {}).token);
+        return !(tk && W && W.tokenQrAnimates && W.tokenQrAnimates(tk));
+      })(),
       // falls back to what is on file, so navigating away cannot lose it
       tokenOutQr: (() => {
         /* Only on its own screen. It was drawn on every render of every
@@ -19202,7 +19291,7 @@ class Component extends DCLogic {
     return {
       // the sheet, raised the first time a payment lands
       bkAskOpen: !!s.bkAskOpen,
-      // not now, and not again until the next payment lands
+      // not now, and not again for a day (`backupAskedLately`)
       bkAskLater: () => this.setState({ bkAskOpen: false, bkAsk: false }),
       // The seed screen is an overlay, not a template screen: bkStart renders
       // blank, which is why this went nowhere. Close the card and open it.
