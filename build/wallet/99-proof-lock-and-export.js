@@ -41,7 +41,9 @@
     * setProofs that followed it, and a claim could drop sats the mint had
     * already issued (tests/onchain-faults.js). None of the three calls another,
     * so none waits on itself; the watcher chains them one at a time anyway. */
-   'onchainPay', 'onchainClaim', 'onchainFollow'].forEach(function (name) {
+   /* And making an address, which writes the same list the claims write: made
+    * while a claim was at the mint, it was erased by that claim's save. */
+   'onchainPay', 'onchainClaim', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
     var inner = FoxyWallet[name];
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {

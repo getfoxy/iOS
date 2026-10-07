@@ -120,6 +120,22 @@
      * Resolves with the sats taken, or 0 when there is nothing yet. */
     onchainClaim: function (quoteId) {
       assertRoute();
+      /* What a claim writes back is what it changed, into the list as it is
+       * NOW. It loaded the whole list before its round trip and saved that
+       * copy after, several seconds later over Tor: an address made meanwhile
+       * (the watcher claims on its own, and a person can be at RECEIVE) was
+       * written into the list and then erased by the claim's save, with the
+       * random key the mint needs before it releases ecash for that quote.
+       * Bitcoin sent to the address on the screen was unclaimable for good.
+       * `onchainAddress` is behind the proof lock as well now
+       * (99-proof-lock-and-export.js), so the two never run at once. */
+      var saveOnchainIssued = function (quote, issued) {
+        var now = load(K.onchain, []);
+        for (var k = 0; k < now.length; k++) {
+          if (now[k].quote === quote) now[k].issued = issued;
+        }
+        save(K.onchain, now);
+      };
       var pending = load(K.onchain, []);
       var record = null;
       for (var i = 0; i < pending.length; i++) if (pending[i].quote === quoteId) record = pending[i];
@@ -163,7 +179,7 @@
               });
               FoxyWallet.tag(lostHash, { to: 'on chain' });
               record.issued = seen.issued;
-              save(K.onchain, pending);
+              saveOnchainIssued(quoteId, record.issued);
               console.log('[foxy] on chain: a claim answer was lost \u2014 restored', back,
                           'sats from its counters');
               return { sats: back, hash: lostHash };
@@ -195,7 +211,7 @@
           });
           FoxyWallet.tag(hash, { to: 'on chain' });
           record.issued = seen.issued + got;
-          save(K.onchain, pending);
+          saveOnchainIssued(quoteId, record.issued);
           console.log('[foxy] on chain:', got, 'sats claimed');
           return { sats: got, hash: hash };
         });

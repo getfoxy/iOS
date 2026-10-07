@@ -6525,7 +6525,29 @@
     var ids = Object.keys(all);
     if (ids.length > LOCK_KEYS_MAX) {
       var waiting = unclaimed();
-      ids.filter(function (k) { return k !== id && !(k in waiting); })
+      /* By the key, not only by the id. A payment kept from a scan waits
+       * under the fingerprint of its pieces, not under the id of the request
+       * whose key it is locked to, so its row was not spared: for a row from
+       * before, a random key, that was the only copy, and the payment was
+       * stranded for good. Every key a waiting payment names is read from
+       * the payment itself. */
+      var named = [];
+      Object.keys(waiting).forEach(function (wid) {
+        var tok = null;
+        try { tok = FoxyWallet.tokenInfo((waiting[wid] || {}).token); } catch (eTok) { tok = null; }
+        ((tok && tok.proofs) || []).forEach(function (pr) {
+          var keys = null;
+          try { keys = spendableBy(pr); } catch (eKeys) { keys = null; }
+          (keys || []).forEach(function (key) { named.push(key); });
+        });
+      });
+      var spared = function (k) {
+        if (k === id || (k in waiting)) return true;
+        if (!named.length) return false;
+        var pub = lockPubOf(all[k]);
+        return !!pub && named.some(function (key) { return sameLockKey(key, pub); });
+      };
+      ids.filter(function (k) { return !spared(k); })
         .sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); })
         .slice(0, ids.length - LOCK_KEYS_MAX)
         .forEach(function (k) { delete all[k]; });
@@ -6593,6 +6615,7 @@
    * the entries are dropped from memory's point of view by the epoch anyway,
    * but there is nothing to throw to. The next prime overwrites the key. */
   function dropLockPool() {
+    lockPoolChecked = false;
     if (!lockPool().length) return;
     console.log('[foxy] the seed changed; the primed lock keys go with it');
     if (!save(LOCK_POOL, [])) {
@@ -6600,6 +6623,35 @@
         + ' requests are sent unlocked until they can be');
       lockPoolStale = true;
     }
+  }
+
+  /* Whether the pool on disk is this seed's, asked of the phone once a launch.
+   *
+   * The latch above lives in memory. One refused write at a seed change, then
+   * a relaunch, and the old seed's keys were handed out again: the request
+   * went out locked to a key the new seed cannot derive, the payment to it
+   * was kept, and the claim found nothing to open it with. The pool carries
+   * no mark of its seed, so the first entry is put to the phone: the key it
+   * derives at that index is the pool's, or the pool is not this seed's and
+   * goes. A phone that cannot answer leaves the pool as it is; a wrong one
+   * costs nothing but the indices. */
+  var lockPoolChecked = false;
+
+  function lockPoolOfThisSeed(pool) {
+    if (lockPoolChecked || !pool.length) { lockPoolChecked = true; return Promise.resolve(true); }
+    var first = pool[0];
+    if (!Number.isInteger(first.i) || first.i < 0) return Promise.resolve(true);
+    return nativeJson('p2pkPubkeys', { start: first.i, count: 1 }, 60000).then(function (j) {
+      var keys = (j && j.pubkeys) || [];
+      var theirs = String(keys[0] || '').toLowerCase();
+      lockPoolChecked = true;
+      if (!/^0[23][0-9a-f]{64}$/.test(theirs)) return true;
+      if (theirs === String(first.pub || '').toLowerCase()) return true;
+      console.warn('[foxy] the primed lock keys are another seed\u2019s; they go, and this seed\u2019s are made');
+      if (!save(LOCK_POOL, [])) { lockPoolStale = true; return false; }
+      lockPoolStale = false;
+      return false;
+    }, function () { return true; });
   }
 
   /* Set when the write above failed. Belt and braces: `takeLockKey` hands out
@@ -6611,11 +6663,12 @@
    * never rejects, because every caller's answer to "no locks" is the same: send
    * the request without one. */
   function primeLockPool() {
-    var have = lockPool();
-    if (have.length >= LOCK_POOL_WANT) return Promise.resolve(have.length);
     if (lockPriming) return lockPriming;
-    var want = LOCK_POOL_WANT - have.length;
-    var run = nativeJson('p2pkReserve', { count: want }, 60000).then(function (j) {
+    var run = lockPoolOfThisSeed(lockPool()).then(function () {
+      var have = lockPool();
+      if (have.length >= LOCK_POOL_WANT) return have.length;
+      var want = LOCK_POOL_WANT - have.length;
+      return nativeJson('p2pkReserve', { count: want }, 60000).then(function (j) {
       var start = j && j.start, keys = (j && j.pubkeys) || [];
       if (!Number.isInteger(start) || start < 0 || !Array.isArray(keys) || keys.length !== want) {
         throw new Error('the phone’s lock keys were not for what was asked');
@@ -6642,6 +6695,7 @@
       console.warn('[foxy] the phone did not derive lock keys for payment requests:', (e && e.message) || e);
       return lockPool().length;
     });
+    });
     lockPriming = run;
     function done() { if (lockPriming === run) lockPriming = null; }
     run.then(done, done);
@@ -6657,7 +6711,8 @@
    * If the row does not land, the request carries no lock and one index is
    * wasted; if the pool write does not land, nothing is taken at all. */
   function takeLockKey(id) {
-    if (lockPoolStale) return '';
+    // nor before the phone has confirmed, this launch, whose keys the pool holds (`lockPoolOfThisSeed`)
+    if (lockPoolStale || !lockPoolChecked) return '';
     var pool = lockPool();
     if (!pool.length) return '';
     var one = pool.shift();
@@ -12513,6 +12568,22 @@
      * Resolves with the sats taken, or 0 when there is nothing yet. */
     onchainClaim: function (quoteId) {
       assertRoute();
+      /* What a claim writes back is what it changed, into the list as it is
+       * NOW. It loaded the whole list before its round trip and saved that
+       * copy after, several seconds later over Tor: an address made meanwhile
+       * (the watcher claims on its own, and a person can be at RECEIVE) was
+       * written into the list and then erased by the claim's save, with the
+       * random key the mint needs before it releases ecash for that quote.
+       * Bitcoin sent to the address on the screen was unclaimable for good.
+       * `onchainAddress` is behind the proof lock as well now
+       * (99-proof-lock-and-export.js), so the two never run at once. */
+      var saveOnchainIssued = function (quote, issued) {
+        var now = load(K.onchain, []);
+        for (var k = 0; k < now.length; k++) {
+          if (now[k].quote === quote) now[k].issued = issued;
+        }
+        save(K.onchain, now);
+      };
       var pending = load(K.onchain, []);
       var record = null;
       for (var i = 0; i < pending.length; i++) if (pending[i].quote === quoteId) record = pending[i];
@@ -12556,7 +12627,7 @@
               });
               FoxyWallet.tag(lostHash, { to: 'on chain' });
               record.issued = seen.issued;
-              save(K.onchain, pending);
+              saveOnchainIssued(quoteId, record.issued);
               console.log('[foxy] on chain: a claim answer was lost \u2014 restored', back,
                           'sats from its counters');
               return { sats: back, hash: lostHash };
@@ -12588,7 +12659,7 @@
           });
           FoxyWallet.tag(hash, { to: 'on chain' });
           record.issued = seen.issued + got;
-          save(K.onchain, pending);
+          saveOnchainIssued(quoteId, record.issued);
           console.log('[foxy] on chain:', got, 'sats claimed');
           return { sats: got, hash: hash };
         });
@@ -18971,7 +19042,9 @@
     * setProofs that followed it, and a claim could drop sats the mint had
     * already issued (tests/onchain-faults.js). None of the three calls another,
     * so none waits on itself; the watcher chains them one at a time anyway. */
-   'onchainPay', 'onchainClaim', 'onchainFollow'].forEach(function (name) {
+   /* And making an address, which writes the same list the claims write: made
+    * while a claim was at the mint, it was erased by that claim's save. */
+   'onchainPay', 'onchainClaim', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
     var inner = FoxyWallet[name];
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {
