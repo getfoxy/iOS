@@ -3753,6 +3753,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this.setState({ everReceived: true });
     if (!W.backedUp || W.backedUp() || this.state.dismissedBackup) return;
+    if (this.backupAskedLately()) return;
 
     // Wait for home. The prompt was rising over the payment confirmation,
     // stacking one thing to read on top of another and burying the amount
@@ -3761,15 +3762,40 @@ class Component extends DCLogic {
     let waited = 0;
     const raise = () => {
       if (W.backedUp() || this.state.dismissedBackup) return;
+      // another arrival may have raised it while this one waited for home
+      if (this.backupAskedLately()) return;
       if (this.state.screen !== 'home') {
         waited += 900;
         if (waited > 90000) return;
         this._bkAskT = setTimeout(raise, 900);
         return;
       }
+      this.backupAskedNow();
       this.setState({ bkAskOpen: true });
     };
     this._bkAskT = setTimeout(raise, 1400);
+  }
+
+  /* BACK UP YOUR BITCOIN, once in a day.
+   *
+   * It rose after every payment until the words were written down, which is
+   * the right thing to say and the wrong number of times to say it: somebody
+   * taking payments all afternoon pressed DO THIS LATER after each one. Now
+   * it is said once and not again for twenty-four hours, counted from when
+   * it was raised and kept across launches. A clock that has gone backwards
+   * does not silence it. The line on the home screen is still there in
+   * between. */
+  BACKUP_ASK_EVERY_MS = 86400000;
+
+  backupAskedLately() {
+    let at = 0;
+    try { at = Number(localStorage.getItem('foxy.backup.asked')) || 0; } catch (e) {}
+    const since = Date.now() - at;
+    return at > 0 && since >= 0 && since < this.BACKUP_ASK_EVERY_MS;
+  }
+
+  backupAskedNow() {
+    try { localStorage.setItem('foxy.backup.asked', String(Date.now())); } catch (e) {}
   }
 
   /* Check the phrase was actually written down: the phone's own quiz, with
@@ -17863,7 +17889,7 @@ class Component extends DCLogic {
     return {
       // the sheet, raised the first time a payment lands
       bkAskOpen: !!s.bkAskOpen,
-      // not now, and not again until the next payment lands
+      // not now, and not again for a day (`backupAskedLately`)
       bkAskLater: () => this.setState({ bkAskOpen: false, bkAsk: false }),
       // The seed screen is an overlay, not a template screen: bkStart renders
       // blank, which is why this went nowhere. Close the card and open it.

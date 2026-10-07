@@ -243,6 +243,61 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     delete window.FoxyWallet;
   }
 
+  /* BACK UP YOUR BITCOIN, once in a day.
+   *
+   * It rose after every payment until the words were written down: somebody
+   * taking payments all afternoon pressed DO THIS LATER after each one. */
+  {
+    const ask = new Function('return {' + method('noteReceived() {') + ',' + method('backupAskedLately() {') + ','
+      + method('backupAskedNow() {') + '}')();
+    const every = Number(/\n  BACKUP_ASK_EVERY_MS = (\d+);/.exec(src)[1]);
+    const store = {};
+    global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+    const realNow = Date.now, realSet = global.setTimeout, realClear = global.clearTimeout;
+    let now = 1800000000000;
+    Date.now = () => now;
+    // the card waits a moment for home before it rises: run that wait at once
+    global.setTimeout = (fn) => { fn(); return 0; };
+    global.clearTimeout = () => {};
+    let backed = false;
+    window.FoxyWallet = { backedUp: () => backed };
+    const a = Object.assign({ BACKUP_ASK_EVERY_MS: every, state: { screen: 'home' }, raised: 0,
+      setState(p) { if (p.bkAskOpen) this.raised += 1; Object.assign(this.state, p); } }, ask);
+    const receive = () => { a.state.bkAskOpen = false; a.noteReceived(); };
+
+    receive();
+    check('the first payment into a wallet that is not backed up raises the card', a.raised === 1, a.raised + ' raised');
+    receive(); now += 3600000; receive(); now += 82799000; receive();
+    check('and no payment in the next twenty-four hours raises it again', a.raised === 1, a.raised + ' raised');
+    now += 1000; receive();
+    check('a payment after that does, once', a.raised === 2, a.raised + ' raised');
+    receive();
+    check('and the day is counted again from there', a.raised === 2, a.raised + ' raised');
+    check('it is kept across launches, as a time and nothing else', /^\d+$/.test(store['foxy.backup.asked'] || ''), JSON.stringify(store));
+    // a new page load: nothing in memory, the stored time still holds
+    const b = Object.assign({ BACKUP_ASK_EVERY_MS: every, state: { screen: 'home' }, raised: 0,
+      setState(p) { if (p.bkAskOpen) this.raised += 1; Object.assign(this.state, p); } }, ask);
+    b.noteReceived();
+    check('a fresh launch inside the day does not raise it', b.raised === 0, b.raised + ' raised');
+    // a clock set back does not silence it for longer than a day
+    now -= 5 * 86400000; b.noteReceived();
+    check('a clock that has gone backwards does not silence it', b.raised === 1, b.raised + ' raised');
+    // off the home screen the card waits, and the day starts when it rises, not when the payment landed
+    now += 30 * 86400000;
+    const c = Object.assign({ BACKUP_ASK_EVERY_MS: every, state: { screen: 'paid' }, raised: 0,
+      setState(p) { if (p.bkAskOpen) this.raised += 1; Object.assign(this.state, p); } }, ask);
+    let tries = 0;
+    global.setTimeout = (fn) => { tries += 1; if (tries === 3) c.state.screen = 'home'; if (tries < 6) fn(); return 0; };
+    const stamped = store['foxy.backup.asked'];
+    c.noteReceived();
+    check('a card waiting for the home screen is not counted until it is shown', c.raised === 1 && store['foxy.backup.asked'] !== stamped, c.raised + ' raised after ' + tries + ' tries');
+    // backed up: never
+    backed = true; now += 30 * 86400000; receive();
+    check('and a wallet that is backed up is never asked', a.raised === 2, a.raised + ' raised');
+    Date.now = realNow; global.setTimeout = realSet; global.clearTimeout = realClear;
+    delete window.FoxyWallet;
+  }
+
   results.forEach(r => console.log(r));
   const failed = results.filter(r => r.startsWith('FAIL')).length;
   console.log(failed ? failed + ' card check(s) failed' : 'all card checks pass');

@@ -112,6 +112,7 @@ answers, and so do its counters (below, "Migration").
 | `foxy.custody.told` | mints whose "the mint holds your bitcoin" card has been shown | no | which mints you use |
 | `foxy.mint.health` | per mint: when it last answered, and consecutive failures with the first and latest time. A failure counts only while Tor is up and something else answered over it in the last three minutes | no | which mints you use, and when |
 | `foxy.nopasscode.off` | THIS IPHONE HAS NO PASSCODE turned off with DON'T SHOW AGAIN | no | no |
+| `foxy.backup.asked` | when BACK UP YOUR BITCOIN was last raised, so it is raised once in a day | no | no |
 | `foxy.mint.spread` | when A LOT AT ONE MINT was last shown, and whether it was turned off | no | no |
 
 *Removed:* `foxyTheme` (light or dark) was listed here. Nothing in the current

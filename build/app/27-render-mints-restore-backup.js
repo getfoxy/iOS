@@ -206,7 +206,7 @@
     return {
       // the sheet, raised the first time a payment lands
       bkAskOpen: !!s.bkAskOpen,
-      // not now, and not again until the next payment lands
+      // not now, and not again for a day (`backupAskedLately`)
       bkAskLater: () => this.setState({ bkAskOpen: false, bkAsk: false }),
       // The seed screen is an overlay, not a template screen: bkStart renders
       // blank, which is why this went nowhere. Close the card and open it.
