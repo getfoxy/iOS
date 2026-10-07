@@ -263,7 +263,27 @@
     + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
     + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
 
+  /* Snow that settles (`data-snow-cap`) is held at nothing while the launch
+   * screen is in front and started when it lifts: gathered where nobody
+   * could see it, it has already fallen by the time they can. Nothing is
+   * written to the page; the clocks themselves are held and let go. */
+  syncSnowCap() {
+    const G = window.FoxyGate;
+    const covered = !!(G && G.visible && G.visible());
+    if (!covered && !this._snowCapHeld) return;          // falling or settled: left alone
+    /** @type {Animation[]} */
+    const clocks = [];
+    document.querySelectorAll('[data-snow-cap], [data-snow-cap] i').forEach((el) => {
+      if (el.getAnimations) el.getAnimations().forEach((a) => clocks.push(a));
+    });
+    this._snowCapHeld = covered;
+    clocks.forEach((a) => {
+      try { a.currentTime = 0; if (covered) a.pause(); else a.play(); } catch (e) {}
+    });
+  }
+
   syncSnow() {
+    this.syncSnowCap();
     const layer = document.querySelector('[data-snow="home"]');
     if (!layer || layer.firstChild) return;            // made once, then left alone
     if (!this._snowCss) {

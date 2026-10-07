@@ -1,7 +1,7 @@
 {
  "home (first render)": {
   "file": "000-home-first-render.html",
-  "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
+  "markup": "2d3bbe0fd11a33392a253eebc16721688ec58be287e895009e77f6d8d8eb4706",
   "vals": "206ce0458e7205d93547859557de51de6adc40bcc59abc0e3dc274462b7218d7"
  },
  "screen amount": {
@@ -46,7 +46,7 @@
  },
  "screen home": {
   "file": "013-screen-home.html",
-  "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
+  "markup": "2d3bbe0fd11a33392a253eebc16721688ec58be287e895009e77f6d8d8eb4706",
   "vals": "206ce0458e7205d93547859557de51de6adc40bcc59abc0e3dc274462b7218d7"
  },
  "screen importSeed": {
@@ -141,67 +141,67 @@
  },
  "popup addConfirmOpen": {
   "file": "037-popup-addconfirmopen.html",
-  "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
+  "markup": "2d3bbe0fd11a33392a253eebc16721688ec58be287e895009e77f6d8d8eb4706",
   "vals": "206ce0458e7205d93547859557de51de6adc40bcc59abc0e3dc274462b7218d7"
  },
  "popup noteOpen": {
   "file": "038-popup-noteopen.html",
-  "markup": "697d5ac3215bb82fe8a11d0302a2dc5d226f1c57f842af91c3532ae02032e7a1",
+  "markup": "c34f337071d762131535ce420465273a00a4fffa6bb8c3abece432b2797d53b4",
   "vals": "57f3e623b6a4f6aa4044855c252ab3528f535e62cd77d5a5a8d6fc9d4e070552"
  },
  "popup rangeOpen": {
   "file": "039-popup-rangeopen.html",
-  "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
+  "markup": "2d3bbe0fd11a33392a253eebc16721688ec58be287e895009e77f6d8d8eb4706",
   "vals": "206ce0458e7205d93547859557de51de6adc40bcc59abc0e3dc274462b7218d7"
  },
  "popup removeConfirmOpen": {
   "file": "040-popup-removeconfirmopen.html",
-  "markup": "c79981d3f9d134436638cf41ae536d2b2cc3431e22c9e2217c2916917b825dc7",
+  "markup": "2d3bbe0fd11a33392a253eebc16721688ec58be287e895009e77f6d8d8eb4706",
   "vals": "206ce0458e7205d93547859557de51de6adc40bcc59abc0e3dc274462b7218d7"
  },
  "home, a balance and a chart": {
   "file": "041-home-a-balance-and-a-chart.html",
-  "markup": "1893e26ae94e6aaa6abf541e0b873895b670d23d14291fbf38db27256cf13392",
+  "markup": "f6d6c5204a3b45209ee44a4753e9421f8fdd8e012836866b4388ac6f263e91ce",
   "vals": "2febc145055aefed7c6b6e9f56002b1e6171da2e2cf9cdfcd100e3d78a8f0a07"
  },
  "home, balance hidden": {
   "file": "042-home-balance-hidden.html",
-  "markup": "305fe7939bad4147888b7df72f693b150d4959d7b2fce1e94e4e8b578fb4ab67",
+  "markup": "031dd02133f91438dda22400338ae10ceae9d74b59e9c61769d0e525ba13e11c",
   "vals": "1fb7e2d101e04310e48fce8a8e9b014620c1882b79bf4896525818372e666131"
  },
  "home, the menu open": {
   "file": "043-home-the-menu-open.html",
-  "markup": "f6b892dad005843140300dd9a212e8cea110bb641a5041a0e249ba76671353cf",
+  "markup": "092f1dc4622e14c7f4d5ead6e174c3971c08170217ecdae4d1599a4307b46b5f",
   "vals": "4c1400ececc2760e5ca6e9f6a7c1a71b8501dae6029ed5f324c95aa191dad697"
  },
  "home, price collapsed": {
   "file": "044-home-price-collapsed.html",
-  "markup": "1b63df2f5518efc06542456440d70e6697e81540d2dcc92c9a7a57e7098975bd",
+  "markup": "6cbf4825ee1212a977fa08936d8daea8094b6702f0b255bbb740ed233bbd3015",
   "vals": "695b5d97ff131c81e321a7975a74fac716f44161eae4e8518c4a544bf7a02911"
  },
  "home, price removed": {
   "file": "045-home-price-removed.html",
-  "markup": "a74215e0c7161bf39faef4b12c01ab600f54f7c4f84ae62b7c881354f02e9fdf",
+  "markup": "89f5a24de9cced2d8c7a686d4d212d864806518dd52e194b0307e79a4950c0df",
   "vals": "dfb5ad50fc785b2ff7b18a94a4bf0bb00a3b78b86d45bad126a52789cc5e4d4e"
  },
  "home, balance loading, no price": {
   "file": "046-home-balance-loading-no-price.html",
-  "markup": "26f64620821ddbd199ccc6938bc8c05f2e849c403b770ac0fa644660d2ff72d8",
+  "markup": "604eb74e61dfe0723f9e0542a6f1a7319cf3ead4cff3770f65808277cd17a2f7",
   "vals": "8c6f7dcc53eb84c5a4b4f330c2e0731c487773f3de92cec1131310da489a4447"
  },
  "home, a credit counting up": {
   "file": "047-home-a-credit-counting-up.html",
-  "markup": "97a28ebdde334d9d91cc60d7f0fac20ca635a431ad1b4f764efc9bc4446d5a58",
+  "markup": "eb78327335be1e4c28a2ee70bf383c3b41bf5bd8d50485e8e51228e5d05796ed",
   "vals": "50ffe59b05c1dbf064c2651e2b25955b3114f9b8bca303d41a5ca376865b7189"
  },
  "home, backup prompt due": {
   "file": "048-home-backup-prompt-due.html",
-  "markup": "a6c94de09a0610c308b974183f6fc26976fead2f88978ecd75263fb2498eeb48",
+  "markup": "25e7514bb19370438cc642d14383ccc3589af609b485465dd5fd918853d376de",
   "vals": "e9d6a2d8dc7e28c1e1486d706f2a16e6c987a6685fb8bcd2a08fe0e89db35138"
  },
  "home, the PIN set": {
   "file": "050-home-the-pin-set.html",
-  "markup": "f6b892dad005843140300dd9a212e8cea110bb641a5041a0e249ba76671353cf",
+  "markup": "092f1dc4622e14c7f4d5ead6e174c3971c08170217ecdae4d1599a4307b46b5f",
   "vals": "4c1400ececc2760e5ca6e9f6a7c1a71b8501dae6029ed5f324c95aa191dad697"
  },
  "change, a full pool": {
@@ -291,12 +291,12 @@
  },
  "home, working offline": {
   "file": "217-home-working-offline.html",
-  "markup": "723ed16c652e7ccc34c8e0851ababf11f37aad358eebb567e7bd55edbe73137e",
+  "markup": "e16051e1ac3dcf6b436aa3c9c727cd599adc0d8b5b47eedc03717c4fb8c41dae",
   "vals": "d14aba32f8c3e3599435d16edfa87b741550df9f2816720b18081af8c8d753a2"
  },
  "home, a secure connection": {
   "file": "218-home-a-secure-connection.html",
-  "markup": "76aa3aa7873c2aee8ac007272c0b35113f155e41183cdad64192093c21476302",
+  "markup": "ba2be9265b0a744a926450162b6808a47809b16f649b9f7ed50dacb3a909e339",
   "vals": "cfffb86625f788c202db5b82ba53ad7c0b6b2949699556d586ca5ac6f934bbfc"
  },
  "sendhow, working offline": {
@@ -346,27 +346,27 @@
  },
  "home, the Tor warning": {
   "file": "051-home-the-tor-warning.html",
-  "markup": "c82fe37b45488d5495054b6c75a08149c72f25cd95639cf36952820253fb66e3",
+  "markup": "36bef53647f1695319e654dd107a5770ca3dc9f19e8d853842e8ace4bb83633c",
   "vals": "2906a8130ad5075403cbeb9194f30ee2912dba8113df1c1f374726ac6724735c"
  },
  "home, light theme, orange accent": {
   "file": "052-home-light-theme-orange-accent.html",
-  "markup": "b4214aa65cc65e1ffd7f11b8496e463b4039d1c20ebc9dccb10f172f9aea1ebc",
+  "markup": "927d952b9c2f78db88de7760e80b89315f17f1cb5ee75bad10081dc8381c838e",
   "vals": "fa2b6d186a001af27c99b594773f39f36e4fe9c723806c97552c302aa0af74eb"
  },
  "home, with the keyboard up": {
   "file": "053-home-with-the-keyboard-up.html",
-  "markup": "4f20e33b26f9b6be228e86313988c9c8df4871ab4093ed772869732a4f96e8dd",
+  "markup": "1f4944f99bb132997a749fdd36a76c44ede2cf809bef7fa61eb02031a0dec1a7",
   "vals": "824c1c452eaedf4fe648e305fccebe0a4bd31b0729fdca2f3a463a998fdd7341"
  },
  "home, a toast": {
   "file": "054-home-a-toast.html",
-  "markup": "cee5a9c300f4668d46bbff86d194f798e77e44737f4cd728dc3805c1b0b755ea",
+  "markup": "4487dd29023de5121659d1263b10c4f5ab18f99a9072d1c4043f60a763bda37b",
   "vals": "abf53b1cc13fa169339ecd1cd41c4a65b779540c357ed950bf859c53e43c1542"
  },
  "home, an amber toast": {
   "file": "055-home-an-amber-toast.html",
-  "markup": "0a9495cb7ab7a9c900ec3c47e42f7221b67cba449fc02fab51f7cd6fe4e5ba6c",
+  "markup": "68b3f5d251d23247c70220ec241d3b34465285b0fcffb63827645dcb6b34639e",
   "vals": "7900ac4ea1bd95648a5056e7258feda68d7f887593d86bb6ec6890f768fb112d"
  },
  "amount, receive, dollars": {
@@ -646,7 +646,7 @@
  },
  "home, a payment at risk is still out there": {
   "file": "233-home-a-payment-at-risk-is-still-out-there.html",
-  "markup": "ec290070bc9da7c303634773bc092f5b8d5e942078f534d43d07b1f4675e4cb8",
+  "markup": "eda909fbe27735f61cbe61ad122c1c6135cad4fd161c0f53fb11be7ede998a3c",
   "vals": "10140b13c410243548ea55493906698971ff20a398986e16a926a85af9ad21e8"
  },
  "history, outgoing only": {
@@ -901,277 +901,277 @@
  },
  "backup ask": {
   "file": "157-backup-ask.html",
-  "markup": "729675fb2eacda4f729aedbaabf75ba68dd2adb1e6b8b5b3461e057208ef3bb0",
+  "markup": "d5016b8ec9370f00666f08c1a7ad8ab7f47b07eafe53bca520f8a63c40a52ed5",
   "vals": "e09135228a51253184b5ec3a49068764af627139f88794272e4c1e00da9f0dd8"
  },
  "settings groups open": {
   "file": "160-settings-groups-open.html",
-  "markup": "ffba120bed07a254fe772925a56cf3d9d0edff33c83fd95c1a993b32dd48e750",
+  "markup": "d5d7950cd4a0397b15fc33e7a5c8209ad5ff68c204d0162a4189b82550dc60fa",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: sendFail": {
   "file": "161-card-sendfail.html",
-  "markup": "4e9a0010fb64910deea27cb9592c207666c50f53fdbd4e1415d08fd84d2a71b8",
+  "markup": "3a2f29294934a2b32519585a0d3d2eaa1a59eb8158a9dcff705d841056fdbf9e",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: mintRefused": {
   "file": "162-card-mintrefused.html",
-  "markup": "931146b93db2db3374b48e13fbfbac2003338b4ad5a225db03de7f5b0f064eb2",
+  "markup": "255ab9303d0964688f6872117157cc95cbdea49ab0945da60cf80c8be7be670c",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: netLost": {
   "file": "163-card-netlost.html",
-  "markup": "e0142ab1dded550a4c8755d4453b50ffbd32452a858d1ae8a18e92122b8354c2",
+  "markup": "d2001a9e22f4927a9abc174821ad6e5cc46a7eb4b9946dc365731d8f60dc206d",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: lnNoRoute": {
   "file": "164-card-lnnoroute.html",
-  "markup": "b265f01190bc29065f371087e2872e531bf5384b1b5214a02c930740ce5e3f52",
+  "markup": "51a1bdf00efd6969264ac4fcb7c9236a1d8ad564a774e39326d24a62d5d52450",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: badAddress": {
   "file": "165-card-badaddress.html",
-  "markup": "798e7043b390650236bdb3590843cbe7e921540de58a6a58a0301bc9d78dbb07",
+  "markup": "67f5d02c4d612102361f23e1cf1fcbed2080107708dc34da83a749361a79505e",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: blocked, a retry and a second button": {
   "file": "166-card-blocked-a-retry-and-a-second-button.html",
-  "markup": "564386e9bdb791ea798a572f9b190e77ac4eb66d68e13d0a07d252897215bc8a",
+  "markup": "834dcd3a52fb8d12b69019442870b35a7613b11fb68cc7b7bb2d1a4edfe7dd54",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: the Tor banner explains itself": {
   "file": "209-card-the-tor-banner-explains-itself.html",
-  "markup": "b98f2a0e2eff836e4e09e2185460a6fe23383d7739be788d9ed883ec3bfd6f87",
+  "markup": "a3a22c267a9781fdd740c2ec9d875ac908b6a2080a657c9b718a3cff70b34f04",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: secure Foxy, three ways": {
   "file": "210-card-secure-foxy-three-ways.html",
-  "markup": "978b84322d2b1921a7c0f2f07e23ca361df9212f0f3207d2114552be0cbd6a26",
+  "markup": "d9d390c5658b3bb7c15fa8341d8c340cc477fd314647a5eb246e75853631b5b4",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: paying another user of this mint": {
   "file": "202-card-paying-another-user-of-this-mint.html",
-  "markup": "47991632dd78b5d5957b31acef2e0782415fd8dd3b9d3f64593c0166e3395601",
+  "markup": "f9035c47571b0c69e7826914077afeb3ef65386998be54490e30456a1d9f154d",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: invalid signatures at a claim": {
   "file": "167-card-invalid-signatures-at-a-claim.html",
-  "markup": "bd33760e79732791ed82a465d222ef00e94684bf8ba5e413be7a53038924428d",
+  "markup": "ed5b7e1c33acef302dbb04d450bcc0d19a6e38b55785c28e7cbd7fe3fe5d0885",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: invalid signatures at a payment": {
   "file": "168-card-invalid-signatures-at-a-payment.html",
-  "markup": "9a966a40490f21428cbc96ab2481917bf66704cf60d1f8a742df7b8a49af2467",
+  "markup": "0a20dcbe5c9870756318e508e0557df7f85de5a0a1b537d7fe41d672336c38c2",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: invalid signatures, elsewhere": {
   "file": "169-card-invalid-signatures-elsewhere.html",
-  "markup": "0cf44a770ee0e5dc355d4b9e44b77126fde3873549b0f2a9c8ac741b5d345ce4",
+  "markup": "2cbd7c96da8a867a40920113aa878ca12851aa605c312c0ab330301fcb8cc307",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: paid, not collected, bad signatures": {
   "file": "170-card-paid-not-collected-bad-signatures.html",
-  "markup": "a96b64a89f3c31f9702599e716f282e6bf2a5bb69e26d60f5034c54598dc7172",
+  "markup": "711b17ca720959e2a43f17d6369de0b91eb4272283565b6ade118fd5b98f8421",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: paid, not collected, refused": {
   "file": "171-card-paid-not-collected-refused.html",
-  "markup": "e175884b15fa6cf35f2b2b073718c1cea2c06018b2693da9707ab4a79d3593ef",
+  "markup": "2630eab91d245a858718475ff09418e288f4b07121f7a74668143ab02306594e",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: paid, not collected yet": {
   "file": "172-card-paid-not-collected-yet.html",
-  "markup": "a2e4d4a67d36b8d539bc90b2fb0656c9fc6c9114feecbd865faa24e7125ee1c3",
+  "markup": "d41fb33d8e94418ce88a1140b5c0a54f9814b0b305b75af632d32c76c765c739",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: both offline, high risk": {
   "file": "226-card-both-offline-high-risk.html",
-  "markup": "8fbaae0748097b41659ec562861211805647e15f289bfdd6dc8a681fd4c7d8ac",
+  "markup": "a648483639314374a5f9870d1d2d4b08df7193cbab7b011d8a11cdde36377603",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: both offline, a small amount": {
   "file": "227-card-both-offline-a-small-amount.html",
-  "markup": "964cd849e7992079426c290528ab617f2c13d77c4f2eb81829606481af5f72a0",
+  "markup": "f3b0360a10c00bf7783013ae6647715b69fa0817c0e3e2f74c653d47fc67e4ff",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a trusted payment was taken back": {
   "file": "228-card-a-trusted-payment-was-taken-back.html",
-  "markup": "c04ad2693796c3cfe9dee98d22e8978777fe938ea3aef7d8cc5a077d5d94ced5",
+  "markup": "697e4bfa159d467560f3875dfff8c038427b45fa9702d8548de745df329b9fe3",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: no exact change, both offline": {
   "file": "239-card-no-exact-change-both-offline.html",
-  "markup": "972c7c805f5fbe701f8e83fa55ef612ca34d149bda585bd28568bc831db0df6b",
+  "markup": "358aea9a6e2a44a067161350894f3214e0a094f1013bb3e56f06cc1290760a88",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: no exact change, change comes back": {
   "file": "240-card-no-exact-change-change-comes-back.html",
-  "markup": "563b7e8b3b86edb6c4d14bb277df94eb95f3a1aca6b6ffe712be897d593c1c37",
+  "markup": "649869496794df854decb332a8a25db8030cef342cb3bc35a5dc8ebd4c95d567",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: they did not take it": {
   "file": "241-card-they-did-not-take-it.html",
-  "markup": "be49c39d874b38dae39fbaaef093afd9906b3c6e493f4863e5b86b8529abfa22",
+  "markup": "eba5eb66ad9cb7b47e51ccf5c3efb2348d8c7aa2f0ba464f7d17593f2e441f6e",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: claim failed, already spent": {
   "file": "173-card-claim-failed-already-spent.html",
-  "markup": "d77f2485a4b6136ee7fb350c65dc6a6eafb872b91bd0157be0dbe8a5f3a56c87",
+  "markup": "9a2b638042a019460f117df9d743dbdd98095ef16fe3821420b42bf69ba86deb",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: claim failed, ecash this phone already took": {
   "file": "244-card-claim-failed-ecash-this-phone-already-took.html",
-  "markup": "9a4ecb66b4d9c746027f8f0f2b921886f5e6951690c739927f7bdd73e4f967cc",
+  "markup": "6e533090aff3060203b4ded7d86d99f36f194fd7e662269c979a49780fccb873",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: claim failed, locked": {
   "file": "174-card-claim-failed-locked.html",
-  "markup": "b4537b41ded09e430c53c211b1dc253fb2e4321427689189641e619a9ae0f16c",
+  "markup": "fe8f63e021712c359bf00331d8c30721415a6c35de7e550279e1700f3cdda33a",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: claim failed, the network, again": {
   "file": "175-card-claim-failed-the-network-again.html",
-  "markup": "fc6a419754e2bcbff6b12c1c3e18c52a0df0b0d81a0e9477b7d786b91e1eaf0f",
+  "markup": "9072122e38725d11276b622ca3964a6754a77aec6c91aeba521f33bbf7fb6d8c",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: claim failed, invalid signatures": {
   "file": "176-card-claim-failed-invalid-signatures.html",
-  "markup": "0cf44a770ee0e5dc355d4b9e44b77126fde3873549b0f2a9c8ac741b5d345ce4",
+  "markup": "2cbd7c96da8a867a40920113aa878ca12851aa605c312c0ab330301fcb8cc307",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: the mint holds your bitcoin": {
   "file": "177-card-the-mint-holds-your-bitcoin.html",
-  "markup": "0d06a6ac3e46329f35d63ba37d2dd6a4e309c718c8d239e36befc13a853dc848",
+  "markup": "764e0af5d1100b5f159edb131128de89d78652035e49f578aab29300d442f918",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a test mint": {
   "file": "178-card-a-test-mint.html",
-  "markup": "44a897a14d3dbfd4b08d4f89f07e58978bc91f5a72fe47e67c94569612b374e2",
+  "markup": "d1e3515ed972b0751a6a2e8251c8c8b0779f0dd99478ce50cc70c43667b67457",
   "vals": "033c7ac30eed2f5426274b4b722cbdad85a54a74ab342c700e0bc966bf49c1a8"
  },
  "card: mint not answering": {
   "file": "179-card-mint-not-answering.html",
-  "markup": "4cbe72bc41c8fa265ea9d3f997c775abeccd255a7dd60a356a56f794b3efb3ca",
+  "markup": "4fb50943ffd0a45b826b9a2911bca7ec65443bad9c361f081098c823e83dc250",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a lot at one mint": {
   "file": "180-card-a-lot-at-one-mint.html",
-  "markup": "d6497a7c49791d8b87d8acedc6f2fdc1f5c1adae362a01a7cac37160e4919108",
+  "markup": "76de3551a649528aa88e76560180ad195998353d22e06cf39d7b6c94fb195eda",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: this iPhone has no passcode": {
   "file": "200-card-this-iphone-has-no-passcode.html",
-  "markup": "ee7deb65202982b538d67110f85fa6ee392ddd19876ef37a316388db74a4c022",
+  "markup": "4416ce0f21e09ffe5bc6dd59cb6ac14cf5fd97bd076e78405915c931cc18980b",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: ecash set aside": {
   "file": "182-card-ecash-set-aside.html",
-  "markup": "2bb5615214cfa7c6ccd945ee9bb0bac622f0fd7c46ab2857c6a209aa7b71fdff",
+  "markup": "8ab546fa08031ccceb402442db150684510f67ffca335ce126ff799850803c68",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: ecash set aside, no mint known": {
   "file": "183-card-ecash-set-aside-no-mint-known.html",
-  "markup": "50b69e318d25d7e934b2241bced43906639e5328fe3965af4be2710c9962b0db",
+  "markup": "6859d705454f6279da0aa0130c01622d5694bdacf8e050be4304ce5e1a4b0c56",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: unclaimed ecash before clearing history": {
   "file": "184-card-unclaimed-ecash-before-clearing-history.html",
-  "markup": "e98d6686a45a3fa3817dd48a79bef09e59b6faf19265ec03c04b8685f41a1b34",
+  "markup": "8e2c6b29fff084c0b102dcfd10d69f4ad03461a18a4a1096c939d8d5521a2d7c",
   "vals": "8e7ab50a58cd9f95d9c499ca659165ce06eadb644834650afcf9f4006806ca6f"
  },
  "price error bar": {
   "file": "186-price-error-bar.html",
-  "markup": "85c1fac0c4471312d960be4a8375cb7d14e3e96980a4ee2b786b651518a323c6",
+  "markup": "7378bbfef1bbf4aada0c9c976f614d5347f89d48f0b8172edf5d9ba8aae612a9",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "sheet: type a mint": {
   "file": "187-sheet-type-a-mint.html",
-  "markup": "3e7f5a245b02c63325658282d1eae4c626ec1d8dc780da249471e7abed7ccd73",
+  "markup": "21b28f233171b54a74d3df8779e8609092b9defb27ca85d8245fdcadcc6a1648",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "sheet: a note": {
   "file": "188-sheet-a-note.html",
-  "markup": "5b968c2e404f6eca83c8809e6372f14d7350116cb82c28f6879a2e102ffe0caa",
+  "markup": "6de09204ec3df1053a4306f17c22b9e1d85e8f53b12b62e9095607cd74d47973",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "sheet: a token note": {
   "file": "189-sheet-a-token-note.html",
-  "markup": "5b968c2e404f6eca83c8809e6372f14d7350116cb82c28f6879a2e102ffe0caa",
+  "markup": "6de09204ec3df1053a4306f17c22b9e1d85e8f53b12b62e9095607cd74d47973",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "loader: melt": {
   "file": "190-loader-melt.html",
-  "markup": "6761ae32fa8d219bb997d192fa54c53259362f8555568ac7053e2be4c1fdd733",
+  "markup": "d07e288f4fce388e7e939a5fbae5c1cc917693a81937c1ff4a533c058782c881",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "overlay: the seed phrase": {
   "file": "191-overlay-the-seed-phrase.html",
-  "markup": "0d55fcdcd2760d0ae9c2a271b3cec76cd42939e2437ab5c22025bff96d158b34",
+  "markup": "fa28b4cd7e459b615605503b8e11c28f3d87be45b433b91e24e8568af7e75191",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "overlay: PIN entry": {
   "file": "193-overlay-pin-entry.html",
-  "markup": "2476359cdf551628b66282029dd83c3e3a51369b2d80f110244a194467efe332",
+  "markup": "ec777778a106bfd7eda663d56a381ed2662e7563f68a6a0c3d78041e7cb06ac4",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "overlay: PIN set-up": {
   "file": "194-overlay-pin-set-up.html",
-  "markup": "8fb4170e3a7424fe15f962140e74f27efbeaf15adbe8c500324a7d18991ffeba",
+  "markup": "5fc459890ce60b4666628ff59d6d827a3b2bdd6a32a7e12f687ad26575642b61",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "overlay: a card’s PIN, to pay, after a wrong one": {
   "file": "272-overlay-a-card-s-pin-to-pay-after-a-wrong-one.html",
-  "markup": "5ded061735ac98d26047e59ae634235724affac45189216467712cfc3ae2e63c",
+  "markup": "31aa454487fcc6f855356d744d2fd09cd5ca50d4a7c534e64635425367d7ea68",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "stage: hold the card to the phone": {
   "file": "259-stage-hold-the-card-to-the-phone.html",
-  "markup": "430b0cb802fc7d0a9b8306e2941a3f64206062278452ae227e4b2630559b20b5",
+  "markup": "55d5b518b9e44f2ff697bf96e8849a977f5fc685f23a6d76d919c1d83d10b38d",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "stage: keep the card there": {
   "file": "260-stage-keep-the-card-there.html",
-  "markup": "ea2025b6ef414092950d7055f49e9dc351e5a06fe8021637474def6b0328f541",
+  "markup": "442f02d42722cfd915ba37baca9163be83057e7e4dc477bf49cd6cbf579af994",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "stage: checking a card payment": {
   "file": "261-stage-checking-a-card-payment.html",
-  "markup": "1d439c20a383791c574b67e8a423b85f5f22c8b32c401ca09cc6fa54ab5f0534",
+  "markup": "02cf36cae6c9ac9e24d72ce8594b06cdc2f842b2cc12fe4e507300fd8e2ac721",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a card’s wrong PIN": {
   "file": "262-card-a-card-s-wrong-pin.html",
-  "markup": "2199dda08255cdaaf4b713db0d9b66f8e363fc1c949749a610c3de9c4dec09f6",
+  "markup": "8f92ea1abf8280e8b981033cd4b1e572bed497232af50c37648483930224ebe7",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a blocked card": {
   "file": "263-card-a-blocked-card.html",
-  "markup": "c9a10d29cc82cda4edde39c341dd04dcd2c1a702813456500c85a91b594a5f71",
+  "markup": "ba83381cebb69aa3029d2f41c81a5e3e17ebe0c6455768dc70f0cfc5a215c948",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: not enough on the card": {
   "file": "264-card-not-enough-on-the-card.html",
-  "markup": "dd9c1a04b79133167a76a7f7ce9496f50144df63ad86d61c8a9d960b210986eb",
+  "markup": "218bbf76fceaa643e16392d5aa17d695c88196f3ae7f960d98a0b250393af693",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: a card payment not made, no mint": {
   "file": "265-card-a-card-payment-not-made-no-mint.html",
-  "markup": "c70bef605f5950b1f57ad4c7ec59c7fed39599b16cc03600fb59d7a59c27bf61",
+  "markup": "b4b1472899b081460f6c1b76b7def7e4a0c01f706c934ae1ac6d325ef71969bb",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: change waiting for a card": {
   "file": "266-card-change-waiting-for-a-card.html",
-  "markup": "1b94c343f97c1244190fac818fad3f91943634b38f30ee400fa026d1c4ff08de",
+  "markup": "03f3d3882321d8aaf4f6d6641e07619be83e1ff6b1a69b306ed4b12862272198",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: how a lost card is treated": {
   "file": "267-card-how-a-lost-card-is-treated.html",
-  "markup": "3b6841effbd2a7ccf8d5d22d55a739937b68ac412d71c4b61742eacb794413ef",
+  "markup": "f5130aee3f6b0c41674f154c6d5cbdcabc02e0bad8d1a6c71b98001f73641c02",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "card: take a lost card back": {
   "file": "268-card-take-a-lost-card-back.html",
-  "markup": "d16e57089684880bbe9ecd5a56930c141f5f72921972cc8e78757b0e82a884ed",
+  "markup": "90f17bee6821247bb684c04434a29fbf790385790033e6649d6332b7005ca813",
   "vals": "c92bd1b117282d5003416464584ab1a732f121cae40d7f8d0d8fe5e03ff1b0e0"
  },
  "importSeed, the words on the phone": {
