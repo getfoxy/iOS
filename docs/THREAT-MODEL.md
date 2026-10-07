@@ -667,18 +667,33 @@ iOS suspends Foxy when it leaves the screen, and closes a suspended app's
 sockets. After a few minutes away every request used to fail until the app was
 killed.
 
-**Off the network while away.** As Foxy goes to the background, the native
-side switches Tor's network off (`TorService.backgrounded`), under a background
-task so Tor answers before iOS suspends the app. Tor then has nothing open for
-the suspension to break. Before this, Tor woke with broken sockets and began
+**Off the network while away.** Once Foxy has been in the background for as
+long as iOS allows less six seconds (`Route.holding`, about twenty-four in
+all), the native side switches Tor's network off (`TorService.backgrounded`),
+under a background task so Tor answers before iOS suspends the app. Tor then
+has nothing open for the suspension to break. Until then only the connection
+is kept: the door is shut and the seed dropped as the work of being put away
+ends, so nothing new is sent while Foxy is away, and somebody back within
+that time finds the circuit they left. Before this, Tor woke with broken sockets and began
 connecting to its guards again, and the reconnect Foxy then ran switched its
 network off mid-attempt. Tor counts a guard connection that closes before it
 opens as that guard failing, and tries a failed primary guard again only after
 ten minutes, so a return waited on guards Tor trusted less and sat at 44% while
 a fresh launch, which remembers no such failures, connected in seconds.
 
-**Set up again on every return.** Nothing is tried on the connection from
-before. Every return sets up a private connection the way launch does
+**The home screen does not wait for Tor.** A wallet that has connected once
+opens on the home screen and works offline until Tor is up (`homeFirst`,
+`Web/foxy-tor-gate.js`); the connection screen shows only on a first launch or
+when the banner is tapped. This changes what is seen and nothing about what is
+sent: `Route.start` refuses every request without Tor exactly as before, and
+working offline is the page saying so, not a way round it. What it does change
+is how often a phone is offline for a few seconds with a network in the room,
+so the steps that move money wait for a route that is on its way
+(`routeSoon`), and the paths an offline phone takes are held to the same rules
+as the others: `tests/two-doors.js`, `tests/scan-twice.js`.
+
+**Set up again on every return after that.** Nothing is tried on a connection
+that was taken off the network. Every such return sets up a private connection the way launch does
 (`TorService.setUp`). Tor can't be started twice in one process, so the steps
 run on the daemon that is already running:
 

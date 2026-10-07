@@ -9,7 +9,7 @@ final class BridgeTests: XCTestCase {
     /// the document itself, so the table and the threat model cannot drift apart.
     private func documentedActions() throws -> Set<String> {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let text = try String(contentsOf: root.appendingPathComponent("THREAT-MODEL.md"), encoding: .utf8)
+        let text = try String(contentsOf: root.appendingPathComponent("docs/THREAT-MODEL.md"), encoding: .utf8)
         let start = try XCTUnwrap(text.range(of: "The bridge exposes exactly these actions:"))
         let end = try XCTUnwrap(text.range(of: "Haptics arrive as", range: start.upperBound..<text.endIndex))
         let list = text[start.upperBound..<end.lowerBound]

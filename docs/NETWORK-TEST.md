@@ -203,7 +203,7 @@ payment. Returns from the background have been run on a phone, with Tor
 re-established in seconds, but not under a packet capture.
 
 **Expect:** nothing belonging to the app outside Tor, at any point. Tor's
-network goes off as Foxy leaves. On return a private connection is set up as
+network goes off about twenty-four seconds after Foxy leaves. On a return after that a private connection is set up as
 at launch, behind CONNECTING TO TOR, and a bridge transport restarts. Requests
 are refused until Tor announces a new circuit, and nothing should leave outside
 Tor meanwhile.

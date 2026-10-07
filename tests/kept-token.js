@@ -81,7 +81,9 @@ ok(/_putAway\(true\)/.test(native) && /FoxyWallet\._tidying/.test(native)
    && /static let waitForMoney: TimeInterval = 20\n/.test(route)
    && /if waited > waitForMoney \{ return \.leave\(/.test(route) && /if money > 0 \|\| tidying \{ return \.wait \}/.test(route),
    'and the phone holds Tor up while it runs, twenty seconds at most');
-ok(/Route\.shutDoor\(\)\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ after\) \{ park\(\) \}/.test(native)
+// the door shuts as the work ends, and is shut again all the while Tor is held on the network (`hold`), which ends in `park`
+ok(/Route\.shutDoor\(\)\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ after\) \{ hold\(\) \}/.test(native)
+   && /func hold\(\) \{[\s\S]{0,900}?park\(\)[\s\S]{0,700}?Route\.shutDoor\(\)\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ 0\.5\) \{ hold\(\) \}/.test(native)
    && /guard !shut\(\) else \{[\s\S]{0,200}?return nil/.test(route)
    && (native.match(/Route\.openDoor\(\)/g) || []).length >= 3,
    'then nothing new leaves until Tor is off the network, and coming back opens the door');
@@ -162,7 +164,7 @@ ok(/\/\^\(token-\|req-\|tap-change-\|reclaim-\)\/\.test\(String\(tx\.hash \|\| '
 
 // The change maker and the entry work out what is owed the same way: less
 // the mint's fee on the pieces that came.
-ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n    if \(!\(owed > 0\)\) return;/.test(read('build/wallet/07-request-delivery.js')),
+ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n    if \(!\(owed > 0\)\) \{ stays\(\); return; \}/.test(read('build/wallet/07-request-delivery.js')),
    'changeBack makes no change for the fee a payer added on purpose');
 
 // Change carries its own cost: cut to what is left over less what it costs to

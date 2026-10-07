@@ -205,6 +205,37 @@ enum Route {
         return .leave(after: 0.5)
     }
 
+    /// What taking Tor off the network needs before iOS suspends Foxy: Tor's
+    /// answer can take four seconds (TorService.backgrounded), and two to spare.
+    static let holdReserve: TimeInterval = 6
+    /// And never longer than this since Foxy was put away, whatever iOS says
+    /// is left: with a debugger attached it says there is no limit.
+    static let holdAtMost: TimeInterval = 26
+
+    /// Whether Tor stays on the network a while longer, once the work of
+    /// being put away is over.
+    ///
+    /// Tor was taken off the network about two seconds after Foxy left the
+    /// screen, so a look at another app that lasted four came back to a
+    /// connection being set up again: three or four seconds of SECURING YOUR
+    /// CONNECTION over a wallet that had been connected a moment before. iOS
+    /// lets an app go on for about thirty seconds; Foxy already used twenty of
+    /// them when a payment was with the mint. Now it uses what there is, every
+    /// time, and comes back inside that to the circuit it left.
+    ///
+    /// `waited`: since Foxy was put away. `remaining`: what iOS says is left
+    /// (UIApplication.backgroundTimeRemaining). Leaving with less than the
+    /// reserve risks being suspended with Tor still on the network, which is
+    /// what parking it exists to prevent: connections that die in a suspended
+    /// app are held against the relays they were to.
+    ///
+    /// Only the connection is held. The door is shut and the seed is dropped
+    /// as the work ends, as before: nothing new leaves while Foxy is away.
+    static func holding(waited: TimeInterval, remaining: TimeInterval) -> Bool {
+        guard waited < holdAtMost else { return false }
+        return remaining > holdReserve
+    }
+
     /// A websocket to a Nostr relay, through Tor and nowhere else.
     ///
     /// Foxy opens one only to hand over a payment a request asked for over

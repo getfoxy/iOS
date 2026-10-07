@@ -6,6 +6,13 @@
    * callers that do call them — moveRun, sweepQuotes, splitReconcile,
    * payLnurl, finishMove — stay unwrapped and wait their turn on each call. */
   var HOME_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
+  /* And these wait a few seconds for a route that is on its way (`routeSoon`),
+   * because each takes a worse branch without one: a token scanned in the
+   * first seconds of a session got the HIGH RISK card, a payment was refused
+   * for want of a connection that was two seconds off, a send dropped to the
+   * pieces on hand. With a route, or with none coming, nothing is waited
+   * for. */
+  var ROUTE_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -76,8 +83,15 @@
        * the walk's own claim, which is what the visit is for; nor change
        * for an overpayment, which is made where the payment was just taken. */
       var changeBack = name === 'sendToken' && args[1] && args[1].purpose === 'change';
-      if (!HOME_FIRST[name] || own || changeBack) return turn();
-      return homeFirst(turn);
+      var go = function () {
+        if (!HOME_FIRST[name] || own || changeBack) return turn();
+        return homeFirst(turn);
+      };
+      // not the walk's own claim, nor change being made: both only ever run with a route
+      if (ROUTE_FIRST[name] && !own && !changeBack && FoxyWallet._routeWaitMs > 0 && routeComing()) {
+        return routeSoon(FoxyWallet._routeWaitMs).then(go);
+      }
+      return go();
     };
   });
 

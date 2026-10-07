@@ -106,6 +106,29 @@ async function run() {
      'which sit in the unclaimed store, not the spendable pile',
      JSON.stringify(Object.keys(rows(stall))));
 
+  /* ---- and with no route, the walk that claims them asks for nothing -----
+   * Every screen money can leave from starts `claimUnclaimed`. Offline it
+   * went row by row to be refused, with a warning for each: a phone with four
+   * payments waiting wrote eight lines a tap, and they crowded the rest out
+   * of the log. Said once for each number waiting, and the rows are left. */
+  {
+    const said = [], warned = [];
+    const con = stall.window.console, log = con.log, warn = con.warn;
+    con.log = (...a) => { said.push(a.join(' ')); };
+    con.warn = (...a) => { warned.push(a.join(' ')); };
+    const kept = JSON.stringify(rows(stall));
+    const took = [await stall.W.claimUnclaimed(), await stall.W.claimUnclaimed(), await stall.W.claimUnclaimed()];
+    con.log = log; con.warn = warn;
+    const waiting = said.filter((l) => /wait to be swapped in/.test(l));
+    ok(took.join(',') === '0,0,0' && JSON.stringify(rows(stall)) === kept,
+       'three walks with no route take nothing and leave the row as it was', took.join(','));
+    ok(waiting.length === 1 && /^\[foxy\] 1 payment\(s\)/.test(waiting[0]),
+       'and it is said once, not at every screen', waiting.length + ' line(s)');
+    ok(!warned.some((l) => /still unclaimed/.test(l)) && !said.some((l) => /was never claimed/.test(l)),
+       'with no warning about a payment that is only waiting for a connection',
+       warned.concat(said).join(' | ').slice(0, 160));
+  }
+
   /* ---- and now it spends them, still with no route ---------------------
    * 28 is 16 + 8 + 4, and the pile holds a 16 and no 8 or 4 — so there is no
    * exact set in it, which is the case this exists for. A swap would be the

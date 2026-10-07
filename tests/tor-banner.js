@@ -34,7 +34,12 @@ function at(privacy) {
 }
 const SECURE = 'Secure Tor Connection';
 const EXPOSED = 'IP Address Exposed';
-const OFFLINE = 'OFFLINE \u2014 TAP TO RETRY';
+/* Offline is where every session begins now (home first), and the banner says
+ * which kind it is: a connection being made, none to make one over, or one
+ * that cannot be made. */
+const SECURING = 'SECURING YOUR CONNECTION';
+const NO_NETWORK = 'OFFLINE - NO CONNECTION';
+const CANNOT = 'CANNOT CONNECT \u2014 TAP TO RETRY';
 
 // ---- working offline, which the person chose --------------------------
 {
@@ -45,7 +50,8 @@ const OFFLINE = 'OFFLINE \u2014 TAP TO RETRY';
    * healthy one. */
   const v = at({ tor: 'connecting', unprotected: false, offline: true, progress: 0, everUp: true });
   check('offline: the banner shows rather than going quiet', v.torBannerShown === true);
-  check('and says so, with the way back in the words', v.torBannerText === OFFLINE, v.torBannerText);
+  check('and says what is happening: with Tor at work, a connection is being secured',
+    v.torBannerText === SECURING, v.torBannerText);
   check('never called secure', v.torBannerText !== SECURE);
   /* Not red. Red is for somebody exposed who might not know it; offline sends
    * nothing at all, so nothing is exposed. */
@@ -162,16 +168,29 @@ const OFFLINE = 'OFFLINE \u2014 TAP TO RETRY';
 {
   const off = (net) => at({ tor: 'connecting', progress: 0, everUp: false,
                             unprotected: false, offline: true, network: net });
-  check('offline with no network still says there is none',
-    /OFFLINE/.test(off('none').torBannerText), off('none').torBannerText);
-  check('offline with wifi back says a connection may be available',
-    off('wifi').torBannerText === 'CONNECTION MAY BE AVAILABLE', off('wifi').torBannerText);
-  check('and with cellular back',
-    off('cellular').torBannerText === 'CONNECTION MAY BE AVAILABLE', off('cellular').torBannerText);
-  check('but not before the phone has answered at all',
-    /OFFLINE/.test(off('unknown').torBannerText), off('unknown').torBannerText);
+  check('offline with no network says there is none',
+    off('none').torBannerText === NO_NETWORK, off('none').torBannerText);
+  check('offline with wifi, and Tor at work, says a connection is being secured',
+    off('wifi').torBannerText === SECURING, off('wifi').torBannerText);
+  check('and with cellular',
+    off('cellular').torBannerText === SECURING, off('cellular').torBannerText);
+  check('and before the phone has said what network there is, as the launch screen did',
+    off('unknown').torBannerText === SECURING, off('unknown').torBannerText);
   check('and it is still the tap that leaves offline',
     off('wifi').torBannerOffline === true, String(off('wifi').torBannerOffline));
+  check('with nothing for that tap to announce while Tor is already at it',
+    off('wifi').torBannerMaking === true && off('none').torBannerMaking === false);
+  // a network, and a Tor that has stopped or given up: said, with the tap that brings the ways on
+  const stuck = (tor) => at({ tor: tor, progress: 0, everUp: false, unprotected: false, offline: true, network: 'wifi' });
+  check('offline with a network and a Tor that has given up says it cannot connect',
+    stuck('failed').torBannerText === CANNOT && stuck('stopped').torBannerText === CANNOT
+      && stuck('none').torBannerText === CANNOT,
+    [stuck('failed').torBannerText, stuck('stopped').torBannerText].join(' / '));
+  check('a Tor that is only slow is still securing, not failed',
+    stuck('stuck').torBannerText === SECURING, stuck('stuck').torBannerText);
+  // a stale `up` over no network is no connection, and says so
+  check('a circuit Tor still believes in, with no network under it, is OFFLINE - NO CONNECTION',
+    at({ tor: 'up', progress: 100, everUp: true, unprotected: false, offline: true, network: 'none' }).torBannerText === NO_NETWORK);
 }
 
 console.log('\n' + (R.fail ? R.pass + ' passed, ' + R.fail + ' failed' : 'all ' + R.pass + ' tor banner checks pass'));

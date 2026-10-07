@@ -178,12 +178,18 @@
    * apart — a refusal missing from this list spends a NUT-13 counter and one of
    * the receive screen's three tries on a request that never left. */
   var OFFLINE_REFUSAL = 'Foxy is working offline. This needs a connection \u2014 tap OFFLINE to reconnect.';
+  /* And the same refusal while a connection is on its way. Foxy opens on the
+   * home screen and works offline until Tor is up, with a banner that says
+   * SECURING YOUR CONNECTION: there is no OFFLINE to tap, and nothing for the
+   * person to do but wait the few seconds it takes. */
+  var SECURING_REFUSAL = 'Foxy is securing its connection. Try again in a moment.';
 
   var NEVER_SENT = [
     'Foxy is not connected to Tor.',
     'Tor is reconnecting. Try again in a moment.',
     'Foxy is still connecting to Tor.',
     OFFLINE_REFUSAL,
+    SECURING_REFUSAL,
   ];
 
   /* True only when this failure is known to have asked the mint nothing. */
@@ -290,6 +296,8 @@
    * claims (`claimUnclaimed`): one walk each, shared. */
   var carrying = null;
   var claimingLate = null;
+  // how many payments were waiting when it was last said that none can be asked for (`claimUnclaimed`)
+  var claimHeldSaid = -1;
   /* While that walk has the wallet at another mint.
    *
    * Ecash from another mint is claimed at that mint, and for those seconds
@@ -2151,12 +2159,68 @@
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
+  /* ---- a route that is on its way ------------------------------------------
+   *
+   * Foxy opens on the home screen and works offline until Tor is up, so for
+   * the first seconds of a session the route is neither open nor absent: it
+   * is coming. Every money step reads `routeOpen()` once and takes a branch,
+   * and the branch for no route is a worse one where a route was two seconds
+   * off: a payer drops the lock it was asked for, a receiver refuses plain
+   * ecash or keeps an over-payment it could have made change for, a scanned
+   * token gets the HIGH RISK card. The connection screen used to make people
+   * sit those seconds out. Now the step itself does, for a few seconds at
+   * most, and only while a connection really is being made.
+   *
+   * Coming means: a network under it, Tor at work on a circuit, and nobody
+   * having chosen to go without Tor. No network is not coming, and neither is
+   * a Tor that has stopped or given up: those take the offline branch at
+   * once, as before. */
+  var ROUTE_WAIT_MS = 6000;
+  var routeWaiters = [];
+
+  function routeComing() {
+    if (!bridged() || routeOpen()) return false;
+    if (privacy.network === 'none' || privacy.unprotected) return false;
+    return privacy.tor === 'connecting' || privacy.tor === 'stuck';
+  }
+
+  /* Resolves true the moment the route is open, false when it is not coming
+   * or `ms` have gone by. Never rejects: what follows goes on either way, by
+   * whatever the route then is. */
+  function routeSoon(ms) {
+    if (routeOpen()) return Promise.resolve(true);
+    var wait = ms === undefined ? ROUTE_WAIT_MS : Math.max(0, Number(ms) || 0);
+    if (!(wait > 0) || !routeComing()) return Promise.resolve(false);
+    console.log('[foxy] a connection is on its way; waiting for it, ' + Math.round(wait / 1000) + 's at most');
+    return new Promise(function (done) {
+      var settled = false;
+      var timer = null;
+      var answer = function (open) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        routeWaiters = routeWaiters.filter(function (fn) { return fn !== answer; });
+        done(!!open);
+      };
+      timer = setTimeout(function () { answer(false); }, wait);
+      routeWaiters.push(answer);
+    });
+  }
+
+  /* Every change of the route, from `_privacy` and `setOffline`. */
+  function routeChanged() {
+    if (!routeWaiters.length) return;
+    var open = routeOpen();
+    if (!open && routeComing()) return;
+    routeWaiters.slice().forEach(function (fn) { fn(open); });
+  }
+
   function assertRoute() {
     // storage from a newer Foxy: nothing that could change it runs (see the header)
     if (storageNewer) throw new Error(STORAGE_NEWER);
     if (routeOpen()) return;
     throw new Error(privacy.offline
-      ? OFFLINE_REFUSAL
+      ? (routeComing() ? SECURING_REFUSAL : OFFLINE_REFUSAL)
       : privacy.everUp
         ? 'Tor is reconnecting. Try again in a moment.'
         : 'Foxy is still connecting to Tor.');
@@ -7072,6 +7136,46 @@
     return most;
   }
 
+  /* ---- change on its way back, out of what this phone says it has --------
+   *
+   * An offline payer with no exact pieces pays with a larger one, and the
+   * receiver hands the difference back. The entry is written at what stays
+   * (`kept`) the moment the payment lands; the pieces say the whole of it until
+   * the swap that makes the change has run, two to six seconds later. For
+   * those seconds the balance was the payment plus its change, and the books
+   * were out by the change: a phone paid 100 with a 128 piece showed the 28
+   * it was about to give away, and DOES NOT ADD UP to anybody who opened the
+   * history card just then.
+   *
+   * So what is going back is set aside from the start. Held by the payment's
+   * own entry, in memory only: a page that dies in those seconds comes back
+   * holding the lot, which is the truth, and the change's own record puts it
+   * right (`repairOwedChange`, the swap record's `pay`). Let go at the instant
+   * the pieces leave the pile (`sendToken`), or when no change is going to be
+   * made after all and this phone keeps the lot. */
+  var changeLeaving = {};
+
+  function holdChange(hash, sats, at) {
+    var n = Math.round(Number(sats) || 0);
+    if (!hash || !(n > 0)) return;
+    changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || mintUrl || '')) };
+  }
+
+  /* Idempotent: every way out of making change calls it, and only one of
+   * them is the one that had anything to let go. */
+  function changeHoldOver(hash) {
+    if (hash && changeLeaving[hash]) delete changeLeaving[hash];
+  }
+
+  function changeLeavingSats(at) {
+    var here = at ? canonicalMint(String(at)) : '', total = 0;
+    Object.keys(changeLeaving).forEach(function (k) {
+      var one = changeLeaving[k];
+      if (!here || !one.mint || one.mint === here) total += one.sats;
+    });
+    return total;
+  }
+
   function changeOwed(p, over) {
     if (over !== 'tap') return 0;
     var asked = Number(p.asked);
@@ -7281,9 +7385,16 @@
       if (e.changeState !== 'owed' && e.changeState !== 'never came') return;
       var want = Math.round(Number(e.changeSats));
       var near = function (n) { var s = Math.round(Number(n)); return s >= want - changeAllowance(want) && s <= want + changeAllowance(want); };
+      /* A code that was scanned or pasted, and no other kind of receive.
+       * Change collected later is the receiver's code taken in by hand, which
+       * is filed as a token (`token-`) or, offline, as a scan (`req-scan-`).
+       * Any later receive near the size used to do: a payment by tap or an
+       * invoice of about the same amount was bound as "collected", and the
+       * change that was in fact still owed stopped being pointed at. */
+      var byCode = function (r) { return /^(token-|req-scan-)/.test(String(r.hash || '')); };
       var got = log.filter(function (r) {
         return r && r.dir === 'in' && r.hash !== e.hash && !used[r.hash] && !r.failed
-          && near(r.sats) && Number(r.at) >= Number(e.at)
+          && byCode(r) && near(r.sats) && Number(r.at) >= Number(e.at)
           && Number(r.at) - Number(e.at) < 7 * 86400;
       })[0];
       if (!got) return;
@@ -7301,24 +7412,46 @@
    * before this phone could tell: the payment already says its change came
    * back, and the scan is a second row for the same sats. The duplicate was
    * refused by the mint on the next connection, so the balance is right and
-   * the list is one row too long. Only a scan, only for exactly the change,
-   * and only within a quarter of an hour of the payment it belongs to. */
+   * the list is one row too long.
+   *
+   * Known by its pieces, and by nothing else. A scan's entry is named after
+   * the pieces it held (`req-scan-` and their fingerprint), and the pieces of
+   * change that came back are written down as it is checked (`checkChange`,
+   * `changeSeenNote`). This matched by amount, to within the fee allowance,
+   * inside a quarter of an hour: a real payment taken by code that happened to
+   * be near the size of change that had just come back was written off as
+   * that change, and written off again after every claim put it right, since
+   * this runs on every reading of history. A scan from before the pieces were
+   * written down is left as it is. */
+  var CHANGE_SEEN = 'foxy.change.seen';
+
+  function changeSeen() {
+    var l = load(CHANGE_SEEN, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.f === 'string'; }) : [];
+  }
+
+  function changeSeenNote(list) {
+    var f = piecesFingerprint(list);
+    if (!f) return;
+    var l = changeSeen().filter(function (r) { return r.f !== f; });
+    l.push({ f: f, at: Date.now() });
+    // `save`, and a refusal ignored: this is only for tidying a list, and the change itself is kept elsewhere
+    save(CHANGE_SEEN, l.slice(-100));
+  }
+
   function dropScannedTwice() {
+    var seen = {};
+    changeSeen().forEach(function (r) { seen[r.f] = true; });
+    if (!Object.keys(seen).length) return 0;
     var log = load(K.log, []);
-    var done = 0, used = {};
-    log.forEach(function (e) {
-      if (!e || e.dir !== 'out' || e.changeState !== 'came back' || !(Number(e.changeSats) > 0)) return;
-      var want = Math.round(Number(e.changeSats));
-      var near = function (n) { var s = Math.round(Number(n)); return s >= want - changeAllowance(want) && s <= want + changeAllowance(want); };
-      var twin = log.filter(function (r) {
-        return r && r.dir === 'in' && !used[r.hash] && /^req-scan-/.test(String(r.hash || ''))
-          && r.state !== 'failed' && near(r.sats)
-          && Number(r.at) >= Number(e.at) && Number(r.at) - Number(e.at) <= 900;
-      })[0];
-      if (!twin) return;
-      used[twin.hash] = true;
-      amendTx(twin.hash, { state: 'failed', settled: false, memo: 'the same change, scanned again' });
-      console.log('[foxy] a scan of change that had already come back is no longer counted: ' + want + ' sats');
+    var done = 0;
+    log.forEach(function (r) {
+      if (!r || r.dir !== 'in' || r.state === 'failed') return;
+      var m = /^req-scan-(.+)$/.exec(String(r.hash || ''));
+      if (!m || !seen[m[1]]) return;
+      amendTx(r.hash, { state: 'failed', settled: false, memo: 'the same change, scanned again' });
+      console.log('[foxy] a scan of change that had already come back is no longer counted: '
+        + Math.round(Number(r.sats) || 0) + ' sats');
       done += 1;
     });
     return done;
@@ -7719,10 +7852,30 @@
   }
 
   function changeBack(p, over) {
-    if (over !== 'tap') return;
+    /* Whatever was set aside for this payment's change stays set aside only
+     * while change is really being made: each way out below that makes none
+     * lets it go, and this phone is seen to hold what it holds. */
+    var stays = function () { changeHoldOver('req-' + p.id); };
+    /* No change will be made after all, and the entry was written as if it
+     * would be: it says what stays less the change, and this phone holds the
+     * lot. Put right here, as the failure to make it already was below. The
+     * route had only to drop between the payment landing and this running,
+     * which on the path that swaps first is the whole length of the swap, and
+     * history said 100 for good over a phone holding 128. Only where the entry
+     * is still waiting on that change. */
+    var keptTheLot = function () {
+      stays();
+      try {
+        var row = load(K.log, []).filter(function (e) { return e && e.hash === 'req-' + p.id; })[0];
+        var waiting = row && Number(row.changeSats) > 0
+          && (!row.changeState || row.changeState === 'making');
+        if (waiting && FoxyWallet.changeSettled) FoxyWallet.changeSettled('req-' + p.id, 0);
+      } catch (eRow) { console.warn('[foxy] the entry could not be put right for change that was not made:', eRow && eRow.message); }
+    };
+    if (over !== 'tap') { stays(); return; }
     var asked = Number(p.asked);
     var paid = Number(p.sats) || 0;
-    if (!(asked > 0) || !(paid > asked)) return;
+    if (!(asked > 0) || !(paid > asked)) { stays(); return; }
     /* The same sum `changeOwed` does, fee and all. This one was left at
      * paid less asked, so at a mint that charges a fee every payment from
      * another Foxy "overpaid" by exactly that fee: the entry said no change
@@ -7730,17 +7883,19 @@
      * payer refused it over the link as change nobody owed it, and the
      * receiver put a code up to be scanned for one or two sats — every time. */
     var owed = Math.max(0, paid - asked - (Number(p.inFee) || 0));
-    if (!(owed > 0)) return;
+    if (!(owed > 0)) { stays(); return; }
     /* Less what it costs to make and to take, which is the payer's
      * (`changeFor`). When that leaves nothing, nothing is made: the payer's
      * phone has done the same sum and is not waiting. */
     var back = changeFromPile(wallet, owed);
     if (!(back > 0)) {
       console.log('[foxy] they paid ' + owed + ' sats over, which is too little to send back at this mint; it stays with the payment');
+      keptTheLot();
       return;
     }
     if (!routeOpen()) {
       console.warn('[foxy] they overpaid by ' + owed + ' sats and this phone has no route to make change');
+      keptTheLot();
       return;
     }
     /* Locked to the payer, or not sent at all.
@@ -7755,6 +7910,7 @@
      * can account for is worse than both. */
     if (!p.changeTo) {
       console.warn('[foxy] they overpaid by ' + owed + ' sats and sent no key to lock change to; they are owed');
+      keptTheLot();
       return;
     }
     console.log('[foxy] they overpaid by ' + owed + ' sats; making change locked to them');
@@ -7770,6 +7926,8 @@
     FoxyWallet.sendToken(back, { unit: 'sat', lockTo: p.changeTo, purpose: 'change',
                                  forHash: 'req-' + p.id, owed: owed }).then(function (made) {
       var madeIn = Date.now() - began;
+      // let go as the pieces left the pile (`sendToken`); again here costs nothing
+      stays();
       console.log('[foxy] change of ' + back + ' sats made in ' + madeIn + ' ms for the ' + owed
         + ' paid over; handing it back');
       /* On the payment it is the rest of, whatever happens next. It is locked
@@ -7819,6 +7977,8 @@
        * not be handed over is money that has already left this pile — it is
        * locked to the payer and sitting on the token screen — so the net stands.
        */
+      // and what was set aside for it is this phone's after all
+      stays();
       if (FoxyWallet.changeSettled) FoxyWallet.changeSettled('req-' + p.id, 0);
     });
   }
@@ -7948,6 +8108,8 @@
       return pubs.some(function (pub) { return onlyLockedTo(pr, pub); });
     });
     if (!locked) return no('it is not locked to a key this phone asked for');
+    // its pieces, so a later scan of the same change is known for what it is (`dropScannedTwice`)
+    try { changeSeenNote(list); } catch (eSeen) {}
     return { ok: true, why: '', signed: mintSigned(wallet, list), sats: sum };
   }
 
@@ -8697,6 +8859,8 @@
         try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
+      // whatever was waiting for a route that was on its way hears how that ended (`routeSoon`)
+      routeChanged();
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       return FoxyWallet.privacy();
@@ -8770,8 +8934,19 @@
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
       console.log('[foxy] working offline: ' + (privacy.offline ? 'yes' : 'no'));
+      routeChanged();
       return FoxyWallet.privacy();
     },
+
+    /* A connection that is on its way, and the wait for it (`routeSoon`):
+     * for the screens, which say SECURING YOUR CONNECTION while it is true
+     * and hold a step a few seconds for it rather than take the offline way. */
+    routeComing: function () { return routeComing(); },
+    routeSoon: function (ms) {
+      return routeSoon(ms === undefined ? FoxyWallet._routeWaitMs : ms);
+    },
+    // how long a money step waits for a route that is on its way; the suites set 0
+    _routeWaitMs: ROUTE_WAIT_MS,
 
     refreshPrivacy: function () {
       return bridgeAsk('privacy', {}, 5000).then(applyPrivacy);
@@ -8860,7 +9035,13 @@
       }
       /* Offline and a cache for this mint: connect from it. Offline and none:
        * the refusal assertRoute would have thrown anyway. */
-      var cached = routeOpen() ? null : mintCacheFor(u);
+      /* Or asked for from the cache, route or no route (`opts.fromCache`): a
+       * launch shows the home screen from what is on file and speaks to the
+       * mint afterwards, where it used to hold the screen for the mint's
+       * answer over Tor, three to six seconds, whenever Tor happened to be up
+       * first. Such a wallet is marked as one from the cache, and the app
+       * connects for real behind it (`connectForRealOnceOnline`). */
+      var cached = (routeOpen() && !(opts && opts.fromCache)) ? null : mintCacheFor(u);
       if (cached && typeof window.CashuTS.Wallet.prototype.loadMintFromCache !== 'function') cached = null;
       if (!cached) assertRoute();
       /* What is connected now, to put back if this does not come off.
@@ -9018,7 +9199,10 @@
        * just paid should see what they were paid.
        *
        * At this mint: what is waiting at another is that mint's balance. */
-      return Promise.resolve(sumProofs(proofs()) + unclaimedSats(mintUrl || ''));
+      /* Less change this phone is about to hand back for an over-payment:
+       * the entry already says what stays, and so does this (`holdChange`). */
+      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
+                                         - changeLeavingSats(mintUrl || '')));
     },
 
     /* Every pile that holds anything, in its own unit: [{ mint, unit, amount }].
@@ -13880,6 +14064,16 @@
             throw new Error('You have already taken this ecash. It is waiting to be swapped in'
               + ' as soon as there is a connection.');
           }
+          /* And one already swapped in, as the locked branch below asks. The
+           * row goes when it is claimed, so the store above then has nothing
+           * to say: the same token shown again was put to the person again,
+           * counted again, and on the next connection found spent, by this
+           * phone's own earlier claim. Both entries were then written "taken
+           * back" and the person told the payer had taken money that was in
+           * their pile. History is named after the same pieces and knows. */
+          if (FoxyWallet.txSeen('req-' + fp) || takenBefore(tok.proofs)) {
+            throw new Error('You have already been paid this ecash.');
+          }
           return Promise.resolve(ask({ sats: tok.amount, id: fp, purpose: 'scan', scanned: true }))
             .then(function (yes) {
               if (yes !== true) {
@@ -14617,6 +14811,11 @@
          * token is still only made once the record is gone, so its proofs are
          * never restorable as balance. */
         setProofs((split.keep || []).concat(stuck), at, w);
+        /* Change for an over-payment was set aside from the balance when the
+         * payment landed (`holdChange`). Its pieces have just left the pile,
+         * so it is let go here and nowhere later: between this line and the
+         * caller hearing of it the balance would be short by the change. */
+        if (opts && opts.purpose === 'change' && opts.forHash) changeHoldOver(opts.forHash);
         if (split.guard) split.guard.done();
         var token = window.CashuTS.getEncodedToken(changeNoteKey && Number(split.over) > 0
           ? { mint: at, proofs: split.send, unit: 'sat',
@@ -15894,7 +16093,25 @@
        * taken. */
       if (claimingLate) return claimingLate;
       var all = unclaimed(), ids = Object.keys(all);
-      if (!ids.length) return Promise.resolve(0);
+      if (!ids.length) { claimHeldSaid = -1; return Promise.resolve(0); }
+      /* With no route there is nobody to ask, so nobody is asked.
+       *
+       * Every screen money can leave from starts this walk, and each row then
+       * went as far as `receiveToken` to be refused there, in a warning of its
+       * own: four payments waiting was eight lines for every tap on an
+       * offline phone, about a tenth of everything the log keeps, and the
+       * lines that said what happened were pushed out by the ones that said
+       * nothing had. Said once for each number waiting. The rows are not
+       * touched: they are locked to this phone, and the next connect walks
+       * them. */
+      if (!routeOpen()) {
+        if (claimHeldSaid !== ids.length) {
+          claimHeldSaid = ids.length;
+          console.log('[foxy] ' + ids.length + ' payment(s) for a request wait to be swapped in; with no route, none is asked for');
+        }
+        return Promise.resolve(0);
+      }
+      claimHeldSaid = -1;
       console.log('[foxy] a payment for a request was never claimed:', ids.length, 'waiting');
       var took = 0;
       /* Where the phone is, to come back to. Ecash from another mint is
@@ -16032,7 +16249,18 @@
                * The history entry is turned from PENDING to failed rather than
                * disappearing: an entry that vanishes leaves somebody sure they
                * were paid and unable to find it. */
-              if (gone && one.trusted) {
+              /* Unless it was this phone that spent it. "Gone" is what the
+               * mint says of pieces this phone itself swapped in earlier, and
+               * what it took in is written down by its pieces (`noteTaken`).
+               * Read as the payer's doing, a payment that had settled was
+               * marked failed and its payer accused. */
+              var mineBefore = null;
+              try { mineBefore = takenBefore((FoxyWallet.tokenInfo(claimText) || {}).proofs || []); }
+              catch (eMine) { mineBefore = null; }
+              if (gone && one.trusted && mineBefore) {
+                console.log('[foxy] a payment taken on trust was already swapped in by this phone; nothing was taken back');
+              }
+              if (gone && one.trusted && !mineBefore) {
                 console.warn('[foxy] a payment taken on trust while offline was spent by the payer:',
                              one.sats, 'sats');
                 logTx({ dir: 'in', sats: one.sats, feeSats: 0, settled: false, state: 'failed',
@@ -16086,7 +16314,18 @@
      * or a relay. Both used to come through here indistinguishable, and change can
      * only go back over a link that is still open — so the one thing this function
      * has to know before it can hand any back is which it was. */
-    _requestPaid: function (body, answerId, over) {
+    _requestPaid: function (body, answerId, over, waited) {
+      /* What arrives is judged by the route: plain ecash is swapped or
+       * refused by it, and an over-payment has its change made or is kept by
+       * it. A phone opened a moment ago has a route two seconds off, so the
+       * judging waits for it, a few seconds at most (`routeSoon`); the payer's
+       * phone is holding its link for the answer far longer than that. */
+      if (!waited && FoxyWallet._routeWaitMs > 0 && routeComing()) {
+        var self = this;
+        return routeSoon(FoxyWallet._routeWaitMs).then(function () {
+          return FoxyWallet._requestPaid.call(self, body, answerId, over, true);
+        });
+      }
       var answer = function (status, text) {
         return bridgeAsk('inboxAnswer', { answer: String(answerId), status: status, text: text || '' }, 5000)
           .catch(function () {});
@@ -16116,6 +16355,40 @@
       } catch (e) {
         delete FoxyWallet._requestsBeingPaid[p.id];
         answer(422, 'That payment would not make a token.');
+        return;
+      }
+      /* The same payment by a second door.
+       *
+       * A token scanned as a code is checked against what this phone already
+       * holds, against the request's lock having been taken, and against
+       * history (`receiveToken`). The same token arriving over the link was
+       * checked against none of them, and a scan leaves its request open: so
+       * ecash scanned by an offline phone and then sent again over a tap was
+       * kept a second time, PAYMENT RECEIVED was raised a second time, the
+       * balance counted it twice, and after the next connection history held
+       * two settled entries for one payment for good. A payer has only to
+       * skip its own asking first to do it on purpose; and a payer whose tap
+       * stalled, who showed the code, and whose phone then delivered over the
+       * link does it by accident.
+       *
+       * This phone already has those very pieces: said as 409, which the
+       * payer reads as not yet confirmed and watches its token, because "not
+       * taken, your sats are still yours" would be false. A request already
+       * paid by other ecash is a plain no: the payer keeps what it sent. */
+      var heldAs = '';
+      try { heldAs = heldAlready(token); } catch (eHeld) { heldAs = ''; }
+      var paidBy = heldAs ? '' : lockTaken(p.id);
+      if (heldAs || paidBy) {
+        delete FoxyWallet._requestsBeingPaid[p.id];
+        var twice = heldAs ? 'This phone already has that ecash. Nothing more was taken.'
+          : 'That request has already been paid on this phone. Nothing was taken.';
+        console.warn('[foxy] a payment for a request was refused: '
+          + (heldAs ? 'this phone already holds that ecash' : 'that request has already been paid here'));
+        answer(heldAs ? 409 : 422, twice);
+        FoxyWallet._requestPaidListeners.forEach(function (fn) {
+          try { fn({ stage: 'failed', sats: 0, id: p.id, purpose: p.purpose, refused: twice }); }
+          catch (x) { console.warn('[foxy] request paid listener:', x && x.message); }
+        });
         return;
       }
       /* Which wire, because it said "over Tor" whatever the answer was — and a
@@ -16324,6 +16597,15 @@
           answer(422, 'This phone could not write the payment down, so it was not taken. Try again.');
           return;
         }
+        /* And what will go back as change is set aside in the same breath, so
+         * the balance never shows the piece the payment came in (`holdChange`).
+         * `giveBack` is only ever more than nothing with a route and a key to
+         * lock the change to: when change is going to be made. */
+        if (giveBack > 0) holdChange('req-' + p.id, giveBack, p.mint);
+        /* And the request's lock is marked taken, as a scan marks it: other
+         * ecash scanned for the same request is then told it has been paid.
+         * A refusal to write is only logged; the payment itself is down. */
+        try { markLockTaken(p.id, p.id); } catch (eMark) { console.warn('[foxy] could not mark a request\u2019s lock taken:', eMark && eMark.message); }
         // a payment to be brought home: its job learns which request it answered, and the payer's key
         carryArrived(p);
 
@@ -16485,6 +16767,8 @@
           tell('paid', { sats: kept, result: r });
         }, function (e) {
           delete FoxyWallet._requestsBeingPaid[p.id];
+          // nothing was taken, so no change is going back for it
+          changeHoldOver('req-' + p.id);
           tell('failed');
           var spent = /spent|already|nothing to take/i.test(String((e && e.message) || ''));
           /* Proofs the mint has already taken are not money waiting to be
@@ -16562,6 +16846,18 @@
      * payment that would have to over-pay is refused with the figures attached
      * (`foxyNeedsOverpay`) rather than made. */
     payRequest: function (req, onStep, opts) {
+      /* Whether the lock the request asked for can be made is decided by the
+       * route, once, a few lines down. A route two seconds off is waited for
+       * rather than paid around: without it the payment goes unlocked from
+       * pieces on hand, over by whatever the pieces come to, to a receiver
+       * who may be offline and able to take only locked ecash. */
+      if (FoxyWallet._routeWaitMs > 0 && routeComing() && !(opts && opts.waited)) {
+        var self = this;
+        var again = Object.assign({}, opts || {}, { waited: true });
+        return routeSoon(FoxyWallet._routeWaitMs).then(function () {
+          return FoxyWallet.payRequest.call(self, req, onStep, again);
+        });
+      }
       var step = typeof onStep === 'function' ? onStep : function () {};
       /* An open Bluetooth link counts as a way to deliver.
        *
@@ -17114,6 +17410,9 @@
     /* Everything arrived and not yet swapped in, in sats. Local and instant; the
      * balance already counts it. The app asks before running a claim on a route
      * coming back, so an empty list costs nothing. */
+    // change set aside for over-payments and not yet gone, at this mint (`holdChange`); for the suites
+    _changeLeavingSats: function () { return changeLeavingSats(mintUrl || ''); },
+
     unclaimedSats: function (at) {
       return unclaimedSats(at);
     },
@@ -18637,6 +18936,13 @@
    * callers that do call them — moveRun, sweepQuotes, splitReconcile,
    * payLnurl, finishMove — stay unwrapped and wait their turn on each call. */
   var HOME_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
+  /* And these wait a few seconds for a route that is on its way (`routeSoon`),
+   * because each takes a worse branch without one: a token scanned in the
+   * first seconds of a session got the HIGH RISK card, a payment was refused
+   * for want of a connection that was two seconds off, a send dropped to the
+   * pieces on hand. With a route, or with none coming, nothing is waited
+   * for. */
+  var ROUTE_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -18707,8 +19013,15 @@
        * the walk's own claim, which is what the visit is for; nor change
        * for an overpayment, which is made where the payment was just taken. */
       var changeBack = name === 'sendToken' && args[1] && args[1].purpose === 'change';
-      if (!HOME_FIRST[name] || own || changeBack) return turn();
-      return homeFirst(turn);
+      var go = function () {
+        if (!HOME_FIRST[name] || own || changeBack) return turn();
+        return homeFirst(turn);
+      };
+      // not the walk's own claim, nor change being made: both only ever run with a route
+      if (ROUTE_FIRST[name] && !own && !changeBack && FoxyWallet._routeWaitMs > 0 && routeComing()) {
+        return routeSoon(FoxyWallet._routeWaitMs).then(go);
+      }
+      return go();
     };
   });
 

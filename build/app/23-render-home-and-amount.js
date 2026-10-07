@@ -180,9 +180,13 @@
        * chosen to go without. Every other state has nothing a tap could change,
        * so it keeps the explainer. */
       torBanner: () => {
-        if (this.torBannerVals().torBannerOffline) {
+        const now = this.torBannerVals();
+        if (now.torBannerOffline) {
+          /* The connecting screen, which is where the count, RESTART TOR and
+           * the way to go without Tor now live. It comes down by itself once
+           * Tor is through. */
           if (window.FoxyGate && window.FoxyGate.leaveOffline) window.FoxyGate.leaveOffline();
-          this.toast('Looking for Tor again\u2026');
+          if (!now.torBannerMaking) this.toast('Looking for Tor again\u2026');
           return;
         }
         this.blockedCard('torConnection', {
@@ -259,11 +263,27 @@
      * likely to work and the person has no way of knowing that from Foxy. The
      * path monitor knows, so the banner says so — carefully: a network is not a
      * Tor circuit, and "may be" is the whole of what this can honestly claim. It is the same tap either way. */
-    const mayWork = offline && !!p && p.network && p.network !== 'none' && p.network !== 'unknown';
+    /* Offline is where every session begins now, and the banner says which
+     * kind it is. Foxy opens on the home screen and works offline until Tor is
+     * up (`homeFirst`, foxy-tor-gate.js), so this line is what the connecting
+     * screen used to be:
+     *
+     *   SECURING YOUR CONNECTION   a network, and Tor at work on a circuit:
+     *                              nothing to do, it turns to Secure by itself
+     *   OFFLINE - NO CONNECTION    no network at all
+     *   CANNOT CONNECT             a network, and Tor has stopped or given up:
+     *                              the tap brings the screen with the ways on
+     *
+     * Read from the route every time, as the rest of this banner is. A stale
+     * `up` over no network is no connection (the path monitor wins, as it does
+     * in the gate), and with a network under it `up` is not offline at all. */
+    const noNet = !!p && p.network === 'none';
+    const making = offline && !noNet && (p.tor === 'connecting' || p.tor === 'stuck');
     return {
       torBannerShown: secure || off || offline,
-      torBannerText: mayWork ? 'CONNECTION MAY BE AVAILABLE'
-        : offline ? 'OFFLINE \u2014 TAP TO RETRY'
+      torBannerText: offline
+        ? (noNet ? 'OFFLINE - NO CONNECTION'
+           : making ? 'SECURING YOUR CONNECTION' : 'CANNOT CONNECT \u2014 TAP TO RETRY')
         : exposed ? 'IP Address Exposed'
         : viaOrbot ? 'Connected Via Orbot'
         : viaVpn ? 'Connected To Your VPN' : 'Secure Tor Connection',
@@ -273,6 +293,8 @@
         : (viaOrbot || viaVpn) ? '#3A2F0B' : '#123642',
       // read by the banner's tap, which is the way back out of offline
       torBannerOffline: offline,
+      // and whether there is anything for that tap to announce: Tor is already at it
+      torBannerMaking: making,
     };
   }
   /* amount: the keypad, for sending, receiving and making a token. */

@@ -49,6 +49,8 @@
         try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
+      // whatever was waiting for a route that was on its way hears how that ended (`routeSoon`)
+      routeChanged();
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       return FoxyWallet.privacy();
@@ -122,8 +124,19 @@
         catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
       }
       console.log('[foxy] working offline: ' + (privacy.offline ? 'yes' : 'no'));
+      routeChanged();
       return FoxyWallet.privacy();
     },
+
+    /* A connection that is on its way, and the wait for it (`routeSoon`):
+     * for the screens, which say SECURING YOUR CONNECTION while it is true
+     * and hold a step a few seconds for it rather than take the offline way. */
+    routeComing: function () { return routeComing(); },
+    routeSoon: function (ms) {
+      return routeSoon(ms === undefined ? FoxyWallet._routeWaitMs : ms);
+    },
+    // how long a money step waits for a route that is on its way; the suites set 0
+    _routeWaitMs: ROUTE_WAIT_MS,
 
     refreshPrivacy: function () {
       return bridgeAsk('privacy', {}, 5000).then(applyPrivacy);
@@ -212,7 +225,13 @@
       }
       /* Offline and a cache for this mint: connect from it. Offline and none:
        * the refusal assertRoute would have thrown anyway. */
-      var cached = routeOpen() ? null : mintCacheFor(u);
+      /* Or asked for from the cache, route or no route (`opts.fromCache`): a
+       * launch shows the home screen from what is on file and speaks to the
+       * mint afterwards, where it used to hold the screen for the mint's
+       * answer over Tor, three to six seconds, whenever Tor happened to be up
+       * first. Such a wallet is marked as one from the cache, and the app
+       * connects for real behind it (`connectForRealOnceOnline`). */
+      var cached = (routeOpen() && !(opts && opts.fromCache)) ? null : mintCacheFor(u);
       if (cached && typeof window.CashuTS.Wallet.prototype.loadMintFromCache !== 'function') cached = null;
       if (!cached) assertRoute();
       /* What is connected now, to put back if this does not come off.

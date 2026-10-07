@@ -31,6 +31,11 @@
     this.syncAccent();
     // before anything else is usable, including the gate
     this.pinLock();
+    /* And the phone's splash comes off the lock: the connecting screen, which
+     * is what used to tell the phone the page had the screen, now stays down
+     * on every launch but the first (home first), and waited for the unlock
+     * even when it did not. */
+    if (this._pinLocked && window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
     if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
     this.applyShell();
@@ -107,7 +112,14 @@
     // that talks to the network on launch was the one screen not behind Tor.
     const W = window.FoxyWallet;
     if (!W || !W.candles) { this._loading[r] = false; return; }
-    W.candles(cfg.g, cfg.span)
+    /* Asked inside a promise. `candles` refuses with a throw when there is no
+     * route, and thrown here it went up through `walletReady` into the
+     * launch's own catch: "connect failed, attempt 1" for a wallet that had
+     * connected, the rest of `walletReady` skipped (no balance, no history,
+     * nothing listening), and three seconds before it was tried again. A
+     * launch with no route did that every time; opening on the home screen,
+     * every launch has no route yet. */
+    Promise.resolve().then(() => W.candles(cfg.g, cfg.span))
       .then(series => {
         const rows = (series || [])
           .filter(x => isFinite(x.t) && isFinite(x.c) && x.c > 0)

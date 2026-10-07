@@ -1335,6 +1335,35 @@ wallet is on plus what is waiting to be swapped in *at that mint*
 placed by the mint in their token. With no argument `unclaimedSats()` is
 still everything waiting, which is what the claim-on-reconnect asks.
 
+**A route that is on its way is waited for.** Every step reads the route once
+and takes a branch, and the branch for no route is the worse one where a
+route was two seconds off: a payer drops the lock it was asked for, a receiver
+refuses plain ecash or keeps an over-payment it could have made change for, a
+scanned token gets the HIGH RISK card. Foxy opens on the home screen and is
+offline for the first seconds of every session, so `pay`, `sendToken`,
+`receiveToken`, `reclaimToken`, `onchainPay`, `payRequest` and a payment
+arriving (`_requestPaid`) wait up to six seconds while Tor is at work over a
+network (`routeSoon`), and not at all with no network or a Tor that has given
+up. `tests/home-first.js`.
+
+**One payment, one entry, whichever door it came by.** A token this phone
+already holds, or has already swapped in, is turned away at a scan and over
+the tap alike (`heldAlready`, `takenBefore`, `txSeen`); a request already paid
+by one is closed to other ecash by the lock being marked taken. Over the tap
+the answer for the very same pieces is 409, since "not taken" would be false.
+`tests/two-doors.js`, `tests/scan-twice.js`.
+
+**Change on its way back is not in it.** A receiver handed a larger piece than
+it asked for writes its entry at what stays, and sets the difference aside in
+the same breath (`holdChange`), so `balanceSats()` says what stays too. Before
+this the balance was the payment plus its change for the two to six seconds
+the change's swap took, and the books were out by the change for as long.
+The hold is in memory only: a page that dies in those seconds comes back
+holding the lot, which is true, and the change's own record puts it right.
+It is let go as the change's pieces leave the pile (`sendToken`,
+`purpose: 'change'`), or when no change is made after all and this phone
+keeps the lot (`changeBack`). `tests/change-leg.js` 6b.
+
 **An invoice belongs to the mint that made it.** `watch()` notes that mint
 (`madeAt`, from the quote's record) and asks nothing while the wallet is on
 another; `_claimOnce` refuses a claim from another mint without asking and

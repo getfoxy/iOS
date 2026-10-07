@@ -63,6 +63,8 @@ function load(opts) {
   if (phone) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
+  // nor is a route that is "on its way" waited for, unless a test is about that wait (routeSoon)
+  W._routeWaitMs = o.routeWaitMs || 0;
   W._keysetCheckDelay = o.keysetCheckDelay || [0, 0];
   return { W, window: w, storage: w.localStorage, phone };
 }
@@ -155,6 +157,8 @@ function loadReal(opts) {
   if (o.bridge) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
+  // nor is a route that is "on its way" waited for, unless a test is about that wait (routeSoon)
+  W._routeWaitMs = o.routeWaitMs || 0;
   W._keysetCheckDelay = o.keysetCheckDelay || [0, 0];
   const ctx = { W, window: w, storage: w.localStorage };
   watchBooks(ctx);

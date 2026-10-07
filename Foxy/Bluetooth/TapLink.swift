@@ -174,11 +174,11 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
     private var armed = false
     private var linked = false
     private var finished = false
-    /// A subscriber has this long to send M1. A phone that subscribes and
-    /// says nothing is not a payer — a scanner, a curious app — and with the
-    /// receiver arming itself on every invoice it would otherwise
-    /// hold every till it touched off the air for as long as it stayed.
-    static let handshakeWait: TimeInterval = 5
+    /// A phone that has said its first word has this long to finish the
+    /// handshake. A real one takes a few hundred milliseconds. The place is
+    /// taken by that first word and not by a subscribe (`TapPlace`), so a phone
+    /// that only listens holds nothing; this is for one that begins and stops.
+    static let handshakeWait: TimeInterval = 3
     private var handshakeTimer: Timer?
     /* The offer is M4, and M4 can wait.
      *
@@ -551,28 +551,44 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
             print("[tap] receive: another phone tried to join; ignored")
             return
         }
-        talkingTo = central.identifier
         if !subscribed.contains(where: { $0.identifier == central.identifier }) { subscribed.append(central) }
+        /* A subscribe takes nothing. It needs no key and says nothing, and it
+         * used to take this receiver's one place and its advertisement with
+         * it: anything in range could subscribe, stay silent for the five
+         * seconds that were waited, and do it again, and no customer could tap
+         * meanwhile. The place is taken by the first word (`didReceiveWrite`,
+         * `TapPlace`), which a real payer sends within milliseconds of this. */
+        guard talkingTo == central.identifier else {
+            print("[tap] receive: a phone is listening; its first word takes the place")
+            return
+        }
+        // the payer already talking, subscribing again: its handshake starts over, as it did
+        takePlace(central)
+    }
+
+    /// The place is this phone's: a session for it, off the air, and a clock on
+    /// the rest of the handshake.
+    private func takePlace(_ central: CBCentral) {
+        talkingTo = central.identifier
         arriving = TapProtocol.Bytes()
         session = TapSession(role: .receiver, service: service)
         /* Off the air the moment a payer is really there.
          *
          * It used to wait for `.linked`, three messages later, which left a few
          * hundred milliseconds in which a second phone could still find this
-         * one. A subscribe is the earliest moment this side can act on — a bare
-         * GATT connection is invisible to a peripheral, CoreBluetooth reports
-         * nothing until somebody subscribes — and it is also the right one: a
-         * payer subscribes only after its own proximity verdict has passed, so
-         * this is a phone that has been held against ours, not one that walked
-         * past. If it leaves without finishing, `didUnsubscribeFrom` puts this
-         * back on the air. */
+         * one; then for a subscribe, which is earlier still and which anything
+         * can do. The first word is the earliest moment that is a payer's: it
+         * comes only after that phone's own proximity verdict has passed and
+         * it has made a key to promise. If it leaves without finishing,
+         * `didUnsubscribeFrom` puts this back on the air, and so does the
+         * clock below. */
         if let m = manager, m.isAdvertising { m.stopAdvertising() }
         onEvent(.connecting, nil)
         handshakeTimer?.invalidate()
         handshakeTimer = Timer.scheduledTimer(withTimeInterval: Self.handshakeWait, repeats: false) { [weak self] _ in
             guard let self, !self.linked, !self.finished, self.talkingTo == central.identifier,
                   self.arriving.buffer.isEmpty else { return }
-            print("[tap] receive: that phone subscribed and said nothing for \(Int(Self.handshakeWait))s; back on the air")
+            print("[tap] receive: that phone began and did not finish in \(Int(Self.handshakeWait))s; back on the air")
             self.subscribed.removeAll { $0.identifier == central.identifier }
             self.talkingTo = nil
             self.session = nil
@@ -652,6 +668,13 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
 
     func peripheralManager(_ p: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         guard let first = requests.first else { return }
+        // the first word from a phone that is listening takes the place; a subscribe alone took nothing
+        if first.characteristic.uuid == inId,
+           TapPlace.taken(by: first.central.identifier, holder: talkingTo,
+                          listening: subscribed.contains(where: { $0.identifier == first.central.identifier }),
+                          linked: linked, early: early) {
+            takePlace(first.central)
+        }
         guard first.characteristic.uuid == inId, first.central.identifier == talkingTo else {
             // said, so a word from a payer this phone no longer counts as its own is in the diary
             print("[tap] receive: a write from \(first.central.identifier == talkingTo ? "the payer on another characteristic" : "a central that is not the payer"); refused")
@@ -1726,6 +1749,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if let error {
             print("[tap] pay: a piece would not go —", error.localizedDescription)
             outgoing.removeAll()
+            // which word it was decides what follows (`TapWriteFailure`)
+            let failed = TapWriteFailure.after(question: againOut, payment: sendDone != nil, changeKept: ackOut)
             if ackOut { ackOut = false; print("[tap] pay: the word that the change was kept did not get through") }
             /* The payment is with them already, and this was only the
              * question "what became of it" (`askAgain`). A phone that has
@@ -1748,7 +1773,18 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 return
             }
             if sendDone != nil { finishSend(.lost("That phone stopped taking the payment.")) }
-            if closingAfterWrites { closingAfterWrites = false; stop() }
+            if closingAfterWrites { closingAfterWrites = false; stop(); return }
+            /* Any other word: a price, an asking first, a step of the
+             * handshake. It took its place in the count as it was sealed and
+             * did not go, and the link was left up: the next word, the payment
+             * as often as not, was then sealed one ahead of what the receiver
+             * expected, would not open there, and the tap ended in a wait on
+             * both phones. The link is let go here and another is made. */
+            if failed == .letLinkGo, !finished {
+                print("[tap] pay: that word took its place in the count and did not go; letting this link go and making another")
+                linked = false
+                retry("a word did not get through")
+            }
             return
         }
         if ackOut, outgoing.isEmpty {

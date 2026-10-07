@@ -112,7 +112,11 @@ class Component extends DCLogic {
    * looks dead and does nothing at all reads as a bug; one that says why reads
    * as a state. */
   offlineNo(what) {
-    this.toast((what || 'That') + ' needs a connection. Tap OFFLINE to reconnect.', true);
+    const W = window.FoxyWallet;
+    // there is no OFFLINE to tap while a connection is on its way: the banner says SECURING YOUR CONNECTION
+    const coming = !!(W && W.routeComing && W.routeComing());
+    this.toast((what || 'That') + (coming ? ' needs a connection. One is on its way.'
+                                           : ' needs a connection. Tap the banner to retry.'), true);
   }
 
   toast(msg, amber) {

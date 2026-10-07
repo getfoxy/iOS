@@ -159,7 +159,13 @@
            * holding the link open. */
           const changeHash = 'tap-change-' + Date.now();
           const bits = W.tokenInfo ? W.tokenInfo(token) : null;
-          const sats = bits ? (bits.proofs || []).reduce((a, pr) => a + Number(pr.amount || 0), 0) : 0;
+          /* The wallet's own total, not one added up here. A piece's amount
+           * is cashu-ts's own type, and `Number()` of one is the coercion its
+           * next major version throws on: the one sum in the app that had not
+           * gone over to `satsOf` with the wallet's, and it warned on the
+           * first change to arrive in every session. `sats` is null for a
+           * token that is not sats, which is 0 here and refused below. */
+          const sats = bits ? Math.round(Number(bits.sats) || 0) : 0;
           /* Checked before it is believed: owed, no more than owed, this mint,
            * and locked to a key this phone asked for (W.checkChange). M7 is
            * the other phone's word, and it used to be kept as it came. A
@@ -285,6 +291,11 @@
         console.log('[foxy] wake:', away + 's in the background');
         // A phone handed over while Foxy was in the background: lock first.
         this.pinLock();
+        /* The lock is the page's own cover, and the phone's comes off it now.
+         * The connection screen waits for the unlock, so until then nothing
+         * said the page had the screen: the splash sat over the PIN pad for
+         * the four seconds of the phone's backstop, on every return. */
+        if (this._pinLocked && window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
         /* The one Face ID of this visit: once past the lock, whose Face ID
          * unlock covers it, the seed is read now rather than when a payment
          * first needs it (FoxyWallet.openSeedForVisit). */

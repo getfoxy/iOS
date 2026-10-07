@@ -605,3 +605,47 @@ struct TapProgress {
         return pct
     }
 }
+
+/// Who holds a receiver's one place.
+///
+/// A receiver talks to one payer at a time, and it used to give that place to
+/// the first phone that subscribed: it left the air at once and waited five
+/// seconds for a first word. A subscribe needs no key and says nothing, so
+/// anything in range could take the place, stay silent, and take it again
+/// when the five seconds were up, and no customer could tap for as long as it
+/// went on. The place is taken by the first word now (M1, a write): a phone
+/// that only listens holds nothing, and the receiver stays on the air.
+enum TapPlace {
+    /// Whether a word from `writer` takes the place: nobody holds it, the
+    /// writer is one of the phones listening, and there is something to pay.
+    static func taken(by writer: UUID, holder: UUID?, listening: Bool, linked: Bool, early: Bool) -> Bool {
+        holder == nil && listening && !linked && !early
+    }
+}
+
+/// What a paying phone does about a word that would not go out.
+///
+/// Every sealed word takes the next place in the count as it is sealed, and
+/// the count is the nonce. A word that failed to send has taken its place all
+/// the same, so the next one would be sealed one ahead of what the receiver
+/// expects and would not open there: the receiver stops, and the tap ends in
+/// a wait. A place is never given back (the bytes may have crossed, and one
+/// nonce for two messages is the one thing this cipher cannot forgive), so
+/// what is left is to let the link go and make another.
+enum TapWriteFailure: Equatable {
+    /// The question "what became of it": the answer can still come unasked.
+    case waitForAnswer
+    /// The payment itself: it is the page's to finish, by another road.
+    case paymentLost
+    /// The word that change was kept: the last word on this link anyway.
+    case nothingMore
+    /// Any other word: this link cannot carry the next one.
+    case letLinkGo
+
+    static func after(question: Bool, payment: Bool, changeKept: Bool) -> TapWriteFailure {
+        if question { return .waitForAnswer }
+        if payment { return .paymentLost }
+        if changeKept { return .nothingMore }
+        return .letLinkGo
+    }
+}

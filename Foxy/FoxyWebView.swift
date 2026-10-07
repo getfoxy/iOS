@@ -1009,6 +1009,30 @@ final class WebHostController: UIViewController {
             }
             bridge.torBackgrounded { finish() }
         }
+        /* The work is over, and Tor stays where it is for as long as iOS
+         * allows (Route.holding): somebody back within that finds the circuit
+         * they left, and no connection screen. Asked twice a second, because
+         * what iOS allows is only known by asking it. The door is shut again
+         * each time, since it shuts for a few seconds at a time: only the
+         * connection is kept, and nothing new leaves while Foxy is away. A
+         * return ends it at the next look, through `park`'s own guard. */
+        var saidHold = false
+        func hold() {
+            guard stillAway() else { park(); return }
+            let remaining = UIApplication.shared.backgroundTimeRemaining
+            guard Route.holding(waited: Date().timeIntervalSince(began), remaining: remaining) else {
+                park()
+                return
+            }
+            if !saidHold {
+                saidHold = true
+                print("[foxy] tor: kept on the network while Foxy is away, "
+                      + (remaining < 3600 ? "\(Int(remaining))s left of what iOS allows" : "iOS names no limit")
+                      + "; nothing new leaves")
+            }
+            Route.shutDoor()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { hold() }
+        }
         func waitForRequests() {
             guard stillAway() else { finish(); return }
             webView.evaluateJavaScript("!!(window.FoxyWallet && window.FoxyWallet._tidying)") { [weak self] answer, _ in
@@ -1041,7 +1065,7 @@ final class WebHostController: UIViewController {
                 SeedVault.endLeaving()
                 // nothing new from here; what the page starts now is told it was not sent
                 Route.shutDoor()
-                DispatchQueue.main.asyncAfter(deadline: .now() + after) { park() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + after) { hold() }
             }
         }
         // a moment for the page to hear it has been put away and start its top-up
@@ -1068,7 +1092,8 @@ final class WebHostController: UIViewController {
         SeedVault.endLeaving()
         Route.openDoor()
         let wentAway = backgroundedAt != nil
-        if !wentAway {
+        let away = backgroundedAt.map { max(0, Int(Date().timeIntervalSince($0))) } ?? 0
+        if Self.coverOffAtOnce(wentAway: wentAway, away: away) {
             removeCover()
         } else {
             /* The cover stays until the page has the screen again.
@@ -1084,12 +1109,23 @@ final class WebHostController: UIViewController {
         }
         // a paste alert that was up has been answered; leaving now is leaving
         FoxyBridge.pastePromptUntil = min(FoxyBridge.pastePromptUntil, Date().addingTimeInterval(2))
-        let away = backgroundedAt.map { max(0, Int(Date().timeIntervalSince($0))) } ?? 0
         backgroundedAt = nil
         pushUptime()
         // Tor first: a set-up marks it not ready before the page hears of the return
         bridge.torResumed(away: away)
         webView?.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._resumed(\(away))")
+    }
+
+    /// Whether the cover over a return comes off now, with no word from the page.
+    ///
+    /// The page says when it has the screen (FoxyBridge.pageCovered), and the
+    /// cover waits for that, four seconds at most. But the page is told how
+    /// long Foxy was away in whole seconds and does nothing at all for less
+    /// than one: so a trip to the background and back inside a second, which
+    /// the app switcher makes easy, was a return nobody answered for, and the
+    /// splash sat over a wallet that had never stopped working for all four.
+    static func coverOffAtOnce(wentAway: Bool, away: Int) -> Bool {
+        !wentAway || away < 1
     }
 
     /// Seconds since the phone started, which moving the clock does not change.

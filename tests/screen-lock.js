@@ -447,6 +447,12 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
        'the lock runs at launch, before the Tor gate and the home screen');
     const wake = fs.readFileSync(path.join(ROOT, 'build', 'app', '15-paid-wake-keyboard.js'), 'utf8');
     ok(/this\.pinLock\(\);/.test(wake), 'and again on every return from the background');
+    /* And the phone's cover over the return comes off the lock at once. The
+     * connection screen, which is what tells the phone the page has the
+     * screen, waits for the unlock; so nothing said it, and the splash sat
+     * over the PIN pad until the phone's own four seconds were up. */
+    ok(/this\.pinLock\(\);[\s\S]{0,500}?if \(this\._pinLocked && window\.FoxyGate && window\.FoxyGate\.uncover\) window\.FoxyGate\.uncover\(\);/.test(wake),
+       'with the phone told at once that the lock has the screen, so its cover does not sit over the PIN pad');
   }
 
   console.log('\n' + (failures ? failures + ' failed' : 'all screen lock checks pass'));

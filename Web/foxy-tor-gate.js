@@ -109,10 +109,65 @@
    * was once locked out, so this one is always on a timer. */
   var offRaised = false;
   var offGiveUp = null;
+  /* And the screen the person asked for, by tapping the banner. It is not put
+   * away by `goHomeFirst`, and it comes down by itself once Tor is through. */
+  var tapRaised = false;
 
   function chosenOffline() {
     var p = state();
     return !!(p && p.offline);
+  }
+
+  /* ---- home first ---------------------------------------------------------
+   *
+   * Foxy opens on the home screen. This file's connecting screen made every
+   * launch and every return a wait: three to fifteen seconds of SECURING YOUR
+   * CONNECTION before a balance could be read or a payment started, and a
+   * second and a half of its ending after Tor was already up. A wallet that
+   * has connected once has all it needs to be useful before the connection:
+   * its mint's keysets and a price are on file (`offlineReady`), which is
+   * what working offline runs on, and working offline gives itself up the
+   * moment Tor is really up (`_privacy`).
+   *
+   * So wherever this file would have put the connecting screen up by itself
+   * (a launch, a return, a request, the network going), it puts the wallet
+   * into working offline instead and stays down. The banner at the foot of
+   * the home screen says the rest: SECURING YOUR CONNECTION while Tor is at
+   * work, OFFLINE - NO CONNECTION with no network. A step that moves money
+   * waits a few seconds for a connection that is on its way rather than take
+   * the offline branch (`routeSoon`, in the wallet).
+   *
+   * Not on a first launch: with nothing on file there is no wallet to show,
+   * and that launch keeps this screen and the fox. And never over a screen
+   * the person opened by tapping the banner (`tapRaised`): that one is theirs,
+   * and comes down when Tor is through or when they say.
+   *
+   * Nothing here decides whether anything is sent. The native side refuses
+   * every request without Tor, as it always has. */
+  function homeFirst() {
+    if (FoxyGate.homeFirst === false || !bridged()) return false;
+    var w = W();
+    if (!w || typeof w.offlineReady !== 'function' || typeof w.setOffline !== 'function') return false;
+    try { return !!w.offlineReady(); } catch (e) { return false; }
+  }
+
+  /* Instead of the screen: working offline, until the connection is up. True
+   * when the screen is not needed, whether or not anything had to change. */
+  function goHomeFirst(why) {
+    if (tapRaised || !homeFirst()) return false;
+    var p = state();
+    if (through(p)) return true;
+    console.log('[foxy] tor gate: home first, ' + why + ' \u2014 working offline until the connection is up');
+    /* Tor is already setting itself up, so the try this file makes when a
+     * network appears is spent for this stretch: it is a restart, and a
+     * restart a few seconds into a launch only sets Tor back (seen in the
+     * simulator: ten seconds in, "restarting (the person asked)"). Spent
+     * unless the phone is known to have no network, which is the one case
+     * that try is for; before the phone has said what network it has, Tor is
+     * at work all the same. */
+    if (!(p && p.network === 'none')) triedOnNetwork = true;
+    W().setOffline(true);
+    return chosenOffline();
   }
 
   function el(style, html) {
@@ -1019,6 +1074,7 @@
     screen = null;
     retrying = false;
     netRaised = false;
+    tapRaised = false;
     awake(false);
     watchState(false);
     stopCount();
@@ -1154,8 +1210,19 @@
        * Answered true, because the person said carry on and that is exactly
        * what this promise means. The gate is taken down rather than left to
        * whatever put it up. */
+      // home first: the wallet goes offline in place of this screen, and the answer below is the same
+      if (!screen || screen === 'connecting') goHomeFirst('a launch or a return');
       if (chosenOffline()) {
-        takeDown(true, 'the person chose to work offline');
+        /* Unless the screen up is the try this file is making itself.
+         *
+         * A network that appears while somebody works offline is tried at
+         * once, on this screen, so that the wait has a face (`_changed`). A
+         * phone whose wifi came on while Foxy was put away came back to that
+         * screen and to the app's set-up, which asks here — and this took the
+         * screen down with the try two seconds from getting through, under
+         * the old reason. It comes down by its own rule: Tor up, or twenty
+         * seconds. */
+        if (!offRaised && !tapRaised) takeDown(true, 'working offline');
         return Promise.resolve(true);
       }
 
@@ -1257,10 +1324,46 @@
     quiet: function (retry) {
       if (retry) onRetry = retry;
       var p = state();
+      /* Home first: a connection that is on its way is waited for, a few
+       * seconds, and then the request goes on by whatever there is. No screen
+       * comes up for it; the step that asked shows its own waiting. */
+      if (homeFirst() && !tapRaised) {
+        var w = W();
+        var soon = (w && w.routeSoon) ? w.routeSoon() : Promise.resolve(false);
+        return soon.then(function () { goHomeFirst('a request'); return true; });
+      }
       if (through(p)) return Promise.resolve(true);
       if (p && p.everUp) return waitFor(15000);
       return FoxyGate.check(retry);
     },
+
+    /* Is there a connection right now, with nothing here to wait for?
+     *
+     * Tor up, or the person's choice to go without it, over a network that is
+     * there. Not `through`: somebody working offline is through and is not
+     * connected. Asked on a return to the app (`setUpAfterReturn`), where a
+     * yes means the connection Foxy left with is the one it came back to and
+     * no screen is owed. */
+    connected: function () {
+      if (!bridged()) return true;
+      var p = state();
+      if (!p || p.network === 'none' || chosenOffline()) return false;
+      return p.tor === 'up' || !!p.unprotected;
+    },
+
+    /* Whether this launch or return goes straight to the home screen
+     * (`homeFirst`): the app boots from what is on file then, and does not
+     * wait for the mint or a price before showing it. */
+    isHomeFirst: function () { return homeFirst(); },
+
+    /* Nothing of this file's is going up, and what the page is showing is
+     * what should be seen: the phone's cover over a return can come off.
+     *
+     * The cover waits to hear that the page has the screen (`sayCovered`), and
+     * a return that raised no connection screen never said so: the splash sat
+     * over a connected wallet for the four seconds of the phone's own
+     * backstop, which is the wait this was meant to remove. */
+    uncover: function () { sayCovered(); },
 
     /* Before spending. The same question; kept as its own name because the
      * send path calls it. */
@@ -1369,6 +1472,10 @@
     leaveOffline: function () {
       var w = W();
       if (!w) return;
+      /* Theirs, so home first leaves it alone; and it comes down by itself
+       * once Tor is through (`_changed`). It used to stay up at whatever the
+       * count had reached, with a connection behind it. */
+      tapRaised = true;
       if (w.setOffline) w.setOffline(false);
       /* Up at once, on what is known now, so the tap is not silent while the
        * phone is asked. The answer re-renders it a moment later. */
@@ -1452,7 +1559,7 @@
          * works, and if it does not they are put back exactly where they were.
          * The screen offers PROCEED OFFLINE throughout, so it is never a wall.
          */
-        if (!screen) {
+        if (!screen && !homeFirst()) {
           offRaised = true;
           show('connecting');
           gateChanged();
@@ -1496,6 +1603,8 @@
               if (chosenOffline() || !noNetwork(state())) return;
               if (screen) { netGone = setTimeout(netLook, 700); return; }
               console.log('[foxy] tor gate: the network went away');
+              // home first: the banner says OFFLINE - NO CONNECTION, and nothing goes up
+              if (goHomeFirst('the network went away')) { gateChanged(); return; }
               netRaised = true;
               show('connecting');
               gateChanged();
@@ -1519,14 +1628,26 @@
        * is merely slow is what vpnPatienceMs is for, and the clock in decide()
        * covers the Orbot case this trigger was added for, since Orbot's Tor
        * sits at 10% and never reaches any of these states either. */
-      if (p && p.vpn && !through(p) && screen !== 'vpn'
+      /* Home first, a connection lost or still being made is working offline,
+       * with the banner saying which. Tor dropping its circuit in the middle
+       * of a session put nothing on screen and left the app neither online
+       * nor offline: every request refused, and no mode that says why. */
+      if (p && !screen && !through(p)) goHomeFirst('the connection is not up');
+
+      /* And the screens below, which ask the person for something, do not
+       * come up over the home screen by themselves: the banner says CANNOT
+       * CONNECT, and a tap on it brings them (`leaveOffline`). Once one of
+       * this file's screens is up, they follow the state as before. */
+      var mayRaise = !!screen || !homeFirst();
+
+      if (mayRaise && p && p.vpn && !through(p) && screen !== 'vpn'
           && (p.tor === 'failed' || p.tor === 'stopped')) {
         show('vpn');
         gateChanged();
         return;
       }
 
-      if (p && p.tor === 'stopped' && !through(p) && screen !== 'failed') {
+      if (mayRaise && p && p.tor === 'stopped' && !through(p) && screen !== 'failed') {
         show('failed');
         gateChanged();
         return;
@@ -1534,7 +1655,7 @@
 
       // Orbot switched on mid-session: a silent reconnect cannot work under it,
       // so the screen that can fix it comes up.
-      if (p && p.orbot === 'needs-access' && !through(p) && screen !== 'vpn' && (screen || p.everUp)) {
+      if (mayRaise && p && p.orbot === 'needs-access' && !through(p) && screen !== 'vpn' && (screen || p.everUp)) {
         show('vpn');
       }
 
@@ -1542,7 +1663,7 @@
        * never a reason to stop somebody: Tor rides most of them without
        * complaint, and a person whose Foxy works must not be shown a warning
        * about a problem they do not have. So this waits for the failure. */
-      if (p && p.vpn && (p.tor === 'failed' || p.tor === 'stopped') && !through(p)
+      if (mayRaise && p && p.vpn && (p.tor === 'failed' || p.tor === 'stopped') && !through(p)
           && screen !== 'vpn') {
         show('vpn');
       }
@@ -1568,6 +1689,15 @@
       if (netRaised && screen === 'connecting' && through(p) && !noNetwork(p)) {
         netRaised = false;
         takeDown(true, 'the network came back');
+        gateChanged();
+        return;
+      }
+
+      /* And the one the person raised by tapping the banner: through, so it
+       * goes. A failure or a tunnel takes it to its own screen above, and
+       * those come down below. */
+      if (tapRaised && screen === 'connecting' && through(p) && !noNetwork(p) && !chosenOffline()) {
+        takeDown(true, 'through, after the banner was tapped');
         gateChanged();
         return;
       }
@@ -1638,6 +1768,7 @@
      * home screen behind it is not ready. */
     showLaunch: function () {
       if (chosenOffline()) return;
+      if (goHomeFirst('a launch or a return')) return;
       if (bridged() && !screen) show('connecting');
     },
 
@@ -1672,6 +1803,10 @@
      * for two seconds before Tor got through on its own, more than once, and a
      * screen that is right for two seconds is worse than no screen. */
     vpnPatienceMs: 30000,
+    /* Home first (see `homeFirst`). Off, every launch and return waits behind
+     * the connecting screen, as before: the suites that are about that screen
+     * turn it off, and it is the one switch back. */
+    homeFirst: true,
 
     /* How often a blocking screen looks at the state itself, rather than
      * waiting to be told. See watchState. */
@@ -1930,7 +2065,7 @@
 
   /* ---- the intro: the splash fox waking up --------------------------------
    *
-   * The first launch of each day opens with the drawing the splash is a still
+   * The first launch after install opens with the drawing the splash is a still
    * of: the fox sleeping, stretching, standing. It sits
    * over everything this file draws, so nothing else in the launch has to know
    * about it — Tor connects underneath, and the CONNECTING screen is simply
@@ -1963,14 +2098,18 @@
     return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
   }
 
-  /* Once a day. The stamp is written when it starts, not when it finishes, so
-   * a launch killed halfway through does not replay it on the next one. */
+  /* The first launch after install, and no other. It was once a day, and
+   * every launch of a debug build: a film in front of a wallet somebody
+   * wants to pay with. The first launch is the one with something to wait
+   * for, since the relay list has to be fetched before anything can happen.
+   *
+   * The stamp is written when it starts, not when it finishes, so a launch
+   * killed halfway through does not replay it on the next one. A phone that
+   * holds the old daily stamp has seen it. */
   function introDue() {
     try {
-      // a debug build plays it every launch: once a day is impossible to watch
-      if (window.FOXY_DEBUG) return true;
-      if (localStorage.getItem('foxy.intro.day') === introDay()) return false;
-      localStorage.setItem('foxy.intro.day', introDay());
+      if (localStorage.getItem('foxy.intro.seen') || localStorage.getItem('foxy.intro.day')) return false;
+      localStorage.setItem('foxy.intro.seen', introDay());
       return true;
     } catch (e) { return false; }      // no storage: no intro rather than every launch
   }
@@ -2005,7 +2144,7 @@
 
   /* The intro: the splash fox waking up.
    *
-   * The first launch of each day opens with the drawing the splash is a still
+   * The first launch after install opens with the drawing the splash is a still
    * of — sleeping, stretching, standing. It sits over
    * everything else this file draws, so nothing in the launch has to know about
    * it: Tor connects underneath the whole time — which is the point on a first

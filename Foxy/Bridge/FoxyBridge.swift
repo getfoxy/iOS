@@ -116,6 +116,11 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     func torResumed(away: Int) {
 #if canImport(Tor)
         TorService.resumed(away: TimeInterval(away))
+        /* Back to a Tor that never went down: nothing changes, so nothing
+         * says "up" and the address kept warm for the next request, closed as
+         * Foxy left, was never started again (warmSpare runs on a change).
+         * It does nothing unless Tor is up and there is no spare. */
+        warmSpare()
 #endif
     }
 

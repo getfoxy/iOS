@@ -435,14 +435,17 @@ Go to the home screen for **5 minutes or more**. Come back.
 
 **Pass:** Console shows these in order:
 
-- `tor: off the network while Foxy is in the background` (as it leaves)
+- `tor: kept on the network while Foxy is away` (as it leaves)
+- `tor: off the network while Foxy is in the background` (about twenty-four seconds later)
 - `[foxy] wake: …s in the background`
 - `tor: setting up a private connection (back after …s)`
 - `tor: circuit established`
 
-The phone showed CONNECTING TO TOR with "Setting up a private connection", then
-"Loading your balance", and landed on the home screen with its balance and
-price shown. A payment goes through.
+The phone showed the home screen at once, with its balance and the last
+price, and SECURING YOUR CONNECTION on the banner at its foot until the circuit
+was established (§22m). A payment goes through. With home first switched off
+(`FoxyGate.homeFirst = false`) the return waits behind the connection screen
+instead, as it used to.
 
 **The percentage on the way back, and while waiting.** A return used to show no
 percentage, then Foxy's own set-up steps (10, 20, 30%, shown as 18% of the
@@ -1470,7 +1473,9 @@ Two phones each showing an invoice, a hand's width apart, and a third to pay.
 
 #### 22k. Putting Foxy away while it is asking a mint
 
-Tor leaves the network when Foxy is put away. A request cut at that moment,
+Tor leaves the network when Foxy has been put away for as long as iOS
+allows (§22l), and nothing new is sent from the moment its work is over. A
+request cut at that moment,
 while Tor was still building its circuit, was counted against the entry relay,
 and a phone whose relays had been marked down that way took many seconds for
 an invoice. Debug build, diary pulled afterwards.
@@ -1490,6 +1495,83 @@ an invoice. Debug build, diary pulled afterwards.
    Foxy is not connected to Tor once the home screen is up.
 
 ---
+
+#### 22l. What two diaries of offline taps showed besides the money
+
+*All of it needs phones: the radios, a real return from the background, and
+two phones for the last.*
+
+1. **No RESTART TOR with the radios off.** Airplane mode, open Foxy, PROCEED
+   OFFLINE, leave it open a minute, put it away and bring it back, leave it
+   another minute. **Pass:** wherever the diary says the phone has no
+   network, it never says `RESTART TOR offered`.
+2. **Payments waiting, said once.** Still offline, with two or more payments
+   received and waiting, go to SEND and back several times. **Pass:** the
+   diary says once how many payments wait to be swapped in, and again only
+   when that number changes; there is no line for each payment at each
+   screen.
+3. **A look at another app.** Online, on the home screen: go to another app
+   for ten seconds and come back, then SEND. **Pass:** no splash and no
+   SECURING YOUR CONNECTION, and the camera is there at once. The diary says
+   `tor: kept on the network while Foxy is away`, then `back after …s and
+   the circuit is up; nothing to set up` and `back with the connection still
+   up`. Then stay away a minute: `tor: off the network while Foxy is in the
+   background` comes about twenty-four seconds after leaving, and the return
+   shows the connection screen as in §5a. With a PIN set, look at how long
+   the splash stays before the PIN pad on a return.
+4. **Wi-Fi back while Foxy is away.** Working offline, put Foxy away, turn
+   Wi-Fi on, and bring Foxy back within a few seconds. **Pass:** the
+   connection screen stays until the home screen is there with its secure
+   connection, and the diary says `the try from offline got through`, not
+   `the person chose to work offline`.
+5. **An over-payment's change.** An offline payer with no exact pieces pays
+   an online receiver by tap. **Pass:** the receiver's balance goes up once,
+   by what it asked, and never shows the larger piece; the payer's diary has
+   no `Implicit numeric coercion` line as its change arrives.
+
+#### 22m. Home first: the connection as a banner
+
+*Needs phones. A wallet that has connected at least once; the first step needs
+a fresh install.*
+
+1. **A first launch.** Delete Foxy, install, open. **Pass:** the fox plays,
+   then SECURING YOUR CONNECTION with its count, then the home screen. Close
+   Foxy fully and open it again: no fox.
+2. **Every launch after.** Close Foxy fully and open it. **Pass:** the splash,
+   then the home screen within about a second, with the balance and the last
+   price, and the banner SECURING YOUR CONNECTION at the foot. A few seconds
+   later the banner turns to Secure Tor Connection by itself, with no screen
+   in between and no toast. The diary says `tor gate: home first` and never
+   `tor gate: connecting`.
+3. **No network.** Airplane mode, open Foxy. **Pass:** the home screen at
+   once, with OFFLINE - NO CONNECTION. Turn the radios on: the banner goes to
+   SECURING YOUR CONNECTION and then to Secure, with no screen.
+4. **The banner's tap.** While it says SECURING YOUR CONNECTION, tap it.
+   **Pass:** the connection screen with its count, which comes down by itself
+   when Tor is through. In airplane mode the tap shows NO CONNECTION with TRY
+   AGAIN and PROCEED OFFLINE.
+5. **Starting at once.** Open Foxy and go straight to RECEIVE, an amount,
+   NEXT, before the banner has turned. **Pass:** a code is up at once; when
+   the connection lands the app stays on that screen (it is not thrown back
+   to the home screen), and the diary says `a route is up and this wallet
+   came from storage`.
+6. **A scan in the first seconds.** Open Foxy and at once scan a plain ecash
+   token from another wallet. **Pass:** no HIGH RISK card; it waits a moment
+   (`a connection is on its way; waiting for it`) and is taken as usual.
+7. **A tap in the first seconds.** Two phones, the payer opened a moment ago.
+   **Pass:** the payment is made locked (the diary says `locked to them`), not
+   from pieces on hand with change to come back.
+8. **A long return.** Put Foxy away for a minute and bring it back.
+   **Pass:** the home screen at once with SECURING YOUR CONNECTION, then
+   Secure; no connection screen, no splash held.
+9. **Tor in trouble.** With a VPN that Tor cannot get through, or Orbot on
+   and not allowing Foxy, open Foxy. **Pass:** the home screen, with CANNOT
+   CONNECT on the banner (or SECURING while Tor still tries); the tap brings
+   the screen that says what to do.
+10. **The same payment twice.** Offline receiver. Pay it by showing a code,
+    which it scans; then send the very same token over the tap from a payer
+    that still holds it (a second phone restored from the same words will
+    do). **Pass:** PAYMENT RECEIVED once; the balance counts it once.
 
 ## Getting a log off somebody else's phone
 
