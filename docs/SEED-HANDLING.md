@@ -114,6 +114,19 @@ Nowhere but native code. `SeedVault` reads the words for two things only:
   or loads again, Foxy goes to the background, or a write of the saved seed is
   attempted (whether or not it reports success) or the seed is deleted. The
   counter, restore and seed actions share it.
+
+  One exception, for the work Foxy does as it is put away. The small-change
+  top-up runs then (`MONEY.md` §13) and makes ecash, which needs the seed, and
+  behind Face ID the keychain cannot be read from the background: iOS has
+  nobody to ask (-25308). So the seed already in memory serves that work, from
+  the moment Foxy is put away until the work is over, which is twenty seconds
+  at most, and never past twenty-five by the clock (`SeedVault.putAway`,
+  `endLeaving`, `leavingSeconds`). A return to Foxy ends it at once, so coming
+  back reads the seed again as it always did. The unlock and typed words still
+  go the moment Foxy leaves, the keychain is not read for it, and a visit that
+  never read the seed leaves with none. What it costs: if iOS freezes Foxy
+  inside those seconds, the seed is in the frozen process's memory until Foxy
+  next runs, when it is dropped before anything is served from it.
 - `wordsForScreen()`: the words, for Foxy's own seed screen (`seedShow`), always
   behind its own Face ID or passcode prompt when the seed is kept behind Face ID;
   with protection `none` it asks nothing (above).

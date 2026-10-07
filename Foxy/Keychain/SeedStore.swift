@@ -277,13 +277,40 @@ enum SeedVault {
     /// The BIP-39 seed the counter and restore actions derive from
     /// (NativeSeedBridge.swift).
     /// Native memory, this page load only: it goes wherever the unlock is
-    /// forgotten, when the page goes, when Foxy goes to the background, and when
-    /// the saved seed is written or deleted. Words typed for a restore
-    /// (SeedCandidates) go at each of those moments too.
+    /// forgotten, when the page goes, when Foxy goes to the background (but for
+    /// the work of leaving: `leaving`), and when the saved seed is written or
+    /// deleted. Words typed for a restore (SeedCandidates) go at each of those
+    /// moments too.
     private static var nativeSeed: NUT13.Seed?
     /// Moves on every forget, so a read that was waiting on Face ID while the
     /// seed was forgotten answers its own request but keeps nothing.
     private static var nativeSeedEpoch = 0
+
+    /// The same seed for the work Foxy does as it is put away, and no longer.
+    ///
+    /// The page tops up its small change when Foxy is put away, and making
+    /// ecash needs the seed. It used to be forgotten the instant Foxy left and
+    /// read again for the top-up, which worked only on a phone with no
+    /// passcode: where the seed sits behind Face ID, iOS cannot ask for a face
+    /// once the app is off the screen (errSecInteractionNotAllowed, -25308),
+    /// so on every phone that protects its seed the top-up never ran (seen
+    /// in a phone log, from the moment Face ID was turned on).
+    ///
+    /// So the seed already in memory serves that work: from `putAway` until
+    /// the work is over (`endLeaving`: nothing with the mint, twenty seconds
+    /// at most, FoxyWebView), and never past `leavingSeconds` by the clock,
+    /// whoever forgot to end it. A return to Foxy ends it too, so coming
+    /// back asks for the seed exactly as it did. Nothing is read from the
+    /// keychain for it and nothing new is kept: a visit that never read the
+    /// seed leaves with none.
+    private static var leaving: (seed: NUT13.Seed, at: Date)?
+    static let leavingSeconds: TimeInterval = 25
+
+    /// Whether a seed kept at `keptAt` for the work of leaving still serves it.
+    static func leavingCovers(keptAt: Date, now: Date) -> Bool {
+        let age = now.timeIntervalSince(keptAt)
+        return age >= 0 && age < leavingSeconds
+    }
 
     /// A Face ID unlock of Foxy succeeded with this context. Its approval covers
     /// the one seed read after it, within 30 seconds, and never the words screen.
@@ -300,6 +327,7 @@ enum SeedVault {
         if nativeSeed != nil { print("[foxy] seed: dropped — the unlock was given up") }
         unlock = nil
         nativeSeed = nil
+        leaving = nil
         nativeSeedEpoch += 1
         SeedCandidates.shared.forgetAll()
     }
@@ -311,6 +339,7 @@ enum SeedVault {
         lock.lock(); defer { lock.unlock() }
         if nativeSeed != nil { print("[foxy] seed: dropped — the page is loading again") }
         nativeSeed = nil
+        leaving = nil
         nativeSeedEpoch += 1
         SeedCandidates.shared.forgetAll()
     }
@@ -332,8 +361,61 @@ enum SeedVault {
         }
         unlock = nil
         nativeSeed = nil
+        leaving = nil
         nativeSeedEpoch += 1
         SeedCandidates.shared.forgetAll(except: kept)
+    }
+
+    /// Foxy went to the background. Everything `forgetNativeSeed` drops is
+    /// dropped — the unlock, typed words, the seed a visit reads from — and
+    /// the seed that was in memory stays only for the work of leaving
+    /// (`leaving`).
+    static func putAway(now: Date = Date()) {
+        lock.lock(); defer { lock.unlock() }
+        if let seed = nativeSeed {
+            leaving = (seed, now)
+            print("[foxy] seed: kept for the work of being put away, \(Int(leavingSeconds))s at most; a return asks again")
+        } else {
+            leaving = nil
+        }
+        unlock = nil
+        nativeSeed = nil
+        nativeSeedEpoch += 1
+        SeedCandidates.shared.forgetAll()
+    }
+
+    /// The work of leaving is over, or Foxy is back in front.
+    static func endLeaving() {
+        lock.lock(); defer { lock.unlock() }
+        if leaving != nil { print("[foxy] seed: dropped — the work of being put away is over") }
+        leaving = nil
+    }
+
+    /// A seed just read from the keychain, kept for the rest of the visit
+    /// unless something forgot the seed while iOS was asking (`readAt` is the
+    /// epoch the read began in).
+    static func keep(_ seed: NUT13.Seed, readAt epoch: Int) {
+        lock.lock(); defer { lock.unlock() }
+        if epoch == nativeSeedEpoch { nativeSeed = seed }
+    }
+
+    /// The epoch a read beginning now belongs to.
+    static var epochNow: Int {
+        lock.lock(); defer { lock.unlock() }
+        return nativeSeedEpoch
+    }
+
+    /// The seed in memory, if there is one to use: the visit's, or the one
+    /// kept for the work of leaving while that still holds. One that is out
+    /// of time is dropped here, not left for a clock to come back to.
+    static func kept(now: Date = Date()) -> NUT13.Seed? {
+        lock.lock(); defer { lock.unlock() }
+        if let seed = nativeSeed { return seed }
+        guard let last = leaving else { return nil }
+        if leavingCovers(keptAt: last.at, now: now) { return last.seed }
+        leaving = nil
+        print("[foxy] seed: dropped — kept for being put away, and out of time")
+        return nil
     }
 
     enum SecretsSeed {
@@ -360,13 +442,8 @@ enum SeedVault {
     }
 
     static func seedForSecrets() -> SecretsSeed {
-        lock.lock()
-        if let seed = nativeSeed {
-            lock.unlock()
-            return .found(seed)
-        }
-        let epoch = nativeSeedEpoch
-        lock.unlock()
+        if let seed = kept() { return .found(seed) }
+        let epoch = epochNow
         /* About to ask iOS, which means a prompt in front of somebody.
          *
          * The seed is kept for the whole visit on purpose, so this should happen
@@ -383,9 +460,7 @@ enum SeedVault {
         case .found(let words):
             // saved words that are not a mnemonic cannot be read as a seed
             guard let seed = try? NUT13.seed(mnemonic: words) else { return .failed }
-            lock.lock()
-            if epoch == nativeSeedEpoch { nativeSeed = seed }
-            lock.unlock()
+            keep(seed, readAt: epoch)
             return .found(seed)
         }
     }
