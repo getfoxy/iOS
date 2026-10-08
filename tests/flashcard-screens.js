@@ -244,6 +244,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0 && /\u20bf824 of change is waiting to go back on the card/.test(card(till).reason),
      'a payment that needs change: the payment stands and the change waits for the card’s next tap', card(till).reason);
   ok(/No PIN is needed/.test(card(till).reason), 'and says no PIN is needed for that', card(till).reason);
+  // the sheet closes with no card read: the change is said to be still waiting, with the tap to try again, not nothing
+  R.nfc = null;
+  card(till).press('TAP CARD');
+  await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP THE CARD AGAIN' && /not read/.test(card(till).reason));
+  ok(/The card was not read\. \u20bf824 is still waiting to go back on it\. No PIN is needed\./.test(card(till).reason) && card(till).has('TAP CARD') && R.W.cardOwed().length === 1,
+     'a tap that read no card says the change is still waiting, and offers the tap again', card(till).reason);
   R.nfc = c;
   c.tap();
   card(till).press('TAP CARD');

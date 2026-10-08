@@ -18563,7 +18563,26 @@ class Component extends DCLogic {
              * after a payment after all: the PIN is what writes then. */
             (e) => ((opt.owner && e && e.card === 'not-owner') || (opt.change && e && e.card === 'pin-needed'))
               ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false }))
-              : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+              : (e && e.card === 'cancelled')
+                ? this.fcStillWaiting(opt)
+                : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+  }
+
+  /* A write tap that closed with no card read (the sheet went without a tap,
+   * or was cancelled): what is still waiting is said again, with the tap to
+   * try once more, instead of nothing. A person who has just been told to tap
+   * for their change must not be left wondering whether anything happened. */
+  fcStillWaiting(opt) {
+    const owed = this.fcOwed().reduce((n, r) => n + r.sats, 0);
+    if (!(owed > 0)) return;
+    const after = this.fcOwedAfterPaying();
+    this.blockedCard('fc-change', {
+      tone: 'warn', title: 'TAP THE CARD AGAIN',
+      reason: 'The card was not read. ' + this.fcSats(owed) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' No PIN is needed.' : ''),
+      chip: 'It is kept for that card and no other.',
+      retry: 'TAP CARD', go: () => this.fcWriteAsk(opt),
+      shut: { label: 'LATER' },
+    });
   }
 
   fcWrote(r, o) {
