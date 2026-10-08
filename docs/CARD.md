@@ -283,7 +283,8 @@ or two buttons. The ones a payment can end in:
 | NO MONEY ON THIS CARD | a card with no PIN, or nothing on it |
 | NOT A FOXY CARD | it could not be read, or is another kind |
 | NO CARD READER | this phone, or this build, cannot read a card |
-| NOT PAID | the card left while it was signing: nothing was paid, and the next tap puts back what it signed, with no PIN (or, where the mint has not answered, once it has) |
+| NOT PAID YET | the card left while it was signing, and the sheet that came up again to finish read no card: TAP CARD finishes the payment, CANCEL gives back what it signed |
+| NOT PAID | the card was refused, or gave a bad signature, part way through: nothing was paid, and the next tap puts back what it signed, with no PIN (or, where the mint has not answered, once it has) |
 | TAP TO RECEIVE | the payment is made and its change is waiting for the second tap, with no PIN |
 | COMPLETE | the second tap did it: what was paid, and the change back on the card |
 | PAYMENT FAILED (NOT TAKEN OFF for a withdrawal) | the mint refused it after the card had signed: tap the card again to put the money back, and, if it has a limit, that the day stays used |
@@ -291,6 +292,31 @@ or two buttons. The ones a payment can end in:
 
 Every screen of the card flows has a render snapshot in `tests/snapshots/render`
 (the views named `flashcard…`, `card: …`, `stage: …`).
+
+## A tap cut short is taken up again
+
+A card held to a phone for a second or two is sometimes taken away too soon.
+Wherever some of the work was done, the next tap does the rest, and the phone's
+sheet comes up again by itself for it, with the PIN already given:
+
+- **A payment.** What the card signed before it left is held by the till for
+  that payment, and the next tap of the same card for the same amount signs only
+  the rest. The two are swapped at the mint as one payment. Nothing has to be
+  written back to the card, so the card is never short for a payment that was
+  finished. Cut short again, what it signed is held with the rest. Offline, taken
+  on trust, it works the same way: the rest of the exact set, kept on trust as one
+  payment. A held payment is given back to the card, by the road a refund always
+  took, when the person presses CANCEL, when the card pays another amount at that
+  till (its money then goes back in the same tap as that payment's change), or
+  three minutes later, at the next settling.
+- **A withdrawal.** What the card signed is already in the phone, with an entry
+  of its own, and the next tap takes the rest.
+- **Money going onto the card.** Whatever pieces went on stay on, and the next
+  tap writes the rest.
+
+Where the sheet that comes up again reads no card, the screen says what is
+waiting, with TAP CARD to finish. A card refused, or a bad signature, part way
+through a payment is not taken up again: what the card signed goes back to it.
 
 ## Change
 

@@ -508,10 +508,13 @@
    * change goes back on, with no PIN) and COMPLETE. Paid exactly, there is
    * nothing to receive, and the payment is complete at once. Taken on trust
    * with no route, it is one tap: only an exact set is taken then. */
-  fcPayRun(sats, pin, trusted) {
+  /* `resuming`: the same payment, taken up again after the card left part way
+   * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). */
+  fcPayRun(sats, pin, trusted, resuming) {
     const W = this.fcW();
     const opt = { paying: true, taken: true, again: () => this.fcPayAsk(sats, trusted) };
-    this.fcTap({ amount: this.stageMoney(sats), body: trusted ? '' : 'Tap 1 of 2: SEND.', warm: !trusted },
+    this.fcTap({ amount: this.stageMoney(sats), body: resuming ? 'Tap again to finish paying.' : trusted ? '' : 'Tap 1 of 2: SEND.',
+                 sheet: resuming ? 'Hold the card here again to finish paying' : '', warm: !trusted },
                (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
       .then((r) => {
         this.haptic && this.haptic('success');
@@ -524,7 +527,66 @@
         if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcReceiveNow(ch.sats, sats);
         // not made: this phone tries again when it connects, and says so
         if (ch && ch.unmade && ch.sats > 0) this.fcChangeLater(ch.sats, sats);
-      }, (e) => this.fcFailed(e, opt));
+        /* A payment of this card's held for another amount was let go as this
+         * one finished: its pieces go back on at the same second tap. */
+        const back = r && r.letGo && r.letGo.made ? Math.round(Number(r.letGo.sats) || 0) : 0;
+        if (back > 0 && !(ch && !ch.written && !ch.unmade && ch.sats > 0)) this.fcReceiveNow(back, sats);
+      }, (e) => {
+        /* The card left part way through signing: what it signed is held for
+         * this payment, and the sheet comes up again by itself for the rest. */
+        if (e && e.card === 'interrupted' && e.resumable) { this.fcResumeNow(sats, pin, trusted); return; }
+        // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted); return; }
+        this.fcFailed(e, opt);
+      });
+  }
+
+  /* The sheet again, a moment after the one the card left: iOS refuses a
+   * reading session started on the heels of the last. The PIN typed for this
+   * payment is used again, as it is for every tap of the one payment. And a
+   * settling once the hold could be stale, so one nobody came back for goes
+   * back to the card even with Foxy left open. */
+  fcResumeNow(sats, pin, trusted) {
+    clearTimeout(this._fcResumeT);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true), 700);
+    this.fcHeldClock();
+  }
+
+  fcHeldClock() {
+    const W = this.fcW();
+    clearTimeout(this._fcHeldT);
+    this._fcHeldT = setTimeout(() => { if (W && W.cardSettle) W.cardSettle().then(null, () => {}); }, 185000);
+  }
+
+  /* Held, and the tap to finish read no card: said, with the tap again, and
+   * CANCEL, which gives back what the card signed (`fcLetGo`). */
+  fcHeldCard(sats, pin, trusted) {
+    this.fcHeldClock();
+    this.blockedCard('fc-held', {
+      tone: 'warn', title: 'NOT PAID YET',
+      reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
+      chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true),
+      shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
+    });
+  }
+
+  /* The payment is given up: what the card signed for it is made into pieces
+   * for the card again, and the sheet comes up by itself to put them back. With
+   * no route to the mint they are made once there is one, and said so. */
+  fcLetGo() {
+    const W = this.fcW();
+    if (!W || !W.cardHeldLetGo) return;
+    W.cardHeldLetGo().then((r) => {
+      if (r && r.made && r.sats > 0) { this.fcReceiveNow(r.sats, 0, { putBack: true }); return; }
+      if (r && r.sats > 0) {
+        this.blockedCard('fc-let-go', {
+          tone: 'warn', title: 'NOT PAID',
+          reason: 'What the card signed goes back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back.',
+          shut: { label: 'OK' },
+        });
+      }
+    }, () => {});
   }
 
   fcTrusted(r) {
@@ -561,14 +623,16 @@
    * RECEIVE up instead, so the change is never left without a way to it. A
    * moment's pause first: iOS refuses a reading session started on the heels
    * of the last one. */
-  fcReceiveNow(sats, paid) {
+  fcReceiveNow(sats, paid, o) {
     const p = Math.round(Number(paid) || 0);
+    const putBack = !!(o && o.putBack);
     clearTimeout(this._fcReceiveT);
     this._fcReceiveT = setTimeout(() => {
       const W = this.fcW();
       // written meanwhile (or never owed here): nothing to ask for
       if (!W || !this.fcOwedAfterPaying()) return;
-      this.fcWriteRun('', { change: true, receive: true, paid: p, sats: Math.round(Number(sats) || 0) });
+      this.fcWriteRun('', { change: true, receive: !putBack, paid: p, sats: Math.round(Number(sats) || 0),
+                            sheet: putBack ? 'Hold the card here to put back what it signed' : '' });
     }, 700);
   }
 
@@ -646,7 +710,7 @@
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
     this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '', body: opt.receive && opt.paid > 0 ? 'Tap 2 of 2: RECEIVE.' : '',
-                 sheet: opt.receive ? 'Hold the card here again for its change' : '' },
+                 sheet: opt.sheet || (opt.receive ? 'Hold the card here again for its change' : '') },
                (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap
@@ -655,7 +719,18 @@
               ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false }))
               : (e && e.card === 'cancelled')
                 ? this.fcStillWaiting(opt)
-                : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+                /* The card left after some pieces went on: the sheet again by
+                 * itself for the rest. A tap of it that reads no card says what
+                 * is still waiting. Where nothing went on, the card says so and
+                 * waits to be asked, so a card that keeps leaving is not asked forever. */
+                : (e && e.card === 'gone' && e.wrote > 0)
+                  ? this.fcWriteAgain(opt)
+                  : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+  }
+
+  fcWriteAgain(o) {
+    clearTimeout(this._fcResumeT);
+    this._fcResumeT = setTimeout(() => this.fcWriteAsk(Object.assign({}, o, { sheet: 'Hold the card here again for the rest' })), 700);
   }
 
   /* A write tap that closed with no card read (the sheet went without a tap,
@@ -683,6 +758,10 @@
     const moved = !!(was && now && was !== now);
     this.refreshBalance();
     this.loadHistory();
+    /* Cut short with some of it written: the sheet comes up again by itself
+     * for the rest (a tap of it that reads no card says what is still waiting,
+     * `fcStillWaiting`). Not where nothing went on: that would ask forever. */
+    if (r.left > 0 && r.why !== 'full' && r.sats > 0) { this.fcWriteAgain(o); return; }
     if (r.left > 0) {
       this.blockedCard('fc-more', {
         tone: 'warn', title: r.why === 'full' ? 'THE CARD IS FULL' : 'TAP THE CARD AGAIN',
@@ -719,11 +798,13 @@
     }
     /* The second tap of a payment: its change is back on the card, and the
      * payment is COMPLETE. */
-    if (r.change > 0 && r.change === r.sats) {
+    if (r.change > 0 && r.change + (r.refund || 0) === r.sats) {
       const paid = Math.round(Number(o && o.paid) || 0);
       this.blockedCard('fc-complete', {
         tone: 'ask', title: 'COMPLETE',
         reason: (paid > 0 ? 'Paid ' + this.fcSats(paid) + '. ' : '') + this.fcSats(r.change) + ' of change is back on the card.'
+          // and a payment of the card's given up here, which went back in the same tap
+          + (r.refund > 0 ? ' So is ' + this.fcSats(r.refund) + ' from a payment that was not finished.' : '')
           + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
         shut: { label: 'DONE' },
       });
@@ -1027,9 +1108,20 @@
    * (a tap cut short keeps what the card signed, and the next takes the rest).
    * The PIN is held for the length of the withdrawal, as for one tap: the
    * card that says TAP CARD for the rest is still this flow, and LATER ends it. */
-  fcWithdrawRun(sats, pin, before) {
+  /* `again`: { rest } where this is the sheet come up by itself for the rest of
+   * a withdrawal cut short; a tap of it that reads no card puts the TAP CARD
+   * card up instead. */
+  fcWithdrawRun(sats, pin, before, again) {
     const W = this.fcW();
     const prior = Math.round(Number(before) || 0);
+    const partCard = (got, rest) => this.blockedCard('fc-part', {
+      tone: 'warn', title: 'TAP THE CARD AGAIN',
+      reason: this.fcSats(got) + ' came off the card into this phone before it was taken away. Tap it again for the rest'
+        + (rest > 0 ? ', ' + this.fcSats(rest) + '.' : '.'),
+      chip: 'Hold it still until the phone says to remove it.',
+      retry: 'TAP CARD', go: () => this.fcWithdrawRun(sats, pin, got),
+      shut: { label: 'LATER' },
+    });
     const said = (r) => {
       // the card as it reads now, where the tap lasted long enough to read it; otherwise its screen goes
       if (r && r.card) this.fcShow(r.card); else this.fcGone();
@@ -1042,7 +1134,8 @@
       });
     };
     const opt = { taken: true, again: () => this.fcWithdraw(), done: () => said(null) };
-    this.fcTap({ amount: sats ? this.stageMoney(sats) : '', warm: true }, (link, on, progress) => W.cardWithdraw(link, sats ? { pin, sats, on, progress } : { pin, on, progress }))
+    this.fcTap({ amount: sats ? this.stageMoney(sats) : '', warm: true, sheet: again ? 'Hold the card here again for the rest' : '' },
+               (link, on, progress) => W.cardWithdraw(link, sats ? { pin, sats, on, progress } : { pin, on, progress }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
@@ -1050,9 +1143,11 @@
         const ch = r && r.change;
         if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats);
       }, (e) => {
+        // the sheet for the rest read no card, or the card left before signing more: the TAP CARD card, with what came off so far
+        if (again && e && (e.card === 'cancelled' || e.card === 'gone')) { partCard(prior, again.rest); return; }
         if (!(e && e.card === 'partial')) { this.fcFailed(e, opt); return; }
-        /* Cut short: what the card signed is in this phone, and the rest is
-         * one more tap away. */
+        /* Cut short: what the card signed is in this phone, and the sheet comes
+         * up again by itself for the rest, with the PIN already given. */
         if (e.hash) this.txIsNew(e.hash);
         this.fcMoved({});
         this.fcGone();
@@ -1060,13 +1155,8 @@
         const got = prior + Math.round(Number(e.sats) || 0);
         const rest = Math.round(Number(e.left) || 0);
         if (!(rest > 0)) { said({ sats: e.sats }); return; }
-        this.blockedCard('fc-part', {
-          tone: 'warn', title: 'TAP THE CARD AGAIN',
-          reason: this.fcSats(got) + ' came off the card into this phone before it was taken away. Tap it again for the rest, ' + this.fcSats(rest) + '.',
-          chip: 'Hold it still until the phone says to remove it.',
-          retry: 'TAP CARD', go: () => this.fcWithdrawRun(sats ? rest : 0, pin, got),
-          shut: { label: 'LATER' },
-        });
+        clearTimeout(this._fcResumeT);
+        this._fcResumeT = setTimeout(() => this.fcWithdrawRun(sats ? rest : 0, pin, got, { rest }), 700);
       });
   }
 

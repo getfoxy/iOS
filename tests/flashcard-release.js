@@ -333,13 +333,16 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     ok(out.sats === 500 && out.card === undefined && Hh.trace.filter((x) => x === 'end' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && asked(Hh, '/v1/checkstate') === 0 && asked(Hh, '/v1/swap') === 1,
        'a withdrawal that does not hold lets the card go once it has signed, asks the mint nothing first, and does not read the card again', Hh.trace.join(', '));
 
-    // the card leaves part-way through signing: as it always did (the sheet ends in an error, what it signed goes back)
+    // the card leaves part-way through signing: the sheet ends in an error, and what it signed is held for its next tap
     c.tap();
     await binaryLoad(Hh, c, 1536);
     Hh.sheet.length = 0;
     const half = await tap(Hh, c, (link) => { c.leaveBefore('20', 2); return Hh.W.cardPay(link, { sats: 1535, pin: '1234' }); }).then(() => null, (e) => e);
-    ok(half && half.card === 'interrupted' && Hh.W.cardOwed().length === 1 && Hh.W.cardOwed()[0].kind === 'refund' && Hh.sheet.some((x) => /^error:/.test(x)),
-       'a card that leaves while it is signing is as it was: nothing paid, what it signed owed back, and the sheet says it left too soon', JSON.stringify({ card: half && half.card, owed: Hh.W.cardOwed().map((r) => [r.kind, r.sats]), sheet: Hh.sheet }));
+    ok(half && half.card === 'interrupted' && half.resumable === true && Hh.W.cardOwed().length === 0 && !!Hh.W.cardHeldPayment(c.key) && Hh.sheet.some((x) => /^error:/.test(x)),
+       'a card that leaves while it is signing: nothing paid yet, what it signed held for its next tap and nothing owed back, and the sheet says it left too soon', JSON.stringify({ card: half && half.card, held: Hh.W.cardHeldPayment(c.key), sheet: Hh.sheet }));
+    await Hh.W.cardHeldLetGo(c.key);
+    ok(!Hh.W.cardHeldPayment(c.key) && Hh.W.cardOwed().length === 1 && Hh.W.cardOwed()[0].kind === 'refund',
+       'and let go, it goes back by the road it always did: made into pieces for the card, owed to it', JSON.stringify(Hh.W.cardOwed().map((r) => [r.kind, r.sats])));
   }
 
   /* ---- 6: the road to the mint is opened as the sheet opens ----------------------------------- */

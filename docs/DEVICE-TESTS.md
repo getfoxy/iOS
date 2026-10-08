@@ -1566,9 +1566,13 @@ and load it), a phone whose build carries the NFC entitlement
 3. The same, lifting the card away the moment the sheet first changes.
    **Pass:** one of two ends, and never a third: nothing was taken and the
    screen says so, or the card had signed and the payment stands (or is
-   checked) with the sheet ended. Pulling it away between two signatures says
-   NOT PAID, with what it signed owed back to it, and TAP CARD puts it there with
-   no PIN.
+   checked) with the sheet ended. Pulling it away between two signatures leaves
+   nothing paid yet: the sheet comes up again by itself ("Hold the card here
+   again to finish paying"), and the next tap signs only the rest and pays.
+   **Pass:** HISTORY has one payment for the whole amount, and the card is down
+   by exactly that (and its change). Pull it away again and let the second sheet
+   time out: NOT PAID YET, with TAP CARD and CANCEL; CANCEL puts what it signed
+   back on the card at a tap that comes up by itself.
 4. Put Foxy away the moment the sheet says "Done" and wait. **Pass:** on return
    the payment is paid, or CHECKING says it is still being asked; the wallet asks
    again by itself. A mint that refuses a payment after the card has signed cannot

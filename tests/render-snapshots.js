@@ -594,6 +594,7 @@ function cards() {
   add('card: a payment complete, its change back on the card', (a) => { a.refreshBalance = () => {}; a.loadHistory = () => {}; a.fcWrote({ card: { balance: 0, info: {}, record: {} }, sats: 212, change: 212, refund: 0, back: 0, left: 0 }, { paid: 1180 }); });
   add('card: a payment cut short, not paid', (a) => a.fcFailed({ card: 'interrupted', owed: 512, made: true, message: 'x' }, { paying: true, taken: true }));
   add('card: change the mint did not make yet', (a) => a.fcChangeLater(824, 200));
+  add('card: a payment the card left part way through, not paid yet', (a) => { a.fcHeldClock = () => {}; a.fcHeldCard(1536, '1234', false); });
   add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
   add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
   // the card has signed and been let go; the sheet is gone and our own screen waits for the mint

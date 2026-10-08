@@ -9736,7 +9736,13 @@
       });
     });
     return walk.then(function () {
-      if (stopped && !done.length) throw stopped;
+      /* Nothing finished, but some pieces went on before the card left: said on
+       * the error (`wrote`), so the screen can ask for the tap that finishes it
+       * at once, as for any write cut short part way. */
+      if (stopped && !done.length) {
+        if (written > 0 && stopped && typeof stopped === 'object') { try { stopped.wrote = written; } catch (x) {} }
+        throw stopped;
+      }
       var why = stopped || misfit;
       return { sats: sats, back: back, change: change, refund: refund, done: done, left: left, why: why ? (why.card || 'refused') : '' };
     });
@@ -10459,6 +10465,41 @@
     return { sats: row.sats, hash: 'req-' + row.id };
   }
 
+  /* A payment the card left part way through is HELD, not given back at once.
+   *
+   * The pieces it signed before it left are the start of that same payment:
+   * they stay in CARD_TAKEN as a refund row with `resume` ({ want }), and the
+   * card's next tap here for the same amount signs only the rest (`cardTake`),
+   * and the two are swapped as one payment. They used to be given back at once,
+   * which took a second tap to write them back and left the card short until
+   * then, even when the person tapped again straight away to pay the same thing.
+   *
+   * A held payment is let go (`cardHeldRelease`: it becomes the refund row it
+   * always was, given back by `cardReturn` now, or by the next settling where
+   * there is no route) when the person cancels it, when the card pays another
+   * amount here, or when CARD_RESUME_MS have passed (`cardSettle` leaves a
+   * fresh one alone, and lets an old one go). */
+  var CARD_RESUME_MS = 3 * 60 * 1000;
+  function cardHeld(key) {
+    return cardStore(CARD_TAKEN).filter(function (r) { return r && r.resume && r.card === key; })[0] || null;
+  }
+  function cardHeldFresh(r) {
+    return !!(r && r.resume && Date.now() - (Number(r.at) || 0) < CARD_RESUME_MS);
+  }
+  function cardHeldProofs(r) {
+    try { return ((FoxyWallet.tokenInfo(r.token) || {}).proofs) || []; } catch (e) { return []; }
+  }
+  function cardHeldRelease(r, w) {
+    var plain = {};
+    Object.keys(r).forEach(function (k) { if (k !== 'resume') plain[k] = r[k]; });
+    mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).map(function (x) { return (x && x.id === r.id) ? plain : x; }));
+    console.log('[foxy] card: a payment it left part way through is let go; what it signed goes back to it');
+    if (!w || !routeOpen()) return Promise.resolve({ sats: Number(r.worth) || 0, made: false });
+    return cardReturn(plain, null, w, null).then(function (made) {
+      return { sats: (made && made.sats) || 0, made: !!made };
+    }, function () { return { sats: 0, made: false }; });
+  }
+
   /* The one flow behind being paid by a card and emptying one (21a-flashcard.js). */
   function cardTake(link, o, memo) {
     var on = function (step) { try { if (typeof o.on === 'function') o.on(step); } catch (e) {} };
@@ -10477,6 +10518,8 @@
     try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     var t = cardTalk(link);
     var card, picked, worth, fee, row, result, own, cap, lift = false, released = false, signedNonces = [];
+    // a payment of this card's held from a tap cut short (`cardHeld`), and one held for another amount, let go after this one
+    var held = null, heldProofs = [], heldWorth = 0, letGoAfter = null;
     on('reading');
     /* A till does not ask the card to prove its key (AUTH: the card's slowest
      * answer): it is about to be paid in pieces the card signs, and a signature
@@ -10503,15 +10546,33 @@
       lift = !!(o.lift && day.limited && card.mine);
       cap = (day.limited && !lift) ? day.left : null;
       if (day.limited && day.noTime && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
+      /* The same payment, taken up again: what the card signed for it before
+       * it left counts, and only the rest is signed now. Held for another
+       * amount, or too long ago, it is let go once this payment is done. */
+      if (!o.lift && !o.all) {
+        held = cardHeld(card.key);
+        if (held && !(cardHeldFresh(held) && Number(held.resume.want) === want)) { letGoAfter = held; held = null; }
+        heldProofs = held ? cardHeldProofs(held) : [];
+        if (held && !heldProofs.length) { letGoAfter = held; held = null; }
+        heldWorth = sumProofs(heldProofs);
+      }
+      var heldFee = heldProofs.length ? swapFeeFor(w, heldProofs) : 0;
+      if (!isFinite(heldFee) || heldFee < 0) heldFee = 0;
+      var rest = held ? want + heldFee - heldWorth : want;
+      if (held) console.log('[foxy] card: taking up a payment it left part way through: ' + heldWorth + ' of ' + want + ' sats signed, the rest now');
       /* Offline, only an exact set: change cannot be made without a route, and
        * a till that paid it out of its own pile would lose the payment and the
        * change both to a payer who spent their copy. */
-      var choose = function (limit) { return offline ? cardExactPick(w, have, want, limit) : cardPick(w, have, want, limit); };
+      var choose = function (limit) { return offline ? cardExactPick(w, have, rest, limit) : cardPick(w, have, rest, limit); };
       if (o.all) {
         picked = have;
+      } else if (held && rest <= 0) {
+        // signed in full before it left after all: nothing more to sign, only the PIN to give again
+        picked = [];
       } else {
         picked = choose(cap);
       }
+      if (!(held && rest <= 0)) {
       if ((!picked || !picked.length) && cap !== null && !o.all) {
         var free = choose(null);
         if (free && free.length && sumProofs(free) > cap) {
@@ -10519,40 +10580,44 @@
                           { left: cap, need: sumProofs(free), turns: turns, limit: day.limit });
         }
       }
-      if (offline && (!picked || !picked.length) && card.balance >= want && !(usable.stale > 0 && usable.pieces.length === 0)) {
+      if (offline && (!picked || !picked.length) && card.balance >= rest && !(usable.stale > 0 && usable.pieces.length === 0)) {
         throw cardError('inexact', 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly '
           + want + ' sats. Pay an amount it can make, or pay when this phone is online.', { balance: card.balance });
       }
       if (!picked || !picked.length) {
-        if (usable.stale > 0 && card.balance >= want) {
+        if (usable.stale > 0 && card.balance >= rest) {
           throw own
             ? cardError('past-date', 'This card\u2019s date has passed. Its money comes back to this phone with TAKE IT BACK, and needs no card.', { stale: usable.stale })
             : cardError('renew', 'This card must be renewed by its owner before it can pay.', { stale: usable.stale });
         }
         throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       }
-      worth = sumProofs(picked);
-      fee = swapFeeFor(w, picked);
+      }
+      worth = sumProofs(picked) + heldWorth;
+      fee = swapFeeFor(w, picked.concat(heldProofs));
       if (!isFinite(fee) || fee < 0) fee = 0;
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       /* A card that signs for three pieces and refuses the fourth has spent
        * three for a payment that was not made, so the limit is checked for the
        * whole set before the first is asked for. */
-      if (cap !== null && worth > cap) {
+      // what was held is already in the card's day: only what is signed now is charged to it
+      if (cap !== null && sumProofs(picked) > cap) {
         throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
-                        { left: cap, need: worth, turns: turns, limit: day.limit });
+                        { left: cap, need: sumProofs(picked), turns: turns, limit: day.limit });
       }
       on('signing');
       return cardSign(t, card, picked, pin, lift, o.progress);
-    }).then(function (signed) {
-      if (own) cardSpentHere(card.key, signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
+    }).then(function (fresh) {
+      if (own) cardSpentHere(card.key, fresh.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
+      // with what was signed for this payment before the card left, where it was taken up again
+      var signed = heldProofs.concat(fresh);
       var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
       row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: worth - fee - want,
               all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
       signedNonces = signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
-      // written down before the card is let go: from here this row is the only copy of the right to spend the pieces
-      mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([row]));
+      // written down before the card is let go: from here this row is the only copy of the right to spend the pieces (and the held one is part of it)
+      mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([row]));
       if (offline) {
         var kept = cardKeepOnTrust(row, signed, card, w);
         on('done');
@@ -10573,6 +10638,24 @@
        * card, by the same road as change. */
       var some = (e && e.signed) || [];
       if (!some.length) throw e;
+      /* A payment the card left part way through: what it signed is held for
+       * its next tap here, which signs only the rest (`cardHeld`), with what was
+       * held from an earlier tap of the same payment. Nothing is paid yet, and
+       * nothing has to be written back to the card. */
+      if (!o.lift && e && e.card === 'gone') {
+        var holding = heldProofs.concat(some);
+        var keep = { id: 'card-' + piecesFingerprint(holding),
+                     token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: holding, unit: 'sat' }),
+                     sats: 0, worth: sumProofs(holding), over: sumProofs(holding), all: false, card: card.key,
+                     memo: 'card, not completed', at: Date.now(), refund: true, resume: { want: want } };
+        mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([keep]));
+        console.warn('[foxy] card: the card signed for ' + some.length + ' of ' + picked.length + ' pieces and left; '
+          + sumProofs(holding) + ' of ' + want + ' sats are held for its next tap, which signs the rest');
+        throw cardError('interrupted', 'The card was taken away before it had signed for all of it. Nothing is paid yet: tap it again to finish.',
+                        { owed: sumProofs(holding), held: sumProofs(holding), want: want, resumable: true, made: false });
+      }
+      // a refusal or a bad signature is not taken up again: what was held from before goes back with what was signed now
+      if (!o.lift && heldProofs.length) some = heldProofs.concat(some);
       /* A holder taking money off their own card, and not holding it for a
        * write after (`o.lift`, not `o.hold`): what the card signed before it
        * left is already off the card, and is theirs. It is kept, in this
@@ -10602,7 +10685,7 @@
       var back = { id: 'card-' + piecesFingerprint(some), token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: some, unit: 'sat' }),
                    sats: 0, worth: sumProofs(some), over: sumProofs(some), all: false, card: card.key, memo: 'card, not completed', at: Date.now(),
                    refund: true };
-      mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
+      mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([back]));
       console.warn('[foxy] card: the card signed for ' + some.length + ' of ' + picked.length + ' pieces and left; what it signed goes back to it');
       var signedHere = some.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
       return cardReturn(back, card, w, signedHere).then(function (made) {
@@ -10612,7 +10695,8 @@
         throw cardError('interrupted', 'The card was taken away too soon. Nothing was paid; what it signed for will go back to it when the mint answers.', { owed: sumProofs(some), made: false });
       });
     }).then(function (got) {
-      if (offline) return got;
+      // held for another amount: let go now this payment is done (offline, at the next settling)
+      if (offline) { if (letGoAfter) cardHeldRelease(letGoAfter, null); return got; }
       result = { sats: want, hash: row.id, change: null };
       /* Change: what the card paid over, less what it costs to make and for the
        * card to spend again (`changeFromPile`), locked to the card again with
@@ -10635,6 +10719,10 @@
           }, function () {
             result.change = { sats: owe.sats, written: false };
           });
+        }).then(function () {
+          if (!letGoAfter) return null;
+          // made into pieces for the card and owed to it, so the same second tap that takes the change puts it back
+          return cardHeldRelease(letGoAfter, w).then(function (back) { result.letGo = back; });
         }).then(function () { on('done'); return result; });
     });
   }
@@ -20635,6 +20723,25 @@
       return cardStore(CARD_DUE).map(function (d) { return { forHash: d.forHash, card: d.card, sats: Math.round(Number(d.owed) || 0) }; });
     },
 
+    /* A payment a card left part way through and this phone holds for its next
+     * tap (`cardHeld`): { card, held, want, at, fresh } or null. `cardHeldLetGo(key)`
+     * gives it back instead (all held, with no key): what it signed is made into
+     * pieces for the card and owed to it. Resolves { sats, made }. */
+    cardHeldPayment: function (key) {
+      var r = cardHeld(key);
+      return r ? { card: r.card, held: Number(r.worth) || 0, want: Number(r.resume.want) || 0, at: Number(r.at) || 0, fresh: cardHeldFresh(r) } : null;
+    },
+    cardHeldLetGo: function (key) {
+      var w = null;
+      try { w = need(); } catch (e) { w = null; }
+      var rows = cardStore(CARD_TAKEN).filter(function (r) { return r && r.resume && (!key || r.card === key); });
+      return rows.reduce(function (chain, r) {
+        return chain.then(function (sum) {
+          return cardHeldRelease(r, w).then(function (x) { return { sats: sum.sats + (x.sats || 0), made: sum.made || x.made }; });
+        });
+      }, Promise.resolve({ sats: 0, made: false }));
+    },
+
     /* Signed pieces the mint has not answered for yet: [{ id, sats, card }]. */
     cardTaken: function () {
       return cardStore(CARD_TAKEN).map(function (r) { return { id: r.id, sats: r.sats, card: r.card }; });
@@ -20648,6 +20755,15 @@
       var out = [];
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
+          /* A payment the card left part way through, held for its next tap
+           * (`cardHeld`): left alone while it is fresh, and given back once it
+           * is not. */
+          if (row && row.resume) {
+            if (cardHeldFresh(row)) { out.push({ id: row.id, state: 'held', sats: 0 }); return null; }
+            var wl = null;
+            try { wl = need(); } catch (x0) { wl = null; }
+            return cardHeldRelease(row, wl).then(function (r) { out.push({ id: row.id, state: 'released', sats: 0, owed: r.sats, refund: true, made: r.made }); });
+          }
           /* Found paid: what it owes the card back (its over-payment, or all of a
            * refund) is made now, as the tap would have made it, and waits for the
            * card's next tap. Missing, a receiver whose answer was lost kept it. */

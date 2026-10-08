@@ -570,6 +570,25 @@
       return cardStore(CARD_DUE).map(function (d) { return { forHash: d.forHash, card: d.card, sats: Math.round(Number(d.owed) || 0) }; });
     },
 
+    /* A payment a card left part way through and this phone holds for its next
+     * tap (`cardHeld`): { card, held, want, at, fresh } or null. `cardHeldLetGo(key)`
+     * gives it back instead (all held, with no key): what it signed is made into
+     * pieces for the card and owed to it. Resolves { sats, made }. */
+    cardHeldPayment: function (key) {
+      var r = cardHeld(key);
+      return r ? { card: r.card, held: Number(r.worth) || 0, want: Number(r.resume.want) || 0, at: Number(r.at) || 0, fresh: cardHeldFresh(r) } : null;
+    },
+    cardHeldLetGo: function (key) {
+      var w = null;
+      try { w = need(); } catch (e) { w = null; }
+      var rows = cardStore(CARD_TAKEN).filter(function (r) { return r && r.resume && (!key || r.card === key); });
+      return rows.reduce(function (chain, r) {
+        return chain.then(function (sum) {
+          return cardHeldRelease(r, w).then(function (x) { return { sats: sum.sats + (x.sats || 0), made: sum.made || x.made }; });
+        });
+      }, Promise.resolve({ sats: 0, made: false }));
+    },
+
     /* Signed pieces the mint has not answered for yet: [{ id, sats, card }]. */
     cardTaken: function () {
       return cardStore(CARD_TAKEN).map(function (r) { return { id: r.id, sats: r.sats, card: r.card }; });
@@ -583,6 +602,15 @@
       var out = [];
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
+          /* A payment the card left part way through, held for its next tap
+           * (`cardHeld`): left alone while it is fresh, and given back once it
+           * is not. */
+          if (row && row.resume) {
+            if (cardHeldFresh(row)) { out.push({ id: row.id, state: 'held', sats: 0 }); return null; }
+            var wl = null;
+            try { wl = need(); } catch (x0) { wl = null; }
+            return cardHeldRelease(row, wl).then(function (r) { out.push({ id: row.id, state: 'released', sats: 0, owed: r.sats, refund: true, made: r.made }); });
+          }
           /* Found paid: what it owes the card back (its over-payment, or all of a
            * refund) is made now, as the tap would have made it, and waits for the
            * card's next tap. Missing, a receiver whose answer was lost kept it. */

@@ -287,6 +287,64 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   card(till).press('DONE');
   ok(till.state.fc === null, 'nor is a payer\u2019s card left on show under the till\u2019s menu');
 
+  /* ---- a payment the card leaves part way through is finished, not given back --------
+   * What it signed is held for that payment, and the sheet comes up again by itself: the next
+   * tap signs only the rest. No card to press, and nothing to write back to the card. */
+  {
+    const HL = await funded({ sharedMint: H.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 4000);
+    const RT = await funded({ sharedMint: H.mint, words: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about' }, 0);
+    const till2 = appOn(RT, { screen: 'confirm' });
+    const c3 = newCard(HL);
+    await HL.W.cardSetUp(c3, { pin: '1234' });
+    await binaryLoad(HL, c3, 1536);         // 1,024 and 512, and a price they make exactly: no change to take
+    till2.state.screen = 'confirm';
+    till2.asking = 1536;
+    RT.nfc = c3;
+    const rb = await RT.W.balanceSats();
+    const tap0 = c3.tap;
+    c3.tap = () => { tap0(); c3.leaveBefore('20', 2); c3.tap = tap0; };      // the first tap only: it leaves before its second signature
+    const titles = [];
+    const shown = till2.blockedCard.bind(till2);
+    till2.blockedCard = (k, sp) => { titles.push((sp && sp.title) || k); return shown(k, sp); };
+    RT.sheet.length = 0;
+    till2.payByCard();
+    pad(till2).type('1234');
+    await until('the payment to be finished by the next tap', () => till2.state.screen === 'home' && !RT.W.cardHeldPayment(c3.key) && RT.W.cardTaken().length === 0 && !stage(R));
+    await settle();
+    const got = (await RT.W.balanceSats()) - rb;
+    const begins = RT.sheet.filter((x) => /^begin:/.test(x));
+    ok(got === 1536 && c3.balance() === 0 && begins.length === 2 && begins[1] === 'begin: Hold the card here again to finish paying' && !pad(till2),
+       'a payment the card leaves part way through: the sheet comes up again by itself, with no PIN, and the next tap signs the rest and pays', begins.join(' / ') + '; ' + got + ' received');
+    ok(titles.length === 0 && RT.W.cardOwed().filter((r) => r.card === c3.key).length === 0, 'with no card to press, and nothing to put back on the card', titles.join(', '));
+    till2.blockedCard = shown;
+
+    // the tap to finish reads no card: NOT PAID YET, with TAP CARD to finish and CANCEL to give it back
+    const c4 = newCard(HL);
+    await HL.W.cardSetUp(c4, { pin: '1234' });
+    await binaryLoad(HL, c4, 768);          // 512 and 256
+    till2.state.screen = 'confirm';
+    till2.asking = 768;
+    RT.nfc = c4;
+    const rb4 = await RT.W.balanceSats();
+    const tap4 = c4.tap;
+    c4.tap = () => { tap4(); c4.leaveBefore('20', 2); c4.tap = tap4; };
+    till2.payByCard();
+    pad(till2).type('1234');
+    await until('the payment to be held', () => !!RT.W.cardHeldPayment(c4.key));
+    RT.nfc = null;                      // and the card is not brought back
+    await until('NOT PAID YET to be said', () => card(till2) && card(till2).title === 'NOT PAID YET');
+    ok(/^The card was taken away before it had signed for all of ₿768\. Tap it again to finish paying\.$/.test(card(till2).reason) && card(till2).has('TAP CARD') && card(till2).has('CANCEL')
+       && RT.W.cardOwed().length === 0 && (await RT.W.balanceSats()) === rb4,
+       'a tap to finish that reads no card says NOT PAID YET, with TAP CARD to finish and CANCEL', card(till2).all);
+    RT.nfc = c4;
+    c4.tap();
+    card(till2).press('CANCEL');
+    await until('what it signed to be back on the card', () => card(till2) && card(till2).title === 'BACK ON THE CARD');
+    ok(c4.balance() === 768 && !RT.W.cardHeldPayment(c4.key) && RT.W.cardOwed().length === 0 && (await RT.W.balanceSats()) === rb4,
+       'CANCEL gives back what the card signed: the sheet comes up by itself, and the tap puts it back with no PIN', card(till2).reason + ' / ' + c4.balance());
+    card(till2).press('DONE');
+  }
+
   /* ---- its daily limit, in three steps; its PIN --------------------------------- */
   H.nfc = c;
   c.tap();
@@ -496,7 +554,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(out && holder.seen[out.hash] === true, 'and its entry is not announced a second time');
   card(holder).press('DONE');
 
-  // a withdrawal cut short keeps what the card signed, and TAP CARD takes the rest
+  // a withdrawal cut short keeps what the card signed, and the sheet comes up again by itself for the rest
   {
     c.tap();
     await H.W.cardAdd(c, { sats: 1500, owner: true });
@@ -505,24 +563,79 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the loaded card to be read', () => holder.state.fc && holder.state.fc.balance === 1500 && holder.state.fc.check !== 'asking');
     await holder.refreshBalance();
     const had = await H.W.balanceSats();
+    const titlesW = [];
+    const shownW = holder.blockedCard.bind(holder);
+    holder.blockedCard = (k, sp) => { titlesW.push((sp && sp.title) || k); return shownW(k, sp); };
     // the session's own tap, and then the third piece is not answered: the card is taken away
     const tapW = c.tap;
     c.tap = () => { tapW(); c.leaveBefore('20', 3); c.tap = tapW; };
+    H.sheet.length = 0;
     holder.fcWithdrawPin(0);
     pad(holder).type('4321');
-    await until('the cut-short withdrawal to be said', () => card(holder) && card(holder).title === 'TAP THE CARD AGAIN');
-    const first = (await H.W.balanceSats()) - had;
-    ok(first > 0 && c.balance() === 1500 - first && /came off the card into this phone before it was taken away\. Tap it again for the rest, ₿/.test(card(holder).reason)
+    await until('the whole withdrawal to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
+    await settle();
+    const begins = H.sheet.filter((x) => /^begin:/.test(x));
+    ok(begins.length === 2 && begins[1] === 'begin: Hold the card here again for the rest' && !pad(holder) && titlesW.join() === 'IN YOUR WALLET',
+       'a withdrawal cut short keeps what came off, and the sheet comes up again by itself for the rest, with no PIN and no card to press', begins.join(' / ') + ' | ' + titlesW.join(', '));
+    ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.' && c.state.record.limit === 700 && H.W.cardOwed().length === 0,
+       'and then all of it is in the phone, said as the whole withdrawal, and the card’s limit is back as it was', card(holder).reason + ' / ' + c.state.record.limit);
+    card(holder).press('DONE');
+
+    // the sheet for the rest reads no card: TAP THE CARD AGAIN, with what came off so far, and TAP CARD for the rest
+    c.tap();
+    await H.W.cardAdd(c, { sats: 1500, owner: true });
+    c.tap();
+    holder.fcRead(true);
+    await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === 1500 && holder.state.fc.check !== 'asking');
+    const had2 = await H.W.balanceSats();
+    c.tap = () => { tapW(); c.leaveBefore('20', 3); c.tap = tapW; };
+    H.sheet.length = 0;
+    holder.fcWithdrawPin(0);
+    pad(holder).type('4321');
+    // the first tap ends with the card gone, and the card is not brought back for the sheet that follows
+    await until('the first tap to end with the card gone', () => H.sheet.some((x) => /^error:/.test(x)) && holder.state.fc === null);
+    H.nfc = null;
+    await until('the rest to be asked for with a card', () => card(holder) && card(holder).title === 'TAP THE CARD AGAIN');
+    const first = (await H.W.balanceSats()) - had2;
+    ok(first > 0 && c.balance() === 1500 - first && /came off the card into this phone before it was taken away\. Tap it again for the rest/.test(card(holder).reason)
        && card(holder).has('TAP CARD') && card(holder).has('LATER') && H.W.cardOwed().length === 0,
-       'a withdrawal cut short says what came off into this phone and offers the tap for the rest; nothing waits to go back', card(holder).reason);
+       'where that sheet reads no card, it says what came off and offers the tap for the rest; nothing waits to go back', card(holder).reason);
+    H.nfc = c;
     c.tap();
     card(holder).press('TAP CARD');
     ok(!pad(holder), 'the tap for the rest asks no PIN again: it is the same withdrawal');
     await until('the rest to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
     await settle();
-    ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.' && c.state.record.limit === 700,
-       'and then all of it is in the phone, said as the whole withdrawal, and the card’s limit is back as it was', card(holder).reason + ' / ' + c.state.record.limit);
+    ok(c.balance() === 0 && (await H.W.balanceSats()) === had2 + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.',
+       'and then all of it is in the phone, said as the whole', card(holder).reason);
     card(holder).press('DONE');
+    holder.blockedCard = shownW;
+  }
+
+  // money going onto the card, cut short after some of it is written: the sheet comes up again by itself for the rest
+  {
+    c.tap();
+    holder.fcRead(true);
+    await until('the card to be read for a load', () => holder.state.fc && holder.state.screen === 'flashcard' && holder.state.fc.check !== 'asking');
+    const onBefore = c.balance();
+    c.tap();
+    const seenL = await H.W.cardLook(c);
+    await H.W.cardPrepare(seenL, 1000);                 // many pieces, made and owed to the card
+    const tapL = c.tap;
+    c.tap = () => { tapL(); c.leaveBefore('30', 3); c.tap = tapL; };   // two pieces go on, and the card leaves
+    H.sheet.length = 0;
+    holder.fcWriteAsk({});
+    await until('the load to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
+    await settle();
+    const beginsL = H.sheet.filter((x) => /^begin:/.test(x));
+    ok(beginsL.length === 2 && beginsL[1] === 'begin: Hold the card here again for the rest' && c.balance() === onBefore + 1000 && H.W.cardOwed().length === 0,
+       'a load cut short after some pieces went on: the sheet comes up again by itself, and the rest goes on', beginsL.join(' / ') + ' | ' + c.balance());
+    card(holder).press('DONE');
+    // and taken off again, so what comes after has the phone and the card as they were
+    c.tap();
+    await H.W.cardWithdraw(c, { pin: '4321' });
+    await settle();
+    holder.setState({ screen: 'home', stack: [], fc: null });
   }
 
   // a payment the card left part-way through is said by what it was: not paid, and how its money goes back

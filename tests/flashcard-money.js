@@ -189,17 +189,81 @@ let L0 = null;
     const rBefore = await bal(R);
     c8.leaveBefore('20', 2);
     const half = await R.W.cardPay(c8, { sats: 1535, pin: '1234' }).then(() => null, (e) => e);
-    ok(half && half.card === 'interrupted' && (await bal(R)) === rBefore, 'a card taken away between two signatures has paid nothing', half && half.message);
-    const refund = R.W.cardOwed();
-    ok(refund.length === 1 && refund[0].kind === 'refund' && refund[0].sats === 1024 && R.W.cardTaken().length === 0,
-       'what it had signed for is on its way back to it, not kept', JSON.stringify(refund.map((r) => [r.kind, r.sats])));
+    ok(half && half.card === 'interrupted' && half.resumable === true && (await bal(R)) === rBefore, 'a card taken away between two signatures has paid nothing yet', half && half.message);
+    const held = R.W.cardHeldPayment(c8.key);
+    ok(held && held.held === 1024 && held.want === 1535 && held.fresh && R.W.cardOwed().length === 0,
+       'what it had signed for is held for this payment: not given back, so nothing waits to be written to the card', JSON.stringify(held));
     ok(c8.balance() === 512, 'the card holds only the piece it had not signed for');
+    // the next tap, for the same payment, signs only the rest
     c8.tap();
-    await R.W.cardWrite(c8, { pin: '1234' });
-    ok(c8.balance() === 1536 && R.W.cardOwed().length === 0 && (await bal(R)) === rBefore, 'and the next tap puts it back: the card holds what it did, and the receiver nothing of it', String(c8.balance()));
-    c8.tap();
+    c8.sent.length = 0;
     const then = await R.W.cardPay(c8, { sats: 1535, pin: '1234' });
-    ok(then.sats === 1535 && (await bal(R)) === rBefore + 1535, 'after which it pays as it meant to');
+    const signedNow = c8.sent.filter((x) => /^b020/.test(x)).length;
+    ok(then.sats === 1535 && signedNow === 1 && !R.W.cardHeldPayment(c8.key) && R.W.cardTaken().length === 0 && (await bal(R)) >= rBefore + 1535 && (await bal(R)) <= rBefore + 1536,
+       'the next tap for the same payment signs only the piece it had not, and the payment is made with both', signedNow + ' signed, ' + ((await bal(R)) - rBefore) + ' received');
+    ok(c8.balance() + R.W.cardOwed().filter((r) => r.card === c8.key).reduce((n, r) => n + r.sats, 0) <= 1, 'and the card has paid it once: nothing put back, nothing lost', String(c8.balance()));
+  }
+
+  /* ---- 8b: a payment left part way through, and what becomes of it ----------- */
+  {
+    // a phone of its own to load the cards, at the same mint as the till
+    const L = await funded({ sharedMint: R.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 12000);
+    const fresh = async (sats) => { const c = newCard(L); await L.W.cardSetUp(c, { pin: '1234' }); await binaryLoad(L, c, sats); return c; };
+    const cut = async (c, sats, nth) => { c.tap(); c.leaveBefore('20', nth || 2); return R.W.cardPay(c, { sats, pin: '1234' }).then(() => null, (e) => e); };
+
+    // another amount from the same card: a payment of its own, and the one left part way through is given back as it ends
+    const a = await fresh(1536);
+    await cut(a, 1535);
+    a.tap();
+    const other = await R.W.cardPay(a, { sats: 300, pin: '1234' });
+    const owedA = R.W.cardOwed().filter((r) => r.card === a.key);
+    ok(other.sats === 300 && other.letGo && other.letGo.made && !R.W.cardHeldPayment(a.key)
+       && owedA.some((r) => r.kind === 'refund' && r.sats === 1024) && owedA.some((r) => r.kind === 'change'),
+       'another amount from the same card is a payment of its own, and the one left part way through goes back as it ends', JSON.stringify({ letGo: other.letGo, owed: owedA.map((r) => [r.kind, r.sats]) }));
+    a.tap();
+    await R.W.cardWrite(a, { change: true });
+    ok(a.balance() === 1536 - 300 && R.W.cardOwed().filter((r) => r.card === a.key).length === 0,
+       'and the one tap after it puts back both its change and what the first had signed', String(a.balance()));
+
+    // nobody comes back: three minutes on, the next settling gives it back
+    const b = await fresh(1536);
+    await cut(b, 1535);
+    const settledEarly = await R.W.cardSettle();
+    ok(!!R.W.cardHeldPayment(b.key) && settledEarly.some((x) => x.state === 'held'), 'a fresh one is left alone by the settling', JSON.stringify(settledEarly));
+    const real = R.window.Date.now.bind(R.window.Date);
+    R.window.Date.now = () => real() + 4 * 60 * 1000;
+    const settled = await R.W.cardSettle();
+    R.window.Date.now = real;
+    ok(!R.W.cardHeldPayment(b.key) && settled.some((x) => x.state === 'released' && x.made) && R.W.cardOwed().some((r) => r.card === b.key && r.kind === 'refund' && r.sats === 1024),
+       'one nobody came back for is given back at the first settling after three minutes: owed to the card', JSON.stringify(settled));
+    b.tap();
+    await R.W.cardWrite(b, { change: true });
+    ok(b.balance() === 1536, 'and its next tap puts it back', String(b.balance()));
+
+    // cut short twice: the second tap signs some more, the third the rest
+    const d = await fresh(1536 + 256);
+    const firstCut = await cut(d, 1791, 2);
+    ok(firstCut && firstCut.resumable && R.W.cardHeldPayment(d.key).held === 1024, 'cut short once', JSON.stringify(R.W.cardHeldPayment(d.key)));
+    const secondCut = await cut(d, 1791, 2);
+    ok(secondCut && secondCut.resumable && R.W.cardHeldPayment(d.key).held === 1024 + 512, 'cut short again: what it signed this time is held with the rest', JSON.stringify(R.W.cardHeldPayment(d.key)));
+    d.tap();
+    const done = await R.W.cardPay(d, { sats: 1791, pin: '1234' });
+    ok(done.sats === 1791 && !R.W.cardHeldPayment(d.key) && d.balance() + R.W.cardOwed().filter((r) => r.card === d.key).reduce((n, r) => n + r.sats, 0) <= 1,
+       'and the third tap finishes it, the card having paid it once', String(d.balance()));
+
+    // and offline, taken on trust: the next tap signs the rest of the exact set, and the whole is kept on trust
+    const e = await fresh(1536);
+    R.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
+    e.tap();
+    e.leaveBefore('20', 2);
+    const offCut = await R.W.cardPay(e, { sats: 1536, pin: '1234', trusted: true }).then(() => null, (x) => x);
+    ok(offCut && offCut.resumable && R.W.cardHeldPayment(e.key) && R.W.cardHeldPayment(e.key).held === 1024, 'offline, a payment taken on trust is held the same way', JSON.stringify(offCut && { card: offCut.card, held: R.W.cardHeldPayment(e.key) }));
+    e.tap();
+    const offDone = await R.W.cardPay(e, { sats: 1536, pin: '1234', trusted: true });
+    R.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    ok(offDone.trusted === true && offDone.sats === 1536 && !R.W.cardHeldPayment(e.key) && e.balance() === 0,
+       'and the next tap signs the rest of the exact set, kept on trust as one payment', JSON.stringify(offDone));
+    await settle();
   }
 
   /* ---- 9: a copy of the card pays nobody twice ----------------------------- */
