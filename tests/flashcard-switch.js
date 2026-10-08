@@ -111,10 +111,18 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
   /* ---- the card at its new mint ----------------------------------------------- */
   card.tap();
   const paid = await W.cardPay(card, { sats: 500, pin: '1234' });
-  ok(paid.sats === 500 && at(H, MINT2) === 500 && card.balance() === 1490, 'it pays there, with its change written back', card.balance() + ' left');
+  const gave = 1990 - card.balance();
+  // RECEIVE: the change goes back on at the next tap, with no PIN
+  if (paid.change && paid.change.sats > 0 && !paid.change.written) {
+    card.tap();
+    await W.cardWrite(card, { change: true });
+  }
+  const left = card.balance();
+  ok(paid.sats === 500 && at(H, MINT2) === 500 && gave >= 500 && left === 1990 - gave + ((paid.change && paid.change.sats) || 0) && left <= 1490 && left >= 1480,
+     'it pays there, with its change written back at the next tap', left + ' left');
   await W.connect(MINT, null, null, { remember: true });
   card.tap();
-  ok((await why(W.cardPay(card, { sats: 100, pin: '1234' }))) === 'other-mint' && card.balance() === 1490, 'and at its old mint it is a card of another mint, and signs nothing');
+  ok((await why(W.cardPay(card, { sats: 100, pin: '1234' }))) === 'other-mint' && card.balance() === left, 'and at its old mint it is a card of another mint, and signs nothing');
 
   /* ---- an empty card needs no Lightning --------------------------------------- */
   const blank = newCard(H);

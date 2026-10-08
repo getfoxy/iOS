@@ -1540,28 +1540,35 @@ and load it), a phone whose build carries the NFC entitlement
    ("Verified 5 Minutes Ago"), not "Just Now". Turn airplane mode off.
 5. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** IN YOUR WALLET; the pill
    reads 0 on the next tap.
+6. Load it again, WITHDRAW, ALL OF IT, and take the card away while the sheet
+   is still counting pieces. **Pass:** TAP THE CARD AGAIN says how much came off
+   into the phone and how much is left; HISTORY has an entry, From card, for
+   what came off; TAP CARD asks no PIN and takes the rest; IN YOUR WALLET says
+   the whole amount.
 
 #### 23c. Paying another phone
 
 1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
    **Pass:** the sheet reads the card, counts the pieces it signs ("Signing
    piece 2 of 4"), and then ends with "Done. Remove the card." the moment the
-   last is signed; Foxy's own screen then says CHECKING WITH THE MINT and that the
+   last is signed; Foxy's own screen then says VERIFYING WITH THE MINT and that the
    card can be removed, and after that the ordinary paid screen. Time two things
    apart: from the sheet opening to "Done" (how long the card is held; the
    model says about 1.2 seconds for one piece, with the phone finding the card
    on top), and from "Done" to paid (the mint's part, over Tor). These are
    the numbers that decide whether the card is usable at a till.
-2. Load a card with 2,000 sats and pay it 600. **Pass:** four pieces are signed
-   (512, 64, 16 and 8), no change, no TAP THE CARD AGAIN. Pay it 1,000 and then
-   a price the pieces cannot make exactly if there is one (a card loaded with 11,000
-   has no exact set for 300). **Pass:** the payment stands, and TAP THE CARD AGAIN
-   asks for the change to be put back, which a second tap and the PIN does.
+2. Load a card with 2,000 sats and pay it 600. **Pass:** the stage says `Tap 1
+   of 2: SEND.`; two pieces are signed (512 and 128), and the sheet is done in
+   under three seconds; TAP TO RECEIVE says what was paid and the 40 of change;
+   TAP CARD asks no PIN, says `Tap 2 of 2: RECEIVE.`, and ends at COMPLETE. Time
+   both taps. Pay it a price no two pieces cover. **Pass:** the fewest pieces
+   that do are signed, and the same second tap puts the change back.
 3. The same, lifting the card away the moment the sheet first changes.
    **Pass:** one of two ends, and never a third: nothing was taken and the
    screen says so, or the card had signed and the payment stands (or is
-   checked) with the sheet ended. Pulling it away between two signatures leaves
-   what it signed owed back to it, and TAP THE CARD AGAIN puts it there.
+   checked) with the sheet ended. Pulling it away between two signatures says
+   NOT PAID, with what it signed owed back to it, and TAP CARD puts it there with
+   no PIN.
 4. Put Foxy away the moment the sheet says "Done" and wait. **Pass:** on return
    the payment is paid, or CHECKING says it is still being asked; the wallet asks
    again by itself. A mint that refuses a payment after the card has signed cannot

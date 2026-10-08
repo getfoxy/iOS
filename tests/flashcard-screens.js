@@ -199,7 +199,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   let atMint = null;
   R.sheet.length = 0;
   R.fate = (m) => {
-    if (/\/v1\/swap$/.test(String(m.url || ''))) {
+    if (!atMint && /\/v1\/swap$/.test(String(m.url || ''))) {
       const up = R.window.document.getElementById('foxy-stage');
       atMint = { kind: stage(R), head: up && up.querySelector('h1') && up.querySelector('h1').textContent, line: up && up.querySelector('[data-stage-line]') && up.querySelector('[data-stage-line]').textContent,
                  button: up && up.querySelector('[data-stage-button]') && up.querySelector('[data-stage-button]').style.visibility, ended: R.ended };
@@ -210,11 +210,25 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the payment to be made', () => till.state.screen === 'home');
   await settle();
   R.fate = null;
-  ok((await R.W.balanceSats()) === 1000 && !card(till) && !stage(R), 'the right PIN: 1,000 sats paid, the receive screen closed, and no card left over it');
   ok(R.sheet.indexOf('say: Keep the card there: asking the mint') < 0 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.' && R.sheet.filter((x) => /^end:/.test(x)).length === 1 && !R.sheet.some((x) => /^error:/.test(x)),
      'and the sheet did not say to keep the card there while the mint was asked: it ended, "Done. Remove the card.", when the card had signed', R.sheet.slice(-4).join(' / '));
-  ok(atMint && atMint.ended === true && atMint.kind === 'card' && /CHECKING\s*WITH THE MINT/.test(atMint.head) && atMint.line === 'You can remove the card.' && atMint.button === 'hidden',
-     'with the mint being asked, our own screen said CHECKING WITH THE MINT and that the card can be removed, with nothing to press', JSON.stringify(atMint));
+  ok(atMint && atMint.ended === true && atMint.kind === 'card' && /VERIFYING\s*WITH THE MINT/.test(atMint.head) && atMint.line === 'You can remove the card.' && atMint.button === 'hidden',
+     'with the mint being asked, our own screen said VERIFYING WITH THE MINT and that the card can be removed, with nothing to press', JSON.stringify(atMint));
+  // tap 1, SEND: the card signs the fewest pieces that cover it, and is let go; what they come to over the price is its change
+  const first = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
+  ok((await R.W.balanceSats()) === 1000 && !stage(R) && (first === 0 ? !card(till) : (card(till) && card(till).title === 'TAP TO RECEIVE')),
+     'the right PIN: 1,000 sats paid, the receive screen closed, and its change, if any, asked for by the second tap', first + ' of change; ' + (card(till) ? card(till).title : 'no card'));
+  if (first > 0) {
+    ok(card(till).reason === 'Paid \u20bf1,000. Tap the card again to receive its \u20bf' + first.toLocaleString('en-US') + ' of change. No PIN is needed.' && /Tap 2 of 2\./.test(card(till).all),
+       'which says what was paid, the change, that no PIN is needed, and that this is the second of two taps', card(till).all);
+    c.tap();
+    card(till).press('TAP CARD');
+    ok(!pad(till), 'the second tap, RECEIVE, asks for no PIN');
+    await until('the payment to be complete', () => card(till) && card(till).title === 'COMPLETE');
+    ok(card(till).reason === 'Paid \u20bf1,000. \u20bf' + first.toLocaleString('en-US') + ' of change is back on the card.' && R.W.cardOwed().length === 0,
+       'and then the payment is COMPLETE: what was paid, and the change back on the card', card(till).reason);
+    card(till).press('DONE');
+  }
   const paid = history(R).filter((e) => e.memo === 'card')[0];
   ok(paid && !till.seen[paid.hash] && R.W.tagsFor(paid.hash).to === 'card payment', 'its entry is left for the history pass to announce, as a payment');
   ok(c.balance() === 1500 && R.W.cardOwed().length === 0, 'the card holds its change: 1,500', String(c.balance()));
@@ -239,15 +253,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   c2.tap();
   till.payByCard();
   pad(till).type('1234');
-  await until('the change to be left waiting', () => card(till) && card(till).title === 'TAP THE CARD AGAIN');
+  await until('the change to be left waiting', () => card(till) && card(till).title === 'TAP TO RECEIVE');
   const owed = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
-  ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0 && /\u20bf824 of change is waiting to go back on the card/.test(card(till).reason),
+  ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0 && /^Paid \u20bf200\. Tap the card again to receive its \u20bf824 of change\./.test(card(till).reason),
      'a payment that needs change: the payment stands and the change waits for the card’s next tap', card(till).reason);
   ok(/No PIN is needed/.test(card(till).reason), 'and says no PIN is needed for that', card(till).reason);
   // the sheet closes with no card read: the change is said to be still waiting, with the tap to try again, not nothing
   R.nfc = null;
   card(till).press('TAP CARD');
-  await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP THE CARD AGAIN' && /not read/.test(card(till).reason));
+  await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP TO RECEIVE' && /not read/.test(card(till).reason));
   ok(/The card was not read\. \u20bf824 is still waiting to go back on it\. No PIN is needed\./.test(card(till).reason) && card(till).has('TAP CARD') && R.W.cardOwed().length === 1,
      'a tap that read no card says the change is still waiting, and offers the tap again', card(till).reason);
   // a fresh card that has never paid: it has no change note, so it asks for the PIN after all
@@ -267,9 +281,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   c2.tap();
   till.fcWriteAsk({});
   ok(!pad(till), 'the right card, which has just paid, is tapped with no PIN pad');
-  await until('the change to be back on the card', () => card(till) && card(till).title === 'ON THE CARD');
-  ok(c2.balance() === 824 && R.W.cardOwed().length === 0 && card(till).reason === '\u20bf824 went onto the card.',
-     'and the right card\u2019s second tap puts it back, without the till being shown what the card holds', card(till).reason);
+  await until('the change to be back on the card', () => card(till) && card(till).title === 'COMPLETE');
+  ok(c2.balance() === 824 && R.W.cardOwed().length === 0 && card(till).reason === '\u20bf824 of change is back on the card.',
+     'and the right card\u2019s second tap puts it back, COMPLETE, without the till being shown what the card holds', card(till).reason);
   card(till).press('DONE');
   ok(till.state.fc === null, 'nor is a payer\u2019s card left on show under the till\u2019s menu');
 
@@ -340,8 +354,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await settle();
   const spentNow = c.state.spent;
   ok(spentNow >= 300 && spentNow <= 700 && (await R.W.balanceSats()) >= 1200 + 290, 'a payment inside the day goes, and the day is charged the whole pieces', String(spentNow));
+  // its change, if any, goes back on at the second tap; the day stays charged the whole pieces
+  if (card(till) && card(till).title === 'TAP TO RECEIVE') {
+    c.tap();
+    card(till).press('TAP CARD');
+    await until('the 300’s change to be back', () => card(till) && card(till).title === 'COMPLETE');
+    card(till).press('DONE');
+  }
   till.state.screen = 'confirm';
-  till.asking = 450;     // the 300 was made exactly, so 400 of the 700 is left
+  till.asking = 450;     // the day was charged at least 300 of its 700, so less than 450 is left
   c.tap();
   c.sent.length = 0;
   till.payByCard();
@@ -361,11 +382,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await settle();
   ok((await R.W.balanceSats()) >= 1200 + 290 + 140 && c.state.windowStart === Math.floor(clock.ms / 1000) && c.state.spent <= 700, 'a day later the card’s day has turned: a payment goes, and a new day begins with only that in it', String(c.state.spent));
   // the card's pieces had no exact set for 150: its change waits for its next tap, and is put back now
-  if (card(till) && card(till).title === 'TAP THE CARD AGAIN') {
+  if (card(till) && card(till).title === 'TAP TO RECEIVE') {
     c.tap();
     card(till).press('TAP CARD');   // the tap after a payment: no PIN is asked
     if (pad(till)) pad(till).type('1234');
-    await until('the change to be put back', () => card(till) && card(till).title === 'ON THE CARD');
+    await until('the change to be put back', () => card(till) && card(till).title === 'COMPLETE');
     card(till).press('DONE');
   }
 
@@ -483,6 +504,49 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const out = history(H).filter((e) => e.memo === 'from card')[0];
   ok(out && holder.seen[out.hash] === true, 'and its entry is not announced a second time');
   card(holder).press('DONE');
+
+  // a withdrawal cut short keeps what the card signed, and TAP CARD takes the rest
+  {
+    c.tap();
+    await H.W.cardAdd(c, { sats: 1500, owner: true });
+    c.tap();
+    holder.fcRead(true);
+    await until('the loaded card to be read', () => holder.state.fc && holder.state.fc.balance === 1500 && holder.state.fc.check !== 'asking');
+    await holder.refreshBalance();
+    const had = await H.W.balanceSats();
+    // the session's own tap, and then the third piece is not answered: the card is taken away
+    const tapW = c.tap;
+    c.tap = () => { tapW(); c.leaveBefore('20', 3); c.tap = tapW; };
+    holder.fcWithdrawPin(0);
+    pad(holder).type('4321');
+    await until('the cut-short withdrawal to be said', () => card(holder) && card(holder).title === 'TAP THE CARD AGAIN');
+    const first = (await H.W.balanceSats()) - had;
+    ok(first > 0 && c.balance() === 1500 - first && /came off the card into this phone before it was taken away\. Tap it again for the rest, ₿/.test(card(holder).reason)
+       && card(holder).has('TAP CARD') && card(holder).has('LATER') && H.W.cardOwed().length === 0,
+       'a withdrawal cut short says what came off into this phone and offers the tap for the rest; nothing waits to go back', card(holder).reason);
+    c.tap();
+    card(holder).press('TAP CARD');
+    ok(!pad(holder), 'the tap for the rest asks no PIN again: it is the same withdrawal');
+    await until('the rest to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
+    await settle();
+    ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.' && c.state.record.limit === 700,
+       'and then all of it is in the phone, said as the whole withdrawal, and the card’s limit is back as it was', card(holder).reason + ' / ' + c.state.record.limit);
+    card(holder).press('DONE');
+  }
+
+  // a payment the card left part-way through is said by what it was: not paid, and how its money goes back
+  till.fcFailed({ card: 'interrupted', owed: 512, made: true }, { paying: true, taken: true });
+  ok(card(till).title === 'NOT PAID' && card(till).reason === 'The card was taken away too soon. Nothing was paid. Tap it again to put back the ₿512 it signed for. No PIN is needed.'
+     && card(till).has('TAP CARD'), 'a payment cut short says NOT PAID, and that the next tap puts back what it signed, with no PIN', card(till).all);
+  card(till).press('LATER');
+  till.fcFailed({ card: 'interrupted', owed: 512, made: false }, { paying: true, taken: true });
+  ok(/goes back on it once the mint answers\.$/.test(card(till).reason), 'and, where the mint has not answered, that it goes back once it has', card(till).reason);
+  card(till).press('LATER');
+  // change the mint did not make: the payment stands, and the phone says it makes the change when it next connects
+  till.fcChangeLater(824, 200);
+  ok(card(till).title === 'CHANGE NOT MADE YET' && card(till).reason === 'Paid \u20bf200. The mint did not make its \u20bf824 of change. This phone tries again whenever it connects, and then a tap of the card here receives it.'
+     && card(till).has('OK'), 'change the mint did not make is said, with when it will be', card(till).all);
+  card(till).press('OK');
 
   /* ---- with the switch on: cards that can be taken back -----------------------
    * Off, as it ships: no list, and a card that leaves the screen takes the
@@ -602,7 +666,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     pad(till).type('1234');
     await until('the failed payment to be said', () => card(till) && card(till).title === 'PAYMENT FAILED');
     R.fate = null;
-    ok(card(till).has('TAP CARD') && card(till).has('LATER') && /The mint refused it, and the card had already signed for it\. Tap the card again to put ₿300 back on it\./.test(card(till).reason)
+    const signedFor = f.state.spent;     // the fewest pieces that cover 300, signed whole
+    ok(signedFor >= 300 && card(till).has('TAP CARD') && card(till).has('LATER') && card(till).reason === 'The mint refused it, and the card had already signed for it. Tap the card again to put ₿' + signedFor.toLocaleString('en-US') + ' back on it.'
        && /daily limit stays used/.test(card(till).all) && (await R.W.balanceSats()) === rb && till.state.screen === 'confirm' && !stage(R),
        'a refused payment says it failed and that the card must be tapped again to put the money back, and that its day stays charged; nothing was paid, and the invoice is still up', card(till).all);
     ok(R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.' && !R.sheet.some((x) => /^error:/.test(x)), 'the sheet had already ended well; it is not made to look like a failure now');
@@ -610,7 +675,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     card(till).press('TAP CARD');
     ok(!pad(till), 'TAP CARD puts it back with no PIN: the card has just signed, and lets the tap after a payment load');
     await until('the money to be put back', () => card(till) && card(till).title === 'PUT BACK ON THE CARD');
-    ok(/^₿300 is back on the card\. The payment was not made\.$/.test(card(till).reason) && f.balance() === 1000 && R.W.cardOwed().length === 0 && f.state.spent === 300,
+    ok(card(till).reason === '₿' + signedFor.toLocaleString('en-US') + ' is back on the card. The payment was not made.' && f.balance() === 1000 && R.W.cardOwed().length === 0 && f.state.spent === signedFor,
        'and says it is back, and that the payment was not made; the card holds what it did and its day is as charged', card(till).reason + ' / ' + f.balance() + ' / ' + f.state.spent);
     card(till).press('DONE');
 

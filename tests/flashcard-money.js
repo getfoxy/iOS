@@ -252,6 +252,11 @@ let L0 = null;
     F.card.tap();
     const held = F.card.balance();
     const p = await F.R.W.cardPay(F.card, { sats: 1000, pin: '1234' });
+    // RECEIVE: its change goes back on at the next tap, with no PIN
+    if (p.change && p.change.sats > 0 && !p.change.written) {
+      F.card.tap();
+      await F.R.W.cardWrite(F.card, { change: true });
+    }
     ok(p.sats === 1000 && (await bal(F.R)) >= 1000 - 2 && (await bal(F.R)) <= 1000 + 4, 'a receiver is paid 1,000 from it, within a sat or two: more when the sats over are too few to make change of, less by what making it cost', String(await bal(F.R)));
     ok(row(F.R, p.hash).sats === (await bal(F.R)) && F.R.W.cardOwed().length === 0 && F.R.W.cardTaken().length === 0,
        'its entry says exactly what it holds, and nothing of the card\u2019s is left with it', JSON.stringify({ sats: row(F.R, p.hash).sats, holds: await bal(F.R) }));
@@ -309,18 +314,19 @@ let L0 = null;
     ok(tooBig && tooBig.card === 'limit', 'nor can one of 200: the card’s pieces are large, and what is signed for is charged whole', tooBig && tooBig.message);
     L.card.tap();
     const small = await L.R.W.cardPay(L.card, { sats: 150, pin: '1234' });
-    ok(small.sats === 150 && spent(L.card) === 470, 'one of 150 goes, with pieces worth exactly 150: the change that came back to the card was cut to fill its gaps, small pieces among them', String(spent(L.card)));
+    // no two pieces under the 280 left cover 150; three do (128, 16 and 8, from the change cut to fill the card's gaps), where exactly 150 is four
+    ok(small.sats === 150 && spent(L.card) === 472, 'one of 150 goes, with the fewest pieces that cover it: three, worth 152, from the change that came back cut to fill the card’s gaps', String(spent(L.card)));
 
     // the card reads its own day for the screens
     L.card.tap();
     const day = (await L.H.W.cardLook(L.card)).day;
-    ok(day.limited && day.limit === 600 && day.spent === 470 && day.left === 130 && day.turns === start + 86400, 'the card’s day reads as 130 left, turning a day after it began', JSON.stringify(day));
+    ok(day.limited && day.limit === 600 && day.spent === 472 && day.left === 128 && day.turns === start + 86400, 'the card’s day reads as 128 left, turning a day after it began', JSON.stringify(day));
 
     // a till that sends the PIN again and again is held to the day by the card, and a day later it is a new day
     clock.ms += 86399 * 1000;
     L.card.tap();
     const still = await L.R.W.cardPay(L.card, { sats: 300, pin: '1234' }).then(() => null, (e) => e);
-    ok(still && still.card === 'limit' && still.left === 130, 'a second short of a day on, it is the same day', still && still.message);
+    ok(still && still.card === 'limit' && still.left === 128, 'a second short of a day on, it is the same day', still && still.message);
     clock.ms += 1000;
     L.card.tap();
     const turned = await L.R.W.cardPay(L.card, { sats: 300, pin: '1234' });

@@ -20,7 +20,9 @@ does not repeat the protocol. The limits are listed at the end and argued in
   payment with no key proof, the progress lines on the sheet, loading like a
   cash drawer, SWITCH TO a mint, taking a card payment with no connection, and
   letting the card go before the mint is asked (with the put-back tap when the
-  mint refuses). The list of what only a card and a hand can show is
+  mint refuses), the two-tap payment that signs at most two pieces, and the
+  withdrawal that keeps what a cut-short tap signed. The list of what only a
+  card and a hand can show is
   `DEVICE-TESTS.md` §23.
 - **The time the card is told is interim, and weak** (*The time*, below).
 - **A card is cash.** Lose it and the money on it is gone. Whoever has the card
@@ -137,23 +139,26 @@ altered to look like one, sees it.
    rest of the wallet keeps. Every power of two from 1 up to the largest that
    fits is on the card at least once, and the rest of the amount comes after
    them in powers of two. Pieces cut that way make any price up to the whole
-   balance exactly, so a payment signs only the few it needs (600 is 512, 64, 16
-   and 8) and has no change, which is a second swap and a second tap.
+   balance exactly, which is what a till with no connection needs: it cannot
+   make change, so it takes only an exact set (*Paying with no
+   connection*). Online, a payment overpays with the fewest pieces instead, and
+   the change comes back at a second tap (*Paying at a till*).
 
    One of each rung makes one exact payment: the payment takes the rungs its
    price is made of, and the next price needs some of the same. So the drawer is
-   cut deep where the load allows, like a till's: a load may use the whole card
-   (its 64 places, less four kept for what a mint's fee may add), and whatever
-   places are left after the drawer and the rest go to more of the smallest
-   rungs, three of each where there is room and two where not. 2,000 sats is 1
-   to 512 once, two more of each of 1 to 128, and 256, 128, 64, 16, 2 and 1:
-   thirty-two pieces. 50,000 sats is 1 to 16384 once, two more of each of 1 to
-   4096, and 512, 256, 64, 16, 2 and 1: forty-seven. An amount that is more than
-   a full drawer can hold in the places there are has fewer rungs, the biggest
-   taken off first, and the big pieces carry the rest; such a card is not exact
-   for every price. An amount that is more than the places even with no drawer
-   is rounded up, smallest pieces first, and the screen says by how many sats.
-   No piece is larger than the mint's own largest key.
+   cut deep where the load allows, like a till's: a load is at most thirty-two
+   pieces, half the card's 64 places, and keeps at least a dozen places free
+   besides, so that an online payment's change always has somewhere to go.
+   Whatever places a load has left after the drawer and the rest go to more of
+   the smallest rungs, three of each where there is room and two where not.
+   2,000 sats is 1 to 512 once, two more of each of 1 to 128, and 256, 128, 64,
+   16, 2 and 1: thirty-two pieces. 11,000 sats is a whole drawer to 4096 in
+   thirty-one. An amount that is more than a full drawer can hold in the places
+   there are has fewer rungs, the biggest taken off first, and the big pieces
+   carry the rest; such a card is not exact for every price. An amount that is
+   more than the places even with no drawer is rounded up, smallest pieces
+   first, and the screen says by how many sats. No piece is larger than the
+   mint's own largest key.
 
    A card that holds pieces already is cut for: the sizes it lacks are filled
    first, the smallest first, then the rest of the amount, then the smallest
@@ -162,14 +167,10 @@ altered to look like one, sees it.
    keeps its drawer as it is spent from. The pieces are written down on the
    phone before the tap, as every swap here is.
 
-   The cost of a deep drawer is pieces: a card in daily use holds fifty or
-   more, and taking everything off it signs every one, most of a second each.
-   That is the holder's choice, for change at every payment: for a card loaded
-   with about $50 a day and paid from four or five times, the deep drawer makes
-   about six payments in seven exact, and the first of the day always, where
-   one of each rung made about two in three; deeper than three of each was
-   tried and is worse, the card filling with small pieces. The rest need
-   change, which is a second tap and no PIN (*Change*).
+   The cost of a deep drawer is pieces: taking everything off a card signs
+   every one, most of a second each, which is longer than a person holds a
+   card. A withdrawal cut short keeps what the card signed, and the next tap
+   takes the rest (*Change PIN, withdraw, and a blocked card*).
 4. A tap writes them, and reads them back. The screen says `GETTING IT READY`
    while the swap runs, then the states of a tap. **ON THE CARD** gives the new
    balance.
@@ -195,11 +196,15 @@ On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
    before it sends the PIN, what it can: that the card is at this mint, that it
    holds enough, and that what is left of today's limit can cover the payment. A
    refusal here takes nothing.
-3. The phone chooses the pieces. A set that comes to exactly the price is taken
-   before any set that overpays, even when it has more pieces, because change has
-   to be made and written back and that is a second tap. It is found by search,
-   fewest pieces first. The mint's fee for swapping them, where it charges one, is
-   added to the price, and the card pays it.
+3. The phone chooses the pieces, as few as it can, because a tap should take
+   under three seconds and each piece is most of a second of signing. The card
+   is read in about 1.2 seconds, so a payment signs at most two pieces where two
+   cover the price: the one or two that overpay least. Where no two do, it signs
+   the fewest pieces that cover it, the set of that many that overpays least.
+   What they come to over the price is change, made after the swap and written
+   back at the second tap (*Change*). From a drawer of $50, every price from $1
+   to $10 is one or two pieces. The mint's fee for swapping them, where it
+   charges one, is added to the price, and the card pays it.
 4. The phone writes down the outputs of the swap to come, so a lost answer can be
    recovered. Then it sends the PIN and asks the card to sign each piece. From
    here the card's slots are spent. The card signs each piece in software, about
@@ -212,7 +217,7 @@ On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
    eight commands and one signing, which on the card tested through its contact
    reader (a command about 0.06 s, a signature 0.74 s) is about 1.2 seconds, not
    counting the time the phone takes to find the card over NFC. Foxy's own screen
-   goes on saying CHECKING WITH THE MINT and that the card can be removed. The
+   goes on saying VERIFYING WITH THE MINT and that the card can be removed. The
    mint's part took 10 to 40 seconds over Tor, and used to be done with the card
    held to the phone and the sheet open.
 6. The phone swaps at the mint, with the card's signatures as the witness for each
@@ -252,7 +257,7 @@ amount and says the same. iOS ends a session after a minute.
 | reading | READING THE CARD | Reading the card |
 | found | (the same) | Scanning. Hold still. |
 | signing | KEEP THE CARD THERE, and under it the piece | Signing piece 3 of 9 |
-| signed | CHECKING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. Remove the card. (the sheet ends here) |
+| signed | VERIFYING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. Remove the card. (the sheet ends here) |
 | the change | MAKING THE CHANGE, and under it that the payment is made | (no sheet) |
 | writing | WRITING TO THE CARD, and under it the piece | Writing 2 of 4 |
 | done | REMOVE THE CARD | Done. Remove the card. |
@@ -278,8 +283,9 @@ or two buttons. The ones a payment can end in:
 | NO MONEY ON THIS CARD | a card with no PIN, or nothing on it |
 | NOT A FOXY CARD | it could not be read, or is another kind |
 | NO CARD READER | this phone, or this build, cannot read a card |
-| THE CARD LEFT TOO SOON | nothing was paid, or what the card signed for goes back on it |
-| TAP THE CARD AGAIN | the payment is made and change is waiting |
+| NOT PAID | the card left while it was signing: nothing was paid, and the next tap puts back what it signed, with no PIN (or, where the mint has not answered, once it has) |
+| TAP TO RECEIVE | the payment is made and its change is waiting for the second tap, with no PIN |
+| COMPLETE | the second tap did it: what was paid, and the change back on the card |
 | PAYMENT FAILED (NOT TAKEN OFF for a withdrawal) | the mint refused it after the card had signed: tap the card again to put the money back, and, if it has a limit, that the day stays used |
 | PUT BACK ON THE CARD | the next tap did it: ₿ is back on the card, and the payment was not made |
 
@@ -294,18 +300,38 @@ the gaps in what the card will then hold (*Adding money*), after the swap has
 landed. Change is never the receiver's: it is kept in a store of its own, outside
 the balance, until it is on the card.
 
-The card has been let go by then, so change is always written at the card's next
-tap: the receiver's phone says `The payment is made. ₿212 of change is waiting to
-go back on the card.` with **TAP CARD** and LATER, and the line stays on that
-payment's entry until the card is tapped. The receiver cannot spend that change,
-and neither can anyone else but that card. Because cards are cash, change that is
-never written back stays unspendable. Cutting the card like a cash drawer is what
-makes this rare: a price the card's pieces make exactly has no change, and
-nothing to write.
+A card payment is two taps, and is said as two every time, so a person learns
+one way of paying:
+
+1. **SEND.** The PIN, and the first tap (`Tap 1 of 2: SEND.` under the amount).
+   The card signs its one or two pieces and is let go.
+2. **VERIFY.** Foxy's screen says VERIFYING WITH THE MINT while the swap runs,
+   then MAKING THE CHANGE.
+3. **RECEIVE.** **TAP TO RECEIVE**: `Paid ₿1,180. Tap the card again to receive
+   its ₿212 of change. No PIN is needed.` with **TAP CARD** and LATER. The tap
+   (`Tap 2 of 2: RECEIVE.`) writes the change. The card allows the tap after a
+   payment to load with no PIN; a card that has not just paid asks for it.
+4. **COMPLETE.** `Paid ₿1,180. ₿212 of change is back on the card.`
+
+Where the pieces came to the price exactly there is nothing to receive, and the
+payment is complete at the first tap. Until the second tap the change stays on
+that payment's entry. The receiver cannot spend it, and neither can anyone else
+but that card. Because cards are cash, change that is never written back stays
+unspendable. A tap that reads no card says the change is still waiting, and
+offers the tap again.
 
 Where a sat or two are over and not enough to make change of, they stay with the
-payment, and its entry says so. A payment whose swap was found only later (a lost
-answer) has no change made for what it paid over.
+payment, and its entry says so. A payment whose swap answer was lost and found
+later has its change made then, and owed to the card the same way; the checking
+screen asks for the second tap when it finds it.
+
+If the mint does not make the change, the payment still stands, and the screen
+says **CHANGE NOT MADE YET**: this phone tries again whenever it connects, and
+then a tap of the card here receives it. Until it is made the receiver holds it,
+and the payment's entry says the whole amount. A change swap whose answer was
+lost waits for the wallet's own recovery, so nothing is made twice, and what the
+recovery finds is owed to the card. After thirty days of trying, the payment
+keeps it.
 
 ## The daily limit and the owner's phone
 
@@ -365,6 +391,12 @@ the moment it has signed, as at a till, and is not read again afterwards: it end
 at **IN YOUR WALLET**, and the card's screen goes away, so that the next tap shows
 the card as it is. (A move to another mint, and a renewal, hold the card.)
 
+A withdrawal of many pieces takes longer than a person holds a card. If the card
+leaves part way, what it signed is kept: it is in the phone, with an entry of its
+own, and the screen says **TAP THE CARD AGAIN**, how much came off and how much
+is left. TAP CARD takes the rest with the PIN already given, and IN YOUR WALLET
+then says the whole amount. LATER ends the withdrawal; the rest stays on the card.
+
 **A blocked card** shows BLOCKED on its face and a red line. Any reader in range
 can send three wrong PINs and block a card, so this is a known way to annoy a
 holder, not only a sign of theft. On the owner's phone the line says that this
@@ -416,7 +448,9 @@ receiver's.
   in front of the amount and before the PIN. CONTINUE or REJECT; the person's
   answer decides, and REJECT touches nothing;
 - only an exact set of pieces; an offline till cannot make change. A card that has
-  none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE);
+  none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE).
+  It is one tap, with no second, and a longer one than online: from a drawer of
+  $50 a price of $1 to $10 is five to nine pieces;
 - the card's time is signed on the phone, which works with no connection, and the
   daily limit is looked at as ever;
 - the card's signatures are checked on the phone, and so is each piece's DLEQ

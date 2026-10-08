@@ -45,7 +45,7 @@
     change: ['PUTTING CHANGE<br>BACK ON THE CARD', 'Putting change back on the card'],
     /* The card has signed and been let go; its sheet is gone, and these are said
      * on our screen alone (`fcTap`'s `on`). */
-    checking: ['CHECKING<br>WITH THE MINT', ''],
+    checking: ['VERIFYING<br>WITH THE MINT', ''],
     making: ['MAKING<br>THE CHANGE', ''],
     writing: ['WRITING<br>TO THE CARD', 'Keep the card there: writing to it'],
     done: ['REMOVE<br>THE CARD', 'Done. Remove the card.'],
@@ -341,7 +341,15 @@
       'no-time-source': () => ({ tone: 'warn', title: 'NO TIME TO TELL THE CARD', reason: said }),
       'gone': () => Object.assign({ tone: 'warn', title: 'THE CARD LEFT TOO SOON',
         reason: 'Hold it still until the phone says to remove it.' + safe }, again),
-      'interrupted': () => ({ tone: 'warn', title: 'THE CARD LEFT TOO SOON', reason: said,
+      /* The card left part-way through signing: nothing moved, and what it did
+       * sign goes back on it at its next tap (with no PIN), or, where the mint
+       * has not answered yet, once it has. Said by what the person was doing. */
+      'interrupted': () => ({ tone: 'warn', title: opt.paying ? 'NOT PAID' : 'THE CARD LEFT TOO SOON',
+        reason: 'The card was taken away too soon. ' + (opt.paying ? 'Nothing was paid. ' : 'Nothing was taken. ')
+          + (e.made === false
+            ? 'What it signed for goes back on it once the mint answers.'
+            : 'Tap it again to put back the ' + this.fcSats(e.owed) + ' it signed for. No PIN is needed.'),
+        chip: 'Hold it still until the phone says to remove it.',
         retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
       'spent': () => ({ title: opt.taken ? 'NOT PAID' : 'ALREADY SPENT',
         reason: 'The mint says this card’s money was already spent.' }),
@@ -413,7 +421,12 @@
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
-      if (how === 'paid') { this.fcMoved(opt); return; }
+      if (how === 'paid') {
+        this.fcMoved(opt);
+        // the mint's answer came late, and the change it made waits for the card's second tap (RECEIVE)
+        if (opt.paying && row && row.change > 0 && !row.refund) this.fcChangeWaiting(row.change, row.sats);
+        return;
+      }
       if (how === 'spent') { this.fcFailed({ card: 'spent' }, { taken: opt.taken }); return; }
       if (how === 'putback') { this.fcFailed({ card: 'putback', owed: row && row.owed, limited: row && row.limited }, opt); return; }
       if (how === 'bad') { this.fcFailed({ card: 'bad-pieces', message: 'The card gave pieces the mint did not sign. Nothing was paid.' }, opt); return; }
@@ -427,7 +440,7 @@
       W.cardSettle().then((rows) => {
         if (!this.stageUp('cardChecking')) return;
         const mine = (rows || []).filter(r => r.id === id)[0];
-        if (mine && mine.state === 'paid') return settled('paid');
+        if (mine && mine.state === 'paid') return settled('paid', mine);
         if (mine && mine.state === 'spent') return settled('spent');
         if (mine && mine.state === 'putback') return settled('putback', mine);
         if (mine && mine.state === 'bad') return settled('bad');
@@ -487,10 +500,17 @@
     }, (pin) => this.fcPayRun(sats, pin, trusted));
   }
 
+  /* A card payment is two taps, and is said as two every time, so a person
+   * learns one way of paying: SEND (the card signs no more than two pieces and
+   * is let go), VERIFY (this screen, while the mint swaps them), RECEIVE (the
+   * change goes back on, with no PIN) and COMPLETE. Paid exactly, there is
+   * nothing to receive, and the payment is complete at once. Taken on trust
+   * with no route, it is one tap: only an exact set is taken then. */
   fcPayRun(sats, pin, trusted) {
     const W = this.fcW();
     const opt = { paying: true, taken: true, again: () => this.fcPayAsk(sats, trusted) };
-    this.fcTap({ amount: this.stageMoney(sats), warm: !trusted }, (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
+    this.fcTap({ amount: this.stageMoney(sats), body: trusted ? '' : 'Tap 1 of 2: SEND.', warm: !trusted },
+               (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
       .then((r) => {
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
@@ -498,8 +518,10 @@
         if (r && r.trusted) { this.fcTrusted(r); return; }
         this.fcMoved(opt);
         const ch = r && r.change;
-        // made, and the card left before it was written back: it waits here for the card
-        if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats);
+        // made, and the card left before it was written back: it waits here for the card's second tap
+        if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats, sats);
+        // not made: this phone tries again when it connects, and says so
+        if (ch && ch.unmade && ch.sats > 0) this.fcChangeLater(ch.sats, sats);
       }, (e) => this.fcFailed(e, opt));
   }
 
@@ -516,12 +538,30 @@
     this.loadHistory();
   }
 
-  fcChangeWaiting(sats) {
+  /* The change for a payment could not be made (the mint did not make it):
+   * the payment stands, and this phone makes the change when it next
+   * connects, after which a tap of the card here receives it. */
+  fcChangeLater(sats, paid) {
+    const p = Math.round(Number(paid) || 0);
+    this.blockedCard('fc-change-later', {
+      tone: 'warn', title: 'CHANGE NOT MADE YET',
+      reason: (p > 0 ? 'Paid ' + this.fcSats(p) + '. ' : '') + 'The mint did not make its ' + this.fcSats(sats)
+        + ' of change. This phone tries again whenever it connects, and then a tap of the card here receives it.',
+      chip: 'It is owed to that card and no other.',
+      shut: { label: 'OK' },
+    });
+  }
+
+  /* The second tap of a payment: RECEIVE. `paid` is what was paid, where
+   * this phone was the till; a holder's own withdrawal with change has none. */
+  fcChangeWaiting(sats, paid) {
+    const p = Math.round(Number(paid) || 0);
     this.blockedCard('fc-change', {
-      tone: 'warn', title: 'TAP THE CARD AGAIN',
-      reason: 'The payment is made. ' + this.fcSats(sats) + ' of change is waiting to go back on the card. No PIN is needed.',
-      chip: 'It is kept for that card and no other.',
-      retry: 'TAP CARD', go: () => this.fcWriteAsk({}),
+      tone: 'warn', title: 'TAP TO RECEIVE',
+      reason: (p > 0 ? 'Paid ' + this.fcSats(p) + '. ' : 'The money is off the card. ')
+        + 'Tap the card again to receive its ' + this.fcSats(sats) + ' of change. No PIN is needed.',
+      chip: (p > 0 ? 'Tap 2 of 2. ' : '') + 'The change is kept for that card and no other.',
+      retry: 'TAP CARD', go: () => this.fcWriteAsk({ paid: p, receive: true }),
       shut: { label: 'LATER' },
     });
   }
@@ -585,7 +625,8 @@
     const W = this.fcW();
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
-    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '' }, (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
+    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '', body: opt.receive && opt.paid > 0 ? 'Tap 2 of 2: RECEIVE.' : '' },
+               (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap
              * after a payment after all: the PIN is what writes then. */
@@ -605,7 +646,7 @@
     if (!(owed > 0)) return;
     const after = this.fcOwedAfterPaying();
     this.blockedCard('fc-change', {
-      tone: 'warn', title: 'TAP THE CARD AGAIN',
+      tone: 'warn', title: after ? 'TAP TO RECEIVE' : 'TAP THE CARD AGAIN',
       reason: 'The card was not read. ' + this.fcSats(owed) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' No PIN is needed.' : ''),
       chip: 'It is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk(opt),
@@ -650,6 +691,29 @@
         tone: 'ask', title: 'PUT BACK ON THE CARD',
         reason: this.fcSats(r.back) + ' is back on the card. The payment was not made.'
           + (r.sats > r.back ? ' ' + this.fcSats(r.sats - r.back) + ' more went on.' : '')
+          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
+        shut: { label: 'DONE' },
+      });
+      return;
+    }
+    /* The second tap of a payment: its change is back on the card, and the
+     * payment is COMPLETE. */
+    if (r.change > 0 && r.change === r.sats) {
+      const paid = Math.round(Number(o && o.paid) || 0);
+      this.blockedCard('fc-complete', {
+        tone: 'ask', title: 'COMPLETE',
+        reason: (paid > 0 ? 'Paid ' + this.fcSats(paid) + '. ' : '') + this.fcSats(r.change) + ' of change is back on the card.'
+          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
+        shut: { label: 'DONE' },
+      });
+      return;
+    }
+    /* What a card signed for a payment that was not made, back on it: said
+     * as that, and not as money put on it. */
+    if (r.refund > 0 && r.refund === r.sats) {
+      this.blockedCard('fc-refunded', {
+        tone: 'ask', title: 'BACK ON THE CARD',
+        reason: this.fcSats(r.refund) + ' is back on the card. The payment was not made.'
           + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
         shut: { label: 'DONE' },
       });
@@ -938,15 +1002,21 @@
     }, (p) => { this.fcLeaveAmount(); this.fcWithdrawRun(sats, p); });
   }
 
-  fcWithdrawRun(sats, pin) {
+  /* `before`: what earlier taps of this same withdrawal took off the card
+   * (a tap cut short keeps what the card signed, and the next takes the rest).
+   * The PIN is held for the length of the withdrawal, as for one tap: the
+   * card that says TAP CARD for the rest is still this flow, and LATER ends it. */
+  fcWithdrawRun(sats, pin, before) {
     const W = this.fcW();
+    const prior = Math.round(Number(before) || 0);
     const said = (r) => {
       // the card as it reads now, where the tap lasted long enough to read it; otherwise its screen goes
       if (r && r.card) this.fcShow(r.card); else this.fcGone();
       this.haptic && this.haptic('success');
+      const got = prior + Math.round(Number(r && r.sats) || 0);
       this.blockedCard('fc-out', {
         tone: 'ask', title: 'IN YOUR WALLET',
-        reason: (r && r.sats ? this.fcSats(r.sats) : 'The money') + ' from the card is in this phone now.',
+        reason: (got > 0 ? this.fcSats(got) : 'The money') + ' from the card is in this phone now.',
         shut: { label: 'DONE' },
       });
     };
@@ -958,7 +1028,25 @@
         said(r);
         const ch = r && r.change;
         if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats);
-      }, (e) => this.fcFailed(e, opt));
+      }, (e) => {
+        if (!(e && e.card === 'partial')) { this.fcFailed(e, opt); return; }
+        /* Cut short: what the card signed is in this phone, and the rest is
+         * one more tap away. */
+        if (e.hash) this.txIsNew(e.hash);
+        this.fcMoved({});
+        this.fcGone();
+        this.haptic && this.haptic('warning');
+        const got = prior + Math.round(Number(e.sats) || 0);
+        const rest = Math.round(Number(e.left) || 0);
+        if (!(rest > 0)) { said({ sats: e.sats }); return; }
+        this.blockedCard('fc-part', {
+          tone: 'warn', title: 'TAP THE CARD AGAIN',
+          reason: this.fcSats(got) + ' came off the card into this phone before it was taken away. Tap it again for the rest, ' + this.fcSats(rest) + '.',
+          chip: 'Hold it still until the phone says to remove it.',
+          retry: 'TAP CARD', go: () => this.fcWithdrawRun(sats ? rest : 0, pin, got),
+          shut: { label: 'LATER' },
+        });
+      });
   }
 
   /* What the screen knew of the card is out of date and is not shown as if it

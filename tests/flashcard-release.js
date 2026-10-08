@@ -56,36 +56,54 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
   card.tap();
   await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
 
-  /* ---- 1: a normal payment, the card gone before the mint answers ------------------ */
+  /* ---- 1: a normal payment: SEND, the card gone before the mint answers, then RECEIVE ---- */
   {
     const steps = [];
     let atSwap = null;
+    // the first swap is the payment's; the second, after it, makes the change
     R.fate = (m) => {
-      if (/\/v1\/swap$/.test(String(m.url || ''))) atSwap = { ended: R.ended, taken: R.W.cardTaken().length, sheet: R.sheet.slice() };
+      if (!atSwap && /\/v1\/swap$/.test(String(m.url || ''))) atSwap = { ended: R.ended, taken: R.W.cardTaken().length, sheet: R.sheet.slice() };
       return null;
     };
     R.trace.length = 0;
     R.sheet.length = 0;
     R.circuits.length = 0;
     card.sent.length = 0;
+    const held = card.balance();
     const paid = await tap(R, card, (link) => R.W.cardPay(link, { sats: 600, pin: '1234', on: (s) => steps.push(s) }));
     R.fate = null;
-    ok(paid.sats === 600 && paid.change === null && (await bal(R)) === 600 && R.W.cardTaken().length === 0 && R.W.cardOwed().length === 0,
-       'a card pays 600 (512, 64, 16, 8: an exact set), and the receiver is paid', JSON.stringify({ sats: paid.sats, bal: await bal(R) }));
+    const signed = card.sent.filter((a) => /^b020/.test(a)).length;
+    const gave = held - card.balance();
+    ok(paid.sats === 600 && (await bal(R)) === 600 && R.W.cardTaken().length === 0 && signed >= 1 && signed <= 2 && gave > 600,
+       'SEND: a card pays 600 in no more than two pieces, over-paying, and the receiver keeps 600', JSON.stringify({ sats: paid.sats, bal: await bal(R), signed, gave }));
+    ok(paid.change && paid.change.sats > 0 && paid.change.written === false && R.W.cardOwed().length === 1 && R.W.cardOwed()[0].kind === 'change'
+       && R.W.cardOwed()[0].sats === paid.change.sats,
+       'the difference is made into change for the card, and waits for its next tap', JSON.stringify({ change: paid.change, owed: R.W.cardOwed().map((r) => [r.kind, r.sats]) }));
     const order = R.trace.filter((x) => x === 'begin' || x === 'end' || x === 'error' || x === 'mint /v1/swap');
-    ok(order.join(' ') === 'begin end mint /v1/swap', 'the sheet ends, and then the swap is asked: with the card gone', R.trace.join(', '));
+    ok(order.join(' ') === 'begin end mint /v1/swap mint /v1/swap', 'the sheet ends, then the swap is asked, then the change is made: all with the card gone', R.trace.join(', '));
     ok(!!atSwap && atSwap.ended === true && atSwap.sheet.filter((x) => /^end:/.test(x)).length === 1, 'at the moment the mint is asked the sheet has ended', JSON.stringify(atSwap && atSwap.sheet));
     ok(R.sheet.filter((x) => /^end:/.test(x)).length === 1 && R.sheet.filter((x) => /^error:/.test(x)).length === 0 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
        'it ends once, as "Done. Remove the card.", and never again after the mint', R.sheet.join(' | '));
     ok(R.refusedAfterEnd === 0, 'nothing is sent to the card after the sheet has ended', String(R.refusedAfterEnd));
     ok(atSwap && atSwap.taken === 1, 'the signed pieces were written down (in the card store) before the card was let go', JSON.stringify(atSwap && atSwap.taken));
-    ok(steps.join(' ') === 'reading signing checking done', 'the screen is told: the card is let go (checking), and then it is done', steps.join(' '));
-    ok(asked(R, '/v1/swap') === 1 && asked(R, '/v1/checkstate') === 0,
-       'one swap request, and the mint is asked nothing about the pieces first', R.circuits.map((x) => x.path.replace('/v1/', '')).join(', '));
-    ok(row(R, paid.hash).memo === 'card' && row(R, paid.hash).card === card.key && row(R, paid.hash).sats === 600, 'its entry is a card’s', JSON.stringify(row(R, paid.hash)));
-    // what the card was asked: read, a PIN, three signatures and a fourth, and nothing after the last
+    ok(steps.join(' ') === 'reading signing checking making done', 'the screen is told: the card is let go (checking), the change is made, and then it is done', steps.join(' '));
+    ok(asked(R, '/v1/swap') === 2 && asked(R, '/v1/checkstate') === 0,
+       'one swap for the payment and one for its change, and the mint is asked nothing about the pieces first', R.circuits.map((x) => x.path.replace('/v1/', '')).join(', '));
+    const entry = row(R, paid.hash);
+    ok(entry.memo === 'card' && entry.card === card.key && entry.sats === 600 && entry.grossSats === gave && entry.changeSats === gave - 600 && entry.changeState === 'not handed',
+       'its entry is a card’s: 600 kept, what the card gave, and the change not yet handed over', JSON.stringify(entry));
+    // what the card was asked: read, a PIN, its signatures, and nothing after the last
     const ins = card.sent.map((a) => a.slice(0, 6));
-    ok(ins[ins.length - 1] === 'b02000' || /^b020/.test(ins[ins.length - 1]), 'the last thing the card was asked is the last signature', ins.join(' '));
+    ok(/^b020/.test(ins[ins.length - 1]), 'the last thing the card was asked is the last signature', ins.join(' '));
+
+    // RECEIVE: the next tap writes the change, with no PIN
+    card.tap();
+    card.sent.length = 0;
+    const back = await tap(R, card, (link) => R.W.cardWrite(link, { change: true }));
+    ok(back.sats === paid.change.sats && back.left === 0 && R.W.cardOwed().length === 0 && card.balance() === held - gave + paid.change.sats,
+       'RECEIVE: the next tap puts the change on the card', JSON.stringify({ sats: back.sats, card: card.balance() }));
+    ok(!card.sent.some((a) => /^b040/.test(a)), 'with no PIN sent');
+    ok(row(R, paid.hash).changeState === 'given back' && (await bal(R)) === 600, 'and the entry says given back; the receiver still holds 600');
   }
 
   /* ---- 1b: how long the card is held for a one-piece payment ------------------------- */
@@ -125,26 +143,28 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     R.circuits.length = 0;
     const steps = [];
     const refused = await tap(R, card, (link) => R.W.cardPay(link, { sats: 600, pin: '1234', on: (s) => steps.push(s) })).then(() => null, (e) => e);
-    ok(refused && refused.card === 'putback' && refused.owed === 88 && refused.lost === 512 && refused.limited === true,
-       'the card pays 600 with the same pieces, and the mint refuses it: 512 of it is spent, 88 is still good, and the error says so', refused && refused.message);
+    // the fewest pieces that cover 600 are three: the two 256s the copy spent, and a 128
+    const signedFor = card.state.spent - spentBefore;
+    ok(refused && refused.card === 'putback' && signedFor === 640 && refused.owed === 128 && refused.lost === 512 && refused.limited === true,
+       'the card pays 600 with the same pieces, and the mint refuses it: 512 of the 640 it signed is spent, 128 is still good, and the error says so', refused && refused.message);
     ok(R.trace.filter((x) => x === 'end' || x === 'error' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
        'the sheet had ended before the swap, and says nothing more now', R.trace.join(', '));
     ok(steps.join(' ') === 'reading signing checking', 'the screen was on checking with the mint', steps.join(' '));
     ok(asked(R, '/v1/swap') === 1 && asked(R, '/v1/checkstate') === 1, 'one swap, and then, with the card gone, the mint is asked which pieces are still good', R.circuits.map((x) => x.path.replace('/v1/', '')).join(', '));
     ok((await bal(R)) === rb && R.W.cardTaken().length === 0, 'nothing was paid, and nothing is left in the card store');
     const owed = R.W.cardOwed();
-    ok(owed.length === 1 && owed[0].kind === 'putback' && owed[0].sats === 88 && owed[0].card === card.key, 'the 88 sats that are still good are owed back to the card', JSON.stringify(owed.map((r) => [r.kind, r.sats])));
-    ok(card.state.spent === spentBefore + 600, 'the card’s day stays charged for all it signed', String(card.state.spent - spentBefore));
-    ok(card.state.slots.filter((x) => x.status === 2).length >= 4, 'and its places stay burned until it is tapped again');
+    ok(owed.length === 1 && owed[0].kind === 'putback' && owed[0].sats === 128 && owed[0].card === card.key, 'the 128 sats that are still good are owed back to the card', JSON.stringify(owed.map((r) => [r.kind, r.sats])));
+    ok(card.state.spent === spentBefore + 640, 'the card’s day stays charged for all it signed', String(card.state.spent - spentBefore));
+    ok(card.state.slots.filter((x) => x.status === 2).length >= 3, 'and its places stay burned until it is tapped again');
 
     // the tap that puts it back: the places are cleared and the same pieces loaded
     const tapAgain = await tap(R, card, (link) => R.W.cardWrite(link, { pin: '1234' }));
-    ok(tapAgain.back === 88 && tapAgain.sats === 88 && tapAgain.left === 0 && R.W.cardOwed().length === 0,
-       'the next tap says 88 was put back', JSON.stringify({ back: tapAgain.back, sats: tapAgain.sats }));
+    ok(tapAgain.back === 128 && tapAgain.sats === 128 && tapAgain.left === 0 && R.W.cardOwed().length === 0,
+       'the next tap says 128 was put back', JSON.stringify({ back: tapAgain.back, sats: tapAgain.sats }));
     const after = amounts(card);
     const lostSum = before.reduce((a, b) => a + b, 0) - after.reduce((a, b) => a + b, 0);
     ok(lostSum === 512 && card.state.slots.filter((x) => x.status === 2).length === 0, 'the card holds what it did less the 512 the mint had seen spent, and no burned place', amounts(card).join('+'));
-    ok(card.state.spent === spentBefore + 600, 'the day is as charged: loading gives it nothing back', String(card.state.spent));
+    ok(card.state.spent === spentBefore + 640, 'the day is as charged: loading gives it nothing back', String(card.state.spent));
     ok((await bal(R)) === rb, 'and the receiver was paid nothing');
     ok(R.sheet.filter((x) => /^error:/.test(x)).length === 0, 'no sheet of this ended in an error');
   }
@@ -161,14 +181,16 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     R.circuits.length = 0;
     const refused = await tap(R, card, (link) => R.W.cardPay(link, { sats: 600, pin: '1234' })).then(() => null, (e) => e);
     R.fate = null;
-    ok(refused && refused.card === 'putback' && refused.owed === 600 && refused.lost === 0 && refused.limited === false && swaps === 1,
-       'a mint that refuses the signatures leaves all 600 good: all of it is owed back, and the screen is told the card has no limit to stay charged', refused && refused.message);
-    ok(card.balance() === holds - 600 && R.W.cardOwed().length === 1 && R.W.cardTaken().length === 0 && (await bal(R)) === rb, 'the card holds the rest, and nothing was paid');
+    const gone = holds - card.balance();
+    ok(refused && refused.card === 'putback' && gone >= 600 && refused.owed === gone && refused.lost === 0 && refused.limited === false && swaps === 1,
+       'a mint that refuses the signatures leaves all it signed good: all of it is owed back, and the screen is told the card has no limit to stay charged', refused && refused.message);
+    ok(R.W.cardOwed().length === 1 && R.W.cardTaken().length === 0 && (await bal(R)) === rb, 'the card holds the rest, and nothing was paid');
     const put = await tap(R, card, (link) => R.W.cardWrite(link, { pin: '1234' }));
-    ok(put.back === 600 && card.balance() === holds && R.W.cardOwed().length === 0, 'the next tap puts it all back: the card holds what it did', String(card.balance()));
-    // and it pays as it did, with the pieces put back
+    ok(put.back === gone && card.balance() === holds && R.W.cardOwed().length === 0, 'the next tap puts it all back: the card holds what it did', String(card.balance()));
+    // and it pays as it did, with the pieces put back, and its change goes back at the tap after (RECEIVE)
     const again = await tap(R, card, (link) => R.W.cardPay(link, { sats: 600, pin: '1234' }));
-    ok(again.sats === 600 && (await bal(R)) === rb + 600, 'and then pays the 600, with the same pieces', String(await bal(R)));
+    if (again.change && again.change.sats > 0 && !again.change.written) await tap(R, card, (link) => R.W.cardWrite(link, { change: true }));
+    ok(again.sats === 600 && (await bal(R)) === rb + 600 && card.balance() === holds - 600 && R.W.cardOwed().length === 0, 'and then pays the 600, with the same pieces', String(await bal(R)));
 
     // pieces the mint never signed are not put back: nothing to put
     const rb2 = await bal(R);
@@ -228,16 +250,29 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     ok((await bal(Rl)) === 0, 'nothing is counted yet');
     // the connection comes back: the wallet’s own recovery finds the swap, and the card’s row is closed
     Rl.deaf = false;
+    const signedWorth = 1000 - c.balance();
     await Rl.W.recoverSwaps();
     await settle();
-    ok((await bal(Rl)) === 100 && Rl.W.cardTaken().length === 1, 'the wallet’s own recovery finds the swap first and the money is in the balance; the card’s row is still there to be closed', String(await bal(Rl)));
+    ok(signedWorth > 100 && (await bal(Rl)) === signedWorth && Rl.W.cardTaken().length === 1,
+       'the wallet’s own recovery finds the swap first: what the card signed is in the pile, and the card’s row is still there to be closed', String(await bal(Rl)));
     const rows = await Rl.W.cardSettle();
     await settle();
-    ok((await bal(Rl)) === 100 && Rl.W.cardTaken().length === 0 && Rl.W.cardOwed().length === 0 && JSON.parse(Rl.storage.getItem('foxy.cashu.swaps') || '[]').length === 0,
-       'on the next connection it is found: the receiver is paid once, the row and the record are gone', JSON.stringify({ bal: await bal(Rl), rows }));
+    const owedNow = Rl.W.cardOwed();
+    ok((await bal(Rl)) === 100 && Rl.W.cardTaken().length === 0 && JSON.parse(Rl.storage.getItem('foxy.cashu.swaps') || '[]').length === 0
+       && rows.length === 1 && rows[0].state === 'paid' && rows[0].change > 0
+       && owedNow.length === 1 && owedNow[0].kind === 'change' && owedNow[0].card === c.key && owedNow[0].sats === rows[0].change,
+       'on the next connection it is found: the receiver keeps 100, the over-payment is made into change for the card, and the row and the record are gone',
+       JSON.stringify({ bal: await bal(Rl), rows, owed: owedNow.map((r) => [r.kind, r.sats]) }));
     const entries = history(Rl).filter((e) => e.hash === lost.id);
-    ok(entries.length === 1 && entries[0].memo === 'card' && entries[0].card === c.key && entries[0].state === 'success', 'with one entry, a card’s', JSON.stringify(entries.map((e) => [e.memo, e.state, e.sats])));
-    ok(asked(Rl, '/v1/swap') >= 1 && c.balance() === 900, 'and the card was not asked for anything again', String(c.balance()));
+    ok(entries.length === 1 && entries[0].memo === 'card' && entries[0].card === c.key && entries[0].state === 'success' && entries[0].sats === 100
+       && entries[0].grossSats === signedWorth && entries[0].changeState === 'not handed',
+       'with one entry, a card’s: 100 kept, the change owed to the card', JSON.stringify(entries.map((e) => [e.memo, e.state, e.sats, e.grossSats, e.changeState])));
+    ok(asked(Rl, '/v1/swap') >= 1 && c.balance() === 1000 - signedWorth, 'and the card was not asked for anything again', String(c.balance()));
+    // its next tap takes the change, with no PIN
+    c.tap();
+    const back = await Rl.W.cardWrite(c, { change: true });
+    ok(back.sats === rows[0].change && c.balance() === 1000 - signedWorth + rows[0].change && Rl.W.cardOwed().length === 0,
+       'and the card’s next tap receives it', String(c.balance()));
 
     // an answer that never came because the request never got there: the next asking makes the swap
     const Rm = await funded({ sharedMint: Hh.mint, words: THIRD }, 0);
@@ -340,6 +375,82 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     await Rr.W.cardSession('Hold the card to the top of the phone', (link) => Rr.W.cardLook(link));
     await settle();
     ok(!Rr.W._spare(), 'a tap that only reads a card opens no circuit ahead of time', Rr.circuits.map((x) => x.path).join(', '));
+  }
+
+  /* ---- 7: change the mint did not make is made at the next connection --------------------- */
+  {
+    const Hd = await funded({}, 3000);
+    const Rd = await funded({ sharedMint: Hd.mint, words: OTHER_WORDS }, 0);
+    const c = newCard(Hd);
+    await Hd.W.cardSetUp(c, { pin: '1234' });
+    await binaryLoad(Hd, c, 1024);
+    // the payment's swap goes through; the one that makes its change is refused
+    let swaps = 0;
+    Rd.fate = (m) => { if (/\/v1\/swap$/.test(String(m.url || ''))) { swaps += 1; if (swaps === 2) return JSONERR(11000, 'not now'); } return null; };
+    const paid = await tap(Rd, c, (link) => Rd.W.cardPay(link, { sats: 200, pin: '1234' }));
+    Rd.fate = null;
+    await settle();
+    const due = Rd.W.cardDue();
+    ok(paid.sats === 200 && paid.change && paid.change.unmade === true && paid.change.sats === 824 && Rd.W.cardOwed().length === 0
+       && due.length === 1 && due[0].sats === 824 && due[0].card === c.key,
+       'a payment whose change the mint did not make stands, and the change is written down as due to the card', JSON.stringify({ change: paid.change, due }));
+    const e0 = row(Rd, paid.hash);
+    ok((await bal(Rd)) === 1024 && e0.sats === 1024 && e0.changeState === 'never sent',
+       'until it is made the receiver holds it, and its entry says the whole', JSON.stringify({ bal: await bal(Rd), sats: e0.sats, state: e0.changeState }));
+    // the next connection
+    const tried = await Rd.W.cardDueRetry();
+    await settle();
+    const e1 = row(Rd, paid.hash);
+    const owed = Rd.W.cardOwed();
+    ok(tried.length === 1 && tried[0].state === 'made' && Rd.W.cardDue().length === 0 && owed.length === 1 && owed[0].kind === 'change' && owed[0].card === c.key,
+       'the next connection makes it, owed to the card like any change', JSON.stringify({ tried, owed: owed.map((r) => [r.kind, r.sats]) }));
+    ok((await bal(Rd)) === 200 && e1.sats === 200 && e1.changeState === 'not handed',
+       'and the receiver is back to the 200 it was paid, its entry the same', JSON.stringify({ bal: await bal(Rd), sats: e1.sats, state: e1.changeState }));
+    const back = await tap(Rd, c, (link) => Rd.W.cardWrite(link, { change: true }));
+    ok(back.change === owed[0].sats && c.balance() === owed[0].sats && Rd.W.cardOwed().length === 0 && row(Rd, paid.hash).changeState === 'given back',
+       'and the card’s next tap receives it, with no PIN', JSON.stringify({ back: back.change, card: c.balance() }));
+    ok((await Rd.W.cardDueRetry()).length === 0, 'with nothing left to try');
+  }
+
+  /* ---- 7b: the change's answer is lost: the recovery finds it, and it goes to the card ------- */
+  {
+    const Hd = await funded({}, 3000);
+    const Rd = await funded({ sharedMint: Hd.mint, words: OTHER_WORDS }, 0);
+    const c = newCard(Hd);
+    await Hd.W.cardSetUp(c, { pin: '1234' });
+    await binaryLoad(Hd, c, 1024);
+    const real = Rd.mint.handle.bind(Rd.mint);
+    let swaps = 0;
+    // the mint makes the change, its answer never comes, and the mint is out of reach after it
+    // (with the mint still in reach, the wallet's own swap finds the answer at once, and the change is owed as usual)
+    Rd.fate = (m) => {
+      if (!/\/v1\/swap$/.test(String(m.url || ''))) return null;
+      swaps += 1;
+      if (swaps !== 2) return null;
+      real(m);
+      Rd.deaf = true;
+      return '0\n';
+    };
+    const paid = await tap(Rd, c, (link) => Rd.W.cardPay(link, { sats: 200, pin: '1234' }));
+    Rd.fate = null;
+    await settle();
+    ok(paid.sats === 200 && paid.change && paid.change.unmade === true && Rd.W.cardDue().length === 1 && Rd.W.cardOwed().length === 0,
+       'a payment whose change answer was lost stands, and the change is due', JSON.stringify(paid.change));
+    ok(row(Rd, paid.hash).changeState === 'making', 'and its entry is left for the recovery to finish', row(Rd, paid.hash).changeState);
+    const early = await Rd.W.cardDueRetry();
+    ok(early.length === 1 && early[0].state === 'waiting' && Rd.W.cardOwed().length === 0, 'while the swap is still being asked about, nothing is made twice', JSON.stringify(early));
+    Rd.deaf = false;
+    await Rd.W.recoverSwaps();
+    await settle();
+    const tried = await Rd.W.cardDueRetry();
+    await settle();
+    const owed = Rd.W.cardOwed();
+    const tags = Rd.W.tagsFor(paid.hash) || {};
+    ok(tried.length === 1 && tried[0].state === 'made' && owed.length === 1 && owed[0].card === c.key && owed[0].sats > 0 && !tags.changeToken && !tags.owedChange,
+       'the recovery finds the change, and it is owed to the card, not left as a code on the payment', JSON.stringify({ tried, owed: owed.map((r) => [r.kind, r.sats]), tags }));
+    ok((await bal(Rd)) === 200 && row(Rd, paid.hash).sats === 200, 'the receiver holds the 200 it was paid', String(await bal(Rd)));
+    const back = await tap(Rd, c, (link) => Rd.W.cardWrite(link, { change: true }));
+    ok(c.balance() === owed[0].sats && Rd.W.cardOwed().length === 0, 'and the card’s next tap receives it', String(c.balance()));
   }
 
   console.log('\n' + (failed ? failed + ' flashcard-release check(s) failed' : 'all flashcard-release checks pass'));

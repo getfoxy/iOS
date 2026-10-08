@@ -1241,7 +1241,37 @@
  },
  "card: change waiting for a card": {
   "file": "288-card-change-waiting-for-a-card.html",
-  "markup": "00e1ef2e05cabc6f6ce483a173d24c487abdc6d1528ab8ffae8d6e39b00007dc",
+  "markup": "a2eb2f6a109ee455a829df9d4e43fe954bf47cc40d59eada12c128e0089b6b3a",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: tap 1 of 2, send": {
+  "file": "296-stage-tap-1-of-2-send.html",
+  "markup": "d9f97b7723e56b02ff934e014fe6b8530a0e2ac1713ebf5849f9a9c6518ce502",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: tap to receive the change of a payment": {
+  "file": "297-card-tap-to-receive-the-change-of-a-payment.html",
+  "markup": "7f140bf58c7c9964968d0ac2064887ed6e1deb7e4890d4b7773847ee764629e0",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: tap 2 of 2, receive": {
+  "file": "298-stage-tap-2-of-2-receive.html",
+  "markup": "4311ddd49d3d60f1d719bd21272b73c3c463eb936898d3ffdf59e610edc73b78",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: a payment complete, its change back on the card": {
+  "file": "299-card-a-payment-complete-its-change-back-on-the-card.html",
+  "markup": "c711981e0a6490f1e515d440b048f74de91174a6f2eba92d5e27c95ab8f6bb7f",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: a payment cut short, not paid": {
+  "file": "300-card-a-payment-cut-short-not-paid.html",
+  "markup": "044d95a52ddd6b86404b88eb572dde9446f3065f6876b244c671d4d7451e53be",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: change the mint did not make yet": {
+  "file": "301-card-change-the-mint-did-not-make-yet.html",
+  "markup": "1c21336611a94dda73d515b0c8c7d8471299fbc070914a53192490414cdf854f",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: how a lost card is treated": {
@@ -1256,7 +1286,7 @@
  },
  "stage: checking with the mint, the card let go": {
   "file": "291-stage-checking-with-the-mint-the-card-let-go.html",
-  "markup": "125dd20ff7c023a7c0d58484047b916182d6939356ba821053df6f3644f12f4a",
+  "markup": "807f3f5d77785c180ef96171be169410fc6c50c355f14d97feb58d047e0fc2f2",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "stage: making the change, the card let go": {

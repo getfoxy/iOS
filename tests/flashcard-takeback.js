@@ -115,6 +115,11 @@ function later(c, ms) {
     c3.tap();
     const p3 = await R.W.cardPay(c3, { sats: 100, pin: '1234' });
     ok(p3.sats === 100, 'and renewed, it pays');
+    // RECEIVE: the change goes back on at the next tap, with no PIN
+    if (p3.change && p3.change.sats > 0 && !p3.change.written) {
+      c3.tap();
+      await R.W.cardWrite(c3, { change: true });
+    }
     c3.tap();
     const h1 = await bal(H);
     const out = await H.W.cardWithdraw(c3, { pin: '1234' });

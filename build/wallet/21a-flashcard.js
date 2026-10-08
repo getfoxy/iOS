@@ -263,14 +263,14 @@
        * corrected. Said before any money is made for it. */
       if (!card.info.owner) return Promise.reject(cardError('no-owner', 'This card has no owner, so it cannot be loaded.'));
       /* The amount is cut like a cash drawer, to fill the gaps in what the card
-       * holds (and has owed to it): the rungs it has too few of, then the rest, and
-       * no more than CARD_LOAD_PIECES pieces or than the card has places for (an
-       * amount that needs more has a shallower drawer and fewer rungs, and is
-       * rounded up only where even that is too many, smallest pieces first;
-       * `rounded` says by how much). A few more where the mint adds its fee: there
-       * must be places for them. Spent places are freed at the write, so they count
-       * as room. */
-      var ladder = cardLadder(want, cardRoomFor(card), cardMaxPiece(w), cardHeldAmounts(card));
+       * holds (and has owed to it): the small rungs a few deep for paying small
+       * amounts offline with exact change, the big value in a handful of large
+       * proofs, and no more than CARD_LOAD_PIECES pieces (about half the card's
+       * places), so the rest stay free for an online payment's change. An amount
+       * that needs more has a shallower drawer, and is rounded up only where even
+       * that is too many; `rounded` says by how much. A few more places are kept
+       * for what the mint's fee may add. */
+      var ladder = cardLadder(want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardMaxPiece(w), cardHeldAmounts(card));
       var room = card.info.empty + card.info.spent;
       if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
       /* Whether this mint's ecash fits a card, asked before any is made. It
@@ -348,7 +348,8 @@
         return cardLook(link, { mine: !!o.owner });
       }).then(function (card) {
         if (card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
-        return { card: card, sats: wrote.sats, back: wrote.back || 0, left: wrote.left.length, why: wrote.why || '' };
+        return { card: card, sats: wrote.sats, back: wrote.back || 0, change: wrote.change || 0, refund: wrote.refund || 0,
+                 left: wrote.left.length, why: wrote.why || '' };
       });
     },
 
@@ -561,6 +562,14 @@
     /* Whether this phone is the one that can take this card back. */
     cardIsMine: function (card) { return !!(card && card.key && card.record && cardMine(card)); },
 
+    /* Change due to cards that could not be made when they paid, made now
+     * where it can be (`cardDueRetry`): [{ forHash, state, sats }]. */
+    cardDueRetry: function () { return cardDueRetry(); },
+    /* What is due: [{ forHash, card, sats }]. */
+    cardDue: function () {
+      return cardStore(CARD_DUE).map(function (d) { return { forHash: d.forHash, card: d.card, sats: Math.round(Number(d.owed) || 0) }; });
+    },
+
     /* Signed pieces the mint has not answered for yet: [{ id, sats, card }]. */
     cardTaken: function () {
       return cardStore(CARD_TAKEN).map(function (r) { return { id: r.id, sats: r.sats, card: r.card }; });
@@ -574,7 +583,19 @@
       var out = [];
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
-          return cardSwapTaken(row, true).then(function (r) { out.push({ id: row.id, state: 'paid', sats: r.sats }); },
+          /* Found paid: what it owes the card back (its over-payment, or all of a
+           * refund) is made now, as the tap would have made it, and waits for the
+           * card's next tap. Missing, a receiver whose answer was lost kept it. */
+          return cardSwapTaken(row, true).then(function (r) {
+            var w = null;
+            try { w = need(); } catch (x) { w = null; }
+            var owe = w ? cardOweBack(row, w, null, null, r) : Promise.resolve({ sats: 0 });
+            return owe.then(function (o) {
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: (o && o.sats) || 0, refund: !!row.refund });
+            }, function () {
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: 0, refund: !!row.refund });
+            });
+          },
             function (e) {
               var kind = e && e.card;
               out.push({ id: row.id, state: kind === 'spent' ? 'spent' : kind === 'bad-pieces' ? 'bad' : kind === 'putback' ? 'putback' : 'waiting', sats: 0,

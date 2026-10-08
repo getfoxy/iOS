@@ -338,6 +338,8 @@
           .then(sweepPause).then(function () { return FoxyWallet.claimUnclaimed(); })
           // and a card's pieces it signed for while the mint was not answering (08a-flashcard.js)
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })
+          // and change due to a card that could not be made when it paid
+          .then(function () { return FoxyWallet.cardDue().length ? FoxyWallet.cardDueRetry() : null; })
           .catch(function () {})
           /* And what was left between two mints: a crossing paid and not
            * claimed, a payment taken at a payer's mint and not yet home, a

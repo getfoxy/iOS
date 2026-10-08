@@ -10,12 +10,14 @@
  *   one read of the places on a card (GET_PIECES) in a page for each three
  *   pieces, with the old reads kept for an older applet;
  *   no AUTH in a till's payment, and the payment still true only by the mint;
- *   the exact set of pieces taken whenever one exists, by search and not by
- *   greed, and change only when none does;
+ *   online, two pieces or one that overpay least, so a tap signs at most two,
+ *   with the change written back at the next tap; offline, the exact set of
+ *   pieces whenever one exists, by search and not by greed;
  *   what goes onto a card cut like a cash drawer (every power of two from 1 up to
  *   the largest that fits, then the rest), to fill the gaps in what the card
- *   holds, and no more than sixteen pieces of it, so that any price up to the
- *   balance has an exact set whenever the drawer is complete;
+ *   holds, and no more than thirty-two pieces of it (half the card, leaving
+ *   room for change), so that any price up to the balance has an exact set
+ *   whenever the drawer is complete;
  *   the screen told which piece is being signed or written;
  *   a withdrawal cut short, finished by the next tap;
  *   and a till with no route, taking a card on trust only when the person has
@@ -130,9 +132,15 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     card.tap();
     card.sent.length = 0;
     const paid = await R.W.cardPay(card, { sats: 592, pin: '1234' });
-    ok(paid.sats === 592 && count(card, CMD.auth) === 0 && count(card, CMD.spend) === 3,
-       'a till paid by a card does not ask it to prove its key', card.sent.map((a) => a.slice(0, 6)).join(' '));
+    ok(paid.sats === 592 && count(card, CMD.auth) === 0 && count(card, CMD.spend) >= 1 && count(card, CMD.spend) <= 2,
+       'a till paid by a card does not ask it to prove its key, and the card signs no more than two pieces', card.sent.map((a) => a.slice(0, 6)).join(' '));
     ok((await bal(R)) === 592, 'and is paid, by the mint’s swap');
+    // RECEIVE: the change goes back on at the next tap, with no PIN
+    if (paid.change && paid.change.sats > 0 && !paid.change.written) {
+      card.tap();
+      await R.W.cardWrite(card, { change: true });
+    }
+    ok(card.balance() === 2000 - 592, 'and with its change written back the card is down by exactly the price', String(card.balance()));
 
     // a pretend card with a key of its own and the real card’s pieces: the mint refuses what it signs
     const rBefore = await bal(R);
@@ -157,7 +165,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
   {
     const rand = rng(20261007);
     const feeOf = (ppk) => (l) => Math.ceil(l.length * ppk / 1000);
-    let cases = 0, exactFound = 0, bad = 0, over = 0;
+    let cases = 0, exactFound = 0, bad = 0, over = 0, fewHad = 0, fewBad = 0, moreHad = 0, moreBad = 0;
     for (let n = 0; n < 700; n++) {
       const ppk = [0, 0, 100, 250, 1000][Math.floor(rand() * 5)];
       const stub = { getFeesForProofs: feeOf(ppk) };
@@ -167,34 +175,54 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
       const total = pool.reduce((s, p) => s + p.amount, 0);
       const want = 1 + Math.floor(rand() * total);
       const cap = rand() < 0.3 ? 1 + Math.floor(rand() * total) : null;
-      // every subset: is there one that comes to exactly the price and the fee on it, and with how few pieces
-      let best = -1;
+      // every subset: the fewest pieces that come to exactly the price and the fee on it, and the least that two pieces or one cover it with
+      let best = -1, fewLeast = -1, fewCount = 0, coverCount = -1;
       for (let m = 1; m < (1 << size); m++) {
         const set = pool.filter((p, i) => m & (1 << i));
         const sum = set.reduce((s, p) => s + p.amount, 0);
         if (cap !== null && sum > cap) continue;
-        if (sum === want + feeOf(ppk)(set) && (best < 0 || set.length < best)) best = set.length;
+        const need = want + feeOf(ppk)(set);
+        if (sum === need && (best < 0 || set.length < best)) best = set.length;
+        if (set.length <= 2 && sum >= need && (fewLeast < 0 || sum < fewLeast || (sum === fewLeast && set.length < fewCount))) { fewLeast = sum; fewCount = set.length; }
+        if (sum >= need && (coverCount < 0 || set.length < coverCount)) coverCount = set.length;
       }
-      const got = H.W.cardPick(stub, pool, want, cap);
       cases += 1;
+      // offline: the exact set, the fewest pieces of it, whenever there is one
+      const exactGot = H.W.cardExactPick(stub, pool, want, cap);
       if (best > 0) {
         exactFound += 1;
+        const sum = exactGot ? exactGot.reduce((s, p) => s + p.amount, 0) : -1;
+        if (!exactGot || sum !== want + feeOf(ppk)(exactGot) || exactGot.length !== best) { bad += 1; if (bad < 4) console.log('  exact missed', JSON.stringify({ ppk, want, cap, pool: pool.map((p) => p.amount), best, got: exactGot && exactGot.map((p) => p.amount) })); }
+      }
+      // online: two pieces or one, the least over, whenever they cover it; otherwise whatever covers it within the limit
+      const got = H.W.cardPick(stub, pool, want, cap);
+      if (fewLeast > 0) {
+        fewHad += 1;
         const sum = got ? got.reduce((s, p) => s + p.amount, 0) : -1;
-        if (!got || sum !== want + feeOf(ppk)(got) || got.length !== best) { bad += 1; if (bad < 4) console.log('  exact missed', JSON.stringify({ ppk, want, cap, pool: pool.map((p) => p.amount), best, got: got && got.map((p) => p.amount) })); }
+        if (!got || got.length > 2 || sum !== fewLeast || got.length !== fewCount) { fewBad += 1; if (fewBad < 4) console.log('  few missed', JSON.stringify({ ppk, want, cap, pool: pool.map((p) => p.amount), fewLeast, got: got && got.map((p) => p.amount) })); }
       } else if (got) {
         const sum = got.reduce((s, p) => s + p.amount, 0);
         if (sum < want + feeOf(ppk)(got) || (cap !== null && sum > cap)) { over += 1; if (over < 4) console.log('  bad cover', JSON.stringify({ ppk, want, cap, pool: pool.map((p) => p.amount), got: got.map((p) => p.amount) })); }
+        // more than two needed: still the fewest that cover it
+        if (coverCount > 2) {
+          moreHad += 1;
+          if (got.length !== coverCount) { moreBad += 1; if (moreBad < 4) console.log('  not the fewest', JSON.stringify({ ppk, want, cap, pool: pool.map((p) => p.amount), coverCount, got: got.map((p) => p.amount) })); }
+        }
       }
     }
-    ok(bad === 0 && exactFound > 100, 'whenever a set of pieces comes to exactly the price and the fee on it, the fewest such pieces are taken, over ' + cases + ' random cards at mints that charge nothing and up to a sat a piece', exactFound + ' of them had one, ' + bad + ' missed');
-    ok(over === 0, 'and where there is none, what is taken covers the price and the fee, and keeps to the day’s limit');
+    ok(bad === 0 && exactFound > 100, 'offline, whenever a set of pieces comes to exactly the price and the fee on it, the fewest such pieces are taken, over ' + cases + ' random cards at mints that charge nothing and up to a sat a piece', exactFound + ' of them had one, ' + bad + ' missed');
+    ok(fewBad === 0 && fewHad > 100, 'online, whenever two pieces or one cover the price and the fee, the pair or piece that overpays least is taken', fewHad + ' of them had one, ' + fewBad + ' missed');
+    ok(over === 0, 'and where none does, what is taken covers the price and the fee, and keeps to the day’s limit');
+    ok(moreBad === 0 && moreHad > 50, 'and is the fewest pieces that cover it, each being most of a second of holding the card', moreHad + ' needed more than two, ' + moreBad + ' were not the fewest');
 
-    // the owner’s case: more pieces and no change beats fewer pieces and change
+    // one price both ways: online a tap signs two pieces and takes change; offline, with no change to be had, it pays exactly
     const pool = [1024, 512, 256, 128, 64, 16].map((n, i) => ({ amount: n, secret: 'p' + i, id: 'k' }));
     const stub = { getFeesForProofs: () => 0 };
     const pick = H.W.cardPick(stub, pool, 592, null);
-    ok(pick && pick.map((p) => p.amount).sort((x, y) => y - x).join('+') === '512+64+16', 'a price of 592 is paid with 512, 64 and 16, not with the 1024 and 432 of change', pick && pick.map((p) => p.amount).join('+'));
-    ok(H.W.cardPick(stub, pool, 1000, null).map((p) => p.amount).join('+') === '1024', 'and where no set is exact, one piece that covers it is taken: 1000 is paid with the 1024');
+    ok(pick && pick.map((p) => p.amount).join('+') === '512+128', 'online a price of 592 is paid with 512 and 128, signed largest first, and 48 of change', pick && pick.map((p) => p.amount).join('+'));
+    const exactPick = H.W.cardExactPick(stub, pool, 592, null);
+    ok(exactPick && exactPick.map((p) => p.amount).sort((x, y) => y - x).join('+') === '512+64+16', 'offline it is paid exactly, with 512, 64 and 16', exactPick && exactPick.map((p) => p.amount).join('+'));
+    ok(H.W.cardPick(stub, pool, 1000, null).map((p) => p.amount).join('+') === '1024', 'and 1000 is paid with the 1024');
 
     // through a whole payment
     card.tap();
@@ -209,7 +237,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
   {
     const L = (n, most, top, have) => H.W.cardLadder(n, most, top, have);
     const show = (l) => l.denominations.join('+');
-    // the drawer, the rest, and then the smallest rungs deepened with the places left (the default cap is the whole card, 60)
+    // the drawer, the rest, and then the smallest rungs deepened with the places left (the default cap is a load, 32: half the card)
     const two = L(2000);
     ok(two.denominations.length === 32 && total(two.denominations) === 2000 && two.extra === 0
        && show(two) === '512+256+256+128+128+128+128+64+64+64+64+32+32+32+16+16+16+16+8+8+8+4+4+4+2+2+2+2+1+1+1+1',
@@ -218,8 +246,8 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     ok(sixteen.denominations.length === 16 && total(sixteen.denominations) === 2000 && show(sixteen) === '512+512+256+256+128+128+64+64+32+16+16+8+4+2+1+1',
        'in sixteen pieces it is the drawer and the rest alone: 1 to 512 once, then 512, 256, 128, 64, 16 and 1', show(sixteen));
     const big = L(11000);
-    ok(big.denominations.length === 41 && total(big.denominations) === 11000 && big.extra === 0 && complete(big.denominations),
-       '11,000 sats is a whole drawer to 4096 in forty-one pieces, deepened to 512', show(big));
+    ok(big.denominations.length === 31 && total(big.denominations) === 11000 && big.extra === 0 && complete(big.denominations),
+       '11,000 sats is a whole drawer to 4096 in thirty-one pieces, its small rungs deepened', show(big));
     const bigSixteen = L(11000, 16);
     ok(bigSixteen.denominations.length === 15 && total(bigSixteen.denominations) === 11000 && bigSixteen.extra === 0 && !complete(bigSixteen.denominations),
        '11,000 sats is not a whole drawer in sixteen pieces: it has fewer rungs, the biggest taken off first (1 to 64), and the big pieces after them', show(bigSixteen));
@@ -228,7 +256,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     ok(L(0).denominations.length === 0 && L(0).sats === 0, 'and nothing is no pieces');
     ok(L(131071, 16).denominations.length === 1 && L(131071, 16).sats === 131072 && L(131071, 16).extra === 1,
        'an amount that is more than the pieces allowed even with no drawer is rounded up, its smallest pieces first, until it is not: 131,071 in sixteen is one piece of 131,072, a sat more', JSON.stringify(L(131071, 16)));
-    ok(L(131071).denominations.length === 17 && L(131071).extra === 0, 'and in sixty it is its seventeen rungs, nothing added');
+    ok(L(131071).denominations.length === 17 && L(131071).extra === 0, 'and in thirty-two it is its seventeen rungs, nothing added');
     ok(L(0b1111111111111111, 16).denominations.length === 16 && L(0b1111111111111111, 16).extra === 0 && L(0b11111111111111111, 16).denominations.length <= 16,
        'sixteen pieces is allowed, seventeen is not: 65,535 is the sixteen rungs from 1 to 32,768, and nothing is added');
     ok(L(7, 2).sats === 8 && L(7, 2).extra === 1 && L(5, 2).extra === 0 && L(5, 2).denominations.join('+') === '4+1', 'and the limit can be asked for');
@@ -305,7 +333,8 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
           const have = total(held);
           if (have > 0 && rand() < 0.6) {
             const price = 1 + Math.floor(rand() * have);
-            const pick = H.W.cardPick(stub, dummy(held), price, null);
+            // a tap at a till offline pays exactly; online, two pieces or one and change cut back on
+            const pick = H.W.cardExactPick(stub, dummy(held), price, null) || H.W.cardPick(stub, dummy(held), price, null);
             if (!pick) { missed += 1; continue; }
             const took = pick.map((p) => p.amount);
             const out = held.slice();
@@ -324,7 +353,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
             for (let price = 1; price <= total(held); price++) {
               if (!every && rand() > 0.02) continue;
               prices += 1;
-              const pick = H.W.cardPick(stub, dummy(held), price, null);
+              const pick = H.W.cardExactPick(stub, dummy(held), price, null);
               const sum = pick ? pick.reduce((a, p) => a + p.amount, 0) : -1;
               if (!sums[price] || sum !== price) { missed += 1; if (missed < 4) console.log('  no exact set for', price, 'on', held.join(',')); }
             }
@@ -333,7 +362,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
         }
       }
       ok(wrong === 0 && missed === 0 && completeCards > 30 && prices > 3000,
-         'over random cards and prices, whenever the drawer is complete an exact set exists for every price up to the balance, and the wallet finds it', cards + ' cards, ' + completeCards + ' complete, ' + prices + ' prices, ' + spent + ' payments, ' + missed + ' missed, ' + wrong + ' wrong');
+         'over random cards and prices, whenever the drawer is complete an exact set exists for every price up to the balance, and the wallet finds it for an offline till', cards + ' cards, ' + completeCards + ' complete, ' + prices + ' prices, ' + spent + ' payments, ' + missed + ' missed, ' + wrong + ' wrong');
     }
 
     // loads one after another onto a card keep a complete drawer complete
@@ -379,8 +408,8 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     const c2 = newCard(Q);
     await Q.W.cardSetUp(c2, { pin: '1234' });
     c2.tap();
-    // a card with places for sixteen pieces and no more (the rest taken, as the phone sees it)
-    const wide = await Q.W.cardLook(c2).then((seen) => Q.W.cardPrepare(Object.assign({}, seen, { info: Object.assign({}, seen.info, { empty: 20 }) }), 131071));
+    // a card with places for sixteen pieces and no more (the rest taken, as the phone sees it, and a dozen kept for change)
+    const wide = await Q.W.cardLook(c2).then((seen) => Q.W.cardPrepare(Object.assign({}, seen, { info: Object.assign({}, seen.info, { empty: 28 }) }), 131071));
     // the pieces are of the sizes this mint's keys can make: no bigger than its largest
     const most = Q.W.cardMaxPiece();
     const fit = Math.ceil(131072 / most);
@@ -393,7 +422,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
 
   /* ---- 4b: what a payment signs, on a card cut that way ---------------------------------- */
   {
-    for (const [load, pieces] of [[2000, 32], [11000, 41]]) {
+    for (const [load, pieces] of [[2000, 32], [11000, 31]]) {
       const P = await funded({ feePpk: 0 }, load + 200);
       const Rv = await funded({ sharedMint: P.mint, words: OTHER_WORDS }, 0);
       const c = newCard(P);
@@ -409,8 +438,15 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
       const left = amounts(c);
       const took = before.slice();
       left.forEach((a) => { took.splice(took.indexOf(a), 1); });
-      ok(paid.sats === 600 && paid.change === null && total(took) === 600 && signed === took.length && !Rv.W.cardOwed().length && (await bal(Rv)) === 600,
-         'a payment of 600 from it is exact: no change, no second swap, no second tap', took.sort((a, b) => b - a).join('+') + ' signed');
+      const over = total(took) - 600;
+      ok(paid.sats === 600 && signed <= 2 && signed === took.length && (await bal(Rv)) === 600
+         && (over === 0 ? paid.change === null : (paid.change && paid.change.sats === over && paid.change.written === false)),
+         'a payment of 600 from it signs no more than two pieces (SEND), and what they come to over the price is change for the card', took.sort((a, b) => b - a).join('+') + ' signed, ' + over + ' over');
+      if (over > 0) {
+        c.tap();
+        await Rv.W.cardWrite(c, { change: true });
+      }
+      ok(c.balance() === load - 600 && !Rv.W.cardOwed().length, 'and its change is written back at the next tap, with no PIN (RECEIVE): the card is down by exactly 600', String(c.balance()));
       console.log('      ' + load + ' sats: ' + pieces + ' pieces; a payment of 600 signs ' + signed + ' (' + took.join('+') + '), ' + (signed * 0.74).toFixed(1) + ' s of signing');
       await settle();
     }
@@ -425,7 +461,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     c.tap();
     const writes = [];
     await P.W.cardAdd(c, { sats: 11165, pin: '1234' });
-    ok(amounts(c).length === 37 && c.balance() === 11165, '11,165 sats on a card is thirty-seven pieces: a drawer to 4096, the rest, and the small rungs deepened', amounts(c).join('+'));
+    ok(amounts(c).length === 31 && c.balance() === 11165, '11,165 sats on a card is thirty-one pieces: a drawer to 4096, the rest, and the small rungs deepened', amounts(c).join('+'));
     // the same, with a screen listening
     const c3 = newCard(P);
     await P.W.cardSetUp(c3, { pin: '1234' });
@@ -469,16 +505,16 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     w.leaveBefore('20', 4);          // the fourth piece is not answered
     const cut = await P.W.cardWithdraw(w, { pin: '1234' }).then(() => null, (e) => e);
     const owed = P.W.cardOwed().filter((r) => r.card === w.key);
-    ok(cut && cut.card === 'interrupted' && cut.owed > 0 && owed.length === 1 && owed[0].kind === 'refund' && P.W.cardTaken().length === 0,
-       'a withdrawal cut short has taken nothing: what the card signed is made into pieces for the card and waits for it', cut && cut.message);
-    ok(w.balance() + cut.owed === total && (await bal(P)) === mine0, 'and the card holds the rest, and the phone has taken nothing', w.balance() + ' + ' + cut.owed + ' of ' + total);
-    w.tap();
-    const back = await P.W.cardWrite(w, { owner: true });
-    ok(back.left === 0 && w.balance() === total && P.W.cardOwed().length === 0 && (await bal(P)) === mine0,
-       'the next tap puts it back, with the owner’s proof and no PIN: the card holds all it did', String(w.balance()));
+    const kept = (await bal(P)) - mine0;
+    ok(cut && cut.card === 'partial' && cut.sats > 0 && kept === cut.sats && owed.length === 0 && P.W.cardTaken().length === 0,
+       'a withdrawal cut short keeps what the card signed: it is in this phone, and nothing waits to go back to the card', cut && cut.message);
+    ok(w.balance() > 0 && w.balance() < total && cut.left === w.balance(), 'and the card holds the rest, which the screen is told', w.balance() + ' on the card, ' + (cut && cut.left) + ' said');
+    const entry = history(P).filter((e) => e.hash === cut.hash)[0] || {};
+    ok(entry.dir === 'in' && entry.sats === cut.sats && entry.memo === 'from card', 'with one entry for what came off', JSON.stringify([entry.dir, entry.sats, entry.memo]));
     w.tap();
     const done = await P.W.cardWithdraw(w, { pin: '1234' });
-    ok(w.balance() === 0 && done.sats === total && (await bal(P)) === mine0 + total, 'and the tap after that takes everything', String(done.sats));
+    ok(w.balance() === 0 && done.sats > 0 && (await bal(P)) === mine0 + cut.sats + done.sats && cut.sats + done.sats <= total,
+       'and the next tap takes the rest', cut.sats + ' + ' + done.sats + ' of ' + total);
     ok(n0 >= 5, 'the card had several pieces to cut it in', String(n0));
     await settle();
   }

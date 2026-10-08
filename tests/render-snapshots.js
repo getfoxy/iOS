@@ -587,6 +587,13 @@ function cards() {
   add('card: no change while offline', (a) => a.fcFailed({ card: 'inexact', message: 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly 1000 sats. Pay an amount it can make, or pay when this phone is online.' }, { taken: true }));
   add('stage: signing piece 3 of 9', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('signing'); a.fcLine('Signing piece 3 of 9'); });
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
+  // a card payment is two taps: SEND, then RECEIVE its change, then COMPLETE
+  add('stage: tap 1 of 2, send', (a) => { a._fcTapO = { amount: '\u20bf 1,180', body: 'Tap 1 of 2: SEND.' }; a.fcStage('hold'); });
+  add('card: tap to receive the change of a payment', (a) => a.fcChangeWaiting(212, 1180));
+  add('stage: tap 2 of 2, receive', (a) => { a._fcTapO = { body: 'Tap 2 of 2: RECEIVE.' }; a.fcStage('writing'); });
+  add('card: a payment complete, its change back on the card', (a) => { a.refreshBalance = () => {}; a.loadHistory = () => {}; a.fcWrote({ card: { balance: 0, info: {}, record: {} }, sats: 212, change: 212, refund: 0, back: 0, left: 0 }, { paid: 1180 }); });
+  add('card: a payment cut short, not paid', (a) => a.fcFailed({ card: 'interrupted', owed: 512, made: true, message: 'x' }, { paying: true, taken: true }));
+  add('card: change the mint did not make yet', (a) => a.fcChangeLater(824, 200));
   add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
   add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
   // the card has signed and been let go; the sheet is gone and our own screen waits for the mint
