@@ -1259,11 +1259,6 @@
   "markup": "4311ddd49d3d60f1d719bd21272b73c3c463eb936898d3ffdf59e610edc73b78",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
- "card: a payment complete, its change back on the card": {
-  "file": "299-card-a-payment-complete-its-change-back-on-the-card.html",
-  "markup": "c711981e0a6490f1e515d440b048f74de91174a6f2eba92d5e27c95ab8f6bb7f",
-  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
- },
  "card: a payment cut short, not paid": {
   "file": "300-card-a-payment-cut-short-not-paid.html",
   "markup": "044d95a52ddd6b86404b88eb572dde9446f3065f6876b244c671d4d7451e53be",

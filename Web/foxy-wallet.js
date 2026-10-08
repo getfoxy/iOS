@@ -10751,7 +10751,11 @@
           if (!letGoAfter) return null;
           // made into pieces for the card and owed to it, so the same second tap that takes the change puts it back
           return cardHeldRelease(letGoAfter, w).then(function (back) { result.letGo = back; });
-        }).then(function () { on('done'); return result; });
+        }).then(function () {
+          // a sheet kept for the change says nothing of being done: what comes next (the change, or the end) says it
+          if (!o.keepSheet) on('done');
+          return result;
+        });
     });
   }
 
@@ -10763,7 +10767,15 @@
    * (a test's bare model: it is simply not spoken to again). Resolves
    * when the sheet has been told. */
   function cardLetGo(link, o) {
-    if (o.hold || !link || typeof link.release !== 'function') return Promise.resolve();
+    if (o.hold || !link) return Promise.resolve();
+    /* `o.keepSheet`: the card may go, and the sheet stays up and says so, for
+     * the tap that takes its change back in the same sheet once the mint has
+     * answered (26f-flashcard.js, fcChangeInSheet). A second sheet opened for
+     * that tap was refused by iOS as often as not. */
+    if (o.keepSheet && typeof link.say === 'function') {
+      return Promise.resolve().then(function () { return link.say('Remove the card. Verifying the payment.'); }).then(function () {}, function () {});
+    }
+    if (typeof link.release !== 'function') return Promise.resolve();
     return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
   }
 
@@ -20895,6 +20907,10 @@
        * for a new one (`warmMint`). */
       if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
       var ended = function (e) {
+        /* `e.sheetText`: the flow put things right in the sheet before it
+         * failed (a refused payment's pieces put back on the card), and the
+         * sheet ends saying so, not in red. */
+        if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
         var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
       };
@@ -20907,7 +20923,8 @@
       var run = function () {
         return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
           if (link.released) return r;
-          return bridgeAsk('cardEnd', { text: 'Done. Remove the card.' }, 5000).then(function () { return r; }, function () { return r; });
+          // `link.doneText`: what the sheet ends with, where `fn` has more to say than "done" (the change back on the card)
+          return bridgeAsk('cardEnd', { text: String(link.doneText || 'Done. Remove the card.') }, 5000).then(function () { return r; }, function () { return r; });
         }, function (e) {
           // the sheet was ended when the card was let go, and has nothing to say about what came after
           if (link.released) throw e;

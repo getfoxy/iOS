@@ -63,14 +63,32 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     /// Open the sheet with `text` on it. `found(nil)` when a card is there to
     /// talk to; `found(why)` when the session ended first.
     func begin(text: String, found: @escaping (CardLinkError?) -> Void) {
+        self.found = found
+        opening = text
+        refusals = 0
+        open()
+    }
+
+    /* A sheet iOS refuses as it opens is opened again, a moment later, up to
+     * three times. iOS ends a new session at once ("Session invalidated
+     * unexpectedly", "System resource unavailable") while the last one is
+     * still going down, and that refusal was shown to the person as a card to
+     * press. Only before the sheet has become active: a sheet that was up and
+     * then ended is the person's doing, or iOS's minute. */
+    private var opening = ""
+    private var refusals = 0
+    private var active = false
+    private func open() {
         guard NFCTagReaderSession.readingAvailable,
               let session = NFCTagReaderSession(pollingOption: [.iso14443], delegate: self, queue: .main) else {
-            found(.unavailable)
+            let tell = found
+            found = nil
+            tell?(.unavailable)
             return
         }
-        self.found = found
         self.session = session
-        session.alertMessage = text
+        active = false
+        session.alertMessage = opening
         Self.sessionOpen = true
         // said, so a sheet that sees no card leaves a trace: one did, for twenty seconds, with nothing in the diary
         print("[card] sheet: open")
@@ -127,7 +145,11 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
 
     /// Close the sheet: with a tick and `text`, or with `error` said in red.
     func end(error: String?, text: String?) {
-        guard let session else { return }
+        guard let session else {
+            // closed between a refusal and the sheet opened again: it is not opened again, and the wait ends
+            if let tell = found { found = nil; tell(.cancelled) }
+            return
+        }
         self.session = nil
         card = nil
         if let error, !error.isEmpty {
@@ -140,7 +162,10 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         }
     }
 
-    func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) { print("[card] sheet: scanning") }
+    func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {
+        active = true
+        print("[card] sheet: scanning")
+    }
 
     /// While the system's card sheet is up: the app resigns active for it, and
     /// the app-switcher cover must not go up behind it (FoxyWebView).
@@ -149,6 +174,19 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
         print("[card] sheet: ended — \(error.localizedDescription)")
         Self.sessionOpen = false
+        // refused as it opened, with a card still being waited for: opened again shortly (`open`)
+        let code = (error as? NFCReaderError)?.code
+        if !active, found != nil, self.session === session, refusals < 3,
+           code == .readerSessionInvalidationErrorSessionTerminatedUnexpectedly || code == .readerSessionInvalidationErrorSystemIsBusy {
+            refusals += 1
+            self.session = nil
+            print("[card] sheet: iOS refused it as it opened; asking again (\(refusals) of 3)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self, self.found != nil, self.session == nil else { return }
+                self.open()
+            }
+            return
+        }
         let ended = self.session == nil        // the page closed it: it knows
         self.session = nil
         card = nil

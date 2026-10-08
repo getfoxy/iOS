@@ -18359,7 +18359,10 @@ class Component extends DCLogic {
        * when it signed, so it has to be tapped again to have them put back (the
        * next tap clears the places and loads the same pieces). Its day stays
        * charged: only the owner's phone can give a day back. */
-      'putback': () => ({ tone: 'warn', title: opt.paying ? 'PAYMENT FAILED' : 'NOT TAKEN OFF',
+      // put back in the same sheet already: said, with nothing more to do
+      'putback': () => (e.putBackDone > 0) ? ({ tone: 'warn', title: opt.paying ? 'PAYMENT FAILED' : 'NOT TAKEN OFF',
+        reason: 'The mint refused it. ' + this.fcSats(e.putBackDone) + ' is back on the card.',
+        chip: e.limited ? 'The card\u2019s daily limit stays used for it.' : '' }) : ({ tone: 'warn', title: opt.paying ? 'PAYMENT FAILED' : 'NOT TAKEN OFF',
         reason: 'The mint refused it, and the card had already signed for it. Tap the card again to put ' + this.fcSats(e.owed) + ' back on it.',
         chip: e.limited ? 'The card’s daily limit stays used for it.' : '',
         retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
@@ -18513,7 +18516,8 @@ class Component extends DCLogic {
                  /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                  again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold the card here again to finish paying'
                    : (e && e.card === 'gone') ? 'Hold the card here again' : '' },
-               (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
+               (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted, keepSheet: !trusted })
+                 .then((r) => this.fcChangeInSheet(link, on, progress, r), (e) => this.fcPutBackInSheet(link, on, progress, e)))
       .then((r) => {
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
@@ -18521,8 +18525,10 @@ class Component extends DCLogic {
         if (r && r.trusted) { this.fcTrusted(r); return; }
         const ch = r && r.change;
         const receiving = !!(ch && !ch.written && !ch.unmade && ch.sats > 0);
-        // no change to take after all (made and written, too small, or not made): the confirmation is not held for it
-        if (!receiving) this.fcReleaseConfirm('no change to take');
+        // the change went back in the same sheet: the payment is whole, and its PAYMENT RECEIVED goes up now
+        if (ch && ch.written && ch.sats > 0) this.fcReleaseConfirm('the change is back on the card');
+        // no change to take after all (too small, or not made): the confirmation is not held for it
+        else if (!receiving) this.fcReleaseConfirm('no change to take');
         this.fcMoved(opt);
         // made, and the card left before it was written back: the second tap is asked for at once
         if (receiving) this.fcReceiveNow(ch.sats, sats);
@@ -18659,7 +18665,7 @@ class Component extends DCLogic {
       if (!W || !this.fcOwedAfterPaying()) return;
       this.fcWriteRun('', { change: true, receive: !putBack, paid: p, sats: Math.round(Number(sats) || 0),
                             sheet: putBack ? 'Hold the card here to put back what it signed' : '' });
-    }, 700);
+    }, 2500);
   }
 
   /* The second tap of a payment: RECEIVE. `paid` is what was paid, where
@@ -18761,6 +18767,65 @@ class Component extends DCLogic {
                   : (this.fcReleaseConfirm('the change tap failed'), this.fcFailed(e, { again: () => this.fcWriteAsk(opt) })));
   }
 
+  /* RECEIVE in the same sheet as SEND.
+   *
+   * The card has signed and may be taken away; the sheet stayed up saying so
+   * (`keepSheet`, 08a-flashcard.js) while the mint answered and the change was
+   * made. Now the same sheet asks for the card again and puts the change on,
+   * with no PIN, and ends saying the change is back. A second sheet opened for
+   * this was refused by iOS as often as not, and the person was left a card to
+   * press. Never throws: whatever is not done here (the sheet dismissed, or
+   * timed out at iOS's minute, or a card that wants its PIN) is left on the
+   * result unwritten, and the screen takes it from there. */
+  fcChangeInSheet(link, on, progress, r) {
+    const W = this.fcW();
+    const ch = r && r.change;
+    if (!W || !link || link.released || typeof link.again !== 'function' || !(ch && !ch.written && !ch.unmade && ch.sats > 0)) return Promise.resolve(r);
+    let tries = 0;
+    const once = (line) => link.again(line).then(() => {
+      on('writing');
+      return W.cardWrite(link, { change: true, progress }).then((w) => {
+        if (w && w.left > 0 && w.sats > 0 && tries < 3) { tries += 1; return once('Hold the card here again for the rest of its change'); }
+        // written when nothing made for this payment is still owed to a card
+        const still = ((W.cardOwed && W.cardOwed()) || []).some((x) => x && r && x.forHash === r.hash);
+        ch.written = !!(w && !(w.left > 0) && !still);
+        if (ch.written) link.doneText = 'Done. ' + this.fcSats(ch.sats) + ' of change is back on the card.';
+        return r;
+      }, (e) => {
+        // taken away while it was written: what went on stays on, and the same sheet asks again
+        if (e && e.card === 'gone' && tries < 3) { tries += 1; return once('Hold the card here again for its change'); }
+        return r;
+      });
+    }, () => r);
+    return once('Tap the card again for its change');
+  }
+
+  /* The mint refused a payment after the card had signed, with the sheet still
+   * up (`keepSheet`): what is still good goes back on the card in the same
+   * sheet, and the payment's failure is said once it is back. Always rejects
+   * with the payment's own error; `putBackDone` says it went back, and
+   * `sheetText` ends the sheet calmly. */
+  fcPutBackInSheet(link, on, progress, e) {
+    const W = this.fcW();
+    if (!W || !e || e.card !== 'putback' || !(e.owed > 0) || !link || link.released || typeof link.again !== 'function') return Promise.reject(e);
+    let tries = 0;
+    const once = (line) => link.again(line).then(() => {
+      on('writing');
+      return W.cardWrite(link, { change: true, progress }).then((w) => {
+        if (w && w.left > 0 && w.sats > 0 && tries < 3) { tries += 1; return once('Hold the card here again for the rest'); }
+        if (w && w.back > 0 && !(w.left > 0)) {
+          e.putBackDone = w.back;
+          e.sheetText = 'The payment did not go through. ' + this.fcSats(w.back) + ' is back on the card.';
+        }
+        throw e;
+      }, (x) => {
+        if (x && x.card === 'gone' && tries < 3) { tries += 1; return once('Hold the card here again'); }
+        throw e;
+      });
+    }, () => { throw e; });
+    return once('The payment did not go through. Tap the card to put it back');
+  }
+
   /* A card payment's PAYMENT RECEIVED (announcePayment, 12-receive.js) waits
    * while its change is made and taken: it came up the moment the payment
    * landed, with the payer still to tap for their change, and read as if it
@@ -18768,9 +18833,9 @@ class Component extends DCLogic {
    * COMPLETE), when the change is left for later, or after two and a half
    * minutes whatever happens, so it is never lost. */
   fcHoldConfirm() {
-    this._holdConfirmUntil = Date.now() + 150000;
+    this._holdConfirmUntil = Date.now() + 75000;
     clearTimeout(this._holdConfirmT);
-    this._holdConfirmT = setTimeout(() => this.fcReleaseConfirm('the change tap took too long'), 150000);
+    this._holdConfirmT = setTimeout(() => this.fcReleaseConfirm('the change tap took too long'), 75000);
   }
 
   fcReleaseConfirm(why) {
@@ -18849,17 +18914,14 @@ class Component extends DCLogic {
     }
     /* The second tap of a payment: its change is back on the card, and the
      * payment is COMPLETE. */
+    /* The change of a payment, back on the card: said in passing, and the
+     * payment's own PAYMENT RECEIVED, held until now, goes up at once. It was
+     * a COMPLETE card with DONE, and the confirmation waited on the press,
+     * which did not always come. */
     if (r.change > 0 && r.change + (r.refund || 0) === r.sats) {
-      const paid = Math.round(Number(o && o.paid) || 0);
-      this.blockedCard('fc-complete', {
-        tone: 'ask', title: 'COMPLETE',
-        reason: (paid > 0 ? 'Paid ' + this.fcSats(paid) + '. ' : '') + this.fcSats(r.change) + ' of change is back on the card.'
-          // and a payment of the card's given up here, which went back in the same tap
-          + (r.refund > 0 ? ' So is ' + this.fcSats(r.refund) + ' from a payment that was not finished.' : '')
-          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
-        // and then the payment's own PAYMENT RECEIVED, held until now
-        shut: { label: 'DONE', tap: () => this.fcReleaseConfirm('the change is back on the card') },
-      });
+      this.toast(this.fcSats(r.change) + ' of change is back on the card'
+        + (r.refund > 0 ? ', and ' + this.fcSats(r.refund) + ' from a payment that was not finished' : '') + '.');
+      this.fcReleaseConfirm('the change is back on the card');
       return;
     }
     /* What a card signed for a payment that was not made, back on it: said
@@ -19202,7 +19264,8 @@ class Component extends DCLogic {
                    if (e && e.card === 'partial' && Number(e.left) > 0) { absorb(e); return 'Hold the card here again for the rest'; }
                    return (e && e.card === 'gone') ? 'Hold the card here again' : '';
                  } },
-               (link, on, progress) => W.cardWithdraw(link, ask ? { pin, sats: ask, on, progress } : { pin, on, progress }))
+               (link, on, progress) => W.cardWithdraw(link, ask ? { pin, sats: ask, on, progress, keepSheet: true } : { pin, on, progress, keepSheet: true })
+                 .then((r) => this.fcChangeInSheet(link, on, progress, r)))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});

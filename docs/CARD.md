@@ -299,7 +299,9 @@ A card held to a phone for a second or two is sometimes taken away too soon.
 Wherever some of the work was done, the next tap does the rest, and the phone's
 sheet comes up again by itself for it, with the PIN already given:
 
-- **A payment.** What the card signed before it left is held by the till for
+- **A payment.** The card signs a piece before it marks it spent, and marks it
+  spent before the signature leaves the card, so a card pulled away while it
+  signs has lost nothing. What the card signed before it left is held by the till for
   that payment, and the next tap of the same card for the same amount signs only
   the rest. The two are swapped at the mint as one payment. Nothing has to be
   written back to the card, so the card is never short for a payment that was
@@ -330,14 +332,23 @@ A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
 
 1. **SEND.** The PIN, and the first tap (`Tap 1 of 2: SEND.` under the amount).
-   The card signs its one or two pieces and is let go.
-2. **VERIFY.** Foxy's screen says VERIFYING WITH THE MINT while the swap runs,
-   then MAKING THE CHANGE.
-3. **RECEIVE.** **TAP TO RECEIVE**: `Paid ₿1,180. Tap the card again to receive
-   its ₿212 of change. No PIN is needed.` with **TAP CARD** and LATER. The tap
-   (`Tap 2 of 2: RECEIVE.`) writes the change. The card allows the tap after a
-   payment to load with no PIN; a card that has not just paid asks for it.
-4. **COMPLETE.** `Paid ₿1,180. ₿212 of change is back on the card.`
+   The card signs its one or two pieces and may be taken away.
+2. **VERIFY.** The phone's sheet stays up and says `Remove the card. Verifying
+   the payment.` while the swap runs and the change is made; Foxy's screen
+   behind it says VERIFYING WITH THE MINT, then MAKING THE CHANGE.
+3. **RECEIVE.** The same sheet says `Tap the card again for its change`, and
+   the tap writes it, with no PIN: the card allows the tap after a payment to
+   load. The sheet ends `Done. ₿212 of change is back on the card.`
+4. **PAYMENT RECEIVED**, the receiver's own confirmation, is held until then and
+   goes up as the sheet ends.
+
+There is one sheet for all of it: a second sheet opened for the change was
+refused by iOS as often as not. iOS ends a sheet after a minute; where the mint
+is slower than that, a new sheet comes up for the change, and where that reads
+no card, **TAP TO RECEIVE** stays up with TAP CARD. A payment the mint refuses
+after the card signed is put back in the same sheet too (`The payment did not
+go through. Tap the card to put it back`), and the screen says PAYMENT FAILED
+with the money back on the card.
 
 Where the pieces came to the price exactly there is nothing to receive, and the
 payment is complete at the first tap. Until the second tap the change stays on

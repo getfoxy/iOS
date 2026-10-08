@@ -1967,7 +1967,11 @@
           if (!letGoAfter) return null;
           // made into pieces for the card and owed to it, so the same second tap that takes the change puts it back
           return cardHeldRelease(letGoAfter, w).then(function (back) { result.letGo = back; });
-        }).then(function () { on('done'); return result; });
+        }).then(function () {
+          // a sheet kept for the change says nothing of being done: what comes next (the change, or the end) says it
+          if (!o.keepSheet) on('done');
+          return result;
+        });
     });
   }
 
@@ -1979,7 +1983,15 @@
    * (a test's bare model: it is simply not spoken to again). Resolves
    * when the sheet has been told. */
   function cardLetGo(link, o) {
-    if (o.hold || !link || typeof link.release !== 'function') return Promise.resolve();
+    if (o.hold || !link) return Promise.resolve();
+    /* `o.keepSheet`: the card may go, and the sheet stays up and says so, for
+     * the tap that takes its change back in the same sheet once the mint has
+     * answered (26f-flashcard.js, fcChangeInSheet). A second sheet opened for
+     * that tap was refused by iOS as often as not. */
+    if (o.keepSheet && typeof link.say === 'function') {
+      return Promise.resolve().then(function () { return link.say('Remove the card. Verifying the payment.'); }).then(function () {}, function () {});
+    }
+    if (typeof link.release !== 'function') return Promise.resolve();
     return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
   }
 

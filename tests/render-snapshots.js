@@ -591,7 +591,6 @@ function cards() {
   add('stage: tap 1 of 2, send', (a) => { a._fcTapO = { amount: '\u20bf 1,180', body: 'Tap 1 of 2: SEND.' }; a.fcStage('hold'); });
   add('card: tap to receive the change of a payment', (a) => a.fcChangeWaiting(212, 1180));
   add('stage: tap 2 of 2, receive', (a) => { a._fcTapO = { body: 'Tap 2 of 2: RECEIVE.' }; a.fcStage('writing'); });
-  add('card: a payment complete, its change back on the card', (a) => { a.refreshBalance = () => {}; a.loadHistory = () => {}; a.fcWrote({ card: { balance: 0, info: {}, record: {} }, sats: 212, change: 212, refund: 0, back: 0, left: 0 }, { paid: 1180 }); });
   add('card: a payment cut short, not paid', (a) => a.fcFailed({ card: 'interrupted', owed: 512, made: true, message: 'x' }, { paying: true, taken: true }));
   add('card: change the mint did not make yet', (a) => a.fcChangeLater(824, 200));
   add('card: a payment the card left part way through, not paid yet', (a) => { a.fcHeldClock = () => {}; a.fcHeldCard(1536, '1234', false); });
