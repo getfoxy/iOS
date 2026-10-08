@@ -100,10 +100,11 @@ function makeCard(opts) {
 
     if (cla === 0x00 && ins === 0xa4) {
       if (!data.length || AID.indexOf(hex(data)) !== 0) return '6a82';
-      // a SELECT is a new session: what the tap had verified, the nonce and the owner's grant are gone; the note that the
-      // card has paid is taken into this session, and is then gone too
+      // a SELECT is a new session: what the tap had verified, the nonce and the owner's grant are gone. The note that the
+      // card has paid grants this tap a load with no PIN (changeGrant), but is NOT cleared here: only a load that uses it
+      // clears it (0x30), so a glance or a cut-short tap leaves it standing for the tap that writes the change
       s.verified = false; s.nonce = null; s.grant = false; s.selected = true;
-      s.changeGrant = s.changeDue; s.changeDue = false;
+      s.changeGrant = s.changeDue;
       return '0102' + '9000';
     }
     if (!s.selected) return '6999';
@@ -194,6 +195,8 @@ function makeCard(opts) {
         const nonce = hex(data.subarray(12, 44));
         if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
         s.slots[at] = { status: 1, data: hex(data) };
+        // a load the change grant alone allowed spends the note now, not at SELECT: the change is going on
+        if (!s.verified && !s.grant) s.changeDue = false;
         return ('0' + at.toString(16)).slice(-2) + '9000';
       }
       case 0x31: {

@@ -250,13 +250,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP THE CARD AGAIN' && /not read/.test(card(till).reason));
   ok(/The card was not read\. \u20bf824 is still waiting to go back on it\. No PIN is needed\./.test(card(till).reason) && card(till).has('TAP CARD') && R.W.cardOwed().length === 1,
      'a tap that read no card says the change is still waiting, and offers the tap again', card(till).reason);
-  R.nfc = c;
-  c.tap();
+  // a fresh card that has never paid: it has no change note, so it asks for the PIN after all
+  const cElse = newCard(H);
+  await H.W.cardSetUp(cElse, { pin: '1234' });
+  R.nfc = cElse;
+  cElse.tap();
   card(till).press('TAP CARD');
-  // the wrong card, which has not just paid: it asks for the PIN after all
   await until('the PIN to be asked after all', () => pad(till));
   ok(/put \u20bf824 on the card/.test(pad(till).sub), 'TAP CARD taps first with no PIN; a card that has not just paid asks for it, and the pad comes up', pad(till).sub);
-  c.tap();   // tapped again, with the PIN this time
+  cElse.tap();   // tapped again, with the PIN this time
   pad(till).type('1234');
   await until('the wrong card to be noticed', () => card(till) && card(till).title === 'A DIFFERENT CARD');
   ok(R.W.cardOwed().length === 1 && /\u20bf824 is waiting for CARD/.test(card(till).reason), 'another card tapped instead gets none of it, and the till says which card it is for', card(till).reason);

@@ -59,7 +59,7 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
   ok(!card.sent.some((a) => /^b030|^b031/.test(a)), 'and nothing was sent to the card but a read', card.sent.map((a) => a.slice(0, 6)).join(' '));
   ok(card.balance() === 824, 'the card is as it was');
 
-  /* ---- 3: a read between the payment and the change tap uses the note up ------------- */
+  /* ---- 3: a read between the payment and the change tap does NOT use the note up ------ */
   const c2 = newCard(H);
   await H.W.cardSetUp(c2, { pin: '1234' });
   await binaryLoad(H, c2, 1024);
@@ -67,15 +67,16 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
   const paid2 = await R.W.cardPay(c2, { sats: 300, pin: '1234' });
   ok(paid2.sats === 300 && paid2.change && paid2.change.sats === 724 && !paid2.change.written, 'another card pays 300 from one piece, 724 of change owed');
   c2.tap();
-  await H.W.cardLook(c2);   // the holder looks at it on their own phone
-  ok(c2.state.changeDue === false, 'a tap that only reads the card uses the note up');
+  await H.W.cardLook(c2);   // the holder looks at it on their own phone, between the payment and the change tap
+  ok(c2.state.changeDue === true, 'a tap that only reads the card leaves the note standing (the fix: it is not burned at SELECT)');
   c2.tap();
-  const refused = await why(R.W.cardWrite(c2, { change: true }));
-  const owed = R.W.cardOwed().filter((r) => r.card === c2.key);
-  ok(refused === 'pin-needed' && owed.length === 1 && owed[0].sats === 724, 'so the till is asked for the PIN after all, and the change is still owed', refused + ', owed ' + JSON.stringify(owed.map((r) => r.sats)));
+  const wrote2 = await R.W.cardWrite(c2, { change: true });
+  ok(wrote2.sats === 724 && wrote2.left === 0 && c2.balance() === 724 && R.W.cardOwed().filter((r) => r.card === c2.key).length === 0,
+     'so the change still goes on with no PIN, after the glance', String(c2.balance()));
+  ok(c2.state.changeDue === false, 'and the load closed the window');
   c2.tap();
-  const withPin = await R.W.cardWrite(c2, { pin: '1234' });
-  ok(withPin.sats === 724 && withPin.left === 0 && c2.balance() === 724 && R.W.cardOwed().filter((r) => r.card === c2.key).length === 0, 'and the PIN writes it', String(c2.balance()));
+  const noMore = await why(R.W.cardWrite(c2, { change: true }));
+  ok(noMore === 'pin-needed', 'a tap after the change is on gets no grant', noMore);
 
   /* ---- 4: the note opens nothing but loading ------------------------------------------ */
   {
