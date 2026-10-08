@@ -77,13 +77,22 @@
    * what it has signed for since. */
   function cardInfoOf(hex) {
     var h = String(hex || '').toLowerCase();
-    // 30 bytes; a card of version 1.1 gives 29, without the last, and may still be read
-    if (!cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
+    /* 42 bytes from a card that has the limit on one tap (1.3, asked with P1 = 1);
+     * 30 from one that has not, which answers the same question with the thirty
+     * it knows; a card of version 1.1 gives 29, without the last, and may still be read. */
+    if (!cardHexOk(h, 42) && !cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
+    var tapKnown = h.length === 84;
     var b = function (i) { return parseInt(h.substr(i * 2, 2), 16); };
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
              now: cardU32(h, 17), windowStart: cardU32(h, 21), spentToday: cardU32(h, 25),
+             /* The limit on one tap: the most the card signs for in CARD_TAP
+              * seconds of its own clock, when the current tap began, and what
+              * it has signed for in it. `tapKnown`: this card has such a limit
+              * to set (an older card's software has none). */
+             tapKnown: tapKnown, tapLimit: tapKnown ? cardU32(h, 30) : 0,
+             tapStart: tapKnown ? cardU32(h, 34) : 0, tapSpent: tapKnown ? cardU32(h, 38) : 0,
              /* This tap is the one after a payment: the card lets pieces be put
               * on with no PIN (the change). Said by the card for this tap only. */
              changeDue: h.length >= 60 && b(29) === 1 };
@@ -120,6 +129,24 @@
     var spent = over ? 0 : (Number(info.spentToday) || 0);
     return { limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY,
              now: now, noTime: now === 0 };
+  }
+
+  /* The same for the limit on one tap: what the card has left of the tap it is
+   * in. A tap, to the card, is CARD_TAP seconds of its own clock from the first
+   * piece it signs: nothing a terminal sends begins a new one (the PIN again, a
+   * new SELECT, a reset), only time. `left` is null where there is no such
+   * limit; `turns` is when this tap ends, 0 where none is in hand. */
+  var CARD_TAP = 10;
+  function cardTapOf(info) {
+    var limit = Number(info && info.tapLimit) || 0;
+    var known = !!(info && info.tapKnown);
+    if (!limit) return { known: known, limited: false, limit: 0, spent: 0, left: null, turns: 0, noTime: false };
+    var now = Number(info.now) || 0;
+    var begun = Number(info.tapStart) || 0;
+    var over = now >= begun + CARD_TAP;
+    var spent = over ? 0 : (Number(info.tapSpent) || 0);
+    return { known: known, limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent),
+             turns: over ? 0 : begun + CARD_TAP, noTime: now === 0 };
   }
 
   /* One slot, as GET_PROOF gives it: status, keyset, amount, nonce, C, date. */
@@ -254,6 +281,7 @@
     if (w === '6984') return cardError('no-pin', 'This card has no PIN yet.');
     if (w === '6982') return cardError('pin-needed', 'The card wants its PIN first.');
     if (w === '6a8f') return cardError('limit', 'This payment is over what the card can spend in a day.');
+    if (w === '6a95') return cardError('tap-limit', 'This payment is over what the card can spend in one tap.');
     if (w === '6a90') return cardError('no-owner', 'This card has no owner, so it cannot be loaded, and its PIN and its limit cannot be changed.');
     if (w === '6a91') return cardError('not-owner', 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.');
     if (w === '6a92') return cardError('no-time', 'The card has not been told the time.');
@@ -376,10 +404,21 @@
    * never been told the time takes none but zero (`cardTold` first). Rejects
    * `not-owner` where this phone's words are not the ones the card was set up
    * with, and `no-owner` where it has none. */
-  function cardLimitTo(t, cardKey, sats) {
+  /* `tapSats`, where given, sets the limit on one tap in the same command (the
+   * day's, then the tap's: eight bytes). There a limit whose number does not
+   * change keeps its window and its count, so setting one of the two does not
+   * begin the other again. Without it the command is the four bytes it always
+   * was, and the tap's limit is left as it is. */
+  function cardLimitTo(t, cardKey, sats, tapSats) {
     var n = Math.round(Number(sats));
     if (!(n >= 0 && n <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
-    return cardOwned(t, cardKey, 'set-limit', cardU32Hex(n)).then(function (data) {
+    var value = cardU32Hex(n);
+    if (tapSats !== undefined && tapSats !== null) {
+      var m = Math.round(Number(tapSats));
+      if (!(m >= 0 && m <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
+      value += cardU32Hex(m);
+    }
+    return cardOwned(t, cardKey, 'set-limit', value).then(function (data) {
       return t.want(cardCommand(CARD_INS.setLimit, 0, data), 'its limit');
     });
   }
@@ -414,9 +453,10 @@
     var o = load(CARD_LIFTED, {});
     return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
   }
-  function cardLiftNote(cardKey, limit) {
+  function cardLiftNote(cardKey, limit, tap) {
     var all = cardLiftedAll();
-    if (limit > 0) all[cardKey] = { limit: limit, at: Date.now() }; else delete all[cardKey];
+    var day = Number(limit) || 0, one = Number(tap) || 0;
+    if (day > 0 || one > 0) all[cardKey] = { limit: day, tap: one, at: Date.now() }; else delete all[cardKey];
     mustSave(CARD_LIFTED, all);
   }
 
@@ -493,7 +533,8 @@
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
       return o.noTime ? 0 : cardTold(t);
     }).then(function () {
-      return t.want(cardCommand(CARD_INS.info, 0, '', 0), 'to say what it is');
+      // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
+      return t.want(cardCommand(CARD_INS.info, 1, '', 0), 'to say what it is');
     }).then(function (d) {
       card.info = cardInfoOf(d);
       if (card.info.format !== CARD_FORMAT) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
@@ -526,19 +567,23 @@
       card.pieces = card.slots.filter(function (x) { return x.state === 'unspent'; });
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
       card.day = cardDayOf(card.info);
+      card.tap = cardTapOf(card.info);
       if (!o.mine || !card.info.owner || card.info.locked) return card;
       /* Whether this phone is the owner, and a limit it lifted and did not put back */
       return cardGrant(t, card.key).then(function (yes) {
         card.mine = yes;
         var note = cardLiftedAll()[card.key];
-        if (!yes || !note || card.info.limit !== 0) return card;
-        return cardLimitTo(t, card.key, note.limit).then(function () {
+        if (!yes || !note || card.info.limit !== 0 || card.info.tapLimit !== 0) return card;
+        var tapBack = card.info.tapKnown ? (Number(note.tap) || 0) : undefined;
+        return cardLimitTo(t, card.key, note.limit, tapBack).then(function () {
           cardLiftNote(card.key, 0);
-          // as the card has it now: the limit back, and a day begun at its clock with nothing spent
+          // as the card has it now: the limits back, and a day and a tap begun at its clock with nothing spent
           card.info.limit = note.limit; card.record.limit = note.limit;
           card.info.windowStart = card.info.now; card.info.spentToday = 0;
+          if (tapBack) { card.info.tapLimit = tapBack; card.info.tapStart = card.info.now; card.info.tapSpent = 0; }
           card.day = cardDayOf(card.info);
-          card.restored = note.limit;
+          card.tap = cardTapOf(card.info);
+          card.restored = note.limit || tapBack || 0;
           console.log('[foxy] card: a limit lifted for a withdrawal and not put back is put back now');
           return card;
         }, function () { return card; });
@@ -1233,7 +1278,7 @@
    * a till with no route can take; paid with a 4096, the change is cut to fill
    * the drawer and it can still pay anything. Where no set leaves it whole,
    * the least-overpaying set stands. */
-  function cardFewPick(w, pool, want, most, whole) {
+  function cardFewPick(w, pool, want, most, whole, upper) {
     var list = (pool || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; });
     if (!list.length || !(want > 0)) return null;
     var up = list.slice().sort(function (a, b) { return satsOf(a.amount) - satsOf(b.amount); });
@@ -1244,6 +1289,8 @@
       picked.forEach(function (p) { total += satsOf(p.amount); });
       var fee = swapFeeFor(w, picked);
       if (!isFinite(fee) || total < want + fee) return;
+      // `upper`: the most a set may come to (what the day and the tap leave), where there is one
+      if (upper !== null && upper !== undefined && total > upper) return;
       covering.push({ picked: picked, total: total, fee: fee });
     };
     for (var i = 0; i < up.length; i++) consider([up[i]]);
@@ -1388,24 +1435,29 @@
    * it holding. Under a day's limit (`cap`) the least-overpaying set stands:
    * the day is charged the whole worth of what is signed, and a larger piece
    * taken to keep the drawer whole would use up the day. */
-  function cardPick(w, have, want, cap, card) {
+  /* `tapCap`: what is left of this tap, on a card with a limit on one. No set
+   * comes to more than it, or than `cap`; but unlike the day it is not used up
+   * for later by a larger piece, so the drawer is still kept whole under it. */
+  function cardPick(w, have, want, cap, card, tapCap) {
     var bound = (cap === null || cap === undefined) ? null : Math.max(0, Number(cap) || 0);
-    var within = bound === null ? have : (have || []).filter(function (p) { return satsOf(p.amount) <= /** @type {number} */ (bound); });
+    var one = (tapCap === null || tapCap === undefined) ? null : Math.max(0, Number(tapCap) || 0);
+    var upper = bound === null ? one : (one === null ? bound : Math.min(bound, one));
+    var within = upper === null ? have : (have || []).filter(function (p) { return satsOf(p.amount) <= /** @type {number} */ (upper); });
     // the fewest signatures that cover the price (one or two pieces), over-paying; change comes back
     var whole = bound === null ? cardWholeAfter(w, card || null, have, want) : null;
-    var few = cardFewPick(w, within, want, cardSignBudget(), whole);
-    if (few && (bound === null || sumProofs(few) <= bound)) return few;
+    var few = cardFewPick(w, within, want, cardSignBudget(), whole, upper);
+    if (few) return few;
     /* No two pieces cover it: still the fewest that do, since every piece is
      * most of a second of holding the card; then the least-overpay set of any
      * size, an exact set, and what fits under the cap. */
-    var fewest = cardFewestCover(w, within, want, bound, whole);
+    var fewest = cardFewestCover(w, within, want, upper, whole);
     var cover = coverPieces(w, within, want);
-    var covered = (cover && (bound === null || cover.total <= bound)) ? cover.picked : null;
+    var covered = (cover && (upper === null || cover.total <= upper)) ? cover.picked : null;
     if (fewest && (!covered || fewest.length < covered.length)) return fewest;
     if (covered) return covered;
-    var exact = cardExactPick(w, within, want, bound);
+    var exact = cardExactPick(w, within, want, upper);
     if (exact) return exact;
-    return bound === null ? null : cardPickUnder(w, within, want, bound);
+    return upper === null ? null : cardPickUnder(w, within, want, upper);
   }
 
   /* The fewest pieces that come to exactly `want` and the receiver's fee on
@@ -1504,17 +1556,19 @@
   function cardSign(t, card, picked, pinHex, lift, progress) {
     var signed = [];
     var lifted = false;
+    // a card that has the limit on one tap is given both numbers in the one command
+    var tapWas = card.info && card.info.tapKnown ? (Number(card.info.tapLimit) || 0) : undefined;
     var back = function () {
       if (!lifted) return Promise.resolve();
-      return cardLimitTo(t, card.key, card.record.limit).then(function () {
+      return cardLimitTo(t, card.key, card.record.limit, tapWas).then(function () {
         lifted = false;
         cardLiftNote(card.key, 0);
       }, function () { /* the note stays, and the next tap of this phone puts it back */ });
     };
     return t.want(cardCommand(CARD_INS.verify, 0, pinHex), 'its PIN').then(function () {
       if (!lift) return null;
-      cardLiftNote(card.key, card.record.limit);
-      return cardLimitTo(t, card.key, 0).then(function () { lifted = true; }, function (e) {
+      cardLiftNote(card.key, card.record.limit, tapWas);
+      return cardLimitTo(t, card.key, 0, tapWas === undefined ? undefined : 0).then(function () { lifted = true; }, function (e) {
         if (e && e.card === 'not-owner') cardLiftNote(card.key, 0);
         throw e;
       });
@@ -1849,7 +1903,7 @@
     }
     try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     var t = cardTalk(link);
-    var card, picked, worth, fee, row, result, own, cap, lift = false, released = false, signedNonces = [];
+    var card, picked, worth, fee, row, result, own, cap, tapCap = null, lift = false, released = false, signedNonces = [];
     // a payment of this card's held from a tap cut short (`cardHeld`), and one held for another amount, let go after this one
     var held = null, heldProofs = [], heldWorth = 0, letGoAfter = null, tornSats = 0;
     on('reading');
@@ -1874,10 +1928,16 @@
        * its proof, to take money off the card, and puts it back; a phone that is
        * not the card's owner is a till like any other. */
       var day = card.day;
+      var tap = card.tap || cardTapOf(card.info);
       var turns = day.turns;
-      lift = !!(o.lift && day.limited && card.mine);
+      lift = !!(o.lift && (day.limited || tap.limited) && card.mine);
       cap = (day.limited && !lift) ? day.left : null;
-      if (day.limited && day.noTime && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
+      /* And what is left of this tap, where the card has a limit on one: no
+       * set of pieces may come to more, and one that would is not asked for.
+       * It is not something a larger piece uses up for later, as the day is,
+       * so a set chosen to keep the drawer whole is still chosen under it. */
+      tapCap = (tap.limited && !lift) ? tap.left : null;
+      if (((day.limited && day.noTime) || (tap.limited && tap.noTime)) && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
       /* The same payment, taken up again: what the card signed for it before
        * it left counts, and only the rest is signed now. Held for another
        * amount, or too long ago, it is let go once this payment is done. */
@@ -1907,14 +1967,17 @@
       /* Offline, only an exact set: change cannot be made without a route, and
        * a till that paid it out of its own pile would lose the payment and the
        * change both to a payer who spent their copy. */
-      var choose = function (limit) { return offline ? cardExactPick(w, have, rest, limit) : cardPick(w, have, rest, limit, card); };
+      var least = function (a, b) { return a === null ? b : b === null ? a : Math.min(a, b); };
+      var choose = function (limit, one) {
+        return offline ? cardExactPick(w, have, rest, least(limit, one)) : cardPick(w, have, rest, limit, card, one);
+      };
       if (o.all) {
         picked = have;
       } else if (held && rest <= 0) {
         // signed in full before it left after all: nothing more to sign, only the PIN to give again
         picked = [];
       } else {
-        picked = choose(cap);
+        picked = choose(cap, tapCap);
       }
       /* Taken up, and the card cannot make the rest (often because of a piece
        * lost as it left): the payment cannot be finished with this card, and
@@ -1928,11 +1991,21 @@
         });
       }
       if (!(held && rest <= 0)) {
-      if ((!picked || !picked.length) && cap !== null && !o.all) {
-        var free = choose(null);
-        if (free && free.length && sumProofs(free) > cap) {
+      if ((!picked || !picked.length) && (cap !== null || tapCap !== null) && !o.all) {
+        /* The least any set that pays this comes to, to say which limit it is
+         * over: asked with a bound no card reaches, since with no bound at all
+         * the set is the one that keeps the drawer whole, which may be larger
+         * than the payment needs (and was then said to be over the day when
+         * it was the tap it was over). */
+        var free = offline ? cardExactPick(w, have, rest, null) : cardPick(w, have, rest, 281474976710655, card, null);
+        var need = (free && free.length) ? sumProofs(free) : 0;
+        if (need > 0 && cap !== null && need > cap) {
           throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
-                          { left: cap, need: sumProofs(free), turns: turns, limit: day.limit });
+                          { left: cap, need: need, turns: turns, limit: day.limit });
+        }
+        if (need > 0 && tapCap !== null && need > tapCap) {
+          throw cardError('tap-limit', 'This card can spend ' + tapCap + ' sats in this tap, and this payment needs more than that.',
+                          { left: tapCap, need: need, turns: tap.turns, limit: tap.limit });
         }
       }
       if (offline && (!picked || !picked.length) && card.balance >= rest && !(usable.stale > 0 && usable.pieces.length === 0)) {
@@ -1960,6 +2033,10 @@
       if (cap !== null && sumProofs(picked) > cap) {
         throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
                         { left: cap, need: sumProofs(picked), turns: turns, limit: day.limit });
+      }
+      if (tapCap !== null && sumProofs(picked) > tapCap) {
+        throw cardError('tap-limit', 'This card can spend ' + tapCap + ' sats in this tap, and this payment needs more than that.',
+                        { left: tapCap, need: sumProofs(picked), turns: tap.turns, limit: tap.limit });
       }
       on('signing');
       return cardSign(t, card, picked, pin, lift, o.progress);

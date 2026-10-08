@@ -300,6 +300,7 @@ or two buttons. The ones a payment can end in:
 | CARD BLOCKED | too many wrong PINs; the card pays again when its owner sets a new PIN on it |
 | NOT ENOUGH ON THE CARD | what it holds |
 | OVER THE CARD'S DAILY LIMIT | what is left of today, and when the day turns; said before the PIN is sent |
+| OVER THE CARD'S PER TAP LIMIT | the most the card pays in one tap, and to charge it in parts; or what this tap has left, and to tap again in ten seconds; said before the PIN is sent |
 | A DIFFERENT MINT | the card's mint and this phone's. Adding funds to a card that holds money: "You need to withdraw all funds on the card before you can switch mints." and CLOSE. To an empty card, on its owner's phone: SWITCH TO <MINT>, which goes to the amount and moves the card in the tap that writes the funds; on any other phone, that only the phone that set the card up can switch it |
 | NO CHANGE WHILE OFFLINE | no connection, and the card has no pieces that make the price exactly; said before the PIN |
 | TAKEN ON TRUST | no connection: kept, not paid, swapped in when online |
@@ -414,7 +415,10 @@ The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
 
-**CHANGE LIMIT** on the card's screen has three steps and then a tap:
+**CHANGE LIMIT** on the card's screen first asks which of the card's two limits:
+**PER TAP LIMIT** or **DAILY LIMIT** (*The limit on one tap*, below; a card whose
+software has only the daily limit is not asked). Each has three steps and then a
+tap. The daily limit's:
 
 1. A full-screen warning, SET DAILY LIMIT: `A daily limit is the most this card
    will spend in one day. It starts again by itself each day.` and `Only this
@@ -455,6 +459,39 @@ How it behaves:
   `This phone does not hold the seed phrase this card was set up with, so it
   cannot change the card's PIN or limit.`
 
+### The limit on one tap
+
+A second limit: the most the card will sign for in **one tap**. It is set the
+same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
+LIMIT: a warning, SET PER TAP LIMIT (`A per tap limit is the most this card will
+pay in one tap. A larger amount has to be charged in parts, a tap for each, ten
+seconds apart.`), the amount (`What is the most this card should pay in one
+tap?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE APPLYING A PER TAP
+LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and the amount, or
+`PER TAP $2.00 · DAILY $5.00` where it has both.
+
+- **A tap, to the card, is ten seconds of its own clock**, from the first piece
+  it signs. Nothing a terminal sends begins a new one: not the PIN again, not
+  choosing the card again, not a reset. A limit that a new PIN entry began again
+  was tried on this card first, and a terminal that had the PIN sent it between
+  every two pieces. Only the clock ends a tap, and the clock moves only when the
+  card is told a later signed time (*The time*, and its weakness, which this
+  limit shares with the daily one).
+- **It counts the pieces signed, not the price**, as the day does, and change
+  written back gives it nothing back.
+- **A payment over it is refused before the PIN is sent**: OVER THE CARD'S PER
+  TAP LIMIT, with `Charge it in parts, a tap for each.` A payment larger than
+  the limit is made as more than one charge, ten seconds apart; one charge is
+  not split over several taps.
+- **Within it, the card still pays with pieces that keep its drawer whole**
+  (*Paying at a till*): the tap's limit is not used up for later by a larger
+  piece, as the day's is. No set of pieces comes to more than the tap has left.
+- **The owner takes money off at any limit**: both limits are lifted in one
+  command and put back in one, and written down first, as the daily limit is.
+- **Setting one limit does not begin the other's count again.** Both go to the
+  card in one command, and a limit whose number has not changed keeps its
+  window.
+
 ## Change PIN, withdraw, and a blocked card
 
 **CHANGE PIN** takes two pads, `NEW PIN` and `NEW PIN AGAIN`, and a tap. The old
@@ -492,7 +529,8 @@ the card the time once, before anything that depends on the day is read.
 inside the app.** Its private half is a constant named `InterimCardTime` in
 `Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy of
 the app, and in the tests. That is on purpose and is documented where it is
-used. It makes the daily limit **as weak as trusting the receiver's clock**:
+used. It makes the daily limit, and the limit on one tap with it, **as weak as
+trusting the receiver's clock**:
 
 - an honest receiver cannot be talked into taking more than a day's limit by
   accident, and the holder's own spending is held to the day;

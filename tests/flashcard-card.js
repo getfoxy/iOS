@@ -24,6 +24,8 @@ const AID = 'f0464f58594341524401';
 const SLOTS = 64;
 const PAGE_MAX = 255;
 const DAY = 86400;
+// how long a tap is, to the card, for the limit on one tap (the applet's TAP_SECONDS)
+const TAP = 10;
 const MINT_MAX = 80;
 const ascii = (t) => Buffer.from(t, 'ascii');
 const hex = (bytes) => Buffer.from(bytes).toString('hex');
@@ -43,6 +45,8 @@ function makeCard(opts) {
     record: { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '' },
     // the card's own clock and its day: the latest signed time it has taken, when this day began, what it has signed for since
     now: 0, windowStart: 0, spent: 0,
+    // the limit on one tap, which to the card is TAP seconds of that clock: the limit, when this tap began, what it has signed for in it
+    tapLimit: 0, tapStart: 0, tapSpent: 0,
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
     // the owner's public key (hex, 04 || X || Y), given to a card with none or by the owner's proof, and never read out
     owner: null,
@@ -83,6 +87,17 @@ function makeCard(opts) {
     return p256Verify(s.owner, message, hex(data.subarray(1, 1 + len))) ? { at: 1 + len, value } : { sw: '6a91' };
   };
   const unspent = () => s.slots.some((x) => x.status === 1);
+  /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
+   * the tap's, and there a limit whose number does not change keeps its window and its count. A limit needs a time. */
+  const writeLimit = (value) => {
+    const both = value.length === 8;
+    const day = value.readUInt32BE(0);
+    const tap = both ? value.readUInt32BE(4) : 0;
+    if ((day !== 0 || (both && tap !== 0)) && s.now === 0) return '6a92';
+    if (!both || day !== s.record.limit) { s.record.limit = day; s.windowStart = s.now; s.spent = 0; }
+    if (both && tap !== s.tapLimit) { s.tapLimit = tap; s.tapStart = s.now; s.tapSpent = 0; }
+    return '9000';
+  };
   const u32of = (n) => u32(Number(n));
   const failPin = () => {
     s.verified = false;
@@ -105,7 +120,7 @@ function makeCard(opts) {
       // clears it (0x30), so a glance or a cut-short tap leaves it standing for the tap that writes the change
       s.verified = false; s.nonce = null; s.grant = false; s.selected = true;
       s.changeGrant = s.changeDue;
-      return '0102' + '9000';
+      return '0103' + '9000';
     }
     if (!s.selected) return '6999';
     if (cla !== 0xb0) return '6e00';
@@ -116,9 +131,11 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, 2, SLOTS, n(1), n(2), n(0), 7, s.pinState, 3, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [1, 3, SLOTS, n(1), n(2), n(0), 7, s.pinState, 3, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
-          + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00') + '9000';
+          + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
+          // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
+          + (p1 === 1 ? u32(s.tapLimit) + u32(s.tapStart) + u32(s.tapSpent) : '') + '9000';
       }
       case 0x10: return pub + '9000';
       case 0x11: return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
@@ -172,9 +189,18 @@ function makeCard(opts) {
           total = (begins ? 0 : s.spent) + amountOf(slot);
           if (total > s.record.limit || total > 4294967295) return '6a8f';
         }
+        // and the limit on one tap, the same way, against a window of TAP seconds that only the clock ends
+        let tapBegins = false, tapTotal = 0;
+        if (s.tapLimit !== 0) {
+          if (s.now === 0) return '6a92';
+          tapBegins = s.now >= s.tapStart + TAP;
+          tapTotal = (tapBegins ? 0 : s.tapSpent) + amountOf(slot);
+          if (tapTotal > s.tapLimit || tapTotal > 4294967295) return '6a95';
+        }
         const digest = sha256(Buffer.from(secretOf(slot), 'utf8'));
         slot.status = 2;
         if (s.record.limit !== 0) { if (begins) s.windowStart = s.now; s.spent = total; }
+        if (s.tapLimit !== 0) { if (tapBegins) s.tapStart = s.now; s.tapSpent = tapTotal; }
         // and the next tap may put the change on with no PIN
         s.changeDue = true;
         return sign(digest) + '9000';
@@ -228,7 +254,7 @@ function makeCard(opts) {
         const newKey = hex(timeKey) !== s.record.timeKey;
         s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: hex(timeKey), mint: rec.subarray(100).toString('latin1') };
         // a different time key is the one thing that sends the card's clock, and the day it was counting, back to nothing
-        if (newKey) { s.now = 0; s.windowStart = 0; s.spent = 0; }
+        if (newKey) { s.now = 0; s.windowStart = 0; s.spent = 0; s.tapStart = 0; s.tapSpent = 0; }
         return '9000';
       }
       case 0x33: {
@@ -236,22 +262,16 @@ function makeCard(opts) {
         if (!mayWrite()) return '6982';
         if (s.owner) return '6a91';
         if (unspent()) return '6a8d';
-        if (data.length !== 4) return '6700';
-        const limit = data.readUInt32BE(0);
-        if (limit !== 0 && s.now === 0) return '6a92';
-        s.record.limit = limit; s.windowStart = s.now; s.spent = 0;
-        return '9000';
+        if (data.length !== 4 && data.length !== 8) return '6700';
+        return writeLimit(data);
       }
       case 0x34: {
         if (s.locked) return '6986';
         if (!s.owner) return '6a90';
         const got = ownerProof('FoxyCard/set-limit', data);
         if (got.sw) return got.sw;
-        if (got.value.length !== 4) return '6700';
-        const limit = got.value.readUInt32BE(0);
-        if (limit !== 0 && s.now === 0) return '6a92';
-        s.record.limit = limit; s.windowStart = s.now; s.spent = 0;
-        return '9000';
+        if (got.value.length !== 4 && got.value.length !== 8) return '6700';
+        return writeLimit(got.value);
       }
       case 0x35: {
         if (data.length < 6) return '6700';

@@ -1151,7 +1151,7 @@ function nativePhone(opts) {
       const value = Buffer.from(m.value, 'hex');
       const shaped = {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
-        'set-limit': value.length === 4,
+        'set-limit': value.length === 4 || value.length === 8,
         'set-owner': value.length === 65 && value[0] === 4,
         'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99] && value[34] === 4,
         'load': value.length === 0,

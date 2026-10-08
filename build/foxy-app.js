@@ -12355,7 +12355,7 @@ class Component extends DCLogic {
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to add to your card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
-        : s.flow === 'cardLimit' ? 'What would you like the daily limit to be?'
+        : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         : s.flow === 'receive' ? 'How much to receive?'
         : 'How much to send?',
       hideSkip: true,
@@ -18494,6 +18494,12 @@ class Component extends DCLogic {
        * day turns. */
       'limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S DAILY LIMIT',
         reason: (e.left !== undefined ? this.fcLimitRefusal(e) : said) + safe }),
+      /* The same for the limit on one tap: said before the PIN was sent, with
+       * what to do about it, which is to charge it in parts. */
+      'tap-limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S PER TAP LIMIT',
+        reason: (e.left !== undefined ? this.fcTapRefusal(e) : said) + safe }),
+      'old-card': () => ({ tone: 'warn', title: 'NOT ON THIS CARD',
+        reason: 'This card’s software has no per tap limit. Its daily limit can still be set.' }),
       'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
         reason: 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.',
         chip: 'Restore that seed phrase in Foxy, on this phone or another, to do it.' }),
@@ -18562,6 +18568,15 @@ class Component extends DCLogic {
   /* What a till is told when the card's day cannot cover the payment: how much
    * the card can still spend today and when its day turns. `e.left`, `e.turns`
    * and `e.limit` are the card's own, read before the PIN was sent. */
+  /* Why a payment was over the limit on one tap: what the tap has left where
+   * some of it is used (a tap is ten seconds to the card), or the limit. */
+  fcTapRefusal(e) {
+    if (e.turns > 0 && e.left < e.limit) {
+      return 'The card has ' + this.fcBoth(e.left) + ' left in this tap. Tap it again in ten seconds.';
+    }
+    return 'The card pays at most ' + this.fcBoth(e.limit || e.left) + ' in one tap, and this payment is more than that. Charge it in parts, a tap for each.';
+  }
+
   fcLimitRefusal(e) {
     if (e.turns > 0 && e.left < e.limit) {
       return 'The card can still spend ' + this.fcBoth(e.left) + ' today. Its day turns at ' + this.fcWhen(e.turns) + '.';
@@ -19227,6 +19242,8 @@ class Component extends DCLogic {
       pin: card.info.pin, locked: !!card.info.locked, hasRecord: !!card.info.hasRecord,
       limit: (card.record && card.record.limit) || 0,
       day: card.day || null,
+      // the limit on one tap: { known, limited, limit, left, turns }; `known` false on a card whose software has none
+      tap: card.tap || null,
       owner: !!(card.info && card.info.owner),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
@@ -19598,10 +19615,23 @@ class Component extends DCLogic {
    *   a confirmation  the amount again, and what it means
    *
    * `fcLimitAsk(done)` runs them and calls `done(sats)` with the screens that
-   * were opened for them gone: `sats` is 0 for NO LIMIT. */
-  fcLimitAsk(done) {
+   * were opened for them gone: `sats` is 0 for NO LIMIT.
+   *
+   * A card has a second limit, on ONE TAP, asked for by the same three steps
+   * in its own words (`tap`). To the card a tap is ten seconds of its own
+   * clock, so a payment above the limit is charged in parts, a tap for each. */
+  fcLimitAsk(done, tap) {
     this._fcLimitDone = done;
-    this.blockedCard('fc-limit-warn', {
+    this._fcLimitTap = !!tap;
+    this.blockedCard('fc-limit-warn', tap ? {
+      tone: 'warn', title: 'SET PER TAP LIMIT',
+      reason: 'A per tap limit is the most this card will pay in one tap. A larger amount has to be charged in parts, a tap for each, ten seconds apart.\n\n'
+        + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
+        + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
+        + 'Do you wish to continue?',
+      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
+    } : {
       tone: 'warn', title: 'SET DAILY LIMIT',
       reason: 'A daily limit is the most this card will spend in one day. It starts again by itself each day.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
@@ -19610,6 +19640,11 @@ class Component extends DCLogic {
       retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     });
+  }
+
+  /* What the keypad asks, for whichever limit is being set (23-render-home-and-amount.js). */
+  fcLimitQuestion() {
+    return this._fcLimitTap ? 'What is the most this card should pay in one tap?' : 'What would you like the daily limit to be?';
   }
 
   /* After NEXT on the keypad, or NO LIMIT under it: the confirmation, over it. */
@@ -19621,6 +19656,22 @@ class Component extends DCLogic {
   fcLimitSpec() {
     const sats = ((this.state.fcLimit || {}).sats) || 0;
     const secondary = { label: 'CANCEL', go: () => this.fcLimitCancel() };
+    if (this._fcLimitTap) {
+      return !(sats > 0) ? {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
+        amount: 'NO LIMIT', amountSub: '', rows: [],
+        warn: 'One tap will be able to pay as much as the card holds' + (((this.state.fc || {}).limit || 0) > 0 ? ', up to its daily limit.' : '.'),
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      } : {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
+        amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
+        warn: 'This card will pay no more than this in one tap. A larger amount has to be charged in parts, a tap for each. '
+          + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      };
+    }
     if (!(sats > 0)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD’S DAILY LIMIT.',
@@ -19672,18 +19723,27 @@ class Component extends DCLogic {
     // said before anything is asked: a card with no owner has nobody to set its limit, and another phone's card is not this one's to
     if (!fc.owner) { this.fcFailed({ card: 'no-owner', message: 'This card has no owner, so its limit cannot be changed.' }); return; }
     if (fc.ownedHere === false) { this.fcFailed({ card: 'not-owner' }); return; }
-    this.fcLimitAsk((sats) => this.fcLimitRun(sats));
+    /* Which of the two. A card whose software has no limit on one tap (an
+     * older one) has the one limit, and is asked for it as it always was. */
+    if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
+    this.blockedCard('fc-limit-which', {
+      tone: 'ask', title: 'CHANGE LIMIT',
+      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap.\n\nDAILY: the most it will spend in one day.',
+      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats, true), true),
+      shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
+      also: { label: 'CANCEL' },
+    });
   }
 
-  /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked. */
-  fcLimitRun(sats) {
+  /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked. `tap`: the limit on one tap. */
+  fcLimitRun(sats, tap) {
     const W = this.fcW();
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats }); })
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats, tap: !!tap }); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast(sats > 0 ? 'Daily limit set.' : 'Daily limit removed.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats) }));
+        this.toast((tap ? 'Per tap limit ' : 'Daily limit ') + (sats > 0 ? 'set.' : 'removed.'));
+      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap) }));
   }
 
   /* ---- its mint -------------------------------------------------------------
@@ -20115,6 +20175,7 @@ class Component extends DCLogic {
     // the card's day: the daily limit, what is left today, and when the day turns
     const day = (fc && fc.hasRecord && fc.day) || null;
     const limited = !!(day && day.limited);
+    const tapped = !!(fc && fc.tap && fc.tap.limited);
     const usable = !!fc && fc.pin === 'set' && fc.hasRecord;
     const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
     const past = near && fc.first <= now;
@@ -20193,7 +20254,10 @@ class Component extends DCLogic {
       /* How much of its limit the card has left, under what it holds, in
        * dollars first as the balance is. A card that has none left says so. */
       fcLimitShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked',
-      fcLimitLine: (fc && fc.hasRecord) ? (limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT') : '',
+      fcLimitLine: !(fc && fc.hasRecord) ? ''
+        : (limited && tapped) ? 'PER TAP ' + this.fcPrice(fc.tap.limit) + ' \u00b7 DAILY ' + this.fcPrice(day.limit)
+        : tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit)
+        : limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT',
       // under the balance, where there is a limit: what the day has left, and when it turns
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
       fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',

@@ -1607,6 +1607,29 @@ and load it), a phone whose build carries the NFC entitlement
 5. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
    right PIN no longer opens it. On the holder's phone the card reads BLOCKED.
 
+#### 23c-2. The limit on one tap
+
+Needs a card with the software that has it (its screen offers PER TAP LIMIT
+under CHANGE LIMIT; an older card goes straight to the daily limit).
+
+1. On the holder's phone: CHANGE LIMIT. **Pass:** a card asks which, PER TAP
+   LIMIT or DAILY LIMIT, with CANCEL. PER TAP LIMIT, CONTINUE, an amount,
+   CONFIRM, tap. **Pass:** no PIN is asked; `Per tap limit set.`; the card's
+   screen says PER TAP LIMIT and the amount (or both limits on one line).
+2. On the second phone, charge the card more than that limit. **Pass:** OVER THE
+   CARD'S PER TAP LIMIT, before the PIN pad's tap reaches the card for anything
+   but a read: nothing is taken, and it says to charge it in parts.
+3. Charge it an amount within the limit, and again straight away for another
+   amount within it that together come to more. **Pass:** the first is paid;
+   the second is paid if ten seconds have passed since the first tap (typing the
+   amount and the PIN takes longer than that), and otherwise is refused with
+   what the tap has left and `Tap it again in ten seconds.`
+4. On the holder's phone, WITHDRAW everything. **Pass:** it comes off whatever
+   the limits, and afterwards the card's screen shows the same limits as
+   before.
+5. Set the limit on one tap to NO LIMIT. **Pass:** `Per tap limit removed.`, and
+   the daily limit, if there was one, is still there.
+
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the

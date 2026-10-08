@@ -244,6 +244,11 @@
   "markup": "db9b2272a90ce6312d565d0a965129371e0dc3c2e5bbad86881a49ef3cabd00d",
   "vals": "5f46487bc0e193e5ed14a092679028ddf9880edc0686bdb38257afe540417ead"
  },
+ "fcLimitConfirm, a per tap limit, to be confirmed": {
+  "file": "310-fclimitconfirm-a-per-tap-limit-to-be-confirmed.html",
+  "markup": "5f43a99c3e5cada5bd6a31d81ecffde54918b78299182b49e1efac74bde521a2",
+  "vals": "0e436419f87fdc8132fced8233a591ace020f4484bad6bc02f7c33547b583c60"
+ },
  "switchMint, asking which mint a card moves to": {
   "file": "255-switchmint-asking-which-mint-a-card-moves-to.html",
   "markup": "c96f986402d40f12abf224084379620b68fe5620c19b0db1db09e916da146cf7",
@@ -283,6 +288,16 @@
   "file": "262-flashcard-a-card-with-a-daily-limit-what-is-left-and-when-the-day-turns.html",
   "markup": "76db5364273e54ac825ea509f803947fdaf01616e58b1ca0eb25e672160fa8f6",
   "vals": "4819fd19abc59decc2a4a35193e6b04227cda047359104ffa5099c81f252e9f9"
+ },
+ "flashcard, a card with a limit on one tap": {
+  "file": "311-flashcard-a-card-with-a-limit-on-one-tap.html",
+  "markup": "1899774a00dc83d9843c5b34012b262b0902948c51fb843664dab9846ec14d71",
+  "vals": "add8315052eb1eed5eb6bf4686f5896797a087bd146bfd19fb4674d5d25a7c68"
+ },
+ "flashcard, a card with a limit on one tap and a daily limit": {
+  "file": "312-flashcard-a-card-with-a-limit-on-one-tap-and-a-daily-limit.html",
+  "markup": "8855cec8084dd10792676b5d184a09964d3916dfe13fec8811076a4fbf8f2e01",
+  "vals": "f02a7c14f1d65a8c9a14a9f6ab4341d0cea0ff0e60cb2ac082e140bfffe009be"
  },
  "flashcard, a new card": {
   "file": "263-flashcard-a-new-card.html",
@@ -1162,6 +1177,31 @@
  "card: set daily limit, the warning": {
   "file": "272-card-set-daily-limit-the-warning.html",
   "markup": "0d229f8d79f555a8ab96c381d92e1fd8779b244458518b219ebc593460a12130",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: change limit, which of the two": {
+  "file": "313-card-change-limit-which-of-the-two.html",
+  "markup": "ee14c1483bee9ad4bf17df1bca415a4e9348c29c5dc844cee3e84f2ce61faadd",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: set per tap limit, the warning": {
+  "file": "314-card-set-per-tap-limit-the-warning.html",
+  "markup": "0c78874ad046a1fcad254ee6a7332657200d978027b3e4b47d100219a3b814b0",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: a till, over the card’s per tap limit": {
+  "file": "315-card-a-till-over-the-card-s-per-tap-limit.html",
+  "markup": "fc8b213d7b96356e959c3cbcb5f5821dd26ab4cf6b2e78e9504248c18477f43f",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: a till, over what is left of this tap": {
+  "file": "316-card-a-till-over-what-is-left-of-this-tap.html",
+  "markup": "d6616c7869073e6addacf1b879f0548e74239c4236c2a1176deb2b84d01b924f",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: a per tap limit on a card whose software has none": {
+  "file": "317-card-a-per-tap-limit-on-a-card-whose-software-has-none.html",
+  "markup": "07c58ed57786b79e8a24ec04aa3632c99095c387fc54ef70a69b016579811aa0",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: set up this card, this phone becomes its owner": {

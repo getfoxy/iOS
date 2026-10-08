@@ -131,7 +131,7 @@ final class NativeSeedTests: XCTestCase {
         }
         // whole requests: each label, a value of its shape
         let whole: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "00000000"),
-                                         ("set-limit", "FFFFFFFF"), ("set-owner", owner), ("set-card", record), ("load", "")]
+                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-owner", owner), ("set-card", record), ("load", "")]
         for (label, value) in whole {
             switch FoxyBridge.cardOwnerSignCheck(body(label, value)) {
             case .ok(let request):

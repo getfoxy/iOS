@@ -492,6 +492,107 @@ let L0 = null;
     ok(limit(L.card) === 77 && L.card.balance() >= 120, 'a card renewed has the limit it had, though its money was signed off and back on', JSON.stringify({ left: limit(L.card), card: L.card.balance() }));
     await settle();
   }
+  /* ---- 13b: the limit on one tap ------------------------------------------------------
+   * A second limit, on what the card signs for in one tap: to the card, ten seconds of its own clock. A terminal that
+   * sends the PIN again, or selects the card again, begins no new tap (the applet's own tests, and the transcript the
+   * model is held to); only the clock does. */
+  {
+    const P = await world(0);
+    const clock = { ms: Date.now() };
+    P.H.phone.clockMs = () => clock.ms;
+    P.R.phone.clockMs = () => clock.ms;
+    const ins = (c) => c.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) => a.slice(2, 4));
+    await binaryLoad(P.H, P.card, 2000);            // 1024 512 256 128 64 16
+    P.card.tap();
+    const set = await P.H.W.cardSetLimit(P.card, { sats: 300, tap: true });
+    ok(P.card.state.tapLimit === 300 && P.card.state.record.limit === 0 && set.tap && set.tap.known && set.tap.limited && set.tap.limit === 300 && set.tap.left === 300 && !set.day.limited,
+       'the owner’s phone sets a limit of 300 on one tap, with its proof and no PIN, and the card has no daily limit still', JSON.stringify(set.tap));
+
+    // a till asked for more than one tap may pay
+    P.card.tap();
+    P.card.sent.length = 0;
+    const over = await P.R.W.cardPay(P.card, { sats: 400, pin: '1234' }).then(() => null, (e) => e);
+    ok(over && over.card === 'tap-limit' && over.left === 300 && over.limit === 300 && !ins(P.card).includes('40') && !ins(P.card).includes('20') && P.card.balance() === 2000,
+       '400 is over it: refused before the PIN is sent or anything is signed', over && over.message);
+
+    // within it: no set of pieces comes to more than the limit, whatever would keep the drawer whole
+    P.card.tap();
+    P.card.sent.length = 0;
+    const paid = await P.R.W.cardPay(P.card, { sats: 200, pin: '1234' });
+    ok(paid.sats === 200 && P.card.state.tapSpent === 256 && P.card.state.tapSpent <= 300 && ins(P.card).filter((i) => i === '20').length === 1,
+       '200 is paid with the 256, the one set that covers it within the limit, and the card has counted it in this tap', JSON.stringify({ signed: P.card.state.tapSpent, change: paid.change && paid.change.sats }));
+    P.card.tap();
+    await P.R.W.cardWrite(P.card, { change: true });
+    ok(P.card.balance() === 1800 && P.card.state.tapSpent === 256, 'its change goes back on, and gives the tap nothing back: the limit counts what was signed', String(P.card.balance()));
+
+    // three seconds on is the same tap: 44 of it are left, and 100 more is refused, with when to try again
+    clock.ms += 3000;
+    P.card.tap();
+    P.card.sent.length = 0;
+    const same = await P.R.W.cardPay(P.card, { sats: 100, pin: '1234' }).then(() => null, (e) => e);
+    ok(same && same.card === 'tap-limit' && same.left === 44 && same.turns > 0 && !ins(P.card).includes('20'),
+       'three seconds later is the same tap to the card: 44 are left of it, and a payment of 100 is refused', same && JSON.stringify({ left: same.left, turns: same.turns }));
+    // ten seconds on from the first signature is the next
+    clock.ms += 8000;
+    P.card.tap();
+    const next = await P.R.W.cardPay(P.card, { sats: 100, pin: '1234' });
+    ok(next.sats === 100 && P.card.state.tapSpent > 0 && P.card.state.tapSpent <= 300, 'ten seconds on by the clock the card is told, it is the next tap, and 100 is paid', JSON.stringify({ signed: P.card.state.tapSpent }));
+    if (next.change && next.change.sats > 0 && !next.change.written) { P.card.tap(); await P.R.W.cardWrite(P.card, { change: true }); }
+
+    // the daily limit beside it, set alone: the tap's is left as it is, and each refuses in its own name
+    clock.ms += 20000;
+    P.card.tap();
+    await P.H.W.cardSetLimit(P.card, { sats: 600 });
+    ok(P.card.state.record.limit === 600 && P.card.state.tapLimit === 300, 'the daily limit is set beside it, and the limit on one tap is as it was');
+    P.card.tap();
+    const tapFirst = await P.R.W.cardPay(P.card, { sats: 450, pin: '1234' }).then(() => null, (e) => e);
+    ok(tapFirst && tapFirst.card === 'tap-limit', '450 is within the day and over the tap: refused as over the tap', tapFirst && tapFirst.card);
+    P.card.tap();
+    const dayFirst = await P.R.W.cardPay(P.card, { sats: 700, pin: '1234' }).then(() => null, (e) => e);
+    ok(dayFirst && dayFirst.card === 'limit', '700 is over the day: refused as over the day', dayFirst && dayFirst.card);
+
+    // the owner's phone takes everything off: both limits are lifted for it with its proof, and both put back
+    const onIt = P.card.balance(), hNow = await bal(P.H);
+    P.card.tap();
+    P.card.sent.length = 0;
+    const all = await P.H.W.cardWithdraw(P.card, { pin: '1234' });
+    const seq = ins(P.card);
+    ok(all.sats === onIt && P.card.balance() === 0 && (await bal(P.H)) === hNow + onIt && seq.filter((i) => i === '34').length === 2
+       && P.card.state.record.limit === 600 && P.card.state.tapLimit === 300 && !JSON.parse(P.H.storage.getItem('foxy.flashcard.lifted') || '{}')[P.card.key],
+       'the owner’s phone empties the card whatever the limits: both lifted in one command and both put back in one, and nothing left written down as lifted',
+       JSON.stringify({ got: all.sats, day: P.card.state.record.limit, tap: P.card.state.tapLimit, seq: seq.join(' ') }));
+
+    // a tap that ends between the two leaves a note, and this phone's next reading of the card puts both back
+    P.card.tap();
+    await P.H.W.cardAdd(P.card, { sats: 300, owner: true });
+    P.card.tap();
+    let limits = 0;
+    const cut = { tap: () => P.card.tap(), send: (a) => (a.slice(0, 4) === 'b034' && ++limits === 2 ? Promise.reject(Object.assign(new Error('the card left'), { gone: true })) : P.card.send(a)) };
+    await P.H.W.cardWithdraw(cut, { pin: '1234' }).then(() => null, () => null);
+    const note = JSON.parse(P.H.storage.getItem('foxy.flashcard.lifted') || '{}')[P.card.key];
+    ok(P.card.state.record.limit === 0 && P.card.state.tapLimit === 0 && note && note.limit === 600 && note.tap === 300,
+       'a withdrawal whose card left before the limits were put back leaves both written down', JSON.stringify(note));
+    P.card.tap();
+    const back = await P.H.W.cardLook(P.card, { mine: true });
+    ok(P.card.state.record.limit === 600 && P.card.state.tapLimit === 300 && back.tap.limit === 300 && back.day.limit === 600
+       && !JSON.parse(P.H.storage.getItem('foxy.flashcard.lifted') || '{}')[P.card.key],
+       'and the next reading of the card by its owner’s phone puts both back', JSON.stringify({ day: P.card.state.record.limit, tap: P.card.state.tapLimit }));
+
+    // removed, and a card whose software has no such limit
+    P.card.tap();
+    const off = await P.H.W.cardSetLimit(P.card, { sats: 0, tap: true });
+    ok(P.card.state.tapLimit === 0 && P.card.state.record.limit === 600 && !off.tap.limited, 'a limit of nothing on one tap removes it, and leaves the day’s');
+    const older = { tap: () => P.card.tap(), send: (a) => P.card.send(/^b0010100/i.test(a) ? 'b0010000' + a.slice(8) : a) };
+    P.card.tap();
+    P.card.sent.length = 0;
+    const cannot = await P.H.W.cardSetLimit(older, { sats: 300, tap: true }).then(() => null, (e) => e);
+    ok(cannot && cannot.card === 'old-card' && !ins(P.card).includes('34') && P.card.state.tapLimit === 0,
+       'a card whose software has no limit on one tap (it answers with the thirty bytes it knows) is not asked for one, and says so', cannot && cannot.message);
+    P.card.tap();
+    const read = await P.H.W.cardLook(older);
+    ok(read.tap && read.tap.known === false && read.tap.limited === false && read.day.limit === 600, 'and is read as it always was: its day, and no tap', JSON.stringify(read.tap));
+    await settle();
+  }
   /* ---- 14: a terminal with the PIN cannot write a piece twice ------------------------ */
   {
     // What a card signs for is a piece's secret, which its nonce makes; its amount is only what the day is charged. A

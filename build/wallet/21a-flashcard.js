@@ -6,7 +6,7 @@
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
     cardTimeKey: CARD_TIME_KEY,
-    cardPick: function (w, have, want, cap, card) { return cardPick(w, have, want, cap, card); },
+    cardPick: function (w, have, want, cap, card, tapCap) { return cardPick(w, have, want, cap, card, tapCap); },
     cardReach: function (amounts) { return cardReach(amounts); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
@@ -118,6 +118,11 @@
      * holds the words the card was set up with can, and it does not need to know
      * the PIN. A limit starts a new day at the card's clock, so the card has
      * been told the time first (`cardLook` does it). */
+    /* `opts.tap`: the limit on ONE TAP is the one set (the most the card signs
+     * for in ten seconds of its own clock), and the day's is left as it is.
+     * Both go in the one command, the day's as the card has it, so the day's
+     * window and count are not begun again. A card whose software has no such
+     * limit says so (`old-card`). */
     cardSetLimit: function (link, opts) {
       var o = opts || {};
       var sats = Math.round(Number(o.sats));
@@ -128,6 +133,10 @@
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
         key = card.key;
+        if (o.tap) {
+          if (!card.info.tapKnown) throw cardError('old-card', 'This card\u2019s software has no limit on one tap.');
+          return cardLimitTo(t, key, card.info.limit, sats);
+        }
         return cardLimitTo(t, key, sats);
       }).then(function () {
         /* What the owner has just chosen is the limit now. A note of a limit

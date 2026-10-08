@@ -262,6 +262,7 @@ function representative() {
   add('amount, a card\u2019s daily limit, in sats, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
   add('fcLimitConfirm, a daily limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, no limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 0 } }, { wallet: CARDS() }));
+  add('fcLimitConfirm, a per tap limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 2000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; } }));
   // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
   add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
   const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, sats: 2048, plan: null, fee: null, lands: 0, err: '', busy: false }, over || {});
@@ -279,6 +280,10 @@ function representative() {
     ] }) }));
   add('flashcard, a card of this phone\u2019s, with no limit', at('flashcard', { fc: FC() }, { wallet: CARDS() }));
   add('flashcard, a card with a daily limit, what is left and when the day turns', at('flashcard', { fc: FC({ limit: 5000, day: DAY }) }, { wallet: CARDS() }));
+  // the limit on one tap: alone, and beside the daily limit
+  const TAP = { known: true, limited: true, limit: 2000, spent: 0, left: 2000, turns: 0, noTime: false };
+  add('flashcard, a card with a limit on one tap', at('flashcard', { fc: FC({ tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a limit on one tap and a daily limit', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
@@ -566,6 +571,12 @@ function cards() {
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
   // the daily limit's first step, what making this phone a card's owner says, and what a till says when a card cannot cover a payment
   add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
+  // CHANGE LIMIT asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
+  add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
+  add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}, true));
+  add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
+  add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
+  add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'x' }, {}));
   add('card: set up this card, this phone becomes its owner', (a) => a.fcSetUpOwner('1234'));
   add('card: a till, over the card\u2019s daily limit, with what is left today', (a) => a.fcFailed({ card: 'limit', left: 1200, need: 2000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a till, over what a card can spend in a day', (a) => a.fcFailed({ card: 'limit', left: 5000, need: 9000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
