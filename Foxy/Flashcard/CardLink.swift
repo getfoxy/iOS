@@ -77,6 +77,21 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         session.begin()
     }
 
+    /// The card left part way through: the sheet stays up with `text` on it and
+    /// looks for the card again; `found(nil)` when it is back, `found(why)` when
+    /// the session ends first. A new sheet opened a moment after the last was
+    /// refused by iOS while the last still showed "card disconnected" ("Session
+    /// invalidated unexpectedly"), and the person was shown a card to press
+    /// where they should have seen a sheet to tap.
+    func again(text: String, found: @escaping (CardLinkError?) -> Void) {
+        guard let session else { found(.cancelled); return }
+        card = nil
+        self.found = found
+        Self.show(text, on: session)
+        print("[card] sheet: looking for the card again")
+        session.restartPolling()
+    }
+
     /// One command, and the card's answer with its two status bytes on the end.
     func send(_ apdu: Data, done: @escaping (Data?, CardLinkError?) -> Void) {
         guard let card, session != nil, let command = NFCISO7816APDU(data: apdu) else {
@@ -229,6 +244,22 @@ final class SimCardLink {
     func begin(text: String, found: @escaping (CardLinkError?) -> Void) {
         self.found = found
         deadline = Date().addingTimeInterval(Self.wait)
+        look(at: 0)
+    }
+
+    /// As the phone's: look for the card again, the session still open.
+    func again(text: String, found: @escaping (CardLinkError?) -> Void) {
+        guard !ended else { found(.cancelled); return }
+        say(text)
+        self.found = found
+        deadline = Date().addingTimeInterval(Self.wait)
+        if let conn {
+            conn.stateUpdateHandler = nil
+            conn.cancel()
+            self.conn = nil
+            waiting = []
+            buffer = Data()
+        }
         look(at: 0)
     }
 

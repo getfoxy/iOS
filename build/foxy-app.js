@@ -18145,7 +18145,11 @@ class Component extends DCLogic {
           this._stageT = setTimeout(() => this.hideStage('card'), 180000);
           this.fcLine('You can remove the card.');
         }
-        if (step === 'making') this.fcLine('The payment is made.');
+        if (step === 'making') {
+          this.fcLine('The payment is made.');
+          // and the payment's PAYMENT RECEIVED waits for its change to be back on the card
+          if (this._fcTapO && this._fcTapO.paying) this.fcHoldConfirm();
+        }
       };
       /* Which piece, of how many: said on the sheet and on the screen at once,
        * before the card is asked, so the line is up for as long as it works on
@@ -18159,7 +18163,7 @@ class Component extends DCLogic {
       on('reading');
       return fn(link, on, progress);
       // a tap that goes on to the mint opens the road to it as the sheet opens, not when the card has signed
-    }, { warm: !!(o && o.warm) }).then((r) => { over(); return r; },
+    }, { warm: !!(o && o.warm), again: (o && o.again) || null }).then((r) => { over(); return r; },
             (e) => { over(); throw e; });
   }
 
@@ -18505,27 +18509,42 @@ class Component extends DCLogic {
     const W = this.fcW();
     const opt = { paying: true, taken: true, again: () => this.fcPayAsk(sats, trusted) };
     this.fcTap({ amount: this.stageMoney(sats), body: resuming ? 'Tap again to finish paying.' : trusted ? '' : 'Tap 1 of 2: SEND.',
-                 sheet: resuming ? 'Hold the card here again to finish paying' : '', warm: !trusted },
+                 sheet: resuming ? 'Hold the card here again to finish paying' : '', warm: !trusted, paying: true,
+                 /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
+                 again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold the card here again to finish paying'
+                   : (e && e.card === 'gone') ? 'Hold the card here again' : '' },
                (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
       .then((r) => {
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
          * nothing here says paid; it settles when this phone is online. */
         if (r && r.trusted) { this.fcTrusted(r); return; }
-        this.fcMoved(opt);
         const ch = r && r.change;
+        const receiving = !!(ch && !ch.written && !ch.unmade && ch.sats > 0);
+        // no change to take after all (made and written, too small, or not made): the confirmation is not held for it
+        if (!receiving) this.fcReleaseConfirm('no change to take');
+        this.fcMoved(opt);
         // made, and the card left before it was written back: the second tap is asked for at once
-        if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcReceiveNow(ch.sats, sats);
+        if (receiving) this.fcReceiveNow(ch.sats, sats);
         // not made: this phone tries again when it connects, and says so
         if (ch && ch.unmade && ch.sats > 0) this.fcChangeLater(ch.sats, sats);
         /* A payment of this card's held for another amount was let go as this
          * one finished: its pieces go back on at the same second tap. */
         const back = r && r.letGo && r.letGo.made ? Math.round(Number(r.letGo.sats) || 0) : 0;
         if (back > 0 && !(ch && !ch.written && !ch.unmade && ch.sats > 0)) this.fcReceiveNow(back, sats);
+        // a piece the card signed as it was taken away, whose answer never came: said, quietly
+        if (r && r.torn > 0) this.toast(this.fcSats(r.torn) + ' the card signed as it was taken away never reached this phone.', true);
       }, (e) => {
-        /* The card left part way through signing: what it signed is held for
-         * this payment, and the sheet comes up again by itself for the rest. */
-        if (e && e.card === 'interrupted' && e.resumable) { this.fcResumeNow(sats, pin, trusted); return; }
+        /* The card left part way through signing, and the sheet that looked for
+         * it again was dismissed: what it signed is held, said with TAP CARD.
+         * Where the phone could not keep the sheet up (an older one), a new
+         * sheet comes up by itself instead, once iOS has taken the last down. */
+        if (e && e.card === 'interrupted' && e.resumable) {
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted); else this.fcResumeNow(sats, pin, trusted);
+          return;
+        }
+        // taken up, and the card could not make the rest: what it signed goes back, and why is said
+        if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
         if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted); return; }
         this.fcFailed(e, opt);
@@ -18539,8 +18558,24 @@ class Component extends DCLogic {
    * back to the card even with Foxy left open. */
   fcResumeNow(sats, pin, trusted) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true), 700);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true), 2500);
     this.fcHeldClock();
+  }
+
+  /* A payment taken up again that the card could not finish: it holds too
+   * little for the rest (often because a piece it signed as it was taken away
+   * never arrived). What it signed for the payment is given back; the tap that
+   * puts it on is one press away. */
+  fcShortHeld(e, sats) {
+    const back = e.letGo && e.letGo.made ? Math.round(Number(e.letGo.sats) || 0) : 0;
+    this.fcReleaseConfirm('the payment was not finished');
+    this.blockedCard('fc-short', Object.assign({
+      tone: 'warn', title: 'NOT PAID',
+      reason: 'The card holds ' + this.fcSats(e.balance) + ', and ' + this.fcSats(e.still) + ' of ' + this.fcSats(sats) + ' was still to pay.'
+        + (e.torn > 0 ? ' ' + this.fcSats(e.torn) + ' it signed as it was taken away never reached this phone, and cannot be spent.' : '')
+        + (back > 0 ? ' What it signed for this payment goes back on it: tap it to put it back.' : ' What it signed for this payment goes back on it once this phone reaches the mint.'),
+    }, back > 0 ? { retry: 'TAP CARD', go: () => this.fcWriteAsk({ sheet: 'Hold the card here to put back what it signed' }), shut: { label: 'LATER' } }
+                : { shut: { label: 'OK' } }));
   }
 
   fcHeldClock() {
@@ -18637,7 +18672,7 @@ class Component extends DCLogic {
         + 'Tap the card again to receive its ' + this.fcSats(sats) + ' of change. No PIN is needed.',
       chip: (p > 0 ? 'Tap 2 of 2. ' : '') + 'The change is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk({ paid: p, receive: true }),
-      shut: { label: 'LATER' },
+      shut: { label: 'LATER', tap: () => this.fcReleaseConfirm('the change is left for later') },
     });
   }
 
@@ -18684,6 +18719,8 @@ class Component extends DCLogic {
       title: 'CARD PIN',
       subtitle: owed > 0 ? 'To put ' + this.fcBoth(owed) + ' on the card.' : 'To write to the card.',
       cta: owed > 0 ? 'PUT ' + this.fcPrice(owed) + ' ON CARD' : 'WRITE TO CARD',
+      // backed out of: a payment's confirmation held for this goes up
+      onBack: () => this.fcReleaseConfirm('the change was not taken'),
     }, (pin) => this.fcWriteRun(pin, opt));
   }
 
@@ -18701,7 +18738,9 @@ class Component extends DCLogic {
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
     this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '', body: opt.receive && opt.paid > 0 ? 'Tap 2 of 2: RECEIVE.' : '',
-                 sheet: opt.sheet || (opt.receive ? 'Hold the card here again for its change' : '') },
+                 sheet: opt.sheet || (opt.receive ? 'Hold the card here again for its change' : ''),
+                 // what went on stays on: the same sheet asks for the card again for the rest
+                 again: (e) => (e && e.card === 'gone') ? 'Hold the card here again for the rest' : '' },
                (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap
@@ -18714,14 +18753,35 @@ class Component extends DCLogic {
                  * itself for the rest. A tap of it that reads no card says what
                  * is still waiting. Where nothing went on, the card says so and
                  * waits to be asked, so a card that keeps leaving is not asked forever. */
+                // the sheet asked for the card again and was dismissed: what is still waiting is said, with TAP CARD
+                : (e && e.card === 'gone' && e.sheetClosed)
+                  ? this.fcStillWaiting(opt)
                 : (e && e.card === 'gone' && e.wrote > 0)
                   ? this.fcWriteAgain(opt)
-                  : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+                  : (this.fcReleaseConfirm('the change tap failed'), this.fcFailed(e, { again: () => this.fcWriteAsk(opt) })));
+  }
+
+  /* A card payment's PAYMENT RECEIVED (announcePayment, 12-receive.js) waits
+   * while its change is made and taken: it came up the moment the payment
+   * landed, with the payer still to tap for their change, and read as if it
+   * were over. It goes up when the change is back on the card (DONE on
+   * COMPLETE), when the change is left for later, or after two and a half
+   * minutes whatever happens, so it is never lost. */
+  fcHoldConfirm() {
+    this._holdConfirmUntil = Date.now() + 150000;
+    clearTimeout(this._holdConfirmT);
+    this._holdConfirmT = setTimeout(() => this.fcReleaseConfirm('the change tap took too long'), 150000);
+  }
+
+  fcReleaseConfirm(why) {
+    if (this.releaseHeldConfirm) { this.releaseHeldConfirm(why); return; }
+    clearTimeout(this._holdConfirmT);
+    this._holdConfirmUntil = 0;
   }
 
   fcWriteAgain(o) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcWriteAsk(Object.assign({}, o, { sheet: 'Hold the card here again for the rest' })), 700);
+    this._fcResumeT = setTimeout(() => this.fcWriteAsk(Object.assign({}, o, { sheet: 'Hold the card here again for the rest' })), 2500);
   }
 
   /* A write tap that closed with no card read (the sheet went without a tap,
@@ -18737,7 +18797,7 @@ class Component extends DCLogic {
       reason: 'The card was not read. ' + this.fcSats(owed) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' No PIN is needed.' : ''),
       chip: 'It is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk(opt),
-      shut: { label: 'LATER' },
+      shut: { label: 'LATER', tap: () => this.fcReleaseConfirm('the change is left for later') },
     });
   }
 
@@ -18797,7 +18857,8 @@ class Component extends DCLogic {
           // and a payment of the card's given up here, which went back in the same tap
           + (r.refund > 0 ? ' So is ' + this.fcSats(r.refund) + ' from a payment that was not finished.' : '')
           + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
-        shut: { label: 'DONE' },
+        // and then the payment's own PAYMENT RECEIVED, held until now
+        shut: { label: 'DONE', tap: () => this.fcReleaseConfirm('the change is back on the card') },
       });
       return;
     }
@@ -19105,19 +19166,30 @@ class Component extends DCLogic {
   fcWithdrawRun(sats, pin, before, again) {
     const W = this.fcW();
     const prior = Math.round(Number(before) || 0);
+    /* What came off in this tap's sheet, as it is cut short and taken up again
+     * in the same sheet (`again` below), and what is still to take. */
+    let took = prior, ask = sats;
+    const counted = new Set();
+    const absorb = (e) => {
+      if (!e || e.card !== 'partial' || counted.has(e)) return;
+      counted.add(e);
+      took += Math.round(Number(e.sats) || 0);
+      if (e.hash) this.txIsNew(e.hash);
+      ask = sats ? Math.round(Number(e.left) || 0) : 0;
+    };
     const partCard = (got, rest) => this.blockedCard('fc-part', {
       tone: 'warn', title: 'TAP THE CARD AGAIN',
       reason: this.fcSats(got) + ' came off the card into this phone before it was taken away. Tap it again for the rest'
         + (rest > 0 ? ', ' + this.fcSats(rest) + '.' : '.'),
       chip: 'Hold it still until the phone says to remove it.',
-      retry: 'TAP CARD', go: () => this.fcWithdrawRun(sats, pin, got),
+      retry: 'TAP CARD', go: () => this.fcWithdrawRun(sats ? rest : 0, pin, got),
       shut: { label: 'LATER' },
     });
     const said = (r) => {
       // the card as it reads now, where the tap lasted long enough to read it; otherwise its screen goes
       if (r && r.card) this.fcShow(r.card); else this.fcGone();
       this.haptic && this.haptic('success');
-      const got = prior + Math.round(Number(r && r.sats) || 0);
+      const got = took + Math.round(Number(r && r.sats) || 0);
       this.blockedCard('fc-out', {
         tone: 'ask', title: 'IN YOUR WALLET',
         reason: (got > 0 ? this.fcSats(got) : 'The money') + ' from the card is in this phone now.',
@@ -19125,8 +19197,12 @@ class Component extends DCLogic {
       });
     };
     const opt = { taken: true, again: () => this.fcWithdraw(), done: () => said(null) };
-    this.fcTap({ amount: sats ? this.stageMoney(sats) : '', warm: true, sheet: again ? 'Hold the card here again for the rest' : '' },
-               (link, on, progress) => W.cardWithdraw(link, sats ? { pin, sats, on, progress } : { pin, on, progress }))
+    this.fcTap({ amount: sats ? this.stageMoney(sats) : '', warm: true, sheet: again ? 'Hold the card here again for the rest' : '',
+                 again: (e) => {
+                   if (e && e.card === 'partial' && Number(e.left) > 0) { absorb(e); return 'Hold the card here again for the rest'; }
+                   return (e && e.card === 'gone') ? 'Hold the card here again' : '';
+                 } },
+               (link, on, progress) => W.cardWithdraw(link, ask ? { pin, sats: ask, on, progress } : { pin, on, progress }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
@@ -19134,20 +19210,28 @@ class Component extends DCLogic {
         const ch = r && r.change;
         if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats);
       }, (e) => {
-        // the sheet for the rest read no card, or the card left before signing more: the TAP CARD card, with what came off so far
-        if (again && e && (e.card === 'cancelled' || e.card === 'gone')) { partCard(prior, again.rest); return; }
+        absorb(e);
+        /* The sheet looked for the card again and was dismissed, or a sheet for
+         * the rest read no card: the TAP CARD card, with what came off so far. */
+        if (took > prior || (again && e && (e.card === 'cancelled' || e.card === 'gone'))) {
+          if (e && (e.sheetClosed || e.card === 'cancelled' || e.card === 'gone')) {
+            this.fcMoved({});
+            this.fcGone();
+            partCard(took, sats ? ask : 0);
+            return;
+          }
+        }
         if (!(e && e.card === 'partial')) { this.fcFailed(e, opt); return; }
-        /* Cut short: what the card signed is in this phone, and the sheet comes
-         * up again by itself for the rest, with the PIN already given. */
-        if (e.hash) this.txIsNew(e.hash);
+        /* Cut short where the phone could not keep the sheet up (an older one):
+         * a new sheet comes up by itself for the rest, once iOS has taken the
+         * last down, with the PIN already given. */
         this.fcMoved({});
         this.fcGone();
         this.haptic && this.haptic('warning');
-        const got = prior + Math.round(Number(e.sats) || 0);
-        const rest = Math.round(Number(e.left) || 0);
-        if (!(rest > 0)) { said({ sats: e.sats }); return; }
+        // nothing left on the card to take: the withdrawal is whole
+        if (!(Math.round(Number(e.left) || 0) > 0)) { said({ sats: 0 }); return; }
         clearTimeout(this._fcResumeT);
-        this._fcResumeT = setTimeout(() => this.fcWithdrawRun(sats ? rest : 0, pin, got, { rest }), 700);
+        this._fcResumeT = setTimeout(() => this.fcWithdrawRun(sats ? ask : 0, pin, took, { rest: ask }), 2500);
       });
   }
 

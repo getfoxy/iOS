@@ -263,6 +263,27 @@ let L0 = null;
     R.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
     ok(offDone.trusted === true && offDone.sats === 1536 && !R.W.cardHeldPayment(e.key) && e.balance() === 0,
        'and the next tap signs the rest of the exact set, kept on trust as one payment', JSON.stringify(offDone));
+
+    /* A piece the card signs as it is taken away, its answer lost in the air: the card has marked it spent,
+     * and its signature is nowhere. Taken up again, the card cannot make the rest, and says why. */
+    const t = await fresh(77);                       // 64, 8, 4 and 1: every piece is needed for 77
+    t.tap();
+    let spends = 0;
+    const realSend = t.send;
+    t.send = (x) => ((/^b020/.test(x) && ++spends === 3) ? realSend(x).then(() => { throw new Error('the tag was lost'); }) : realSend(x));
+    const tornCut = await R.W.cardPay(t, { sats: 77, pin: '1234' }).then(() => null, (x) => x);
+    t.send = realSend;
+    ok(tornCut && tornCut.resumable && R.W.cardHeldPayment(t.key) && R.W.cardHeldPayment(t.key).held === 72 && t.balance() === 1,
+       'the card signs 64 and 8, and then 4 as it is taken away: 72 is held, and the 4 is gone from the card with its answer', JSON.stringify({ held: R.W.cardHeldPayment(t.key), card: t.balance() }));
+    t.tap();
+    const short = await R.W.cardPay(t, { sats: 77, pin: '1234' }).then(() => null, (x) => x);
+    ok(short && short.card === 'not-enough' && short.still === 5 && short.torn === 4 && short.letGo && short.letGo.made && !R.W.cardHeldPayment(t.key)
+       && R.W.cardOwed().some((r) => r.card === t.key && r.kind === 'refund' && r.sats === 72),
+       'taken up, the card cannot make the 5 still to pay: said, with the 4 lost in the air, and the 72 it signed goes back to it', short && short.message);
+    t.tap();
+    await R.W.cardWrite(t, { change: true });
+    ok(t.balance() === 73 && R.W.cardOwed().filter((r) => r.card === t.key).length === 0,
+       'and the next tap puts the 72 back: the card holds all but the piece lost in the air', String(t.balance()));
     await settle();
   }
 

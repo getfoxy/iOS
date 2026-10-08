@@ -90,6 +90,30 @@ extension FoxyBridge {
         }
     }
 
+    /// {text}: the card left part way through, and the sheet stays up and looks
+    /// for it again, with this line on it. Answers "ok" when a card is there to
+    /// talk to (chosen afresh: the applet is chosen again before anything else),
+    /// and otherwise why not.
+    func handleCardAgain(id: String, body: [String: Any]) {
+        let text = CardGate.line(body["text"] as? String)
+        DispatchQueue.main.async {
+            guard let link = self.cardLink else {
+                self.resolve(id: id, text: nil, error: CardLinkError.cancelled.words)
+                return
+            }
+            self.cardSelected = false
+            link.again(text: text.isEmpty ? "Hold the card here again" : text) { [weak self, weak link] why in
+                guard let self else { return }
+                if let why {
+                    if let link, self.cardLink === link { self.cardLink = nil }
+                    self.resolve(id: id, text: nil, error: why.words)
+                    return
+                }
+                self.resolve(id: id, text: "ok", error: nil)
+            }
+        }
+    }
+
     /// {text}: the line on the phone's sheet, changed while a session is open.
     func handleCardSay(id: String, body: [String: Any]) {
         let text = CardGate.line(body["text"] as? String)

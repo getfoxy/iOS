@@ -165,16 +165,23 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.state.amount = '0.50';
   const tap1 = c.tap;
   c.tap = () => { tap1(); c.leaveBefore('30', 1); c.tap = tap1; };
+  // and it is not brought back: the same sheet asks for it again, and is dismissed
+  const send1 = c.send;
+  c.send = (x) => send1(x).then((r) => r, (err) => { H.nfc = null; throw err; });
+  H.sheet.length = 0;
   holder.fcAmountNext();
   holder.price = 0;
-  await until('the card to leave too soon', () => card(holder) && card(holder).title === 'THE CARD LEFT TOO SOON');
-  ok(card(holder).has('TRY AGAIN') && c.balance() === 2000 && H.W.cardOwed().length === 1,
-     'a card taken away before it was written to: said, and the 500 is kept for the card', card(holder).reason);
+  await until('the money to be said to be waiting', () => card(holder) && card(holder).title === 'TAP THE CARD AGAIN');
+  c.send = send1;
+  H.nfc = c;
+  ok(card(holder).has('TAP CARD') && /The card was not read\. ₿500 is still waiting to go onto it\./.test(card(holder).reason) && c.balance() === 2000 && H.W.cardOwed().length === 1
+     && H.sheet.some((x) => /^again: Hold the card here again for the rest$/.test(x)),
+     'a card taken away before it was written to: the same sheet asked for it again, and with no card the 500 is kept for it and said', card(holder).reason);
   v = vals(holder);
   ok(v.fcNotes.length === 1 && /₿500 is waiting to go onto this card/.test(v.fcNotes[0].text), 'the screen carries a line for it', v.fcNotes[0] && v.fcNotes[0].text);
   c.tap();
-  card(holder).press('TRY AGAIN');
-  ok(!pad(holder), 'TRY AGAIN asks for no PIN: this phone owns the card');
+  card(holder).press('TAP CARD');
+  ok(!pad(holder), 'TAP CARD asks for no PIN: this phone owns the card');
   await until('the 500 to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
   ok(c.balance() === 2500 && H.W.cardOwed().length === 0 && vals(holder).fcNotes.length === 0, 'and the next tap finishes it: 2,500 on the card, nothing waiting');
   card(holder).press('DONE');
@@ -206,6 +213,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
     return null;
   };
+  // the payment's own PAYMENT RECEIVED (announcePayment, not in these parts): when it is let go, and why
+  const released = [];
+  till.releaseHeldConfirm = (why) => { released.push(why); till._holdConfirmUntil = 0; };
   // every card the till puts up, to see that none stood between the two taps
   const titles = [];
   const shown = till.blockedCard.bind(till);
@@ -230,7 +240,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'with no card to press between the two taps', titles.join(', '));
   ok(card(till).reason === 'Paid \u20bf1,000. \u20bf24 of change is back on the card.' && R.W.cardOwed().length === 0,
      'and then the payment is COMPLETE: what was paid, and the change back on the card', card(till).reason);
+  ok(till._holdConfirmUntil > Date.now() && released.length === 0,
+     'PAYMENT RECEIVED has waited all this time: it is not raised while the payer still has change to take', JSON.stringify(released));
   card(till).press('DONE');
+  ok(released.join() === 'the change is back on the card', 'and DONE on COMPLETE raises it, now the change is back', released.join(', '));
   till.blockedCard = shown;
   const paid = history(R).filter((e) => e.memo === 'card')[0];
   ok(paid && !till.seen[paid.hash] && R.W.tagsFor(paid.hash).to === 'card payment', 'its entry is left for the history pass to announce, as a payment');
@@ -313,8 +326,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await settle();
     const got = (await RT.W.balanceSats()) - rb;
     const begins = RT.sheet.filter((x) => /^begin:/.test(x));
-    ok(got === 1536 && c3.balance() === 0 && begins.length === 2 && begins[1] === 'begin: Hold the card here again to finish paying' && !pad(till2),
-       'a payment the card leaves part way through: the sheet comes up again by itself, with no PIN, and the next tap signs the rest and pays', begins.join(' / ') + '; ' + got + ' received');
+    const agains = RT.sheet.filter((x) => /^again:/.test(x));
+    ok(got === 1536 && c3.balance() === 0 && begins.length === 1 && agains.join() === 'again: Hold the card here again to finish paying' && !pad(till2),
+       'a payment the card leaves part way through: the same sheet asks for the card again, with no PIN, and the next tap signs the rest and pays', RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + '; ' + got + ' received');
     ok(titles.length === 0 && RT.W.cardOwed().filter((r) => r.card === c3.key).length === 0, 'with no card to press, and nothing to put back on the card', titles.join(', '));
     till2.blockedCard = shown;
 
@@ -328,11 +342,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const rb4 = await RT.W.balanceSats();
     const tap4 = c4.tap;
     c4.tap = () => { tap4(); c4.leaveBefore('20', 2); c4.tap = tap4; };
+    // and when it leaves it is not brought back: the sheet looks for it again and is dismissed
+    const send4 = c4.send;
+    c4.send = (x) => send4(x).then((r) => r, (err) => { RT.nfc = null; throw err; });
     till2.payByCard();
     pad(till2).type('1234');
-    await until('the payment to be held', () => !!RT.W.cardHeldPayment(c4.key));
-    RT.nfc = null;                      // and the card is not brought back
     await until('NOT PAID YET to be said', () => card(till2) && card(till2).title === 'NOT PAID YET');
+    c4.send = send4;
     ok(/^The card was taken away before it had signed for all of ₿768\. Tap it again to finish paying\.$/.test(card(till2).reason) && card(till2).has('TAP CARD') && card(till2).has('CANCEL')
        && RT.W.cardOwed().length === 0 && (await RT.W.balanceSats()) === rb4,
        'a tap to finish that reads no card says NOT PAID YET, with TAP CARD to finish and CANCEL', card(till2).all);
@@ -575,8 +591,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the whole withdrawal to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
     await settle();
     const begins = H.sheet.filter((x) => /^begin:/.test(x));
-    ok(begins.length === 2 && begins[1] === 'begin: Hold the card here again for the rest' && !pad(holder) && titlesW.join() === 'IN YOUR WALLET',
-       'a withdrawal cut short keeps what came off, and the sheet comes up again by itself for the rest, with no PIN and no card to press', begins.join(' / ') + ' | ' + titlesW.join(', '));
+    ok(begins.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold the card here again for the rest' && !pad(holder) && titlesW.join() === 'IN YOUR WALLET',
+       'a withdrawal cut short keeps what came off, and the same sheet asks for the card again for the rest, with no PIN and no card to press', H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + titlesW.join(', '));
     ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.' && c.state.record.limit === 700 && H.W.cardOwed().length === 0,
        'and then all of it is in the phone, said as the whole withdrawal, and the card’s limit is back as it was', card(holder).reason + ' / ' + c.state.record.limit);
     card(holder).press('DONE');
@@ -589,13 +605,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === 1500 && holder.state.fc.check !== 'asking');
     const had2 = await H.W.balanceSats();
     c.tap = () => { tapW(); c.leaveBefore('20', 3); c.tap = tapW; };
+    // and when it leaves it is not brought back: the sheet looks for it again and is dismissed
+    const sendW = c.send;
+    c.send = (x) => sendW(x).then((r) => r, (err) => { H.nfc = null; throw err; });
     H.sheet.length = 0;
     holder.fcWithdrawPin(0);
     pad(holder).type('4321');
-    // the first tap ends with the card gone, and the card is not brought back for the sheet that follows
-    await until('the first tap to end with the card gone', () => H.sheet.some((x) => /^error:/.test(x)) && holder.state.fc === null);
-    H.nfc = null;
     await until('the rest to be asked for with a card', () => card(holder) && card(holder).title === 'TAP THE CARD AGAIN');
+    c.send = sendW;
     const first = (await H.W.balanceSats()) - had2;
     ok(first > 0 && c.balance() === 1500 - first && /came off the card into this phone before it was taken away\. Tap it again for the rest/.test(card(holder).reason)
        && card(holder).has('TAP CARD') && card(holder).has('LATER') && H.W.cardOwed().length === 0,
@@ -628,8 +645,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the load to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
     await settle();
     const beginsL = H.sheet.filter((x) => /^begin:/.test(x));
-    ok(beginsL.length === 2 && beginsL[1] === 'begin: Hold the card here again for the rest' && c.balance() === onBefore + 1000 && H.W.cardOwed().length === 0,
-       'a load cut short after some pieces went on: the sheet comes up again by itself, and the rest goes on', beginsL.join(' / ') + ' | ' + c.balance());
+    ok(beginsL.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold the card here again for the rest' && c.balance() === onBefore + 1000 && H.W.cardOwed().length === 0,
+       'a load cut short after some pieces went on: the same sheet asks for the card again, and the rest goes on', H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + c.balance());
     card(holder).press('DONE');
     // and taken off again, so what comes after has the phone and the card as they were
     c.tap();
@@ -637,6 +654,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await settle();
     holder.setState({ screen: 'home', stack: [], fc: null });
   }
+
+  // a payment taken up again that the card could not finish: why, with any piece lost in the air, and the tap to put back what it signed
+  till.fcShortHeld({ balance: 1, still: 5, torn: 4, letGo: { sats: 72, made: true } }, 77);
+  ok(card(till).title === 'NOT PAID' && card(till).reason === 'The card holds ₿1, and ₿5 of ₿77 was still to pay. ₿4 it signed as it was taken away never reached this phone, and cannot be spent. What it signed for this payment goes back on it: tap it to put it back.'
+     && card(till).has('TAP CARD') && card(till).has('LATER'), 'a payment the card could not finish says why, names a piece lost in the air, and offers the tap to put back what it signed', card(till).all);
+  card(till).press('LATER');
 
   // a payment the card left part-way through is said by what it was: not paid, and how its money goes back
   till.fcFailed({ card: 'interrupted', owed: 512, made: true }, { paying: true, taken: true });

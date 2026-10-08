@@ -666,6 +666,14 @@
      * the card having gone. */
     cardStop: function () { return bridgeAsk('cardEnd', { error: 'Cancelled' }, 5000).then(null, function () {}); },
 
+    /* `opts.again(e)`: where `fn` failed because the card left part way through
+     * and what was done stands (a payment held, a withdrawal kept, pieces
+     * written), the line for the sheet to ask for the card again with, and
+     * '' otherwise. The sheet then stays up and looks for the card
+     * (`link.again`), and `fn` runs again in it: the person sees the same sheet
+     * ask for the card, not a sheet that ends in red and a card to press. A
+     * sheet dismissed or timed out while it looks rejects with `fn`'s error and
+     * `sheetClosed`, and the screen says what is left. */
     cardSession: function (text, fn, opts) {
       var link = {
         released: false,
@@ -687,23 +695,56 @@
           link.released = true;
           return bridgeAsk('cardEnd', { text: String(line || 'Done. Remove the card.') }, 5000).then(function () {}, function () {});
         },
+        /* The card left part way through: the sheet stays up and looks for it
+         * again (`cardAgain`). Resolves when a card is there. Rejects
+         * `cancelled` when the sheet was dismissed or timed out, and with
+         * `unsupported` from a phone whose native side has no such step. */
+        again: function (line) {
+          if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
+          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {}, function (e) {
+            var x = cardError('cancelled', 'The card was not tapped.');
+            x.unsupported = /unknown action/i.test(String((e && e.message) || ''));
+            throw x;
+          });
+        },
       };
       /* A tap that goes on to the mint opens the road to it as the sheet opens
        * (`opts.warm`), while the card is found and read and signs: the swap that
        * comes after takes the circuit made ready, and is not the one that waits
        * for a new one (`warmMint`). */
       if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
-      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 70000).then(function () {
+      var ended = function (e) {
+        var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
+        return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
+      };
+      var tries = 0;
+      /* The error that said what was kept (a payment held, a withdrawal taken
+       * part way): a later tap of the same sheet that only lost the card again
+       * says nothing new, and must not hide it. */
+      var kept = null;
+      var worst = function (e) { return (kept && e && (e.card === 'gone' || e.card === 'cancelled') && e !== kept) ? kept : e; };
+      var run = function () {
         return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
           if (link.released) return r;
           return bridgeAsk('cardEnd', { text: 'Done. Remove the card.' }, 5000).then(function () { return r; }, function () { return r; });
         }, function (e) {
           // the sheet was ended when the card was let go, and has nothing to say about what came after
           if (link.released) throw e;
-          var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
-          return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
+          if (e && (e.resumable || e.card === 'partial')) kept = e;
+          var line = '';
+          try { line = (opts && typeof opts.again === 'function' && tries < 6) ? String(opts.again(e) || '') : ''; } catch (x0) { line = ''; }
+          if (!line) return ended(worst(e));
+          tries += 1;
+          return link.again(line).then(run, function (x) {
+            // a phone with no such step: closed as it always was, and the screen takes it up
+            if (x && x.unsupported) return ended(worst(e));
+            var said = worst(e);
+            try { said.sheetClosed = true; } catch (x1) {}
+            throw said;
+          });
         });
-      }, function (e) {
+      };
+      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 70000).then(run, function (e) {
         var why = String((e && e.message) || '');
         if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');

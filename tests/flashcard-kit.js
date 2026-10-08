@@ -51,6 +51,14 @@ function page(o) {
         return ctx.nfc.send(m.apdu).then((r) => reply(w, m.id, r), () => reply(w, m.id, null, 'the tag was lost'));
       }
       if (m.action === 'cardSay') { ctx.sheet.push('say: ' + m.text); return reply(w, m.id, 'ok'); }
+      // the same sheet looks for the card again (FoxyBridge+Flashcard.swift, handleCardAgain): the card is tapped anew, or none is
+      if (m.action === 'cardAgain') {
+        ctx.sheet.push('again: ' + m.text);
+        if (ctx.ended) return reply(w, m.id, null, 'the session was cancelled');
+        if (!ctx.nfc || ctx.nfc === 'off') { ctx.ended = true; return reply(w, m.id, null, 'the session was cancelled'); }
+        ctx.nfc.tap();
+        return reply(w, m.id, 'ok');
+      }
       if (m.action === 'cardEnd') {
         ctx.sheet.push(m.error ? 'error: ' + m.error : 'end: ' + m.text);
         ctx.trace.push(m.error ? 'error' : 'end');

@@ -418,6 +418,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "cardBegin": FoxyBridge.handleCardBegin,
         "cardSend": FoxyBridge.handleCardSend,
         "cardSay": FoxyBridge.handleCardSay,
+        "cardAgain": FoxyBridge.handleCardAgain,
         "cardEnd": FoxyBridge.handleCardEnd,
         // A card's owner key stays in native code: the page gets its public half and signatures for a
         // fixed list of labels (NativeSeedBridge.swift)
