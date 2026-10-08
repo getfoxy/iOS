@@ -670,12 +670,68 @@
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
+  /* ---- a route that is on its way ------------------------------------------
+   *
+   * Foxy opens on the home screen and works offline until Tor is up, so for
+   * the first seconds of a session the route is neither open nor absent: it
+   * is coming. Every money step reads `routeOpen()` once and takes a branch,
+   * and the branch for no route is a worse one where a route was two seconds
+   * off: a payer drops the lock it was asked for, a receiver refuses plain
+   * ecash or keeps an over-payment it could have made change for, a scanned
+   * token gets the HIGH RISK card. The connection screen used to make people
+   * sit those seconds out. Now the step itself does, for a few seconds at
+   * most, and only while a connection really is being made.
+   *
+   * Coming means: a network under it, Tor at work on a circuit, and nobody
+   * having chosen to go without Tor. No network is not coming, and neither is
+   * a Tor that has stopped or given up: those take the offline branch at
+   * once, as before. */
+  var ROUTE_WAIT_MS = 6000;
+  var routeWaiters = [];
+
+  function routeComing() {
+    if (!bridged() || routeOpen()) return false;
+    if (privacy.network === 'none' || privacy.unprotected) return false;
+    return privacy.tor === 'connecting' || privacy.tor === 'stuck';
+  }
+
+  /* Resolves true the moment the route is open, false when it is not coming
+   * or `ms` have gone by. Never rejects: what follows goes on either way, by
+   * whatever the route then is. */
+  function routeSoon(ms) {
+    if (routeOpen()) return Promise.resolve(true);
+    var wait = ms === undefined ? ROUTE_WAIT_MS : Math.max(0, Number(ms) || 0);
+    if (!(wait > 0) || !routeComing()) return Promise.resolve(false);
+    console.log('[foxy] a connection is on its way; waiting for it, ' + Math.round(wait / 1000) + 's at most');
+    return new Promise(function (done) {
+      var settled = false;
+      var timer = null;
+      var answer = function (open) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        routeWaiters = routeWaiters.filter(function (fn) { return fn !== answer; });
+        done(!!open);
+      };
+      timer = setTimeout(function () { answer(false); }, wait);
+      routeWaiters.push(answer);
+    });
+  }
+
+  /* Every change of the route, from `_privacy` and `setOffline`. */
+  function routeChanged() {
+    if (!routeWaiters.length) return;
+    var open = routeOpen();
+    if (!open && routeComing()) return;
+    routeWaiters.slice().forEach(function (fn) { fn(open); });
+  }
+
   function assertRoute() {
     // storage from a newer Foxy: nothing that could change it runs (see the header)
     if (storageNewer) throw new Error(STORAGE_NEWER);
     if (routeOpen()) return;
     throw new Error(privacy.offline
-      ? OFFLINE_REFUSAL
+      ? (routeComing() ? SECURING_REFUSAL : OFFLINE_REFUSAL)
       : privacy.everUp
         ? 'Tor is reconnecting. Try again in a moment.'
         : 'Foxy is still connecting to Tor.');

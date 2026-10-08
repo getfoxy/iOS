@@ -31,6 +31,9 @@
     this.syncAccent();
     // before anything else is usable, including the gate
     this.pinLock();
+    /* The lock tells the phone it has the screen itself (pinLock): the connecting
+     * screen, which is what used to say it, now stays down on every launch but
+     * the first (home first), and waited for the unlock even when it did not. */
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
     if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
     this.applyShell();
@@ -107,7 +110,14 @@
     // that talks to the network on launch was the one screen not behind Tor.
     const W = window.FoxyWallet;
     if (!W || !W.candles) { this._loading[r] = false; return; }
-    W.candles(cfg.g, cfg.span)
+    /* Asked inside a promise. `candles` refuses with a throw when there is no
+     * route, and thrown here it went up through `walletReady` into the
+     * launch's own catch: "connect failed, attempt 1" for a wallet that had
+     * connected, the rest of `walletReady` skipped (no balance, no history,
+     * nothing listening), and three seconds before it was tried again. A
+     * launch with no route did that every time; opening on the home screen,
+     * every launch has no route yet. */
+    Promise.resolve().then(() => W.candles(cfg.g, cfg.span))
       .then(series => {
         const rows = (series || [])
           .filter(x => isFinite(x.t) && isFinite(x.c) && x.c > 0)
@@ -252,14 +262,16 @@
     + '[data-snow] i>i>i{width:100%;height:100%;border-radius:50%;opacity:0;'
     + 'background:radial-gradient(circle at 34% 30%,#FFF 0%,#E4EEF6 45%,rgba(190,212,230,.55) 100%);'
     + 'animation:foxySnowFade linear infinite}'
-    /* And where it lands on something, it settles. A card on its own screen
-     * has a top edge for the snow to gather on (`data-snow-cap`, in the
-     * markup beside the card): a drift that rises along the edge and clumps
-     * that swell on it, each on its own clock, from nothing when the screen
-     * opens to a full cap half a minute later. Once, and it stays. */
+    /* And where it lands on something, it settles. The panel on the home
+     * screen, and a card on its own screen, have a top edge, round at both
+     * corners, for the snow to gather on (`data-snow-cap`, in the markup at
+     * the top of the panel and beside the card): a drift that rises along the
+     * edge and clumps that swell on it, each on its own clock, and a band
+     * across the whole width that creeps down round both corners to where
+     * they end. From nothing to settled in about half a minute, once, and it
+     * stays until the screen is left. */
     + '@keyframes foxySnowPile{0%{transform:scale(.9,0)}100%{transform:scale(1,1)}}'
     + '@keyframes foxySnowClump{0%{transform:scale(0)}100%{transform:scale(1)}}'
-    // and it lies along the whole edge and creeps down round both corners, to where they end
     + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
     + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
 

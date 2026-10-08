@@ -665,6 +665,16 @@
             throw new Error('You have already taken this ecash. It is waiting to be swapped in'
               + ' as soon as there is a connection.');
           }
+          /* And one already swapped in, as the locked branch below asks. The
+           * row goes when it is claimed, so the store above then has nothing
+           * to say: the same token shown again was put to the person again,
+           * counted again, and on the next connection found spent, by this
+           * phone's own earlier claim. Both entries were then written "taken
+           * back" and the person told the payer had taken money that was in
+           * their pile. History is named after the same pieces and knows. */
+          if (FoxyWallet.txSeen('req-' + fp) || takenBefore(tok.proofs)) {
+            throw new Error('You have already been paid this ecash.');
+          }
           return Promise.resolve(ask({ sats: tok.amount, id: fp, purpose: 'scan', scanned: true }))
             .then(function (yes) {
               if (yes !== true) {
@@ -1425,6 +1435,11 @@
          * token is still only made once the record is gone, so its proofs are
          * never restorable as balance. */
         setProofs((split.keep || []).concat(stuck), at, w);
+        /* Change for an over-payment was set aside from the balance when the
+         * payment landed (`holdChange`). Its pieces have just left the pile,
+         * so it is let go here and nowhere later: between this line and the
+         * caller hearing of it the balance would be short by the change. */
+        if (opts && opts.purpose === 'change' && opts.forHash) changeHoldOver(opts.forHash);
         if (split.guard) split.guard.done();
         var token = window.CashuTS.getEncodedToken(changeNoteKey && Number(split.over) > 0
           ? { mint: at, proofs: split.send, unit: 'sat',

@@ -177,12 +177,18 @@
    * apart — a refusal missing from this list spends a NUT-13 counter and one of
    * the receive screen's three tries on a request that never left. */
   var OFFLINE_REFUSAL = 'Foxy is working offline. This needs a connection \u2014 tap OFFLINE to reconnect.';
+  /* And the same refusal while a connection is on its way. Foxy opens on the
+   * home screen and works offline until Tor is up, with a banner that says
+   * SECURING YOUR CONNECTION: there is no OFFLINE to tap, and nothing for the
+   * person to do but wait the few seconds it takes. */
+  var SECURING_REFUSAL = 'Foxy is securing its connection. Try again in a moment.';
 
   var NEVER_SENT = [
     'Foxy is not connected to Tor.',
     'Tor is reconnecting. Try again in a moment.',
     'Foxy is still connecting to Tor.',
     OFFLINE_REFUSAL,
+    SECURING_REFUSAL,
   ];
 
   /* True only when this failure is known to have asked the mint nothing. */
@@ -289,6 +295,8 @@
    * claims (`claimUnclaimed`): one walk each, shared. */
   var carrying = null;
   var claimingLate = null;
+  // how many payments were waiting when it was last said that none can be asked for (`claimUnclaimed`)
+  var claimHeldSaid = -1;
   /* While that walk has the wallet at another mint.
    *
    * Ecash from another mint is claimed at that mint, and for those seconds

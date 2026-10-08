@@ -2731,17 +2731,25 @@ const eq = (got, want, what) =>
   await test('change that came back and was then scanned as well is counted once, and only a scan of exactly that change', async () => {
     const { load } = require('./harness');
     const now = Math.floor(Date.now() / 1000);
-    const ctx = load({ storage: { 'foxy.cashu.log': JSON.stringify([
-      { hash: 'req-scan-bbb', dir: 'in', sats: 1183, at: now - 100, settled: true },   // a real, separate receive of another amount
-      { hash: 'req-scan-aaa', dir: 'in', sats: 15315, at: now - 280, settled: true },  // the same change, scanned
-      { hash: 'p1', dir: 'out', sats: 14138, grossSats: 29453, changeSats: 15315, changeState: 'came back', at: now - 300, settled: true },
-      { hash: 'req-scan-old', dir: 'in', sats: 15315, at: now - 5000, settled: true }, // before the payment: not its change
-    ]) } });
+    /* Known by its pieces. A scan's entry is named after the pieces it held,
+     * and the pieces of change that came back over the link are written down
+     * as it is checked (`foxy.change.seen`). It was matched by amount inside a
+     * quarter of an hour, which wrote off a real payment of about that size. */
+    const ctx = load({ storage: {
+      'foxy.change.seen': JSON.stringify([{ f: 'aaa', at: Date.now() - 280000 }]),
+      'foxy.cashu.log': JSON.stringify([
+        { hash: 'req-scan-bbb', dir: 'in', sats: 1183, at: now - 100, settled: true },   // a real, separate receive of another amount
+        { hash: 'req-scan-ccc', dir: 'in', sats: 15315, at: now - 200, settled: true },  // a real receive of the very same amount, other pieces
+        { hash: 'req-scan-aaa', dir: 'in', sats: 15315, at: now - 280, settled: true },  // the same change, scanned
+        { hash: 'p1', dir: 'out', sats: 14138, grossSats: 29453, changeSats: 15315, changeState: 'came back', at: now - 300, settled: true },
+        { hash: 'req-scan-old', dir: 'in', sats: 15315, at: now - 5000, settled: true }, // before the payment: not its change
+      ]) } });
     ctx.W.repairOwedChange();
     const by = {};
     JSON.parse(ctx.storage.getItem('foxy.cashu.log')).forEach(e => { by[e.hash] = e; });
     if (by['req-scan-aaa'].state !== 'failed') return 'the scanned twin is still counted: ' + JSON.stringify(by['req-scan-aaa']);
     if (by['req-scan-bbb'].state === 'failed') return 'a different receive was dropped';
+    if (by['req-scan-ccc'].state === 'failed') return 'a real receive of the same amount, in other pieces, was written off as that change';
     if (by['req-scan-old'].state === 'failed') return 'an earlier receive was dropped';
     return by.p1.sats === 14138 ? null : 'the payment was touched: ' + by.p1.sats;
   });
@@ -2752,7 +2760,9 @@ const eq = (got, want, what) =>
     const ctx = load({ storage: { 'foxy.cashu.log': JSON.stringify([
       // newest first, as the log is kept
       { hash: 'r2', dir: 'in', sats: 500, at: now - 50, settled: true },
-      { hash: 'r1', dir: 'in', sats: 22426, at: now - 100, settled: true },
+      { hash: 'token-r1', dir: 'in', sats: 22426, at: now - 100, settled: true },
+      // a payment by tap of the very amount p0 is owed: not a code, so not its change
+      { hash: 'req-tap1', dir: 'in', sats: 20, at: now - 200, settled: true },
       { hash: 'p1', dir: 'out', sats: 1180, grossSats: 23606, changeSats: 22426, changeState: 'owed', at: now - 300, settled: true },
       { hash: 'p0', dir: 'out', sats: 10, grossSats: 30, changeSats: 20, changeState: 'owed', at: now - 400, settled: true },
     ]) } });
@@ -2761,12 +2771,12 @@ const eq = (got, want, what) =>
     JSON.parse(ctx.storage.getItem('foxy.cashu.log')).forEach(e => { by[e.hash] = e; });
     if (by.p1.changeState !== 'collected') return 'p1 is ' + by.p1.changeState;
     if (by.p1.sats !== 23606) return 'p1 counts ' + by.p1.sats + ', wanted its gross 23606';
-    if (by.p1.changeFrom !== 'r1') return 'p1 matched ' + by.p1.changeFrom;
-    if (by.p0.changeState !== 'owed' || by.p0.sats !== 10) return 'p0, with no matching receive, was touched: ' + JSON.stringify(by.p0);
+    if (by.p1.changeFrom !== 'token-r1') return 'p1 matched ' + by.p1.changeFrom;
+    if (by.p0.changeState !== 'owed' || by.p0.sats !== 10) return 'p0, whose only match by amount was a tap payment and not a code, was touched: ' + JSON.stringify(by.p0);
     // and a second pass does not take the same receive for anything else
     ctx.W.repairOwedChange();
-    const again = JSON.parse(ctx.storage.getItem('foxy.cashu.log')).filter(e => e.changeFrom === 'r1').length;
-    return again === 1 ? null : 'r1 was used ' + again + ' times';
+    const again = JSON.parse(ctx.storage.getItem('foxy.cashu.log')).filter(e => e.changeFrom === 'token-r1').length;
+    return again === 1 ? null : 'the code was used ' + again + ' times';
   });
 
   // ----------------------------------------------------------------------

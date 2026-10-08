@@ -580,3 +580,45 @@ private enum SHA256Hex {
         XCTAssertFalse(TapSession.carriesPayment(nil))
     }
 }
+
+
+/// Who holds a receiver's one place, and what a paying phone does about a word
+/// that would not go out. Both rules are pure so that they can be held here:
+/// the code around them is CoreBluetooth's and runs only on phones.
+final class TapPlaceTests: XCTestCase {
+    private let a = UUID(), b = UUID()
+
+    /// A subscribe took the place and the advertisement with it, so anything in
+    /// range could hold a till off the air five seconds at a time by saying
+    /// nothing. Only a first word takes it now.
+    func testTheFirstWordTakesThePlaceAndASubscribeDoesNot() {
+        XCTAssertTrue(TapPlace.taken(by: a, holder: nil, listening: true, linked: false, early: false),
+                      "nobody holds it, and this phone is listening: its first word takes it")
+        XCTAssertFalse(TapPlace.taken(by: a, holder: nil, listening: false, linked: false, early: false),
+                       "a word from a phone that never subscribed takes nothing")
+        XCTAssertFalse(TapPlace.taken(by: b, holder: a, listening: true, linked: false, early: false),
+                       "one payer at a time: the place is held")
+        XCTAssertFalse(TapPlace.taken(by: a, holder: a, listening: true, linked: false, early: false),
+                       "the holder's later words are not a second taking")
+        XCTAssertFalse(TapPlace.taken(by: a, holder: nil, listening: true, linked: true, early: false))
+        XCTAssertFalse(TapPlace.taken(by: a, holder: nil, listening: true, linked: false, early: true),
+                       "nobody while the amount is still being typed")
+    }
+
+    func testTheRestOfTheHandshakeHasThreeSeconds() {
+        XCTAssertEqual(TapReceiver.handshakeWait, 3, "a real handshake is a few hundred milliseconds")
+    }
+
+    /// A sealed word takes its place in the count whether or not it goes. One
+    /// that did not go left the link a count ahead, and the next would not open.
+    func testAWordThatDidNotGoLetsTheLinkGoUnlessItIsOneOfThree() {
+        XCTAssertEqual(TapWriteFailure.after(question: false, payment: false, changeKept: false), .letLinkGo,
+                       "a price, an asking first, a step of the handshake")
+        XCTAssertEqual(TapWriteFailure.after(question: true, payment: true, changeKept: false), .waitForAnswer,
+                       "the question about a payment already handed over: its answer can still come unasked")
+        XCTAssertEqual(TapWriteFailure.after(question: false, payment: true, changeKept: false), .paymentLost,
+                       "the payment is the page's to finish by another road")
+        XCTAssertEqual(TapWriteFailure.after(question: false, payment: false, changeKept: true), .nothingMore,
+                       "the word that change was kept is the last on its link anyway")
+    }
+}

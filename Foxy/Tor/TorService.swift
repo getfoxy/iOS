@@ -212,7 +212,9 @@ enum TorService {
     /// RESTART TOR is offered, as "stuck" (`TorStuck` says when, and why not on
     /// a percentage standing still).
     static var stuck: Bool {
-        TorStuck.offered(connecting: thread != nil && !ready && !failed && !stopped && !parked,
+        TorStuck.offered(connecting: TorStuck.connecting(running: thread != nil, ready: ready,
+                                                         failed: failed, stopped: stopped,
+                                                         parked: parked, offNetwork: offForBlackout),
                          hasLink: controller != nil,
                          quiet: Date().timeIntervalSince(lifeAt),
                          bytesCounted: transport == .direct && orbotBypass == nil,

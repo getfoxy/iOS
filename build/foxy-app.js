@@ -114,7 +114,11 @@ class Component extends DCLogic {
    * looks dead and does nothing at all reads as a bug; one that says why reads
    * as a state. */
   offlineNo(what) {
-    this.toast((what || 'That') + ' needs a connection. Tap OFFLINE to reconnect.', true);
+    const W = window.FoxyWallet;
+    // there is no OFFLINE to tap while a connection is on its way: the banner says SECURING YOUR CONNECTION
+    const coming = !!(W && W.routeComing && W.routeComing());
+    this.toast((what || 'That') + (coming ? ' needs a connection. One is on its way.'
+                                           : ' needs a connection. Tap the banner to retry.'), true);
   }
 
   toast(msg, amber) {
@@ -1122,7 +1126,13 @@ class Component extends DCLogic {
       if (!G) return this.bootWalletNow();
       // The verifying screen is held open across the wallet search, so the
       // app's own SEARCHING FOR WALLET screen never gets a frame to itself.
-      const done = () => { if (G.holdVerify) G.holdVerify(false); };
+      const done = () => {
+        if (G.holdVerify) G.holdVerify(false);
+        /* Home first, no screen of the gate's ever went up, so nothing told
+         * the phone the page had the screen: the splash would sit over a
+         * loaded home screen for the eight seconds of its backstop. */
+        if (G.uncover && !G.visible()) G.uncover();
+      };
       if (G.holdVerify) G.holdVerify(true);
       return G.check(() => this._gateThenBoot()).then(ok => {
         // Tor could not connect: that screen is up with RETRY and CONTINUE UNPROTECTED
@@ -1330,6 +1340,11 @@ class Component extends DCLogic {
          * needs Face ID or the passcode; read while the lock screen is up, it
          * asked for its own Face ID on top of the lock's. Read after a Face ID
          * unlock, the unlock's approval covers it. */
+        /* Home first, the home screen is what is drawn, and the phone's
+         * cover comes off it now rather than at its own four seconds. With
+         * the lock up, the lock says so itself (pinLock, 10-pin.js). */
+        const G0 = window.FoxyGate;
+        if (G0 && G0.isHomeFirst && G0.isHomeFirst() && !this._pinLocked && !G0.visible() && G0.uncover) G0.uncover();
         return this.pinUnlocked().then(() => {
           /* One screen from here to a loaded balance: Tor, the mint, then the
            * balance. It used to come down once the mint answered, so the home
@@ -1385,7 +1400,10 @@ class Component extends DCLogic {
       // A saved mint is used as saved; only a fresh install takes the default.
       // Falling back from one to the other would hide the balance held at the
       // saved mint, which is exactly what per-mint storage exists to prevent.
-      this.retryConnect(saved && saved.url ? undefined : W.defaultMint, 0);
+      /* Home first, the wallet is built from what is on file, at once, and
+       * the mint is spoken to behind the home screen. */
+      const fromFile = !!(G && G.isHomeFirst && G.isHomeFirst());
+      this.retryConnect(saved && saved.url ? undefined : W.defaultMint, 0, fromFile);
     });
   }
 
@@ -1402,13 +1420,40 @@ class Component extends DCLogic {
     if (!W.connected) return this._gateThenBoot ? this._gateThenBoot() : null;
     if (this._returning) return this._returning;
     const run = this.pinUnlocked().then(() => {
-      G.holdVerify(true);
-      G.showLaunch();
-      return G.check(() => this.setUpAfterReturn());
+      /* Back with the connection Foxy left with: nothing to set up, so no
+       * screen about setting it up.
+       *
+       * The native side keeps Tor on the network for a few seconds after Foxy
+       * is put away, and up to twenty while a payment is with the mint, so a
+       * glance at another app comes back to a circuit that never went down
+       * ("nothing to set up", TorService.resumed). The launch screen went up
+       * over it all the same and played its ending: a second and a half of
+       * SECURING YOUR CONNECTION after one second away, with SEND's camera
+       * dark behind it. Asked of the phone now, not read from what the page
+       * last heard: a circuit taken down while Foxy was away says so here. */
+      const asked = W.refreshPrivacy ? W.refreshPrivacy().catch(() => null) : Promise.resolve(null);
+      return asked.then(() => {
+        if (G.connected && G.connected() && !G.visible()) {
+          console.log('[foxy] back with the connection still up; no connection screen');
+          // and the phone's cover over the return comes off now, not after its four seconds
+          if (G.uncover) G.uncover();
+          return 'quiet';
+        }
+        G.holdVerify(true);
+        G.showLaunch();
+        const checked = G.check(() => this.setUpAfterReturn());
+        /* Working offline, the launch screen does not go up either, and the
+         * cover was left to its four seconds on every return. Whatever the
+         * reason, a return that puts up nothing says so. */
+        if (G.uncover && !G.visible()) G.uncover();
+        return checked;
+      });
     }).then(ok => {
       // CANNOT CONNECT or Orbot is on screen; clearing it runs this again
       if (!ok) { G.holdVerify(false); return; }
-      G.launchStage('balance', 60, 100);
+      // with no screen up there is none to move along, and none to let go of
+      const quiet = ok === 'quiet';
+      if (!quiet) G.launchStage('balance', 60, 100);
       this.listenWallet();
       this.loadHistory();
       const swept = W.resumeSweeps ? W.resumeSweeps().catch(() => {}) : null;
@@ -1416,7 +1461,7 @@ class Component extends DCLogic {
         Promise.resolve(this.resumeLoad()).catch(() => {}),
         new Promise(r => setTimeout(r, 20000)),
       ]).then(() => {
-        G.holdVerify(false);
+        if (!quiet) G.holdVerify(false);
         // paid while away, or a melt that settled: the balance again once swept
         if (swept) swept.then(() => this.refreshBalance());
       });
@@ -1476,8 +1521,13 @@ class Component extends DCLogic {
     const p = (W && W.privacy && W.privacy()) || {};
     const offline = !!p.offline;
     const secure = p.tor === 'up' && p.network !== 'none';
+    /* Said out loud only when the phone had really been without a network.
+     * Every session starts offline now and is online a few seconds later,
+     * and a toast for that is noise: the banner turning is the news. */
+    if (offline && p.network === 'none') this._offlineDark = true;
     if (this._wasOffline && !offline && secure) {
-      this.toast('Back online \u2014 connected over Tor');
+      if (this._offlineDark) this.toast('Back online \u2014 connected over Tor');
+      this._offlineDark = false;
       // and anything that was waiting on a route can go now
       this.refreshBalance();
       this.loadHistory();
@@ -1550,24 +1600,57 @@ class Component extends DCLogic {
     const p = (W.privacy && W.privacy()) || {};
     if (!(p.tor === 'up' || p.unprotected)) return;
     if (this._catchUpConnect) return;
+    if (p.network === 'none') return;
     this._catchUpConnect = true;
     const url = W.mintUrl;
     console.log('[foxy] a route is up and this wallet came from storage \u2014 connecting to', url, 'for real');
-    this.retryConnect(url, 0).catch(() => {});
+    /* Behind whatever the person is doing. This went through `retryConnect`,
+     * whose `walletReady` puts the home screen up and empties the back stack:
+     * right for a launch, and a jump out of RECEIVE or a payment for somebody
+     * who had started one in the seconds before the mint answered. Every
+     * launch is such a wallet now, so the catch-up only connects, and then
+     * refreshes what is shown. A failure changes nothing (`connect` keeps the
+     * wallet it had) and is tried again: 3s, 6s, 12s, then every 30s. */
+    const again = (attempt) => {
+      W.connect(url).then(() => {
+        this.refreshBalance();
+        this.loadHistory();
+        this.offerQuarantine();
+      }, (e) => {
+        console.warn('[foxy] the connect behind the home screen failed, attempt', attempt + 1, '\u2014', W.reason(e));
+        const still = W.fromCache && W.fromCache();
+        if (!still) return;
+        clearTimeout(this._catchUpT);
+        this._catchUpT = setTimeout(() => again(attempt + 1), Math.min(3000 * Math.pow(2, attempt), 30000));
+      });
+    };
+    again(0);
   }
 
   /* There is no screen to park on any more, so a mint that will not load is
    * simply tried again — 3s, 6s, 12s, then every 30s. A mint that is briefly
    * down recovers without the person doing anything. */
-  retryConnect(url, attempt) {
+  retryConnect(url, attempt, fromFile) {
     const W = window.FoxyWallet;
     clearTimeout(this._reconnectT);
-    return W.connect(url).then(w => {
+    return W.connect(url, null, null, fromFile ? { fromCache: true } : undefined).then(w => {
       const balance = this.walletReady(w);
       /* The mint is not asked about every proof held, here or on a return: the
        * same list each launch let it know this wallet over any exit. Ecash
        * spent elsewhere is found when a payment picks it (onSpentElsewhere). */
       this.offerQuarantine();
+      if (fromFile) {
+        /* Home first: the sats are local and the last price is on file, so
+         * there is nothing to hold the home screen back for. It waited for the
+         * price walk, up to twelve seconds behind the phone's splash now that
+         * no connection screen stands there. And the mint is spoken to for
+         * real the moment there is a route, which may be now. */
+        this.settleLaunch();
+        this.connectForRealOnceOnline();
+        // the balance is on its way to the screen by itself; a price that would not load is not a failed connect
+        Promise.resolve(balance).catch(() => {});
+        return null;
+      }
       if (!this._launchSettled) return;
       const G = window.FoxyGate;
       if (G && G.launchStage) G.launchStage('balance', 92, 100);
@@ -1591,7 +1674,7 @@ class Component extends DCLogic {
       }
       if (attempt === 2) this.toast(why, true);
       const wait = Math.min(3000 * Math.pow(2, attempt), 30000);
-      this._reconnectT = setTimeout(() => this.retryConnect(url, attempt + 1), wait);
+      this._reconnectT = setTimeout(() => this.retryConnect(url, attempt + 1, fromFile), wait);
     });
   }
 
@@ -5030,7 +5113,12 @@ class Component extends DCLogic {
       + 'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;'
       // under the back button's row, where there is one
       + 'padding:' + (o.back ? '118px' : '76px') + ' 26px 26px;box-sizing:border-box;'
-      + 'font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
+      /* No fade for the lock. It is a cover, drawn under the phone's own
+       * cover before that comes off, and its fade-in showed the home screen
+       * through it for a moment: the connection screen used to sit underneath
+       * and hide that, and opens on the home screen now. */
+      + 'font-family:SatSymbol,Sora,system-ui,sans-serif'
+      + (o.cover ? '' : ';animation:foxyIn .16s ease'));
 
     const title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
       + 'color:var(--ink,#F5F1EC);text-align:center', o.title || '');
@@ -5191,11 +5279,11 @@ class Component extends DCLogic {
         + 'cursor:pointer;display:none', 'USE FACE ID');
       face.addEventListener('click', o.face);
       root.appendChild(face);
-      /* Shown only where a face stands in for a PIN that is there to type —
-       * and never beside a CTA that is already the same button (noKeypad, the
-       * face-alone lock, where the face IS the way in). */
+      /* Shown only where the menu's USE FACE ID is on and there is a PIN to
+       * type beside it — and never beside a CTA that is already the same
+       * button (noKeypad, the face-alone lock, where the face IS the way in). */
       if (W && W.biometric && !o.noKeypad
-          && W.faceInsteadOfPin && W.faceInsteadOfPin()) {
+          && W.faceLock && W.faceLock()) {
         face.style.display = 'flex';
       }
     }
@@ -5239,7 +5327,10 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this.pinOverlay({
       title: 'CHOOSE A PIN',
-      subtitle: 'Four digits or more. You will enter this every time you open Foxy.',
+      // true to the menu's switch: with USE FACE ID on, a face opens Foxy first
+      subtitle: W && W.faceLock && W.faceLock()
+        ? 'Four digits or more. It opens Foxy when Face ID does not.'
+        : 'Four digits or more. You will enter this every time you open Foxy.',
       cta: 'NEXT',
       onCancel: () => { if (onDone) onDone(false); },
       onSubmit: (first) => {
@@ -5287,24 +5378,11 @@ class Component extends DCLogic {
         try {
           W.pinSet(pin);
           this.toast('PIN set');
-          /* May a face be shown instead of these digits?
-           *
-           * A device with biometrics is asked once, here. This is the only
-           * place the answer is given, so setting a PIN again is how it is
-           * changed — nothing else writes it, and the menu's Face ID row must
-           * not: that row is the SEED's guard, and somebody can want a face on
-           * the keychain and still want the PIN typed to get in
-           * (faceInsteadOfPin, 22-screen-lock.js).
-           *
-           * 'unavailable' is a phone that cannot check a face at all, and
-           * leaves the answer alone rather than writing a no. */
-          if (W.biometric && W.faceInsteadOfPin) {
-            W.biometric('Use Face ID to unlock Foxy?').then(answer => {
-              if (answer === 'unavailable') return;
-              W.faceInsteadOfPin(answer === 'yes');
-              if (answer === 'yes') this.toast('Face ID will unlock Foxy');
-            }).catch(() => {});
-          }
+          /* Nothing is asked about a face here. It was, once, and the answer
+           * was kept where no switch showed it: a face then opened Foxy with
+           * the PIN screen never appearing, under a menu that said Face ID
+           * was off. MENU > USE FACE ID is the one place a face is turned on
+           * or off (faceLock, 22-screen-lock.js). */
           if (onDone) onDone(true);
         } catch (e) {
           this.toast(W.reason(e), true);
@@ -5344,13 +5422,14 @@ class Component extends DCLogic {
    * ID row sets `secureChoice`, which guards the
    * SEED, so a face was asked when money was spent and never for looking.
    *
-   * Two settings decide what this screen accepts, and they are not the same
-   * question (22-screen-lock.js):
+   * One setting decides whether a face is offered, the menu's USE FACE ID
+   * (`faceLock()`, 22-screen-lock.js), and whether a PIN is set decides what
+   * the face is:
    *
-   *   no PIN     `faceLock()` — the face is the lock, so it is offered, and
-   *              the phone's own passcode may stand in for it
-   *   a PIN      `faceInsteadOfPin()` — the PIN is the lock and a face is a
-   *              shortcut past it, offered only where they asked for one */
+   *   no PIN     the face is the lock, and the phone's own passcode may
+   *              stand in for it
+   *   a PIN      the face is the quick way in and the PIN is the way in when
+   *              it will not scan; with USE FACE ID off, only the PIN opens */
   pinLock() {
     const W = window.FoxyWallet;
     if (!W || !W.screenLocked || !W.screenLocked()) return;
@@ -5369,6 +5448,8 @@ class Component extends DCLogic {
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;
+    // said, so a diary shows the lock: it drew and asked in silence, and a report about it had nothing to go on
+    console.log('[foxy] lock: up, ' + (byFaceAlone ? 'a face is the way in' : 'the PIN pad') + (W.faceLock && W.faceLock() ? ', a face is asked' : ''));
     this._unlockWait = new Promise(resolve => { this._unlockDone = resolve; });
     const unlocked = () => {
       this._pinLocked = false;
@@ -5387,8 +5468,8 @@ class Component extends DCLogic {
      * unlock the phone can open Foxy anyway. With a PIN set, that PIN is the
      * way in and Face ID stays biometrics-only. */
     const tryFace = (auto) => {
-      const wanted = byFaceAlone ? W.faceLock && W.faceLock()
-                                 : W.faceInsteadOfPin && W.faceInsteadOfPin();
+      // the menu's switch, whether or not a PIN stands behind the face
+      const wanted = W.faceLock && W.faceLock();
       if (!W.biometric || !wanted) return;
       W.biometric('Unlock Foxy', byFaceAlone).then(answer => {
         if (answer === 'unavailable' && byFaceAlone) {
@@ -5413,6 +5494,7 @@ class Component extends DCLogic {
         subtitle: message || (byFaceAlone ? 'Look at your phone to unlock.' : 'Enter your PIN.'),
         cta: byFaceAlone ? 'UNLOCK WITH FACE ID' : 'UNLOCK',
         noKeypad: byFaceAlone,
+        cover: true,
         face: () => tryFace(false),
         onSubmit: (pin, warn) => {
           /* Slow down guessing on a phone in someone's hand. This does
@@ -5429,6 +5511,13 @@ class Component extends DCLogic {
     };
     ask();
     tryFace(true);
+    /* And the phone is told the page has the screen: the lock is drawn, opaque
+     * and without a fade, so the launch image over it, or the cover put up as
+     * Foxy went away, can come off now. Said from here, whoever raised the lock.
+     * At launch it is raised from the wallet's boot, a moment after the page
+     * mounted, and nothing there said it: the splash sat over the PIN pad for
+     * the phone's eight seconds. */
+    if (window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
   }
 
   blockedCard(kind, over) {
@@ -8117,7 +8206,13 @@ class Component extends DCLogic {
            * holding the link open. */
           const changeHash = 'tap-change-' + Date.now();
           const bits = W.tokenInfo ? W.tokenInfo(token) : null;
-          const sats = bits ? (bits.proofs || []).reduce((a, pr) => a + Number(pr.amount || 0), 0) : 0;
+          /* The wallet's own total, not one added up here. A piece's amount
+           * is cashu-ts's own type, and `Number()` of one is the coercion its
+           * next major version throws on: the one sum in the app that had not
+           * gone over to `satsOf` with the wallet's, and it warned on the
+           * first change to arrive in every session. `sats` is null for a
+           * token that is not sats, which is 0 here and refused below. */
+          const sats = bits ? Math.round(Number(bits.sats) || 0) : 0;
           /* Checked before it is believed: owed, no more than owed, this mint,
            * and locked to a key this phone asked for (W.checkChange). M7 is
            * the other phone's word, and it used to be kept as it came. A
@@ -8243,6 +8338,11 @@ class Component extends DCLogic {
         console.log('[foxy] wake:', away + 's in the background');
         // A phone handed over while Foxy was in the background: lock first.
         this.pinLock();
+        /* The lock is the page's own cover, and the phone's comes off it now.
+         * The connection screen waits for the unlock, so until then nothing
+         * said the page had the screen: the splash sat over the PIN pad for
+         * the four seconds of the phone's backstop, on every return. */
+        if (this._pinLocked && window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
         /* The one Face ID of this visit: once past the lock, whose Face ID
          * unlock covers it, the seed is read now rather than when a payment
          * first needs it (FoxyWallet.openSeedForVisit). */
@@ -9579,6 +9679,9 @@ class Component extends DCLogic {
     this.syncAccent();
     // before anything else is usable, including the gate
     this.pinLock();
+    /* The lock tells the phone it has the screen itself (pinLock): the connecting
+     * screen, which is what used to say it, now stays down on every launch but
+     * the first (home first), and waited for the unlock even when it did not. */
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
     if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
     this.applyShell();
@@ -9655,7 +9758,14 @@ class Component extends DCLogic {
     // that talks to the network on launch was the one screen not behind Tor.
     const W = window.FoxyWallet;
     if (!W || !W.candles) { this._loading[r] = false; return; }
-    W.candles(cfg.g, cfg.span)
+    /* Asked inside a promise. `candles` refuses with a throw when there is no
+     * route, and thrown here it went up through `walletReady` into the
+     * launch's own catch: "connect failed, attempt 1" for a wallet that had
+     * connected, the rest of `walletReady` skipped (no balance, no history,
+     * nothing listening), and three seconds before it was tried again. A
+     * launch with no route did that every time; opening on the home screen,
+     * every launch has no route yet. */
+    Promise.resolve().then(() => W.candles(cfg.g, cfg.span))
       .then(series => {
         const rows = (series || [])
           .filter(x => isFinite(x.t) && isFinite(x.c) && x.c > 0)
@@ -9800,14 +9910,16 @@ class Component extends DCLogic {
     + '[data-snow] i>i>i{width:100%;height:100%;border-radius:50%;opacity:0;'
     + 'background:radial-gradient(circle at 34% 30%,#FFF 0%,#E4EEF6 45%,rgba(190,212,230,.55) 100%);'
     + 'animation:foxySnowFade linear infinite}'
-    /* And where it lands on something, it settles. A card on its own screen
-     * has a top edge for the snow to gather on (`data-snow-cap`, in the
-     * markup beside the card): a drift that rises along the edge and clumps
-     * that swell on it, each on its own clock, from nothing when the screen
-     * opens to a full cap half a minute later. Once, and it stays. */
+    /* And where it lands on something, it settles. The panel on the home
+     * screen, and a card on its own screen, have a top edge, round at both
+     * corners, for the snow to gather on (`data-snow-cap`, in the markup at
+     * the top of the panel and beside the card): a drift that rises along the
+     * edge and clumps that swell on it, each on its own clock, and a band
+     * across the whole width that creeps down round both corners to where
+     * they end. From nothing to settled in about half a minute, once, and it
+     * stays until the screen is left. */
     + '@keyframes foxySnowPile{0%{transform:scale(.9,0)}100%{transform:scale(1,1)}}'
     + '@keyframes foxySnowClump{0%{transform:scale(0)}100%{transform:scale(1)}}'
-    // and it lies along the whole edge and creeps down round both corners, to where they end
     + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
     + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
 
@@ -12072,9 +12184,13 @@ class Component extends DCLogic {
        * chosen to go without. Every other state has nothing a tap could change,
        * so it keeps the explainer. */
       torBanner: () => {
-        if (this.torBannerVals().torBannerOffline) {
+        const now = this.torBannerVals();
+        if (now.torBannerOffline) {
+          /* The connecting screen, which is where the count, RESTART TOR and
+           * the way to go without Tor now live. It comes down by itself once
+           * Tor is through. */
           if (window.FoxyGate && window.FoxyGate.leaveOffline) window.FoxyGate.leaveOffline();
-          this.toast('Looking for Tor again\u2026');
+          if (!now.torBannerMaking) this.toast('Looking for Tor again\u2026');
           return;
         }
         this.blockedCard('torConnection', {
@@ -12151,11 +12267,27 @@ class Component extends DCLogic {
      * likely to work and the person has no way of knowing that from Foxy. The
      * path monitor knows, so the banner says so — carefully: a network is not a
      * Tor circuit, and "may be" is the whole of what this can honestly claim. It is the same tap either way. */
-    const mayWork = offline && !!p && p.network && p.network !== 'none' && p.network !== 'unknown';
+    /* Offline is where every session begins now, and the banner says which
+     * kind it is. Foxy opens on the home screen and works offline until Tor is
+     * up (`homeFirst`, foxy-tor-gate.js), so this line is what the connecting
+     * screen used to be:
+     *
+     *   SECURING YOUR CONNECTION   a network, and Tor at work on a circuit:
+     *                              nothing to do, it turns to Secure by itself
+     *   OFFLINE - NO CONNECTION    no network at all
+     *   CANNOT CONNECT             a network, and Tor has stopped or given up:
+     *                              the tap brings the screen with the ways on
+     *
+     * Read from the route every time, as the rest of this banner is. A stale
+     * `up` over no network is no connection (the path monitor wins, as it does
+     * in the gate), and with a network under it `up` is not offline at all. */
+    const noNet = !!p && p.network === 'none';
+    const making = offline && !noNet && (p.tor === 'connecting' || p.tor === 'stuck');
     return {
       torBannerShown: secure || off || offline,
-      torBannerText: mayWork ? 'CONNECTION MAY BE AVAILABLE'
-        : offline ? 'OFFLINE \u2014 TAP TO RETRY'
+      torBannerText: offline
+        ? (noNet ? 'OFFLINE - NO CONNECTION'
+           : making ? 'SECURING YOUR CONNECTION' : 'CANNOT CONNECT \u2014 TAP TO RETRY')
         : exposed ? 'IP Address Exposed'
         : viaOrbot ? 'Connected Via Orbot'
         : viaVpn ? 'Connected To Your VPN' : 'Secure Tor Connection',
@@ -12165,6 +12297,8 @@ class Component extends DCLogic {
         : (viaOrbot || viaVpn) ? '#3A2F0B' : '#123642',
       // read by the banner's tap, which is the way back out of offline
       torBannerOffline: offline,
+      // and whether there is anything for that tap to announce: Tor is already at it
+      torBannerMaking: making,
     };
   }
   /* amount: the keypad, for sending, receiving and making a token. */

@@ -151,6 +151,41 @@ final class RouteTests: XCTestCase {
     }
 }
 
+/// How long Tor is kept on the network once Foxy is put away and its work is
+/// over (Route.holding): for what iOS allows, less what leaving cleanly needs.
+final class TorHoldTests: XCTestCase {
+    func testTorIsHeldForWhatIOSAllowsLessTheTimeToLeave() {
+        XCTAssertTrue(Route.holding(waited: 0.9, remaining: 29), "just put away, with the usual thirty seconds")
+        XCTAssertTrue(Route.holding(waited: 20, remaining: 9.5), "twenty seconds on, and still time to leave cleanly")
+        XCTAssertTrue(Route.holding(waited: 23, remaining: 6.1))
+        XCTAssertFalse(Route.holding(waited: 24, remaining: 6), "the reserve: Tor's answer can take four seconds")
+        XCTAssertFalse(Route.holding(waited: 3, remaining: 4), "iOS allowing less than usual ends it early")
+    }
+
+    func testTheHoldEndsByItselfWhateverIOSSays() {
+        // with a debugger attached iOS names no limit; Tor is still taken off
+        XCTAssertTrue(Route.holding(waited: 25.9, remaining: .greatestFiniteMagnitude))
+        XCTAssertFalse(Route.holding(waited: 26, remaining: .greatestFiniteMagnitude))
+        XCTAssertFalse(Route.holding(waited: 5, remaining: .nan), "an answer that is no number is no time")
+        // and all of it fits in what iOS allows: the hold, then Tor's four seconds
+        XCTAssertLessThanOrEqual(Route.holdAtMost + 4, 30)
+        XCTAssertGreaterThanOrEqual(Route.holdReserve, 4 + 1)
+    }
+}
+
+/// When the cover over a return comes off without waiting for the page.
+final class ReturnCoverTests: XCTestCase {
+    func testAReturnThePageDoesNothingForIsUncoveredAtOnce() {
+        XCTAssertTrue(WebHostController.coverOffAtOnce(wentAway: false, away: 0),
+                      "Face ID, Control Center, a screenshot: Foxy never left")
+        XCTAssertTrue(WebHostController.coverOffAtOnce(wentAway: true, away: 0),
+                      "to the background and back inside a second: the page is told 0 and does nothing")
+        XCTAssertFalse(WebHostController.coverOffAtOnce(wentAway: true, away: 1),
+                       "a second or more: the page answers, and says when it has the screen")
+        XCTAssertFalse(WebHostController.coverOffAtOnce(wentAway: true, away: 300))
+    }
+}
+
 /// When RESTART TOR is offered (TorStuck, in TorTransport.swift). The rule the
 /// page shows the button by, held to the cases a phone once showed.
 final class TorStuckTests: XCTestCase {
@@ -196,6 +231,27 @@ final class TorStuckTests: XCTestCase {
         // up, failed (CANNOT CONNECT has RETRY), stopped (reopen Foxy), or parked in the background
         XCTAssertFalse(offered(connecting: false, link: false, quiet: 600))
         XCTAssertFalse(offered(connecting: false, quiet: 600))
+    }
+
+    /// Radios off: Tor is taken off the network on purpose and says nothing.
+    /// A return to the front with still no network was read as connecting and
+    /// quiet, and RESTART TOR was offered thirty seconds later, every time.
+    func testATorTakenOffTheNetworkIsNotConnecting() {
+        func connecting(ready: Bool = false, failed: Bool = false, stopped: Bool = false,
+                        parked: Bool = false, offNetwork: Bool = false, running: Bool = true) -> Bool {
+            TorStuck.connecting(running: running, ready: ready, failed: failed, stopped: stopped,
+                                parked: parked, offNetwork: offNetwork)
+        }
+        XCTAssertTrue(connecting(), "setting up, with a network: this is when a restart can help")
+        XCTAssertFalse(connecting(offNetwork: true), "the phone has no network; nothing to restart through")
+        XCTAssertFalse(connecting(parked: true), "Foxy is put away")
+        XCTAssertFalse(connecting(ready: true))
+        XCTAssertFalse(connecting(failed: true), "CANNOT CONNECT has RETRY")
+        XCTAssertFalse(connecting(stopped: true), "reopen Foxy")
+        XCTAssertFalse(connecting(running: false), "not started")
+        // and so however long it is quiet, nothing is offered
+        XCTAssertFalse(TorStuck.offered(connecting: connecting(offNetwork: true), hasLink: true,
+                                        quiet: 600, bytesCounted: true))
     }
 }
 

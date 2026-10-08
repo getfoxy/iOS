@@ -125,6 +125,20 @@ enum TorStuck {
     static let silentAfterUncounted: TimeInterval = 60
     static let silentAfterSnowflake: TimeInterval = 120
 
+    /// Whether Tor is trying to connect: the only time a restart can help.
+    ///
+    /// Not while it is off the network on purpose. `parked` is Foxy put away.
+    /// `offNetwork` is the phone having no network at all: Tor is taken off it
+    /// so that it holds nothing against its guards, and it is silent because it
+    /// was told to be. A return to the front clears `parked` and, with no
+    /// network, leaves Tor off; that was read as connecting and quiet, and
+    /// RESTART TOR was offered thirty seconds into every stretch with the
+    /// radios off, where a restart has nothing to connect through.
+    static func connecting(running: Bool, ready: Bool, failed: Bool, stopped: Bool,
+                           parked: Bool, offNetwork: Bool) -> Bool {
+        running && !ready && !failed && !stopped && !parked && !offNetwork
+    }
+
     static func offered(connecting: Bool, hasLink: Bool, quiet: TimeInterval, bytesCounted: Bool,
                         snowflake: Bool = false) -> Bool {
         guard connecting else { return false }

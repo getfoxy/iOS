@@ -434,8 +434,7 @@
 
     /* ---- what guards the SEED, and what guards the SCREEN ----------------
      *
-     * Three settings overlap here and two of them were both called Face ID.
-     * They answer different questions:
+     * One answer, read for two questions, and one switch in the menu for it:
      *
      *   secureChoice()      the SEED. 'device' keeps it behind .userPresence
      *                       in the keychain, so a face is asked when money is
@@ -449,11 +448,21 @@
      *   faceLock()          the SCREEN, by a face. The same stored answer read
      *                       for a second question, because somebody who wants
      *                       a face in front of their money wants one in front
-     *                       of the balance and the history too.
+     *                       of the balance and the history too. With no PIN
+     *                       the face is the lock; with a PIN it is the quick
+     *                       way in, and the PIN is the way in when a face
+     *                       will not scan.
      *
-     *   faceInsteadOfPin()  the SCREEN when a PIN is already on it: may a face
-     *                       be shown instead of the digits being typed. A
-     *                       separate answer on purpose — see below.
+     * There was a third, and it is gone. Setting a PIN asked, once, whether a
+     * face might stand in for the digits, and kept that answer by itself with
+     * no switch anywhere. So somebody set a PIN, let iOS scan their face when
+     * it asked, and from then on Foxy opened by face without the PIN screen
+     * ever showing, under a menu whose USE FACE ID switch was off; the only
+     * way to change it was to remove the PIN (reported from a phone). A lock
+     * setting the menu cannot show is a lock the person cannot reason about.
+     * The switch is the whole of it now: off, a PIN is typed every time; on,
+     * a face opens the screen. What that gives up is a face on the keychain
+     * with the PIN still typed at every opening.
      *
      * Neither of the Face ID settings used to lock the screen at
      * all. `pinLock()` opened with `if (!W.pinIsSet()) return`, so Face ID on
@@ -534,36 +543,6 @@
       return FoxyWallet.secureChoice();
     },
 
-    /* May a face be shown instead of the PIN being typed?
-     *
-     * Read only when a PIN exists: with no PIN there is nothing for a face to
-     * stand in for, and faceLock() governs the screen on its own. Answered
-     * when a PIN is set (pinConfirmWarning), and answered again every time a
-     * PIN is set, so MENU > REMOVE PIN then MENU > SET PIN is the way to
-     * change the answer. Off unless they said yes.
-     *
-     * It looks redundant beside faceLock() now that a face locks the screen by
-     * itself, and it is not. secureChoice is about the SEED: 'device' means a
-     * face can already spend the money and show the twelve words. This is
-     * about the PIN in particular, and the two answers may honestly differ —
-     * somebody sets a PIN precisely because a face is the one key an attacker
-     * holding the phone can obtain, and they still want those digits typed
-     * whatever guards the keychain. Governing the lock screen by faceLock()
-     * instead would let a face open a screen that today only the PIN opens, on
-     * every install that answered no here. That is a weaker lock, so this
-     * setting stays.
-     *
-     * The stored key is still 'foxy.pin.bio' on purpose. The name is poor and
-     * renaming it would buy a tidier string in exchange for migrating every
-     * install that has already answered — and getting that migration wrong in
-     * the safe-looking direction (absent reads as false) silently drops a
-     * setting people rely on to get in. Not worth it. */
-    faceInsteadOfPin: function (on) {
-      if (on === undefined) return !!load('foxy.pin.bio', false);
-      save('foxy.pin.bio', !!on);
-      return !!on;
-    },
-
     /* Wrong PINs, counted across launches.
      *
      * The count used to live in the app's memory, so closing Foxy and opening
@@ -627,6 +606,8 @@
         hash: pinHash(digits, saltHex, FoxyWallet.PIN_ROUNDS),
       });
       FoxyWallet.pinTriesClear();
+      // the answer an older Foxy kept about a face standing in for the PIN: read by nothing now
+      try { localStorage.removeItem('foxy.pin.bio'); } catch (e) {}
       return true;
     },
 
@@ -646,6 +627,7 @@
 
     pinClear: function () {
       try { localStorage.removeItem('foxy.pin.v1'); } catch (e) {}
+      try { localStorage.removeItem('foxy.pin.bio'); } catch (e) {}
       FoxyWallet.pinTriesClear();
       return true;
     },

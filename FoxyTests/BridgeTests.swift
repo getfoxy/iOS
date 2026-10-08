@@ -118,6 +118,8 @@ final class BridgeTests: XCTestCase {
     func testFaceIDSaysOnlyFoxysWords() {
         XCTAssertEqual(FoxyBridge.biometricReason("Leave POS mode"), "Leave POS mode")
         XCTAssertEqual(FoxyBridge.biometricReason("Approve sending 1 BTC"), "Unlock Foxy")
+        // asked once when a PIN was set, and asked by nothing now
+        XCTAssertEqual(FoxyBridge.biometricReason("Use Face ID to unlock Foxy?"), "Unlock Foxy")
         XCTAssertEqual(FoxyBridge.biometricReason(nil), "Unlock Foxy")
     }
 

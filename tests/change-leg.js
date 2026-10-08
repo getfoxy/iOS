@@ -472,6 +472,89 @@ async function run() {
        JSON.stringify({ sats: out.sats, change: out.changeSats, state: out.changeState, dust: out.dustSats }));
   }
 
+  /* ---- 6b: what the receiver says it has while the change is being made ---
+   * The entry is written at what stays, the moment the payment lands. The
+   * pieces said the whole of it until the swap that makes the change had run:
+   * for those seconds the balance was the payment plus its change, and the
+   * books were out by the change. Set aside from the start (`holdChange`), so
+   * the balance only ever says what stays. */
+  {
+    const t = await pair();
+    const ask = t.rx.W.decodeRequest(t.rx.W.paymentRequest(100, { purpose: 'receive' })) || {};
+    const start = await t.rx.W.balanceSats();
+    const seen = new Set();
+    let watching = true;
+    const watcher = (async () => {
+      while (watching) { seen.add(await t.rx.W.balanceSats()); await new Promise((r) => setTimeout(r, 0)); }
+    })();
+    await t.payer.W.payRequest(Object.assign({}, ask, { sats: 100, unit: 'sat', viaTap: true }),
+      () => {}, { overpayOk: true }).catch(() => {});
+    await settle(900);
+    watching = false; await watcher;
+    const said = Array.from(seen).sort((x, y) => x - y);
+    ok(t.L.log.indexOf('M7 change') >= 0, 'paid 128 for 100, and the change went back', t.L.log.join(' | '));
+    ok(!seen.has(start + 128), 'the receiver never shows the 128 sat piece the payment came in',
+       said.map((n) => n - start).join(', ') + ' over what it began with');
+    ok(said.length === 2 && said[0] === start && said[1] === start + 100,
+       'its balance goes from what it had to that plus the 100 it keeps, and nowhere else',
+       said.map((n) => n - start).join(', '));
+    ok(t.rx.W._changeLeavingSats() === 0, 'and nothing is left set aside once the change has gone',
+       String(t.rx.W._changeLeavingSats()));
+  }
+  // and when the change cannot be made, this phone holds the lot and says so
+  {
+    const t = await pair();
+    const ask = t.rx.W.decodeRequest(t.rx.W.paymentRequest(100, { purpose: 'receive' })) || {};
+    const start = await t.rx.W.balanceSats();
+    // the mint takes the payment and then will not make the swap for its change
+    t.rx.W.tapChangeDue = () => { t.rx.swapFate = 'refused'; return Promise.resolve(); };
+    await t.payer.W.payRequest(Object.assign({}, ask, { sats: 100, unit: 'sat', viaTap: true }),
+      () => {}, { overpayOk: true }).catch(() => {});
+    await settle(900);
+    t.rx.swapFate = null;
+    const row = history(t.rx).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || {};
+    const end = await t.rx.W.balanceSats();
+    ok(t.L.log.indexOf('M7 change') < 0, 'a mint that will not make the change: none goes back', t.L.log.join(' | '));
+    ok(end === start + 128 && t.rx.W._changeLeavingSats() === 0,
+       'so nothing stays set aside, and the balance is all 128 that came',
+       (end - start) + ' over, ' + t.rx.W._changeLeavingSats() + ' set aside');
+    ok(Number(row.sats) === 128 && row.changeState === 'never sent',
+       'and the entry says the same', JSON.stringify({ sats: row.sats, state: row.changeState }));
+  }
+
+  // and when the route goes while the payment is being swapped in, the entry is put right too
+  /* `changeOwed` says change is owed when the payment lands, and the entry is
+   * written at what stays. Unlocked ecash is swapped in before anything else,
+   * and the route had the whole length of that swap to drop in: `changeBack`
+   * then found no route, made no change, and said nothing to the entry.
+   * History read 100 for good over a phone holding 128. */
+  {
+    const t = await pair();
+    const ask = t.rx.W.decodeRequest(t.rx.W.paymentRequest(100, { purpose: 'receive' })) || {};
+    const start = await t.rx.W.balanceSats();
+    let letGo = null;
+    const gate = { held: false, until: new Promise((r) => { letGo = r; }) };
+    t.rx.holdSwap = gate;              // the swap that takes the payment in, held at the mint
+    const paying = t.payer.W.payRequest(Object.assign({}, ask, { sats: 100, unit: 'sat', viaTap: true }),
+      () => {}, { overpayOk: true }).catch(() => {});
+    for (let i = 0; i < 200 && !gate.held; i++) await new Promise((r) => setTimeout(r, 10));
+    // the network goes while the mint has it
+    t.rx.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct', network: 'none' });
+    letGo();
+    await paying;
+    await settle(900);
+    const row = history(t.rx).filter((e) => e.dir === 'in' && /^req-/.test(String(e.hash || '')))[0] || {};
+    const end = await t.rx.W.balanceSats();
+    ok(gate.held && t.L.log.indexOf('M7 change') < 0, 'the route drops while the payment is being swapped in: no change is made',
+       t.L.log.join(' | '));
+    ok(end === start + 128 && t.rx.W._changeLeavingSats() === 0, 'the phone holds all 128 and says so',
+       (end - start) + ' over, ' + t.rx.W._changeLeavingSats() + ' set aside');
+    ok(Number(row.sats) === 128 && row.changeState === 'never sent',
+       'and its entry is put right: 128, with the change never sent',
+       JSON.stringify({ sats: row.sats, change: row.changeSats, state: row.changeState }));
+    goOnline(t.rx.W);
+  }
+
   /* ---- 7: a no that is true, and a not-yet that is said as one -----------
    * Plain ecash from an offline payer, and the receiver's swap does not come
    * back. It answered 422 — "they did not take it, your sats are still yours"

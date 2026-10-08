@@ -196,8 +196,8 @@ check('offline, the last price stands however old it is',
 /* 6 — the way back is in the banner ---------------------------------------- */
 
 check('the banner tap leaves offline rather than explaining Tor',
-  /torBannerOffline[\s\S]{0,200}?leaveOffline/.test(app),
-  'TAP TO RETRY has to do what it says');
+  /torBannerOffline\) \{[\s\S]{0,400}?leaveOffline/.test(app),
+  'the tap on an offline banner has to bring the connection screen');
 
 /* 7 — the mint list, offline ------------------------------------------------
  *

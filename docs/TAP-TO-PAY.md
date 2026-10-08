@@ -41,10 +41,14 @@ failed hand-over costs the time it took to try and nothing else.
    instead of a tap. MENU › SETTINGS › AUTO TAP TO PAY, switched off, turns it back into a press.
    `tests/tap-offer.js` checks the arming and smoke check 43 reads both sides.
 
-   A subscriber that never starts the handshake — a scanner, a curious app —
-   is let go after five seconds and the receiver goes back on the air
-   (`TapLink.handshakeWait`), so a stranger cannot hold a till off the air by
-   connecting to it.
+   A phone that subscribes takes nothing by it: the receiver stays on the air
+   and its one place goes to the first phone to say a first word (M1,
+   `TapPlace`). A subscribe used to take the place for five seconds, so
+   anything in range could hold a till off the air by subscribing, saying
+   nothing, and doing it again. A phone that begins the handshake and stops is
+   let go after three seconds (`TapLink.handshakeWait`). Anything in range can
+   still begin a handshake, as it can jam the radio; what it can no longer do
+   is hold the place by listening.
 
    The press can come **before the invoice is ready**. Nothing in the handshake
    needs the offer — it is M4, and the four digits are settled at M3 from a

@@ -131,7 +131,29 @@
     var ids = Object.keys(all);
     if (ids.length > LOCK_KEYS_MAX) {
       var waiting = unclaimed();
-      ids.filter(function (k) { return k !== id && !(k in waiting); })
+      /* By the key, not only by the id. A payment kept from a scan waits
+       * under the fingerprint of its pieces, not under the id of the request
+       * whose key it is locked to, so its row was not spared: for a row from
+       * before, a random key, that was the only copy, and the payment was
+       * stranded for good. Every key a waiting payment names is read from
+       * the payment itself. */
+      var named = [];
+      Object.keys(waiting).forEach(function (wid) {
+        var tok = null;
+        try { tok = FoxyWallet.tokenInfo((waiting[wid] || {}).token); } catch (eTok) { tok = null; }
+        ((tok && tok.proofs) || []).forEach(function (pr) {
+          var keys = null;
+          try { keys = spendableBy(pr); } catch (eKeys) { keys = null; }
+          (keys || []).forEach(function (key) { named.push(key); });
+        });
+      });
+      var spared = function (k) {
+        if (k === id || (k in waiting)) return true;
+        if (!named.length) return false;
+        var pub = lockPubOf(all[k]);
+        return !!pub && named.some(function (key) { return sameLockKey(key, pub); });
+      };
+      ids.filter(function (k) { return !spared(k); })
         .sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); })
         .slice(0, ids.length - LOCK_KEYS_MAX)
         .forEach(function (k) { delete all[k]; });
@@ -199,6 +221,7 @@
    * the entries are dropped from memory's point of view by the epoch anyway,
    * but there is nothing to throw to. The next prime overwrites the key. */
   function dropLockPool() {
+    lockPoolChecked = false;
     if (!lockPool().length) return;
     console.log('[foxy] the seed changed; the primed lock keys go with it');
     if (!save(LOCK_POOL, [])) {
@@ -206,6 +229,35 @@
         + ' requests are sent unlocked until they can be');
       lockPoolStale = true;
     }
+  }
+
+  /* Whether the pool on disk is this seed's, asked of the phone once a launch.
+   *
+   * The latch above lives in memory. One refused write at a seed change, then
+   * a relaunch, and the old seed's keys were handed out again: the request
+   * went out locked to a key the new seed cannot derive, the payment to it
+   * was kept, and the claim found nothing to open it with. The pool carries
+   * no mark of its seed, so the first entry is put to the phone: the key it
+   * derives at that index is the pool's, or the pool is not this seed's and
+   * goes. A phone that cannot answer leaves the pool as it is; a wrong one
+   * costs nothing but the indices. */
+  var lockPoolChecked = false;
+
+  function lockPoolOfThisSeed(pool) {
+    if (lockPoolChecked || !pool.length) { lockPoolChecked = true; return Promise.resolve(true); }
+    var first = pool[0];
+    if (!Number.isInteger(first.i) || first.i < 0) return Promise.resolve(true);
+    return nativeJson('p2pkPubkeys', { start: first.i, count: 1 }, 60000).then(function (j) {
+      var keys = (j && j.pubkeys) || [];
+      var theirs = String(keys[0] || '').toLowerCase();
+      lockPoolChecked = true;
+      if (!/^0[23][0-9a-f]{64}$/.test(theirs)) return true;
+      if (theirs === String(first.pub || '').toLowerCase()) return true;
+      console.warn('[foxy] the primed lock keys are another seed\u2019s; they go, and this seed\u2019s are made');
+      if (!save(LOCK_POOL, [])) { lockPoolStale = true; return false; }
+      lockPoolStale = false;
+      return false;
+    }, function () { return true; });
   }
 
   /* Set when the write above failed. Belt and braces: `takeLockKey` hands out
@@ -217,11 +269,12 @@
    * never rejects, because every caller's answer to "no locks" is the same: send
    * the request without one. */
   function primeLockPool() {
-    var have = lockPool();
-    if (have.length >= LOCK_POOL_WANT) return Promise.resolve(have.length);
     if (lockPriming) return lockPriming;
-    var want = LOCK_POOL_WANT - have.length;
-    var run = nativeJson('p2pkReserve', { count: want }, 60000).then(function (j) {
+    var run = lockPoolOfThisSeed(lockPool()).then(function () {
+      var have = lockPool();
+      if (have.length >= LOCK_POOL_WANT) return have.length;
+      var want = LOCK_POOL_WANT - have.length;
+      return nativeJson('p2pkReserve', { count: want }, 60000).then(function (j) {
       var start = j && j.start, keys = (j && j.pubkeys) || [];
       if (!Number.isInteger(start) || start < 0 || !Array.isArray(keys) || keys.length !== want) {
         throw new Error('the phone’s lock keys were not for what was asked');
@@ -248,6 +301,7 @@
       console.warn('[foxy] the phone did not derive lock keys for payment requests:', (e && e.message) || e);
       return lockPool().length;
     });
+    });
     lockPriming = run;
     function done() { if (lockPriming === run) lockPriming = null; }
     run.then(done, done);
@@ -263,7 +317,8 @@
    * If the row does not land, the request carries no lock and one index is
    * wasted; if the pool write does not land, nothing is taken at all. */
   function takeLockKey(id) {
-    if (lockPoolStale) return '';
+    // nor before the phone has confirmed, this launch, whose keys the pool holds (`lockPoolOfThisSeed`)
+    if (lockPoolStale || !lockPoolChecked) return '';
     var pool = lockPool();
     if (!pool.length) return '';
     var one = pool.shift();
@@ -742,6 +797,46 @@
     return most;
   }
 
+  /* ---- change on its way back, out of what this phone says it has --------
+   *
+   * An offline payer with no exact pieces pays with a larger one, and the
+   * receiver hands the difference back. The entry is written at what stays
+   * (`kept`) the moment the payment lands; the pieces say the whole of it until
+   * the swap that makes the change has run, two to six seconds later. For
+   * those seconds the balance was the payment plus its change, and the books
+   * were out by the change: a phone paid 100 with a 128 piece showed the 28
+   * it was about to give away, and DOES NOT ADD UP to anybody who opened the
+   * history card just then.
+   *
+   * So what is going back is set aside from the start. Held by the payment's
+   * own entry, in memory only: a page that dies in those seconds comes back
+   * holding the lot, which is the truth, and the change's own record puts it
+   * right (`repairOwedChange`, the swap record's `pay`). Let go at the instant
+   * the pieces leave the pile (`sendToken`), or when no change is going to be
+   * made after all and this phone keeps the lot. */
+  var changeLeaving = {};
+
+  function holdChange(hash, sats, at) {
+    var n = Math.round(Number(sats) || 0);
+    if (!hash || !(n > 0)) return;
+    changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || mintUrl || '')) };
+  }
+
+  /* Idempotent: every way out of making change calls it, and only one of
+   * them is the one that had anything to let go. */
+  function changeHoldOver(hash) {
+    if (hash && changeLeaving[hash]) delete changeLeaving[hash];
+  }
+
+  function changeLeavingSats(at) {
+    var here = at ? canonicalMint(String(at)) : '', total = 0;
+    Object.keys(changeLeaving).forEach(function (k) {
+      var one = changeLeaving[k];
+      if (!here || !one.mint || one.mint === here) total += one.sats;
+    });
+    return total;
+  }
+
   function changeOwed(p, over) {
     if (over !== 'tap') return 0;
     var asked = Number(p.asked);
@@ -951,9 +1046,16 @@
       if (e.changeState !== 'owed' && e.changeState !== 'never came') return;
       var want = Math.round(Number(e.changeSats));
       var near = function (n) { var s = Math.round(Number(n)); return s >= want - changeAllowance(want) && s <= want + changeAllowance(want); };
+      /* A code that was scanned or pasted, and no other kind of receive.
+       * Change collected later is the receiver's code taken in by hand, which
+       * is filed as a token (`token-`) or, offline, as a scan (`req-scan-`).
+       * Any later receive near the size used to do: a payment by tap or an
+       * invoice of about the same amount was bound as "collected", and the
+       * change that was in fact still owed stopped being pointed at. */
+      var byCode = function (r) { return /^(token-|req-scan-)/.test(String(r.hash || '')); };
       var got = log.filter(function (r) {
         return r && r.dir === 'in' && r.hash !== e.hash && !used[r.hash] && !r.failed
-          && near(r.sats) && Number(r.at) >= Number(e.at)
+          && byCode(r) && near(r.sats) && Number(r.at) >= Number(e.at)
           && Number(r.at) - Number(e.at) < 7 * 86400;
       })[0];
       if (!got) return;
@@ -971,24 +1073,46 @@
    * before this phone could tell: the payment already says its change came
    * back, and the scan is a second row for the same sats. The duplicate was
    * refused by the mint on the next connection, so the balance is right and
-   * the list is one row too long. Only a scan, only for exactly the change,
-   * and only within a quarter of an hour of the payment it belongs to. */
+   * the list is one row too long.
+   *
+   * Known by its pieces, and by nothing else. A scan's entry is named after
+   * the pieces it held (`req-scan-` and their fingerprint), and the pieces of
+   * change that came back are written down as it is checked (`checkChange`,
+   * `changeSeenNote`). This matched by amount, to within the fee allowance,
+   * inside a quarter of an hour: a real payment taken by code that happened to
+   * be near the size of change that had just come back was written off as
+   * that change, and written off again after every claim put it right, since
+   * this runs on every reading of history. A scan from before the pieces were
+   * written down is left as it is. */
+  var CHANGE_SEEN = 'foxy.change.seen';
+
+  function changeSeen() {
+    var l = load(CHANGE_SEEN, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.f === 'string'; }) : [];
+  }
+
+  function changeSeenNote(list) {
+    var f = piecesFingerprint(list);
+    if (!f) return;
+    var l = changeSeen().filter(function (r) { return r.f !== f; });
+    l.push({ f: f, at: Date.now() });
+    // `save`, and a refusal ignored: this is only for tidying a list, and the change itself is kept elsewhere
+    save(CHANGE_SEEN, l.slice(-100));
+  }
+
   function dropScannedTwice() {
+    var seen = {};
+    changeSeen().forEach(function (r) { seen[r.f] = true; });
+    if (!Object.keys(seen).length) return 0;
     var log = load(K.log, []);
-    var done = 0, used = {};
-    log.forEach(function (e) {
-      if (!e || e.dir !== 'out' || e.changeState !== 'came back' || !(Number(e.changeSats) > 0)) return;
-      var want = Math.round(Number(e.changeSats));
-      var near = function (n) { var s = Math.round(Number(n)); return s >= want - changeAllowance(want) && s <= want + changeAllowance(want); };
-      var twin = log.filter(function (r) {
-        return r && r.dir === 'in' && !used[r.hash] && /^req-scan-/.test(String(r.hash || ''))
-          && r.state !== 'failed' && near(r.sats)
-          && Number(r.at) >= Number(e.at) && Number(r.at) - Number(e.at) <= 900;
-      })[0];
-      if (!twin) return;
-      used[twin.hash] = true;
-      amendTx(twin.hash, { state: 'failed', settled: false, memo: 'the same change, scanned again' });
-      console.log('[foxy] a scan of change that had already come back is no longer counted: ' + want + ' sats');
+    var done = 0;
+    log.forEach(function (r) {
+      if (!r || r.dir !== 'in' || r.state === 'failed') return;
+      var m = /^req-scan-(.+)$/.exec(String(r.hash || ''));
+      if (!m || !seen[m[1]]) return;
+      amendTx(r.hash, { state: 'failed', settled: false, memo: 'the same change, scanned again' });
+      console.log('[foxy] a scan of change that had already come back is no longer counted: '
+        + Math.round(Number(r.sats) || 0) + ' sats');
       done += 1;
     });
     return done;
@@ -1389,10 +1513,30 @@
   }
 
   function changeBack(p, over) {
-    if (over !== 'tap') return;
+    /* Whatever was set aside for this payment's change stays set aside only
+     * while change is really being made: each way out below that makes none
+     * lets it go, and this phone is seen to hold what it holds. */
+    var stays = function () { changeHoldOver('req-' + p.id); };
+    /* No change will be made after all, and the entry was written as if it
+     * would be: it says what stays less the change, and this phone holds the
+     * lot. Put right here, as the failure to make it already was below. The
+     * route had only to drop between the payment landing and this running,
+     * which on the path that swaps first is the whole length of the swap, and
+     * history said 100 for good over a phone holding 128. Only where the entry
+     * is still waiting on that change. */
+    var keptTheLot = function () {
+      stays();
+      try {
+        var row = load(K.log, []).filter(function (e) { return e && e.hash === 'req-' + p.id; })[0];
+        var waiting = row && Number(row.changeSats) > 0
+          && (!row.changeState || row.changeState === 'making');
+        if (waiting && FoxyWallet.changeSettled) FoxyWallet.changeSettled('req-' + p.id, 0);
+      } catch (eRow) { console.warn('[foxy] the entry could not be put right for change that was not made:', eRow && eRow.message); }
+    };
+    if (over !== 'tap') { stays(); return; }
     var asked = Number(p.asked);
     var paid = Number(p.sats) || 0;
-    if (!(asked > 0) || !(paid > asked)) return;
+    if (!(asked > 0) || !(paid > asked)) { stays(); return; }
     /* The same sum `changeOwed` does, fee and all. This one was left at
      * paid less asked, so at a mint that charges a fee every payment from
      * another Foxy "overpaid" by exactly that fee: the entry said no change
@@ -1400,17 +1544,19 @@
      * payer refused it over the link as change nobody owed it, and the
      * receiver put a code up to be scanned for one or two sats — every time. */
     var owed = Math.max(0, paid - asked - (Number(p.inFee) || 0));
-    if (!(owed > 0)) return;
+    if (!(owed > 0)) { stays(); return; }
     /* Less what it costs to make and to take, which is the payer's
      * (`changeFor`). When that leaves nothing, nothing is made: the payer's
      * phone has done the same sum and is not waiting. */
     var back = changeFromPile(wallet, owed);
     if (!(back > 0)) {
       console.log('[foxy] they paid ' + owed + ' sats over, which is too little to send back at this mint; it stays with the payment');
+      keptTheLot();
       return;
     }
     if (!routeOpen()) {
       console.warn('[foxy] they overpaid by ' + owed + ' sats and this phone has no route to make change');
+      keptTheLot();
       return;
     }
     /* Locked to the payer, or not sent at all.
@@ -1425,6 +1571,7 @@
      * can account for is worse than both. */
     if (!p.changeTo) {
       console.warn('[foxy] they overpaid by ' + owed + ' sats and sent no key to lock change to; they are owed');
+      keptTheLot();
       return;
     }
     console.log('[foxy] they overpaid by ' + owed + ' sats; making change locked to them');
@@ -1440,6 +1587,8 @@
     FoxyWallet.sendToken(back, { unit: 'sat', lockTo: p.changeTo, purpose: 'change',
                                  forHash: 'req-' + p.id, owed: owed }).then(function (made) {
       var madeIn = Date.now() - began;
+      // let go as the pieces left the pile (`sendToken`); again here costs nothing
+      stays();
       console.log('[foxy] change of ' + back + ' sats made in ' + madeIn + ' ms for the ' + owed
         + ' paid over; handing it back');
       /* On the payment it is the rest of, whatever happens next. It is locked
@@ -1489,6 +1638,8 @@
        * not be handed over is money that has already left this pile — it is
        * locked to the payer and sitting on the token screen — so the net stands.
        */
+      // and what was set aside for it is this phone's after all
+      stays();
       if (FoxyWallet.changeSettled) FoxyWallet.changeSettled('req-' + p.id, 0);
     });
   }
@@ -1618,6 +1769,8 @@
       return pubs.some(function (pub) { return onlyLockedTo(pr, pub); });
     });
     if (!locked) return no('it is not locked to a key this phone asked for');
+    // its pieces, so a later scan of the same change is known for what it is (`dropScannedTwice`)
+    try { changeSeenNote(list); } catch (eSeen) {}
     return { ok: true, why: '', signed: mintSigned(wallet, list), sats: sum };
   }
 

@@ -39,13 +39,25 @@ mint is `mint.minibits.cash`.
 - **Not through Tor, by design:** Snowflake's broker and STUN contacts. They
   learn the phone is starting Snowflake. They never see a mint, an amount or a
   payment.
-- **Coming back from the background sets up a private connection again.** Tor
-  goes off the network as Foxy leaves, once what is with a mint has come back:
-  a payment is waited for up to twenty seconds, anything else up to three, and
-  from then nothing new is sent. On return it is set up the way launch
-  sets it up, behind the same screen, and the home screen shows once the
-  balance has loaded. Nothing is tried on the connection from before. The PIN
-  lock comes back on a real return from the background.
+- **Foxy opens on the home screen, and the connection is a banner.** A wallet
+  that has connected once is shown from what is on file (its mint's keysets
+  and the last price) and works offline until Tor is really up, a few seconds
+  later. The banner at the foot of the home screen says which: SECURING YOUR
+  CONNECTION while Tor is at work, OFFLINE - NO CONNECTION with no network,
+  CANNOT CONNECT when Tor has given up, and a tap on it brings the connection
+  screen with its count and its choices. Only a first launch, with nothing on
+  file, waits behind that screen. Nothing about what is sent changes: the
+  phone refuses every request without Tor, as before. A step that moves
+  money waits a few seconds for a connection that is on its way rather than
+  take the offline way.
+- **Coming back from the background is the same.** Once what is with a mint
+  has come back (a payment is waited for up to twenty seconds, anything else
+  up to three), nothing new is sent, and Tor goes off the network about
+  twenty-four seconds after Foxy left: as long as iOS allows, less the time
+  leaving takes. Back before that, Foxy has the connection it left with.
+  After it, the home screen is there at once, offline, while a private
+  connection is set up again; nothing is tried on the connection from before.
+  The PIN lock comes back on a real return from the background.
 
 The details, and the limits, are in `THREAT-MODEL.md` §4.
 

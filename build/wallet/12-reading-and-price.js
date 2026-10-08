@@ -9,7 +9,10 @@
        * just paid should see what they were paid.
        *
        * At this mint: what is waiting at another is that mint's balance. */
-      return Promise.resolve(sumProofs(proofs()) + unclaimedSats(mintUrl || ''));
+      /* Less change this phone is about to hand back for an over-payment:
+       * the entry already says what stays, and so does this (`holdChange`). */
+      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
+                                         - changeLeavingSats(mintUrl || '')));
     },
 
     /* Every pile that holds anything, in its own unit: [{ mint, unit, amount }].

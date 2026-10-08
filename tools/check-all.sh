@@ -56,6 +56,15 @@ check "other units"    1 node tests/units.js
 check "interleavings"  1 node tests/interleave.js
 check "bridge matrix"  1 node tests/bridge-matrix.js
 check "gate scenarios" 1 node tests/gate-scenarios.js
+check "home first"     1 node tests/home-first.js
+check "two doors"      1 node tests/two-doors.js
+check "scan twice"     1 node tests/scan-twice.js
+check "change twin"    1 node tests/change-twin.js
+check "address kept"   1 node tests/onchain-address-kept.js
+check "lock key kept"  1 node tests/lock-key-kept.js
+check "lock pool seed" 1 node tests/lock-pool-seed.js
+check "refund after kill" 1 node tests/refund-after-kill.js
+check "split doors"    1 node tests/split-doors.js
 check "p2pk round trip" 1 node tests/p2pk-round-trip.js
 check "offline accept" 1 node tests/offline-accept.js
 check "net of fee"     1 node tests/net-of-fee.js

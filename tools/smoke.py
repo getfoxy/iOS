@@ -633,7 +633,8 @@ needs = [
      'entering the background is no longer observed'),
     (cover_fn and 'addSubview(image)' in cover_fn.group(1) and 'view.window' in cover_fn.group(1),
      'the app-switcher cover no longer goes over the window'),
-    (re.search(r'func appBecameActive\(\) \{[^}]*removeCover\(\)', wv_src),
+    # (the lines before it hold a closure now, so this reads on past a brace)
+    (re.search(r'func appBecameActive\(\) \{[\s\S]{0,2600}?if Self\.coverOffAtOnce\(wentAway: wentAway, away: away\) \{\s*removeCover\(\)', wv_src),
      'the app-switcher cover is never taken down on return'),
     (delegate and re.search(r'shouldAllowExtensionPointIdentifier[^{]*\{\s*extensionPointIdentifier != \.keyboard\s*\}', delegate.group(1)),
      'third-party keyboards are no longer refused (application(_:shouldAllowExtensionPointIdentifier:) in the app delegate)'),
@@ -1108,10 +1109,36 @@ if not parking or '"DisableNetwork=1"' not in parking.group(1):
     problems26.append("TorService.backgrounded no longer switches Tor's network off")
 if not returning or 'setUp(' not in returning.group(1):
     problems26.append('a return no longer sets up a private connection')
+# And it is held on the network first, for what iOS allows less what leaving
+# needs (Route.holding), with the door shut: somebody back within that finds the
+# circuit they left. The rule is unit-tested (TorHoldTests); what is checked here
+# is that putting Foxy away goes through it, still ends in parking, and that only
+# the connection is held: the seed is dropped and the door shut before it starts.
+route26 = open(os.path.join('Foxy', 'Network', 'Route.swift'), encoding='utf8').read()
+if leaving:
+    body26 = leaving.group(1)
+    held26 = re.search(r'func hold\(\) \{(.*?)\n        \}\n', body26, re.S)
+    if not held26:
+        problems26.append('putting Foxy away no longer holds Tor on the network for what iOS allows')
+    else:
+        for needle, why in (('backgroundTimeRemaining', 'the hold no longer asks iOS how long is left'),
+                            ('Route.holding(', 'the hold no longer goes by Route.holding'),
+                            ('guard stillAway() else { park(); return }', 'a return no longer ends the hold'),
+                            ('Route.shutDoor()', 'the door is no longer kept shut while Tor is held: the page could work in the background'),
+                            ('park()', 'the hold no longer ends by taking Tor off the network')):
+            if needle not in held26.group(1):
+                problems26.append(why)
+    if not re.search(r'SeedVault\.endLeaving\(\)\n.*?Route\.shutDoor\(\)\n\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ after\) \{ hold\(\) \}', body26, re.S):
+        problems26.append('the seed is no longer dropped and the door shut before Tor is held')
+# And the cover over a return: off at once where the page will say nothing.
+if 'if Self.coverOffAtOnce(wentAway: wentAway, away: away) {' not in host26 or '!wentAway || away < 1' not in host26:
+    problems26.append('a return of under a second leaves the cover up for its four seconds: the page does nothing for one and never says it has the screen')
+if 'static let holdReserve: TimeInterval = 6' not in route26 or 'static let holdAtMost: TimeInterval = 26' not in route26:
+    problems26.append('the hold no longer leaves six seconds to take Tor off the network, or runs past twenty-six')
 if problems26:
     fail('Tor in the background: ' + '; '.join(problems26))
 else:
-    ok('Tor is off the network while Foxy is in the background; every return sets up a private connection')
+    ok('Tor is held on the network for what iOS allows when Foxy is put away, then taken off; a return after that sets up a private connection')
 
 # ---- 27. the screen lock's Face ID contract, across the bridge ---------------
 #
@@ -1380,6 +1407,7 @@ for needle, why in (('noteLife()                        // bytes from relays', '
                     ('noteLife()                        // an event, even at the same percentage', "Tor's events no longer count as progress"),
                     ('keepClock = true', 'a restart starts the fallback clock again, so taps can hold Foxy on one transport'),
                     ('snowflake: transport == .snowflake', 'TorService no longer tells TorStuck the transport is Snowflake'),
+                    ('parked: parked, offNetwork: offForBlackout', 'a Tor taken off the network because the phone has none is read as connecting, so RESTART TOR is offered with the radios off'),
                     ('if clockKeptFor != gen { armDeadline() }', "the set-up a restart asks for resets the fallback clock")):
     if needle not in tor30:
         problems30c.append(why)
@@ -2714,6 +2742,20 @@ if not sats40c or 'isFinite' not in sats40c.group(1):
 if coerced40c:
     problems40c.append('an amount is coerced with Number() again, which throws in cashu-ts v5: '
                        + ', '.join(sorted(set(coerced40c))[:3]))
+# And the app, which has no `satsOf`: it does not add up a token's pieces. The
+# wallet's `tokenInfo` gives the total (`sats`). The handler for change arriving
+# over the link summed them with Number(pr.amount), and a phone's log showed the
+# warning on the first change of every session.
+app40c = ''
+for f in sorted(os.listdir(os.path.join('build', 'app'))):
+    if f.endswith('.js'):
+        app40c += read32('build', 'app', f) + '\n'
+summed40c = re.findall(r'\.proofs\b[^;\n]*\.reduce\([^;\n]*\.amount\b', app40c)
+if summed40c:
+    problems40c.append('the app adds up a token\'s pieces itself, coercing cashu-ts amounts (use tokenInfo().sats): '
+                       + summed40c[0][:80])
+if 'Math.round(Number(bits.sats) || 0)' not in app40c:
+    problems40c.append('change arriving over the link is no longer counted from the wallet\'s own total')
 for problem in problems40c:
     fail('AMOUNTS: ' + problem)
 if not problems40c:
@@ -2835,10 +2877,26 @@ if 'talkingTo == nil || talkingTo == central.identifier' not in recv43:
     bad43.append('a second phone can join a handshake already under way')
 if 'insufficientAuthorization' not in recv43:
     bad43.append('writes from a phone that is not the one talking are not refused')
+# Off the air at a payer's first word, not at a subscribe. A subscribe needs no
+# key and says nothing, and it used to take the receiver's one place and its
+# advertisement for five seconds: anything in range could hold a till off the
+# air by subscribing, staying silent, and doing it again. The rule is
+# unit-tested (TapPlaceTests); what is checked here is that the radio code goes
+# by it: the subscribe leaves the air alone, and the first word takes the place.
 sub43 = re.search(r'didSubscribeTo characteristic: CBCharacteristic\) \{(.*?)\n    \}', recv43, re.S)
-if not sub43 or 'stopAdvertising' not in sub43.group(1):
-    bad43.append('the receiver stays on the air after a payer has subscribed, so a second '
-                 'phone can still find it')
+place43 = re.search(r'private func takePlace\(_ central: CBCentral\) \{(.*?)\n    \}\n', recv43, re.S)
+write43 = re.search(r'didReceiveWrite requests: \[CBATTRequest\]\) \{(.*?)p\.respond\(to: first, withResult: \.success\)', recv43, re.S)
+if not sub43 or 'stopAdvertising' in sub43.group(1):
+    bad43.append('a bare subscribe takes the receiver off the air again: anything in range can hold a till by listening')
+if not place43 or 'stopAdvertising' not in place43.group(1) or 'handshakeTimer' not in place43.group(1):
+    bad43.append('the receiver stays on the air after a payer has said its first word, so a second '
+                 'phone can still find it, or the rest of the handshake has no clock')
+if not write43 or 'TapPlace.taken(by: first.central.identifier, holder: talkingTo' not in write43.group(1) \
+        or 'takePlace(first.central)' not in write43.group(1):
+    bad43.append('a first word no longer takes the receiver\'s place (TapPlace)')
+if 'TapWriteFailure.after(question: againOut, payment: sendDone != nil, changeKept: ackOut)' not in pay43 \
+        or 'failed == .letLinkGo' not in pay43:
+    bad43.append('a sealed word that would not go no longer lets the link go: the next is sealed a count ahead and will not open')
 # a payment is refused for being a second payment, never for a clock that is
 # running: M9 starts the same clock before any money has come, and a receiver
 # that had agreed a price dropped the payment unread

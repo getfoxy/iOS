@@ -121,6 +121,11 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     func torResumed(away: Int) {
 #if canImport(Tor)
         TorService.resumed(away: TimeInterval(away))
+        /* Back to a Tor that never went down: nothing changes, so nothing
+         * says "up" and the address kept warm for the next request, closed as
+         * Foxy left, was never started again (warmSpare runs on a change).
+         * It does nothing unless Tor is up and there is no spare. */
+        warmSpare()
 #endif
     }
 
@@ -806,7 +811,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
 
     /// The page picks one of these, never its own words: a prompt whose
     /// text a script wrote could ask for Face ID for anything.
-    static let biometricReasons = ["Unlock Foxy", "Use Face ID to unlock Foxy?", "Leave POS mode"]
+    static let biometricReasons = ["Unlock Foxy", "Leave POS mode"]
 
     static func biometricReason(_ asked: Any?) -> String {
         let text = asked as? String ?? ""
