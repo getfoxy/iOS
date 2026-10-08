@@ -28,6 +28,9 @@
 	<array>
 		<string>F0464F58594341524401</string>
 	</array>
+	<!-- the same export-compliance answer as tools/app.plist, so no build asks -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

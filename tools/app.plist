@@ -26,5 +26,11 @@
 	<array>
 		<string>F0464F58594341524401</string>
 	</array>
+	<!-- Export compliance: Foxy uses only exempt encryption — HTTPS/TLS and Tor
+	     (standard), and secp256k1 for signing (authentication). It does not use
+	     non-exempt encryption, so it needs no self-classification report and
+	     App Store Connect never asks for it on upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
