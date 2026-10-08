@@ -1,5 +1,6 @@
 import XCTest
 import Security
+import CryptoKit
 @testable import Foxy
 
 /// Every seed and counter action, run with a stub vault holding a known phrase:
@@ -14,6 +15,10 @@ final class SeedActionsTests: XCTestCase {
     private let typedOther = "ozone drill grab fiber curtain grace pudding thank cruise elder eight picnic"
     private let v00 = "009a1f293253e41e"
     private let v01 = "01" + String(repeating: "ab", count: 32)
+    private let abandonAbout = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    /// A card's compressed public key (secp256k1's generator), as the page gives it and as bytes.
+    private let cardKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    private var cardKeyBytes: [UInt8] { (try? NUT13.bytes(hex: cardKey)) ?? [] }
 
     private var folder: URL!
     private var suite: String!
@@ -32,8 +37,11 @@ final class SeedActionsTests: XCTestCase {
         var confirms = 0
         var windowOpen = true
         var windowClosedBy: [String] = []
+        /// How many times the seed was asked for.
+        var reads = 0
 
         func savedSeed() -> SeedVault.SecretsSeed {
+            reads += 1
             if failRead { return .failed }
             guard let words else { return .absent }
             guard let seed = try? NUT13.seed(mnemonic: words) else { return .failed }
@@ -112,11 +120,11 @@ final class SeedActionsTests: XCTestCase {
 
     private func assertNoWords(in replies: [SeedReply], file: StaticString = #filePath, line: UInt = #line) {
         var secrets = Set<String>()
-        for phrase in [saved, made, typedOther] {
+        for phrase in [saved, made, typedOther, abandonAbout] {
             phrase.split(separator: " ").forEach { secrets.insert(String($0)) }
         }
         var seeds: [String] = []
-        for phrase in [saved, made, typedOther] {
+        for phrase in [saved, made, typedOther, abandonAbout] {
             if let seed = try? NUT13.seed(mnemonic: phrase) {
                 seeds.append(seed.key.withUnsafeBytes { NUT13.hex(Array($0)) })
             }
@@ -179,6 +187,14 @@ final class SeedActionsTests: XCTestCase {
         run(SeedActions.p2pkKey(index: 0, env: env))
         run(SeedActions.p2pkKey(index: 19_999, env: env))
         run(SeedActions.p2pkKey(index: 1_000_000, env: env))
+        // a card's owner key and its signatures, and what they refuse
+        run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env))
+        run(SeedActions.cardOwnerKey(key: [0x04] + cardKeyBytes.dropFirst(), env: env))
+        run(SeedActions.cardOwnerKey(key: [], env: env))
+        for label in CardOwner.Label.allCases {
+            run(SeedActions.cardOwnerSign(sampleRequest(label), env: env))
+        }
+        run(SeedActions.cardOwnerSign(.init(key: cardKeyBytes, label: .setLimit, nonce: nonceBytes, value: [1, 2, 3]), env: env))
         // adopt: the saved words, declined, unknown, replaced
         run(SeedActions.adopt(same, env: env) { false })
         run(SeedActions.adopt(other, env: env) { false })
@@ -196,6 +212,8 @@ final class SeedActionsTests: XCTestCase {
         run(SeedActions.migrate(saved, env: env))
         run(SeedActions.status(env))
         run(SeedActions.counterReserve(range(v00, 0, 1), env: env))
+        run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env))
+        run(SeedActions.cardOwnerSign(sampleRequest(.load), env: env))
         _ = counters
         XCTAssertGreaterThanOrEqual(replies.count, 35)
         XCTAssertTrue(replies.contains { $0.text?.contains("\"secrets\":[\"") == true }, "secrets were answered, and checked")
@@ -547,5 +565,232 @@ final class SeedActionsTests: XCTestCase {
         // and one the walk did not reach is still refused, because that half of
         // the window is what the file is the only record of
         XCTAssertEqual(run(SeedActions.p2pkKey(index: 5_000, env: env)).error, "the counters could not be read")
+    }
+
+    // MARK: A card's owner key
+
+    private func bytes(_ hex: String) -> [UInt8] { (try? NUT13.bytes(hex: hex)) ?? [] }
+
+    private let nonce = "000102030405060708090a0b0c0d0e0f"
+    private var nonceBytes: [UInt8] { bytes(nonce) }
+
+    /// A request of each label with a value of the shape it takes.
+    private func sampleValue(_ label: CardOwner.Label) -> String {
+        switch label {
+        case .changePin: return "31323334"
+        case .setLimit: return "000186a0"
+        case .setOwner: return "04" + String(repeating: "ab", count: 64)
+        case .setCard: return "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
+        case .load: return ""
+        }
+    }
+
+    private func sampleRequest(_ label: CardOwner.Label, key: String? = nil) -> CardOwner.SignRequest {
+        CardOwner.SignRequest(key: bytes(key ?? cardKey), label: label, nonce: nonceBytes, value: bytes(sampleValue(label)))
+    }
+
+    private func fixtureCases() throws -> [[String: Any]] {
+        let data = try Data(contentsOf: repoRoot().appendingPathComponent("tests/fixtures/card-owner-vectors.json"))
+        let all = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(all["cases"] as? [[String: Any]])
+    }
+
+    /// What the page is given: one `pub`, 130 lowercase hex characters.
+    private func ownerPub(_ key: String) -> String? {
+        let reply = run(SeedActions.cardOwnerKey(key: bytes(key), env: env))
+        let object = parsed(reply)
+        let want: Set<String> = reply.text == nil ? [] : ["pub"]
+        XCTAssertEqual(Set(object.keys), want, "nothing but the public key")
+        return object["pub"] as? String
+    }
+
+    /// The signature, or nil: one `sig` and nothing else.
+    private func ownerSig(_ request: CardOwner.SignRequest) -> String? {
+        let reply = run(SeedActions.cardOwnerSign(request, env: env))
+        let object = parsed(reply)
+        let want: Set<String> = reply.text == nil ? [] : ["sig"]
+        XCTAssertEqual(Set(object.keys), want, "nothing but the signature")
+        return object["sig"] as? String
+    }
+
+    /// Whether `sig` is the owner key's signature, as CryptoKit reads it, over "FoxyCard/" + label || nonce || value.
+    private func verifies(_ sig: String?, pub: String?, label: String, nonce: String, value: String) -> Bool {
+        guard let sig, let pub,
+              let key = try? P256.Signing.PublicKey(x963Representation: Data(bytes(pub))),
+              let signature = try? P256.Signing.ECDSASignature(derRepresentation: Data(bytes(sig))) else { return false }
+        return key.isValidSignature(signature, for: Data(Array("FoxyCard/\(label)".utf8) + bytes(nonce) + bytes(value)))
+    }
+
+    /// The public key is Node's, for the two phrases the stub vault can hold, and moves nothing.
+    func testTheOwnerPublicKeyIsTheSeedAndTheKeysAndMovesNothing() throws {
+        let cases = try fixtureCases()
+        vault.words = abandonAbout
+        XCTAssertEqual(ownerPub(cardKey), cases[0]["pub"] as? String)
+        XCTAssertEqual(ownerPub(cardKey), cases[0]["pub"] as? String, "asked again, answered the same")
+        // the same words on a new phone give the same key; other words, another
+        vault.words = saved
+        XCTAssertEqual(cases[1]["mnemonic"] as? String, saved)
+        let elsewhere = ownerPub(try XCTUnwrap(cases[1]["cardKey"] as? String))
+        XCTAssertEqual(elsewhere, cases[1]["pub"] as? String)
+        XCTAssertNotEqual(elsewhere, cases[0]["pub"] as? String)
+        // another card under the same seed, and one bit of the key
+        let sameSeed = ownerPub(cardKey)
+        XCTAssertNotEqual(sameSeed, ownerPub("03" + String(cardKey.dropFirst(2))))
+        XCTAssertNotEqual(sameSeed, ownerPub(String(cardKey.dropLast(2)) + "99"))
+        let pub = try XCTUnwrap(elsewhere)
+        XCTAssertEqual(pub.count, 130)
+        XCTAssertTrue(pub.hasPrefix("04"))
+        XCTAssertEqual(pub, pub.lowercased())
+        // no counter and no index moved
+        XCTAssertEqual(try env.counters.snapshot(), [:])
+        XCTAssertEqual(try env.counters.p2pkNext(), 0)
+    }
+
+    /// A signature made on the phone verifies against the key cardOwnerKey gave, for each label, and only for what was asked.
+    func testASignatureVerifiesAgainstTheOwnerKeyForWhatWasAskedAndNothingElse() throws {
+        vault.words = abandonAbout
+        let pub = ownerPub(cardKey)
+        for label in CardOwner.Label.allCases {
+            let value = sampleValue(label)
+            let sig = ownerSig(sampleRequest(label))
+            XCTAssertTrue(verifies(sig, pub: pub, label: label.rawValue, nonce: nonce, value: value), label.rawValue)
+            // over the label, the nonce and the value together: change any one and it is no signature
+            for other in CardOwner.Label.allCases where other != label {
+                XCTAssertFalse(verifies(sig, pub: pub, label: other.rawValue, nonce: nonce, value: value), "\(label.rawValue) as \(other.rawValue)")
+            }
+            XCTAssertFalse(verifies(sig, pub: pub, label: "lock", nonce: nonce, value: value), "not a lock")
+            XCTAssertFalse(verifies(sig, pub: pub, label: "time", nonce: nonce, value: value), "not a time")
+            XCTAssertFalse(verifies(sig, pub: pub, label: label.rawValue, nonce: "ff" + String(nonce.dropFirst(2)), value: value), "another nonce")
+            XCTAssertFalse(verifies(sig, pub: pub, label: label.rawValue, nonce: nonce, value: value + "00"), "a longer value")
+            if !value.isEmpty {
+                let changed = String(value.dropLast(2)) + (value.hasSuffix("00") ? "01" : "00")
+                XCTAssertFalse(verifies(sig, pub: pub, label: label.rawValue, nonce: nonce, value: changed), "another value")
+            }
+            // and not another card's key, or another seed's
+            XCTAssertFalse(verifies(sig, pub: ownerPub("03" + String(cardKey.dropFirst(2))), label: label.rawValue, nonce: nonce, value: value))
+        }
+        // the signature is for this card: asked for another card's, it is that key's
+        let sig3 = ownerSig(sampleRequest(.load, key: "03" + String(cardKey.dropFirst(2))))
+        XCTAssertTrue(verifies(sig3, pub: ownerPub("03" + String(cardKey.dropFirst(2))), label: "load", nonce: nonce, value: ""))
+        XCTAssertFalse(verifies(sig3, pub: pub, label: "load", nonce: nonce, value: ""))
+        // another seed signs as another owner
+        vault.words = saved
+        let alien = ownerSig(sampleRequest(.load))
+        XCTAssertFalse(verifies(alien, pub: pub, label: "load", nonce: nonce, value: ""))
+        XCTAssertTrue(verifies(alien, pub: ownerPub(cardKey), label: "load", nonce: nonce, value: ""))
+        XCTAssertEqual(try env.counters.snapshot(), [:])
+        XCTAssertEqual(try env.counters.p2pkNext(), 0)
+    }
+
+    /// Node's own signatures verify here (NUT13Tests), and ours verify against Node's public keys: the stub vault holds two of its phrases.
+    func testOurSignaturesVerifyAgainstTheKeysNodeWorkedOut() throws {
+        let cases = try fixtureCases()
+        for (index, c) in cases.enumerated() {
+            guard let words = c["mnemonic"] as? String else { continue }
+            vault.words = words
+            let card = try XCTUnwrap(c["cardKey"] as? String)
+            for s in try XCTUnwrap(c["signatures"] as? [[String: String]]) {
+                let label = try XCTUnwrap(s["label"]), value = try XCTUnwrap(s["value"]), nonce = try XCTUnwrap(s["nonce"])
+                let body: [String: Any] = ["key": card, "label": label, "nonce": nonce, "value": value]
+                let request = try XCTUnwrap(CardOwner.signRequest(body), "case \(index) \(label)")
+                XCTAssertTrue(verifies(ownerSig(request), pub: c["pub"] as? String, label: label, nonce: nonce, value: value), "case \(index) \(label)")
+            }
+        }
+    }
+
+    func testTheOwnerAnswersHoldNeitherTheWordsNorTheSeedNorTheKey() throws {
+        vault.words = abandonAbout
+        let seed = try NUT13.seed(mnemonic: abandonAbout)
+        var scalar = try XCTUnwrap(CardOwner.scalar(seed: seed, cardKey: cardKeyBytes))
+        defer { NUT13.wipe(&scalar) }
+        let scalarHex = NUT13.hex(scalar)
+        let seedHex = seed.key.withUnsafeBytes { NUT13.hex(Array($0)) }
+        var texts: [String] = []
+        let key = run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env))
+        XCTAssertNil(key.error)
+        let pubText = try XCTUnwrap(key.text)
+        let pub = try XCTUnwrap(parsed(key)["pub"] as? String)
+        XCTAssertEqual(pubText, "{\"pub\":\"\(pub)\"}")
+        texts.append(pubText)
+        for label in CardOwner.Label.allCases {
+            let reply = run(SeedActions.cardOwnerSign(sampleRequest(label), env: env))
+            XCTAssertNil(reply.error)
+            let text = try XCTUnwrap(reply.text)
+            let sig = try XCTUnwrap(parsed(reply)["sig"] as? String)
+            XCTAssertEqual(text, "{\"sig\":\"\(sig)\"}")
+            XCTAssertEqual(sig, sig.lowercased())
+            XCTAssertTrue(sig.hasPrefix("30"), "DER")
+            texts.append(text)
+        }
+        // refusals say a fixed thing too
+        vault.words = nil
+        texts += [run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env)), run(SeedActions.cardOwnerSign(sampleRequest(.load), env: env))].compactMap { $0.error }
+        for text in texts {
+            let lower = text.lowercased()
+            for part in [seedHex, String(seedHex.prefix(32)), String(seedHex.suffix(32)), scalarHex, String(scalarHex.prefix(32)), String(scalarHex.suffix(32)), "abandon", "about"] {
+                XCTAssertFalse(lower.contains(part), "an answer holds \(part.prefix(12))")
+            }
+        }
+        // the public key is not the private one's bytes either
+        XCTAssertFalse(pub.contains(scalarHex))
+        XCTAssertEqual(pub.count, 130)
+    }
+
+    /// With no seed there is nothing to derive from: a refusal, and no answer. A seed that cannot be read is another.
+    func testWithNoSeedTheOwnerKeyAndItsSignaturesAreRefused() {
+        vault.words = nil
+        for reply in [run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env)),
+                      run(SeedActions.cardOwnerSign(sampleRequest(.changePin), env: env))] {
+            XCTAssertNil(reply.text)
+            XCTAssertEqual(reply.error, "no seed")
+        }
+        vault.words = saved
+        vault.failRead = true
+        for reply in [run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env)),
+                      run(SeedActions.cardOwnerSign(sampleRequest(.setCard), env: env))] {
+            XCTAssertNil(reply.text)
+            XCTAssertEqual(reply.error, "the seed could not be read")
+        }
+    }
+
+    /// A key that is not a compressed public key, and a request that is not whole,
+    /// are refused before the seed is read (the bridge refuses them first; this is the second guard).
+    func testARequestThatIsNotWholeIsRefusedBeforeTheSeedIsRead() {
+        let body = [UInt8](repeating: 0x11, count: 32)
+        let before = vault.reads
+        let notCardKeys: [[UInt8]] = [[], [0x02] + body.dropLast(), [0x04] + body, [0x00] + body, [0x02] + body + [0x11], [0x04] + body + body]
+        for key in notCardKeys {
+            let reply = run(SeedActions.cardOwnerKey(key: key, env: env))
+            XCTAssertNil(reply.text, "\(key.count) bytes starting \(key.first ?? 0)")
+            XCTAssertEqual(reply.error, "bad request")
+            // a signature for a key that is not a card's
+            let sign = run(SeedActions.cardOwnerSign(.init(key: key, label: .load, nonce: nonceBytes, value: []), env: env))
+            XCTAssertNil(sign.text)
+            XCTAssertEqual(sign.error, "bad request")
+        }
+        let wrongShapes: [CardOwner.SignRequest] = [
+            .init(key: cardKeyBytes, label: .load, nonce: nonceBytes, value: [0]),                          // load takes nothing
+            .init(key: cardKeyBytes, label: .changePin, nonce: nonceBytes, value: [0x31, 0x32, 0x33]),      // three digits
+            .init(key: cardKeyBytes, label: .changePin, nonce: nonceBytes, value: [0x31, 0x32, 0x33, 0x3A]),
+            .init(key: cardKeyBytes, label: .setLimit, nonce: nonceBytes, value: [0, 0, 0]),
+            .init(key: cardKeyBytes, label: .setOwner, nonce: nonceBytes, value: [0x02] + [UInt8](repeating: 0, count: 64)),
+            .init(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: bytes(sampleValue(.setCard)).dropLast().map { $0 }),
+            .init(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: []),
+            .init(key: cardKeyBytes, label: .load, nonce: Array(nonceBytes.dropLast()), value: []),         // a nonce of 15 bytes
+            .init(key: cardKeyBytes, label: .load, nonce: nonceBytes + [0], value: []),                    // and of 17
+            .init(key: cardKeyBytes, label: .load, nonce: [], value: []),
+        ]
+        for request in wrongShapes {
+            XCTAssertFalse(request.isWellFormed)
+            let reply = run(SeedActions.cardOwnerSign(request, env: env))
+            XCTAssertNil(reply.text, "\(request.label) \(request.value.count) bytes")
+            XCTAssertEqual(reply.error, "bad request")
+        }
+        XCTAssertEqual(vault.reads, before, "the seed was not asked for")
+        // and a whole one is the one thing that asks for it
+        _ = run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env))
+        XCTAssertEqual(vault.reads, before + 1)
+        _ = run(SeedActions.cardOwnerSign(sampleRequest(.load), env: env))
+        XCTAssertEqual(vault.reads, before + 2)
     }
 }

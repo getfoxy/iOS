@@ -9,7 +9,7 @@
  * knew to be on the card, and never twice. The date is passed here by moving
  * the page's clock, which the test mint reads too.
  */
-const { funded, newCard, why, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
+const { funded, newCard, binaryLoad, why, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -29,12 +29,15 @@ function later(c, ms) {
   const R = await funded({ sharedMint: H.mint, words: OTHER_WORDS }, 0);
   const card = newCard(H);
   await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
-  card.tap();
-  await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
+  // cut the old way, in large pieces, so that 1,000 is paid with change
+  await binaryLoad(H, card, 2000);
   card.tap();
   const paid = await R.W.cardPay(card, { sats: 1000, pin: '1234' });
-  ok(paid.sats === 1000 && paid.change && paid.change.written && card.balance() === 1000,
-     'a card holding 2,000 pays 1,000 and has its 24 of change written back', JSON.stringify(paid.change));
+  ok(paid.sats === 1000 && paid.change && paid.change.sats === 24 && paid.change.written === false && card.balance() === 976,
+     'a card holding 2,000 pays 1,000 and is let go; its 24 of change waits for the next tap', JSON.stringify(paid.change));
+  card.tap();
+  await R.W.cardWrite(card, { pin: '1234' });
+  ok(card.balance() === 1000, 'which writes it back, without the holder’s phone being there', String(card.balance()));
 
   const list = H.W.cardsList();
   ok(list.length === 1 && list[0].key === card.key && list[0].sats === 2000 && list[0].due === false && list[0].date > Date.now() / 1000,
@@ -71,10 +74,11 @@ function later(c, ms) {
   {
     const c2 = newCard(H);
     await H.W.cardSetUp(c2, { pin: '1234', recoverable: true });
-    c2.tap();
-    await H.W.cardAdd(c2, { sats: 1024, pin: '1234' });
+    await binaryLoad(H, c2, 1024);
     c2.tap();
     const p2 = await R.W.cardPay(c2, { sats: 200, pin: '1234' });
+    c2.tap();
+    await R.W.cardWrite(c2, { pin: '1234' });
     ok(p2.change && p2.change.sats === 824 && c2.balance() === 824, 'another card pays 200 from one piece and holds 824 of change');
     c2.tap();
     await H.W.cardLook(c2);          // the holder checks its balance: the change is now known to the phone

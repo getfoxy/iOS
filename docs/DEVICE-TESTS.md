@@ -1485,12 +1485,15 @@ an invoice. Debug build, diary pulled afterwards.
 
 ### G. A card that holds ecash
 
-None of this has run on a card. The wallet, the screens and the applet have
-been driven together with no card in the loop (tests/flashcard-*.js, and the
-simulator against the applet in a JavaCard simulator); what is left is what
-only a card, a radio and a hand can show. Needs a card with the applet on it
-(the card repository's FORK.md), a phone whose build carries the NFC
-entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
+This has run on one card and one phone, and not beyond that. The wallet, the
+screens and the applet have also been driven together with no card in the loop
+(tests/flashcard-*.js, and the simulator against the applet in a JavaCard
+simulator); what is left is what only more cards, more phones, a radio and a
+hand can show. Needs a card with the applet on it (the applet repository is
+https://github.com/getfoxy/card, and its FORK.md says how to build the applet
+and load it), a phone whose build carries the NFC entitlement
+(tools/flashcard.entitlements), and a second phone at the same mint. How the card works, and what the app does with it, is in
+[CARD.md](CARD.md).
 
 #### 23a. A new card
 
@@ -1530,15 +1533,30 @@ entitlement (tools/flashcard.entitlements), and a second phone at the same mint.
 #### 23c. Paying another phone
 
 1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
-   **Pass:** the sheet says to keep the card there, then the ordinary paid
-   screen; the card holds what it held less the amount and the cost of its
-   change. Time it from tap to paid: this is the number that decides whether
-   the card is usable at a till.
-2. The same, lifting the card away the moment the sheet first changes.
+   **Pass:** the sheet reads the card, counts the pieces it signs ("Signing
+   piece 2 of 4"), and then ends with "Done. Remove the card." the moment the
+   last is signed; Foxy's own screen then says CHECKING WITH THE MINT and that the
+   card can be removed, and after that the ordinary paid screen. Time two things
+   apart: from the sheet opening to "Done" (how long the card is held; the
+   model says about 1.2 seconds for one piece, with the phone finding the card
+   on top), and from "Done" to paid (the mint's part, over Tor). These are
+   the numbers that decide whether the card is usable at a till.
+2. Load a card with 2,000 sats and pay it 600. **Pass:** four pieces are signed
+   (512, 64, 16 and 8), no change, no TAP THE CARD AGAIN. Pay it 1,000 and then
+   a price the pieces cannot make exactly if there is one (a card loaded with 11,000
+   has no exact set for 300). **Pass:** the payment stands, and TAP THE CARD AGAIN
+   asks for the change to be put back, which a second tap and the PIN does.
+3. The same, lifting the card away the moment the sheet first changes.
    **Pass:** one of two ends, and never a third: nothing was taken and the
-   screen says so, or the payment stands and TAP THE CARD AGAIN asks for the
-   change to be put back, which a second tap and the PIN does.
-3. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
+   screen says so, or the card had signed and the payment stands (or is
+   checked) with the sheet ended. Pulling it away between two signatures leaves
+   what it signed owed back to it, and TAP THE CARD AGAIN puts it there.
+4. Put Foxy away the moment the sheet says "Done" and wait. **Pass:** on return
+   the payment is paid, or CHECKING says it is still being asked; the wallet asks
+   again by itself. A mint that refuses a payment after the card has signed cannot
+   be made on demand: PAYMENT FAILED with TAP CARD, and the next tap that says PUT
+   BACK ON THE CARD, are driven in the simulated runs only.
+5. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
    right PIN no longer opens it. On the holder's phone the card reads BLOCKED.
 
 #### 23d. What a card cannot be made to do

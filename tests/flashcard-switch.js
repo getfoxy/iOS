@@ -53,9 +53,13 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
   ok((await why(W.cardMoveQuote(MINT, MINT2, 9))) === 'too-little', 'and says when there is too little to move at all');
 
   /* ---- the first tap: off the card ---------------------------------------- */
+  // the card has a daily limit, which the owner's phone lifts to take the money off and puts back
   card.tap();
-  const off = await W.cardWithdraw(card, { pin: '1234' });
-  ok(off.sats === 2000 && card.balance() === 0 && off.card && off.card.balance === 0 && at(H, MINT) === 6000, 'the first tap takes all of it into the phone');
+  await W.cardSetLimit(card, { sats: 700 });
+  card.tap();
+  const off = await W.cardWithdraw(card, { pin: '1234', hold: true });
+  ok(off.sats === 2000 && card.balance() === 0 && off.card && off.card.balance === 0 && at(H, MINT) === 6000, 'the first tap takes all of it into the phone, past a limit of 700 a day');
+  ok(card.state.record.limit === 700, 'and the limit is back on the card when it has gone');
 
   /* ---- across, with no card ------------------------------------------------ */
   const plan = await W.cardMoveQuote(MINT, MINT2, off.sats);
@@ -91,12 +95,14 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
      'a card holding money at its old mint is not moved under it', under && under.message);
   await W.connect(MINT, null, null, { remember: true });
   card.tap();
-  await W.cardWithdraw(card, { pin: '1234' });
+  await W.cardWithdraw(card, { pin: '1234', hold: true });
 
   /* ---- the second tap, at the second mint ------------------------------------ */
   await W.connect(MINT2, null, null, { remember: false });
   card.tap();
-  const on = await W.cardWrite(card, { pin: '1234' });
+  const on = await W.cardWrite(card, { owner: true });
+  ok(card.state.record.limit === 700 && card.state.record.timeKey === W.cardTimeKey,
+     'the card’s limit is what it was before it was emptied, and moving it kept its time key: the second tap changed its mint and nothing else', String(card.state.record.limit));
   ok(on.sats === 1990 && on.left === 0 && on.card.record.mint === MINT2 && on.card.balance === 1990 && card.balance() === 1990 && W.cardOwed().length === 0,
      'the second tap tells the card its new mint, then writes the money onto it', on.card.record.mint + ' ' + on.card.balance);
   const check = await W.cardCheck(on.card);
@@ -145,7 +151,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     const first = await F.W.cardMoveQuote(MINT, MINT2, seen.balance, { quoteOnly: true, pieces: seen.pieces.length });
     const shown = seen.balance - first.net;
     c.tap();
-    const took = await F.W.cardWithdraw(c, { pin: '1234' });
+    const took = await F.W.cardWithdraw(c, { pin: '1234', hold: true });
     const real = await F.W.cardMoveQuote(MINT, MINT2, took.sats);
     const cost = seen.balance - real.net;         // off the card's balance, as a person counts it: the swap off it too
     ok(took.sats < seen.balance && cost <= shown && real.gross <= took.sats,
@@ -167,7 +173,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     app.goFlashcard();
     await until('the card to be read', () => !!app.state.fc && app.state.fc.check !== 'asking');
     // the card's screen carries no SWITCH MINT button for now; the move is kept, and driven here by its own entry (fcSwitchMint)
-    ok(vals(app).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,SET LIMIT', 'the card’s screen has CHANGE PIN and SET LIMIT, and no SWITCH MINT button');
+    ok(vals(app).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,CHANGE LIMIT', 'the card’s screen has CHANGE PIN and CHANGE LIMIT, and no SWITCH MINT button');
 
     app.fcSwitchMint();
     ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard', 'it opens the list of mints, asking which');
@@ -230,7 +236,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     await U.W.connect(MINT, null, null, { remember: true });
     U.nfc = c;
     vals(app).fcNotes[0].tap();
-    pad(app).type('1234');
+    ok(!pad(app), 'and the owner’s phone is asked for no PIN: its proof moves the card and writes the money');
     await until('the money to be on the card', () => face(app) && face(app).title === 'ON THE CARD');
     ok(c.balance() === 1980 && app.state.fc.mint === MINT && U.W.cardOwed().length === 0, 'from the right one, a tap finishes the move: the card is at that mint with its money', String(c.balance()));
     face(app).press('DONE');
@@ -284,8 +290,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     await until('the empty card to be read', () => app.state.fc && app.state.fc.key === blank.key);
     app.fcSwitchMint();
     app.fcSwitchPick(MINT2);
-    ok(app.state.screen === 'flashcard' && pad(app) && pad(app).cta === 'MOVE CARD' && !app.state.fcMove, 'an empty card has no confirmation and no Lightning: its PIN, and one tap', pad(app).sub);
-    pad(app).type('4321');
+    ok(app.state.screen === 'flashcard' && !pad(app) && !app.state.fcMove, 'an empty card has no confirmation and no Lightning, and asks for no PIN: this phone’s proof, and one tap');
     await until('the empty card to be moved', () => face(app) && face(app).title === 'MOVED');
     await settle();
     ok(app.state.fc.mint === MINT2 && String(U.W.mintUrl).replace(/\/+$/, '') === MINT, 'and it is at the other mint, with the phone back where it was');

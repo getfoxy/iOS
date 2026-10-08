@@ -623,9 +623,9 @@ cover_fn = re.search(r'@objc private func coverScreen\(\) \{(.*?)\n    \}', wv_s
 adaptor = re.search(r'@UIApplicationDelegateAdaptor\((\w+)\.self\)', app_swift)
 delegate = adaptor and re.search(r'class ' + adaptor.group(1) + r'\b[^{]*UIApplicationDelegate[^{]*\{(.*?)\n\}', swift_src, re.S)
 needs = [
-    # resigning active covers the screen; the one exception is iOS's paste prompt, which Foxy asked for
+    # resigning active covers the screen; the exceptions are iOS's paste prompt, which Foxy asked for, and the card sheet iOS draws over Foxy for a tap
     (re.search(r'#selector\(resigningActive\),\s*name: UIApplication\.willResignActiveNotification', wv_src)
-     and re.search(r'@objc private func resigningActive\(\) \{\s*if FoxyBridge\.pastePromptExpected \{[^}]*return\s*\}\s*coverScreen\(\)\s*\}', wv_src),
+     and re.search(r'@objc private func resigningActive\(\) \{\s*if FoxyBridge\.pastePromptExpected \{[^}]*return\s*\}\s*(?:/\*(?s:.*?)\*/\s*)?(?:if CardReader\.sessionOpen \{[^}]*return\s*\}\s*)?coverScreen\(\)\s*\}', wv_src),
      'the app-switcher cover is no longer put up when Foxy resigns active'),
     (re.search(r'func appEnteredBackground\(\) \{[^}]*coverScreen\(\)', wv_src),
      'the app-switcher cover is no longer put up on entering the background'),
@@ -1741,10 +1741,12 @@ actions32 = ['seedStatus', 'seedCreate', 'seedMigrate', 'countersImport', 'count
              # what stands in front of the seed, and the move between the two (SECURE FOXY)
              'seedProtection', 'seedProtect',
              # the keys a payment request locks ecash to, at NUT-13's P2PK path
-             'p2pkReserve', 'p2pkPubkeys', 'p2pkKey']
+             'p2pkReserve', 'p2pkPubkeys', 'p2pkKey',
+             # a card's owner key, from the seed and the card's key: its public half, and signatures for a fixed list of labels
+             'cardOwnerKey', 'cardOwnerSign']
 declared32 = re.search(r'static let nativeSeedActions: Set<String> = \[(.*?)\]', native32, re.S)
 if not declared32 or sorted(re.findall(r'"(\w+)"', declared32.group(1))) != sorted(actions32):
-    problems32.append('nativeSeedActions is not the nineteen seed actions')
+    problems32.append('nativeSeedActions is not the twenty-one seed actions')
 dispatch32 = re.search(r'static func dispatch\(_ message: Any\) -> Dispatch \{(.*?)\n    \}', bridge32, re.S)
 if not dispatch32 or 'guard let handler = handlers[action] else { return .unknown(action: action, id: id) }' not in dispatch32.group(1):
     problems32.append('dispatch no longer refuses an action that is not in the table')

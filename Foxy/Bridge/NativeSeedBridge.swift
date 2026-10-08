@@ -17,6 +17,7 @@ extension FoxyBridge {
         "countersImport", "counterReserve", "counterReserveAt", "counterAdvance", "counterSnapshot",
         "restoreSecrets",
         "p2pkReserve", "p2pkPubkeys", "p2pkKey",
+        "cardOwnerKey", "cardOwnerSign",
         "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
         "seedProtection", "seedProtect",
     ]
@@ -147,6 +148,23 @@ extension FoxyBridge {
     static func p2pkKeyCheck(_ body: [String: Any]) -> NativeCheck<UInt64> {
         guard let index = counterValue(body["index"]), index <= P2PK.lastIndex else { return .refuse("bad request") }
         return .ok(index)
+    }
+
+    /// cardOwnerKey {key}: a card's compressed public key, 66 hex characters (either
+    /// case) for 33 bytes that start 02 or 03. Answers the bytes. Which card it is
+    /// is not this check's question, and nothing is read until it has passed.
+    static func cardOwnerKeyCheck(_ body: [String: Any]) -> NativeCheck<[UInt8]> {
+        guard let key = CardOwner.key(from: body["key"]) else { return .refuse("bad request") }
+        return .ok(key)
+    }
+
+    /// cardOwnerSign {key, label, nonce, value}: the key as above; the label exactly
+    /// one of change-pin, set-limit, set-owner, set-card and load; the nonce 32 hex
+    /// characters; the value hex of the shape that label takes (empty for load).
+    /// CardOwner.signRequest holds the rules, so the Mac's tests run them.
+    static func cardOwnerSignCheck(_ body: [String: Any]) -> NativeCheck<CardOwner.SignRequest> {
+        guard let request = CardOwner.signRequest(body) else { return .refuse("bad request") }
+        return .ok(request)
     }
 
     /// countersImport {counters: {id: n}}: every id a 00 or 01 hex keyset id and
@@ -374,6 +392,27 @@ extension FoxyBridge {
         switch Self.p2pkKeyCheck(body) {
         case .refuse(let why): resolve(id: id, text: nil, error: why)
         case .ok(let index): onSeedQueue(id: id) { SeedActions.p2pkKey(index: index, env: $0) }
+        }
+    }
+
+    // MARK: A card's owner key (CardOwner, in NUT13.swift)
+
+    /// {key} → {"pub"}: the owner public key for the card at `key`, 130 hex
+    /// characters. The private half is derived from the seed and never leaves.
+    func handleCardOwnerKey(id: String, body: [String: Any]) {
+        switch Self.cardOwnerKeyCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let key): onSeedQueue(id: id) { SeedActions.cardOwnerKey(key: key, env: $0) }
+        }
+    }
+
+    /// {key, label, nonce, value} → {"sig"}: the owner key's signature for one of
+    /// five labels and the shape of value it takes, which is all the page can have
+    /// signed. Refused with "bad request", before the seed is read, otherwise.
+    func handleCardOwnerSign(id: String, body: [String: Any]) {
+        switch Self.cardOwnerSignCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request): onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
         }
     }
 

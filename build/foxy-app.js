@@ -9,7 +9,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -216,6 +216,8 @@ class Component extends DCLogic {
     if (s.screen === 'crossConfirm') return this.crossSpec();
     // a card moved to another mint: what moves, what arrives, the fee (26f-flashcard.js)
     if (s.screen === 'fcMoveConfirm') return this.fcMoveSpec();
+    // a card's limit, before it is set (26f-flashcard.js)
+    if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
     // sendConfirm
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
@@ -12210,19 +12212,19 @@ class Component extends DCLogic {
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to add to your card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
-        : s.flow === 'cardLimit' ? 'The most one PIN entry can spend?'
+        : s.flow === 'cardLimit' ? 'What would you like the daily limit to be?'
         : s.flow === 'receive' ? 'How much to receive?'
         : 'How much to send?',
       hideSkip: true,
-      /* A second answer under NEXT, for the two card questions that have one
-       * that is not a number: everything on the card, and no limit at all
-       * (26f-flashcard.js). */
+      /* A second answer under NEXT, for the card question that has one that is
+       * not a number: everything on the card, or, for the daily limit, no
+       * limit at all, which is how one is removed (26f-flashcard.js). */
       amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
-        else if (this.state.flow === 'cardLimit') this.fcLimitPin(0);
+        else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
@@ -17847,11 +17849,24 @@ class Component extends DCLogic {
    *                                      limit, and the cards this phone can
    *                                      take back if they are lost.
    *
+   * The daily limit is the most the card signs for in one day. The card keeps
+   * its own clock (told the time by every phone that taps it), counts the whole
+   * worth of every piece it signs against the day it falls in, and starts the
+   * count again by itself when the day is over. A card has none until its owner
+   * sets one; only the phone that holds the words the card was set up with, the
+   * owner, can set, change or remove it, change the card's PIN, or add funds
+   * without the PIN. While the time the card is told comes from the receiving
+   * phone's own clock (build/wallet/08a-flashcard.js, CARD_TIME_KEY), the limit
+   * bounds an honest receiver and the holder's own overspending, and nothing is
+   * said anywhere on these screens about stopping an attacker.
+   *
    * Three things here are not this app's to draw. The sheet that slides up
    * while the phone looks for a card is the phone's own, and one line of text
    * on it is ours (`link.say`). The page behind it cannot be touched while it
-   * is up. And a card has to stay on the phone while the mint is asked, so the
-   * screen behind the sheet says what is happening for as long as that takes.
+   * is up. And a card is let go as soon as it has signed: its sheet ends with
+   * "Done. Remove the card.", and a screen of ours says that the mint is being
+   * asked for as long as that takes (the card's part is seconds; the mint's is
+   * as long as Tor).
    *
    * A card's PIN is not Foxy's PIN. It is typed on the same pad because that
    * is the pad a person already knows; it is held in a variable for the length
@@ -17866,8 +17881,12 @@ class Component extends DCLogic {
     signing: ['KEEP THE CARD<br>THERE', 'Keep the card there'],
     mint: ['KEEP THE CARD<br>THERE', 'Keep the card there: asking the mint'],
     change: ['PUTTING CHANGE<br>BACK ON THE CARD', 'Putting change back on the card'],
+    /* The card has signed and been let go; its sheet is gone, and these are said
+     * on our screen alone (`fcTap`'s `on`). */
+    checking: ['CHECKING<br>WITH THE MINT', ''],
+    making: ['MAKING<br>THE CHANGE', ''],
     writing: ['WRITING<br>TO THE CARD', 'Keep the card there: writing to it'],
-    done: ['REMOVE<br>THE CARD', 'Done'],
+    done: ['REMOVE<br>THE CARD', 'Done. Remove the card.'],
   };
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // how near its date a card's own phone starts saying RENEW
@@ -17941,25 +17960,84 @@ class Component extends DCLogic {
   /* ---- one tap ------------------------------------------------------------
    *
    * `o`: amount (a heading under the title) and body, for the screen behind
-   * the sheet. `fn(link, on)` is what to do with the card; `on(step)` moves
-   * both screens on. Resolves and rejects as `fn` does, with our screen down
-   * either way. */
+   * the sheet, and `warm`, for a tap that goes on to the mint (the road to it
+   * is opened as the sheet opens). `fn(link, on)` is what to do with the card;
+   * `on(step)` moves both screens on, and after the card is let go
+   * (`link.released`) only ours. Resolves and rejects as `fn` does, with our
+   * screen down either way. */
   fcTap(o, fn) {
     const W = this.fcW();
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
     this._fcTapO = o || {};
     this.fcStage('hold');
+    /* What the phone's own link says is happening, as it says it: the card
+     * found ("Scanning. Hold still."), each line put on the sheet, the card
+     * lost. The screen behind the sheet shows the same line. */
+    if (W.onCard) W.onCard((ev) => { if (ev && ev.text && ev.stage !== 'end') this.fcLine(ev.text); });
+    const over = () => { if (W.onCard) W.onCard(null); this.hideStage('card'); };
     return W.cardSession(this.FC_STEPS.hold[1], (link) => {
       const on = (step) => {
         const words = this.FC_STEPS[step];
         if (!words) return;
+        // the card has been let go and the sheet is gone: nothing to say on it, and "remove the card" has been said
+        if (link.released && step === 'done') return;
         this.fcStage(step);
-        link.say(words[1]);
+        if (!link.released) link.say(words[1]);
+        /* The card's part is over. The mint's work can take as long as Tor does
+         * (this screen is not the sheet, which iOS ends after a minute), and what
+         * is said under the heading is what a person who has taken the card away
+         * needs to hear. */
+        if (step === 'checking') {
+          clearTimeout(this._stageT);
+          this._stageT = setTimeout(() => this.hideStage('card'), 180000);
+          this.fcLine('You can remove the card.');
+        }
+        if (step === 'making') this.fcLine('The payment is made.');
+      };
+      /* Which piece, of how many: said on the sheet and on the screen at once,
+       * before the card is asked, so the line is up for as long as it works on
+       * that piece and a person keeps holding. */
+      const progress = (p) => {
+        const text = this.fcProgressText(p);
+        if (!text) return;
+        this.fcLine(text);
+        link.say(text);
       };
       on('reading');
-      return fn(link, on);
-    }).then((r) => { this.hideStage('card'); return r; },
-            (e) => { this.hideStage('card'); throw e; });
+      return fn(link, on, progress);
+      // a tap that goes on to the mint opens the road to it as the sheet opens, not when the card has signed
+    }, { warm: !!(o && o.warm) }).then((r) => { over(); return r; },
+            (e) => { over(); throw e; });
+  }
+
+  /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
+   * card's work, or '' for a step with none. */
+  fcProgressText(p) {
+    const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
+    if (!(i > 0 && n > 0)) return '';
+    if (p.step === 'signing') return 'Signing piece ' + i + ' of ' + n;
+    if (p.step === 'writing') return 'Writing ' + i + ' of ' + n;
+    return '';
+  }
+
+  /* The line under the heading on the card's screen: what the card is doing
+   * now. Made the first time it is needed, above the dots. */
+  fcLine(text) {
+    if (!this.stageUp('card')) return;
+    const up = document.getElementById('foxy-stage');
+    const h = up && up.querySelector('h1');
+    if (!h || !h.parentElement) return;
+    let line = /** @type {HTMLElement | null} */ (up.querySelector('[data-stage-line]'));
+    if (!line) {
+      line = document.createElement('p');
+      line.setAttribute('data-stage-line', '1');
+      line.style.cssText = 'margin:0;max-width:300px;text-align:center;font-family:Sora,system-ui,sans-serif;'
+        + 'font-weight:800;font-size:19px;line-height:1.3;letter-spacing:.01em;color:#13333C';
+      const col = h.parentElement;
+      const dots = Array.from(col.children).filter((el) => el.querySelector && el.querySelector('span'))[0];
+      col.insertBefore(line, dots || null);
+    }
+    line.textContent = String(text);
   }
 
   fcStage(step) {
@@ -18035,7 +18113,7 @@ class Component extends DCLogic {
      * only when the PIN has been given (`fcLeaveAmount`). */
     if (flow === 'cardAdd') this.fcAddPin(sats);
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
-    else if (flow === 'cardLimit') this.fcLimitPin(sats);
+    else if (flow === 'cardLimit') this.fcLimitConfirm(sats);
   }
 
   /* Off the keypad and back to the card's own screen, once an amount has
@@ -18071,7 +18149,7 @@ class Component extends DCLogic {
         // the last one is said for what it is: the card blocks itself for good
         chip: e.tries === 1 ? 'One more wrong PIN blocks this card for good.' : '' }, again),
       'blocked': () => ({ title: 'CARD BLOCKED',
-        reason: 'Too many wrong PINs. This card can no longer pay.' }),
+        reason: 'Too many wrong PINs. This card can no longer pay until its owner sets a new PIN on it.' }),
       'not-enough': () => ({ tone: 'warn', title: 'NOT ENOUGH ON THE CARD',
         reason: 'It holds ' + this.fcSats(e.balance) + '.' + safe }),
       'other-mint': () => ({ tone: 'warn', title: 'A DIFFERENT MINT', reason: said }),
@@ -18085,7 +18163,20 @@ class Component extends DCLogic {
       'not-a-card': () => ({ title: 'NOT A FOXY CARD', reason: said }),
       'no-route': () => Object.assign({ tone: 'warn', title: opt.taken ? 'NOT PAID' : 'NO CONNECTION',
         reason: 'The mint could not be reached.' + safe }, again),
-      'over-limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S LIMIT', reason: said + safe }),
+      /* A till, and the card's day has too little left for this payment: said
+       * before the PIN was sent, in the amounts a person reads, with when the
+       * day turns. */
+      'limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S DAILY LIMIT',
+        reason: (e.left !== undefined ? this.fcLimitRefusal(e) : said) + safe }),
+      'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
+        reason: 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.',
+        chip: 'Restore that seed phrase in Foxy, on this phone or another, to do it.' }),
+      'no-owner': () => ({ tone: 'warn', title: 'THIS CARD HAS NO OWNER', reason: said }),
+      'set-up': () => ({ tone: 'warn', title: 'THIS CARD HAS AN OWNER', reason: said }),
+      'no-owner-key': () => ({ tone: 'warn', title: 'NO SEED PHRASE', reason: said }),
+      'wrong-signer': () => ({ title: 'NOT A FOXY CARD', reason: said }),
+      'no-time': () => ({ tone: 'warn', title: 'THE CARD HAS NO TIME', reason: said }),
+      'no-time-source': () => ({ tone: 'warn', title: 'NO TIME TO TELL THE CARD', reason: said }),
       'gone': () => Object.assign({ tone: 'warn', title: 'THE CARD LEFT TOO SOON',
         reason: 'Hold it still until the phone says to remove it.' + safe }, again),
       'interrupted': () => ({ tone: 'warn', title: 'THE CARD LEFT TOO SOON', reason: said,
@@ -18094,6 +18185,17 @@ class Component extends DCLogic {
         reason: 'The mint says this card’s money was already spent.' }),
       'no-nfc': () => ({ tone: 'warn', title: 'NO CARD READER', reason: 'This phone cannot read a card.' }),
       'full': () => ({ tone: 'warn', title: 'THE CARD IS FULL', reason: said }),
+      // offline, only an exact set of the card's pieces can be taken: said before the PIN, so nothing was taken
+      'inexact': () => ({ tone: 'warn', title: 'NO CHANGE WHILE OFFLINE', reason: said + safe }),
+      'bad-pieces': () => ({ tone: 'warn', title: 'THE CARD’S PIECES ARE NOT GOOD', reason: said }),
+      /* The mint refused after the card had signed. The card burned the pieces
+       * when it signed, so it has to be tapped again to have them put back (the
+       * next tap clears the places and loads the same pieces). Its day stays
+       * charged: only the owner's phone can give a day back. */
+      'putback': () => ({ tone: 'warn', title: opt.paying ? 'PAYMENT FAILED' : 'NOT TAKEN OFF',
+        reason: 'The mint refused it, and the card had already signed for it. Tap the card again to put ' + this.fcSats(e.owed) + ' back on it.',
+        chip: e.limited ? 'The card’s daily limit stays used for it.' : '',
+        retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
       'misfit': () => ({ tone: 'warn', title: 'NOT AT THIS MINT', reason: said, chip: 'Nothing was taken.' }),
       'misfit-kept': () => ({ tone: 'warn', title: 'KEPT FOR THE CARD', reason: said }),
       'locked': () => ({ tone: 'warn', title: 'THE CARD IS LOCKED', reason: 'Nothing more can be written to it. It can still pay.' }),
@@ -18104,6 +18206,28 @@ class Component extends DCLogic {
     const spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
     this.haptic && this.haptic('error');
     this.blockedCard('fc-' + (kind || 'failed'), spec);
+  }
+
+  /* A time as a person reads it on a card's day: "3:40 PM" for today, and
+   * with the day after it for any other. Written out here and not left to the
+   * phone's region, as fcDay is. */
+  fcWhen(secs) {
+    const d = new Date((Number(secs) || 0) * 1000);
+    const h = d.getHours();
+    const clock = ((h % 12) || 12) + ':' + ('0' + d.getMinutes()).slice(-2) + (h < 12 ? ' AM' : ' PM');
+    const t = new Date();
+    return (d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate())
+      ? clock : clock + ', ' + this.fcDay(secs);
+  }
+
+  /* What a till is told when the card's day cannot cover the payment: how much
+   * the card can still spend today and when its day turns. `e.left`, `e.turns`
+   * and `e.limit` are the card's own, read before the PIN was sent. */
+  fcLimitRefusal(e) {
+    if (e.turns > 0 && e.left < e.limit) {
+      return 'The card can still spend ' + this.fcBoth(e.left) + ' today. Its day turns at ' + this.fcWhen(e.turns) + '.';
+    }
+    return 'The card can spend ' + this.fcBoth(e.limit || e.left) + ' in a day, and this payment is more than that.';
   }
 
   /* The card has signed and the mint has not answered.
@@ -18124,11 +18248,13 @@ class Component extends DCLogic {
       dots: true, forMs: 70000, button: 'CLOSE',
       go: () => clearTimeout(this._fcCheckT),
     });
-    const settled = (how) => {
+    const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
       if (how === 'paid') { this.fcMoved(opt); return; }
       if (how === 'spent') { this.fcFailed({ card: 'spent' }, { taken: opt.taken }); return; }
+      if (how === 'putback') { this.fcFailed({ card: 'putback', owed: row && row.owed, limited: row && row.limited }, opt); return; }
+      if (how === 'bad') { this.fcFailed({ card: 'bad-pieces', message: 'The card gave pieces the mint did not sign. Nothing was paid.' }, opt); return; }
       this.blockedCard('fc-still', { tone: 'warn', title: 'STILL CHECKING',
         reason: 'The mint has not answered. Foxy keeps asking, and this will be in HISTORY when it does.',
         chip: opt.paying ? 'It is not paid until then.' : '' });
@@ -18141,6 +18267,8 @@ class Component extends DCLogic {
         const mine = (rows || []).filter(r => r.id === id)[0];
         if (mine && mine.state === 'paid') return settled('paid');
         if (mine && mine.state === 'spent') return settled('spent');
+        if (mine && mine.state === 'putback') return settled('putback', mine);
+        if (mine && mine.state === 'bad') return settled('bad');
         if (!mine) {
           // answered by the wallet's own asking, between two of ours: the entry says which way
           return W.transactions(50).then((list) => settled((list || []).some(t => t.hash === id) ? 'paid' : 'spent'));
@@ -18175,24 +18303,37 @@ class Component extends DCLogic {
     const s = this.state;
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
+    /* No route to the mint: the mint cannot say paid. The card may still be taken,
+     * as plain ecash is on trust, if the person says so, in front of the amount,
+     * before the PIN is asked for (the HIGH RISK card: until this phone is online,
+     * whoever gave it can still spend it). Only an exact set of the card's pieces
+     * is taken then, which the tap finds out before the PIN is sent. */
+    if (W.cardOnline && !W.cardOnline() && W.cardOffline && W.cardOffline()) {
+      W.cardOfflineAsk(sats).then((yes) => { if (yes) this.fcPayAsk(sats, true); });
+      return;
+    }
     if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
     this.fcPayAsk(sats);
   }
 
-  fcPayAsk(sats) {
+  /* `trusted`: the person has said yes to taking it with no route. */
+  fcPayAsk(sats, trusted) {
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
       cta: 'PAY ' + this.fcPrice(sats),
-    }, (pin) => this.fcPayRun(sats, pin));
+    }, (pin) => this.fcPayRun(sats, pin, trusted));
   }
 
-  fcPayRun(sats, pin) {
+  fcPayRun(sats, pin, trusted) {
     const W = this.fcW();
-    const opt = { paying: true, taken: true, again: () => this.fcPayAsk(sats) };
-    this.fcTap({ amount: this.stageMoney(sats) }, (link, on) => W.cardPay(link, { sats, pin, on }))
+    const opt = { paying: true, taken: true, again: () => this.fcPayAsk(sats, trusted) };
+    this.fcTap({ amount: this.stageMoney(sats), warm: !trusted }, (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted }))
       .then((r) => {
         this.haptic && this.haptic('success');
+        /* Taken on trust: kept, and not paid. The mint has not been asked, so
+         * nothing here says paid; it settles when this phone is online. */
+        if (r && r.trusted) { this.fcTrusted(r); return; }
         this.fcMoved(opt);
         const ch = r && r.change;
         // made, and the card left before it was written back: it waits here for the card
@@ -18200,10 +18341,23 @@ class Component extends DCLogic {
       }, (e) => this.fcFailed(e, opt));
   }
 
+  fcTrusted(r) {
+    this.blockedCard('fc-trusted', {
+      tone: 'warn', title: 'TAKEN ON TRUST',
+      reason: this.fcSats(r.sats) + ' was taken from the card, but this phone is offline, so the mint has not been asked. '
+        + 'It is not paid until this phone is online and the mint has swapped it. Until then it waits in HISTORY, pending.',
+      chip: 'Whoever gave it can still spend it until then.',
+      shut: { label: 'OK', tap: () => { if (this.state.screen === 'confirm') this.closeReceive(); } },
+    });
+    // the pending entry is in HISTORY now, and the balance counts what is waiting
+    this.refreshBalance();
+    this.loadHistory();
+  }
+
   fcChangeWaiting(sats) {
     this.blockedCard('fc-change', {
       tone: 'warn', title: 'TAP THE CARD AGAIN',
-      reason: 'The payment is made. ' + this.fcSats(sats) + ' of change is waiting to go back on the card.',
+      reason: 'The payment is made. ' + this.fcSats(sats) + ' of change is waiting to go back on the card. No PIN is needed.',
       chip: 'It is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk({}),
       shut: { label: 'LATER' },
@@ -18239,6 +18393,15 @@ class Component extends DCLogic {
       });
       return;
     }
+    /* The card on screen is this phone's own: it loads it with its own proof and
+     * no PIN. Any other card is written to as a till writes change, with its PIN. */
+    const fc = this.state.fc;
+    if (fc && fc.ownedHere && this.state.screen === 'flashcard' && !opt.pin) { this.fcWriteRun('', Object.assign({}, opt, { owner: true })); return; }
+    /* What is owed is a payment's change, or pieces a card signed for a payment
+     * that was not made: the card has just paid, and lets the tap after a payment
+     * put pieces on with no PIN. Tapped first without one; a card that asks for
+     * it after all is given it on the next tap. */
+    if (!opt.pin && this.fcOwedAfterPaying()) { this.fcWriteRun('', Object.assign({}, opt, { change: true })); return; }
     const owed = this.fcOwed().reduce((n, r) => n + r.sats, 0);
     this.fcAskPin({
       title: 'CARD PIN',
@@ -18247,16 +18410,34 @@ class Component extends DCLogic {
     }, (pin) => this.fcWriteRun(pin, opt));
   }
 
+  /* Whether what this phone owes cards came of a payment: change, a refund of
+   * what a card signed and left with, or a payment the mint refused put back. */
+  fcOwedAfterPaying() {
+    const W = this.fcW();
+    return ((W && W.cardOwed()) || []).some((r) => r && (r.kind === 'change' || r.kind === 'refund' || r.kind === 'putback'));
+  }
+
+  /* `opt.owner`: this phone's own proof that it owns the card, and no PIN.
+   * `opt.change`: the tap after a payment, which needs none either. */
   fcWriteRun(pin, o) {
     const W = this.fcW();
     const opt = o || {};
-    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '' }, (link, on) => { on('writing'); return W.cardWrite(link, { pin }); })
+    const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
+    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '' }, (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
-            (e) => this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
+            /* Not the owner after all (another card was tapped), or not the tap
+             * after a payment after all: the PIN is what writes then. */
+            (e) => ((opt.owner && e && e.card === 'not-owner') || (opt.change && e && e.card === 'pin-needed'))
+              ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false }))
+              : this.fcFailed(e, { again: () => this.fcWriteAsk(opt) }));
   }
 
   fcWrote(r, o) {
+    // a card that was at another mint and has been moved by this write is told so, below
+    const was = String((this.state.fc && this.state.fc.mint) || '').replace(/\/+$/, '');
     this.fcShow(r.card);
+    const now = String((r.card && r.card.record && r.card.record.mint) || '').replace(/\/+$/, '');
+    const moved = !!(was && now && was !== now);
     this.refreshBalance();
     this.loadHistory();
     if (r.left > 0) {
@@ -18282,12 +18463,26 @@ class Component extends DCLogic {
       return;
     }
     this.haptic && this.haptic('success');
+    /* A payment the mint refused, put back: said as that, with what else went on in the same tap. */
+    if (r.back > 0) {
+      this.blockedCard('fc-put-back', {
+        tone: 'ask', title: 'PUT BACK ON THE CARD',
+        reason: this.fcSats(r.back) + ' is back on the card. The payment was not made.'
+          + (r.sats > r.back ? ' ' + this.fcSats(r.sats - r.back) + ' more went on.' : '')
+          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
+        shut: { label: 'DONE' },
+      });
+      return;
+    }
     /* What it now holds is said to its holder, on the FLASHCARD screen. A
      * till putting a payer's change back says the change and nothing else. */
     this.blockedCard('fc-on', {
       tone: 'ask', title: 'ON THE CARD',
       reason: this.fcSats(r.sats) + ' went onto the card.'
-        + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : ''),
+        + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance) + '.' : '')
+        + (moved ? ' The card is now at ' + this.mintNameOf(now) + '.' : '')
+        // an amount of too many pieces is rounded up, so the card has fewer to sign for and is quicker to use
+        + ((o && o.rounded > 0) ? ' ' + this.fcSats(o.rounded) + ' more than you asked for, so the card holds fewer pieces and is quicker to use.' : ''),
       shut: { label: 'DONE' },
     });
   }
@@ -18298,7 +18493,7 @@ class Component extends DCLogic {
   fcRead(open) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link) => W.cardLook(link))
+    this.fcTap({}, (link) => W.cardLook(link, { mine: true }))
       .then((card) => this.fcShow(card, open), (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
@@ -18319,6 +18514,10 @@ class Component extends DCLogic {
       room: card.info.empty + card.info.spent,
       pin: card.info.pin, locked: !!card.info.locked, hasRecord: !!card.info.hasRecord,
       limit: (card.record && card.record.limit) || 0,
+      day: card.day || null,
+      owner: !!(card.info && card.info.owner),
+      // whether this phone is its owner, which the card was asked (a till does not ask)
+      ownedHere: card.mine === true,
       mint: (card.record && card.record.mint) || '',
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -18366,19 +18565,66 @@ class Component extends DCLogic {
     const here = (W && W.mintHost && W.mintHost()) || '';
     const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (there && here && there !== String(here).replace(/^https?:\/\//, '').replace(/\/+$/, '')) {
-      this.blockedCard('fc-other-mint', {
-        tone: 'warn', title: 'A DIFFERENT MINT',
-        reason: 'This card’s money is at ' + this.mintNameOf(fc.mint) + '. This phone is at ' + this.mintName() + '.',
-        retry: 'SWITCH MINT', go: () => this.goSwitchMint(), shut: { label: 'CANCEL' },
-      });
+      this.fcOtherMint(doing);
       return false;
     }
     return true;
   }
 
+  /* The card is at another mint than this phone. What can be done about it
+   * depends on what is on it:
+   *
+   *   anything, and the only way is to take it all off first (a card's money is
+   *   at one mint, and the record cannot change under it): ADD FUNDS says so, in
+   *   those words, with nothing to press but CLOSE; the other things a card does
+   *   offer to move the phone to the card's mint, as ever;
+   *   nothing, on its owner's phone: SWITCH TO <this phone's mint> goes straight
+   *   to the amount, and the card's record is rewritten in the same tap that
+   *   writes the funds (`fcAddRun`, the owner's proof, no PIN; its PIN, its
+   *   owner, its limit and its time key stay as they are);
+   *   nothing, on any other phone: only the phone that set the card up can
+   *   change its record, and the card says so. */
+  fcOtherMint(doing) {
+    const fc = this.state.fc;
+    const adding = doing === 'Adding funds';
+    const at = this.mintNameOf(fc.mint), here = this.mintName();
+    if (adding && fc.count > 0) {
+      this.blockedCard('fc-other-mint', {
+        tone: 'warn', title: 'A DIFFERENT MINT',
+        reason: 'You need to withdraw all funds on the card before you can switch mints.',
+      });
+      return;
+    }
+    if (adding && fc.ownedHere && fc.owner) {
+      this.blockedCard('fc-other-mint', {
+        tone: 'warn', title: 'A DIFFERENT MINT',
+        reason: 'This card holds nothing, and is set up at ' + at + '. This phone is at ' + here + '.',
+        retry: 'SWITCH TO ' + String(here).toUpperCase(), go: () => this.fcAmount('cardAdd'), shut: { label: 'CANCEL' },
+      });
+      return;
+    }
+    if (adding) {
+      this.blockedCard('fc-other-mint', {
+        tone: 'warn', title: 'A DIFFERENT MINT',
+        reason: 'This card holds nothing, and is set up at ' + at + '. This phone is at ' + here
+          + '. Only the phone that set the card up can switch it to another mint: use that phone to do it.',
+      });
+      return;
+    }
+    this.blockedCard('fc-other-mint', {
+      tone: 'warn', title: 'A DIFFERENT MINT',
+      reason: 'This card’s money is at ' + at + '. This phone is at ' + here + '.',
+      retry: 'SWITCH MINT', go: () => this.goSwitchMint(), shut: { label: 'CANCEL' },
+    });
+  }
+
   /* ---- a new card ----------------------------------------------------------
-   * A PIN, typed twice; then whether a lost card's money can come back; then
-   * one tap that writes both. The mint is this phone's, shown and not chosen. */
+   * A PIN, typed twice; a notice, once, that this phone becomes the card's owner
+   * and what that means; then whether a lost card's money can come back (while
+   * FC_RECOVERABLE offers it); then one tap that writes the PIN, the record and,
+   * last, the owner. No limit is asked for or suggested: a new card has none, and
+   * one is set later from CHANGE LIMIT. The PIN is typed here, once, and never
+   * again to add funds. The mint is this phone's, shown and not chosen. */
   fcSetUp() {
     if (!this.state.fc) return;
     // no mint is asked: the card is told this phone's mint and given a key from this phone's words
@@ -18391,10 +18637,20 @@ class Component extends DCLogic {
       subtitle: 'So a mistyped digit does not become the card’s PIN.',
     }, (b) => {
       if (a !== b) { first('Those did not match. Start again.'); return; }
-      // cash, with nothing asked; or the one choice, where there is one to make
-      if (this.FC_RECOVERABLE) this.fcSetUpKind(a); else this.fcSetUpRun(a, false);
+      this.fcSetUpOwner(a);
     }));
     first('');
+  }
+
+  /* The one place that says what making this phone the owner means. */
+  fcSetUpOwner(pin) {
+    this.blockedCard('fc-owner', {
+      tone: 'ask', title: 'SET UP THIS CARD',
+      reason: 'This phone can reset this card’s PIN and limit. Whoever holds the card and this phone’s seed phrase holds its money.',
+      retry: 'CONTINUE',
+      go: () => { if (this.FC_RECOVERABLE) this.fcSetUpKind(pin); else this.fcSetUpRun(pin, false); },
+      shut: { label: 'CANCEL' },
+    });
   }
 
   fcSetUpRun(pin, recoverable) {
@@ -18406,13 +18662,14 @@ class Component extends DCLogic {
         /* What cash means, said once, where the card becomes one: there is
          * nobody to ask for it back. Its PIN is part of that. The card
          * blocks itself for good after three wrong ones in a row, and what
-         * is on a blocked cash card can be spent by nobody. */
+         * is on a blocked cash card can be spent by nobody but this phone,
+         * which can unblock it. */
         this.blockedCard('fc-ready', {
           tone: 'ask', title: 'THE CARD IS READY',
           reason: recoverable
             ? 'It holds nothing yet. What you put on it can be taken back by this phone a year later, if the card is lost.'
             : 'It holds nothing yet. It is cash: whoever has the card and its PIN has the money.',
-          chip: recoverable ? '' : 'Lose the card, forget its PIN, or type it wrong three times in a row, and the money on it is gone.',
+          chip: recoverable ? '' : 'Lose the card and the money on it is gone.',
           retry: 'ADD FUNDS', go: () => this.fcAdd(), shut: { label: 'LATER' },
         });
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
@@ -18438,15 +18695,24 @@ class Component extends DCLogic {
     this.fcAmount('cardAdd');
   }
 
+  /* The owner's phone adds funds with its own proof and no PIN: the PIN was
+   * typed once, at set-up. Any other phone, with the card's PIN, adds them as a
+   * till writes change. The daily limit is not touched by putting money on. */
   fcAddPin(sats) {
+    const fc = this.state.fc;
+    if (fc && fc.ownedHere) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
+    this.fcAddAskPin(sats);
+  }
+
+  fcAddAskPin(sats) {
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To add ' + this.fcBoth(sats) + ' to the card.',
       cta: 'ADD ' + this.fcPrice(sats) + ' TO CARD',
-    }, (pin) => { this.fcLeaveAmount(); this.fcAddRun(sats, pin); });
+    }, (pin) => { this.fcLeaveAmount(); this.fcAddRun(sats, pin, false); });
   }
 
-  fcAddRun(sats, pin) {
+  fcAddRun(sats, pin, owner) {
     const W = this.fcW();
     const card = this._fcCard;
     this.stageScreen('cardReady', {
@@ -18454,30 +18720,21 @@ class Component extends DCLogic {
       body: 'Keep the card nearby. You will be asked to tap it in a moment.',
       dots: true, forMs: 90000, button: 'CLOSE',
     });
-    W.cardPrepare(card, sats).then((made) => {
+    /* A card that holds nothing and is at another mint than this phone's is told
+     * its new mint in the tap that writes the funds (the owner's proof; `fcOtherMint`
+     * only offers this to its owner): the money is made for the mint this phone is at. */
+    const there = String((card && card.record && card.record.mint) || '').replace(/\/+$/, '');
+    const here = String(W.mintUrl || '').replace(/\/+$/, '');
+    const moving = !!(there && here && there !== here && !((card.pieces || []).length));
+    W.cardPrepare(card, sats, { moving }).then((made) => {
       // said by this flow, so not announced as a payment sent (16-history-lists.js)
       if (made && made.hash) this.txIsNew(made.hash);
       this.hideStage('cardReady');
-      this.fcWriteRun(pin, { sats: made.sats });
+      this.fcWriteRun(pin, { sats: made.sats, owner: !!owner, asked: sats, rounded: Number(made.rounded) || 0 });
     }, (e) => {
       this.hideStage('cardReady');
       this.fcFailed(e, {});
     });
-  }
-
-  /* A card's limit is the card's, and holds for its owner too: it is the
-   * most one typing of the PIN may spend, whoever types it. So emptying or
-   * renewing a card that holds more than its limit is refused by the card.
-   * Said here, before the PIN, with the way round it: take the limit off. */
-  fcOverLimit(sats) {
-    const fc = this.state.fc;
-    if (!fc || !fc.limit || !(sats > fc.limit)) return false;
-    this.blockedCard('fc-limit', {
-      tone: 'warn', title: 'OVER THE CARD\u2019S LIMIT',
-      reason: 'One PIN entry can spend ' + this.fcBoth(fc.limit) + ' of this card. Take the limit off first, or move less.',
-      retry: 'SET LIMIT', go: () => this.fcSetLimit(), shut: { label: 'CANCEL' },
-    });
-    return true;
   }
 
   /* ---- withdraw --------------------------------------------------------------
@@ -18492,7 +18749,7 @@ class Component extends DCLogic {
 
   fcWithdrawPin(sats) {
     const fc = this.state.fc;
-    if (!fc || this.fcOverLimit(sats || fc.balance)) return;
+    if (!fc) return;
     this.fcAskPin({
       title: 'ENTER PIN TO WITHDRAW',
       subtitle: (sats ? this.fcBoth(sats) : 'Everything') + ' from the card to this phone.',
@@ -18513,7 +18770,7 @@ class Component extends DCLogic {
       });
     };
     const opt = { taken: true, again: () => this.fcWithdraw(), done: () => said(null) };
-    this.fcTap({ amount: sats ? this.stageMoney(sats) : '' }, (link, on) => W.cardWithdraw(link, sats ? { pin, sats, on } : { pin, on }))
+    this.fcTap({ amount: sats ? this.stageMoney(sats) : '', warm: true }, (link, on, progress) => W.cardWithdraw(link, sats ? { pin, sats, on, progress } : { pin, on, progress }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
@@ -18533,42 +18790,131 @@ class Component extends DCLogic {
   }
 
   /* ---- its PIN, its limit, its date ------------------------------------------ */
+
+  /* CHANGE PIN, and UNBLOCK, which is the same: the owner's phone sets a new PIN
+   * with its proof. The old PIN is not asked for, because this phone does not
+   * know it and a blocked or forgotten PIN is the case that needs this. */
   fcChangePin() {
-    if (!this.state.fc) return;
+    const fc = this.state.fc;
+    if (!fc) return;
     const W = this.fcW();
-    const fresh = (old, warn) => this.fcAskPin({
+    // said before anything is asked
+    if (!fc.owner) { this.fcFailed({ card: 'no-owner', message: 'This card has no owner, so its PIN cannot be changed.' }); return; }
+    if (fc.ownedHere === false) { this.fcFailed({ card: 'not-owner' }); return; }
+    const was = fc.pin === 'blocked';
+    const fresh = (warn) => this.fcAskPin({
       title: 'NEW PIN', subtitle: 'Four to eight digits.', warn: warn || '',
     }, (a) => this.fcAskPin({ title: 'NEW PIN AGAIN', subtitle: 'So a mistyped digit does not become the card’s PIN.' }, (b) => {
-      if (a !== b) { fresh(old, 'Those did not match. Start again.'); return; }
-      this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { pin: old, newPin: a }); })
+      if (a !== b) { fresh('Those did not match. Start again.'); return; }
+      this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); })
         .then(() => {
           this.haptic && this.haptic('success');
-          this.blockedCard('fc-pin', { tone: 'ask', title: 'PIN CHANGED', reason: 'The card asks for the new one from now on.', shut: { label: 'DONE' } });
+          this.blockedCard('fc-pin', { tone: 'ask', title: was ? 'CARD UNBLOCKED' : 'PIN CHANGED', reason: 'The card asks for the new one from now on.', shut: { label: 'DONE' } });
+          // what the screen knew of the card is out of date: a blocked card is not blocked now
+          if (was && this.state.fc) this.setState({ fc: Object.assign({}, this.state.fc, { pin: 'set' }) });
         }, (e) => this.fcFailed(e, { again: () => this.fcChangePin() }));
     }));
-    this.fcAskPin({ title: 'CURRENT PIN', subtitle: 'The card’s PIN as it is now.' }, (old) => fresh(old, ''));
+    fresh('');
   }
 
-  /* An amount on the keypad, or NO LIMIT, the button under its NEXT. */
-  fcSetLimit() {
-    if (!this.state.fc) return;
-    this.fcAmount('cardLimit');
-  }
-
-  fcLimitPin(sats) {
-    const W = this.fcW();
-    this.fcAskPin({
-      title: 'CARD PIN',
-      subtitle: sats ? 'To let one PIN entry spend up to ' + this.fcBoth(sats) + '.' : 'To take the limit off.',
-      cta: sats ? 'SET LIMIT' : 'REMOVE LIMIT',
-    }, (pin) => {
-      this.fcLeaveAmount();
-      this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { pin, sats }); })
-        .then((card) => {
-          this.fcShow(card);
-          this.toast(sats ? 'Limit set.' : 'No limit.');
-        }, (e) => this.fcFailed(e, { again: () => this.fcSetLimit() }));
+  /* ---- the daily limit ---------------------------------------------------------
+   *
+   * The most the card signs for in one day. CHANGE LIMIT asks for it in three
+   * steps, and the owner's phone sets it with its proof and
+   * no PIN:
+   *
+   *   a warning       what a daily limit is, and who can change it
+   *   an amount       the keypad every amount is typed on, dollars first, with
+   *                   NO LIMIT as the way to remove one
+   *   a confirmation  the amount again, and what it means
+   *
+   * `fcLimitAsk(done)` runs them and calls `done(sats)` with the screens that
+   * were opened for them gone: `sats` is 0 for NO LIMIT. */
+  fcLimitAsk(done) {
+    this._fcLimitDone = done;
+    this.blockedCard('fc-limit-warn', {
+      tone: 'warn', title: 'SET DAILY LIMIT',
+      reason: 'A daily limit is the most this card will spend in one day. It starts again by itself each day.\n\n'
+        + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
+        + 'If you lose the seed phrase for this Foxy app, the PIN and the limit on this card can never be changed.\n\n'
+        + 'Do you wish to continue?',
+      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     });
+  }
+
+  /* After NEXT on the keypad, or NO LIMIT under it: the confirmation, over it. */
+  fcLimitConfirm(sats) {
+    this.setState(p => ({ screen: 'fcLimitConfirm', stack: p.stack.concat([p.screen]), fcLimit: { sats: Math.max(0, Math.round(Number(sats) || 0)) } }));
+  }
+
+  /* The confirmation shell's contents (confirmSpec). */
+  fcLimitSpec() {
+    const sats = ((this.state.fcLimit || {}).sats) || 0;
+    const secondary = { label: 'CANCEL', go: () => this.fcLimitCancel() };
+    if (!(sats > 0)) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD’S DAILY LIMIT.',
+        amount: 'NO LIMIT', amountSub: '', rows: [],
+        warn: 'It will be able to spend everything on it.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      };
+    }
+    return {
+      title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A DAILY LIMIT OF:',
+      amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
+      /* The two sentences go under the amount, in this order. They are set as
+       * `warn` because the shell's subtitle sits above the amount, and would read first. */
+      warn: 'This card will spend no more than this in one day. The limit starts again by itself each day. '
+        + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+      secondary, cta: 'CONFIRM', ctaTone: 'go',
+      go: () => this.fcLimitConfirmed(),
+    };
+  }
+
+  /* Off the confirmation and the keypad under it, to where the flow began. */
+  fcLimitLeave() {
+    this.setState(p => {
+      const at = p.screen === 'fcLimitConfirm' ? 2 : p.screen === 'amount' ? 1 : 0;
+      const back = p.stack.length >= at ? p.stack[p.stack.length - at] : 'flashcard';
+      return at ? { screen: back, stack: p.stack.slice(0, -at), fcLimit: null, flow: 'receive', amount: '', unit: 'USD' } : { fcLimit: null };
+    });
+  }
+
+  fcLimitCancel() {
+    this._fcLimitDone = null;
+    this.fcLimitLeave();
+  }
+
+  fcLimitConfirmed() {
+    const sats = ((this.state.fcLimit || {}).sats) || 0;
+    const done = this._fcLimitDone;
+    this._fcLimitDone = null;
+    this.fcLimitLeave();
+    // zero is a choice here: NO LIMIT
+    if (done) done(sats);
+  }
+
+  /* CHANGE LIMIT. */
+  fcSetLimit() {
+    const fc = this.state.fc;
+    if (!fc) return;
+    // said before anything is asked: a card with no owner has nobody to set its limit, and another phone's card is not this one's to
+    if (!fc.owner) { this.fcFailed({ card: 'no-owner', message: 'This card has no owner, so its limit cannot be changed.' }); return; }
+    if (fc.ownedHere === false) { this.fcFailed({ card: 'not-owner' }); return; }
+    this.fcLimitAsk((sats) => this.fcLimitRun(sats));
+  }
+
+  /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked. */
+  fcLimitRun(sats) {
+    const W = this.fcW();
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats }); })
+      .then((card) => {
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.toast(sats > 0 ? 'Daily limit set.' : 'Daily limit removed.');
+      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats) }));
   }
 
   /* ---- its mint -------------------------------------------------------------
@@ -18614,7 +18960,6 @@ class Component extends DCLogic {
      * from any other mint with a card whose button opened this phone's own
      * list of mints: a person at the mint they wanted the card moved to was
      * sent to switch away from it, and round again. */
-    if (fc.balance > 0 && this.fcOverLimit(fc.balance)) return;
     // through the one way into that list, which clears every other question it can be asking
     this.goSwitchMint({ fcPick: true });
   }
@@ -18628,13 +18973,9 @@ class Component extends DCLogic {
     if (!fc || !W || !to) { this.setState({ fcPick: false }); this.back(); return; }
     this._fcMoveWas = String(W.mintUrl || '').replace(/\/+$/, '');
     if (!(fc.balance > 0)) {
-      // nothing to move: off the list, and the card is told its new mint in one tap
+      // nothing to move: off the list, and the card is told its new mint in one tap, with this phone's proof that it owns it
       this.setState(p => ({ fcPick: false, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
-      this.fcAskPin({
-        title: 'CARD PIN',
-        subtitle: 'To move this card to ' + this.mintNameOf(to) + '. It holds nothing, so nothing else moves.',
-        cta: 'MOVE CARD',
-      }, (pin) => this.fcRepointRun(to, pin));
+      this.fcRepointRun(to);
       return;
     }
     // the confirmation takes the list's place: back from it is the card's own screen
@@ -18645,12 +18986,12 @@ class Component extends DCLogic {
     this.fcMoveQuote();
   }
 
-  fcRepointRun(to, pin) {
+  fcRepointRun(to) {
     const W = this.fcW();
     const end = () => this.fcMoveEnd();
     Promise.resolve()
       .then(() => (String(W.mintUrl || '').replace(/\/+$/, '') === to ? null : W.connect(to, null, null, { remember: false })))
-      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardRepoint(link, { pin }); }))
+      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardRepoint(link); }))
       .then((card) => {
         this.fcShow(card);
         end();
@@ -18741,11 +19082,11 @@ class Component extends DCLogic {
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    this.fcTap({ amount: this.stageMoney(m.sats), body: 'The first of two taps: the money comes off the card.' },
-      (link, on) => W.cardWithdraw(link, { pin, on }))
+    this.fcTap({ amount: this.stageMoney(m.sats), body: 'The first of two taps: the money comes off the card.', warm: true },
+      (link, on) => W.cardWithdraw(link, { pin, on, hold: true }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
-        this.fcMoveAcross(pin, r);
+        this.fcMoveAcross(r);
       }, (e) => { busy(false); this.fcLoud(); this.fcFailed(e, { taken: true, again: () => this.fcMoveGo() }); });
   }
 
@@ -18759,7 +19100,7 @@ class Component extends DCLogic {
 
   /* The crossing, with no card: a plan the money itself pays for, the move,
    * and what landed made into pieces for the card at the far mint. */
-  fcMoveAcross(pin, off) {
+  fcMoveAcross(off) {
     const W = this.fcW();
     const m = this.state.fcMove;
     const to = this.mintNameOf(m.to);
@@ -18779,7 +19120,7 @@ class Component extends DCLogic {
     }).then((made) => {
       if (made && made.hash) this.txIsNew(made.hash);
       this.hideMelt();
-      this.fcMoveOn(pin, made);
+      this.fcMoveOn(made);
     }, (e) => {
       this.hideMelt();
       /* Not moved, or moved and too little to put on a card. Either way the
@@ -18796,14 +19137,14 @@ class Component extends DCLogic {
     });
   }
 
-  /* The second tap: the card is told its new mint, and the money goes on.
-   * The same PIN, typed once at the start and held until this ends. */
-  fcMoveOn(pin, made) {
+  /* The second tap: the card is told its new mint, and the money goes on, both
+   * with this phone's proof that it owns the card: no PIN is asked again. */
+  fcMoveOn(made) {
     const W = this.fcW();
     const m = this.state.fcMove;
     const to = this.mintNameOf(m.to);
     this.fcTap({ amount: this.stageMoney(made.sats), body: 'The second tap: the money goes back on, at ' + to + '.' },
-      (link, on) => { on('writing'); return W.cardWrite(link, { pin }); })
+      (link, on) => { on('writing'); return W.cardWrite(link, { owner: true }); })
       .then((r) => {
         this.fcMoveEnd(r.card);
         if (r.left > 0 || !(r.sats > 0)) { this.fcWrote(r, {}); return; }
@@ -18820,7 +19161,7 @@ class Component extends DCLogic {
           this.blockedCard('fc-move-tap', {
             tone: 'warn', title: 'TAP THE CARD AGAIN',
             reason: this.fcBoth(made.sats) + ' is at ' + to + ', waiting to go onto this card.',
-            retry: 'TAP CARD', go: () => this.fcMoveOn(pin, made),
+            retry: 'TAP CARD', go: () => this.fcMoveOn(made),
             shut: { label: 'LATER', tap: () => this.fcMoveEnd(null) },
           });
           return;
@@ -18861,13 +19202,12 @@ class Component extends DCLogic {
     if (!this.fcReady('Renewing a card')) return;
     const W = this.fcW();
     const fc = this.state.fc;
-    if (this.fcOverLimit(fc.balance)) return;
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To renew ' + this.fcBoth(fc.balance) + ' for another year.',
       cta: 'RENEW',
-    }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), body: 'This takes longer than a payment. Keep the card there.' },
-      (link, on) => W.cardRenew(link, { pin, on }))
+    }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), body: 'This takes longer than a payment. Keep the card there.', warm: true },
+      (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
       .then((r) => {
         (r.hashes || []).forEach(h => this.txIsNew(h));
         this.fcWrote(r, {});
@@ -18941,8 +19281,8 @@ class Component extends DCLogic {
    * characters (capital letters and digits).
    *
    * A card maker takes a code nobody has taken and adds its drawing; the
-   * codes taken are listed here and in the card repository's
-   * docs/CARD-DESIGNS.md, so that anybody can see which are. FL1 is the first
+   * codes taken are listed here and in docs/CARD-DESIGNS.md of the card
+   * repository (https://github.com/getfoxy/card), so that anybody can see which are. FL1 is the first
    * Flash design, and the one design drawn so far (build/markup.html, the
    * card on the FLASHCARD screen). A card does not yet say which design it
    * is, so every card is drawn as FC_DESIGN. */
@@ -19001,6 +19341,11 @@ class Component extends DCLogic {
 
     const fresh = !!fc && (fc.pin === 'none' || !fc.hasRecord) && fc.pin !== 'blocked';
     const blocked = !!fc && fc.pin === 'blocked';
+    // the owner's phone is offered UNBLOCK on a blocked card, which is CHANGE PIN
+    const unblock = blocked && !!fc.ownedHere;
+    // the card's day: the daily limit, what is left today, and when the day turns
+    const day = (fc && fc.hasRecord && fc.day) || null;
+    const limited = !!(day && day.limited);
     const usable = !!fc && fc.pin === 'set' && fc.hasRecord;
     const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
     const past = near && fc.first <= now;
@@ -19020,9 +19365,9 @@ class Component extends DCLogic {
       : fc.locked ? ['Locked', AMBER]
       : ['', ON_CARD];
 
-    /* The card's mint and what it holds are in the pill, as home's are. Its
-     * limit is not said on this screen: SET LIMIT is where it is seen and
-     * changed. */
+    /* The card's mint and what it holds are in the pill, as home's are, and
+     * under what it holds how much of its limit is left. CHANGE LIMIT is where
+     * it is changed. */
     // a card in the last month before its date: said where the money waiting for a card is said, and renewed from there
     if (on && fc && near && !past && fc.balance > 0) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
@@ -19030,11 +19375,12 @@ class Component extends DCLogic {
 
     /* The two smaller things to do with a card, in home's SCAN and PASTE
      * slots under ADD FUNDS and WITHDRAW: a lock for its PIN, a dial for its
-     * limit. */
+     * limit. Both are the owner's: only the phone that holds the words the card
+     * was set up with can do either. */
     const links = !usable ? [] : [
       { label: 'CHANGE PIN', ink: 'var(--ink)', tap: () => this.fcChangePin(), spin: 'rotate(180deg)',
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
-      { label: 'SET LIMIT', ink: 'var(--ink)', tap: () => this.fcSetLimit(), spin: 'none',
+      { label: 'CHANGE LIMIT', ink: 'var(--ink)', tap: () => this.fcSetLimit(), spin: 'none',
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
     ];
 
@@ -19075,6 +19421,14 @@ class Component extends DCLogic {
       fcBalance: !fc ? '' : px > 0 ? '$ ' + this.usd((fc.balance / 1e8) * px) : '\u20bf ' + this.group(fc.balance),
       fcShowAlt: !!fc && px > 0,
       fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(fc.balance) : '',
+      /* How much of its limit the card has left, under what it holds, in
+       * dollars first as the balance is. A card that has none left says so. */
+      fcLimitShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked',
+      fcLimitLine: (fc && fc.hasRecord) ? (limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT') : '',
+      // under the balance, where there is a limit: what the day has left, and when it turns
+      fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
+      fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
+      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase() : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // what has been done with this card, on this phone: only for a card that is one (it has a key and a record)
@@ -19085,9 +19439,15 @@ class Component extends DCLogic {
         ? 'Its set-up was cut short. Finish it to put money on it.'
         : 'This card is new. Give it a PIN to put money on it.',
       fcBlocked: blocked,
+      fcUnblock: unblock,
+      fcUnblockTap: () => this.fcChangePin(),
       /* A blocked card's money: gone, where the card is cash; the loader's to
        * take back, where it is not (and here, where this phone can). */
-      fcBlockedLine: (fc && !fc.recoverable)
+      fcBlockedLine: (fc && fc.ownedHere)
+        ? 'Too many wrong PINs. This phone can unblock the card by giving it a new PIN.'
+        : (fc && fc.owner)
+        ? 'Too many wrong PINs. Only the phone that owns this card can unblock it, with a new PIN.'
+        : (fc && !fc.recoverable)
         ? 'Too many wrong PINs. This card is cash, so what is on it cannot be got back.'
         : (fc && fc.mine && this.FC_RECOVERABLE)
         ? 'Too many wrong PINs. This phone can take its money back after its date, from CARDS YOU LOADED.'

@@ -2,8 +2,8 @@
    *
    * A JavaCard that keeps pieces of ecash locked to a key only it holds, and
    * signs for one when it is tapped and its PIN is right. The applet is a fork
-   * of cashu-javacard; what it does and why is in the card's own repository
-   * (docs/FOXY-CARD-SPEC.md). Here are the parts of it that are only reading
+   * of cashu-javacard; what it does and why is in the card's own repository,
+   * https://github.com/getfoxy/card (docs/FOXY-CARD-SPEC.md). Here are the parts of it that are only reading
    * and writing bytes, with no mint and no phone in them.
    *
    * The card does not hold a piece's secret, which is 150 characters and more.
@@ -20,9 +20,31 @@
    * locked send, and the pieces that send makes are the pieces the card can
    * sign for. An update to the library that wrote the text another way would
    * make pieces no card could spend, and fails that test first. */
-  var CARD_FORMAT = 2;
+  var CARD_FORMAT = 3;
   var CARD_SLOT_BYTES = 82;
   var CARD_PIECE_BYTES = 81;
+  /* A mint's address as the card keeps it: 80 characters at the most, so that
+   * the owner's proof and the whole record fit one command (the card's spec,
+   * docs/FOXY-CARD-DAILY-LIMIT.md in https://github.com/getfoxy/card, section 4). */
+  var CARD_MINT_MAX = 80;
+  var CARD_DAY = 86400;
+
+  /* ---- INTERIM: the key a card checks the time against -------------------------
+   *
+   * A card keeps a clock of its own and a daily limit counted against it. The
+   * clock is told the time under a signature, which the card checks against the
+   * time key in its record, and this is that key's public half: set-up writes it
+   * to every card. Its private half is built into this app (Foxy/Flashcard/
+   * CardTime.swift), because there is no server yet.
+   *
+   * That is exactly as weak as trusting the receiving phone's own clock, and no
+   * stronger. Anyone can take the private half out of the app and sign any time
+   * they like, so a terminal built to cheat can tell a card it is a day later,
+   * again and again in one tap. The limit bounds an honest receiver and the
+   * holder's own overspending, and nothing else. A real signer replaces this by
+   * provisioning: cards are given its public key instead (an owner does it, with
+   * a card that is empty), and the card's code does not change. */
+  var CARD_TIME_KEY = '04403d6dc56a7e17ce887410e510f6214ff8699d5e09bf43dbbbb4159a9856cd0fe0737a186bbc8cbdaa924c49c3e5bc390968348d30c1c5406ba530a040fb17f8';
 
   function cardHexOk(s, bytes) {
     return typeof s === 'string' && s.length === bytes * 2 && /^[0-9a-f]*$/.test(s);
@@ -47,27 +69,57 @@
 
   function cardU32(hex, at) { return parseInt(hex.substr(at * 2, 8), 16); }
 
-  /* GET_INFO's sixteen bytes. */
+  /* GET_INFO's twenty-nine bytes. `limit` is the most the card signs for in a
+   * day, in sats, and 0 is no limit. `owner`: whether the card has an owner,
+   * which changing its PIN, its limit and its record, and loading it with no
+   * PIN, need the proof of. `now` is the card's own clock (0 until it has been
+   * told the time), `windowStart` when its current day began and `spentToday`
+   * what it has signed for since. */
   function cardInfoOf(hex) {
     var h = String(hex || '').toLowerCase();
-    if (!cardHexOk(h, 16)) throw new Error('The card did not say what it is.');
+    // 30 bytes; a card of version 1.1 gives 29, without the last, and may still be read
+    if (!cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
     var b = function (i) { return parseInt(h.substr(i * 2, 2), 16); };
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
-             locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12) };
+             locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
+             now: cardU32(h, 17), windowStart: cardU32(h, 21), spentToday: cardU32(h, 25),
+             /* This tap is the one after a payment: the card lets pieces be put
+              * on with no PIN (the change). Said by the card for this tap only. */
+             changeDue: h.length >= 60 && b(29) === 1 };
   }
 
-  /* GET_CARD: format, set, unit, limit, refund key, mint. */
+  /* GET_CARD: format, set, unit, limit, refund key, time key, mint. */
   function cardRecordOf(hex) {
     var h = String(hex || '').toLowerCase();
-    if (!/^[0-9a-f]*$/.test(h) || h.length < 82) throw new Error('The card’s record could not be read.');
-    var mintLen = parseInt(h.substr(80, 2), 16);
-    if (h.length !== (41 + mintLen) * 2) throw new Error('The card’s record could not be read.');
+    if (!/^[0-9a-f]*$/.test(h) || h.length < 212) throw new Error('The card’s record could not be read.');
+    var mintLen = parseInt(h.substr(210, 2), 16);
+    if (h.length !== (106 + mintLen) * 2) throw new Error('The card’s record could not be read.');
     var refund = h.substr(14, 66);
+    var timeKey = h.substr(80, 130);
     var mint = '';
-    for (var i = 0; i < mintLen; i++) mint += String.fromCharCode(parseInt(h.substr(82 + i * 2, 2), 16));
+    for (var i = 0; i < mintLen; i++) mint += String.fromCharCode(parseInt(h.substr(212 + i * 2, 2), 16));
     return { format: parseInt(h.substr(0, 2), 16), set: h.substr(2, 2) === '01', unit: parseInt(h.substr(4, 2), 16) === 0 ? 'sat' : 'other',
-             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, mint: mint };
+             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, timeKey: /^0+$/.test(timeKey) ? '' : timeKey, mint: mint };
+  }
+
+  /* What a card has left of its day, worked out from what it says of itself:
+   * the same sum it does when it is asked to sign (the window turns 86,400
+   * seconds after it began, and nothing is spent in a new one). `left` is null
+   * where the card has no limit. `turns` is when this day ends, in seconds, or
+   * 0 where there is no day in hand (no limit, or the last one is over and the
+   * next begins with the next signature it gives). The card's clock is what it was just
+   * told: a card that has never been told the time (`noTime`) will not sign
+   * under a limit. */
+  function cardDayOf(info) {
+    var limit = Number(info && info.limit) || 0;
+    if (!limit) return { limited: false, limit: 0, spent: 0, left: null, turns: 0, now: Number(info && info.now) || 0, noTime: false };
+    var now = Number(info.now) || 0;
+    var begun = Number(info.windowStart) || 0;
+    var over = now >= begun + CARD_DAY;
+    var spent = over ? 0 : (Number(info.spentToday) || 0);
+    return { limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY,
+             now: now, noTime: now === 0 };
   }
 
   /* One slot, as GET_PROOF gives it: status, keyset, amount, nonce, C, date. */
@@ -77,6 +129,38 @@
     var status = parseInt(h.substr(0, 2), 16);
     return { state: status === 1 ? 'unspent' : status === 2 ? 'spent' : 'empty',
              keyset: h.substr(2, 16), amount: cardU32(h, 9), nonce: h.substr(26, 64), C: h.substr(90, 66), date: cardU32(h, 78) };
+  }
+
+  /* One page of GET_PIECES: the first place it does not cover (64 when there is
+   * nothing more to ask for), then an entry for each place that is not empty, in
+   * order. An entry is a tag, (state << 6) | place, with state 1 for unspent and
+   * 2 for spent, and for an unspent place the 81 bytes of its piece (what
+   * GET_PROOF gives after its status byte). A place in the range with no entry is
+   * empty. Answers { next, slots: [slot as cardSlotOf gives it, with `i`] }; a spent place is
+   * { state: 'spent', i } and nothing else, because the card sends nothing more of
+   * it and nothing here reads it. Throws where the page is not a whole page that
+   * moves on from `from`. */
+  function cardPageOf(hex, from) {
+    var h = String(hex || '').toLowerCase();
+    var bad = function () { return new Error('A place on the card could not be read.'); };
+    if (!/^[0-9a-f]+$/.test(h) || h.length % 2 || h.length < 2 || h.length > 510) throw bad();
+    var next = parseInt(h.substr(0, 2), 16);
+    if (!(next > from && next <= 64)) throw bad();
+    var at = 2, last = from - 1, slots = [];
+    while (at < h.length) {
+      var tag = parseInt(h.substr(at, 2), 16);
+      var state = tag >> 6, place = tag & 63;
+      at += 2;
+      if ((state !== 1 && state !== 2) || place <= last || place < from || place >= next) throw bad();
+      last = place;
+      if (state === 2) { slots.push({ state: 'spent', i: place }); continue; }
+      if (at + CARD_PIECE_BYTES * 2 > h.length) throw bad();
+      var slot = /** @type {any} */ (cardSlotOf('01' + h.substr(at, CARD_PIECE_BYTES * 2)));
+      slot.i = place;
+      slots.push(slot);
+      at += CARD_PIECE_BYTES * 2;
+    }
+    return { next: next, slots: slots };
   }
 
   /* The 81 bytes LOAD_PROOF takes for a piece. */
@@ -138,9 +222,9 @@
    * the whole name and not by its first nine bytes, which a card may or may
    * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
   var CARD_AID = 'f0464f58594341524401';
-  var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16',
-                   spend: '20', load: '30', clear: '31', setCard: '32', setLimit: '33',
-                   verify: '40', setPin: '41', changePin: '42' };
+  var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17',
+                   spend: '20', load: '30', clear: '31', setCard: '32', setLimit: '34', time: '35',
+                   verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45' };
 
   function cardByte(n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }
 
@@ -169,12 +253,17 @@
     if (w === '6983') return cardError('blocked', 'This card is blocked: its PIN was typed wrong too many times.', { tries: 0 });
     if (w === '6984') return cardError('no-pin', 'This card has no PIN yet.');
     if (w === '6982') return cardError('pin-needed', 'The card wants its PIN first.');
-    if (w === '6a8f') return cardError('over-limit', 'That is more than this card lets one PIN entry spend.');
+    if (w === '6a8f') return cardError('limit', 'This payment is over what the card can spend in a day.');
+    if (w === '6a90') return cardError('no-owner', 'This card has no owner, so it cannot be loaded, and its PIN and its limit cannot be changed.');
+    if (w === '6a91') return cardError('not-owner', 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.');
+    if (w === '6a92') return cardError('no-time', 'The card has not been told the time.');
+    if (w === '6a93') return cardError('wrong-signer', 'That card keeps its time by another signer than this Foxy.');
     if (w === '6a84') return cardError('full', 'The card has no room for more.');
     if (w === '6986') return cardError('locked', 'This card is locked: nothing more can be written to it.');
     if (w === '6a8c') return cardError('no-record', 'This card has not been set up.');
     if (w === '6a8d') return cardError('in-use', 'That cannot change while the card still holds money.');
     if (w === '6a8e') return cardError('no-refund-key', 'This card was set up as cash and cannot hold a piece that can be taken back.');
+    if (w === '6a94') return cardError('on-card', 'That piece is on the card already.');
     return cardError('refused', 'The card refused ' + (doing || 'that') + ' (' + w + ').', { sw: w });
   }
 
@@ -210,18 +299,200 @@
     return out;
   }
 
+  /* ---- the card's owner ---------------------------------------------------
+   *
+   * A card has an owner: a P-256 public key it was given at set-up. On a card
+   * with an owner, changing the PIN, setting the limit, the record or the
+   * owner, and adding funds with no PIN all need the owner's proof, and the PIN
+   * alone changes none of them: a terminal that has been handed the PIN could
+   * otherwise take the card over, or change the PIN and lock the holder out.
+   *
+   * The key is this phone's to make again from its twelve words, and it is made
+   * and kept in the phone's native side. This page never holds it and never sees
+   * a secret from the seed: native gives it the owner's PUBLIC key for a card
+   * (`cardOwnerKey`, for the one command that gives it to the card), and signs,
+   * on request, for one of five fixed labels over a nonce the card has just
+   * given and the value the command carries (`cardOwnerSign`). The proof is an
+   * ECDSA signature the card checks with its own verifier, so a new phone
+   * restored from the same words is the owner of the same cards, and one that
+   * does not hold them is refused (`not-owner`, which costs no PIN tries and
+   * changes nothing). */
+  function cardU32Hex(n) { return ('00000000' + (Number(n) >>> 0).toString(16)).slice(-8); }
+
+  /* The owner's public key for a card, as the card takes it: 130 hex, from 04. */
+  function cardOwnerPub(cardKey) {
+    return nativeJson('cardOwnerKey', { key: cardKey }, 60000).then(function (j) {
+      var pub = String((j && j.pub) || '').toLowerCase();
+      if (!/^04[0-9a-f]{128}$/.test(pub)) throw new Error('not a key');
+      return pub;
+    }).then(null, function () {
+      throw cardError('no-owner-key', 'This phone could not make the key that shows it owns this card. Its seed phrase may be missing.');
+    });
+  }
+
+  /* The owner's proof for one command, answered to a nonce the card gives now:
+   * `name` is one of the five (change-pin, set-limit, set-owner, set-card,
+   * load), `value` what the command carries, as hex. Resolves the command's
+   * data: the proof's length, the proof, and the value. */
+  function cardOwned(t, cardKey, name, value) {
+    var tail = String(value || '');
+    return t.want(cardCommand(CARD_INS.nonce, 0, '', 16), 'a nonce for its owner').then(function (nonce) {
+      if (!cardHexOk(nonce, 16)) throw cardError('refused', 'The card did not give a nonce.');
+      return nativeJson('cardOwnerSign', { key: cardKey, label: name, nonce: nonce, value: tail }, 60000).then(function (j) {
+        var sig = String((j && j.sig) || '').toLowerCase();
+        if (!/^(?:[0-9a-f]{2}){8,72}$/.test(sig)) throw new Error('not a signature');
+        return cardByte(sig.length / 2) + sig + tail;
+      }, function () {
+        throw cardError('no-owner-key', 'This phone could not make the key that shows it owns this card. Its seed phrase may be missing.');
+      });
+    });
+  }
+
+  /* The card told the time, under the phone's signature of its own clock
+   * (`cardTime`: INTERIM, see CARD_TIME_KEY). Resolves the card's clock as it
+   * stands. A card that has no record yet has no time key to check against and
+   * says so: it is read as it was, and the answer is 0. A card at another signer
+   * is not a card this Foxy can use. */
+  function cardTold(t) {
+    return nativeJson('cardTime', {}, 20000).then(function (j) {
+      var time = Number(j && j.time);
+      var sig = String((j && j.sig) || '').toLowerCase();
+      if (!(time > 0 && time <= 4294967295 && Math.floor(time) === time) || !/^(?:[0-9a-f]{2}){8,72}$/.test(sig)) throw new Error('not a time');
+      return { time: time, sig: sig };
+    }).then(function (signed) {
+      return t.ask(cardCommand(CARD_INS.time, 0, cardU32Hex(signed.time) + cardByte(signed.sig.length / 2) + signed.sig, 4)).then(function (r) {
+        if (r.sw === '6a8c' || r.sw === '6d00') return 0;
+        if (r.sw !== '9000') throw cardRefused(r.sw, 'the time');
+        return cardU32(r.data, 0);
+      });
+    }, function (e) {
+      if (e && e.card) throw e;
+      throw cardError('no-time-source', 'This phone could not sign the time for the card.');
+    });
+  }
+
+  /* The card's limit set to `sats` with the owner's proof, in this tap (zero is
+   * no limit). No PIN: the owner's phone does not know it. A card that has
+   * never been told the time takes none but zero (`cardTold` first). Rejects
+   * `not-owner` where this phone's words are not the ones the card was set up
+   * with, and `no-owner` where it has none. */
+  function cardLimitTo(t, cardKey, sats) {
+    var n = Math.round(Number(sats));
+    if (!(n >= 0 && n <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
+    return cardOwned(t, cardKey, 'set-limit', cardU32Hex(n)).then(function (data) {
+      return t.want(cardCommand(CARD_INS.setLimit, 0, data), 'its limit');
+    });
+  }
+
+  /* Whether this phone is the card's owner, found out by asking for the grant to
+   * load (`ALLOW_LOAD`) and being answered or refused. Resolves true or false;
+   * costs no PIN tries and changes nothing but that this tap may load with no PIN.
+   * Anything but the card saying no (the card leaving, say) is thrown. */
+  function cardGrant(t, cardKey) {
+    return cardOwned(t, cardKey, 'load', '').then(function (data) {
+      return t.ask(cardCommand(CARD_INS.allowLoad, 0, data)).then(function (r) {
+        if (r.sw === '9000') return true;
+        if (r.sw === '6a91' || r.sw === '6a90') return false;
+        throw cardRefused(r.sw, 'to be loaded');
+      });
+    }, function (e) {
+      if (e && (e.card === 'no-owner-key')) return false;
+      throw e;
+    });
+  }
+
+  /* ---- a limit lifted for a withdrawal, and put back -----------------------------
+   *
+   * Taking money off a card the holder owns is not stopped by the day's limit: in
+   * the same tap the phone lifts the limit with its proof, spends, and puts the
+   * old limit back, even when the spending fails part way. The old limit is
+   * written down before it is lifted, so that a tap that ends between the two
+   * leaves a note, and the next tap of this phone puts it back
+   * (`cardLookHere`'s restore). */
+  var CARD_LIFTED = 'foxy.flashcard.lifted';
+  function cardLiftedAll() {
+    var o = load(CARD_LIFTED, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+  function cardLiftNote(cardKey, limit) {
+    var all = cardLiftedAll();
+    if (limit > 0) all[cardKey] = { limit: limit, at: Date.now() }; else delete all[cardKey];
+    mustSave(CARD_LIFTED, all);
+  }
+
+  /* Every place on the card that is not empty, as `cardSlotOf` gives them (a
+   * spent place is `{ state: 'spent', i }` only). GET_PIECES says it all in a
+   * page for each three pieces; a card that does not know that command (an
+   * older applet), or whose answer to it is anything but a page, is read the old
+   * way, the states and then each place in turn. Nothing is asked when `info`
+   * says the card holds nothing. */
+  function cardSlotsRead(t, info) {
+    var slots = [];
+    var expect = info.unspent + info.spent;
+    if (!expect) return Promise.resolve(slots);
+    var oldWay = function () {
+      return t.want(cardCommand(CARD_INS.slots, 0, '', 0), 'to list what it holds').then(function (d) {
+        var walk = Promise.resolve();
+        for (var i = 0; i * 2 < d.length; i++) {
+          if (d.substr(i * 2, 2) === '00') continue;
+          (function (at) {
+            walk = walk.then(function () { return t.want(cardCommand(CARD_INS.proof, at, '', 0), 'to show a piece'); }).then(function (hex) {
+              var slot = /** @type {any} */ (cardSlotOf(hex));
+              slot.i = at;
+              slots.push(slot);
+            });
+          })(i);
+        }
+        return walk;
+      });
+    };
+    var pages = 0;
+    var more = function (from) {
+      return t.ask(cardCommand(CARD_INS.pieces, from, '', 0)).then(function (r) {
+        if (r.sw !== '9000') {
+          // the first page refused: an applet without it, read the old way. A page after the first has no old way to go back to
+          if (from === 0 && !slots.length) return oldWay();
+          throw cardRefused(r.sw, 'to show what it holds');
+        }
+        var page = cardPageOf(r.data, from);
+        page.slots.forEach(function (x) { slots.push(x); });
+        pages += 1;
+        if (page.next >= 64 || pages >= 64) return null;
+        return more(page.next);
+      });
+    };
+    return more(0).then(function () { return slots; });
+  }
+
   /* Read everything a card says with no PIN: what it is, its key (and that it
-   * holds that key), its record, and every piece on it.
+   * holds that key), its record, and every piece on it. The card is told the
+   * time first (every tap does: `cardTold`), so what it says of its day is
+   * what it will act on.
    *
    * The key is proved, not taken on the card's word: the card signs this
    * phone's sixteen random bytes with sixteen of its own (AUTH). A reader's
    * copy of what GET_PROOF gives is everything about a card but its key, so
-   * without this a pretend card could show another card's balance. */
-  function cardLook(link) {
+   * without this a pretend card could show another card's balance. It is the
+   * card's slowest answer (the card's own Schnorr signature, most of a second),
+   * so a read that only goes on to be paid by the card leaves it out
+   * (`opts.noAuth`): there the card's signatures are proof enough of its key,
+   * because every piece it signs is checked against that key before anything is
+   * kept, and the mint's swap is what says paid. `card.proved` says whether
+   * the key was proved here.
+   *
+   * `opts.mine`: this phone's own reading of a card, for its holder's screen and
+   * for what only an owner does. The card is asked whether this phone is its
+   * owner (`card.mine`, by the grant to load, which also lets this tap load with
+   * no PIN); and a limit that an earlier tap lifted and did not put back is put
+   * back now. */
+  function cardLook(link, opts) {
+    var o = opts || {};
     var t = cardTalk(link);
-    var card = /** @type {any} */ ({});
+    var card = /** @type {any} */ ({ proved: false });
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
+      return o.noTime ? 0 : cardTold(t);
+    }).then(function () {
       return t.want(cardCommand(CARD_INS.info, 0, '', 0), 'to say what it is');
     }).then(function (d) {
       card.info = cardInfoOf(d);
@@ -230,41 +501,48 @@
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      if (o.noAuth) return null;
       var mine = new Uint8Array(16);
       window.crypto.getRandomValues(mine);
       card._nonce = hexOf(mine);
-      return t.want(cardCommand(CARD_INS.auth, 0, card._nonce, 80), 'to prove it is the card');
-    }).then(function (d) {
-      if (!cardHexOk(d, 80)) throw cardError('not-a-card', 'That card could not prove it is the card it says it is.');
-      var tag = sha256(Array.prototype.map.call('FoxyCard/auth', function (c) { return c.charCodeAt(0); }));
-      var said = tag.concat(tag, Array.prototype.slice.call(bytesOfHex(card._nonce)),
-                            Array.prototype.slice.call(bytesOfHex(d.slice(0, 32))), Array.prototype.slice.call(bytesOfHex(card.key)));
-      var good = false;
-      try { good = window.CashuTS.schnorrVerifyDigest(d.slice(32), new Uint8Array(sha256(said)), card.key) === true; } catch (e) { good = false; }
-      delete card._nonce;
-      if (!good) throw cardError('not-a-card', 'That card could not prove it is the card it says it is.');
+      return t.want(cardCommand(CARD_INS.auth, 0, card._nonce, 80), 'to prove it is the card').then(function (a) {
+        if (!cardHexOk(a, 80)) throw cardError('not-a-card', 'That card could not prove it is the card it says it is.');
+        var tag = sha256(Array.prototype.map.call('FoxyCard/auth', function (c) { return c.charCodeAt(0); }));
+        var said = tag.concat(tag, Array.prototype.slice.call(bytesOfHex(card._nonce)),
+                              Array.prototype.slice.call(bytesOfHex(a.slice(0, 32))), Array.prototype.slice.call(bytesOfHex(card.key)));
+        var good = false;
+        try { good = window.CashuTS.schnorrVerifyDigest(a.slice(32), new Uint8Array(sha256(said)), card.key) === true; } catch (e) { good = false; }
+        delete card._nonce;
+        if (!good) throw cardError('not-a-card', 'That card could not prove it is the card it says it is.');
+        card.proved = true;
+      });
+    }).then(function () {
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
       card.record = cardRecordOf(d);
-      return t.want(cardCommand(CARD_INS.slots, 0, '', 0), 'to list what it holds');
-    }).then(function (d) {
-      card.slots = [];
-      var walk = Promise.resolve();
-      for (var i = 0; i * 2 < d.length; i++) {
-        if (d.substr(i * 2, 2) === '00') continue;
-        (function (at) {
-          walk = walk.then(function () { return t.want(cardCommand(CARD_INS.proof, at, '', 0), 'to show a piece'); }).then(function (hex) {
-            var slot = /** @type {any} */ (cardSlotOf(hex));
-            slot.i = at;
-            card.slots.push(slot);
-          });
-        })(i);
-      }
-      return walk;
-    }).then(function () {
+      return cardSlotsRead(t, card.info);
+    }).then(function (slots) {
+      card.slots = slots;
       card.pieces = card.slots.filter(function (x) { return x.state === 'unspent'; });
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
-      return card;
+      card.day = cardDayOf(card.info);
+      if (!o.mine || !card.info.owner || card.info.locked) return card;
+      /* Whether this phone is the owner, and a limit it lifted and did not put back */
+      return cardGrant(t, card.key).then(function (yes) {
+        card.mine = yes;
+        var note = cardLiftedAll()[card.key];
+        if (!yes || !note || card.info.limit !== 0) return card;
+        return cardLimitTo(t, card.key, note.limit).then(function () {
+          cardLiftNote(card.key, 0);
+          // as the card has it now: the limit back, and a day begun at its clock with nothing spent
+          card.info.limit = note.limit; card.record.limit = note.limit;
+          card.info.windowStart = card.info.now; card.info.spentToday = 0;
+          card.day = cardDayOf(card.info);
+          card.restored = note.limit;
+          console.log('[foxy] card: a limit lifted for a withdrawal and not put back is put back now');
+          return card;
+        }, function () { return card; });
+      });
     });
   }
 
@@ -387,6 +665,190 @@
     return out;
   }
 
+  /* ---- what is cut for a card ------------------------------------------------
+   *
+   * A card signs one piece at a time, and the signing is the card's own work: most
+   * of a second for each. A card is paid from by the piece, and a price that no set
+   * of its pieces makes exactly has to be paid with a piece that is too big and
+   * made up for in change, which is a second swap and a second tap. So money for a
+   * card is cut like the float in a cash drawer: every power of two from 1 up to the
+   * largest that fits is there at least once, and the rest of the amount comes after
+   * them in powers of two. Pieces like that make every price up to the whole
+   * of what is on the card exactly, and a payment signs only the few it needs.
+   *
+   * The largest that fits is the largest whose drawer, 1 + 2 + 4 + … up to it, is no
+   * more than what the card will hold, and the rest of the amount comes after it
+   * in powers of two: with that, every price up to the whole of what is on the
+   * card is exact. Nothing is made that is not a power of two, and none above
+   * the mint's own largest key.
+   *
+   * One of each rung makes one exact payment: the payment takes the rungs its
+   * price is made of, and the next price needs some of the same. A till's
+   * drawer has several of each coin for that, and so does a card's: with the
+   * places a load has left, the smallest rungs are deepened, to
+   * CARD_DRAWER_DEEP of each (two where three do not fit), the rest of the
+   * amount cut again after them. 2,000 sats is 1 to 512 once, two more of each
+   * of 1 to 128, and 256, 128, 64, 16, 2 and 1: thirty-two pieces. 50,000 is 1
+   * to 16384 once, two more of each of 1 to 4096, and 512, 256, 64, 16, 2 and
+   * 1: forty-seven. A price of 1,000 to 15,000 sats is about seven powers of
+   * two, so five such payments take about thirty-five pieces between them,
+   * which is why a load uses the whole card (CARD_LOAD_PIECES: its 64 places
+   * less a few for what a mint's fee may add). Deeper than three was tried and
+   * is worse: the card fills with small pieces, and what is left over from one
+   * day is still on it the next.
+   *
+   * A card that holds pieces already is cut for: the gaps in its drawer, the
+   * powers of two it has none of, are filled first, smallest first, then the
+   * rest of the amount, and then the smallest rungs are deepened with what is
+   * left of the places, as above. A card with 512 and 64 on it, given 300 more,
+   * gets 1, 2, 4, 8, 16, 32, 128, what is left of the 300, and more of its
+   * smallest rungs where the places allow. Change written back is cut the same
+   * way, so a card keeps its drawer as it is spent from.
+   *
+   * A load is at most CARD_LOAD_PIECES pieces, and no more than the card has
+   * places for. Where the drawer and the rest are more than that, the drawer has
+   * fewer rungs, the biggest taken off first: their worth is carried by bigger
+   * pieces, and the small rungs, which make the small prices, stay. An amount
+   * that is more than that even with no drawer at all is rounded up, its
+   * smallest pieces first, until it fits: the card is given a few sats more than
+   * were asked for, and the screen says so. (The sats are the holder's own, on a
+   * card instead of in the phone.)
+   *
+   * The cost of a deep drawer is pieces: a card holds more of them, and taking
+   * everything off it signs every one (most of a second each): the holder's
+   * choice, for change at every payment. */
+  var CARD_LOAD_PIECES = 60;
+  var CARD_DRAWER_DEEP = 3;
+
+  /* The largest piece this mint's current keys can make: the biggest amount in
+   * the keyset. 0 where it is not known, and the ladder is then not limited by it. */
+  function cardMaxPiece(w) {
+    try {
+      var ks = keysetFor(w, String((w && w.keysetId) || ''));
+      var amounts = Object.keys((ks && ks.keys) || {}).map(Number).filter(function (n) { return n > 0 && isFinite(n); });
+      return amounts.length ? Math.max.apply(null, amounts) : 0;
+    } catch (e) { return 0; }
+  }
+
+  /* The pieces for `sats` to go onto a card that holds `have` (their amounts, none
+   * for an empty card): the drawer's gaps, then the rest in powers of two, no piece
+   * larger than `biggest` (the mint's own largest, where it is known: more of that
+   * one then), and no more than `most` pieces. `extra` is what rounding up added.
+   * `plain`: no drawer and no limit on how many, only the powers of two the amount
+   * is made of, for money that is exactly what is owed and cannot be rounded
+   * (change). Largest first. */
+  function cardLadder(sats, most, biggest, have, plain) {
+    var n = Math.max(0, Math.floor(Number(sats) || 0));
+    var cap = Math.max(1, Math.floor(Number(most) || CARD_LOAD_PIECES));
+    var top = Math.max(0, Math.floor(Number(biggest) || 0));
+    // what the card has: how many of each size, and in all
+    var held = {}, heldSum = 0;
+    (Array.isArray(have) ? have : []).forEach(function (a) {
+      var v = Math.floor(Number(a) || 0);
+      if (v > 0) { held[v] = (held[v] || 0) + 1; heldSum += v; }
+    });
+    var cut = function (amount) {
+      var out = [];
+      var d = 1;
+      while (d * 2 <= amount && (!top || d * 2 <= top)) d *= 2;
+      for (var rest = amount; d >= 1; d /= 2) {
+        while (rest >= d) { out.push(d); rest -= d; }
+      }
+      return out;
+    };
+    /* The pieces for `amount` with `r` rungs, `deep` of each rung below the
+     * `m`th and one of the others, what the card holds counting towards each;
+     * null where that is more than the amount or more than `cap` pieces. */
+    var build = function (amount, r, deep, m) {
+      var gaps = [], spend = 0;
+      for (var j = 0; j < r; j++) {
+        var d = Math.pow(2, j);
+        for (var k = held[d] || 0; k < (j < m ? deep : 1); k++) { gaps.push(d); spend += d; }
+      }
+      if (spend > amount) return null;
+      var all = gaps.concat(cut(amount - spend));
+      return all.length <= cap ? all : null;
+    };
+    /* The drawer for `amount`: the most rungs, one of each, that come to no more
+     * than `cap` pieces in all (every price up to the whole is exact then); and
+     * then, with the pieces left under the cap, the smallest rungs deepened, to
+     * CARD_DRAWER_DEEP of each where there is room and to two where not. Null
+     * when not even the rest alone fits. */
+    var drawer = function (amount) {
+      var total = heldSum + amount;
+      var rungs = 0;
+      while (Math.pow(2, rungs + 1) - 1 <= total && (!top || Math.pow(2, rungs) <= top)) rungs += 1;
+      var base = null, r;
+      for (r = rungs; r >= 0 && !base; r--) base = build(amount, r, 1, 0);
+      if (!base) return null;
+      r += 1;
+      for (var deep = CARD_DRAWER_DEEP; deep >= 2; deep--) {
+        for (var m = r; m >= 1; m--) {
+          var deeper = build(amount, r, deep, m);
+          if (deeper) return deeper;
+        }
+      }
+      return base;
+    };
+    var asked = n;
+    var pieces = plain ? cut(n) : drawer(n);
+    for (var guard = 0; !plain && !pieces && n > 0 && guard < 64; guard++) {
+      var low = 1;
+      while (Math.floor(n / low) % 2 === 0) low *= 2;
+      // already all of the mint's largest piece: rounding up cannot make fewer
+      if (top && low >= top) break;
+      n += low;
+      pieces = drawer(n);
+    }
+    if (!pieces) pieces = cut(n);
+    pieces.sort(function (a, b) { return b - a; });
+    return { sats: n, extra: n - asked, denominations: pieces };
+  }
+
+  /* What a card holds, as the amounts of its pieces, for cutting more for it
+   * (`cardLadder`'s `have`): the pieces it was read with, less the ones named in
+   * `except` (nonces; they have been signed and are leaving), and the pieces
+   * this phone has made for it and not yet written. */
+  function cardHeldAmounts(card, except) {
+    var gone = {}, onCard = {}, out = [];
+    (except || []).forEach(function (nonce) { gone[nonce] = true; });
+    ((card && card.pieces) || []).forEach(function (x) {
+      onCard[x.nonce] = true;
+      if (!gone[x.nonce]) out.push(satsOf(x.amount));
+    });
+    cardStore(CARD_OWED).forEach(function (r) {
+      if (!r || !card || r.card !== card.key) return;
+      try {
+        ((FoxyWallet.tokenInfo(r.token) || {}).proofs || []).forEach(function (pr) {
+          var parts = cardSecretParts(pr.secret);
+          if (parts && onCard[parts.nonce]) return;
+          out.push(satsOf(pr.amount));
+        });
+      } catch (e) {}
+    });
+    return out;
+  }
+
+  /* How many pieces a load onto this card may be: the places it has free and
+   * the ones a write frees first (spent, and `signed` pieces that have just
+   * been), less a few for what the mint's fee may add, and never more than a
+   * load is. */
+  function cardRoomFor(card, signed) {
+    var info = (card && card.info) || {};
+    var room = (Number(info.empty) || 0) + (Number(info.spent) || 0) + ((signed && signed.length) || 0) - 4;
+    return Math.max(1, Math.min(CARD_LOAD_PIECES, room));
+  }
+
+  /* The pieces change is made in: exactly `sats`, never rounded, cut for the
+   * card it goes back on as a load is (the card as it will be, without the pieces
+   * that have just been signed), in the room it has. Too many for a drawer, it
+   * is the plain powers of two. */
+  function cardChangeCut(w, sats, card, except) {
+    var top = cardMaxPiece(w);
+    var cut = cardLadder(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except));
+    return (cut.extra > 0 ? cardLadder(sats, 64, top, null, true) : cut).denominations;
+  }
+
   /* A token's proofs as pieces this card can hold, or a throw saying why not.
    * Each must be locked to this card and, built again from what the card will
    * keep of it, be the same secret to the character: a piece that is not is
@@ -417,12 +879,19 @@
    * card (by its nonce) is not written twice, so a tap that was cut short is
    * finished by the next. Answers { sats, done: [ids], left: [ids] }; rejects
    * only when nothing at all could be written for a reason worth saying. */
-  function cardWriteOwed(t, card) {
+  function cardWriteOwed(t, card, progress) {
     var mine = cardStore(CARD_OWED).filter(function (r) { return r && r.card === card.key; });
-    if (!mine.length) return Promise.resolve({ sats: 0, done: [], left: [] });
+    if (!mine.length) return Promise.resolve({ sats: 0, back: 0, done: [], left: [] });
     var onCard = {};
     card.slots.forEach(function (x) { if (x.state === 'unspent') onCard[x.nonce] = true; });
-    var done = [], left = [], sats = 0, stopped = null, misfit = null;
+    /* How many pieces there are to write, for the line that says "writing 2 of
+     * 4": those in the rows that fit this card, that are not on it yet. */
+    var toWrite = 0, written = 0;
+    mine.forEach(function (row) {
+      try { cardPiecesOf(row.token, card).forEach(function (piece) { if (!onCard[piece.nonce]) toWrite += 1; }); } catch (e) {}
+    });
+    var tell = function (info) { try { if (typeof progress === 'function') progress(info); } catch (e) {} };
+    var done = [], left = [], sats = 0, back = 0, stopped = null, misfit = null;
     var walk = t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
       // a locked card frees nothing, and may still have room
       if (!(e && e.card === 'locked')) throw e;
@@ -447,16 +916,19 @@
         pieces.forEach(function (piece) {
           each = each.then(function () {
             if (onCard[piece.nonce]) return null;
-            return t.want(cardCommand(CARD_INS.load, 0, cardPieceBytes(piece), 1), 'a piece').then(function () { onCard[piece.nonce] = true; });
+            tell({ step: 'writing', i: written + 1, n: Math.max(toWrite, written + 1) });
+            return t.want(cardCommand(CARD_INS.load, 0, cardPieceBytes(piece), 1), 'a piece').then(function () { onCard[piece.nonce] = true; written += 1; });
           });
         });
         return each.then(function () {
           done.push(row.id);
           sats += Math.round(Number(row.sats) || 0);
+          // a payment the mint refused, put back: said apart from a load or change
+          if (row.kind === 'putback') back += Math.round(Number(row.sats) || 0);
           // off the list as each lands, so a card that leaves now owes only what is left
           mustSave(CARD_OWED, cardStore(CARD_OWED).filter(function (r) { return !(r && r.id === row.id); }));
-          // written: marked on the token's own note, so it is never taken for one that was not (`cardAdopt`)
-          try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x0) {}
+          // written: marked on the token's own note, so it is never taken for one that was not (`cardAdopt`). A payment put back has no note
+          if (row.kind !== 'putback') { try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x0) {} }
           if (row.kind === 'change' && row.forHash) { try { amendTx(row.forHash, { changeState: 'given back', changeKept: true }); } catch (x) {} }
         }, function (e) { stopped = e; left.push(row.id); });
       });
@@ -464,7 +936,7 @@
     return walk.then(function () {
       if (stopped && !done.length) throw stopped;
       var why = stopped || misfit;
-      return { sats: sats, done: done, left: left, why: why ? (why.card || 'refused') : '' };
+      return { sats: sats, back: back, done: done, left: left, why: why ? (why.card || 'refused') : '' };
     });
   }
 
@@ -568,14 +1040,18 @@
   }
 
   /* The record a card is given (SET_CARD): its unit, the key that may take
-   * its pieces back or none, and its mint's address as text. Throws where the
-   * address is one a card cannot hold. */
-  function cardRecordHex(refundKey, mint) {
+   * its pieces back or none, the key its time is signed by, and its mint's
+   * address as text. Throws where the address is one a card cannot hold.
+   * `timeKey` is the card's own where it has one (a card moved to another mint
+   * keeps its clock), and otherwise the interim key. */
+  function cardRecordHex(refundKey, mint, timeKey) {
     var at = String(mint || '');
-    if (!at || at.length > 96 || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
+    if (!at || at.length > CARD_MINT_MAX || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
+    var key = String(timeKey || CARD_TIME_KEY).toLowerCase();
+    if (!/^04[0-9a-f]{128}$/.test(key)) throw cardError('bad-key', 'That is not a key a card can check a time against.');
     var hex = '';
     for (var i = 0; i < at.length; i++) hex += cardByte(at.charCodeAt(i));
-    return '00' + (refundKey || new Array(67).join('0')) + cardByte(at.length) + hex;
+    return '00' + (refundKey || new Array(67).join('0')) + key + cardByte(at.length) + hex;
   }
 
   /* A card on its way to another mint, told so.
@@ -585,8 +1061,9 @@
    * mint, its record is changed first. Only an empty card: the card itself
    * refuses to change mints under unspent pieces, and it is not asked to. So
    * a card never holds ecash of a mint it does not name, and a move cut short
-   * before its second tap is finished by any later one. The PIN has been
-   * verified in this tap. Answers whether it changed. */
+   * before its second tap is finished by any later one. The record is the
+   * owner's to change, with the owner's proof and no PIN, and it keeps the
+   * time key the card has, so its clock stays. Answers whether it changed. */
   function cardRepointFor(t, card) {
     var w = wallet;
     if (!w || !card || !card.record) return Promise.resolve(false);
@@ -600,8 +1077,10 @@
       return Promise.reject(cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.'));
     }
     var record;
-    try { record = cardRecordHex(card.record.refundKey, here); } catch (e) { return Promise.reject(e); }
-    return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its new mint').then(function () {
+    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey); } catch (e) { return Promise.reject(e); }
+    return cardOwned(t, card.key, 'set-card', record).then(function (data) {
+      return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
+    }).then(function () {
       console.log('[foxy] card: moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here));
       // as the card now has it: what is written next is checked against this
       card.record.mint = here;
@@ -661,16 +1140,148 @@
     return null;
   }
 
+  /* The pieces to take from a card for `want`, exactly if they can be.
+   *
+   * A set that sums to the price and the receiver's fee on it needs no change:
+   * no second tap to write it back, no swap to make it. So one is looked for
+   * first, by search and not by greed, and taken even when it has more pieces
+   * than a set that overpays (`cardExactPick`). Only when there is none are the
+   * pieces that cover the price with the least over chosen, and the difference
+   * comes back as change.
+   *
+   * A card's day is charged the whole worth of each piece it signs, and not
+   * the price, and change written back gives it nothing back. So the pieces
+   * never come to more than `cap`, what is left of today's limit (null where
+   * there is none to keep to: no limit, or the holder's own phone, which lifts
+   * it to take money off). The ordinary choices come first; where the one they
+   * find is over the cap, the pieces that fit under it are searched for. Null
+   * when nothing fits. */
+  function cardPick(w, have, want, cap) {
+    var bound = (cap === null || cap === undefined) ? null : Math.max(0, Number(cap) || 0);
+    var within = bound === null ? have : (have || []).filter(function (p) { return satsOf(p.amount) <= /** @type {number} */ (bound); });
+    var exact = cardExactPick(w, within, want, bound);
+    if (exact) return exact;
+    var cover = coverPieces(w, within, want);
+    if (cover && (bound === null || cover.total <= bound)) return cover.picked;
+    return bound === null ? null : cardPickUnder(w, within, want, bound);
+  }
+
+  /* The fewest pieces that come to exactly `want` and the receiver's fee on
+   * them, or null when no set does.
+   *
+   * The fee depends on how many pieces there are, so each fee it could be is
+   * tried in turn: a set is the answer for a fee of F when it sums to want + F
+   * and the mint would charge exactly F for it. The search takes pieces of one
+   * size together, largest first, and gives up after a fixed number of steps
+   * (a card holds sixty-four pieces at most, and in a few sizes). No more than
+   * `bound` in all, when there is one. */
+  function cardExactPick(w, pool, want, bound) {
+    var list = (pool || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; });
+    if (!list.length || !(want > 0)) return null;
+    // pieces of one size together, largest size first
+    var bySize = {};
+    list.forEach(function (p) { var a = satsOf(p.amount); (bySize[a] = bySize[a] || []).push(p); });
+    var sizes = Object.keys(bySize).map(Number).sort(function (a, b) { return b - a; });
+    var total = sumProofs(list);
+    var feeMost = swapFeeFor(w, list);
+    if (!isFinite(feeMost) || feeMost < 0) feeMost = 0;
+    // what is left in the sizes from i on, to stop where the rest cannot make up the sum
+    var left = sizes.map(function (a, i) {
+      var n = 0;
+      for (var j = i; j < sizes.length; j++) n += sizes[j] * bySize[sizes[j]].length;
+      return n;
+    });
+    /** @type {?any[]} */
+    var best = null;
+    var steps = 0;
+    for (var fee = 0; fee <= feeMost; fee++) {
+      var target = want + fee;
+      if (target > total || (bound !== null && target > bound)) break;
+      var picked = [];
+      var walk = function (i, rem) {
+        if (steps++ > 60000) return;
+        if (rem === 0) {
+          if (picked.length && (!best || picked.length < best.length) && swapFeeFor(w, picked) === fee) best = picked.slice();
+          return;
+        }
+        if (i >= sizes.length || left[i] < rem) return;
+        // more pieces cannot beat a set already found with this many
+        if (best && picked.length + 1 >= best.length) return;
+        var a = sizes[i], group = bySize[a];
+        for (var c = Math.min(group.length, Math.floor(rem / a)); c >= 0; c--) {
+          for (var k = 0; k < c; k++) picked.push(group[k]);
+          walk(i + 1, rem - c * a);
+          for (var k2 = 0; k2 < c; k2++) picked.pop();
+        }
+      };
+      walk(0, target);
+    }
+    return best;
+  }
+
+  /* The cheapest set of pieces that pays `want` and the receiver's fee and is
+   * worth no more than `cap`: a search, largest first, that gives up after a
+   * fixed number of steps (a card holds sixty-four pieces at most). */
+  function cardPickUnder(w, pool, want, cap) {
+    var list = (pool || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; })
+      .slice().sort(function (a, b) { return satsOf(b.amount) - satsOf(a.amount); });
+    /** @type {?{ picked: any[], sum: number }} */
+    var best = null;
+    var steps = 0;
+    var walk = function (i, picked, sum) {
+      if (steps++ > 40000 || sum > cap) return;
+      if (picked.length) {
+        var fee = swapFeeFor(w, picked);
+        if (isFinite(fee) && sum >= want + fee) {
+          // more pieces only add to it
+          if (!best || sum < best.sum || (sum === best.sum && picked.length < best.picked.length)) best = { picked: picked.slice(), sum: sum };
+          return;
+        }
+      }
+      if (i >= list.length || (best && sum >= best.sum)) return;
+      picked.push(list[i]);
+      walk(i + 1, picked, sum + satsOf(list[i].amount));
+      picked.pop();
+      walk(i + 1, picked, sum);
+    };
+    walk(0, [], 0);
+    var found = /** @type {any} */ (best);
+    return found ? found.picked : null;
+  }
+
   /* Have the card sign for these pieces: the PIN, then each in turn. Answers
    * the pieces with their witnesses. If the card leaves part-way, the ones it
    * did sign are on the error as `signed`: the card has marked them spent, so
-   * they are not to be dropped. */
-  function cardSign(t, card, picked, pinHex) {
+   * they are not to be dropped.
+   *
+   * `lift`: the holder's own phone is taking money off a card that has a daily
+   * limit. After the PIN, and before the first piece is asked for, the limit is
+   * lifted with the owner's proof; and it is put back at the end, whether the
+   * signing went well or not. The old limit is written down first, so a tap that
+   * ends between the two is finished by the next one (`cardLook`, `mine`). */
+  function cardSign(t, card, picked, pinHex, lift, progress) {
     var signed = [];
+    var lifted = false;
+    var back = function () {
+      if (!lifted) return Promise.resolve();
+      return cardLimitTo(t, card.key, card.record.limit).then(function () {
+        lifted = false;
+        cardLiftNote(card.key, 0);
+      }, function () { /* the note stays, and the next tap of this phone puts it back */ });
+    };
     return t.want(cardCommand(CARD_INS.verify, 0, pinHex), 'its PIN').then(function () {
+      if (!lift) return null;
+      cardLiftNote(card.key, card.record.limit);
+      return cardLimitTo(t, card.key, 0).then(function () { lifted = true; }, function (e) {
+        if (e && e.card === 'not-owner') cardLiftNote(card.key, 0);
+        throw e;
+      });
+    }).then(function () {
       var walk = Promise.resolve();
       picked.forEach(function (proof) {
         walk = walk.then(function () {
+          // said before the card is asked, so the line is up for the whole of its work on this piece
+          try { if (typeof progress === 'function') progress({ step: 'signing', i: signed.length + 1, n: picked.length }); } catch (e) {}
           return t.want(cardCommand(CARD_INS.spend, proof.slot, '', 64), 'to sign for a piece').then(function (sig) {
             var one = { id: proof.id, amount: proof.amount, secret: proof.secret, C: proof.C,
                         witness: JSON.stringify({ signatures: [sig] }) };
@@ -682,9 +1293,9 @@
         });
       });
       return walk;
-    }).then(function () { return signed; }, function (e) {
+    }).then(function () { return back(); }).then(function () { return signed; }, function (e) {
       try { e.signed = signed; } catch (x) {}
-      throw e;
+      return back().then(function () { throw e; });
     });
   }
 
@@ -731,10 +1342,6 @@
     save(CARDS, all);
   }
 
-  /* Swap a row of TAKEN at the mint, by the ordinary receive. The entry is
-   * the row's own id, so an answer that was lost and found again finishes
-   * that entry and no other. Rejects with `card: 'spent'` when the mint says
-   * the pieces are gone and it was not this phone that took them. */
   /* What moving `have` sats off a card and out of its mint will take in all
    * at the most, for a plan asked before the card is touched
    * (`transferQuote`'s `quoteOnly`): the money is not in this phone yet, so
@@ -775,11 +1382,31 @@
     }
   }
 
+  /* Swap a row of TAKEN at the mint, by the ordinary receive. The entry is
+   * the row's own id, so an answer that was lost and found again finishes
+   * that entry and no other.
+   *
+   * The first asking is a person waiting, and is made with nothing asked of the
+   * mint before it: the swap refuses spent pieces itself, and a question
+   * first is another round trip over Tor in front of a till (the pieces' state
+   * was 9 to 24 seconds of a payment). It leaves on the circuit kept ready. A
+   * later asking (`again`, the wallet's own on a connect) is nobody's wait, and
+   * keeps its question so that a swap that would be refused reserves nothing.
+   *
+   * Four ways out besides paid:
+   *   `putback`  the mint refused, and some of the pieces are still good: they
+   *              are filed to go back onto the card at its next tap;
+   *   `spent`    the mint says the pieces are gone (or this phone swapped
+   *              them already, and this is a copy of a card that has paid);
+   *   `bad-pieces` the mint never signed them: nothing to put back;
+   *   `waiting`  no answer, or one that settles nothing: the swap record and the
+   *              row stay, and the wallet's own recovery settles it. */
   function cardSwapTaken(row, again) {
     return FoxyWallet.receiveToken(row.token, { hash: row.id, memo: row.memo || 'card',
                                                 keptSats: row.all ? undefined : row.sats,
                                                 changeSats: row.all ? undefined : (row.over > 0 ? row.over : undefined),
-                                                grossSats: row.all ? undefined : row.worth })
+                                                grossSats: row.all ? undefined : row.worth,
+                                                noPrecheck: !again, now: !again })
       .then(function (r) {
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
         // 'card' is a move the screens say themselves; 'card payment' is announced like any other (16-history-lists.js)
@@ -801,12 +1428,130 @@
           mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
           return { sats: Number(e.foxyTakenSats) || 0 };
         }
-        if ((e && e.foxyMine) || /already spent|token already|already claimed|nothing to take/i.test(text) || Number(e && e.code) === 11001) {
+        var spent = !!(e && e.foxyMine) || /already spent|token already|already claimed|nothing to take/i.test(text) || Number(e && e.code) === 11001;
+        /* An answer that was lost and then found by the wallet's own recovery
+         * (`recoverSwaps`) has put the ecash in the pile and written the entry,
+         * and the mint now calls the pieces spent, because they were: this
+         * phone's own swap spent them. That is the payment, made. */
+        if (again && spent && !(e && e.foxyMine) && FoxyWallet.txSeen(row.id)) {
           mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
-          throw cardError('spent', 'The mint says this card\u2019s money was already spent.');
+          try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund) ? 'card' : 'card payment' }); } catch (x2) {}
+          try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x3) {}
+          return { sats: Number(row.worth) || 0 };
         }
+        // a restored answer is not a refusal: the mint did the swap, and the ecash is back in the pile
+        var status = Number((e && (e.status || (e.response && e.response.status))) || 0);
+        var busy = status === 408 || status === 425 || status === 429;      // asked too often, or too soon: not a "no" to the pieces
+        if (spent || (mintRefused(e) && !(e && e.recovered) && !busy)) return cardRefusal(row, e, !!(e && e.foxyMine));
         throw cardError('waiting', 'The card has signed and the mint has not answered yet. ' + text, { id: row.id });
       });
+  }
+
+  /* The mint's "no" to pieces a card has signed for. The card marked them spent
+   * when it signed, so what the mint has not spent of them is the holder's money
+   * that only this card can hold, and it has to go back on it.
+   *
+   * Which of them are still good is the mint's to say, and is asked here, after
+   * the card has been let go and not while it is held. Those that are go to the
+   * owed store as they stand (the card's own pieces, without the signatures), and
+   * the next tap on the card clears the places the signing burned and loads them
+   * again. The card's day stays charged: loading gives the day nothing back, and
+   * only the owner's phone can set it right. Said as `putback`, with how much.
+   *
+   * A mint that cannot be asked, or says some are pending, has not said: the row
+   * is kept and this is `waiting`, as a lost answer is. */
+  function cardRefusal(row, e, mine) {
+    var w;
+    try { w = need(); } catch (x) { return Promise.reject(cardError('waiting', 'The card has signed and the mint has not answered yet.', { id: row.id })); }
+    var tok = null;
+    try { tok = FoxyWallet.tokenInfo(row.token); } catch (x1) { tok = null; }
+    var all = (tok && tok.proofs) || [];
+    var strike = function () { mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (r) { return !(r && r.id === row.id); })); };
+    // pieces the mint never signed are worth nothing, and are not put back on a card
+    if (Number(e && e.code) === 10003) {
+      strike();
+      return Promise.reject(cardError('bad-pieces', 'The card gave pieces the mint did not sign. Nothing was paid.', { id: row.id }));
+    }
+    var asked = (mine || !all.length) ? Promise.resolve(all.map(function () { return 'SPENT'; }))
+      : statesOf(onCircuit(w, 'card:' + String(row.card).slice(-16)), all).then(null, function () { return null; });
+    return asked.then(function (states) {
+      var known = !!states && states.length === all.length && states.every(function (st) { return st === 'UNSPENT' || st === 'SPENT'; });
+      if (!known) throw cardError('waiting', 'The card has signed and the mint has not said what became of its pieces yet.', { id: row.id });
+      var good = all.filter(function (p, i) { return states[i] === 'UNSPENT'; });
+      if (!good.length) {
+        strike();
+        throw cardError('spent', 'The mint says this card’s money was already spent.');
+      }
+      var sats = sumProofs(good);
+      var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), unit: 'sat',
+        proofs: good.map(function (p) { return { id: p.id, amount: p.amount, secret: p.secret, C: p.C }; }) });
+      // owed first, then struck off: never in neither
+      mustSave(CARD_OWED, cardStore(CARD_OWED).filter(function (r) { return !(r && r.id === 'back-' + row.id); })
+        .concat([{ id: 'back-' + row.id, card: row.card, token: token, sats: sats, kind: 'putback', forHash: row.id, at: Date.now() }]));
+      strike();
+      console.warn('[foxy] card: the mint refused a payment the card had signed for (' + String((e && (e.message || e.detail)) || e).slice(0, 80)
+        + '); ' + sats + ' sats of it are owed back to the card, ' + (sumProofs(all) - sats) + ' are spent');
+      throw cardError('putback', 'The mint refused this payment, and the card has already signed for it. ' + sats
+        + ' sats are waiting to go back onto the card at its next tap.', { owed: sats, lost: sumProofs(all) - sats, limited: !!row.limited, id: row.id });
+    });
+  }
+
+  /* ---- a till with no route -------------------------------------------------
+   *
+   * Paid needs the mint's swap, and a phone with no route cannot ask. It can
+   * still be handed a card's pieces, signed, and keep them to swap in when it
+   * can, as it can be handed plain ecash and keep that on trust. The same risk
+   * is run and the same question put to the person first, in front of the amount
+   * (the HIGH RISK card): until this phone is online, the card's holder may still
+   * spend what they have just paid with, from a copy of the card or by any
+   * route to the mint, and the person who accepts it is the one who bears that.
+   *
+   * It is the card's own decision, and a switch of its own: plain ecash between
+   * two offline phones stays as `OFFLINE_TO_OFFLINE` has it. One constant turns
+   * this off, and a till with no route then refuses a card as it did.
+   *
+   * What it takes: an exact set of pieces only (a till with no route cannot make
+   * change), a payment and not a withdrawal, and only when the person has said
+   * yes (`o.trusted === true`, which the screen sets after the question). The
+   * card's time and its day work as ever (the time is signed on this phone), and
+   * every signature the card gives is checked here before anything is kept. The
+   * pieces are kept as a trusted row of the unclaimed store, with a PENDING
+   * entry, and `claimUnclaimed` swaps them in when there is a route, or marks
+   * them taken back if the mint says they were spent. "Paid" is never said
+   * here. */
+  var CARD_OFFLINE = true;
+
+  function cardOffline(on) {
+    if (on !== undefined) CARD_OFFLINE = !!on;
+    return CARD_OFFLINE;
+  }
+
+  /* The question, put to the person by the screen that registered for it
+   * (`onOfflineOffer`). No screen means no. Resolves true only for a yes. */
+  function cardOfflineAsk(sats) {
+    var ask = FoxyWallet._onOfflineOffer;
+    if (!CARD_OFFLINE || typeof ask !== 'function') return Promise.resolve(false);
+    var asked;
+    try { asked = ask({ sats: Math.round(Number(sats) || 0), id: 'card', purpose: 'card', scanned: true }); }
+    catch (e) { return Promise.resolve(false); }
+    return Promise.resolve(asked).then(function (yes) { return yes === true; }, function () { return false; });
+  }
+
+  /* The signed pieces, kept on trust. They are written down first as TAKEN, as
+   * for any payment (the card has burned them and this is the only copy), and
+   * moved into the unclaimed store; the row is struck off TAKEN once it is
+   * safely there. */
+  function cardKeepOnTrust(row, signed, card, w) {
+    if (dleqAudit(w, signed).invalid) {
+      throw cardError('bad-pieces', 'The card gave pieces the mint did not sign. Nothing was taken.', { id: row.id });
+    }
+    var already = unclaimed()[row.id];
+    if (!already) keepUnclaimed(row.id, row.token, row.worth, true);
+    logTx({ dir: 'in', sats: row.sats, feeSats: 0, settled: false, state: 'pending', trusted: true,
+            memo: 'card, offline', card: card.key, hash: 'req-' + row.id }, 'req-' + row.id);
+    mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
+    console.log('[foxy] offline: ' + row.sats + ' sats signed by a card taken on trust, to be swapped in when there is a route');
+    return { sats: row.sats, hash: 'req-' + row.id };
   }
 
   /* The one flow behind being paid by a card and emptying one (21a-flashcard.js). */
@@ -817,28 +1562,61 @@
     var want = o.all ? 0 : Math.round(Number(o.sats));
     if (!o.all && !(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
     var w;
-    try { w = need(); } catch (e2) { return Promise.reject(e2); }
-    if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint, so the card was not asked for anything.'));
+    /* No route: refused, as it always was, unless this is a payment the person
+     * has said yes to taking on trust (`cardKeepOnTrust`). */
+    var offline = !routeOpen();
+    if (offline && !(CARD_OFFLINE && o.trusted === true && !o.lift && !o.all)) {
+      try { need(); } catch (e2) { return Promise.reject(e2); }
+      return Promise.reject(cardError('no-route', 'There is no connection to the mint, so the card was not asked for anything.'));
+    }
+    try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     var t = cardTalk(link);
-    var card, picked, worth, fee, row, result, own;
+    var card, picked, worth, fee, row, result, own, cap, lift = false, released = false, signedNonces = [];
     on('reading');
-    return cardLook(link).then(function (c) {
+    /* A till does not ask the card to prove its key (AUTH: the card's slowest
+     * answer): it is about to be paid in pieces the card signs, and a signature
+     * that is not good for the key in a piece's secret is refused below, before
+     * anything is kept. A pretend card gets nothing from that, and the mint's
+     * swap is what says paid. The holder's own phone reads it the full way: it
+     * signs for the owner there. */
+    return cardLook(link, { mine: !!o.lift, noAuth: !o.lift }).then(function (c) {
       card = c;
       var no = cardUnusable(card, w);
       if (no) throw no;
       own = cardMine(card);
-      // this phone's own card, read: what is on it now is written down, as at any other read
-      if (own) cardRemember(card, card.pieces, true);
+      // this phone's own card, read and proved: what is on it now is written down, as at any other read
+      if (own && card.proved) cardRemember(card, card.pieces, true);
       var usable = cardUsable(card, w, own);
       var have = usable.pieces;
+      /* What a till may take is what is left of the card's day, read here and
+       * not found out half-way: the PIN is not sent to a card that cannot cover
+       * the payment. The holder's own phone (`o.lift`) lifts the limit, with
+       * its proof, to take money off the card, and puts it back; a phone that is
+       * not the card's owner is a till like any other. */
+      var day = card.day;
+      var turns = day.turns;
+      lift = !!(o.lift && day.limited && card.mine);
+      cap = (day.limited && !lift) ? day.left : null;
+      if (day.limited && day.noTime && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
+      /* Offline, only an exact set: change cannot be made without a route, and
+       * a till that paid it out of its own pile would lose the payment and the
+       * change both to a payer who spent their copy. */
+      var choose = function (limit) { return offline ? cardExactPick(w, have, want, limit) : cardPick(w, have, want, limit); };
       if (o.all) {
         picked = have;
       } else {
-        picked = exactPieces(w, have, want);
-        if (!picked) {
-          var cover = coverPieces(w, have, want);
-          picked = cover ? cover.picked : null;
+        picked = choose(cap);
+      }
+      if ((!picked || !picked.length) && cap !== null && !o.all) {
+        var free = choose(null);
+        if (free && free.length && sumProofs(free) > cap) {
+          throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
+                          { left: cap, need: sumProofs(free), turns: turns, limit: day.limit });
         }
+      }
+      if (offline && (!picked || !picked.length) && card.balance >= want && !(usable.stale > 0 && usable.pieces.length === 0)) {
+        throw cardError('inexact', 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly '
+          + want + ' sats. Pay an amount it can make, or pay when this phone is online.', { balance: card.balance });
       }
       if (!picked || !picked.length) {
         if (usable.stale > 0 && card.balance >= want) {
@@ -853,22 +1631,36 @@
       if (!isFinite(fee) || fee < 0) fee = 0;
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
-      /* The card's limit, asked of it here and not found out half-way: a
-       * card that signs for three pieces and refuses the fourth has spent
-       * three for a payment that was not made. */
-      if (card.record.limit && worth > card.record.limit) {
-        throw cardError('over-limit', 'That is more than this card lets one PIN entry spend (' + card.record.limit + ' sats).', { limit: card.record.limit });
+      /* A card that signs for three pieces and refuses the fourth has spent
+       * three for a payment that was not made, so the limit is checked for the
+       * whole set before the first is asked for. */
+      if (cap !== null && worth > cap) {
+        throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
+                        { left: cap, need: worth, turns: turns, limit: day.limit });
       }
       on('signing');
-      return cardSign(t, card, picked, pin);
+      return cardSign(t, card, picked, pin, lift, o.progress);
     }).then(function (signed) {
       if (own) cardSpentHere(card.key, signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
       var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
       row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: worth - fee - want,
-              all: !!o.all, card: card.key, memo: memo, at: Date.now() };
+              all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
+      signedNonces = signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
+      // written down before the card is let go: from here this row is the only copy of the right to spend the pieces
       mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([row]));
-      on('mint');
-      return cardSwapTaken(row);
+      if (offline) {
+        var kept = cardKeepOnTrust(row, signed, card, w);
+        on('done');
+        return { sats: kept.sats, hash: kept.hash, trusted: true, change: null };
+      }
+      /* The card has done its part, and the mint's work takes as long as Tor
+       * does: it is let go now, and the person is told so, and the rest is
+       * done with Foxy's own screen saying so (`cardLetGo`). */
+      return cardLetGo(link, o).then(function () {
+        released = !o.hold;
+        on(released ? 'checking' : 'mint');
+        return cardSwapTaken(row, false);
+      });
     }, function (e) {
       /* The card left, or refused, part-way through signing. What it did
        * sign for it has marked spent, and those pieces are the holder's
@@ -881,9 +1673,11 @@
                    refund: true };
       mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
       console.warn('[foxy] card: the card signed for ' + some.length + ' of ' + picked.length + ' pieces and left; what it signed goes back to it');
-      return cardReturn(back, card, w).then(function () { throw cardError('interrupted', 'The card was taken away too soon. Nothing was paid, and ' + sumProofs(some) + ' sats are waiting to go back on it.', { owed: sumProofs(some) }); },
+      var signedHere = some.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
+      return cardReturn(back, card, w, signedHere).then(function () { throw cardError('interrupted', 'The card was taken away too soon. Nothing was paid, and ' + sumProofs(some) + ' sats are waiting to go back on it.', { owed: sumProofs(some) }); },
         function () { throw cardError('interrupted', 'The card was taken away too soon. Nothing was paid; what it signed for will go back to it when the mint answers.', { owed: sumProofs(some) }); });
     }).then(function (got) {
+      if (offline) return got;
       result = { sats: want, hash: row.id, change: null };
       var over = row.all ? 0 : Math.max(0, worth - fee - want);
       if (!(over > 0)) { on('done'); return result; }
@@ -898,16 +1692,18 @@
         on('done');
         return result;
       }
-      on('change');
+      on(released ? 'making' : 'change');
       /* Locked to the card again and with the date of what it paid with: the
        * holder's wait for a lost card is not lengthened by a receiver. Made
        * from this phone's pile, which the swap has just put the whole of the
-       * card's pieces into. */
+       * card's pieces into. Cut for the card as it will be, to fill the gaps
+       * in its drawer (`cardChangeCut`). */
       var date = picked.reduce(function (d, pr) { return Math.max(d, pr.date || 0); }, 0);
       var refund = card.record.refundKey;
       try { amendTx(row.id, { changeState: 'making' }); } catch (x) {}
       return FoxyWallet.sendToken(back, { unit: 'sat', lockTo: card.key, lockUntil: (refund && date) ? date : undefined,
                                           refundTo: (refund && date) ? refund : undefined,
+                                          denominations: cardChangeCut(w, back, card, signedNonces),
                                           purpose: 'change', forHash: row.id, owed: over })
         .then(function (made) {
           settleChangeMade(row.id, over, { sats: made.sats, fee: made.fee, back: back });
@@ -915,11 +1711,14 @@
           mustSave(CARD_OWED, cardStore(CARD_OWED).concat([{ id: made.hash, card: card.key, token: made.token, sats: made.sats,
                                                              kind: 'change', forHash: row.id, at: Date.now() }]));
           try { amendTx(row.id, { changeState: 'not handed' }); } catch (x) {}
+          /* The card has gone: its change waits for the next tap, as it does
+           * for a card that leaves early. */
+          if (released) { result.change = { sats: made.sats, written: false }; return null; }
           /* Back onto the card now: the tap is still open and its PIN still
            * stands. Not read again first: choosing the applet again ends the
            * session the PIN was verified in, and what was read at the start
            * of the tap is still what is on the card but for what it spent. */
-          return cardWriteOwed(t, card).then(function (wrote) {
+          return cardWriteOwed(t, card, o.progress).then(function (wrote) {
             result.change = { sats: made.sats, written: wrote.left.length === 0 };
           }, function () {
             result.change = { sats: made.sats, written: false };
@@ -933,10 +1732,22 @@
     });
   }
 
+  /* The card's part is over: it has signed, and nothing more is asked of it.
+   * Its sheet is ended ("Done. Remove the card.") and the mint, which takes
+   * as long as it takes, is asked with the card gone. Not for a flow that
+   * goes on to speak to the card again (`o.hold`: a renewal writes to it, a move
+   * reads it last), and nothing is sent to a link that has no way to let go
+   * (a test's bare model: it is simply not spoken to again). Resolves
+   * when the sheet has been told. */
+  function cardLetGo(link, o) {
+    if (o.hold || !link || typeof link.release !== 'function') return Promise.resolve();
+    return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
+  }
+
   /* Pieces a card signed for a payment that was not made, on their way back
    * to it: swapped into this phone and straight out again as pieces locked to
    * the card, owed to it. */
-  function cardReturn(row, card, w) {
+  function cardReturn(row, card, w, signedNonces) {
     return cardSwapTaken(row).then(function (got) {
       var owed = Math.max(0, got.sats);
       var back = changeFromPile(w, owed);
@@ -953,6 +1764,7 @@
       try { amendTx(row.id, { memo: 'card, not completed', changeState: 'making', changeSats: owed, grossSats: owed, sats: 0 }); } catch (x) {}
       return FoxyWallet.sendToken(back, { unit: 'sat', lockTo: card.key, lockUntil: (refund && date) ? date : undefined,
                                           refundTo: (refund && date) ? refund : undefined,
+                                          denominations: cardChangeCut(w, back, card, signedNonces),
                                           purpose: 'change', forHash: row.id, owed: owed })
         .then(function (made) {
           settleChangeMade(row.id, owed, { sats: made.sats, fee: made.fee, back: back });

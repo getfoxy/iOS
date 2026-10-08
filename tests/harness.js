@@ -754,6 +754,50 @@ function p2pkAt(parent, index) {
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
 }
 
+/* ---- the owner key and the time key (P-256) --------------------------------
+ *
+ * What the phone's native side does for a card, as Foxy/Keychain (CardOwner) and
+ * Foxy/Flashcard/CardTime.swift do it, with Node's own crypto, and held to the
+ * same fixture (tests/fixtures/card-owner-vectors.json). A card's owner key is
+ * derived per card from the seed and never leaves native; the page gets the
+ * public half and signatures, and that is what these answer. */
+const P256_ORDER = BigInt('0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551');
+/* The labels native signs for, and no others (never "lock", never "time"). */
+const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load'];
+/* INTERIM: the private half of the key a card's time is signed by. It is built into the app, so it is no secret
+ * (Foxy/Flashcard/CardTime.swift holds the same value, and tests/flashcard-daily.js holds the two together). */
+const INTERIM_TIME_PRIVATE = '5d3aa8864437b69bc699905ded587014b3d1f7e0de402684e5eec162d540b2ca';
+
+function cardOwnerScalar(seed, cardKeyHex) {
+  for (let counter = 0; ; counter++) {
+    const message = Buffer.concat([Buffer.from('FoxyCard/owner', 'utf8'), Buffer.from([0]), Buffer.from(cardKeyHex, 'hex'),
+      counter ? Buffer.from([counter]) : Buffer.alloc(0)]);
+    const d = BigInt('0x' + crypto.createHmac('sha256', seed).update(message).digest('hex')) % P256_ORDER;
+    if (d !== 0n) return d;
+  }
+}
+const scalarBytes = (d) => Buffer.from(d.toString(16).padStart(64, '0'), 'hex');
+function p256Public(d) {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.setPrivateKey(scalarBytes(d));
+  return ecdh.getPublicKey('hex', 'uncompressed');
+}
+function p256Sign(d, message) {
+  const pub = Buffer.from(p256Public(d), 'hex');
+  const key = crypto.createPrivateKey({ key: { kty: 'EC', crv: 'P-256', d: scalarBytes(d).toString('base64url'),
+    x: pub.subarray(1, 33).toString('base64url'), y: pub.subarray(33, 65).toString('base64url') }, format: 'jwk' });
+  return crypto.sign('sha256', message, { key, dsaEncoding: 'der' }).toString('hex');
+}
+/* Whether `sig` (DER hex) is a good signature over `message` by the P-256 public key `pubHex` (04 || X || Y). */
+function p256Verify(pubHex, message, sig) {
+  try {
+    const pub = Buffer.from(pubHex, 'hex');
+    const key = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: pub.subarray(1, 33).toString('base64url'),
+      y: pub.subarray(33, 65).toString('base64url') }, format: 'jwk' });
+    return crypto.verify('sha256', message, { key, dsaEncoding: 'der' }, Buffer.from(sig, 'hex'));
+  } catch (e) { return false; }
+}
+
 function nativePhone(opts) {
   const o = opts || {};
   const R = NATIVE_RULES, SAYS = NATIVE_SAYS;
@@ -771,11 +815,14 @@ function nativePhone(opts) {
     served: new Map(),          // slot -> the highest end restoreSecrets served for the saved seed this app session
     imported: false,            // countersImport has run on this install
     asks: [],
+    said: [],                   // what the phone answered, action by action: a test can look for a secret in it
     refusals: [],
     lowered: [],
     screen: null,               // the seed screen open or queued: { close }
     faceIdCancelledAt: null,
     now: () => Date.now(),
+    /* The phone's own clock, in milliseconds, which `cardTime` signs: the real one unless a test sets `clockMs`. */
+    clockMs: () => Date.now(),
     page: null,
     hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null },
     toSeed: null, generate: null, wordlist: null, derive: null, validate: null,
@@ -810,6 +857,12 @@ function nativePhone(opts) {
   const ok = (j) => [JSON.stringify(j), null];
   const no = (why) => [null, why];
   const words = () => keychain.words;
+  // the seed held now, as native derives from it
+  const seedNow = () => {
+    const seedKey = (phone.toSeed ? 'real|' : 'stand-in|') + words();
+    if (!seeds.has(seedKey)) seeds.set(seedKey, toSeed(words()));
+    return Buffer.from(seeds.get(seedKey));
+  };
 
   /* The counter file of the seed held now, and native's keying of it. */
   const book = (w) => {
@@ -1069,6 +1122,49 @@ function nativePhone(opts) {
       const pair = lockKeyAt(words(), m.index);
       return ok({ index: m.index, privkey: pair.priv, pubkey: pair.pub });
     },
+    /* handleCardOwnerKey, SeedActions.cardOwnerKey: the owner PUBLIC key for a
+     * card, 04 || X || Y. The private half is HMAC-SHA256 keyed with the seed over
+     * "FoxyCard/owner", a zero byte and the card's key (33 bytes), taken mod the
+     * order of P-256, and it never leaves here: the key is checked before the seed
+     * is read, no counter moves and no window applies. */
+    cardOwnerKey(m) {
+      const key = typeof m.key === 'string' ? m.key.toLowerCase() : '';
+      if (!/^0[23][0-9a-f]{64}$/.test(key)) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cardOwnerKey', 'read')) return no(SAYS.unreadable);
+      return ok({ pub: p256Public(cardOwnerScalar(seedNow(), key)) });
+    },
+    /* handleCardOwnerSign, SeedActions.cardOwnerSign: a signature (ECDSA, SHA-256,
+     * DER) over "FoxyCard/" + label || nonce (16) || value, for one of five fixed
+     * labels and the shape each takes. Every check comes before the seed is read.
+     * Nothing else is signed: not "lock", not "time". */
+    cardOwnerSign(m) {
+      const key = typeof m.key === 'string' ? m.key.toLowerCase() : '';
+      if (!/^0[23][0-9a-f]{64}$/.test(key)) return no(SAYS.bad);
+      if (typeof m.label !== 'string' || !CARD_LABELS.includes(m.label)) return no(SAYS.bad);
+      if (typeof m.nonce !== 'string' || !/^[0-9a-f]{32}$/i.test(m.nonce)) return no(SAYS.bad);
+      if (typeof m.value !== 'string' || !/^([0-9a-f]{2})*$/i.test(m.value)) return no(SAYS.bad);
+      const value = Buffer.from(m.value, 'hex');
+      const shaped = {
+        'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
+        'set-limit': value.length === 4,
+        'set-owner': value.length === 65 && value[0] === 4,
+        'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99] && value[34] === 4,
+        'load': value.length === 0,
+      }[m.label];
+      if (!shaped) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cardOwnerSign', 'read')) return no(SAYS.unreadable);
+      const message = Buffer.concat([Buffer.from('FoxyCard/' + m.label, 'ascii'), Buffer.from(m.nonce, 'hex'), value]);
+      return ok({ sig: p256Sign(cardOwnerScalar(seedNow(), key), message) });
+    },
+    /* handleCardTime, CardTime.swift: the phone's own clock, signed by the INTERIM
+     * time key over "FoxyCard/time" || the time (4 bytes, big-endian). No seed. */
+    cardTime() {
+      const time = Math.floor(phone.clockMs() / 1000);
+      const message = Buffer.concat([Buffer.from('FoxyCard/time', 'ascii'), Buffer.from([time >>> 24, (time >>> 16) & 255, (time >>> 8) & 255, time & 255])]);
+      return ok({ time, sig: p256Sign(BigInt('0x' + INTERIM_TIME_PRIVATE), message) });
+    },
     // handleSeedShow, SeedScreens: one screen at a time, and none within 10 s of a cancelled Face ID
     seedShow(m) {
       if (phone.screen) return no(SAYS.screenOpen);
@@ -1155,7 +1251,7 @@ function nativePhone(opts) {
     // a page loaded again: native drops the candidates (SeedVault.forgetNativeSeed on a reload)
     if (w && phone.page !== w) { if (phone.page) phone.candidates.clear(); phone.page = w; }
     phone.asks.push(Object.assign({}, m));
-    const said = (got) => { if (got[1]) phone.refusals.push({ action: m.action, error: got[1] }); return got; };
+    const said = (got) => { if (got[1]) phone.refusals.push({ action: m.action, error: got[1] }); else phone.said.push({ action: m.action, text: got[0] }); return got; };
     if (WORDS.has(m.action)) return said(no('Unknown action: ' + m.action));
     const refusal = phone.hooks.refuse && phone.hooks.refuse(m);
     if (refusal) return said(no(refusal));
@@ -1176,4 +1272,4 @@ function nativePhone(opts) {
 }
 
 module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
-                   p2pkParent, p2pkAt };
+                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, INTERIM_TIME_PRIVATE, CARD_LABELS };

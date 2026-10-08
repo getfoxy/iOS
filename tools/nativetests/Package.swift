@@ -16,6 +16,11 @@
 // whose replies must hold no words, and the rules the phone mock answers by
 // (tests/fixtures/native-rules.json) against the Swift that holds them.
 //
+// Foxy/Flashcard/CardTime.swift, the card's interim time signer, is its own module,
+// FoxyCardTime, linked file by file (Sources/FoxyCardTime): it needs nothing of the
+// app, and the rest of Foxy/Flashcard needs NFC, which a Mac does not have. Its
+// tests, CardTimeTests, import it as FoxyCardTime here and as Foxy in the app.
+//
 // libsecp256k1 is Vendor/secp256k1 (Sources/CSecp256k1's src and include are
 // links to it), compiled with the defines and optimisation project.yml gives it.
 // tools/check-all.sh runs this, and GitHub's checks run it on macOS.
@@ -48,9 +53,13 @@ let package = Package(
             path: "Sources/Foxy",
             exclude: ["bip39-english.txt"]
         ),
+        .target(
+            name: "FoxyCardTime",
+            path: "Sources/FoxyCardTime"
+        ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy"],
+            dependencies: ["Foxy", "FoxyCardTime"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -69,6 +78,7 @@ let package = Package(
                 "SeedMigrationWindowTests.swift",
                 "SeedVaultTests.swift",
                 "SeedActionsTests.swift",
+                "CardTimeTests.swift",
             ]
         ),
     ]

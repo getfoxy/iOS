@@ -54,7 +54,10 @@ The details, and the limits, are in `THREAT-MODEL.md` §4.
 - **Receive ordinary ecash offline.** A token is not filed until it has been
   swapped at the mint, because until then the sender holds the same secrets.
   An offline receiver takes only ecash locked to its own key, for a request
-  still open on it (`MONEY.md` §14).
+  still open on it (`MONEY.md` §14). The one exception is a card: a card
+  payment with no route to the mint is taken on trust, if the person says yes:
+  an exact set of pieces, kept as HIGH RISK and never shown as paid until the
+  mint has swapped it (`CARD.md`).
 - **Export proofs from a button.** An export is bearer money in plain text.
   Seed restore is verified against the default mint; `FoxyWallet.exportProofs()`
   exists in the console for the rare case that needs it.

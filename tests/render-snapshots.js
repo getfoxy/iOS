@@ -253,11 +253,15 @@ function representative() {
   const KEY_B = '03' + 'b2'.repeat(30) + '9f0e';
   const KEY_C = '02' + 'c3'.repeat(30) + '77ab';
   const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
-    hasRecord: true, limit: 0, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+    hasRecord: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+  // a card with a daily limit of 5,000 sats, 1,200 of it left, and its day turning at a fixed hour far off
+  const DAY = { limited: true, limit: 5000, spent: 3800, left: 1200, turns: 4102444800, now: 4102358400, noTime: false };
   // the card's three amounts, on the keypad every amount is typed on
   add('amount, adding to a card', at('amount', { flow: 'cardAdd', amount: '5', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
   add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
-  add('amount, a card\u2019s limit, in sats, with no limit under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
+  add('amount, a card\u2019s daily limit, in sats, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
+  add('fcLimitConfirm, a daily limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
+  add('fcLimitConfirm, no limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 0 } }, { wallet: CARDS() }));
   // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
   add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
   const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, sats: 2048, plan: null, fee: null, lands: 0, err: '', busy: false }, over || {});
@@ -273,9 +277,11 @@ function representative() {
       { key: KEY_B, mint: MINT, sats: 1024, date: 1700000000, due: true, takenBack: 0 },
       { key: KEY_C, mint: MINT, sats: 512, date: 1700000000, due: true, takenBack: 1700000500000 },
     ] }) }));
-  add('flashcard, a card of this phone\u2019s, read', at('flashcard', { fc: FC({ limit: 5000 }) }, { wallet: CARDS() }));
+  add('flashcard, a card of this phone\u2019s, with no limit', at('flashcard', { fc: FC() }, { wallet: CARDS() }));
+  add('flashcard, a card with a daily limit, what is left and when the day turns', at('flashcard', { fc: FC({ limit: 5000, day: DAY }) }, { wallet: CARDS() }));
   add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
-  add('flashcard, a blocked card', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
+  add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
+  add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
   add('flashcard, a cash card the mint says is spent', at('flashcard', { fc: FC({ recoverable: false, mine: false, first: 0, last: 0, check: { spent: 1024 } }) }, { wallet: CARDS() }));
   add('flashcard, somebody else\u2019s card, past its date, no connection', at('flashcard', { fc: FC({ mine: false, first: 1700000000, last: 1700000000, check: 'off', locked: true }) }, { wallet: CARDS() }));
   add('home, working offline', at('home', { series: SERIES, range: '1D' }, { wallet: OFFLINE }));
@@ -558,13 +564,37 @@ function cards() {
   add('stage: keep the card there', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('mint'); });
   add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
+  // the daily limit's first step, what making this phone a card's owner says, and what a till says when a card cannot cover a payment
+  add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
+  add('card: set up this card, this phone becomes its owner', (a) => a.fcSetUpOwner('1234'));
+  add('card: a till, over the card\u2019s daily limit, with what is left today', (a) => a.fcFailed({ card: 'limit', left: 1200, need: 2000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
+  add('card: a till, over what a card can spend in a day', (a) => a.fcFailed({ card: 'limit', left: 5000, need: 9000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
+  add('card: another phone\u2019s card', (a) => a.fcFailed({ card: 'not-owner', message: 'x' }, {}));
+  add('card: not a Foxy card, another signer\u2019s', (a) => a.fcFailed({ card: 'wrong-signer', message: 'That card keeps its time by another signer than this Foxy.' }, { taken: true }));
   add('card: a card\u2019s wrong PIN', (a) => a.fcFailed({ card: 'wrong-pin', tries: 2, message: 'Wrong PIN. 2 tries left.' }, { taken: true, again() {} }));
   add('card: a blocked card', (a) => a.fcFailed({ card: 'blocked', message: 'x' }, { taken: true }));
   add('card: not enough on the card', (a) => a.fcFailed({ card: 'not-enough', balance: 900, message: 'The card holds 900 sats.' }, { taken: true }));
   add('card: a card payment not made, no mint', (a) => a.fcFailed({ card: 'no-route', message: 'x' }, { taken: true, again() {} }));
+  // a card at another mint than this phone\u2019s: what ADD FUNDS says, by what is on it and whose phone it is (26f-flashcard.js, fcOtherMint)
+  const THERE = (over) => Object.assign({ key: '02' + 'a1'.repeat(30) + 'c3d4', balance: 0, count: 0, room: 64, pin: 'set', locked: false,
+    hasRecord: true, limit: 0, day: null, owner: true, ownedHere: true, mint: 'https://forge.example/Bitcoin', recoverable: false, mine: false,
+    first: 0, last: 0, check: 'none' }, over || {});
+  add('card: a different mint, adding funds, a card that holds money', (a) => { a.state.fc = THERE({ balance: 2048, count: 4 }); a.fcOtherMint('Adding funds'); });
+  add('card: a different mint, adding funds, an empty card, on its owner\u2019s phone', (a) => { a.state.fc = THERE(); a.fcOtherMint('Adding funds'); });
+  add('card: a different mint, adding funds, an empty card, on another phone', (a) => { a.state.fc = THERE({ ownedHere: false }); a.fcOtherMint('Adding funds'); });
+  // a till with no route: taken on trust and not paid, and the price a card cannot make exactly
+  add('card: taken on trust, a card payment with no route', (a) => a.fcTrusted({ sats: 592 }));
+  add('card: no change while offline', (a) => a.fcFailed({ card: 'inexact', message: 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly 1000 sats. Pay an amount it can make, or pay when this phone is online.' }, { taken: true }));
+  add('stage: signing piece 3 of 9', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('signing'); a.fcLine('Signing piece 3 of 9'); });
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
   add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
   add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
+  // the card has signed and been let go; the sheet is gone and our own screen waits for the mint
+  add('stage: checking with the mint, the card let go', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('checking'); a.fcLine('You can remove the card.'); });
+  add('stage: making the change, the card let go', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('making'); a.fcLine('The payment is made.'); });
+  add('card: a payment the mint refused, the card to be tapped again', (a) => a.fcFailed({ card: 'putback', owed: 600, limited: true, message: 'x' }, { paying: true, taken: true }));
+  add('card: a payment the mint refused, a card with no limit', (a) => a.fcFailed({ card: 'putback', owed: 88, limited: false, message: 'x' }, { paying: true, taken: true }));
+  add('card: a withdrawal the mint refused', (a) => a.fcFailed({ card: 'putback', owed: 1024, limited: true, message: 'x' }, { taken: true }));
   v.push(['importSeed, the words on the phone', at('importSeed', {})]);
   v.push(['importSeed, on the phone, a finished scan', at('importSeed', {
     rsCandidate: 'candidate-1',

@@ -12,9 +12,10 @@
   The key is the list of card applets Foxy may speak to over NFC, by name. iOS
   hands the app a card only if the card answers to one of these names, so a
   bank card or a passport held to the phone is never Foxy's to talk to. There
-  is one name: the applet on a Foxy card (the card repository's build.xml), its
-  package's nine bytes and 01. Foxy/Flashcard/CardGate.swift holds the same
-  name and checks every command against it, and FoxyTests holds the two equal.
+  is one name: the applet on a Foxy card (applet/build.xml in
+  https://github.com/getfoxy/card), its package's nine bytes and 01.
+  Foxy/Flashcard/CardGate.swift holds the same name and checks every command
+  against it, and FoxyTests holds the two equal.
 
   It declares no URL scheme, no document type and no queried scheme: a Release
   Foxy registers none (tests/deep-links.js).

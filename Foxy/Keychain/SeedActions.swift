@@ -455,6 +455,49 @@ enum SeedActions {
         }
     }
 
+    // MARK: A card's owner key
+
+    /// cardOwnerKey {key} → {"pub"}: the owner PUBLIC key for the card whose
+    /// compressed public key is `key`, 65 bytes uncompressed as 130 lowercase hex
+    /// characters (CardOwner, in NUT13.swift). The page gives it to the card at
+    /// set-up, with SET_OWNER.
+    ///
+    /// It depends on the seed and the key and nothing else, so no counter moves
+    /// and no window applies. Only the public half is answered.
+    static func cardOwnerKey(key: [UInt8], env: SeedEnvironment) -> SeedReply {
+        // the bridge refuses this first; here too, so no caller reads the seed for a key that is not one
+        guard CardOwner.isCardKey(key) else { return .refuse("bad request") }
+        do {
+            let seed = try readSavedSeed(env)
+            let pub = try CardOwner.publicKey(seed: seed, cardKey: key)
+            return .answer(json(["pub": NUT13.hex(pub)]))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cardOwnerSign {key, label, nonce, value} → {"sig"}: the owner key's
+    /// signature, DER as lowercase hex, over "FoxyCard/" and the label, the
+    /// nonce and the value. The label is one of five and the value has the shape
+    /// that label takes; anything else is refused before the seed is read, so the
+    /// page cannot have the key sign LOCK_CARD, a time, or anything else it
+    /// invents. The answer is the signature and nothing else.
+    ///
+    /// A page that had been got at can ask for a signature for any card whose key
+    /// it knows, but the card gives a nonce only in the tap that holds it, and
+    /// only that nonce is good for it.
+    static func cardOwnerSign(_ request: CardOwner.SignRequest, env: SeedEnvironment) -> SeedReply {
+        // the bridge checks every shape first; here too, so a request built another way reads no seed
+        guard request.isWellFormed else { return .refuse("bad request") }
+        do {
+            let seed = try readSavedSeed(env)
+            let sig = try CardOwner.signature(for: request, seed: seed)
+            return .answer(json(["sig": NUT13.hex(sig)]))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
     // MARK: Adopting typed words, and wiping
 
     /// seedAdopt {candidate} → {"adopted": false, "same": true} for the saved

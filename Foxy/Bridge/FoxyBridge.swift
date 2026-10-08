@@ -414,6 +414,12 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "cardSend": FoxyBridge.handleCardSend,
         "cardSay": FoxyBridge.handleCardSay,
         "cardEnd": FoxyBridge.handleCardEnd,
+        // A card's owner key stays in native code: the page gets its public half and signatures for a
+        // fixed list of labels (NativeSeedBridge.swift)
+        "cardOwnerKey": FoxyBridge.handleCardOwnerKey,
+        "cardOwnerSign": FoxyBridge.handleCardOwnerSign,
+        // The time a card is told, signed by the interim key (FoxyBridge+Flashcard.swift, CardTime.swift)
+        "cardTime": FoxyBridge.handleCardTime,
         // A shake of the phone presses TAP (TAP-TO-PAY.md)
         "shakeStart": FoxyBridge.handleShakeStart,
         "shakeStop": FoxyBridge.handleShakeStop,

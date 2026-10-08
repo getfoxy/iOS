@@ -23,15 +23,22 @@ final class NativeSeedTests: XCTestCase {
 
     // MARK: Which actions answer
 
-    func testTheSeedActionsAreNineteenAndRunInEveryBuild() {
+    func testTheSeedActionsAreTwentyOneAndRunInEveryBuild() {
         XCTAssertEqual(FoxyBridge.nativeSeedActions, [
             "seedStatus", "seedCreate", "seedMigrate", "countersImport", "counterReserve", "counterReserveAt", "counterAdvance",
             "counterSnapshot", "restoreSecrets", "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
             "seedProtection", "seedProtect",
             // the keys a payment request locks ecash to (Foxy/Keychain/P2PK.swift)
             "p2pkReserve", "p2pkPubkeys", "p2pkKey",
+            // a card's owner key, which stays in native code: its public half, and signatures for a fixed
+            // list of labels (CardOwner, in Foxy/Keychain/NUT13.swift)
+            "cardOwnerKey", "cardOwnerSign",
         ])
-        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 19)
+        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 21)
+        // the draft's action that handed the page a secret is gone, and the time needs no seed
+        XCTAssertNil(FoxyBridge.handlers["cardOwner"])
+        XCTAssertFalse(FoxyBridge.nativeSeedActions.contains("cardTime"))
+        XCTAssertNotNil(FoxyBridge.handlers["cardTime"])
         // No switch since stage 4: the test host is launched with no arguments,
         // and every seed action runs its handler, as in a Release build.
         for action in FoxyBridge.nativeSeedActions {
@@ -75,6 +82,101 @@ final class NativeSeedTests: XCTestCase {
             with["candidate"] = bad
             XCTAssertEqual(FoxyBridge.restoreSecretsCheck(with), .refuse("bad request"), "\(bad)")
         }
+    }
+
+    /// cardOwnerKey {key}: a card's compressed public key as 66 hex characters.
+    /// Anything else is refused before the seed is read. (The rules are CardOwner's,
+    /// which tools/nativetests runs in NUT13Tests; this holds the bridge's check to them.)
+    func testCardOwnerKeyTakesACardsCompressedKeyAndNothingElse() throws {
+        let key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        let tail = String(key.dropFirst(2))
+        let bytes = try NUT13.bytes(hex: key)
+        XCTAssertEqual(bytes.count, 33)
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": key]), .ok(bytes))
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": key.uppercased(), "action": "cardOwnerKey", "id": "1"]), .ok(bytes),
+                       "either case is the same key, and what else the message carries is not looked at")
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": "03" + String(repeating: "Ab", count: 32)]),
+                       .ok([0x03] + [UInt8](repeating: 0xAB, count: 32)))
+        let notKeys: [String] = [
+            "", "02", String(key.dropLast(2)), key + "00",
+            String(key.dropLast()) + "g", String(key.dropLast(2)) + "zz",   // not hex
+            "04" + tail,                                                    // the byte an uncompressed key starts with
+            "00" + tail, "01" + tail, "05" + tail, "ff" + tail,
+            "0x" + tail, key + "\n", " " + String(key.dropFirst()),
+            "02" + String(repeating: "é", count: 32),                       // 66 bytes of UTF-8, none of them hex
+            String(repeating: "02", count: 64),                             // 128 characters
+            String(repeating: "0", count: 66),
+        ]
+        let notStrings: [Any] = [5, NSNull(), true, [key], ["key": key]]
+        let refused = (notKeys as [Any]) + notStrings
+        for bad in refused {
+            XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": bad]), .refuse("bad request"), "\(bad)")
+        }
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck([:]), .refuse("bad request"), "no key")
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["pubkey": key]), .refuse("bad request"), "another name")
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": String(key.prefix(64))]), .refuse("bad request"), "64 characters")
+        XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": key + "11"]), .refuse("bad request"), "68 characters")
+    }
+
+    /// cardOwnerSign {key, label, nonce, value}: the five labels, each with the shape of
+    /// value it takes, and nothing else; refused before the seed is read.
+    func testCardOwnerSignTakesFiveLabelsAndTheirValuesAndNothingElse() throws {
+        let key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        let nonce = "000102030405060708090a0b0c0d0e0f"
+        let owner = "04" + String(repeating: "ab", count: 64)
+        let record = "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
+        let cardKey = key
+        func body(_ label: Any, _ value: Any, key: Any? = nil, nonce given: Any? = nil) -> [String: Any] {
+            ["action": "cardOwnerSign", "id": "5", "key": key ?? cardKey, "label": label, "nonce": given ?? nonce, "value": value]
+        }
+        // whole requests: each label, a value of its shape
+        let whole: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "00000000"),
+                                         ("set-limit", "FFFFFFFF"), ("set-owner", owner), ("set-card", record), ("load", "")]
+        for (label, value) in whole {
+            switch FoxyBridge.cardOwnerSignCheck(body(label, value)) {
+            case .ok(let request):
+                XCTAssertEqual(request.label.rawValue, label)
+                XCTAssertEqual(request.key, try NUT13.bytes(hex: key))
+                XCTAssertEqual(request.nonce, try NUT13.bytes(hex: nonce))
+                XCTAssertEqual(request.value, try NUT13.bytes(hex: value))
+            case .refuse(let why):
+                XCTFail("\(label) was refused: \(why)")
+            }
+        }
+        // a label that is not one of the five, and in particular not a lock or a time, however it is written
+        for label in ["lock", "time", "auth", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "", "Load", "LOAD", "change-pin ", "set-allowance"] as [Any] {
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
+        }
+        for label in [5, NSNull(), true, ["load"]] as [Any] {
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
+        }
+        // a value of another label's shape, or not hex, or not text
+        let wrong: [(String, Any)] = [("load", "00"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
+                                      ("set-limit", "000000"), ("set-limit", "0000000000"), ("set-owner", String(owner.dropFirst(2))),
+                                      ("set-owner", "02" + String(owner.dropFirst(2))), ("set-card", String(record.dropLast(2))),
+                                      ("set-card", record + "6d"), ("set-card", ""), ("change-pin", "31323334 "), ("change-pin", "0x31323334"),
+                                      ("change-pin", "3132333"), ("change-pin", 31323334), ("load", NSNull()), ("load", true), ("set-limit", [0, 0, 0, 0])]
+        for (label, value) in wrong {
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, value)), .refuse("bad request"), "\(label) \(value)")
+        }
+        var noValue = body("load", "")
+        noValue["value"] = nil
+        XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(noValue), .refuse("bad request"), "no value, not even for load")
+        // a nonce of 16 bytes, and a key that is a card's
+        let badNonces: [Any] = ["", String(nonce.dropLast(2)), nonce + "00", String(nonce.dropLast()) + "g", "0x" + String(nonce.dropLast(2)), 5, NSNull()]
+        for bad in badNonces {
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body("load", "", nonce: bad)), .refuse("bad request"), "nonce \(bad)")
+        }
+        let badKeys: [Any] = ["", String(key.dropLast(2)), "04" + String(key.dropFirst(2)), key + "00", 5, NSNull()]
+        for bad in badKeys {
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body("load", "", key: bad)), .refuse("bad request"), "key \(bad)")
+        }
+        for missing in ["key", "label", "nonce", "value"] {
+            var partial = body("load", "")
+            partial[missing] = nil
+            XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(partial), .refuse("bad request"), "no \(missing)")
+        }
+        XCTAssertEqual(FoxyBridge.cardOwnerSignCheck([:]), .refuse("bad request"))
     }
 
     func testCounterAdvanceTakesASafeInteger() {

@@ -320,19 +320,19 @@
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to add to your card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
-        : s.flow === 'cardLimit' ? 'The most one PIN entry can spend?'
+        : s.flow === 'cardLimit' ? 'What would you like the daily limit to be?'
         : s.flow === 'receive' ? 'How much to receive?'
         : 'How much to send?',
       hideSkip: true,
-      /* A second answer under NEXT, for the two card questions that have one
-       * that is not a number: everything on the card, and no limit at all
-       * (26f-flashcard.js). */
+      /* A second answer under NEXT, for the card question that has one that is
+       * not a number: everything on the card, or, for the daily limit, no
+       * limit at all, which is how one is removed (26f-flashcard.js). */
       amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
-        else if (this.state.flow === 'cardLimit') this.fcLimitPin(0);
+        else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)

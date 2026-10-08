@@ -37,6 +37,11 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
     if (e.kind === 'exact') {
       ok(data === e.data, e.name + ': the answer', 'the card ' + e.data.slice(0, 60) + ', the model ' + data.slice(0, 60));
       exact += 1;
+    } else if (e.kind === 'nonce') {
+      // sixteen bytes the card made up. The recording's own are the ones its proofs after this were made from
+      ok(data.length === 32 && /^[0-9a-f]+$/.test(data) && /^[0-9a-f]{32}$/.test(e.data), e.name + ': sixteen bytes');
+      card.setNonce(e.data);
+      verified += 1;
     } else if (e.kind === 'key') {
       ok(data.length === 66 && /^0[23]/.test(data) && data === card.key, e.name + ': a compressed key');
     } else if (e.kind === 'sig') {
@@ -55,7 +60,7 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
       verified += 1;
     }
   }
-  ok(T.length >= 60 && exact >= 55 && verified >= 6, 'the transcript is the whole conversation', T.length + ' exchanges, ' + exact + ' exact, ' + verified + ' verified');
+  ok(T.length >= 100 && exact >= 90 && verified >= 12, 'the transcript is the whole conversation', T.length + ' exchanges, ' + exact + ' exact, ' + verified + ' verified');
 
   // the model's own extras
   const c2 = makeCard({ window: ctx.window });

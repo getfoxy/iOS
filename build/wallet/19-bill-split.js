@@ -777,7 +777,10 @@
       return ready.then(function (keptAlready) {
         // kept with no route: there is nothing to swap and nothing to ask
         if (keptAlready && keptAlready.kept) return keptAlready;
-        var connected = need();
+        /* On the circuit kept ready when the caller is a person's wait
+         * (`opts.now`: a card's payment, whose swap is the last thing between
+         * a till and "paid"). */
+        var connected = (opts && opts.now) ? needNow() : need();
         intoMint = mintOf(connected);
         return unit === 'sat' ? connected : unitWallet(connected, unit);
       }).then(function (w) {
@@ -803,9 +806,14 @@
          * (refuseSpent, W5). It used to swap straight away, and each refusal
          * left counters the mint never signed. A check that cannot be made
          * swaps as before. */
-        return refuseSpent(w, incomingProofs.length ? incomingProofs : tok.proofs,
+        /* Not when the caller asks for the swap alone (`opts.noPrecheck`): a
+         * card's pieces, which the swap refuses itself if they are spent, and
+         * whose payment waits on the answer. The refusal reserves a few
+         * counters the mint never signs; a question asked first is a round trip
+         * over Tor in front of every payment. */
+        return ((opts && opts.noPrecheck) ? Promise.resolve() : refuseSpent(w, incomingProofs.length ? incomingProofs : tok.proofs,
           'That token is already spent, so there was nothing to take. Nothing was taken from you.'
-        ).then(function () {
+        )).then(function () {
           /* The outputs' counter ranges are on disk until the answer is in. A
            * lost answer used to leave the token's proofs spent and the fresh ones
            * nowhere: the sender's token was gone and nothing here held its value
@@ -941,6 +949,10 @@
      * being sent leaves; the rest stays. */
     /* `opts.lockTo`: a public key to lock the ecash to (NUT-11), so only the
      * phone holding the matching private key can ever spend it.
+     *
+     * `opts.denominations`: with a lock, the sizes of the pieces to make (powers
+     * of two, summing to no more than the amount), instead of the library's own
+     * choice. A card is cut into the ladder of its amount (`cardLadder`).
      *
      * A lock cannot be put on pieces already held — it lives in the secret, so
      * the proofs have to be made afresh. That means the exact-change path below
@@ -1320,7 +1332,11 @@
           /* Covering the amount, the input fee, and the fee cashu-ts adds to the
            * sent outputs (includeFees) — without that last, a fee mint refused a
            * one-piece send the whole pile could have made (an audit finding). */
-          var piecesOut = String(want.toString(2)).split('1').length - 1;
+          /* How many pieces go out: the amount's binary places, or, where the
+           * caller cut them (a card is cut like a cash drawer), as many as it
+           * named. The fee is paid for each. */
+          var piecesOut = (opts && Array.isArray(opts.denominations) && opts.denominations.length)
+            ? opts.denominations.length : String(want.toString(2)).split('1').length - 1;
           var outFee = feeForInputs(w, piecesOut + 4);
           var big = have.filter(function (p) { return satsOf(p.amount) - swapFeeFor(w, [p]) >= want + outFee; })
             .sort(function (a, b) { return satsOf(a.amount) - satsOf(b.amount); });
@@ -1333,7 +1349,7 @@
              * decide, so a generous allowance is left out of the shape and
              * cashu-ts fills the gap with powers of two: a shape that sums to
              * less than the change is padded, one that sums to more is refused. */
-            var pieces = String(want.toString(2)).split('1').length - 1;
+            var pieces = piecesOut;
             var slack = feeForInputs(w, pieces + 4);
             var back = satsOf(oneIn.amount) - swapFeeFor(w, [oneIn]) - want - slack;
             others = have.filter(function (p) { return p !== oneIn; });
@@ -1352,6 +1368,13 @@
                          ? { pubkey: lockTo, locktime: Math.floor(opts.lockUntil),
                              refundKeys: opts.refundTo ? [String(opts.refundTo)] : undefined }
                          : { pubkey: lockTo } };
+          /* The pieces of a locked send, cut as the caller says (a card is cut
+           * into the ladder of its amount: 08a-flashcard.js). Whatever the sum
+           * of them leaves of the amount, and the fee on them, is filled by the
+           * library as it always was. */
+          if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
+            lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });
+          }
           return lockTo
             ? (oneIn ? w.send(want, [oneIn], { includeFees: true }, { send: lockOut, keep: keepShape })
                      : w.send(want, have, { includeFees: true }, { send: lockOut }))

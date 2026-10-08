@@ -43,8 +43,9 @@ const bal = (c) => c.W.balanceSats();
 
   card.tap();
   const paid = await R.W.cardPay(card, { sats: 1000, pin: '1234' });
-  ok(paid.sats === 1000 && (await bal(R)) === 1000 && paid.change && paid.change.written,
-     'another phone is paid by it, with change written back', JSON.stringify(paid.change));
+  // exact: a card cut like a cash drawer has the pieces for any price up to its balance
+  ok(paid.sats === 1000 && (await bal(R)) === 1000 && paid.change === null && card.balance() === 1000,
+     'another phone is paid by it, with no change to write back', JSON.stringify(paid.change));
   ok(history(R).some((e) => e.hash === paid.hash && e.sats === 1000), 'with its entry');
   card.tap();
   const before = await bal(H);

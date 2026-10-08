@@ -32,6 +32,7 @@ security claim with the test that proves it, and the vocabulary — then
 - [TAP-TO-PAY.md](TAP-TO-PAY.md): ecash handed between two phones over Bluetooth: the design and its limits.
 - [TAP-SPEC.md](TAP-SPEC.md): the tap and offline rules as a short spec, with what it claims and what is known to be weak.
 - [UWB-TAP.md](UWB-TAP.md): a design for gating tap to pay on ultra-wideband ranging; not built.
+- [CARD.md](CARD.md): a chip card that holds ecash: set-up, the PIN, the daily limit, paying at a till, and what it does not protect against. The card's own side is in https://github.com/getfoxy/card.
 
 ## Testing and upkeep
 

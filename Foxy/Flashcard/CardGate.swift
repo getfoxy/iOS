@@ -13,21 +13,30 @@ import Foundation
 ///
 /// Nothing here touches NFC, so FoxyTests can hold it to its rules.
 enum CardGate {
-    /// The applet on a Foxy card (the card repository's build.xml): its
-    /// package's nine bytes and 01.
+    /// The applet on a Foxy card (applet/build.xml in
+    /// https://github.com/getfoxy/card): its package's nine bytes and 01.
     static let applet = Data([0xF0, 0x46, 0x4F, 0x58, 0x59, 0x43, 0x41, 0x52, 0x44, 0x01])
 
     /// The applet's class byte.
     static let appletClass: UInt8 = 0xB0
 
-    /// The instructions the page uses, and no others the applet has. Locking a
-    /// card for good (50) is one the page never sends, so the phone will not
-    /// carry it.
+    /// The instructions the page uses, and no others the applet has: twenty.
+    ///
+    /// Three the applet has stay out, because the page does not send them, so the
+    /// phone will not carry them for a page that had been got at: the count of
+    /// proofs (12); the limit set with the PIN (33), the form for a card that has
+    /// no owner, where the page sends the owner's form (34); and locking a card
+    /// for good (50).
     static let instructions: Set<UInt8> = [
-        0x01, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16,   // what it is, its key, what it holds, proof it is the card, its record
+        0x01, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16, 0x17,   // what it is, its key, what it holds, proof it is the card, its record, which pieces it holds
         0x20,                                       // sign for a piece
-        0x30, 0x31, 0x32, 0x33,                     // write a piece, free used places, its record, its limit
+        0x30, 0x31, 0x32,                           // write a piece, free used places, its record
+        0x34,                                       // set the card's daily limit (the owner's proof, no PIN)
+        0x35,                                       // tell the card the time, signed (CardTime.swift)
         0x40, 0x41, 0x42,                           // its PIN: check, set, change
+        0x43,                                       // give it its owner key, or change it
+        0x44,                                       // a nonce to answer with the owner's proof
+        0x45,                                       // the owner's grant to load, in this tap, with no PIN
     ]
 
     /// A short command at its longest: four of header, a length, 255 of data
@@ -107,6 +116,26 @@ enum CardGate {
     /// Whether an answer says the command was carried out (9000).
     static func succeeded(_ answer: Data) -> Bool {
         answer.count >= 2 && answer[answer.endIndex - 2] == 0x90 && answer[answer.endIndex - 1] == 0x00
+    }
+
+    /// What the phone's sheet says from the moment a card has connected until
+    /// the page says something else.
+    static let scanning = "Scanning. Hold still."
+
+    /// The stages the phone reports to the page as a session goes on.
+    static let stages: Set<String> = ["connected", "say", "end", "lost"]
+
+    /// The script that tells the page how the session is going, or nil when
+    /// the stage is not one of the four. The words are cut down to a line
+    /// first, then written as a JSON string, so nothing in them can end the
+    /// string or the call: a quote, a backslash and every control character
+    /// are escaped, and so is a slash.
+    static func progressScript(stage: String, text: String) -> String? {
+        guard stages.contains(stage),
+              let data = try? JSONSerialization.data(withJSONObject: [line(text)]),
+              let array = String(data: data, encoding: .utf8) else { return nil }
+        let quoted = String(array.dropFirst().dropLast())       // ["x"] -> "x"
+        return "window.FoxyWallet && window.FoxyWallet._card && window.FoxyWallet._card({\"stage\":\"" + stage + "\",\"text\":" + quoted + "})"
     }
 
     /// A line for the phone's own card sheet: one line, nothing that is not

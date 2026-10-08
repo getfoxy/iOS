@@ -194,7 +194,13 @@ enum NUT13 {
     /// Both are computed and one is picked with a mask, so which one does not
     /// show as a branch.
     static func reducedOnce(_ x: [UInt8]) -> [UInt8] {
-        precondition(x.count == 32)
+        reducedOnce(x, modulo: order)
+    }
+
+    /// The same for another order above 2^255, as P-256's is (CardOwner): a
+    /// 256-bit value is then below twice it, and one subtraction is all it can need.
+    static func reducedOnce(_ x: [UInt8], modulo order: [UInt8]) -> [UInt8] {
+        precondition(x.count == 32 && order.count == 32)
         var difference = [UInt8](repeating: 0, count: 32)
         var borrow: UInt16 = 0
         for i in (0..<32).reversed() {
@@ -334,5 +340,180 @@ enum NUT13 {
             }
         }
         return try stride(from: 0, to: chars.count, by: 2).map { try nibble(chars[$0]) << 4 | nibble(chars[$0 + 1]) }
+    }
+}
+
+/// A card's owner key, derived from the seed, and kept in native code.
+///
+/// A card is shown its owner as a P-256 public key when it is set up, and the owner
+/// proves it later by signing, with the private half, what the card is asked to
+/// do: its label, a number the card gave in that tap, and the value. The private
+/// half is worked out here, from the seed and the card's own key, whenever it is
+/// wanted, and never leaves. The page is given the owner PUBLIC key, signatures
+/// for a fixed list of labels (each with the shape of value that label takes) and
+/// nothing else, so a page that had been got at cannot take the key, and cannot
+/// have anything signed that this list does not name: not LOCK_CARD, and not a time.
+/// Restoring the twelve words on another phone makes the same key, so that phone
+/// is the owner of every card this one was. The card's key is in the message, so
+/// two cards of one owner have two keys.
+///
+/// h(counter) is HMAC-SHA256 keyed with the 64-byte BIP-39 seed, over "FoxyCard/owner",
+/// a zero byte, the card's 33-byte compressed public key and, from counter 1 on,
+/// that counter as one more byte. d is h(0) mod n, n being P-256's order; where
+/// that is 0 it is h(1) mod n, and so on. That is a 1 in 2^256 event, and the
+/// loop is there so that the key is always found and never left to chance.
+enum CardOwner {
+    static let tag = Array("FoxyCard/owner".utf8)
+
+    /// P-256's group order n, big-endian.
+    static let order: [UInt8] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51,
+    ]
+
+    /// The nonce a card gives: 16 bytes.
+    static let nonceLength = 16
+
+    /// The longest value any label takes: SET_CARD's data with the longest mint
+    /// (100 bytes before it and 80 for the mint).
+    static let mostValueBytes = 180
+
+    /// What the page may have signed: the short names of the owner's commands,
+    /// and no others. The bytes signed begin with "FoxyCard/" and the name, so
+    /// LOCK_CARD ("FoxyCard/lock") and the time ("FoxyCard/time") are not on this
+    /// list and cannot be asked for. No name is the start of another, so what was
+    /// signed names its label in one way only.
+    enum Label: String, CaseIterable {
+        case changePin = "change-pin"
+        case setLimit = "set-limit"
+        case setOwner = "set-owner"
+        case setCard = "set-card"
+        case load
+
+        /// Whether `value` has the shape this label's command takes, which is
+        /// what the card will read it as:
+        ///  - change-pin: the new PIN, 4 to 8 bytes, each an ASCII digit;
+        ///  - set-limit: the new limit, 4 bytes;
+        ///  - set-owner: the new owner key, 65 bytes, the first of them 04;
+        ///  - set-card: the card's record, unit (1), refund key (33), time key (65, the
+        ///    first of them 04), mint length L (1, from 1 to 80) and the mint (L bytes);
+        ///  - load: nothing.
+        func accepts(_ value: [UInt8]) -> Bool {
+            switch self {
+            case .changePin:
+                return (4...8).contains(value.count) && value.allSatisfy { (0x30...0x39).contains($0) }
+            case .setLimit:
+                return value.count == 4
+            case .setOwner:
+                return value.count == 65 && value[0] == 0x04
+            case .setCard:
+                guard value.count >= 100, value[34] == 0x04 else { return false }
+                let mint = Int(value[99])
+                return (1...80).contains(mint) && value.count == 100 + mint
+            case .load:
+                return value.isEmpty
+            }
+        }
+    }
+
+    /// One signature asked for, after its shape has been checked.
+    struct SignRequest: Equatable {
+        /// The card's compressed public key, which says whose owner key signs.
+        let key: [UInt8]
+        let label: Label
+        let nonce: [UInt8]
+        let value: [UInt8]
+
+        /// The shape checks again, on a request built some other way than by `CardOwner.signRequest`.
+        var isWellFormed: Bool {
+            CardOwner.isCardKey(key) && nonce.count == CardOwner.nonceLength && label.accepts(value)
+        }
+    }
+
+    // MARK: What the page sends
+
+    /// A card's public key as the page gives it: 33 bytes, compressed, so
+    /// starting 02 or 03.
+    static func isCardKey(_ key: [UInt8]) -> Bool {
+        key.count == 33 && (key[0] == 0x02 || key[0] == 0x03)
+    }
+
+    /// A card's key from the page's text: 66 hex characters, either case, for
+    /// 33 bytes that start 02 or 03. Which card it is is not this check's question.
+    static func key(from text: Any?) -> [UInt8]? {
+        guard let text = text as? String, text.utf8.count == 66,
+              let key = try? NUT13.bytes(hex: text), isCardKey(key) else { return nil }
+        return key
+    }
+
+    /// cardOwnerSign's {key, label, nonce, value}: the key as above; a label that is exactly one
+    /// of the five names; a nonce of 32 hex characters; and a value in hex that has the
+    /// shape the label takes (an empty string for load). Nothing is read until this has passed.
+    static func signRequest(_ body: [String: Any]) -> SignRequest? {
+        guard let key = key(from: body["key"]),
+              let name = body["label"] as? String, let label = Label(rawValue: name),
+              let nonceText = body["nonce"] as? String, nonceText.utf8.count == 2 * nonceLength,
+              let nonce = try? NUT13.bytes(hex: nonceText),
+              let valueText = body["value"] as? String, valueText.utf8.count <= 2 * mostValueBytes,
+              let value = try? NUT13.bytes(hex: valueText), label.accepts(value) else { return nil }
+        return SignRequest(key: key, label: label, nonce: nonce, value: value)
+    }
+
+    // MARK: The key
+
+    /// What is HMACed for a counter: the tag, a zero byte, the card's key and, from
+    /// counter 1 on, the counter.
+    static func hashInput(cardKey: [UInt8], counter: UInt8) -> [UInt8] {
+        var message = tag
+        message.append(0x00)
+        message += cardKey
+        if counter > 0 { message.append(counter) }
+        return message
+    }
+
+    /// d: the first h(counter) that is not 0 mod n, as 32 bytes, for counters 0, 1, 2 and
+    /// so on. `hash` answers h(counter). A 256-bit value is below 2n, so mod n is
+    /// one subtraction. Nil only if all 256 counters gave 0, which does not happen.
+    static func scalar(hash: (_ counter: UInt8) -> [UInt8]) -> [UInt8]? {
+        for counter in 0...UInt8.max {
+            var digest = hash(counter)
+            defer { NUT13.wipe(&digest) }
+            let d = NUT13.reducedOnce(digest, modulo: order)
+            if !NUT13.isZero(d) { return d }
+        }
+        return nil
+    }
+
+    /// The owner private key for the card with this key, as 32 bytes. The caller wipes it.
+    static func scalar(seed: NUT13.Seed, cardKey: [UInt8]) -> [UInt8]? {
+        scalar { counter in
+            Array(HMAC<SHA256>.authenticationCode(for: hashInput(cardKey: cardKey, counter: counter), using: seed.key))
+        }
+    }
+
+    /// Runs `body` with this card's owner private key, and wipes the scalar's bytes
+    /// once it is made into a key. The key must not be kept or answered.
+    static func withPrivateKey<T>(seed: NUT13.Seed, cardKey: [UInt8],
+                                  _ body: (P256.Signing.PrivateKey) throws -> T) throws -> T {
+        guard var d = scalar(seed: seed, cardKey: cardKey) else { throw NUT13.Failure.invalidKey }
+        defer { NUT13.wipe(&d) }
+        return try body(try P256.Signing.PrivateKey(rawRepresentation: d))
+    }
+
+    /// The owner public key: 65 bytes, 04 || X || Y.
+    static func publicKey(seed: NUT13.Seed, cardKey: [UInt8]) throws -> [UInt8] {
+        try withPrivateKey(seed: seed, cardKey: cardKey) { Array($0.publicKey.x963Representation) }
+    }
+
+    /// What the card verifies: "FoxyCard/" and the label, the nonce, the value.
+    static func message(label: Label, nonce: [UInt8], value: [UInt8]) -> [UInt8] {
+        Array("FoxyCard/".utf8) + Array(label.rawValue.utf8) + nonce + value
+    }
+
+    /// The owner's signature for a request that has passed its checks: ECDSA over
+    /// P-256, SHA-256 of the message (CryptoKit hashes it), in DER.
+    static func signature(for request: SignRequest, seed: NUT13.Seed) throws -> [UInt8] {
+        let signed = Data(message(label: request.label, nonce: request.nonce, value: request.value))
+        return try withPrivateKey(seed: seed, cardKey: request.key) { Array(try $0.signature(for: signed).derRepresentation) }
     }
 }

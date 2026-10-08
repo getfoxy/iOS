@@ -55,6 +55,10 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     private var found: ((CardLinkError?) -> Void)?
     /// Told once, when the session has gone for any reason.
     var onGone: (() -> Void)?
+    /// Told as the session goes on, so Foxy's own screen behind the sheet can
+    /// show what the sheet shows: (stage, text), where the stage is one of
+    /// CardGate.stages.
+    var onProgress: ((String, String) -> Void)?
 
     /// Open the sheet with `text` on it. `found(nil)` when a card is there to
     /// talk to; `found(why)` when the session ended first.
@@ -67,6 +71,9 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         self.found = found
         self.session = session
         session.alertMessage = text
+        Self.sessionOpen = true
+        // said, so a sheet that sees no card leaves a trace: one did, for twenty seconds, with nothing in the diary
+        print("[card] sheet: open")
         session.begin()
     }
 
@@ -76,9 +83,13 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
             done(nil, .lost)
             return
         }
-        card.sendCommand(apdu: command) { data, sw1, sw2, error in
+        card.sendCommand(apdu: command) { [weak self] data, sw1, sw2, error in
             DispatchQueue.main.async {
-                if error != nil { done(nil, .lost); return }
+                if error != nil {
+                    self?.onProgress?("lost", CardLinkError.lost.words)
+                    done(nil, .lost)
+                    return
+                }
                 var answer = data
                 answer.append(sw1)
                 answer.append(sw2)
@@ -89,7 +100,14 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
 
     func say(_ text: String) {
         guard !text.isEmpty else { return }
-        session?.alertMessage = text
+        if let session { Self.show(text, on: session) }
+        onProgress?("say", text)
+    }
+
+    /// The sheet's line, changed only when it is different: the same words
+    /// set again make the sheet flicker.
+    private static func show(_ text: String, on session: NFCTagReaderSession) {
+        if session.alertMessage != text { session.alertMessage = text }
     }
 
     /// Close the sheet: with a tick and `text`, or with `error` said in red.
@@ -98,16 +116,25 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         self.session = nil
         card = nil
         if let error, !error.isEmpty {
+            onProgress?("end", error)
             session.invalidate(errorMessage: error)
         } else {
-            if let text, !text.isEmpty { session.alertMessage = text }
+            if let text, !text.isEmpty { Self.show(text, on: session) }
+            onProgress?("end", text ?? "")
             session.invalidate()
         }
     }
 
-    func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {}
+    func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) { print("[card] sheet: scanning") }
+
+    /// While the system's card sheet is up: the app resigns active for it, and
+    /// the app-switcher cover must not go up behind it (FoxyWebView).
+    static var sessionOpen = false
 
     func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
+        print("[card] sheet: ended — \(error.localizedDescription)")
+        Self.sessionOpen = false
+        let ended = self.session == nil        // the page closed it: it knows
         self.session = nil
         card = nil
         let why: CardLinkError
@@ -118,6 +145,8 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         case .readerErrorUnsupportedFeature, .readerErrorSecurityViolation: why = .unavailable
         default: why = .cancelled
         }
+        // before `found` and `onGone`, which let the bridge forget this link
+        if !ended { onProgress?("lost", why.words) }
         if let tell = found {
             found = nil
             tell(why)
@@ -128,6 +157,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     }
 
     func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
+        print("[card] sheet: \(tags.count) tag(s) in the field")
         /* One card, and one that speaks commands. Two cards in the field
          * answer over each other; anything else is not ours. Either way the
          * sheet stays up and goes on looking. */
@@ -147,6 +177,8 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
                     return
                 }
                 self.card = tag
+                Self.show(CardGate.scanning, on: session)
+                self.onProgress?("connected", CardGate.scanning)
                 if let tell = self.found {
                     self.found = nil
                     tell(nil)
@@ -162,10 +194,10 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
 /* The iOS Simulator has no NFC, so every card screen could only ever be seen
  * with a card in one hand and a phone in the other. In the simulator the same
  * commands go over a socket on the Mac's own loopback to a card that runs
- * there: the applet itself, in a JavaCard simulator (the card repository's
- * `tools/cardsim`), listening on one of four ports. So the real page, the
- * real bridge, CardGate and a real mint can be driven against the applet's
- * own code before there is a card to hold.
+ * there: the applet itself, in a JavaCard simulator (`tools/cardsim` in
+ * https://github.com/getfoxy/card), listening on one of four ports. So the
+ * real page, the real bridge, CardGate and a real mint can be driven against
+ * the applet's own code before there is a card to hold.
  *
  * It stands in for the radio and nothing else. What it cannot show is the
  * radio: how long a card takes to sign, a card pulled away by a hand, the
@@ -177,6 +209,9 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
 #if targetEnvironment(simulator)
 final class SimCardLink {
     static let available = true
+    /// The phone's link keeps this true while the system's card sheet is up
+    /// (FoxyWebView reads it); the simulator has no sheet, so it stays false.
+    static var sessionOpen = false
     static let ports: [UInt16] = Array(47431...47434)
     /// As long as the phone's own sheet waits for a card.
     static let wait: TimeInterval = 60
@@ -188,6 +223,8 @@ final class SimCardLink {
     private var ended = false
     private var deadline = Date()
     var onGone: (() -> Void)?
+    /// As the phone's link has it: (stage, text) for Foxy's own screen.
+    var onProgress: ((String, String) -> Void)?
 
     func begin(text: String, found: @escaping (CardLinkError?) -> Void) {
         self.found = found
@@ -198,7 +235,11 @@ final class SimCardLink {
     /// Each port in turn, and round again, until a card answers or time is up.
     private func look(at index: Int) {
         guard !ended else { return }
-        guard Date() < deadline else { finish(.timedOut); return }
+        guard Date() < deadline else {
+            onProgress?("lost", CardLinkError.timedOut.words)
+            finish(.timedOut)
+            return
+        }
         guard index < Self.ports.count else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.look(at: 0) }
             return
@@ -228,6 +269,7 @@ final class SimCardLink {
                         default: break
                         }
                     }
+                    self.onProgress?("connected", CardGate.scanning)
                     if let tell = self.found {
                         self.found = nil
                         tell(nil)
@@ -269,18 +311,26 @@ final class SimCardLink {
 
     func send(_ apdu: Data, done: @escaping (Data?, CardLinkError?) -> Void) {
         guard conn != nil, !ended else { done(nil, .lost); return }
-        ask("apdu " + CardGate.hex(apdu)) { answer in
-            guard let answer, let bytes = CardGate.bytes(hex: answer), bytes.count >= 2 else { done(nil, .lost); return }
+        ask("apdu " + CardGate.hex(apdu)) { [weak self] answer in
+            guard let answer, let bytes = CardGate.bytes(hex: answer), bytes.count >= 2 else {
+                // a dropped connection has said so already
+                if let self, !self.ended { self.onProgress?("lost", CardLinkError.lost.words) }
+                done(nil, .lost)
+                return
+            }
             done(bytes, nil)
         }
     }
 
     func say(_ text: String) {
+        guard !text.isEmpty else { return }
         print("[foxy] card sheet:", text)
+        onProgress?("say", text)
     }
 
     func end(error: String?, text: String?) {
         print("[foxy] card sheet:", error.map { "ended, " + $0 } ?? (text ?? "ended"))
+        if !ended { onProgress?("end", (error?.isEmpty == false ? error : text) ?? "") }
         let waitingForCard = found != nil
         if let conn, !ended { conn.send(content: Data("end\n".utf8), completion: .contentProcessed { _ in conn.cancel() }) }
         if waitingForCard { finish(.cancelled) } else { close() }
@@ -297,6 +347,7 @@ final class SimCardLink {
     /// The card's side went away under an open session.
     private func dropped() {
         guard !ended else { return }
+        onProgress?("lost", CardLinkError.lost.words)
         close()
     }
 

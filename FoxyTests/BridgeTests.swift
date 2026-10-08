@@ -8,8 +8,7 @@ final class BridgeTests: XCTestCase {
     /// The action names THREAT-MODEL.md §1 says the bridge exposes, read from
     /// the document itself, so the table and the threat model cannot drift apart.
     private func documentedActions() throws -> Set<String> {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let text = try String(contentsOf: root.appendingPathComponent("THREAT-MODEL.md"), encoding: .utf8)
+        let text = try String(contentsOf: repoRoot().appendingPathComponent("docs/THREAT-MODEL.md"), encoding: .utf8)
         let start = try XCTUnwrap(text.range(of: "The bridge exposes exactly these actions:"))
         let end = try XCTUnwrap(text.range(of: "Haptics arrive as", range: start.upperBound..<text.endIndex))
         let list = text[start.upperBound..<end.lowerBound]
@@ -19,7 +18,7 @@ final class BridgeTests: XCTestCase {
 
     func testTheTableHoldsExactlyTheDocumentedActions() throws {
         let documented = try documentedActions()
-        XCTAssertEqual(documented.count, 70, "THREAT-MODEL.md §1 lists \(documented.sorted())")
+        XCTAssertEqual(documented.count, 73, "THREAT-MODEL.md §1 lists \(documented.sorted())")
         XCTAssertEqual(Set(FoxyBridge.handlers.keys), documented)
     }
 

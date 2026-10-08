@@ -3,6 +3,7 @@
  *
  *   sh tools/live/local-mint.sh up
  *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
+ *   (the card repository is https://github.com/getfoxy/card)
  *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
  *     node tools/live/flashcard-switch.js [card port]
  *
@@ -119,7 +120,7 @@ async function move(b, card, from, to, label) {
   console.log('    asked first: ' + before.balance + ' on the card in ' + before.pieces.length + ' pieces, about ' + guess.net + ' would land, fee up to ' + shown);
 
   await card.tap();
-  const off = await W.cardWithdraw(card, { pin: PIN });
+  const off = await W.cardWithdraw(card, { pin: PIN, hold: true });
   ok(label + ': the first tap takes the money off the card', off.sats > 0 && off.card && off.card.balance === 0, off.sats + ' of ' + before.balance + ' (the mint took ' + (before.balance - off.sats) + ' to swap it)');
 
   const plan = await W.cardMoveQuote(from, to, off.sats);
@@ -297,7 +298,7 @@ async function run() {
 
   console.log('\nE. a card with nothing on it');
   await card.tap();
-  await W.cardWithdraw(card, { pin: PIN });
+  await W.cardWithdraw(card, { pin: PIN, hold: true });
   app.setState({ fc: null });
   app.fcRead();
   await wait(app, 'the empty card to be read', () => !!app.state.fc && app.state.fc.balance === 0);

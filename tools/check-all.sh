@@ -87,11 +87,15 @@ check "pin pad"        1 node tests/pin-pad.js
 check "flashcard vectors" 1 node tests/flashcard-vectors.js
 check "flashcard model" 1 node tests/flashcard-model.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
+check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js
 check "flashcard money" 1 node tests/flashcard-money.js
+check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
 check "flashcard long ids" 1 node tests/flashcard-long-ids.js
 check "flashcard switch" 1 node tests/flashcard-switch.js
+check "flashcard fewer" 1 node tests/flashcard-fewer.js
+check "flashcard release" 1 node tests/flashcard-release.js
 check "switch guard"   1 node tests/switch-guard.js
 check "transfer quote"  1 node tests/transfer-quote.js
 check "on-chain flow"  1 node tests/onchain-flow.js

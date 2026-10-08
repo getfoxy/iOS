@@ -901,6 +901,13 @@ final class WebHostController: UIViewController {
             print("[foxy] no app-switcher cover: the paste prompt has focus")
             return
         }
+        /* Nor under the card sheet. iOS draws the "Ready to Scan" sheet over
+         * Foxy and takes focus for it, and the cover went up behind it every
+         * time, so the screen the person was on was hidden for the tap. */
+        if CardReader.sessionOpen {
+            print("[foxy] no app-switcher cover: the card sheet has focus")
+            return
+        }
         coverScreen()
     }
 

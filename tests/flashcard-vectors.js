@@ -50,7 +50,7 @@ for (const p of V.pieces) {
    * first key go on spending beside the refund key, and the bundled library
    * follows that, while an older mint takes the refund key only. The wallet
    * leans on neither: it treats a piece near its date as one to renew, and
-   * refuses to be paid with it (docs/FOXY-CARD-SPEC.md, section 6). So only
+   * refuses to be paid with it (docs/FOXY-CARD-SPEC.md in https://github.com/getfoxy/card, section 6). So only
    * the case that is the same everywhere is held to here. */
   const past = p.date !== 0 && p.date * 1000 < Date.now();
   if (!past) ok(spendable === true, 'date ' + p.date + ': the library says the card may spend it', String(spendable));

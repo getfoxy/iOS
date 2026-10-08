@@ -3,12 +3,28 @@
 
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey) { return cardSecret(nonce, cardKey, date, refundKey); },
-    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId },
+    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf },
+    /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
+    cardTimeKey: CARD_TIME_KEY,
+    cardPick: function (w, have, want, cap) { return cardPick(w, have, want, cap); },
+    cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
+    /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
+    cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
+    /* What a card holds, as the amounts of its pieces, for cutting more for it. */
+    cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
+    cardMaxPiece: function () { try { return cardMaxPiece(need()); } catch (e) { return 0; } },
+    /* A till with no route: whether a card may be taken on trust at all (the card's own switch), whether this
+     * phone has a route, and the question put to the person first. */
+    cardOffline: function (on) { return cardOffline(on); },
+    cardOnline: function () { return routeOpen(); },
+    cardOfflineAsk: function (sats) { return cardOfflineAsk(sats); },
 
-    /* What a card says with no PIN (`cardLook`). Rejects with `card` on the
-     * error naming why: not-a-card, gone. */
-    cardLook: function (link) {
-      return cardLook(link).then(function (card) {
+    /* What a card says with no PIN (`cardLook`), after telling it the time.
+     * `opts.mine`: also whether this phone is its owner (`card.mine`), for a
+     * holder's own screen. Rejects with `card` on the error naming why:
+     * not-a-card, wrong-signer, gone. */
+    cardLook: function (link, opts) {
+      return cardLook(link, opts).then(function (card) {
         // a card this phone can take back: what is on it now is written down for the day it is lost
         var mine = cardsOnFile()[card.key];
         if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces, true);
@@ -18,17 +34,23 @@
       });
     },
 
-    /* A new card made this phone's: a PIN, and the record that says which mint
-     * its money is at and who may take it back.
+    /* A new card made this phone's: a PIN, the record that says which mint its
+     * money is at and who may take it back (with the key its time is signed by),
+     * and, last, this phone as its owner. One tap. No limit is set: a new card
+     * has none, and one is set later from CHANGE LIMIT.
+     *
+     * The card is open until it has an owner: while it has none it takes a PIN
+     * and a record from anybody, and cannot be loaded. So the owner is given
+     * last, and nothing before it needs a proof. A set-up cut off anywhere is
+     * finished by the next, because every step is allowed again on a card that
+     * still has no owner. The owner's public key is what native makes for this
+     * card from the seed (`cardOwnerKey`); the private key never leaves it.
      *
      * `recoverable`: a key from this phone's words is written to the card, and
      * every piece loaded later names it, so a lost or blocked card's money
      * comes back to these words after the piece's date. Without it the card is
      * cash. The key is on file here before the card is told it, and the card
-     * is told once: its record cannot change while it holds money.
-     *
-     * Also finishes a set-up that was cut off after the PIN was set and before
-     * the record was written. */
+     * is told once: its record cannot change while it holds money. */
     cardSetUp: function (link, opts) {
       var o = opts || {};
       var pin;
@@ -36,60 +58,84 @@
       var w;
       try { w = need(); } catch (e2) { return Promise.reject(e2); }
       var mint = mintOf(w);
-      if (!mint || mint.length > 96 || /[^\x20-\x7e]/.test(mint)) {
+      if (!mint || mint.length > CARD_MINT_MAX || /[^\x20-\x7e]/.test(mint)) {
         return Promise.reject(cardError('bad-mint', 'This mint\u2019s address is too long for a card.'));
       }
       var t = cardTalk(link);
-      var card;
+      var card, ownerPub;
       return cardLook(link).then(function (c) {
         card = c;
-        if (card.info.pin === 'blocked') throw cardRefused('6983');
-        if (card.info.hasRecord) throw cardError('set-up', 'This card is already set up.');
         if (card.info.locked) throw cardRefused('6986');
+        /* A card with an owner is not open, set up or not: it is its owner's, and
+         * only that owner's proof changes it. */
+        if (card.info.owner) throw cardError('set-up', 'This card already belongs to a Foxy. Only that Foxy, or one restored from its seed phrase, can set it up again.');
+        return cardOwnerPub(card.key);
+      }).then(function (pub) {
+        ownerPub = pub;
         return o.recoverable ? cardRefundKey(card.key) : '';
       }).then(function (refund) {
         if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
         var record = cardRecordHex(refund, mint);
-        var first = card.info.pin === 'none'
-          ? t.want(cardCommand(CARD_INS.setPin, 0, pin), 'its new PIN')
-          : Promise.resolve('');
-        return first.then(function () {
+        return t.want(cardCommand(CARD_INS.setPin, 0, pin), 'its new PIN').then(function () {
           return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
         }).then(function () {
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
+        }).then(function () {
+          return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
         });
       }).then(function () {
-        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash'));
-        return cardLook(link);
+        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with no limit');
+        return cardLook(link, { mine: true });
       });
     },
 
-    /* The PIN changed. The card checks the old one itself; a wrong one costs a try. */
+    /* The PIN changed by the card's owner: this phone's proof over the new PIN,
+     * and nothing else. The old PIN is not asked for, because this phone does
+     * not know it and the cards that most need this are the blocked and the
+     * forgotten. It sets the new PIN, gives the tries back and unblocks a blocked
+     * card. A phone that does not hold the words the card was set up with is
+     * refused with `not-owner`, which costs no try and changes nothing. */
     cardChangePin: function (link, opts) {
       var o = opts || {};
-      var oldPin, newPin;
-      try { oldPin = cardPinHex(o.pin); newPin = cardPinHex(o.newPin); } catch (e) { return Promise.reject(e); }
+      var newPin;
+      try { newPin = cardPinHex(o.newPin); } catch (e) { return Promise.reject(e); }
       var t = cardTalk(link);
-      return cardLook(link).then(function () {
-        return t.want(cardCommand(CARD_INS.verify, 0, oldPin), 'its PIN');
-      }).then(function () {
-        return t.want(cardCommand(CARD_INS.changePin, 0, cardByte(oldPin.length / 2) + oldPin + newPin), 'its new PIN');
+      var key;
+      return cardLook(link).then(function (card) {
+        // said before anything is signed: nothing here can change a card that has no owner
+        if (!card.info.owner) throw cardRefused('6a90');
+        if (card.info.locked) throw cardRefused('6986');
+        key = card.key;
+        return cardOwned(t, key, 'change-pin', newPin);
+      }).then(function (data) {
+        return t.want(cardCommand(CARD_INS.changePin, 0, data), 'its new PIN');
       }).then(function () { return true; });
     },
 
-    /* The most one typing of the PIN may spend, in sats; 0 for no limit. */
+    /* The card's daily limit: the most it signs for in one day, in sats, set to
+     * `sats` (zero removes it). The owner's proof and no PIN: only a phone that
+     * holds the words the card was set up with can, and it does not need to know
+     * the PIN. A limit starts a new day at the card's clock, so the card has
+     * been told the time first (`cardLook` does it). */
     cardSetLimit: function (link, opts) {
       var o = opts || {};
-      var pin;
-      try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
-      var sats = Math.round(Number(o.sats) || 0);
+      var sats = Math.round(Number(o.sats));
       if (!(sats >= 0 && sats <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
       var t = cardTalk(link);
-      return cardLook(link).then(function () {
-        return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+      var key;
+      return cardLook(link).then(function (card) {
+        if (!card.info.owner) throw cardRefused('6a90');
+        if (card.info.locked) throw cardRefused('6986');
+        key = card.key;
+        return cardLimitTo(t, key, sats);
       }).then(function () {
-        return t.want(cardCommand(CARD_INS.setLimit, 0, ('00000000' + sats.toString(16)).slice(-8)), 'its limit');
-      }).then(function () { return cardLook(link); });
+        /* What the owner has just chosen is the limit now. A note of a limit
+         * lifted for a withdrawal and not put back is older than this, and the
+         * read below would act on it: a card told NO LIMIT on purpose would be
+         * given the old limit back in the same tap. */
+        cardLiftNote(key, 0);
+        return cardLook(link, { mine: true });
+      });
     },
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
@@ -212,11 +258,21 @@
       if (no && no.card !== 'empty' && !(moving && no.card === 'other-mint')) return Promise.reject(no);
       if (card.info.pin !== 'set' || !card.info.hasRecord) return Promise.reject(cardError('no-record', 'Set this card up first.'));
       if (card.info.locked) return Promise.reject(cardRefused('6986'));
-      /* One piece for each power of two in the amount, and a few more where
-       * the mint adds its fee: there must be places for them. Spent places
-       * are freed at the write, so they count as room. */
+      /* A card with no owner cannot be loaded: nobody could change its PIN or its
+       * limit, and a terminal that had the PIN could never be bounded or
+       * corrected. Said before any money is made for it. */
+      if (!card.info.owner) return Promise.reject(cardError('no-owner', 'This card has no owner, so it cannot be loaded.'));
+      /* The amount is cut like a cash drawer, to fill the gaps in what the card
+       * holds (and has owed to it): the rungs it has too few of, then the rest, and
+       * no more than CARD_LOAD_PIECES pieces or than the card has places for (an
+       * amount that needs more has a shallower drawer and fewer rungs, and is
+       * rounded up only where even that is too many, smallest pieces first;
+       * `rounded` says by how much). A few more where the mint adds its fee: there
+       * must be places for them. Spent places are freed at the write, so they count
+       * as room. */
+      var ladder = cardLadder(want, cardRoomFor(card), cardMaxPiece(w), cardHeldAmounts(card));
       var room = card.info.empty + card.info.spent;
-      if (piecesFor(want) + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
+      if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
       /* Whether this mint's ecash fits a card, asked before any is made. It
        * was asked after: the pieces were made, locked to the card, found not
        * to fit, and the error left them filed nowhere. */
@@ -224,8 +280,9 @@
       if (misfit) return Promise.reject(misfit);
       var recoverable = !!card.record.refundKey;
       var date = recoverable ? Math.floor(Date.now() / 1000) + CARD_DATE_AHEAD : 0;
-      return FoxyWallet.sendToken(want, { unit: 'sat', lockTo: card.key, lockUntil: date || undefined,
-                                          refundTo: recoverable ? card.record.refundKey : undefined, purpose: 'card' })
+      return FoxyWallet.sendToken(ladder.sats, { unit: 'sat', lockTo: card.key, lockUntil: date || undefined,
+                                                 refundTo: recoverable ? card.record.refundKey : undefined,
+                                                 denominations: ladder.denominations, purpose: 'card' })
         .then(function (made) {
           /* Filed first, whatever else is true of it. From this line the
            * pieces exist, only this card can spend them, and this row is how
@@ -241,43 +298,69 @@
               + ' It is kept for the card: nothing is lost, and it cannot be written yet.', { sats: made.sats, hash: made.hash });
           }
           if (recoverable) cardRemember(card, cardPiecesOf(made.token, card));
-          console.log('[foxy] card: ' + made.sats + ' sats made for a card; to be written at the next tap');
-          return { id: row.id, sats: made.sats, hash: made.hash };
+          console.log('[foxy] card: ' + made.sats + ' sats made for a card, in ' + cardPiecesOf(made.token, card).length + ' pieces'
+            + (ladder.extra ? ' (' + ladder.extra + ' more than asked, so there are fewer)' : '') + '; to be written at the next tap');
+          return { id: row.id, sats: made.sats, hash: made.hash, rounded: ladder.extra, pieces: cardPiecesOf(made.token, card).length };
         });
     },
 
-    /* A tap with the PIN: everything owed to this card is written onto it.
-     * Resolves { card, sats, left } with the card as it now reads. */
+    /* A tap: everything owed to this card is written onto it. Resolves
+     * { card, sats, left } with the card as it now reads.
+     *
+     * Three ways to be allowed to, and one of them is asked for:
+     *   `owner: true`  this phone's own proof that it owns the card lets this tap
+     *                  load with no PIN (the card's grant): the PIN is never
+     *                  asked for, and never known to this phone after set-up. A
+     *                  phone that is not the owner is refused, with everything
+     *                  still owed to the card;
+     *   `change: true` the tap after a payment: the card lets pieces on with no
+     *                  PIN then, once, for the change (`card.info.changeDue`,
+     *                  which it says of this tap). A card that does not is
+     *                  refused ('pin-needed'), with everything still owed, and
+     *                  the PIN is asked for;
+     *   `pin`          the card's PIN is typed, as a till's is.
+     * The card's day is not touched any way: loading gives it nothing back. */
     cardWrite: function (link, opts) {
-      var pin;
-      try { pin = cardPinHex(opts && opts.pin); } catch (e) { return Promise.reject(e); }
+      var o = opts || {};
+      var pin = '';
+      if (!o.owner && !o.change) {
+        try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      }
       var t = cardTalk(link);
       var wrote;
       return cardLook(link).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
+        if (o.owner && !card.info.owner) throw cardRefused('6a90');
+        // not the tap after a payment after all (a read came between, say): the PIN is what writes
+        if (o.change && !o.owner && !card.info.changeDue) throw cardRefused('6982');
         // what was found for this card is asked of the mint before any of it is written
         return cardOwedPrune(card).then(null, function () { return 0; }).then(function () {
-          return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+          if (o.change && !o.owner) return null;
+          if (!o.owner) return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+          return cardGrant(t, card.key).then(function (yes) {
+            if (!yes) throw cardRefused('6a91');
+          });
         }).then(function () {
           return cardRepointFor(t, card);
-        }).then(function () { return cardWriteOwed(t, card); });
+        }).then(function () { return cardWriteOwed(t, card, o.progress); });
       }).then(function (r) {
         wrote = r;
-        return cardLook(link);
+        return cardLook(link, { mine: !!o.owner });
       }).then(function (card) {
         if (card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
-        return { card: card, sats: wrote.sats, left: wrote.left.length, why: wrote.why || '' };
+        return { card: card, sats: wrote.sats, back: wrote.back || 0, left: wrote.left.length, why: wrote.why || '' };
       });
     },
 
-    /* Both, in one tap: read the card, make the pieces, write them. */
+    /* Both, in one tap: read the card, make the pieces, write them (`opts.owner`
+     * or `opts.pin`, as `cardWrite`). */
     cardAdd: function (link, opts) {
       var o = opts || {};
-      try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      if (!o.owner) { try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       return cardLook(link).then(function (card) {
         return FoxyWallet.cardPrepare(card, o.sats);
       }).then(function () {
-        return FoxyWallet.cardWrite(link, { pin: o.pin });
+        return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin });
       });
     },
 
@@ -338,10 +421,9 @@
       return FoxyWallet.cardPrepare(card, back, { moving: true });
     },
 
-    /* A card with nothing on it, told it is at this phone's mint. One tap. */
-    cardRepoint: function (link, opts) {
-      var pin;
-      try { pin = cardPinHex(opts && opts.pin); } catch (e) { return Promise.reject(e); }
+    /* A card with nothing on it, told it is at this phone's mint, by its owner:
+     * the owner's proof, no PIN. One tap. */
+    cardRepoint: function (link) {
       var w;
       try { w = need(); } catch (e2) { return Promise.reject(e2); }
       var here = mintOf(w);
@@ -351,9 +433,10 @@
         if (card.info.pin !== 'set' || !card.info.hasRecord) throw cardError('no-record', 'Set this card up first.');
         if (canonicalMint(card.record.mint) === here) return null;
         if (card.pieces.length) throw cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.');
-        var record = cardRecordHex(card.record.refundKey, here);
-        return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN').then(function () {
-          return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its new mint');
+        if (!card.info.owner) throw cardRefused('6a90');
+        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey);
+        return cardOwned(t, card.key, 'set-card', record).then(function (data) {
+          return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {
           console.log('[foxy] card: an empty card moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here));
         });
@@ -377,26 +460,42 @@
      *
      *   1. read the card, and refuse here, with nothing signed, anything that
      *      can be known already: another mint, too little, a card to renew,
-     *      more than its limit allows, no route to the mint;
+     *      more than the card's limit has left (a till: the holder's own phone
+     *      raises it, with the owner's proof), no route to the mint;
      *   2. the PIN, and the card signs for the pieces chosen. From here the
      *      card has marked them spent;
-     *   3. the signed pieces are written down (TAKEN), then swapped at the
-     *      mint by the ordinary receive, which is where this phone's own
-     *      pieces come from and where the payment becomes true;
-     *   4. change: what the pieces were worth over the amount is made into
-     *      pieces locked to the card again and written back while it is still
-     *      there, or left owed to it.
+     *   3. the signed pieces are written down (TAKEN), and the card is let go
+     *      (its sheet ends, "Done. Remove the card."): its part is over. Foxy's
+     *      own screen goes on saying it is checking with the mint;
+     *   4. the pieces are swapped at the mint by the ordinary receive, with no
+     *      question first (the swap refuses spent pieces itself), which is where
+     *      this phone's own pieces come from and where the payment becomes true.
+     *      If the mint refuses, whatever of the pieces is still good is owed back
+     *      to the card and the next tap puts it there (`putback`); if it does not
+     *      answer, the swap record and the row wait for the wallet's own recovery;
+     *   5. change: what the pieces were worth over the amount is made into
+     *      pieces locked to the card again, cut to fill the gaps in what it holds,
+     *      and left owed to it for its next tap.
      *
-     * `opts.on(step)` is told 'reading', 'signing', 'mint', 'change', 'done',
-     * for the screen. Resolves { sats, hash, change: { sats, written } }. */
+     * `opts.hold` keeps the card in the field instead (a renewal writes to it
+     * next, a move reads it last): then the mint is asked with the card still
+     * there, and change is written back in the same tap if it stays.
+     *
+     * `opts.on(step)` is told 'reading', 'signing', 'checking' (the card has been
+     * let go), 'making' (the change), 'done' for the screen; with `hold`, 'mint'
+     * and 'change' for the same. Resolves { sats, hash, change: { sats, written } }. */
     cardPay: function (link, opts) { return cardTake(link, opts || {}, 'card'); },
-    /* A withdrawal ends by reading the card once more, for its holder's
-     * screen (`card` on the result). Only this one: a till being paid learns
-     * no more of a card than it needs. A card that has left by then is no
-     * failure: the money moved, and the result simply has no card on it. */
+    /* A withdrawal that holds the card (`opts.hold`) ends by reading it once
+     * more, for its holder's screen (`card` on the result). Only this one: a
+     * till being paid learns no more of a card than it needs. A card that has
+     * left by then is no failure: the money moved, and the result simply has no
+     * card on it. One that was let go when it had signed is not read again. */
     cardWithdraw: function (link, opts) {
-      return cardTake(link, Object.assign({ all: !(opts && opts.sats) }, opts || {}), 'from card').then(function (r) {
-        return FoxyWallet.cardLook(link).then(function (card) { r.card = card; return r; }, function () { return r; });
+      // the holder's own: where this phone is the card's owner, the day's limit is lifted, with its proof, for the taking, and put back
+      return cardTake(link, Object.assign({ all: !(opts && opts.sats), lift: true }, opts || {}), 'from card').then(function (r) {
+        // the card has been let go once it signed (`opts.hold` keeps it), and is not read again: the next tap shows it as it is
+        if (!(opts && opts.hold)) return r;
+        return FoxyWallet.cardLook(link, { mine: true }).then(function (card) { r.card = card; return r; }, function () { return r; });
       });
     },
 
@@ -411,13 +510,15 @@
       var o = opts || {};
       var hashes = [];
       var failed = function (e) { if (e && typeof e === 'object') e.hashes = hashes; throw e; };
-      return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on }).then(function (got) {
+      // the card is held for all of it: it is written to as soon as it is empty
+      return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on, progress: o.progress, hold: true }).then(function (got) {
         hashes.push(got.hash);
         if (typeof o.on === 'function') { try { o.on('writing'); } catch (e) {} }
         return cardLook(link).then(function (card) { return FoxyWallet.cardPrepare(card, got.sats); });
       }).then(function (made) {
         hashes.push(made.hash);
-        return FoxyWallet.cardWrite(link, { pin: o.pin });
+        // the limit was put back when the money came off, and what it was signed for then is no more than that day's
+        return FoxyWallet.cardWrite(link, { pin: o.pin, progress: o.progress });
       }).then(function (r) { return Object.assign({ hashes: hashes }, r); }, failed);
     },
 
@@ -465,15 +566,35 @@
       return cardStore(CARD_TAKEN).map(function (r) { return { id: r.id, sats: r.sats, card: r.card }; });
     },
 
-    /* Ask the mint again about each. Resolves [{ id, state: 'paid' | 'spent' | 'waiting', sats }]. */
+    /* Ask the mint again about each. Resolves [{ id, state: 'paid' | 'spent' | 'bad' | 'putback' | 'waiting', sats }];
+     * `bad` is pieces the mint never signed, `putback` a refusal with some of the pieces
+     * still good: they are owed back to the card (`owed`, and `limited` where its day
+     * stays charged for them). */
     cardSettle: function () {
       var out = [];
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
           return cardSwapTaken(row, true).then(function (r) { out.push({ id: row.id, state: 'paid', sats: r.sats }); },
-            function (e) { out.push({ id: row.id, state: (e && e.card === 'spent') ? 'spent' : 'waiting', sats: 0 }); });
+            function (e) {
+              var kind = e && e.card;
+              out.push({ id: row.id, state: kind === 'spent' ? 'spent' : kind === 'bad-pieces' ? 'bad' : kind === 'putback' ? 'putback' : 'waiting', sats: 0,
+                         owed: (e && e.owed) || 0, limited: !!(e && e.limited) });
+            });
         });
       }, Promise.resolve()).then(function () { return out; });
+    },
+
+    /* What the phone's card link says is happening, pushed from Swift
+     * (Foxy/Flashcard/CardLink.swift through FoxyBridge+Flashcard.swift):
+     * { stage: 'connected' | 'say' | 'end' | 'lost', text }. The card screen
+     * shows the same line the sheet does. */
+    /** @type {?function(*): void} */
+    _onCard: null,
+    onCard: function (fn) { FoxyWallet._onCard = typeof fn === 'function' ? fn : null; },
+    _card: function (ev) {
+      var fn = FoxyWallet._onCard;
+      if (typeof fn !== 'function' || !ev || typeof ev !== 'object') return;
+      try { fn({ stage: String(ev.stage || ''), text: String(ev.text || '') }); } catch (e) { console.warn('[foxy] card progress watcher:', e && e.message); }
     },
 
     /* ---- a tap ------------------------------------------------------------
@@ -496,15 +617,40 @@
      * the card having gone. */
     cardStop: function () { return bridgeAsk('cardEnd', { error: 'Cancelled' }, 5000).then(null, function () {}); },
 
-    cardSession: function (text, fn) {
+    cardSession: function (text, fn, opts) {
       var link = {
-        send: function (apdu) { return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000); },
-        say: function (line) { return bridgeAsk('cardSay', { text: String(line || '') }, 5000).then(null, function () {}); },
+        released: false,
+        send: function (apdu) {
+          // once let go, nothing more is asked of the card; the sheet is gone
+          if (link.released) return Promise.reject(new Error('the card was let go'));
+          return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000);
+        },
+        say: function (line) {
+          if (link.released) return Promise.resolve();
+          return bridgeAsk('cardSay', { text: String(line || '') }, 5000).then(null, function () {});
+        },
+        /* The card has done its part and the rest (the mint) needs no card: the
+         * sheet ends now with its tick and a word, and what `fn` still has to do
+         * goes on with no sheet. The end is not said twice. Resolves when the
+         * phone has been told. */
+        release: function (line) {
+          if (link.released) return Promise.resolve();
+          link.released = true;
+          return bridgeAsk('cardEnd', { text: String(line || 'Done. Remove the card.') }, 5000).then(function () {}, function () {});
+        },
       };
+      /* A tap that goes on to the mint opens the road to it as the sheet opens
+       * (`opts.warm`), while the card is found and read and signs: the swap that
+       * comes after takes the circuit made ready, and is not the one that waits
+       * for a new one (`warmMint`). */
+      if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
       return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 70000).then(function () {
         return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
-          return bridgeAsk('cardEnd', { text: 'Done' }, 5000).then(function () { return r; }, function () { return r; });
+          if (link.released) return r;
+          return bridgeAsk('cardEnd', { text: 'Done. Remove the card.' }, 5000).then(function () { return r; }, function () { return r; });
         }, function (e) {
+          // the sheet was ended when the card was let go, and has nothing to say about what came after
+          if (link.released) throw e;
           var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
           return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
         });
