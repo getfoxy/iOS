@@ -194,8 +194,15 @@
     var post = function () {
       try { mh.postMessage({ id: 'covered-' + Date.now(), action: 'covered' }); } catch (e) {}
     };
-    if (typeof requestAnimationFrame !== 'function') { post(); return; }
-    requestAnimationFrame(function () { requestAnimationFrame(post); });
+    /* And on a clock as well. At launch, under the phone's splash, the two
+     * frames did not come, and the splash sat over the PIN pad for the
+     * phone's own eight seconds. Said once, by whichever comes first; the
+     * phone takes a second word as no news. */
+    var said = false;
+    var once = function () { if (said) return; said = true; post(); };
+    if (typeof requestAnimationFrame !== 'function') { once(); return; }
+    requestAnimationFrame(function () { requestAnimationFrame(once); });
+    setTimeout(once, 150);
   }
 
   function gateChanged() {
@@ -1046,6 +1053,7 @@
     awake(true);
     watchState(which === 'vpn' || which === 'failed');
     if (was !== which) console.log('[foxy] tor gate:', which, '—', reason(state()));
+    if (was !== which) { try { console.log('[foxy] tor gate: raised by ' + String((new Error().stack || '').split('\n').slice(1, 4).join(' < ')).replace(/https?:\/\/[^ )]*\//g, '')); } catch (e) {} }
     /* Said, as going down is: the camera is a native view above the page and
      * has to be taken off a scan screen this covers (syncPreview). */
     if (!was) { try { window.dispatchEvent(new Event('foxy-gate-up')); } catch (e) {} }
@@ -1212,6 +1220,14 @@
        * whatever put it up. */
       // home first: the wallet goes offline in place of this screen, and the answer below is the same
       if (!screen || screen === 'connecting') goHomeFirst('a launch or a return');
+      /* And through already: nothing to wait for and nothing to show. Tor came
+       * up while the person was at the Face ID prompt, working offline was
+       * given up by itself, and the launch's hold then put this screen up over
+       * a connected wallet and played its ending (seen on a phone). */
+      if (homeFirst() && !tapRaised && !screen && through(state())) {
+        if (!offRaised) takeDown(true, 'home first: through already');
+        return Promise.resolve(true);
+      }
       if (chosenOffline()) {
         /* Unless the screen up is the try this file is making itself.
          *
@@ -1782,6 +1798,10 @@
      * the paced count is the only number on the screen. */
     launchStage: function (label, from, to) {
       if (chosenOffline()) return;
+      /* Home first, there is no launch screen to move along: this put it up
+       * after the PIN unlock, over a wallet whose Tor had come up meanwhile,
+       * and played its ending (seen on a phone, with the raiser logged). */
+      if (homeFirst() && !tapRaised) return;
       if (!hold || !bridged()) return;
       if (screen && screen !== 'connecting') return;
       launchStep = label;

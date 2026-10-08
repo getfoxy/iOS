@@ -1334,6 +1334,11 @@ class Component extends DCLogic {
          * needs Face ID or the passcode; read while the lock screen is up, it
          * asked for its own Face ID on top of the lock's. Read after a Face ID
          * unlock, the unlock's approval covers it. */
+        /* Home first, the home screen is what is drawn, and the phone's
+         * cover comes off it now rather than at its own four seconds. With
+         * the lock up, the lock says so itself (pinLock, 10-pin.js). */
+        const G0 = window.FoxyGate;
+        if (G0 && G0.isHomeFirst && G0.isHomeFirst() && !this._pinLocked && !G0.visible() && G0.uncover) G0.uncover();
         return this.pinUnlocked().then(() => {
           /* One screen from here to a loaded balance: Tor, the mint, then the
            * balance. It used to come down once the mint answered, so the home
@@ -5092,7 +5097,12 @@ class Component extends DCLogic {
     const root = el('position:fixed;inset:0;z-index:2147483647;background:var(--bg,#050505);'
       + 'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;'
       + 'padding:76px 26px 26px;box-sizing:border-box;'
-      + 'font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
+      /* No fade for the lock. It is a cover, drawn under the phone's own
+       * cover before that comes off, and its fade-in showed the home screen
+       * through it for a moment: the connection screen used to sit underneath
+       * and hide that, and opens on the home screen now. */
+      + 'font-family:SatSymbol,Sora,system-ui,sans-serif'
+      + (o.cover ? '' : ';animation:foxyIn .16s ease'));
 
     const title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
       + 'color:var(--ink,#F5F1EC);text-align:center', o.title || '');
@@ -5376,6 +5386,8 @@ class Component extends DCLogic {
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;
+    // said, so a diary shows the lock: it drew and asked in silence, and a report about it had nothing to go on
+    console.log('[foxy] lock: up, ' + (byFaceAlone ? 'a face is the way in' : 'the PIN pad') + (W.faceLock && W.faceLock() ? ', a face is asked' : ''));
     this._unlockWait = new Promise(resolve => { this._unlockDone = resolve; });
     const unlocked = () => {
       this._pinLocked = false;
@@ -5420,6 +5432,7 @@ class Component extends DCLogic {
         subtitle: message || (byFaceAlone ? 'Look at your phone to unlock.' : 'Enter your PIN.'),
         cta: byFaceAlone ? 'UNLOCK WITH FACE ID' : 'UNLOCK',
         noKeypad: byFaceAlone,
+        cover: true,
         face: () => tryFace(false),
         onSubmit: (pin, warn) => {
           /* Slow down guessing on a phone in someone's hand. This does
@@ -5436,6 +5449,13 @@ class Component extends DCLogic {
     };
     ask();
     tryFace(true);
+    /* And the phone is told the page has the screen: the lock is drawn, opaque
+     * and without a fade, so the launch image over it, or the cover put up as
+     * Foxy went away, can come off now. Said from here, whoever raised the lock.
+     * At launch it is raised from the wallet's boot, a moment after the page
+     * mounted, and nothing there said it: the splash sat over the PIN pad for
+     * the phone's eight seconds. */
+    if (window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
   }
 
   blockedCard(kind, over) {
@@ -9584,11 +9604,9 @@ class Component extends DCLogic {
     this.syncAccent();
     // before anything else is usable, including the gate
     this.pinLock();
-    /* And the phone's splash comes off the lock: the connecting screen, which
-     * is what used to tell the phone the page had the screen, now stays down
-     * on every launch but the first (home first), and waited for the unlock
-     * even when it did not. */
-    if (this._pinLocked && window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
+    /* The lock tells the phone it has the screen itself (pinLock): the connecting
+     * screen, which is what used to say it, now stays down on every launch but
+     * the first (home first), and waited for the unlock even when it did not. */
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
     if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
     this.applyShell();

@@ -31,11 +31,9 @@
     this.syncAccent();
     // before anything else is usable, including the gate
     this.pinLock();
-    /* And the phone's splash comes off the lock: the connecting screen, which
-     * is what used to tell the phone the page had the screen, now stays down
-     * on every launch but the first (home first), and waited for the unlock
-     * even when it did not. */
-    if (this._pinLocked && window.FoxyGate && window.FoxyGate.uncover) window.FoxyGate.uncover();
+    /* The lock tells the phone it has the screen itself (pinLock): the connecting
+     * screen, which is what used to say it, now stays down on every launch but
+     * the first (home first), and waited for the unlock even when it did not. */
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
     if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
     this.applyShell();

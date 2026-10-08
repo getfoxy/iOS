@@ -245,6 +245,20 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
       ok(t.app._pinLocked === false && !t.root(), '  and the PIN opens it');
     }
 
+    /* The phone is told the page has the screen, by the lock itself. At launch
+     * the lock is raised from the wallet's boot, after the page has mounted, so
+     * a word said only where the page mounts never went out, and the launch
+     * image sat over the PIN pad for the phone's eight seconds. */
+    {
+      const t = mount(realPin({ 'foxy.secure.choice': '"none"' }), 'yes');
+      const told = [];
+      t.window.FoxyGate = { uncover() { told.push(!!t.pad()); } };
+      t.app.pinLock();
+      ok(told.length === 1 && told[0] === true,
+         'the lock tells the phone it has the screen, once the pad is drawn, whoever raised it',
+         JSON.stringify(told));
+    }
+
     // a PIN, the switch on: a face first, and the PIN behind it
     {
       const t = mount(realPin({ 'foxy.secure.choice': '"device"' }), 'yes');

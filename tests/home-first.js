@@ -132,6 +132,21 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
        'a first launch, with no wallet on file to show, still waits behind the connection screen', t.title().slice(0, 40));
     t.G.holdVerify(false); }
 
+  /* Tor up before the launch's check (the person was at the Face ID prompt):
+   * working offline was given up by itself, and the launch's hold put the
+   * screen up over a connected wallet and played its ending. */
+  { const t = home();
+    await t.set({ tor: 'connecting', everUp: false, progress: 5, network: 'wifi' });
+    t.G.holdVerify(true); t.G.showLaunch();
+    await t.set({ tor: 'up', everUp: true, progress: 100, network: 'wifi' });
+    const went = await t.G.check(() => {});
+    await sleep(80);
+    ok(went === true && t.title() === '' && t.W.privacy().offline === false,
+       'Tor up by the time the launch checks: let through, nothing shown', t.title().slice(0, 40));
+    t.G.launchStage('balance', 92, 100); t.G.holdVerify(false);
+    await sleep(1700);
+    ok(t.title() === '' && !t.G.visible(), 'and no ending plays over the home screen', t.title().slice(0, 40)); }
+
   /* ---- the connection goes, mid-session -------------------------------- */
   { const t = home();
     await t.set({ tor: 'up', everUp: true, progress: 100, network: 'wifi' });

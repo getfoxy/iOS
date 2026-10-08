@@ -228,6 +228,11 @@
          * needs Face ID or the passcode; read while the lock screen is up, it
          * asked for its own Face ID on top of the lock's. Read after a Face ID
          * unlock, the unlock's approval covers it. */
+        /* Home first, the home screen is what is drawn, and the phone's
+         * cover comes off it now rather than at its own four seconds. With
+         * the lock up, the lock says so itself (pinLock, 10-pin.js). */
+        const G0 = window.FoxyGate;
+        if (G0 && G0.isHomeFirst && G0.isHomeFirst() && !this._pinLocked && !G0.visible() && G0.uncover) G0.uncover();
         return this.pinUnlocked().then(() => {
           /* One screen from here to a loaded balance: Tor, the mint, then the
            * balance. It used to come down once the mint answered, so the home
