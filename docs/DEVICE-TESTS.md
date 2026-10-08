@@ -1549,20 +1549,46 @@ and load it), a phone whose build carries the NFC entitlement
 #### 23c. Paying another phone
 
 1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
-   **Pass:** the sheet reads the card, counts the pieces it signs ("Signing
-   piece 2 of 4"), and then ends with "Done. Remove the card." the moment the
-   last is signed; Foxy's own screen then says VERIFYING WITH THE MINT and that the
-   card can be removed, and after that the ordinary paid screen. Time two things
-   apart: from the sheet opening to "Done" (how long the card is held; the
-   model says about 1.2 seconds for one piece, with the phone finding the card
-   on top), and from "Done" to paid (the mint's part, over Tor). These are
-   the numbers that decide whether the card is usable at a till.
-2. Load a card with 2,000 sats and pay it 600. **Pass:** the stage says `Tap 1
-   of 2: SEND.`; two pieces are signed (512 and 128), and the sheet is done in
-   under three seconds; TAP TO RECEIVE says what was paid and the 40 of change;
-   TAP CARD asks no PIN, says `Tap 2 of 2: RECEIVE.`, and ends at COMPLETE. Time
-   both taps. Pay it a price no two pieces cover. **Pass:** the fewest pieces
-   that do are signed, and the same second tap puts the change back.
+   **Pass:** behind the sheet the screen is TAP TO VERIFY (light blue, a card's
+   outline, arrows flying into its mark) over the amount; the sheet reads the
+   card and counts the pieces it signs ("Signing piece 2 of 4"), and the moment
+   the last is signed says "Verifying the payment. Keep this open for your
+   change." while the screen says VERIFYING CARD; then, where there is change,
+   the sheet asks for the card again and the screen is TAP TO CONFIRM (orange)
+   until the change is back; and after that the ordinary paid screen. Time two
+   things apart: from the sheet opening to "Verifying" (how long the card is
+   held; the model says about 1.2 seconds for one piece, with the phone finding
+   the card on top), and from there to the second tap being asked for (the
+   mint's part, over Tor). These are the numbers that decide whether the card is
+   usable at a till. Look at how much of the three screens the sheet's dimming
+   leaves readable.
+2. Load a card with 2,000 sats and pay it 600. **Pass:** two pieces are signed
+   (512 and 128), and the card's part is done in under three seconds; the same
+   sheet asks for it again and puts the 40 of change back with no PIN, and
+   PAYMENT RECEIVED goes up as the sheet ends, for 600. Time both taps. Pay it a
+   price no two pieces cover. **Pass:** the fewest pieces that do are signed, and
+   the same second tap puts the change back.
+2a. Close the sheet (its Cancel) while it says "Verifying the payment".
+   **Pass:** the payment still stands; TAP TO CONFIRM is on the screen at once
+   and stays (the home screen is not seen), a new sheet comes up by itself for
+   the change, and PAYMENT RECEIVED goes up when it is back, for the right
+   amount. Close that sheet too. **Pass:** TAP TO RECEIVE, with TAP CARD and
+   LATER; LATER raises PAYMENT RECEIVED. Then take a second payment straight
+   away. **Pass:** its PAYMENT RECEIVED is its own amount, and the first's does
+   not come up again.
+2c. Lift the card away part way through the first tap, and again part way
+   through the change. **Pass:** each time the screen turns to TAP AGAIN ("The
+   last tap didn't finish...") on the ground it was on (light blue for the
+   payment, orange for the change), the same sheet asks for the card, and the
+   next tap finishes: the payment is made, the change is all back, and no PIN
+   pad comes up for the rest of the change.
+2b. Pay from one card online several times (a few thousand sats each, from a
+   card of forty thousand or so), then put the receiving phone in airplane mode
+   and pay it three odd amounts. **Pass:** each offline payment is taken (HIGH
+   RISK, then exactly), and none is refused with NO CHANGE WHILE OFFLINE: the
+   online payments were made with pieces that left no gap. Note which pieces
+   each online payment signed (the log says) and how many pieces of change went
+   back.
 3. The same, lifting the card away the moment the sheet first changes.
    **Pass:** one of two ends, and never a third: nothing was taken and the
    screen says so, or the card had signed and the payment stands (or is

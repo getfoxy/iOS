@@ -9645,8 +9645,31 @@
     var top = cardMaxPiece(w);
     // no card read (a lost answer found later): its drawer is not known, so the plain powers of two
     if (!card) return cardLadder(sats, 64, top, null, true).denominations;
-    var cut = cardLadder(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except));
+    return cardChangeFor(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except));
+  }
+
+  /* The same cut from its parts: `sats` of change in no more than `room` pieces
+   * for a card that holds `held` (amounts). A payment is chosen by what this
+   * would give back (`cardPick`), so the choosing and the making are one rule. */
+  function cardChangeFor(sats, room, top, held) {
+    var cut = cardLadder(sats, room, top, held);
     return (cut.extra > 0 ? cardLadder(sats, 64, top, null, true) : cut).denominations;
+  }
+
+  /* How far a card's pieces reach: the most N for which every amount from 1 to
+   * N is made exactly by some of them. Taken smallest first, a piece adds to
+   * the reach when it is no more than one above the sum of those before it;
+   * the first that is more is a gap, and nothing above it is exact for every
+   * amount. A drawer with no gap reaches its whole sum. */
+  function cardReach(amounts) {
+    var up = (amounts || []).map(function (a) { return Math.floor(Number(a) || 0); })
+      .filter(function (a) { return a > 0; }).sort(function (a, b) { return a - b; });
+    var sum = 0;
+    for (var i = 0; i < up.length; i++) {
+      if (up[i] > sum + 1) break;
+      sum += up[i];
+    }
+    return sum;
   }
 
   /* A token's proofs as pieces this card can hold, or a throw saying why not.
@@ -9958,6 +9981,12 @@
    * itself exact, no change is owed. Exactness is not chased at the cost of more
    * signatures: a six-piece exact set is slower than one piece and its change.
    *
+   * Of the sets that small, the one taken is the least-overpaying that leaves
+   * the card's drawer with no gap, counting the change as it will be cut
+   * (`cardFewPick`, `cardWholeAfter`): a card that paid online with its middle
+   * pieces was left unable to pay most prices exactly, and exactly is the only
+   * way a till with no route can be paid.
+   *
    * A card's day is charged the whole worth of each piece it signs, and not
    * the price, and change written back gives it nothing back. So the pieces
    * never come to more than `cap`, what is left of today's limit (null where
@@ -9980,21 +10009,26 @@
    * five over, not one piece of 2048 and thirteen hundred over. Fewer pieces
    * breaks a tie. The card holds few pieces, so one- and two-piece sets are
    * searched in full. */
-  function cardFewPick(w, pool, want, most) {
+  /* `whole(picked, total, fee)`, where given, says whether the card would be
+   * left with no gap in its drawer (`cardWholeAfter`): the least-overpaying set
+   * that leaves none is taken before one that over-pays less and leaves one.
+   * A 3,000 paid with the last 2048 and 1024 leaves a card of large pieces and
+   * small change that can pay nothing in between exactly, which is every price
+   * a till with no route can take; paid with a 4096, the change is cut to fill
+   * the drawer and it can still pay anything. Where no set leaves it whole,
+   * the least-overpaying set stands. */
+  function cardFewPick(w, pool, want, most, whole) {
     var list = (pool || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; });
     if (!list.length || !(want > 0)) return null;
     var up = list.slice().sort(function (a, b) { return satsOf(a.amount) - satsOf(b.amount); });
-    /** @type {{ picked: any[], total: number } | null} */
-    var best = null;
+    /** @type {{ picked: any[], total: number, fee: number }[]} */
+    var covering = [];
     var consider = function (picked) {
       var total = 0;
       picked.forEach(function (p) { total += satsOf(p.amount); });
       var fee = swapFeeFor(w, picked);
       if (!isFinite(fee) || total < want + fee) return;
-      if (!best || total < best.total
-          || (total === best.total && picked.length < best.picked.length)) {
-        best = { picked: picked, total: total };
-      }
+      covering.push({ picked: picked, total: total, fee: fee });
     };
     for (var i = 0; i < up.length; i++) consider([up[i]]);
     if (most >= 2) {
@@ -10002,9 +10036,47 @@
         for (var b = a + 1; b < up.length; b++) consider([up[a], up[b]]);
       }
     }
-    // signed largest first, as every other pick here is (set inside `consider`, which the checker does not follow)
-    var found = /** @type {{ picked: any[], total: number } | null} */ (best);
-    return found ? found.picked.slice().sort(function (x, y) { return satsOf(y.amount) - satsOf(x.amount); }) : null;
+    if (!covering.length) return null;
+    // least over-paid first, fewer pieces breaking a tie
+    covering.sort(function (x, y) { return (x.total - y.total) || (x.picked.length - y.picked.length); });
+    var found = covering[0];
+    if (typeof whole === 'function') {
+      // sets of the same worth and size leave the same card: one of each is asked about
+      var asked = {};
+      for (var k = 0; k < covering.length; k++) {
+        var c = covering[k];
+        var name = c.picked.map(function (p) { return satsOf(p.amount); }).sort().join('+');
+        if (asked[name]) continue;
+        asked[name] = true;
+        if (whole(c.picked, c.total, c.fee)) { found = c; break; }
+      }
+    }
+    // signed largest first, as every other pick here is
+    return found.picked.slice().sort(function (x, y) { return satsOf(y.amount) - satsOf(x.amount); });
+  }
+
+  /* A question for `cardFewPick`: would this card have no gap in its drawer
+   * after paying `want` with a set of its pieces? What it would hold is what
+   * it holds now (`card` as read, and what this phone owes it; or `pool`, where
+   * there is no card to ask), less the set, and the change the till would make
+   * (`changeFor`), cut as the till cuts it (`cardChangeFor`). */
+  function cardWholeAfter(w, card, pool, want) {
+    var top = cardMaxPiece(w);
+    var base = card ? cardHeldAmounts(card, null)
+      : (pool || []).map(function (p) { return satsOf(p && p.amount); }).filter(function (a) { return a > 0; });
+    return function (picked, total, fee) {
+      var rest = base.slice();
+      picked.forEach(function (p) {
+        var at = rest.indexOf(satsOf(p.amount));
+        if (at >= 0) rest.splice(at, 1);
+      });
+      var back = changeFor(w, total - fee - want);
+      var room = card ? cardRoomFor(card, picked) : CARD_LOAD_PIECES;
+      var after = back > 0 ? rest.concat(cardChangeFor(back, room, top, rest)) : rest;
+      var sum = 0;
+      after.forEach(function (a) { sum += a; });
+      return cardReach(after) === sum;
+    };
   }
 
   /* The fewest pieces that cover `want` and the fee on them, and of those
@@ -10012,8 +10084,10 @@
    * cashier would, largest first; which of that many is searched, by size,
    * largest first, with a budget of steps (a card's pieces are powers of two,
    * a few of each, so the search is small), and where the budget runs out
-   * the cashier's set stands. Null when nothing covers it. */
-  function cardFewestCover(w, pool, want, bound) {
+   * the cashier's set stands. Null when nothing covers it. `whole`, where
+   * given, is asked of a set as `cardFewPick` asks it: of that many pieces,
+   * the least-overpaying set that leaves the card's drawer with no gap. */
+  function cardFewestCover(w, pool, want, bound, whole) {
     var list = (pool || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; })
       .sort(function (a, b) { return satsOf(b.amount) - satsOf(a.amount); });
     if (!list.length || !(want > 0)) return null;
@@ -10055,19 +10129,60 @@
       }
     };
     walk(0, k, 0, []);
-    return best ? best.set : null;
+    if (!best || typeof whole !== 'function') return best ? best.set : null;
+    /* That many pieces, and the card left with no gap (`cardWholeAfter`): the
+     * least-overpaying set of them that leaves none, looked for the same way,
+     * with a budget of sets asked about. The least-overpaying of all stands
+     * where it leaves none itself, or nothing that few does. */
+    var least = /** @type {{ set: any[], total: number }} */ (best);
+    if (whole(least.set, least.total, feeOf(least.set))) return least.set;
+    /** @type {{ set: any[], total: number } | null} */
+    var kept = null;
+    var asked = 0;
+    steps = 0;
+    var look = function (i, left, total, chosen) {
+      if (++steps > 50000 || asked > 300) return;
+      if (kept && total >= kept.total) return;
+      if (left === 0) {
+        if (!covers(chosen, total)) return;
+        asked += 1;
+        if (whole(chosen, total, feeOf(chosen))) kept = { set: chosen.slice(), total: total };
+        return;
+      }
+      if (i >= sizes.length) return;
+      var most = total, room = left;
+      for (var j = i; j < sizes.length && room > 0; j++) {
+        var take = Math.min(room, bySize[sizes[j]].length);
+        most += take * sizes[j];
+        room -= take;
+      }
+      if (room > 0 || most < want) return;
+      var size = sizes[i], have = bySize[size];
+      // fewer of the largest first here: the sets that over-pay least are asked about first
+      for (var n = 0; n <= Math.min(left, have.length); n++) {
+        look(i + 1, left - n, total + n * size, chosen.concat(have.slice(0, n)));
+      }
+    };
+    look(0, k, 0, []);
+    var keeps = /** @type {{ set: any[], total: number } | null} */ (kept);
+    return keeps ? keeps.set : least.set;
   }
 
-  function cardPick(w, have, want, cap) {
+  /* `card`: the card as read, where there is one, for what a set would leave
+   * it holding. Under a day's limit (`cap`) the least-overpaying set stands:
+   * the day is charged the whole worth of what is signed, and a larger piece
+   * taken to keep the drawer whole would use up the day. */
+  function cardPick(w, have, want, cap, card) {
     var bound = (cap === null || cap === undefined) ? null : Math.max(0, Number(cap) || 0);
     var within = bound === null ? have : (have || []).filter(function (p) { return satsOf(p.amount) <= /** @type {number} */ (bound); });
     // the fewest signatures that cover the price (one or two pieces), over-paying; change comes back
-    var few = cardFewPick(w, within, want, cardSignBudget());
+    var whole = bound === null ? cardWholeAfter(w, card || null, have, want) : null;
+    var few = cardFewPick(w, within, want, cardSignBudget(), whole);
     if (few && (bound === null || sumProofs(few) <= bound)) return few;
     /* No two pieces cover it: still the fewest that do, since every piece is
      * most of a second of holding the card; then the least-overpay set of any
      * size, an exact set, and what fits under the cap. */
-    var fewest = cardFewestCover(w, within, want, bound);
+    var fewest = cardFewestCover(w, within, want, bound, whole);
     var cover = coverPieces(w, within, want);
     var covered = (cover && (bound === null || cover.total <= bound)) ? cover.picked : null;
     if (fewest && (!covered || fewest.length < covered.length)) return fewest;
@@ -10502,7 +10617,8 @@
 
   /* The one flow behind being paid by a card and emptying one (21a-flashcard.js). */
   function cardTake(link, o, memo) {
-    var on = function (step) { try { if (typeof o.on === 'function') o.on(step); } catch (e) {} };
+    // `info`: what a step is about, where the screen needs it (the payment's entry, for a step after the card has signed)
+    var on = function (step, info) { try { if (typeof o.on === 'function') o.on(step, info); } catch (e) {} };
     var pin;
     try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
     var want = o.all ? 0 : Math.round(Number(o.sats));
@@ -10575,7 +10691,7 @@
       /* Offline, only an exact set: change cannot be made without a route, and
        * a till that paid it out of its own pile would lose the payment and the
        * change both to a payer who spent their copy. */
-      var choose = function (limit) { return offline ? cardExactPick(w, have, rest, limit) : cardPick(w, have, rest, limit); };
+      var choose = function (limit) { return offline ? cardExactPick(w, have, rest, limit) : cardPick(w, have, rest, limit, card); };
       if (o.all) {
         picked = have;
       } else if (held && rest <= 0) {
@@ -10651,7 +10767,7 @@
        * done with Foxy's own screen saying so (`cardLetGo`). */
       return cardLetGo(link, o).then(function () {
         released = !o.hold;
-        on(released ? 'checking' : 'mint');
+        on(released ? 'checking' : 'mint', { hash: row.id });
         return cardSwapTaken(row, false);
       });
     }, function (e) {
@@ -10732,7 +10848,7 @@
        * owed to it (`cardOweBack`). The receiver keeps exactly what it asked for;
        * where the change is too small to make, the sat or two over stay with the
        * payment and its entry says so. */
-      return cardOweBack(row, w, card, signedNonces, got, { making: function () { on(released ? 'making' : 'change'); } })
+      return cardOweBack(row, w, card, signedNonces, got, { making: function () { on(released ? 'making' : 'change', { hash: row.id }); } })
         .then(function (owe) {
           if (owe.unmade) { result.change = { sats: owe.owed, written: false, unmade: true }; return null; }
           if (!(owe.sats > 0)) return null;
@@ -10768,12 +10884,14 @@
    * when the sheet has been told. */
   function cardLetGo(link, o) {
     if (o.hold || !link) return Promise.resolve();
-    /* `o.keepSheet`: the card may go, and the sheet stays up and says so, for
-     * the tap that takes its change back in the same sheet once the mint has
-     * answered (26f-flashcard.js, fcChangeInSheet). A second sheet opened for
-     * that tap was refused by iOS as often as not. */
+    /* `o.keepSheet`: the card may go, and the sheet stays up, for the tap that
+     * takes its change back in the same sheet once the mint has answered
+     * (26f-flashcard.js, fcChangeInSheet). A second sheet opened for that tap
+     * was refused by iOS as often as not. What it says asks for the sheet to
+     * be left open: "Remove the card" beside the sheet's own Cancel read as
+     * finished, the sheet was closed, and the change had no sheet to go in. */
     if (o.keepSheet && typeof link.say === 'function') {
-      return Promise.resolve().then(function () { return link.say('Remove the card. Verifying the payment.'); }).then(function () {}, function () {});
+      return Promise.resolve().then(function () { return link.say('Verifying the payment. Keep this open for your change.'); }).then(function () {}, function () {});
     }
     if (typeof link.release !== 'function') return Promise.resolve();
     return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
@@ -20199,7 +20317,8 @@
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
     cardTimeKey: CARD_TIME_KEY,
-    cardPick: function (w, have, want, cap) { return cardPick(w, have, want, cap); },
+    cardPick: function (w, have, want, cap, card) { return cardPick(w, have, want, cap, card); },
+    cardReach: function (amounts) { return cardReach(amounts); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },

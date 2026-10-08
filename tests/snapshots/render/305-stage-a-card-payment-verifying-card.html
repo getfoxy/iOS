@@ -1,4 +1,4 @@
-<!-- stage: tap 1 of 2, send -->
+<!-- stage: a card payment, verifying card -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -518,35 +518,22 @@
 </div>
 </div>
 <!-- on document.body -->
-<div id="foxy-stage" data-stage="card" style="position: fixed; inset: 0px; z-index: 2147483300; display: flex; flex-direction: column; overflow: hidden; background: linear-gradient(170deg, rgb(211, 237, 244) 0%, rgb(197, 230, 239) 45%, rgb(181, 221, 233) 80%, rgb(169, 214, 228) 100%); color: rgb(19, 51, 60); font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease;">
-<div style="position:absolute;left:50%;top:44%;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 65%);animation:glowDrift 5s ease-in-out infinite;pointer-events:none">
+<div id="foxy-stage" data-stage="card" data-look="verify" style="position: fixed; inset: 0px; z-index: 2147483300; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; background: rgb(191, 227, 236); color: rgb(15, 42, 51); font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease;">
+<div style="position:relative;flex:0 0 auto;height:224px;margin-top:8px;display:flex;align-items:center;justify-content:center">
+<div style="position:relative;width:345px;max-width:calc(100% - 30px);aspect-ratio:1.586;border-radius:16px;overflow:hidden;background:#0F2A33;box-shadow:0 20px 40px rgba(15,42,51,.35)">
+<div style="position:absolute;left:24px;top:20px;font-weight:800;font-size:23px;color:#BFE3EC">FLASHcard</div>
+<div style="position:absolute;left:24px;top:82px;width:54px;height:42px;border-radius:9px;background:linear-gradient(135deg,#E6F4F8,#8FB9C6)">
 </div>
-<div style="position:absolute;inset:-10%;background-image:url(snow-fur.jpg);background-size:cover;background-position:center;mix-blend-mode:soft-light;opacity:.18;animation:grain 14s ease-in-out infinite;pointer-events:none">
-</div>
-<div style="position:relative;z-index:1;flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:56px;padding:calc(20px + env(safe-area-inset-top)) 28px 0">
-<div style="position:relative;width:150px;height:96px;border-radius:14px;border:3px dashed #13333C;background:rgba(255,255,255,.45);animation:offlineFade 2.4s ease-in-out infinite">
-<div style="position:absolute;left:16px;top:30px;width:30px;height:24px;border-radius:5px;border:3px solid #13333C;box-sizing:border-box">
-</div>
-<svg viewBox="0 0 24 24" fill="none" stroke="#13333C" stroke-width="2.2" stroke-linecap="round" style="position:absolute;right:14px;top:24px;width:44px;height:44px">
-<path d="M7.75 9A3.5 3.5 0 0 1 7.75 15M9.25 6.4A6.5 6.5 0 0 1 9.25 17.6M10.75 3.8A9.5 9.5 0 0 1 10.75 20.2">
-</path>
-</svg>
-</div>
-<div style="display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center">
-<h1 style="margin:0;font-weight:800;font-size:30px;line-height:1.1;letter-spacing:-.01em;text-transform:uppercase;color:#13333C">HOLD THE CARD<br>TO THE TOP OF THE PHONE</h1>
-<div style="font-weight:800;font-size:44px;line-height:1;letter-spacing:-.03em;color:#13333C">₿ 1,180</div>
-<p style="margin:0;max-width:300px;text-align:center;font-family:Figtree,Sora,system-ui,sans-serif;font-weight:500;font-size:17px;line-height:1.45;color:#13333C;text-wrap:pretty">Tap 1 of 2: SEND.</p>
-<div style="display:flex;gap:8px;margin-top:4px">
-<span style="width:8px;height:8px;border-radius:50%;background:#13333C;animation:dot 1.4s ease-in-out 0s infinite">
-</span>
-<span style="width:8px;height:8px;border-radius:50%;background:#13333C;animation:dot 1.4s ease-in-out 0.2s infinite">
-</span>
-<span style="width:8px;height:8px;border-radius:50%;background:#13333C;animation:dot 1.4s ease-in-out 0.4s infinite">
-</span>
+<div style="position:absolute;right:22px;bottom:20px;width:58px;height:58px;border-radius:50%;border:5px solid rgba(191,227,236,.22);border-top-color:#BFE3EC;box-sizing:border-box;animation:cvSpin .9s linear infinite">
 </div>
 </div>
 </div>
-<div style="position: relative; z-index: 1;">
-<div style="width: 100%; height: 60px; border-radius: 18px; background: rgba(255, 255, 255, 0.35); font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(19, 51, 60); display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px solid rgba(19, 51, 60, 0.85); visibility: visible;" data-stage-button="1">CANCEL</div>
+<div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">
+<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;text-transform:uppercase">Verifying card</h1>
+<p data-stage-line="1" style="margin:0;font-family:Figtree,Sora,system-ui,sans-serif;font-weight:500;font-size:19px;line-height:1.45;color:#1E4450;text-wrap:pretty">This may take a few seconds...</p>
+<div style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em">$25.75</div>
+</div>
+<div style="position: relative; z-index: 1; margin-top: auto;">
+<div style="width: 100%; height: 60px; border-radius: 18px; box-sizing: border-box; background: rgba(255, 255, 255, 0.35); font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(15, 42, 51); display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px solid rgb(15, 42, 51); visibility: hidden;" data-stage-button="1">CANCEL</div>
 </div>
 </div>

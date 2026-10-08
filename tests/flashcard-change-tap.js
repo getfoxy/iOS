@@ -82,9 +82,9 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
   {
     const c3 = newCard(H);
     await H.W.cardSetUp(c3, { pin: '1234' });
-    await binaryLoad(H, c3, 1024 + 512);
+    await binaryLoad(H, c3, 512 + 2 + 1);
     c3.tap();
-    await R.W.cardPay(c3, { sats: 512, pin: '1234' });   // exact: 512; the note is set all the same
+    await R.W.cardPay(c3, { sats: 512, pin: '1234' });   // exact: 512, which leaves a 2 and a 1 and no gap; the note is set all the same
     ok(c3.state.changeDue === true, 'an exact payment leaves the note too (the card cannot know there is no change)');
     c3.tap();
     await c3.send('00a40400' + '0a' + 'f0464f58594341524401' + '00');
@@ -96,7 +96,7 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
     ok(limit === '6982' || limit === '6a91', 'and so does anything else the PIN opens', limit);
     const info2 = await c3.send('b001000000');
     ok(info2.slice(58, 60) === '01', 'the refusals did not use the grant up', info2);
-    ok(c3.balance() === 1024, 'nothing was spent');
+    ok(c3.balance() === 3, 'nothing was spent');
   }
 
   /* ---- 5: a card that says nothing of the sort (version 1.1) is written with the PIN -- */

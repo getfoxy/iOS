@@ -1244,19 +1244,39 @@
   "markup": "a2eb2f6a109ee455a829df9d4e43fe954bf47cc40d59eada12c128e0089b6b3a",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
- "stage: tap 1 of 2, send": {
-  "file": "296-stage-tap-1-of-2-send.html",
-  "markup": "d9f97b7723e56b02ff934e014fe6b8530a0e2ac1713ebf5849f9a9c6518ce502",
+ "stage: a card payment, tap to verify": {
+  "file": "304-stage-a-card-payment-tap-to-verify.html",
+  "markup": "a786e83cb883893e21c08c41db3f4e43fbaad2d4dc4db1207e438639b165c877",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: a card payment, verifying card": {
+  "file": "305-stage-a-card-payment-verifying-card.html",
+  "markup": "8c2f5aa1efd6956f797d40a53803346cfdf146d89753d99925d28d0084cbd52d",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: a card payment, tap to confirm": {
+  "file": "306-stage-a-card-payment-tap-to-confirm.html",
+  "markup": "b3116cf91b3bcab4d28b8a2dd0088b5846299b1c73b2e36ad0c5dea458ae870a",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: a card payment, tap again to verify": {
+  "file": "308-stage-a-card-payment-tap-again-to-verify.html",
+  "markup": "1aa33e9dd6cdd009ae0e1a9d907021ec73e14d751713f6f8d05b1c6df5250fc5",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: a card payment, tap again to confirm": {
+  "file": "309-stage-a-card-payment-tap-again-to-confirm.html",
+  "markup": "5a4770274d03800664f182d2b1a41c9ad81215de6ee33a5284d524abcb675ea9",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "stage: a card payment, tap to put back": {
+  "file": "307-stage-a-card-payment-tap-to-put-back.html",
+  "markup": "592c11a41d3b549ec88fc29896ae544e8168623cd445c1b32ab61442bb41266c",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: tap to receive the change of a payment": {
   "file": "297-card-tap-to-receive-the-change-of-a-payment.html",
   "markup": "7f140bf58c7c9964968d0ac2064887ed6e1deb7e4890d4b7773847ee764629e0",
-  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
- },
- "stage: tap 2 of 2, receive": {
-  "file": "298-stage-tap-2-of-2-receive.html",
-  "markup": "4311ddd49d3d60f1d719bd21272b73c3c463eb936898d3ffdf59e610edc73b78",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: a payment cut short, not paid": {

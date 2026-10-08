@@ -165,7 +165,17 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
   {
     const rand = rng(20261007);
     const feeOf = (ppk) => (l) => Math.ceil(l.length * ppk / 1000);
-    let cases = 0, exactFound = 0, bad = 0, over = 0, fewHad = 0, fewBad = 0, moreHad = 0, moreBad = 0;
+    let cases = 0, exactFound = 0, bad = 0, over = 0, fewHad = 0, fewBad = 0, moreHad = 0, moreBad = 0, keptWhole = 0, keptBigger = 0;
+    /* What a card would hold after a set of its pieces paid: the rest, and `back` of change cut as a till cuts it (the
+     * drawer's gaps first, in a load's worth of places; the plain powers of two where that would round it). Whole when
+     * every amount up to all of it has an exact set (`chain`, held to the sums further down). */
+    const wholeAfter = (pool, set, back) => {
+      const rest = pool.filter((p) => set.indexOf(p) < 0).map((p) => p.amount);
+      let cut = back > 0 ? H.W.cardLadder(back, 32, 0, rest) : { denominations: [], extra: 0 };
+      if (cut.extra > 0) cut = H.W.cardLadder(back, 64, 0, null, true);
+      const after = rest.concat(cut.denominations);
+      return chain(after) && H.W.cardReach(after) === total(after);
+    };
     for (let n = 0; n < 700; n++) {
       const ppk = [0, 0, 100, 250, 1000][Math.floor(rand() * 5)];
       const stub = { getFeesForProofs: feeOf(ppk) };
@@ -176,7 +186,7 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
       const want = 1 + Math.floor(rand() * total);
       const cap = rand() < 0.3 ? 1 + Math.floor(rand() * total) : null;
       // every subset: the fewest pieces that come to exactly the price and the fee on it, and the least that two pieces or one cover it with
-      let best = -1, fewLeast = -1, fewCount = 0, coverCount = -1;
+      let best = -1, fewLeast = -1, fewCount = 0, coverCount = -1, keepLeast = -1, keepCount = 0;
       for (let m = 1; m < (1 << size); m++) {
         const set = pool.filter((p, i) => m & (1 << i));
         const sum = set.reduce((s, p) => s + p.amount, 0);
@@ -184,8 +194,13 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
         const need = want + feeOf(ppk)(set);
         if (sum === need && (best < 0 || set.length < best)) best = set.length;
         if (set.length <= 2 && sum >= need && (fewLeast < 0 || sum < fewLeast || (sum === fewLeast && set.length < fewCount))) { fewLeast = sum; fewCount = set.length; }
+        // and the least of those that leave the card with no gap, the change cut back onto it as a till cuts it
+        if (set.length <= 2 && sum >= need && cap === null && wholeAfter(pool, set, sum - need)
+            && (keepLeast < 0 || sum < keepLeast || (sum === keepLeast && set.length < keepCount))) { keepLeast = sum; keepCount = set.length; }
         if (sum >= need && (coverCount < 0 || set.length < coverCount)) coverCount = set.length;
       }
+      // with no limit on the day, the set that keeps the drawer whole is the one taken, where there is one
+      if (keepLeast > 0) { if (keepLeast > fewLeast) keptBigger += 1; fewLeast = keepLeast; fewCount = keepCount; keptWhole += 1; }
       cases += 1;
       // offline: the exact set, the fewest pieces of it, whenever there is one
       const exactGot = H.W.cardExactPick(stub, pool, want, cap);
@@ -211,18 +226,38 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
       }
     }
     ok(bad === 0 && exactFound > 100, 'offline, whenever a set of pieces comes to exactly the price and the fee on it, the fewest such pieces are taken, over ' + cases + ' random cards at mints that charge nothing and up to a sat a piece', exactFound + ' of them had one, ' + bad + ' missed');
-    ok(fewBad === 0 && fewHad > 100, 'online, whenever two pieces or one cover the price and the fee, the pair or piece that overpays least is taken', fewHad + ' of them had one, ' + fewBad + ' missed');
+    ok(fewBad === 0 && fewHad > 100, 'online, whenever two pieces or one cover the price and the fee, the pair or piece taken is the least-overpaying that leaves the card’s drawer with no gap, and the least-overpaying of all where none does or the day has a limit', fewHad + ' of them had one, ' + fewBad + ' missed');
+    ok(keptWhole > 30 && keptBigger > 5, 'and that is a larger piece than the least-overpaying one often enough to matter', keptWhole + ' kept the drawer whole, ' + keptBigger + ' of them by over-paying more');
     ok(over === 0, 'and where none does, what is taken covers the price and the fee, and keeps to the day’s limit');
     ok(moreBad === 0 && moreHad > 50, 'and is the fewest pieces that cover it, each being most of a second of holding the card', moreHad + ' needed more than two, ' + moreBad + ' were not the fewest');
 
     // one price both ways: online a tap signs two pieces and takes change; offline, with no change to be had, it pays exactly
-    const pool = [1024, 512, 256, 128, 64, 16].map((n, i) => ({ amount: n, secret: 'p' + i, id: 'k' }));
     const stub = { getFeesForProofs: () => 0 };
+    const asPool = (list) => list.map((n, i) => ({ amount: n, secret: 'p' + i + '-' + n, id: 'k' }));
+    const says = (pick) => pick && pick.map((p) => p.amount).join('+');
+    // a drawer with two of its middle rungs: taking one of each leaves no gap
+    const pool = asPool([1024, 512, 512, 256, 128, 128, 64, 32, 16, 16, 8, 4, 2, 1]);
     const pick = H.W.cardPick(stub, pool, 592, null);
-    ok(pick && pick.map((p) => p.amount).join('+') === '512+128', 'online a price of 592 is paid with 512 and 128, signed largest first, and 48 of change', pick && pick.map((p) => p.amount).join('+'));
+    ok(says(pick) === '512+128', 'online a price of 592 is paid with 512 and 128, signed largest first, and 48 of change', says(pick));
     const exactPick = H.W.cardExactPick(stub, pool, 592, null);
-    ok(exactPick && exactPick.map((p) => p.amount).sort((x, y) => y - x).join('+') === '512+64+16', 'offline it is paid exactly, with 512, 64 and 16', exactPick && exactPick.map((p) => p.amount).join('+'));
-    ok(H.W.cardPick(stub, pool, 1000, null).map((p) => p.amount).join('+') === '1024', 'and 1000 is paid with the 1024');
+    ok(exactPick && exactPick.map((p) => p.amount).sort((x, y) => y - x).join('+') === '512+64+16', 'offline it is paid exactly, with 512, 64 and 16', says(exactPick));
+    ok(says(H.W.cardPick(stub, pool, 1000, null)) === '1024', 'and 1000 is paid with the 1024');
+
+    /* The drawer kept whole. A card that paid online with its last middle pieces was left with large pieces and small
+     * change, and could pay nothing in between exactly: every price a till with no route was asked for was refused. */
+    const thin = asPool([8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1]);
+    ok(says(H.W.cardPick(stub, thin, 3000, null)) === '8192', 'a card with one of each size pays 3,000 with its largest piece, whose change fills the drawer again, and not with its 2048 and 1024', says(H.W.cardPick(stub, thin, 3000, null)));
+    ok(says(H.W.cardPick(stub, thin, 3000, 5000)) === '2048+1024', 'but under a day’s limit, which is charged the whole of what is signed, it is the 2048 and 1024 that over-pay least', says(H.W.cardPick(stub, thin, 3000, 5000)));
+    const spare = asPool([8192, 4096, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1]);
+    ok(says(H.W.cardPick(stub, spare, 3000, null)) === '4096', 'and with a second 4096 it is that one: the least over-paid that leaves no gap', says(H.W.cardPick(stub, spare, 3000, null)));
+    // a card that already has a gap is mended by the change of the piece it pays with
+    const gapped = asPool([8192, 4096, 128, 64, 8]);
+    const mend = H.W.cardPick(stub, gapped, 50, null);
+    ok(says(mend) === '8192', 'a card of two large pieces and a little change pays 50 with the large one whose change fills the gap (the 4096’s would not reach the 8192)', says(mend));
+    ok(H.W.cardReach([4096, 128, 64, 8].concat(H.W.cardLadder(8142, 32, 0, [4096, 128, 64, 8]).denominations)) === 4096 + 200 + 8142,
+       'after which every amount up to all it holds has an exact set');
+    ok(H.W.cardReach([1, 2, 4, 8]) === 15 && H.W.cardReach([1, 2, 8]) === 3 && H.W.cardReach([2, 4]) === 0 && H.W.cardReach([1, 1, 1, 4, 8]) === 15 && H.W.cardReach([]) === 0,
+       'how far a card’s pieces reach is the sum of them up to the first that is more than one above those before it');
 
     // through a whole payment
     card.tap();
@@ -363,6 +398,33 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
       }
       ok(wrong === 0 && missed === 0 && completeCards > 30 && prices > 3000,
          'over random cards and prices, whenever the drawer is complete an exact set exists for every price up to the balance, and the wallet finds it for an offline till', cards + ' cards, ' + completeCards + ' complete, ' + prices + ' prices, ' + spent + ' payments, ' + missed + ' missed, ' + wrong + ' wrong');
+    }
+
+    // the property the choosing is for: a card paid from online, time after time, can still pay any amount offline
+    {
+      const rand = rng(20261009);
+      const stub = { getFeesForProofs: () => 0 };
+      const dummy = (list) => list.map((a, i) => ({ amount: a, secret: 'p' + i + '-' + a, id: 'k' }));
+      let paid = 0, broke = 0, mended = 0, none = 0, most = 0;
+      for (let t = 0; t < 400; t++) {
+        // a load of twenty pieces, as a card is given (thirty-two, less the places kept for change)
+        let held = L(500 + Math.floor(rand() * 60000), 20, 0, []).denominations.slice();
+        if (!chain(held)) continue;
+        for (let step = 0; step < 14 && total(held) > 20; step++) {
+          const price = 1 + Math.floor(rand() * Math.min(total(held), 6000));
+          const pick = H.W.cardPick(stub, dummy(held), price, null);
+          if (!pick) { none += 1; break; }
+          const took = pick.map((p) => p.amount);
+          took.forEach((a) => { held.splice(held.indexOf(a), 1); });
+          const back = total(took) - price;
+          if (back > 0) { let l = L(back, 32, 0, held); if (l.extra > 0) l = H.W.cardLadder(back, 64, 0, null, true); held = held.concat(l.denominations); most = Math.max(most, l.denominations.length); }
+          paid += 1;
+          if (!chain(held)) { broke += 1; if (broke < 4) console.log('  a payment of', price, 'with', took.join('+'), 'left a gap:', held.slice().sort((a, b) => b - a).join(',')); break; }
+          if (took.length <= 2 && back > price) mended += 1;
+        }
+      }
+      ok(broke === 0 && paid > 800 && none === 0, 'over random cards, each paid from online again and again, no payment leaves a gap: every amount up to what the card holds still has an exact set for a till with no route',
+         paid + ' payments, ' + broke + ' left a gap, ' + mended + ' over-paid by more than the price to keep it, the most pieces of change ' + most);
     }
 
     // loads one after another onto a card keep a complete drawer complete

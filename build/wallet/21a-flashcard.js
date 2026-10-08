@@ -6,7 +6,8 @@
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
     cardTimeKey: CARD_TIME_KEY,
-    cardPick: function (w, have, want, cap) { return cardPick(w, have, want, cap); },
+    cardPick: function (w, have, want, cap, card) { return cardPick(w, have, want, cap, card); },
+    cardReach: function (amounts) { return cardReach(amounts); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },

@@ -588,9 +588,15 @@ function cards() {
   add('stage: signing piece 3 of 9', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('signing'); a.fcLine('Signing piece 3 of 9'); });
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
   // a card payment is two taps: SEND, then RECEIVE its change, then COMPLETE
-  add('stage: tap 1 of 2, send', (a) => { a._fcTapO = { amount: '\u20bf 1,180', body: 'Tap 1 of 2: SEND.' }; a.fcStage('hold'); });
+  // a card payment's own three screens (FC_LOOKS), and the one for a refused payment going back on the card
+  add('stage: a card payment, tap to verify', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('hold'); });
+  add('stage: a card payment, verifying card', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('checking'); });
+  add('stage: a card payment, tap to confirm', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('receive'); });
+  // the card left part way through a tap: TAP AGAIN, on the ground of the tap it left
+  add('stage: a card payment, tap again to verify', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', lost: true }; a.fcStage('reading'); });
+  add('stage: a card payment, tap again to confirm', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', lost: true }; a.fcStage('receive'); });
+  add('stage: a card payment, tap to put back', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', putBack: true }; a.fcStage('receive'); });
   add('card: tap to receive the change of a payment', (a) => a.fcChangeWaiting(212, 1180));
-  add('stage: tap 2 of 2, receive', (a) => { a._fcTapO = { body: 'Tap 2 of 2: RECEIVE.' }; a.fcStage('writing'); });
   add('card: a payment cut short, not paid', (a) => a.fcFailed({ card: 'interrupted', owed: 512, made: true, message: 'x' }, { paying: true, taken: true }));
   add('card: change the mint did not make yet', (a) => a.fcChangeLater(824, 200));
   add('card: a payment the card left part way through, not paid yet', (a) => { a.fcHeldClock = () => {}; a.fcHeldCard(1536, '1234', false); });

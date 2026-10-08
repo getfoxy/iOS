@@ -969,7 +969,11 @@
      * and DONE raises this (changeMaking, changeStuckCard). Taking a fresh
      * confirmation down when the card arrived still flashed PAYMENT RECEIVED
      * for the second the swap took. */
-    if (!ev.again && Date.now() < (this._holdConfirmUntil || 0)) {
+    /* A card payment's hold names its payment (fcHoldConfirm, 26f-flashcard.js):
+     * another payment's confirmation is not held by it. */
+    const heldFor = String(this._holdConfirmFor || '');
+    if (!ev.again && Date.now() < (this._holdConfirmUntil || 0)
+        && (!heldFor || heldFor === String(ev.hash || ev.tokenHash || ''))) {
       console.log('[foxy] confirmation: held behind the change being made');
       this._heldConfirm = ev;
       return;

@@ -199,8 +199,18 @@ On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
 3. The phone chooses the pieces, as few as it can, because a tap should take
    under three seconds and each piece is most of a second of signing. The card
    is read in about 1.2 seconds, so a payment signs at most two pieces where two
-   cover the price: the one or two that overpay least. Where no two do, it signs
-   the fewest pieces that cover it, the set of that many that overpays least.
+   cover the price: the one or two that overpay least **and leave the card's
+   drawer with no gap**. Where no two do, it signs the fewest pieces that cover
+   it, the set of that many chosen the same way. A card that paid 3,000 with its
+   last 2048 and 1024 was left holding large pieces and small change, and could
+   pay nothing in between exactly, which is the only way a till with no route can
+   be paid (*With no connection*); so it pays with a 4096 instead, and the change
+   is cut to fill the drawer. What the card would hold afterwards is worked out
+   before anything is signed, from the pieces left and the change as it will be
+   cut. A card with a gap already is mended the same way, by the change of a
+   larger piece. Where no set leaves it whole, the one that overpays least is
+   taken; and under a daily limit it always is, because the day is charged the
+   whole worth of what is signed.
    What they come to over the price is change, made after the swap and written
    back at the second tap (*Change*). From a drawer of $50, every price from $1
    to $10 is one or two pieces. The mint's fee for swapping them, where it
@@ -216,8 +226,9 @@ On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
    card's part is a few commands and the signatures: for a payment of one piece
    eight commands and one signing, which on the card tested through its contact
    reader (a command about 0.06 s, a signature 0.74 s) is about 1.2 seconds, not
-   counting the time the phone takes to find the card over NFC. Foxy's own screen
-   goes on saying VERIFYING WITH THE MINT and that the card can be removed. The
+   counting the time the phone takes to find the card over NFC. (At a till the
+   sheet is kept up for the change, and says so: *Change*.) Foxy's own screen
+   goes on saying that the payment is being verified. The
    mint's part took 10 to 40 seconds over Tor, and used to be done with the card
    held to the phone and the sheet open.
 6. The phone swaps at the mint, with the card's signatures as the witness for each
@@ -261,6 +272,18 @@ amount and says the same. iOS ends a session after a minute.
 | the change | MAKING THE CHANGE, and under it that the payment is made | (no sheet) |
 | writing | WRITING TO THE CARD, and under it the piece | Writing 2 of 4 |
 | done | REMOVE THE CARD | Done. Remove the card. |
+
+A payment at a till has three screens of its own in place of these, drawn from
+the design: **TAP TO VERIFY** (a card's outline, with arrows flying into its
+mark) from the PIN until the card has signed, **VERIFYING CARD** (the card, with
+a spinner) while the mint is asked and the change is made, and **TAP TO
+CONFIRM** (on orange) from the moment the card is asked for again until its
+change is back on it. A card that leaves part way through a tap turns that
+tap's screen into **TAP AGAIN** ("The last tap didn't finish..."), on the same
+ground, from the moment it is lost until the tap is finished. Each says one
+thing and does not change as the card works: the sheet says the steps. They sit in the top half of the screen, above where the
+sheet comes up. The sheet dims whatever is behind it; that is the phone's own
+doing and an app cannot turn it off.
 
 A flow that goes on to speak to the card again (a renewal writes to it, a move
 reads it last) holds it instead, as it always did: the sheet stays open through the
@@ -331,21 +354,36 @@ the balance, until it is on the card.
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
 
-1. **SEND.** The PIN, and the first tap (`Tap 1 of 2: SEND.` under the amount).
-   The card signs its one or two pieces and may be taken away.
-2. **VERIFY.** The phone's sheet stays up and says `Remove the card. Verifying
-   the payment.` while the swap runs and the change is made; Foxy's screen
-   behind it says VERIFYING WITH THE MINT, then MAKING THE CHANGE.
-3. **RECEIVE.** The same sheet says `Tap the card again for its change`, and
-   the tap writes it, with no PIN: the card allows the tap after a payment to
-   load. The sheet ends `Done. ₿212 of change is back on the card.`
-4. **PAYMENT RECEIVED**, the receiver's own confirmation, is held until then and
-   goes up as the sheet ends.
+1. **SEND.** The PIN, and the first tap, under TAP TO VERIFY. The card signs its
+   one or two pieces and may be taken away.
+2. **VERIFY.** The phone's sheet stays up and says `Verifying the payment. Keep
+   this open for your change.` while the swap runs and the change is made;
+   Foxy's screen behind it says VERIFYING CARD. (The sheet used to say `Remove
+   the card`, which beside its own Cancel read as finished, and it was closed
+   before the change.)
+3. **RECEIVE.** The same sheet says `Tap the card again for its change` and the
+   screen says TAP TO CONFIRM; the tap writes it, with no PIN: the card allows
+   the tap after a payment to load. The sheet ends `Done. ₿212 of change is back
+   on the card.` A card that leaves while its change is being written has used
+   that one tap up, and wants its PIN for the rest: the same sheet asks for it
+   again (TAP AGAIN) and gives it the PIN typed for this payment, so nobody is
+   asked for it twice. The PIN is held for the length of the one payment's sheet
+   and no longer; a change tap in a sheet of its own, later, asks for it on the
+   pad as it always did.
+4. **PAYMENT RECEIVED**, the receiver's own confirmation, is held from the
+   moment the card has signed and goes up as the sheet ends. It is held as that
+   payment's and no other's, and it is let go whenever nothing is owed for the
+   payment any more, however that came about: the change back on the card, the
+   change left for later, or after two and a half minutes whatever happens. A
+   confirmation still held when the next card payment begins is dropped; the
+   payment is in HISTORY.
 
 There is one sheet for all of it: a second sheet opened for the change was
 refused by iOS as often as not. iOS ends a sheet after a minute; where the mint
-is slower than that, a new sheet comes up for the change, and where that reads
-no card, **TAP TO RECEIVE** stays up with TAP CARD. A payment the mint refuses
+is slower than that, or the sheet was closed, a new sheet comes up for the
+change, with TAP TO CONFIRM up from the payment until that tap is over, so the
+till is never looking at its home screen in between; and where that reads no
+card, **TAP TO RECEIVE** stays up with TAP CARD. A payment the mint refuses
 after the card signed is put back in the same sheet too (`The payment did not
 go through. Tap the card to put it back`), and the screen says PAYMENT FAILED
 with the money back on the card.

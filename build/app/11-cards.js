@@ -426,6 +426,8 @@
    * a swap that fails or hangs does not swallow the confirmation. */
   changeMaking(info) {
     this._holdConfirmUntil = Date.now() + 12000;
+    // whichever payment's confirmation comes in that time: a scanned payment's change is made as it lands
+    this._holdConfirmFor = '';
     clearTimeout(this._holdConfirmT);
     this._holdConfirmT = setTimeout(() => this.releaseHeldConfirm('the change took too long'), 12000);
   }
@@ -433,6 +435,7 @@
   releaseHeldConfirm(why) {
     clearTimeout(this._holdConfirmT);
     this._holdConfirmUntil = 0;
+    this._holdConfirmFor = '';
     const ev = this._heldConfirm;
     if (!ev) return;
     this._heldConfirm = null;

@@ -208,8 +208,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   R.fate = (m) => {
     if (!atMint && /\/v1\/swap$/.test(String(m.url || ''))) {
       const up = R.window.document.getElementById('foxy-stage');
-      atMint = { kind: stage(R), head: up && up.querySelector('h1') && up.querySelector('h1').textContent, line: up && up.querySelector('[data-stage-line]') && up.querySelector('[data-stage-line]').textContent,
-                 button: up && up.querySelector('[data-stage-button]') && up.querySelector('[data-stage-button]').style.visibility, ended: R.ended };
+      atMint = { kind: stage(R), look: up && up.getAttribute('data-look'), head: up && up.querySelector('h1') && up.querySelector('h1').textContent, line: up && up.querySelector('[data-stage-line]') && up.querySelector('[data-stage-line]').textContent,
+                 button: up && up.querySelector('[data-stage-button]') && up.querySelector('[data-stage-button]').style.visibility, ended: R.ended,
+                 amount: up && up.textContent.indexOf('\u20bf1,000') >= 0 };
     }
     return null;
   };
@@ -221,8 +222,19 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const shown = till.blockedCard.bind(till);
   till.blockedCard = (kind, spec) => { titles.push((spec && spec.title) || kind); return shown(kind, spec); };
   let heldOnce = false;
+  const heldFor = [];
   const hold0 = till.fcHoldConfirm.bind(till);
-  till.fcHoldConfirm = () => { heldOnce = true; hold0(); };
+  till.fcHoldConfirm = (hash) => { heldOnce = true; heldFor.push(hash); hold0(hash); };
+  // which of the payment's screens was up after each step of the tap, and what the sheet had last been told by then
+  const looks = [];
+  const look0 = till.fcLookStage.bind(till);
+  till.fcLookStage = (step) => {
+    look0(step);
+    const up = R.window.document.getElementById('foxy-stage');
+    const now = (up && up.getAttribute('data-look')) || '';
+    if (looks[looks.length - 1] !== now) looks.push(now);
+    if (now === 'confirm' && looks.confirmAt === undefined) looks.confirmAt = R.sheet.length;
+  };
   pad(till).type('1234');
   /* Tap 1, SEND: the card signs the fewest pieces that cover it (two 512s for 1,000 here) and may go: the sheet stays up
    * and says so while the mint is asked. Then the same sheet asks for the card again, and its change (the 24 over) goes
@@ -232,13 +244,18 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await settle();
   const begins = R.sheet.filter((x) => /^begin:/.test(x));
   const ends = R.sheet.filter((x) => /^(end|error):/.test(x));
-  const removeAt = R.sheet.indexOf('say: Remove the card. Verifying the payment.');
+  const removeAt = R.sheet.indexOf('say: Verifying the payment. Keep this open for your change.');
   ok(begins.length === 1 && ends.length === 1 && ends[0] === 'end: Done. \u20bf24 of change is back on the card.' && removeAt >= 0
      && R.sheet.indexOf('again: Tap the card again for its change') > removeAt && R.sheet.indexOf('say: Keep the card there: asking the mint') < 0 && !pad(till),
-     'one sheet for the whole payment: it says to remove the card while the mint is asked, asks for it again for its change, and ends saying the change is back',
-     R.sheet.filter((x) => /^(begin|again|end|error):|Remove the card/.test(x)).join(' / '));
-  ok(atMint && atMint.kind === 'card' && /VERIFYING\s*WITH THE MINT/.test(atMint.head) && atMint.line === 'You can remove the card.' && atMint.button === 'hidden',
-     'behind it, our own screen said VERIFYING WITH THE MINT and that the card can be removed, with nothing to press', JSON.stringify(atMint));
+     'one sheet for the whole payment: while the mint is asked it says to keep it open for the change (and nothing that reads as finished), asks for the card again, and ends saying the change is back',
+     R.sheet.filter((x) => /^(begin|again|end|error):|Verifying the payment/.test(x)).join(' / '));
+  ok(R.sheet.every((x) => !/Remove the card\. Verifying/.test(x)), 'the sheet no longer says “Remove the card” beside its own Cancel, which read as over and got it closed before the change');
+  ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.head === 'Verifying card' && atMint.line === 'This may take a few seconds...' && atMint.button === 'hidden' && atMint.amount,
+     'behind it, our own screen said VERIFYING CARD over the amount, with nothing to press', JSON.stringify(atMint));
+  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt <= R.sheet.indexOf('again: Tap the card again for its change'),
+     'the payment’s three screens in turn: TAP TO VERIFY while the card signs, VERIFYING CARD while the mint is asked, and TAP TO CONFIRM from the moment the card is asked for again, before it is found',
+     looks.join(' > '));
+  till.fcLookStage = look0;
   ok((await R.W.balanceSats()) === 1000 && titles.length === 0, 'the right PIN: 1,000 sats paid, with no card to press at any point', titles.join(', '));
   ok(heldOnce && released.join() === 'the change is back on the card',
      'PAYMENT RECEIVED was held while the change was taken, and went up the moment it was back on the card', JSON.stringify({ heldOnce, released }));
@@ -246,6 +263,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   till.blockedCard = shown;
   const paid = history(R).filter((e) => e.memo === 'card')[0];
   ok(paid && !till.seen[paid.hash] && R.W.tagsFor(paid.hash).to === 'card payment', 'its entry is left for the history pass to announce, as a payment');
+  ok(heldFor.length >= 1 && heldFor.every((h) => h === paid.hash),
+     'the hold names the payment it is for, from the moment the card has signed: its entry’s own name, so no other payment’s confirmation waits on it', JSON.stringify(heldFor));
   ok(c.balance() === 1500 && R.W.cardOwed().length === 0, 'the card holds its change: 1,500', String(c.balance()));
 
   till.state.screen = 'confirm';
@@ -269,9 +288,27 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   // the card is taken away once it has signed and not brought back: the sheet asks for it again for the change and reads nothing
   const send2 = c2.send;
   c2.send = (x) => send2(x).then((r) => { if (/^b020/.test(x)) R.nfc = null; return r; });
+  /* Whether the till's own home screen could ever be seen between the payment and its change: from the payment being
+   * made (the invoice put away) until the second tap is over, one of the payment's screens is up at every look. */
+  let bare = 0, seenConfirm = false, sheets = 0;
+  const watch = setInterval(() => {
+    const up = R.window.document.getElementById('foxy-stage');
+    const lookNow = (up && up.getAttribute('data-look')) || '';
+    if (lookNow === 'confirm') seenConfirm = true;
+    if (till.state.screen === 'home' && !up && !card(till)) bare += 1;
+  }, 20);
+  R.sheet.length = 0;
+  released.length = 0;
+  till.releaseHeldConfirm = (why) => { released.push(why); till._holdConfirmUntil = 0; };
   till.payByCard();
   pad(till).type('1234');
   await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP TO RECEIVE' && /not read/.test(card(till).reason));
+  clearInterval(watch);
+  sheets = R.sheet.filter((x) => /^begin:/.test(x)).length;
+  ok(bare === 0 && seenConfirm && sheets === 2,
+     'the sheet gone with the change still to take: TAP TO CONFIRM stays up through the pause and the second sheet, and the till’s home screen is never what is showing between the payment and its change',
+     JSON.stringify({ bare, seenConfirm, sheets }));
+  ok(released.length === 0, 'and PAYMENT RECEIVED is still held: the change is waiting, and the card says so', released.join());
   c2.send = send2;
   const owed = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
   ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0
@@ -296,6 +333,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(!pad(till), 'the right card, which has just paid, is tapped with no PIN pad');
   await until('the change to be back on the card', () => R.W.cardOwed().length === 0 && !stage(R));
   await settle();
+  ok(released.join() === 'the change is back on the card', 'and with the change back on the card, the payment’s PAYMENT RECEIVED goes up', released.join());
+  /* A tap that wrote the change and still ended as if no card had been read (the sheet closed as the last piece went on):
+   * nothing is owed, so there is nothing to say, and the confirmation is let go. It was held for good. */
+  released.length = 0;
+  till.fcHoldConfirm('card-x');
+  till.fcStillWaiting({});
+  ok(released.join() === 'nothing is waiting for the card' && !card(till), 'a change tap that ended as cancelled with nothing left to write lets the confirmation go, and puts up no card', released.join());
   ok(c2.balance() === 824 && !card(till) && till.toasts.indexOf('\u20bf824 of change is back on the card.') >= 0,
      'and the right card\u2019s tap puts it back, said in passing with no card to press, and without the till being shown what the card holds', till.toasts.slice(-2).join(' | '));
   ok(till.state.fc === null, 'nor is a payer\u2019s card left on show under the till\u2019s menu');
@@ -320,10 +364,27 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const shown = till2.blockedCard.bind(till2);
     till2.blockedCard = (k, sp) => { titles.push((sp && sp.title) || k); return shown(k, sp); };
     RT.sheet.length = 0;
+    // the payment's screens, in the order they went up, and what TAP AGAIN said and when
+    const seen = [];
+    const drawLook = till2.fcLookStage.bind(till2);
+    const watchLooks = (list) => (step) => {
+      drawLook(step);
+      const up = RT.window.document.getElementById('foxy-stage');
+      const now = (up && up.getAttribute('data-look')) || '';
+      if (list[list.length - 1] !== now) list.push(now);
+      if (/Again$/.test(now) && !list.words) {
+        list.words = up.querySelector('h1').textContent + ' / ' + up.querySelector('[data-stage-line]').textContent;
+        list.asked = RT.sheet.filter((x) => /^again: Hold/.test(x)).length;
+      }
+    };
+    till2.fcLookStage = watchLooks(seen);
     till2.payByCard();
     pad(till2).type('1234');
     await until('the payment to be finished by the next tap', () => till2.state.screen === 'home' && !RT.W.cardHeldPayment(c3.key) && RT.W.cardTaken().length === 0 && !stage(R));
     await settle();
+    ok(seen.join(' > ') === 'tap > tapAgain > verify' && seen.words === 'Tap again / The last tap didn\u2019t finish...' && seen.asked === 0,
+       'the card lost part way through signing: the screen says TAP AGAIN, on TAP TO VERIFY’s ground, from the moment it is lost (before the sheet has asked for it again) until it has signed',
+       seen.join(' > ') + '; ' + seen.words);
     const got = (await RT.W.balanceSats()) - rb;
     const begins = RT.sheet.filter((x) => /^begin:/.test(x));
     const agains = RT.sheet.filter((x) => /^again:/.test(x));
@@ -331,6 +392,42 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'a payment the card leaves part way through: the same sheet asks for the card again, with no PIN, and the next tap signs the rest and pays', RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + '; ' + got + ' received');
     ok(titles.length === 0 && RT.W.cardOwed().filter((r) => r.card === c3.key).length === 0, 'with no card to press, and nothing to put back on the card', titles.join(', '));
     till2.blockedCard = shown;
+
+    /* The card lost while its change was being written: what went on stays on, the same sheet asks again, and the
+     * screen says TAP AGAIN on TAP TO CONFIRM's ground until the rest is on. */
+    {
+      const HC = await funded({ sharedMint: H.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 2000);
+      const c5 = newCard(HC);
+      await HC.W.cardSetUp(c5, { pin: '1234' });
+      await binaryLoad(HC, c5, 1024);         // one piece: 200 is paid with it, and 824 comes back
+      till2.state.screen = 'confirm';
+      till2.asking = 200;
+      RT.nfc = c5;
+      let taps = 0;
+      const tap5 = c5.tap;
+      // its second tap (the change) leaves before the second piece is written; the third stays
+      c5.tap = () => { tap5(); taps += 1; if (taps === 2) c5.leaveBefore('30', 2); };
+      const seen5 = [];
+      till2.fcLookStage = watchLooks(seen5);
+      const sentBefore = c5.sent.length;
+      RT.sheet.length = 0;
+      till2.payByCard();
+      pad(till2).type('1234');
+      await until('the change to be back on the card after two tries', () => till2.state.screen === 'home' && RT.W.cardOwed().filter((r) => r.card === c5.key).length === 0 && !stage(RT) && c5.balance() === 824);
+      await settle();
+      c5.tap = tap5;
+      const lines5 = RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x));
+      ok(seen5.join(' > ') === 'tap > verify > confirm > confirmAgain' && seen5.words === 'Tap again / The last tap didn\u2019t finish...',
+         'the card lost part way through taking its change: TAP AGAIN, on TAP TO CONFIRM’s ground, until the rest is on', seen5.join(' > ') + '; ' + seen5.words);
+      ok(lines5.filter((x) => /^begin:/.test(x)).length === 1 && lines5.indexOf('again: Hold the card here again for its change') > lines5.indexOf('again: Tap the card again for its change')
+         && lines5[lines5.length - 1] === 'end: Done. \u20bf824 of change is back on the card.' && taps === 3,
+         'in the one sheet: asked for its change, asked again when it left, and ended with the change back', lines5.join(' / '));
+      // the card allows one tap after a payment to load with no PIN, and the tap it left used that up: the rest needs its PIN
+      const pins5 = c5.sent.slice(sentBefore).filter((a) => /^b040/.test(a)).length;
+      ok(!pad(till2) && pins5 === 2,
+         'the rest went on with the PIN typed for this payment, given to the card again (once to pay, once for the rest), and nobody was asked for it twice', String(pins5));
+    }
+    till2.fcLookStage = drawLook;
 
     // the tap to finish reads no card: NOT PAID YET, with TAP CARD to finish and CANCEL to give it back
     const c4 = newCard(HL);
@@ -851,11 +948,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     till.payByCard();
     pad(till).type('1234');
     await until('the card to be asked to sign', () => R.sheet.indexOf('say: Signing piece 1 of 4') >= 0);
-    ok(lines.indexOf('Signing piece 1 of 4') >= 0 && R.window.document.querySelector('[data-stage-line]').textContent === 'Signing piece 1 of 4',
-       'the screen behind the sheet says the piece being signed, as the sheet does', R.sheet.slice(-2).join(' / '));
+    const behind = () => { const up = R.window.document.getElementById('foxy-stage'); return up ? up.getAttribute('data-look') + ': ' + up.querySelector('h1').textContent + ' / ' + up.querySelector('[data-stage-line]').textContent : ''; };
+    ok(lines.indexOf('Signing piece 1 of 4') >= 0 && behind() === 'tap: Tap to verify / Tap for a few seconds...',
+       'the sheet says the piece being signed; the screen behind it is TAP TO VERIFY and says the one thing to do', behind());
     // what the phone’s own link says, pushed to the page as it happens
     R.W._card({ stage: 'connected', text: 'Scanning. Hold still.' });
-    ok(R.window.document.querySelector('[data-stage-line]').textContent === 'Scanning. Hold still.', 'and what the phone’s link pushes (the card found) is shown there too');
+    ok(lines.indexOf('Scanning. Hold still.') >= 0 && behind() === 'tap: Tap to verify / Tap for a few seconds...', 'and what the phone’s link pushes (the card found) does not change it either', behind());
     R.W._card({ stage: 'say', text: 'Signing piece 1 of 4' });
     let_go();
     await until('the payment to be made', () => till.state.screen === 'home');
@@ -978,6 +1076,66 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(empty.sent.filter((a) => /^b032/.test(a)).length === 1 && !empty.sent.some((a) => /^b040/.test(a)),
        'the record was rewritten once, with the owner’s proof and no PIN, in the same tap that wrote the funds');
     card(app).press('DONE');
+  }
+
+  /* ---- a held PAYMENT RECEIVED is one payment's, and no other's ---------------------------
+   *
+   * The app's own announcePayment (12-receive.js), lifted out and run over these parts. One payment's confirmation was
+   * held, never let go, and raised with its amount when the NEXT payment's change went back, which got none of its own. */
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '12-receive.js'), 'utf8');
+    const from = src.indexOf('  announcePayment(ev) {');
+    const to = src.indexOf('\n  }\n', from) + 5;
+    const lifted = new Function('window', 'document', 'CONFIRM_SCREENS', 'return {' + src.slice(from, to) + '}')(
+      { FoxyWallet: { notify: () => {} } }, { visibilityState: 'visible' }, []);
+    const g = appOn(R, { screen: 'home' });
+    g.announcePayment = lifted.announcePayment;
+    const up = () => (g.state.screen === 'paid' ? 'paid ' + g.state.amount : g.state.screen);
+    const home = () => { g.state.screen = 'home'; g.state.stack = []; };
+    ok(from > 0 && to > from && typeof g.announcePayment === 'function' && typeof g.releaseHeldConfirm === 'function', 'the app’s own announcePayment and releaseHeldConfirm are what is run');
+
+    g.fcHoldConfirm('card-a');
+    g.announcePayment({ hash: 'card-b', dir: 'in', sats: 3069 });
+    ok(up() === 'paid 3069' && !g._heldConfirm, 'a hold for one card payment does not hold another payment’s confirmation: that one goes up at once', up());
+    home();
+    g.announcePayment({ hash: 'card-a', dir: 'in', sats: 15664 });
+    ok(up() === 'home' && g._heldConfirm && g._heldConfirm.hash === 'card-a', 'its own is held, with its change still to take', up());
+    g.fcReleaseConfirm('the change is back on the card');
+    ok(up() === 'paid 15664' && !g._heldConfirm && !g._holdConfirmFor && !(g._holdConfirmUntil > 0), 'and goes up when it is let go, with nothing left held', up());
+
+    // one left held (its change tap never ended in anything the screen heard of), and the next payment begun
+    home();
+    g.fcHoldConfirm('card-a');
+    g.announcePayment({ hash: 'card-a', dir: 'in', sats: 15664 });
+    g.fcDropConfirm();
+    ok(up() === 'home' && !g._heldConfirm && !(g._holdConfirmUntil > 0), 'a confirmation still held when the next payment begins is dropped, not raised: it is in HISTORY', up());
+    g.fcHoldConfirm('card-c');
+    g.fcReleaseConfirm('the change is back on the card');
+    ok(up() === 'home', 'so the next payment’s change going back raises nothing of the last one’s', up());
+    g.announcePayment({ hash: 'card-c', dir: 'in', sats: 3069 });
+    ok(up() === 'paid 3069', 'and its own confirmation, announced after, is the one that shows: the right payment, the right amount', up());
+
+    // the same from the payment's own flow: a new payment drops what is left, a resumed one does not
+    home();
+    g.fcHoldConfirm('card-a');
+    g.announcePayment({ hash: 'card-a', dir: 'in', sats: 15664 });
+    g.fcTap = () => new Promise(() => {});
+    g.fcPayRun(100, '1234', false, true);
+    ok(g._heldConfirm && g._heldConfirm.hash === 'card-a', 'a payment taken up again leaves the hold as it is');
+    g.fcPayRun(100, '1234', false, false);
+    ok(!g._heldConfirm && !(g._holdConfirmUntil > 0), 'a new payment starts with nothing held');
+
+    // a scanned payment's change (changeMaking) names no payment, and holds whichever confirmation comes, as it did
+    home();
+    g.changeMaking({});
+    g.announcePayment({ hash: 'req-z', dir: 'in', sats: 50 });
+    ok(up() === 'home' && g._heldConfirm && g._heldConfirm.hash === 'req-z', 'a scanned payment’s hold, which names none, still holds the one that comes');
+    g.releaseHeldConfirm('the change card was dismissed');
+    ok(up() === 'paid 50', 'and lets it go as before', up());
+    clearTimeout(g._holdConfirmT);
+    ok(g.FC_HOLD_MS === 150000, 'the longest a confirmation waits for a change tap is two and a half minutes');
   }
 
   failed += until.failed;

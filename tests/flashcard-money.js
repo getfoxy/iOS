@@ -55,7 +55,9 @@ let L0 = null;
 
   /* ---- 4: paying a receiver, with change ---------------------------------- */
   {
-    // a card cut the old way (the powers of two of 2,000 and no more), so that 1,000 has no exact set and needs change
+    // a card cut the old way (the powers of two of 2,000 and no more), so that 1,000 has no exact set and needs change.
+    // It has no small pieces at all: paid with the 1024 alone it would get 24 back, too little to fill what it lacks,
+    // so it pays with the 1024 and the 512, and the 536 of change is cut into a whole drawer (`cardPick`).
     const H4 = await funded({ sharedMint: H.mint, words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' }, 4500);
     const R4 = await funded({ sharedMint: H.mint, words: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about' }, 0);
     const c4 = newCard(H4);
@@ -67,20 +69,21 @@ let L0 = null;
     const paid = await R4.W.cardPay(c4, { sats: 1000, pin: '1234', on: (s) => steps.push(s) });
     ok(paid.sats === 1000 && (await bal(R4)) === 1000, 'a card pays a receiver 1,000 sats', String(await bal(R4)));
     ok(steps.join(' ') === 'reading signing checking making done', 'the screen is told each step: the card is let go once it has signed, and the mint and the change are done after', steps.join(' '));
-    ok(paid.change && paid.change.sats === 24 && paid.change.written === false && c4.balance() === 1000 - 24,
-       'the 24 sats over are made into change, and wait for the card’s next tap: it has been let go', JSON.stringify(paid.change) + ', card ' + c4.balance());
-    ok(R4.W.cardOwed().length === 1 && R4.W.cardOwed()[0].kind === 'change' && R4.W.cardOwed()[0].sats === 24 && R4.W.cardTaken().length === 0,
+    ok(paid.change && paid.change.sats === 536 && paid.change.written === false && c4.balance() === 1000 - 536,
+       'it pays with 1024 and 512, and the 536 sats over are made into change, and wait for the card’s next tap: it has been let go', JSON.stringify(paid.change) + ', card ' + c4.balance());
+    ok(R4.W.cardOwed().length === 1 && R4.W.cardOwed()[0].kind === 'change' && R4.W.cardOwed()[0].sats === 536 && R4.W.cardTaken().length === 0,
        'the receiver holds nothing of the card’s but that change, owed to it');
     const payRow = row(R4, paid.hash);
-    ok(payRow.dir === 'in' && payRow.sats === 1000 && payRow.memo === 'card' && payRow.changeSats === 24 && payRow.changeState === 'not handed',
+    ok(payRow.dir === 'in' && payRow.sats === 1000 && payRow.memo === 'card' && payRow.changeSats === 536 && payRow.changeState === 'not handed',
        'the receiver has one entry: 1,000 from a card, its change not yet handed over', JSON.stringify({ sats: payRow.sats, memo: payRow.memo, c: payRow.changeSats, state: payRow.changeState }));
     c4.tap();
     const given = await R4.W.cardWrite(c4, { pin: '1234' });
     ok(given.left === 0 && c4.balance() === 1000 && R4.W.cardOwed().length === 0 && row(R4, paid.hash).changeState === 'given back',
        'the next tap writes it, and the entry says given back', String(c4.balance()));
-    // the change fills the drawer’s gaps: the card held 512, 256, 128, 64 and 16, so 24 comes as 1, 2, 4 and 8 (a drawer up to 16) and the 9 left,
-    // and then the smallest rungs deepened with the places left: three of 1 and 2, then 4, 8, 2 and 1
-    ok(amounts(c4).join('+') === '512+256+128+64+16+8+4+2+2+2+2+1+1+1+1', 'and it comes as the sizes the card lacked, not as 16 and 8', amounts(c4).join('+'));
+    // the change fills the drawer’s gaps: the card was left 256, 128, 64 and 16, so the 536 comes as 1, 2, 4, 8 and 32, the sizes it
+    // lacked, then the rest, and the smallest rungs deepened with the places left. Every amount up to its 1,000 now has an exact set.
+    ok(amounts(c4).join('+') === '256+128+128+64+64+64+64+32+32+32+32+16+16+16+8+8+8+8+4+4+4+2+2+2+2+1+1+1+1' && R4.W.cardReach(amounts(c4)) === 1000,
+       'and it comes as the sizes the card lacked, a whole drawer, not as 512, 16 and 8', amounts(c4).join('+'));
     ok(R4.W.cardTaken().length === 0 && R4.W.cardOwed().length === 0, 'and the receiver holds nothing of the card’s');
 
     // the card held to the phone for all of it (a renewal, a move): the change is written back in the same tap
@@ -90,7 +93,7 @@ let L0 = null;
     c4b.tap();
     const rb = await bal(R4);
     const held = await R4.W.cardPay(c4b, { sats: 1000, pin: '1234', hold: true, on: (s) => steps.push(s) });
-    ok(held.change && held.change.sats === 24 && held.change.written === true && c4b.balance() === 1000 && (await bal(R4)) === rb + 1000,
+    ok(held.change && held.change.sats === 536 && held.change.written === true && c4b.balance() === 1000 && (await bal(R4)) === rb + 1000,
        'with the card held (`hold`) the change is written back in the same tap, as it always was', JSON.stringify(held.change));
   }
 
