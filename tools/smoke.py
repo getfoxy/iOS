@@ -2935,6 +2935,20 @@ if 'setNotifyValue' in pay43:
 warm43 = re.search(r'private func warm\(at now: TimeInterval\) \{(.*?)\n    \}', pay43, re.S)
 if not warm43 or 'target == nil' not in warm43.group(1):
     bad43.append('the warm link can be opened over one that already exists')
+# warming goes off only for a link that is OPEN and silent about its strength:
+# counted from when it opened (`warmOpen`, set in didConnect), not from when it
+# was asked for. A link slow to open was taken for a silent one, warming went
+# off for the whole listen, and the receiver never heard a payer was near.
+judge43 = re.search(r'private func judge\(\) \{(.*?)\n    \}', pay43, re.S)
+conn43 = re.search(r'func centralManager\(_ c: CBCentralManager, didConnect(.*?)\n    \}', pay43, re.S)
+if not judge43 or 'warmOpen > 0, warmReadings == 0, now - warmOpen > 2' not in judge43.group(1):
+    bad43.append('warming is turned off by a clock that does not start when the link opens')
+elif re.search(r'warmSince > 0, warmReadings == 0, now - warmSince > 2', judge43.group(1)):
+    bad43.append('a link still being opened is taken for one that will not say how strong it is')
+if not conn43 or 'warmOpen = ' not in conn43.group(1):
+    bad43.append('nothing says when the quiet link opened, so a slow one cannot be told from a silent one')
+if judge43 and 'retry("the link did not open")' not in judge43.group(1):
+    bad43.append('a quiet link that never opens is never asked for again')
 # and the pool keeps being fed while one is open, or the verdict has only the
 # link's own readings to go on and a phone held against another is refused
 disc43 = re.search(r'func centralManager\(_ c: CBCentralManager, didDiscover(.*?)\n    \}', pay43, re.S)

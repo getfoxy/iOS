@@ -978,6 +978,21 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var asking = false
     private var warmSince: TimeInterval = 0
     private var warmReadings = 0
+    /* When the quiet link actually opened (`didConnect`), against when it was
+     * asked for (`warmSince`). The two-second rule below is about a link that
+     * is open and will not say how strong it is. It was counted from the
+     * asking, so a link that was only slow to open was taken for a silent one:
+     * warming went off for the rest of the listen, the receiver was never told
+     * a payer was near (no CONNECT TO PAY on its screen), and when the phones
+     * did touch, the link had to be opened from nothing and the person gave up
+     * first. A link still being opened is waited for, and one that has not
+     * opened in `warmOpenWait` seconds is asked for afresh, with warming left on. */
+    private var warmOpen: TimeInterval = 0
+    private var slowSaid = false
+    private let warmOpenWait: TimeInterval = 10
+    /// How many slow openings this listen has said: three, then quiet, so a
+    /// receiver that is slow every time does not fill the log a tester shares.
+    private var slowTold = 0
 
     /* Warming off for the rest of this listen.
      *
@@ -1099,6 +1114,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         spoke = false
         warmSince = 0
         warmReadings = 0
+        warmOpen = 0
+        slowSaid = false
         incoming = TapProtocol.Bytes()
         // everything, because a receiver's UUID is new every time
         m.scanForPeripherals(withServices: nil,
@@ -1230,13 +1247,30 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             // opened never answers, and the flag would never clear
             if !asking, warm.state == .connected { asking = true; warm.readRSSI() }
             /* And a link that never becomes a tap is let go, so a receiver who
-             * arrives behind it can be warmed in its place. */
-            if warmSince > 0, warmReadings == 0, now - warmSince > 2 {
+             * arrives behind it can be warmed in its place. Counted from when
+             * it opened: open, and silent about its strength for two seconds. */
+            if warmOpen > 0, warmReadings == 0, now - warmOpen > 2 {
                 warmOff = true
                 print("[tap] pay: the open link will not say how strong it is; "
                       + "deciding on advertisements instead")
                 retry("the link would not answer")
                 return
+            }
+            /* Not open yet: waited for, since iOS goes on asking until the other
+             * phone answers, and said once. A request that has not been answered
+             * in `warmOpenWait` seconds is let go and made again from a fresh
+             * listen, with warming still on. */
+            if warmOpen == 0, warmSince > 0, now - warmSince > 2 {
+                if !slowSaid {
+                    slowSaid = true
+                    slowTold += 1
+                    if slowTold <= 3 { print("[tap] pay: the link to that phone has not opened in 2 s; waiting for it") }
+                }
+                if now - warmSince > warmOpenWait {
+                    if slowTold <= 3 { print("[tap] pay: the link to that phone has not opened in \(Int(warmOpenWait)) s; asking again") }
+                    retry("the link did not open")
+                    return
+                }
             }
             /* Not while the receiver has been told this phone is near. The
              * "near" it was told lives on this link: letting the link go and
@@ -1273,6 +1307,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             warmReady = false
             warmSince = now
             warmReadings = 0
+            warmOpen = 0
+            slowSaid = false
             found.peripheral.delegate = self
             m.connect(found.peripheral)
             return
@@ -1356,6 +1392,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                     warmReady = false
                     warmSince = now
                     warmReadings = 0
+                    warmOpen = 0
+                    slowSaid = false
                     found.peripheral.delegate = self
                     m.connect(found.peripheral)
                 }
@@ -1395,6 +1433,7 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             // somebody else's link was warm; drop it and open this one the long way
             if let old = target { m.cancelPeripheralConnection(old) }
             warmReady = false
+            warmOpen = 0
             target = found.peripheral
             service = UUID(uuidString: found.service.uuidString)
             found.peripheral.delegate = self
@@ -1413,6 +1452,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         warmReady = false
         warmSince = now
         warmReadings = 0
+        warmOpen = 0
+        slowSaid = false
         found.peripheral.delegate = self
         m.connect(found.peripheral)
     }
@@ -1465,6 +1506,8 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         spoke = false
         warmSince = 0
         warmReadings = 0
+        warmOpen = 0
+        slowSaid = false
         outgoing.removeAll()
         writing = false
         scan()
@@ -1472,6 +1515,13 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         guard let s = service else { retry("no service"); return }
+        if p === target, warmOpen == 0 {
+            warmOpen = ProcessInfo.processInfo.systemUptime
+            if slowSaid, warmSince > 0 {
+                print("[tap] pay: the link to that phone opened after "
+                      + String(format: "%.1f", warmOpen - warmSince) + " s")
+            }
+        }
         stamp("connected")
         p.discoverServices([CBUUID(nsuuid: s), Self.deviceInformation])
     }
