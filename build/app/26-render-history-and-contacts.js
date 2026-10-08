@@ -82,16 +82,30 @@
         + ' has not reached this phone. Ask the receiver to open that payment in their history and show its code, then scan it.'
         + (auditTitle === 'CHANGE NOT COLLECTED' ? ' Everything else adds up.' : ' ' + auditBody);
     }
+    /* One card's list is the card's own account, read from this phone's
+     * entries, so each is turned round: money this phone was paid by the card
+     * left the card, and money this phone put on it came in. Named for what it
+     * was to the card, and counted at what reached or left the card (a load's
+     * fee was this phone's). It read the other way: a $5 payment off the card
+     * as a $5 credit, and $50 put on it as a withdrawal. */
+    const dirOf = (t) => (ofCard ? (t.dir === 'in' ? 'out' : 'in') : t.dir);
+    const unfinished = (t) => !!ofCard && t.memo === 'card, not completed';
+    const cardName = (t) => (t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
+    const cardRail = (t) => {
+      if (unfinished(t)) return t.changeState === 'given back' ? 'Put back on the card' : 'To go back on the card';
+      if (t.dir === 'in' && t.changeState === 'not handed' && t.changeSats > 0) return 'Change to go back on the card';
+      return '';
+    };
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => (hf === 'all' || t.dir === hf) && (!ofCard || t.card === ofCard)).map(t => ({
+      items: g.items.filter(t => (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => ({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
          * as the card allows, cut with an ellipsis; the card is no taller for
          * it. */
-        name: (t.note && String(t.note).trim()) || t.name,
-        initial: t.name.slice(0, 1).toUpperCase(),
+        name: ofCard ? cardName(t) : ((t.note && String(t.note).trim()) || t.name),
+        initial: (ofCard ? cardName(t) : t.name).slice(0, 1).toUpperCase(),
         /* The card's outline and its icon say how the payment stands: green
          * done (sent, received or redeemed), amber pending, red failed. The
          * amount says which way it went: green in, red out. */
@@ -111,7 +125,7 @@
           : 'var(--surface)',
         cardEdge: A.flagged.has(t) ? '2.5px' : '1.5px',
         cardSpin: A.flagged.has(t) ? 'foxyEdge 1.6s linear infinite' : 'none',
-        metaRail: A.flagged.has(t) ? A.flagged.get(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
+        metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
           : t.failed ? 'Failed' : t.atRisk ? 'AT RISK \u00b7 not settled'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
@@ -123,12 +137,15 @@
         tileBg: (t.failed || t.atRisk || A.flagged.has(t)) ? 'var(--bad)' : t.pending ? 'var(--btc-ink)' : 'var(--ok)',
         stroke: A.flagged.has(t) ? 'transparent' : (t.failed || t.atRisk) ? 'rgba(var(--bad-rgb),.7)'
           : t.pending ? 'var(--btc-ink)' : 'rgba(var(--ok-rgb),.7)',
-        amtColor: A.flagged.has(t) ? 'var(--bad)' : t.dir === 'in' ? 'var(--ok-ink)' : 'var(--bad)',
+        amtColor: A.flagged.has(t) ? 'var(--bad)' : unfinished(t) ? 'rgba(var(--ink-rgb),.55)' : dirOf(t) === 'in' ? 'var(--ok-ink)' : 'var(--bad)',
         /* Dollars, and the dollars of the day it settled: `fiat` is written on
          * the entry then and never worked out again, so yesterday's coffee
          * does not change price with bitcoin. */
-        amtText: (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
-        amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
+        amtText: ofCard
+          ? (unfinished(t) ? '' : dirOf(t) === 'in' ? '+' : '−') + this.money(t.sats, this.txFiat(t, t.sats)).main
+          : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
+        amtSub: ofCard ? this.money(t.sats, this.txFiat(t, t.sats)).sub
+          : t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
         // dollars at today's price, and the sats that actually add up
         // the wallet's running balance, which is not a card's: left off a card's own list
         balText: ofCard ? '' : 'BAL ' + (this.px()

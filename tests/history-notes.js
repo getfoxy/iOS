@@ -65,7 +65,8 @@ console.log('1. the time, by the phone’s clock');
 
 console.log('\n2. the note is what the card says');
 {
-  ok('a row with a note shows the note; one without shows what it showed', /name: \(t\.note && String\(t\.note\)\.trim\(\)\) \|\| t\.name,/.test(app));
+  // (a card's own list names its rows for what they were to the card: section 5)
+  ok('a row with a note shows the note; one without shows what it showed', /name: ofCard \? cardName\(t\) : \(\(t\.note && String\(t\.note\)\.trim\(\)\) \|\| t\.name\),/.test(app));
   // the history list's own row, not the home screen's
   const row = /<div style="([^"]*)">\{\{ t\.name \}\}<\/div>/.exec(markup.slice(markup.indexOf('list="{{ g.items }}"')));
   ok('on one line, cut with an ellipsis, so the card is no taller', !!row && /white-space:nowrap/.test(row[1]) && /text-overflow:ellipsis/.test(row[1]) && /overflow:hidden/.test(row[1]), row ? row[1] : 'row not found');
@@ -145,6 +146,58 @@ console.log('\n4. a note outlives the tidying of old entries');
   for (let i = 0; i < 300; i++) W.tag('later-' + i, { to: 'ecash' });
   ok('three hundred payments later, the note is still on its payment', (W.tagsFor('old-with-note') || {}).note === 'Rent, March', JSON.stringify(W.tagsFor('old-with-note')));
   ok('and what went to make room was an older entry with nothing written on it', !(W.tagsFor('old-plain') || {}).to, JSON.stringify(W.tagsFor('old-plain')));
+}
+
+console.log('\n5. a card’s own list is the card’s account');
+{
+  /* CARD HISTORY is this phone's entries that name the card, and it read them
+   * as this phone's: a payment the card made here showed as a credit, and
+   * money put on the card as a withdrawal. Turned round, each is named for
+   * what it was to the card. renderHistory is lifted out, with what it calls
+   * stood in for. */
+  const a = lift(['renderHistory(c) {']);
+  global.CTA_INK = () => '#fff';
+  global.window = { FoxyWallet: {} };
+  Object.assign(a, {
+    histAudit: () => ({ balOf: new Map(), balNow: 0, run: 0, dueChange: 0, dueCount: 0, off: 0, flagged: new Map(), toShowCount: 0, toShowSats: 0 }),
+    stageMoney: (n) => '₿ ' + n, money: (n) => ({ main: '₿ ' + n, sub: '' }), txFiat: () => 0,
+    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), px: () => 0, group: (n) => String(n),
+    topUpFeeSats: () => 0, recoveringSats: () => 0, unitMoney: (n) => String(n), unitLabel: (u) => u,
+    openTx: () => {}, openPendingSplit: () => {}, goSwitchMint: () => {}, go: () => {}, setState: () => {}, histRef: () => {},
+  });
+  const KEY = '02card';
+  const item = (o) => Object.assign({ hash: 'h' + Math.random(), time: '9:22 AM', fee: 0, card: KEY, name: 'card', memo: '', changeSats: 0, changeState: '' }, o);
+  const history = [{ label: 'TODAY', items: [
+    item({ dir: 'in', sats: 6156, memo: 'card', name: 'ecash' }),                             // a till paid by the card, on trust
+    item({ dir: 'in', sats: 12312, memo: 'card', name: 'card payment', changeSats: 4072, changeState: 'given back' }),
+    item({ dir: 'in', sats: 34448, memo: 'card', name: 'card payment', changeSats: 368, changeState: 'not handed' }),
+    item({ dir: 'out', sats: 61514, fee: 31, memo: 'to card', name: 'card' }),               // put on the card, and its fee
+    item({ dir: 'in', sats: 900, memo: 'from card', name: 'card' }),                          // taken off it
+    item({ dir: 'in', sats: 0, memo: 'card, not completed', name: 'card', changeSats: 6144, changeState: 'not handed' }),
+    item({ dir: 'in', sats: 5000, memo: 'lunch', name: 'alice@example.com', card: '' }),     // nothing to do with the card
+  ] }];
+  const view = (hf, card) => {
+    const s = { screen: 'history', stack: card ? ['home', 'flashcard'] : ['home'], histCard: card ? KEY : '', histFilter: hf, history, historyComplete: true };
+    const v = a.renderHistory({ s, sc: 'history' });
+    return { title: v.histTitle, rows: [].concat(...v.historyGroups.map((g) => g.items)) };
+  };
+  const all = view('all', true);
+  const said = all.rows.map((r) => r.name + ' ' + r.amtText + (r.line2 && !/AM|PM/.test(r.line2) ? ' (' + r.line2 + ')' : '')).join(', ');
+  ok('the card’s list is titled CARD HISTORY and holds only the card’s entries', all.title === 'CARD HISTORY' && all.rows.length === 6, said);
+  ok('a payment the card made is Paid, and minus: money that left the card',
+     all.rows.slice(0, 3).every((r) => r.name === 'Paid' && /^−₿/.test(r.amtText)) && all.rows[0].amtText === '−₿ 6156', said);
+  ok('money put on the card is Added, and plus, at what reached the card and not with this phone’s fee', all.rows[3].name === 'Added' && all.rows[3].amtText === '+₿ 61514', said);
+  ok('money taken off it is Withdrawn, and minus', all.rows[4].name === 'Withdrawn' && all.rows[4].amtText === '−₿ 900', said);
+  ok('a payment that was not made is Not completed, with no sign, and says its money is to go back on the card',
+     all.rows[5].name === 'Not completed' && all.rows[5].amtText === '₿ 0' && all.rows[5].line2 === 'To go back on the card', said);
+  ok('a payment whose change is still to go back says so', all.rows[2].line2 === 'Change to go back on the card', all.rows[2].line2);
+  ok('RECEIVED is what came onto the card, SENT what left it',
+     view('in', true).rows.map((r) => r.name).join() === 'Added' && view('out', true).rows.map((r) => r.name).join() === 'Paid,Paid,Paid,Withdrawn,Not completed',
+     view('in', true).rows.map((r) => r.name).join() + ' / ' + view('out', true).rows.map((r) => r.name).join());
+  const mine = view('all', false);
+  ok('the wallet’s own history is the phone’s account, as it was: the card payment is a plus here, the money put on the card a minus',
+     mine.title === 'HISTORY' && mine.rows.length === 7 && /^\+/.test(mine.rows[1].amtText) && /^−/.test(mine.rows[3].amtText) && mine.rows[1].name === 'card payment',
+     mine.rows.map((r) => r.name + ' ' + r.amtText).join(', '));
 }
 
 console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');

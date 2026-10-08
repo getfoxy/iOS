@@ -310,6 +310,8 @@
           hash: t.hash,
           // the card an entry is for (26f-flashcard.js), so one card's entries can be shown on their own
           card: t.card || '',
+          // and what the wallet called it, which is what a card's own list names it by
+          memo: t.memo || '',
           dir: t.dir,
           sats: t.sats,
           fee: t.feeSats,

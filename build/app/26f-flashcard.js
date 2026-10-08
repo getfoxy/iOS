@@ -137,7 +137,7 @@
      * lost. The screen behind the sheet shows the same line. */
     if (W.onCard) W.onCard((ev) => { if (ev && ev.text && ev.stage !== 'end') this.fcLine(ev.text); });
     const over = () => { if (W.onCard) W.onCard(null); this.hideStage('card'); };
-    return W.cardSession(this.FC_STEPS.hold[1], (link) => {
+    return W.cardSession((o && o.sheet) || this.FC_STEPS.hold[1], (link) => {
       const on = (step) => {
         const words = this.FC_STEPS[step];
         if (!words) return;
@@ -344,13 +344,15 @@
       /* The card left part-way through signing: nothing moved, and what it did
        * sign goes back on it at its next tap (with no PIN), or, where the mint
        * has not answered yet, once it has. Said by what the person was doing. */
-      'interrupted': () => ({ tone: 'warn', title: opt.paying ? 'NOT PAID' : 'THE CARD LEFT TOO SOON',
+      /* Not made yet (no route to the mint): there is nothing to write, and a
+       * TAP CARD here only found "nothing was waiting for this card". */
+      'interrupted': () => Object.assign({ tone: 'warn', title: opt.paying ? 'NOT PAID' : 'THE CARD LEFT TOO SOON',
         reason: 'The card was taken away too soon. ' + (opt.paying ? 'Nothing was paid. ' : 'Nothing was taken. ')
           + (e.made === false
-            ? 'What it signed for goes back on it once the mint answers.'
+            ? 'What it signed for is made ready to go back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back.'
             : 'Tap it again to put back the ' + this.fcSats(e.owed) + ' it signed for. No PIN is needed.'),
-        chip: 'Hold it still until the phone says to remove it.',
-        retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
+        chip: 'Hold it still until the phone says to remove it.' },
+        e.made === false ? { shut: { label: 'OK' } } : { retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
       'spent': () => ({ title: opt.taken ? 'NOT PAID' : 'ALREADY SPENT',
         reason: 'The mint says this card’s money was already spent.' }),
       'no-nfc': () => ({ tone: 'warn', title: 'NO CARD READER', reason: 'This phone cannot read a card.' }),
@@ -424,7 +426,7 @@
       if (how === 'paid') {
         this.fcMoved(opt);
         // the mint's answer came late, and the change it made waits for the card's second tap (RECEIVE)
-        if (opt.paying && row && row.change > 0 && !row.refund) this.fcChangeWaiting(row.change, row.sats);
+        if (opt.paying && row && row.change > 0 && !row.refund) this.fcReceiveNow(row.change, row.sats);
         return;
       }
       if (how === 'spent') { this.fcFailed({ card: 'spent' }, { taken: opt.taken }); return; }
@@ -518,8 +520,8 @@
         if (r && r.trusted) { this.fcTrusted(r); return; }
         this.fcMoved(opt);
         const ch = r && r.change;
-        // made, and the card left before it was written back: it waits here for the card's second tap
-        if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcChangeWaiting(ch.sats, sats);
+        // made, and the card left before it was written back: the second tap is asked for at once
+        if (ch && !ch.written && !ch.unmade && ch.sats > 0) this.fcReceiveNow(ch.sats, sats);
         // not made: this phone tries again when it connects, and says so
         if (ch && ch.unmade && ch.sats > 0) this.fcChangeLater(ch.sats, sats);
       }, (e) => this.fcFailed(e, opt));
@@ -550,6 +552,24 @@
       chip: 'It is owed to that card and no other.',
       shut: { label: 'OK' },
     });
+  }
+
+  /* The second tap of a payment, asked for as soon as the mint has said paid:
+   * the phone's sheet comes up by itself for the card again, with nothing to
+   * press first. PIN, tap, remove the card, wait, tap again. A sheet that ends
+   * with no card read (cancelled, timed out, Foxy put away) leaves TAP TO
+   * RECEIVE up instead, so the change is never left without a way to it. A
+   * moment's pause first: iOS refuses a reading session started on the heels
+   * of the last one. */
+  fcReceiveNow(sats, paid) {
+    const p = Math.round(Number(paid) || 0);
+    clearTimeout(this._fcReceiveT);
+    this._fcReceiveT = setTimeout(() => {
+      const W = this.fcW();
+      // written meanwhile (or never owed here): nothing to ask for
+      if (!W || !this.fcOwedAfterPaying()) return;
+      this.fcWriteRun('', { change: true, receive: true, paid: p, sats: Math.round(Number(sats) || 0) });
+    }, 700);
   }
 
   /* The second tap of a payment: RECEIVE. `paid` is what was paid, where
@@ -625,7 +645,8 @@
     const W = this.fcW();
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
-    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '', body: opt.receive && opt.paid > 0 ? 'Tap 2 of 2: RECEIVE.' : '' },
+    this.fcTap({ amount: opt.sats ? this.stageMoney(opt.sats) : '', body: opt.receive && opt.paid > 0 ? 'Tap 2 of 2: RECEIVE.' : '',
+                 sheet: opt.receive ? 'Hold the card here again for its change' : '' },
                (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap

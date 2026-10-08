@@ -206,29 +206,32 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
     return null;
   };
+  // every card the till puts up, to see that none stood between the two taps
+  const titles = [];
+  const shown = till.blockedCard.bind(till);
+  till.blockedCard = (kind, spec) => { titles.push((spec && spec.title) || kind); return shown(kind, spec); };
   pad(till).type('1234');
   await until('the payment to be made', () => till.state.screen === 'home');
-  await settle();
   R.fate = null;
-  ok(R.sheet.indexOf('say: Keep the card there: asking the mint') < 0 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.' && R.sheet.filter((x) => /^end:/.test(x)).length === 1 && !R.sheet.some((x) => /^error:/.test(x)),
-     'and the sheet did not say to keep the card there while the mint was asked: it ended, "Done. Remove the card.", when the card had signed', R.sheet.slice(-4).join(' / '));
+  // tap 1, SEND: the card signs the fewest pieces that cover it (two 512s for 1,000 here), and is let go; the 24 over is its change.
+  // Then tap 2, RECEIVE, asked for by itself: the phone's sheet comes up again with nothing to press, and the card's tap puts the change back.
+  await until('the payment to be complete', () => card(till) && card(till).title === 'COMPLETE');
+  await settle();
+  const ends = R.sheet.map((x, i) => (/^end:/.test(x) ? i : -1)).filter((i) => i >= 0);
+  const sheet1 = R.sheet.slice(0, (ends[0] === undefined ? -1 : ends[0]) + 1);
+  const sheet2 = R.sheet.slice(sheet1.length);
+  ok(sheet1.indexOf('say: Keep the card there: asking the mint') < 0 && sheet1[sheet1.length - 1] === 'end: Done. Remove the card.' && !sheet1.some((x) => /^error:/.test(x)),
+     'and the sheet did not say to keep the card there while the mint was asked: it ended, "Done. Remove the card.", when the card had signed', sheet1.slice(-4).join(' / '));
   ok(atMint && atMint.ended === true && atMint.kind === 'card' && /VERIFYING\s*WITH THE MINT/.test(atMint.head) && atMint.line === 'You can remove the card.' && atMint.button === 'hidden',
      'with the mint being asked, our own screen said VERIFYING WITH THE MINT and that the card can be removed, with nothing to press', JSON.stringify(atMint));
-  // tap 1, SEND: the card signs the fewest pieces that cover it, and is let go; what they come to over the price is its change
-  const first = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
-  ok((await R.W.balanceSats()) === 1000 && !stage(R) && (first === 0 ? !card(till) : (card(till) && card(till).title === 'TAP TO RECEIVE')),
-     'the right PIN: 1,000 sats paid, the receive screen closed, and its change, if any, asked for by the second tap', first + ' of change; ' + (card(till) ? card(till).title : 'no card'));
-  if (first > 0) {
-    ok(card(till).reason === 'Paid \u20bf1,000. Tap the card again to receive its \u20bf' + first.toLocaleString('en-US') + ' of change. No PIN is needed.' && /Tap 2 of 2\./.test(card(till).all),
-       'which says what was paid, the change, that no PIN is needed, and that this is the second of two taps', card(till).all);
-    c.tap();
-    card(till).press('TAP CARD');
-    ok(!pad(till), 'the second tap, RECEIVE, asks for no PIN');
-    await until('the payment to be complete', () => card(till) && card(till).title === 'COMPLETE');
-    ok(card(till).reason === 'Paid \u20bf1,000. \u20bf' + first.toLocaleString('en-US') + ' of change is back on the card.' && R.W.cardOwed().length === 0,
-       'and then the payment is COMPLETE: what was paid, and the change back on the card', card(till).reason);
-    card(till).press('DONE');
-  }
+  ok((await R.W.balanceSats()) === 1000 && sheet2[0] === 'begin: Hold the card here again for its change' && ends.length === 2 && !pad(till),
+     'the right PIN: 1,000 sats paid, and the second tap asked for by itself once the mint said paid: the sheet comes up again for the change, with no PIN', sheet2.join(' / '));
+  ok(titles.indexOf('TAP TO RECEIVE') < 0 && titles.filter((t) => t !== 'COMPLETE').length === 0,
+     'with no card to press between the two taps', titles.join(', '));
+  ok(card(till).reason === 'Paid \u20bf1,000. \u20bf24 of change is back on the card.' && R.W.cardOwed().length === 0,
+     'and then the payment is COMPLETE: what was paid, and the change back on the card', card(till).reason);
+  card(till).press('DONE');
+  till.blockedCard = shown;
   const paid = history(R).filter((e) => e.memo === 'card')[0];
   ok(paid && !till.seen[paid.hash] && R.W.tagsFor(paid.hash).to === 'card payment', 'its entry is left for the history pass to announce, as a payment');
   ok(c.balance() === 1500 && R.W.cardOwed().length === 0, 'the card holds its change: 1,500', String(c.balance()));
@@ -253,17 +256,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   c2.tap();
   till.payByCard();
   pad(till).type('1234');
-  await until('the change to be left waiting', () => card(till) && card(till).title === 'TAP TO RECEIVE');
-  const owed = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
-  ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0 && /^Paid \u20bf200\. Tap the card again to receive its \u20bf824 of change\./.test(card(till).reason),
-     'a payment that needs change: the payment stands and the change waits for the card’s next tap', card(till).reason);
-  ok(/No PIN is needed/.test(card(till).reason), 'and says no PIN is needed for that', card(till).reason);
-  // the sheet closes with no card read: the change is said to be still waiting, with the tap to try again, not nothing
+  // the card is taken away once it has signed and not brought back: the second tap's sheet comes up by itself and reads nothing
+  await until('the payment to be made', () => till.state.screen === 'home' && R.W.cardOwed().length === 1);
   R.nfc = null;
-  card(till).press('TAP CARD');
   await until('the change to be said to be still waiting', () => card(till) && card(till).title === 'TAP TO RECEIVE' && /not read/.test(card(till).reason));
-  ok(/The card was not read\. \u20bf824 is still waiting to go back on it\. No PIN is needed\./.test(card(till).reason) && card(till).has('TAP CARD') && R.W.cardOwed().length === 1,
-     'a tap that read no card says the change is still waiting, and offers the tap again', card(till).reason);
+  const owed = R.W.cardOwed().reduce((n, r) => n + r.sats, 0);
+  ok((await R.W.balanceSats()) === 1200 && owed === 824 && c2.balance() === 0
+     && /^The card was not read\. \u20bf824 is still waiting to go back on it\. No PIN is needed\.$/.test(card(till).reason) && card(till).has('TAP CARD'),
+     'a payment whose second tap reads no card: the payment stands, and the change is said to be still waiting, with TAP CARD to try again', card(till).reason);
   // a fresh card that has never paid: it has no change note, so it asks for the PIN after all
   const cElse = newCard(H);
   await H.W.cardSetUp(cElse, { pin: '1234' });
@@ -351,16 +351,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   till.payByCard();
   pad(till).type('1234');
   await until('the payment of 300', () => till.state.screen === 'home');
-  await settle();
+  // its change, if any, goes back on at the second tap, asked for by itself; the day stays charged the whole pieces
+  await until('the 300 to be complete', () => R.W.cardOwed().length === 0 && (!R.W.cardTaken().length));
+  await until('the second tap, if any, to be over', () => !stage(R));
+  if (card(till) && card(till).title === 'COMPLETE') card(till).press('DONE');
   const spentNow = c.state.spent;
   ok(spentNow >= 300 && spentNow <= 700 && (await R.W.balanceSats()) >= 1200 + 290, 'a payment inside the day goes, and the day is charged the whole pieces', String(spentNow));
-  // its change, if any, goes back on at the second tap; the day stays charged the whole pieces
-  if (card(till) && card(till).title === 'TAP TO RECEIVE') {
-    c.tap();
-    card(till).press('TAP CARD');
-    await until('the 300’s change to be back', () => card(till) && card(till).title === 'COMPLETE');
-    card(till).press('DONE');
-  }
   till.state.screen = 'confirm';
   till.asking = 450;     // the day was charged at least 300 of its 700, so less than 450 is left
   c.tap();
@@ -379,16 +375,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   till.payByCard();
   pad(till).type('1234');
   await until('the day to have turned', () => till.state.screen === 'home');
-  await settle();
+  // its change goes back on at the second tap, asked for by itself
+  await until('the 150 to be complete', () => R.W.cardOwed().length === 0 && !R.W.cardTaken().length);
+  await until('the second tap, if any, to be over', () => !stage(R));
+  if (card(till) && card(till).title === 'COMPLETE') card(till).press('DONE');
   ok((await R.W.balanceSats()) >= 1200 + 290 + 140 && c.state.windowStart === Math.floor(clock.ms / 1000) && c.state.spent <= 700, 'a day later the card’s day has turned: a payment goes, and a new day begins with only that in it', String(c.state.spent));
-  // the card's pieces had no exact set for 150: its change waits for its next tap, and is put back now
-  if (card(till) && card(till).title === 'TAP TO RECEIVE') {
-    c.tap();
-    card(till).press('TAP CARD');   // the tap after a payment: no PIN is asked
-    if (pad(till)) pad(till).type('1234');
-    await until('the change to be put back', () => card(till) && card(till).title === 'COMPLETE');
-    card(till).press('DONE');
-  }
 
   // a phone that does not hold the words cannot change the PIN: said before anything is asked
   {
@@ -540,8 +531,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      && card(till).has('TAP CARD'), 'a payment cut short says NOT PAID, and that the next tap puts back what it signed, with no PIN', card(till).all);
   card(till).press('LATER');
   till.fcFailed({ card: 'interrupted', owed: 512, made: false }, { paying: true, taken: true });
-  ok(/goes back on it once the mint answers\.$/.test(card(till).reason), 'and, where the mint has not answered, that it goes back once it has', card(till).reason);
-  card(till).press('LATER');
+  ok(/made ready to go back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back\.$/.test(card(till).reason) && !card(till).has('TAP CARD') && card(till).has('OK'),
+     'and, where the mint has not answered, that it goes back once it has, with no TAP CARD to find nothing waiting', card(till).all);
+  card(till).press('OK');
   // change the mint did not make: the payment stands, and the phone says it makes the change when it next connects
   till.fcChangeLater(824, 200);
   ok(card(till).title === 'CHANGE NOT MADE YET' && card(till).reason === 'Paid \u20bf200. The mint did not make its \u20bf824 of change. This phone tries again whenever it connects, and then a tap of the card here receives it.'
