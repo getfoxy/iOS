@@ -528,6 +528,9 @@ async function world(feePpk, sats) {
     const lines = [];
     const text0 = till.fcProgressText.bind(till);
     till.fcProgressText = (p) => { const t = text0(p); if (t) lines.push(t); return t; };
+    // every buzz, and what the sheet had been told by then
+    const felt = [];
+    till.haptic = (kind, silent) => felt.push({ kind, silent: !!silent, ended: U.R.sheet.some((x) => /^end:/.test(x)), paid: U.R.W.cardTaken().length === 0 && U.R.trace.indexOf('mint /v1/swap') >= 0 });
     till.wantedSats = () => 700;
     U.R.nfc = U.card;
     U.R.sheet.length = 0;
@@ -545,6 +548,10 @@ async function world(feePpk, sats) {
     ok(U.R.trace.indexOf('end') >= 0 && U.R.trace.indexOf('end') < U.R.trace.lastIndexOf('mint /v1/swap'),
        'and it closes as soon as the card has signed, before the mint is asked: the wait for the mint is on Foxy’s own screen');
     ok(lines.indexOf('Signing') >= 0 && lines.every((t) => !/Signing piece/.test(t)), 'and the line under the heading says Signing, with no count of pieces', lines.join(' / '));
+    // (the PIN pad's own keys are felt too, lightly: those are not this)
+    const buzz = felt.filter((f) => f.kind !== 'light');
+    ok(buzz.length === 2 && buzz[0].kind === 'tap' && buzz[0].silent === true && buzz[0].ended === true && buzz[1].kind === 'success',
+       'a silent tap is felt the moment the card has signed and its sheet is told to go, and the payment’s own buzz comes when it is paid', JSON.stringify(buzz.map((f) => f.kind + (f.silent ? ' (silent)' : ''))));
 
     // taken away as it signs: the same sheet looks for the card again, and the payment is made at that tap with nothing more signed
     till.setState({ screen: 'confirm' });

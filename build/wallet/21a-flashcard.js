@@ -723,6 +723,8 @@
     cardSession: function (text, fn, opts) {
       var link = {
         released: false,
+        // what is true of the card for as long as this sheet is up, and no longer (08a-flashcard.js, `cardProvedHere`)
+        one: {},
         send: function (apdu) {
           // once let go, nothing more is asked of the card; the sheet is gone
           if (link.released) return Promise.reject(new Error('the card was let go'));

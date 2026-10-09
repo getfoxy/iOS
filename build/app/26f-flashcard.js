@@ -726,8 +726,19 @@
                  /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                  again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold the card here again to finish paying'
                    : (e && e.card === 'gone') ? 'Hold the card here again' : '' },
-               (link, on, progress) => W.cardPay(link, { sats, pin, on, progress, trusted: !!trusted, keepSheet: !trusted })
-                 .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin)))
+               (link, on, progress) => {
+                 /* A tap to feel the moment the card has signed and may be lifted: the
+                  * phone's own sheet takes about three seconds to go after it is told
+                  * to, and nothing on it says the card's part is over. Its own kind,
+                  * and silent: the payment's buzz and sound are for PAYMENT RECEIVED. */
+                 let felt = false;
+                 const onPay = (step, info) => {
+                   if (!felt && (step === 'checking' || step === 'mint')) { felt = true; this.haptic && this.haptic('tap', true); }
+                   on(step, info);
+                 };
+                 return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
+                   .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
+               })
       .then((r) => {
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so

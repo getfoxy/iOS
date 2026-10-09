@@ -435,6 +435,7 @@
       });
     }
     return {
+      link: link,
       ask: ask,
       want: function (apdu, doing) {
         return ask(apdu).then(function (r) {
@@ -682,6 +683,13 @@
       card.key = d;
       mark('key');
       if (o.noAuth) return null;
+      /* Proved once in this sheet, a key is not proved again in it (`link.one`,
+       * which a session of the phone's sheet has and nothing else does). The
+       * proof is the card's slowest answer, most of a second and often two,
+       * and a tap that writes used to ask for it before the write and again
+       * after: the same card, in the same session, with the same key. A card
+       * that has signed a payment here has proved it too (`cardProvedHere`). */
+      if (link && link.one && link.one.proved === card.key) { card.proved = true; return null; }
       var mine = new Uint8Array(16);
       window.crypto.getRandomValues(mine);
       card._nonce = hexOf(mine);
@@ -695,6 +703,7 @@
         delete card._nonce;
         if (!good) throw cardError('not-a-card', 'That card could not prove it is the card it says it is.');
         card.proved = true;
+        cardProvedHere(link, card.key);
       });
     }).then(function () {
       if (!o.noAuth) mark('proof');
@@ -749,6 +758,12 @@
         return cardLogRead(t, c);
       }).then(function (c) { mark('log'); return said(c); });
     });
+  }
+
+  /* This card has shown, in this session, that it holds its key: by AUTH, or by a
+   * signature for a payment that was good for that key. */
+  function cardProvedHere(link, key) {
+    if (link && link.one && key) link.one.proved = key;
   }
 
   /* ---- the cards this phone knows ---------------------------------------------
@@ -1807,6 +1822,12 @@
    * can make the same outputs again; without it the signed pieces could not be
    * swapped by anybody. `asked` is on a row from then until the signature is
    * in hand: the pieces, and what the payment was for. */
+  /* The most outputs a card payment's swap is set out with. Every output is
+   * 37 bytes sent to the card and hashed by it, six to a command, while the
+   * card is held: shaped to fill this phone's whole pool, a swap had fifty of
+   * them and nine commands. Twelve is two commands, and what the pool still
+   * lacks is made up by the next swap it does anyway. */
+  var CARD_OUTPUTS_MOST = 12;
   var CARD_SWAPS = 'foxy.flashcard.swaps';
   // the pieces one signature may be for: the card's own bound
   var CARD_ALL_MOST = 32;
@@ -1884,8 +1905,17 @@
       // a token gathers the pieces of one keyset together: read back from one, they are in the order the swap will have them
       var token = CT.getEncodedToken({ mint: mintOf(w), proofs: bare, unit: 'sat' });
       // shaped as any receipt is, to fill this phone's own pile (`receiveToken`)
-      var shape = shapeOutputs(proofs(mintOf(w), 'sat'), net, mintArrayCap(w) - 16);
-      return w.prepareSwapToReceive(token, { onCountersReserved: saw }, { type: 'deterministic', counter: 0, denominations: shape });
+      /* As many of the pool's missing pieces as leave the whole swap at
+       * CARD_OUTPUTS_MOST outputs or fewer, counting the powers of two the
+       * library adds for the rest; none, where even a few are too many. */
+      var pile = proofs(mintOf(w), 'sat'), shape = [];
+      var ones = function (n) { var c = 0; while (n > 0) { c += n % 2; n = Math.floor(n / 2); } return c; };
+      [CARD_OUTPUTS_MOST, 8, 4, 0].some(function (most) {
+        shape = most ? shapeOutputs(pile, net, Math.min(mintArrayCap(w) - 16, most)) : [];
+        var sum = shape.reduce(function (a, b) { return a + (Number(b) || 0); }, 0);
+        return shape.length + ones(Math.max(0, net - sum)) <= CARD_OUTPUTS_MOST;
+      });
+      return w.prepareSwapToReceive(token, { onCountersReserved: saw }, shape.length ? { type: 'deterministic', counter: 0, denominations: shape } : { type: 'deterministic', counter: 0 });
     }).then(function (pre) {
       off();
       var outs = cardOutsOf(pre.keepOutputs);
@@ -2026,7 +2056,11 @@
   function cardSignGroup(t, card, w, group, progress, note) {
     var slotOf = {};
     group.forEach(function (p) { slotOf[p.secret] = p.slot; });
+    // how long each part took, for one line of the log: times and counts and nothing else
+    var began = Date.now(), last = began, took = [], waited = false;
+    var mark = function (name) { var now = Date.now(); took.push(name + ' ' + (now - last)); last = now; };
     return cardSwapPlan(w, group).then(function (plan) {
+      mark('set out');
       var slots = plan.inputs.map(function (p) { return slotOf[p.secret]; });
       /* Written down before the card is asked. From SIGN on, what the card did
        * is not known until it answers, and this row is what its next tap is
@@ -2037,6 +2071,7 @@
       var asked = false;
       return t.want(cardCommand(CARD_INS.begin, 0, slots.map(cardByte).join(''), 4), 'to take the pieces of a payment').then(function (d) {
         if (!cardHexOk(d, 4) || cardU32(d, 0) !== plan.sum) throw cardError('refused', 'The card does not hold what it said it holds.', { sw: '' });
+        mark(slots.length + ' pieces');
         var walk = Promise.resolve();
         // six to a command: 37 bytes each
         for (var at = 0; at < plan.outputs.length; at += 6) {
@@ -2054,11 +2089,13 @@
          * signed nothing, and is known to have signed nothing because the
          * card itself said more were to come. Only the SIGN that may be the
          * signing one is not known about if its answer is lost. */
+        mark(plan.outputs.length + ' outputs');
         var left = -1, polls = 0;
         var again = function () {
           asked = !(left > 0);
           return t.want(cardCommand(CARD_INS.signAll, 0, '', 64), 'to sign for a payment').then(function (d) {
             if (!cardHexOk(d, 2)) return d;
+            waited = true;
             left = parseInt(d, 16);
             if (++polls > 1100) throw cardError('refused', 'The card kept waiting and did not sign.', { sw: '' });
             try { if (typeof progress === 'function') progress({ step: 'waiting', left: left, seconds: cardWaitSeconds(left) }); } catch (e) {}
@@ -2075,6 +2112,10 @@
           cardSwapDrop(plan.id);
           throw cardError('bad-signature', 'The card’s signature for this payment was not good. Nothing more was asked of it.');
         }
+        // a signature good for its key is the card proving it holds that key: nothing in this session asks it to again
+        cardProvedHere(t.link, card.key);
+        mark(waited ? 'waits and signature' : 'signature');
+        try { console.log('[foxy] card: signed in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (eL) {}
         return { plan: plan, signed: [first].concat(plan.inputs.slice(1)) };
       }, function (e) {
         /* Gone with SIGN asked and no answer: it may have signed, and burned
@@ -2681,6 +2722,8 @@
         return kept;
       }, { want: want, all: !!o.all, memo: memo });
     }).then(function (answer) {
+      // when the card had signed, to say in the log how long after it its sheet was told to go
+      var signedAt = Date.now();
       // a card that signs for each piece answers the pieces; a one-signature card, its rows and the pieces
       var made = (answer && !Array.isArray(answer) && answer.rows) || [];
       var fresh = Array.isArray(answer) ? answer : ((answer && answer.signed) || []);
@@ -2709,6 +2752,7 @@
       // whether anything is coming back to the card in this sheet: its change, or a payment held for another amount
       return cardLetGo(link, o, row.over > 0 || !!letGoAfter).then(function () {
         released = !o.hold;
+        if (!o.hold) console.log('[foxy] card: let go ' + (Date.now() - signedAt) + ' ms after it signed' + ((row.over > 0 || letGoAfter) ? ' (its sheet is kept for the change)' : ''));
         on(released ? 'checking' : 'mint', { hash: row.id });
         return cardSwapTaken(row, false);
       }).then(function (got) {

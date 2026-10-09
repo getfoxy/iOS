@@ -374,6 +374,17 @@ What that changes:
   with no words on it, only the phone's own tick as it closes. The wait for the
   mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
   Where change is coming the sheet stays, as below.
+- **Nothing is asked of the card twice.** Its slowest answer is the proof that
+  it holds its key (most of a second, and often two on a phone). A sheet asks
+  for it once at the most: a tap that writes used to ask before the write and
+  again after, and a card that has just signed a payment has proved its key by
+  signing. The swap is set out with twelve outputs or fewer, since the card
+  hashes every one while it is held. The log says how long each part of a
+  read and of a signing took (`card: read in`, `card: signed in`), in
+  milliseconds and nothing else.
+- **A tap is felt the moment the card has signed**, silent and of its own kind:
+  the phone's sheet takes about three seconds to go after it is told to, and
+  that is the phone's own doing.
 - **Exactly, where the card can.** Signing costs the same for one piece as for
   thirty-two, so the pieces are chosen to come to exactly the price (and the
   mint's fee on them) where the card holds them: no change, and no second tap.
