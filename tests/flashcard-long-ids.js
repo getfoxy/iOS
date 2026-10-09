@@ -13,7 +13,8 @@
  * So: the card is given the short form; the phone turns it back into the
  * whole name against the mint's own list before a mint sees the piece; and a
  * short form that could mean two of a mint's keysets is not guessed at. */
-const { funded, newCard, why, history, OTHER_WORDS } = require('./flashcard-kit');
+const { funded, newCard, binaryLoad, why, history, OTHER_WORDS } = require('./flashcard-kit');
+const { makeCard } = require('./flashcard-card');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -161,6 +162,33 @@ const bal = (c) => c.W.balanceSats();
     other.tap();
     const wrote = await H.W.cardWrite(other, { pin: '1234' });
     ok(wrote.sats === 0 && other.balance() === 0 && H.W.cardOwed().length === 0, 'nor is it ever written back onto the card: the write asks the mint first');
+  }
+
+  /* ---- the card's own change (software 1.12) at such a mint ----------------------
+   * The card makes its change in the keyset of its first piece and knows that keyset by its eight bytes; the
+   * swap names it by the whole name, the row the card is owed keeps the whole name, and the piece the card is
+   * finally written is of the eight bytes the opening says. */
+  {
+    const OC = makeCard({ window: H.window, format: 4 });
+    await H.W.cardSetUp(OC, { pin: '1234', recoverable: true });
+    await binaryLoad(H, OC, 2000);                  // no exact set for 1,000
+    OC.tap();
+    OC.sent.length = 0;
+    let sent = null;
+    R.fate = (m) => { if (!sent && /\/v1\/swap$/.test(String(m.url || ''))) sent = JSON.parse(m.body); return null; };
+    const p = await R.W.cardPay(OC, { sats: 1000, pin: '1234' });
+    R.fate = null;
+    const asked = OC.sent.filter((a) => a.slice(0, 4) === 'b026').length;
+    const rows = JSON.parse(R.storage.getItem('foxy.flashcard.owed') || '[]');
+    ok(p.sats === 1000 && asked >= 1 && sent && sent.outputs.slice(-asked).every((o) => o.id === long) && rows.length === 1 && rows[0].blind.every((b) => b.id === long),
+       'the card’s outputs are named by the whole name in the swap and in what the card is owed', asked + ' outputs of the card’s');
+    OC.tap();
+    const w = await R.W.cardWrite(OC, { change: true });
+    ok(w.left === 0 && R.W.cardOwed().length === 0 && OC.balance() === 1000 && OC.state.slots.filter((x) => x.status === 1).every((x) => x.data.substr(0, 16) === long.slice(0, 16)),
+       'and the pieces written at the next tap are of the short form, like every other on the card', String(OC.balance()));
+    OC.tap();
+    const spent = await R.W.cardPay(OC, { sats: 1000, pin: '1234' });
+    ok(spent.sats === 1000 && OC.balance() === 0, 'which the mint takes, by the whole name', String(spent.sats));
   }
 
   /* ---- the short form itself ------------------------------------------------ */

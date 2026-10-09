@@ -18235,7 +18235,9 @@ class Component extends DCLogic {
     if (p && p.step === 'waiting') {
       // how long it will be is the card's to know and it does not say (that would say what its limit is): how long it has been
       const s = Math.max(1, Math.round(Number(p.seconds) || 0));
-      /* The card waits by what its pieces come to. A small payment made
+      // a card that makes its own change (software 1.12) waits a limit's worth for it, within the limit as well as over it
+      if (p.making) return 'The card is making change. Keep holding (' + s + ' s)';
+      /* A card before 1.12 waits by what its pieces come to. A small payment made
        * with a piece worth much more than the price is not over anybody's
        * limit, and was being told it was: it is the piece that is. */
       if (p.want > 0 && p.sum >= 2 * p.want) return 'Paying from a larger piece. Keep holding (' + s + ' s)';
@@ -19697,7 +19699,7 @@ class Component extends DCLogic {
     this._fcLimitTap = !!tap;
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: 'A per tap limit is the most this card pays in one tap straight away. For every limit more than that, the card has to be held 3 seconds longer before it pays. Lift the card and the payment stops, with nothing taken.\n\n'
+      reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
@@ -19739,7 +19741,7 @@ class Component extends DCLogic {
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
-        warn: 'This card will pay up to this straight away. For every limit more, it has to be held 3 seconds longer. '
+        warn: 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats)) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
@@ -19897,7 +19899,7 @@ class Component extends DCLogic {
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
     this.blockedCard('fc-limit-which', {
       tone: 'ask', title: 'CHANGE LIMIT',
-      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away. More than that and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
+      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
       retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
       shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },

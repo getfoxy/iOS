@@ -76,7 +76,7 @@ function wire(port) {
   /* ---- a new card, read and set up ------------------------------------------ */
   await tap();
   const fresh = await H.W.cardLook(link);
-  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === 64 && /^0[23][0-9a-f]{64}$/.test(fresh.key),
+  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === fresh.info.slots && /^0[23][0-9a-f]{64}$/.test(fresh.key),
      'the applet is chosen by its whole name, proves it holds its key, and reads as new', fresh.info.version);
   await tap();
   const made = await H.W.cardSetUp(link, { pin: '1234', recoverable: true });

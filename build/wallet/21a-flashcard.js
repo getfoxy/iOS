@@ -537,12 +537,21 @@
       }).then(function () { return FoxyWallet.cardLook(link); });
     },
 
-    /* What is waiting to be written onto cards: [{ id, card, sats, kind, mint }]. */
+    /* What is waiting to be written onto cards: [{ id, card, sats, kind, mint }]. Not what cannot be: a card's
+     * own change (1.12) that its card no longer has the means to finish (`cardStuck`) is kept, and not promised. */
     cardOwed: function () {
-      return cardStore(CARD_OWED).map(function (r) {
+      return cardStore(CARD_OWED).filter(function (r) { return r && !r.stuck; }).map(function (r) {
         var at = r.mint || '';
-        if (!at) { try { at = (FoxyWallet.tokenInfo(r.token) || {}).mint || ''; } catch (e) { at = ''; } }
+        if (!at && r.token) { try { at = (FoxyWallet.tokenInfo(r.token) || {}).mint || ''; } catch (e) { at = ''; } }
         return { id: r.id, card: r.card, sats: r.sats, kind: r.kind, forHash: r.forHash || '', mint: at ? canonicalMint(at) : '' };
+      });
+    },
+    /* The card's own change that could not be finished and is kept: [{ id, card, sats, forHash, why, blind }], `blind`
+     * being what the mint signed for each output (the blinded message, its signature and the key), which is what
+     * a restore of the card's openings by the owner's phone (NUT-09) would be given. */
+    cardStuck: function () {
+      return cardStore(CARD_OWED).filter(function (r) { return r && r.stuck; }).map(function (r) {
+        return { id: r.id, card: r.card, sats: r.sats, forHash: r.forHash || '', why: r.why || '', blind: (r.blind || []).slice() };
       });
     },
 
@@ -679,9 +688,10 @@
     /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
     cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
     /* The limit on one payment, as its holder set it: the dollars, or 0 (`cardPaceNote`); and what a payment
-     * of `sats` waits on a card with that limit, in seconds. */
+     * that leaves the card for `sats` waits on a card of software 1.12 with that limit, in seconds, whether it makes change (`change`)
+     * or not (a payment within the limit that does waits one limit's worth). */
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
-    cardWait: function (limit, sats) { return cardWaitSeconds(cardWaitSigns(limit, sats)); },
+    cardWait: function (limit, sats, change) { return cardWaitSeconds(cardWaitSigns(limit, sats, change)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     cardHeldLetGo: function (key) {
@@ -724,10 +734,12 @@
             var w = null;
             try { w = need(); } catch (x) { w = null; }
             var owe = w ? cardOweBack(row, w, null, null, r) : Promise.resolve({ sats: 0 });
+            // the change the card made for itself (1.12) is owed to it already, and goes back with any made here
+            var itself = function () { return row.all ? 0 : cardBlindOwed(row.id).sats; };
             return owe.then(function (o) {
-              out.push({ id: row.id, state: 'paid', sats: r.sats, change: (o && o.sats) || 0, refund: !!row.refund });
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: ((o && o.sats) || 0) + itself(), refund: !!row.refund });
             }, function () {
-              out.push({ id: row.id, state: 'paid', sats: r.sats, change: 0, refund: !!row.refund });
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: itself(), refund: !!row.refund });
             });
           },
             function (e) {

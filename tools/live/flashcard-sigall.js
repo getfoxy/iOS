@@ -72,6 +72,13 @@ function applet(port) {
   });
 }
 
+/* The SIGN commands a payment waits before the signature under a limit on one payment: by what leaves the card for good, with change
+ * made by the card itself (software 1.12) or not (before it, the pieces whole and the first limit's worth free). */
+const waitsFor = (leaves, limit, change, own) => {
+  if (!own) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
+  return leaves > limit ? 4 * Math.ceil(leaves / limit) : (change ? 4 : 0);
+};
+
 const held = (b, mint) => {
   try { return (JSON.parse(b.w.localStorage.getItem('foxy.cashu.proofs.' + mint.replace(/\/+$/, ''))) || []).reduce((n, p) => n + Number(p.amount || 0), 0); }
   catch (e) { return 0; }
@@ -81,7 +88,9 @@ async function at(mintKey, names, real) {
   const MINT = H.MINTS[mintKey].https;
   console.log('\n== ' + names[mintKey]);
   const holder = H.boot({ keychain: { words: '' } });
-  const till = H.boot({ keychain: { words: '' } });
+  // the till's next swap is answered by the mint and the answer is lost on the way back, when a test says so
+  let loseNext = false;
+  const till = H.boot({ keychain: { words: '' }, net: (m, p) => { if (loseNext && p === '/v1/swap') { loseNext = false; return 'after'; } return 'ok'; } });
   await holder.W.seedReady();
   await till.W.seedReady();
 
@@ -147,10 +156,14 @@ async function at(mintKey, names, real) {
   }
   ok('with the pieces it had, at least one payment was made exactly, with no change', exact >= 1, exact + ' of 3');
 
-  /* The limit on one payment, which asks no clock and is waited for: over it
-   * the card does four signatures of work for every limit's worth past the
-   * first, a SIGN command each, and only then signs. The mint sees nothing of
-   * that: the one signature it is sent is the same kind as any other. */
+  /* The limit on one payment, which asks no clock and is waited for. From
+   * software 1.12 the card counts what leaves it for good (the pieces less the
+   * change it makes for itself, which is the price and the mint's fee on the
+   * pieces): within the limit and with no change it signs at once; otherwise
+   * it does four signatures of work for every limit's worth of that, whole or
+   * in part, a SIGN command each, and only then signs (a payment within the
+   * limit that makes change waits one). The mint sees nothing of that: the
+   * one signature it is sent is the same kind as any other. */
   {
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 100, tap: true });
@@ -167,14 +180,21 @@ async function at(mintKey, names, real) {
     const left = (await till.W.cardLook(card, { noAuth: true })).balance;
     const change = (paid.change && paid.change.sats) || 0;
     const waits = signatures() - 1;
+    // what left the card for good: the pieces less the change it made for itself (before 1.12, the pieces whole)
+    const leaves = (onIt - left) - (first.card.info.ownChange ? change : 0);
     ok('a per tap limit of 100, and 250 asked: the card waits, then signs once, and the mint takes it',
-       paid.sats === 250 && waits === 4 * (Math.ceil((onIt - left) / 100) - 1) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => i + 1).join(','),
-       waits + ' waits for ' + (onIt - left) + ' sats of pieces, each answered "not yet" and no more; the till is up ' + (held(till, MINT) - tb));
+       paid.sats === 250 && waits === waitsFor(leaves, 100, change > 0, first.card.info.ownChange) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => i + 1).join(','),
+       waits + ' waits for ' + leaves + ' sats that left the card (' + (onIt - left) + ' of pieces), each answered "not yet" and no more; the till is up ' + (held(till, MINT) - tb));
     if (change) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     sent.length = 0;
     await card.tap();
     const small = await till.W.cardPay(card, { sats: 100, pin: PIN });
-    ok('  and 100, at the limit (or a sat over it for the mint\u2019s fee), waits nothing or once', small.sats === 100 && signatures() === 1 + 4 * (Math.ceil(pieceSum() / 100) - 1) && signatures() <= 5, signatures() + ' SIGN command(s)');
+    const smallChange = (small.change && small.change.sats) || 0;
+    // 100 and the mint's fee on the pieces is 101 or more: a limit's worth over, so two; with no fee it is nothing, or one for its change
+    const smallLeaves = pieceSum() - (first.card.info.ownChange ? smallChange : 0);
+    ok('  and 100, at the limit (or a sat over it for the mint\u2019s fee), waits what it should: nothing, one limit\u2019s worth for change within the limit, two for the fee',
+       small.sats === 100 && signatures() === 1 + waitsFor(smallLeaves, 100, smallChange > 0, first.card.info.ownChange) && signatures() <= 9,
+       signatures() + ' SIGN command(s) for ' + smallLeaves + ' sats that left the card');
     if (small.change && small.change.sats) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 0, tap: true });
@@ -239,6 +259,86 @@ async function at(mintKey, names, real) {
     await card.tap();
     await holder.W.cardWithdraw(card, { pin: PIN });
   }
+  /* The card makes its own change (software 1.12): the till names an amount for each output of it, the card answers a blinded message
+   * it made itself, and the mint signs for those outputs in the same swap as the till's own. The till keeps what the mint signed and finishes the
+   * pieces at the next tap from the card's openings: the nonce makes the secret, the blinding factor takes the blinding off. Nothing a till
+   * chooses can take the change, and the mint is the only judge of whether the pieces are good: here they are spent again. */
+  if (first.card.info.ownChange) {
+    await card.tap();
+    const seen = await holder.W.cardLook(card);
+    const sizes = [];
+    for (let i = 0; i < 46; i++) for (let k = 0; k < 8; k++) sizes.push({ nonce: 'z'.repeat(i + 1) + k, amount: Math.pow(2, i) });
+    await holder.W.cardPrepare(Object.assign({}, seen, { pieces: seen.pieces.concat(sizes) }), 2000);
+    await card.tap();
+    await holder.W.cardWrite(card, { owner: true });
+    const tb = held(till, MINT);
+    sent.length = 0;
+    await card.tap();
+    const paid = await till.W.cardPay(card, { sats: 1000, pin: PIN });
+    const made = sent.filter((a) => a.slice(0, 4) === 'b026');
+    const order = sent.map((a) => a.slice(2, 4)).filter((i) => /^(22|23|26|24)$/.test(i)).join(' ');
+    const rows = JSON.parse(till.w.localStorage.getItem('foxy.flashcard.owed') || '[]');
+    const change = (paid.change && paid.change.sats) || 0;
+    ok('the card is asked for its own change, an amount to a command, between the till’s outputs and its one signature, and the mint takes the swap',
+       paid.sats === 1000 && made.length >= 1 && made.length <= 8 && /^22( 23)+( 26)+ 24$/.test(order) && signatures() === 1 && held(till, MINT) - tb === 1000,
+       made.length + ' commands for ' + change + ' sats; the till is up ' + (held(till, MINT) - tb));
+    ok('  what it is owed is what the mint signed for those outputs, and no token',
+       rows.length === 1 && rows[0].kind === 'change' && !rows[0].token && Array.isArray(rows[0].blind) && rows[0].blind.length === made.length && rows[0].sats === change
+       && rows[0].blind.every((b) => /^0[23][0-9a-f]{64}$/.test(b.C_) && /^0[23][0-9a-f]{64}$/.test(b.K)),
+       JSON.stringify(rows.map((r) => [r.sats, (r.blind || []).length])));
+    sent.length = 0;
+    await card.tap();
+    const back = await till.W.cardWrite(card, { change: true });
+    const reads = sent.filter((a) => a.slice(0, 4) === 'b019').length;
+    // the card is chosen again, and asked what its change is made of: nothing is left
+    await card.tap();
+    await card.send('00a404000af0464f5859434152440100');
+    const none = await card.send('b019000000');
+    ok('  the next tap finishes its pieces from the card’s openings with no PIN, and the card lists none after', back.left === 0 && back.change === change && till.W.cardOwed().length === 0
+       && reads >= 1 && /^009000$/i.test(none), back.card.balance + ' on the card, ' + reads + ' page(s) of openings read');
+    sent.length = 0;
+    await card.tap();
+    const again = await till.W.cardPay(card, { sats: 700, pin: PIN });
+    ok('  and those pieces are good at the mint: the card pays 700 more with them, in one signature', again.sats === 700 && signatures() === 1, 'the till is up ' + (held(till, MINT) - tb));
+    if (again.change && again.change.sats) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
+    await card.tap();
+    await holder.W.cardWithdraw(card, { pin: PIN });
+
+    /* The swap's answer lost after the mint made it. The till finds its own outputs again by their counters; the card's are not made of
+     * anything it holds, so it asks the mint for the signatures by the blinded messages it wrote down before the card signed
+     * (NUT-09, the same question a restore of the card's openings by its owner's phone would put), and the change is had. */
+    await card.tap();
+    const seen2 = await holder.W.cardLook(card);
+    const sizes2 = [];
+    for (let i = 0; i < 46; i++) for (let k = 0; k < 8; k++) sizes2.push({ nonce: 'q'.repeat(i + 1) + k, amount: Math.pow(2, i) });
+    await holder.W.cardPrepare(Object.assign({}, seen2, { pieces: seen2.pieces.concat(sizes2) }), 2000);
+    await card.tap();
+    await holder.W.cardWrite(card, { owner: true });
+    const tb2 = held(till, MINT);
+    loseNext = true;
+    sent.length = 0;
+    await card.tap();
+    const lostPay = await till.W.cardPay(card, { sats: 1000, pin: PIN });
+    await till.W.recoverSwaps();
+    await till.W.cardSettle();
+    const lostChange = (lostPay.change && lostPay.change.sats) || 0;
+    const rows2 = JSON.parse(till.w.localStorage.getItem('foxy.flashcard.owed') || '[]');
+    ok('a swap whose answer is lost after the mint made it: the payment is made, and the card\u2019s change is had from the mint by its blinded messages and owed',
+       till.rec.lost.some((x) => x.path === '/v1/swap') && lostPay.sats === 1000 && held(till, MINT) - tb2 === 1000 && lostChange > 0 && rows2.length === 1 && !!rows2[0].blind && rows2[0].sats === lostChange
+       && till.W.cardTaken().length === 0 && JSON.parse(till.w.localStorage.getItem('foxy.flashcard.swaps') || '[]').length === 0,
+       'the till is up ' + (held(till, MINT) - tb2) + ', ' + lostChange + ' of change owed');
+    await card.tap();
+    const lostBack = await till.W.cardWrite(card, { change: true });
+    const owedAfter = till.W.cardOwed().length;
+    sent.length = 0;
+    await card.tap();
+    const lostAgain = await till.W.cardPay(card, { sats: 700, pin: PIN });
+    ok('  and written at the next tap, and the pieces are good at the mint', lostBack.left === 0 && lostBack.change === lostChange && owedAfter === 0 && lostAgain.sats === 700 && signatures() === 1,
+       lostBack.card.balance + ' on the card');
+    if (lostAgain.change && lostAgain.change.sats) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
+    await card.tap();
+    await holder.W.cardWithdraw(card, { pin: PIN });
+  }
   /* A card of 128 places and its deep drawer (software 1.8): eight of each
    * small size, so prices in a row are each made exactly; a payment of most
    * of a small card, which is more than thirty-two pieces, in one signature;
@@ -292,7 +392,9 @@ async function at(mintKey, names, real) {
     await card.tap();
     await holder.W.cardWithdraw(card, { pin: PIN });
 
-    // a set chosen for its change, on a card that would wait for it: given up at the first "not yet"
+    /* A set chosen for its change, on a card that has a limit: before 1.12 the card waited by the pieces, so a larger set was given up
+     * at the first "not yet" for the cheapest. From 1.12 it waits by what leaves it, which is the same for both sets, and both make change: a
+     * payment within the limit that makes change waits one limit's worth, for the one set, and the till is told the card is making change. */
     await card.tap();
     const seen = await holder.W.cardLook(card);
     const sizes = [];
@@ -306,9 +408,15 @@ async function at(mintKey, names, real) {
     sent.length = 0;
     await card.tap();
     const cheap = await till.W.cardPay(card, { sats: 250, pin: PIN, progress: (p) => { if (p.step === 'waiting') told.push(p); } });
-    ok('a till that first asks for a set with change worth having is told "not yet" once, and pays with the cheapest set: nobody is told to hold',
-       cheap.sats === 250 && signatures() === 2 && sent.filter((a) => a.slice(0, 4) === 'b022').length === 2 && pieceSum() <= 400 && told.length === 0,
-       signatures() + ' SIGN, ' + pieceSum() + ' sats of pieces signed for');
+    if (first.card.info.ownChange) {
+      ok('a payment within the limit that makes change waits one limit\u2019s worth for it, with the one set: four "not yet", and the till is told the card is making change',
+         cheap.sats === 250 && signatures() === 1 + 4 && sent.filter((a) => a.slice(0, 4) === 'b022').length === 1 && told.length === 4 && told.every((p) => p.making === true),
+         signatures() + ' SIGN, ' + pieceSum() + ' sats of pieces signed for, ' + told.length + ' told to hold');
+    } else {
+      ok('a till that first asks for a set with change worth having is told "not yet" once, and pays with the cheapest set: nobody is told to hold',
+         cheap.sats === 250 && signatures() === 2 && sent.filter((a) => a.slice(0, 4) === 'b022').length === 2 && pieceSum() <= 400 && told.length === 0,
+         signatures() + ' SIGN, ' + pieceSum() + ' sats of pieces signed for');
+    }
     if (cheap.change && cheap.change.sats) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
     // and with no limit in the way, the larger set is what pays, and its change fills the drawer
     await card.tap();

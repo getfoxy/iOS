@@ -23,7 +23,9 @@ does not repeat the protocol. The limits are listed at the end and argued in
   mint refuses), the two-tap payment that signs at most two pieces, the
   withdrawal that keeps what a cut-short tap signed, and the whole of a card
   that signs once for a payment (below), which has paid real mints only from
-  the simulator. The list of what only a
+  the simulator, and the change such a card makes for itself (below), which
+  has not been held to a real card at all, so how long a tap lasts with it is
+  not known. The list of what only a
   card and a hand can show is
   `DEVICE-TESTS.md` §23.
 - **The time the card is told is interim, and weak** (*The time*, below).
@@ -430,7 +432,7 @@ What that changes:
   back a sat or two: one piece, and the payment after it short again. So a
   till takes the cheapest set that brings back 256 sats or more (and no more
   than 1,024), and that change is cut to fill the small sizes, in thirty-two
-  pieces at the most. One second tap in ten payments or so, where it would be
+  pieces at the most (eight, where the card makes it itself). One second tap in ten payments or so, where it would be
   one in two. The larger set may be over a per tap limit the till is not
   told: the card then answers "not yet" before it has signed anything, and
   the till pays with the cheapest set after all, at once. Nobody is told to
@@ -527,8 +529,9 @@ payment kept on trust for days) leaves pieces the card's signature can no
 longer spend; on a recoverable card they come back to the holder's phone after
 their date.
 
-The limits are held to what a payment's pieces come to together, by the card,
-before it signs; and the card's log counts the payment once.
+The limits are held to what a payment's pieces come to together (from 1.12, less
+the change the card makes for itself: *A card that makes its own change*), by the
+card, before it signs; and the card's log counts the payment once.
 
 ## Change
 
@@ -536,7 +539,10 @@ The card signs whole pieces, so a payment of $0.43 may use a piece worth more.
 The difference is made into new pieces **locked to the card's key**, cut to fill
 the gaps in what the card will then hold (*Adding money*), after the swap has
 landed. Change is never the receiver's: it is kept in a store of its own, outside
-the balance, until it is on the card.
+the balance, until it is on the card. (A card of software 1.12 makes the change
+itself, in the swap, and this phone finishes the pieces at the second tap:
+*A card that makes its own change*, below. What follows is the change a till
+makes, which is every card's before 1.12, and a later part of a bigger change.)
 
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
@@ -594,6 +600,86 @@ and the payment's entry says the whole amount. A change swap whose answer was
 lost waits for the wallet's own recovery, so nothing is made twice, and what the
 recovery finds is owed to the card. After thirty days of trying, the payment
 keeps it.
+
+## A card that makes its own change
+
+From software 1.12 the card makes a payment's change itself. Before it, a till
+paid in pieces worth more than the price made the difference into new pieces
+after the swap, locked to the card, and the card could not tell what it was given
+back, so its limits had to count the pieces whole. Now the till names an amount
+for each piece of change and the card makes the piece: it draws the nonce and
+the blinding factor, builds the secret as it builds its own pieces' (locked to
+its own key), hashes it to the curve, blinds it, and answers the blinded message.
+That goes into the swap beside the till's own outputs, the card signs once for
+all of it, and the mint signs the card's outputs in the same swap as the till's.
+
+The order of a payment is the pieces, the till's outputs, the card's change one
+command a piece, and the signature. The swap's row (`foxy.flashcard.swaps`) holds
+the sizes of the card's change before the card is asked for anything and each
+blinded message as the card answers it, before the signature is asked for: the
+signature is over every output and must never exist without the row having them.
+The till then keeps what the mint signed for each output of the card's, with the
+DLEQ and the mint's key for the size, as what the card is owed
+(`foxy.flashcard.owed`, with no token in it). Nothing in it can be spent without
+what only the card holds.
+
+What it means for the holder:
+
+- **Nothing a till names can take the change.** A till says how much and nothing
+  else. The secret, the nonce and the blinding factor are the card's, and the
+  piece is locked to the card's key, so a terminal built to cheat cannot choose
+  an output of its own for it.
+- **The limits are held to what leaves the card for good**: the pieces less the
+  change it made for itself, which is the price and the mint's fee on the pieces.
+  A payment of $3 made with a $10 piece costs the day $3, and not $10. A till that
+  writes change back by other means gives the day nothing back, and the card does
+  not take its word.
+- **The wait on a per tap limit is by the same.** A payment within the limit that
+  makes no change goes at once; a payment within it that makes change takes three
+  seconds (a limit's worth); over it, three seconds for every limit's worth of
+  what leaves the card, whole or in part, with change or without. Overpaying costs
+  no wait, so the pieces are no longer chosen to overpay the least for the wait's
+  sake (the larger set that fills the drawer is taken, as it was, and a till is
+  not sent round to a cheaper one). While it waits
+  the till's sheet says `The card is making change. Keep holding` for the first
+  limit's worth (the card does not say which it is) and `Over the card's per tap
+  limit` after. The day's limit is held at the card's first SIGN and not at the
+  start of the payment, so a refusal comes after the outputs and the change were
+  sent, and gives the payment up: the swap's row is dropped, nothing is burned.
+- **The change tap is as before**: the second tap, no PIN, TAP TO CONFIRM. The till
+  reads the card's openings (`GET_CHANGE`, three a page, once in the tap), finds
+  the one each output of its is (it makes the blinded message from the opening's
+  nonce and factor again, and the two are the same), takes the blinding off the
+  mint's signature, checks its DLEQ where the mint gave one, and writes the piece
+  with the rest, three to a command. The card lets an opening go as its piece is
+  written, so a tap that was cut short is finished by the next, and the card lists
+  none when all is back. An output the card no longer lists and does not hold (it
+  was wiped and set up again) cannot be finished: the row is kept, marked, and
+  left out of what the screen says is owed.
+- **Eight pieces at most**, as many as the card keeps openings for, and the
+  openings of change not yet written back count. Each piece costs the card half a
+  second to a second of its own work (its hash to the curve) while it is held to
+  the phone, so a change of eight holds the card several seconds longer than a
+  change of one or two. The change is cut for the card as change always was
+  (the gaps in its drawer first) but in eight pieces: a deep drawer is refilled
+  less deeply than a thirty-two piece change refilled it. A
+  change that would be more than eight has its eight largest made by the card and
+  the rest made by the till after the swap, as before, and written at the same tap
+  (the log line says so). A card with no opening free refuses the first request for
+  change, and the payment is begun again with none asked of it. The card makes its
+  pieces in the keyset of its first piece, which has to be the one in use at the mint;
+  if it is not, the change is the till's.
+- **A lost answer comes back the same way**: the till asks the mint for the
+  signatures by the blinded messages (NUT-09) when it finds the payment was made,
+  and where the mint cannot say, notes it as due and asks again whenever it
+  connects.
+- **If a till never hands the change over**, the card still has what each piece is
+  made of until the piece is written back, so the owner's phone can finish it by
+  asking the mint for the signatures (NUT-09) and unblinding them. That is not
+  built yet.
+
+A card before 1.12 is paid as it always was, and the wait is by what its pieces
+come to (*The limit on one tap*).
 
 ## The daily limit and the owner's phone
 
@@ -675,15 +761,18 @@ follows is the one a card has now.
   which at a mint that charges for inputs costs what a withdrawal and a top-up
   cost. Without the PIN the card is left as it is, and its screen says what it
   holds above the limit.
-- **A payment over it waits.** For every limit's worth past the first, the
-  card does about three seconds of its own work before it signs, and nothing is
-  taken until that is done. The till's screen says `Over the card's per tap
-  limit. Keep holding` and how long it has been; how long is left it cannot
-  say, because the card does not tell it. (The card waits by what its pieces
-  come to, so a small payment made with a piece worth twice the price or more
-  waits too: the screen then says `Paying from a larger piece. Keep holding`,
-  since it is the piece that is over the limit and not the payment.) Lifted in
-  the wait, the card has
+- **A payment over it waits.** For every limit's worth, the card does about
+  three seconds of its own work before it signs, and nothing is taken until that
+  is done. The till's screen says `Over the card's per tap limit. Keep holding`
+  and how long it has been; how long is left it cannot say, because the card does
+  not tell it. From software 1.12 the limit's worth is of what leaves the card
+  (*A card that makes its own change*): within the limit and with no change a
+  payment goes at once, with change it waits one, and over the limit it waits
+  ceil(what leaves / limit). (Before 1.12 the card waited by what its pieces come
+  to, the first limit's worth free, so a small payment made with a piece worth
+  twice the price or more waited too: the screen then says `Paying from a larger
+  piece. Keep holding`, since it is the piece that is over the limit and not the
+  payment.) Lifted in the wait, the card has
   paid nothing and the till holds nothing; tapped again, it waits the whole of
   it again.
 - **The limit is its owner's to know.** The card says it to the phone that
@@ -698,8 +787,10 @@ follows is the one a card has now.
   payment of that size would, so a card lifted when the payment ought to be
   over has lost about what it ought to have paid. It is a rate and not a
   ceiling: the daily limit is the ceiling, and that one does ask the clock.
-- **It counts the pieces signed, not the price**, so the pieces for such a card
-  are chosen to overpay the least where they cannot come to the price exactly.
+- **It counts what leaves the card.** Before 1.12 that was the pieces signed, not
+  the price, so the pieces for such a card were chosen to overpay the least where
+  they could not come to the price exactly. From 1.12 it is the pieces less the
+  change the card makes for itself, and overpaying costs no wait.
 - **A wait longer than a tap lasts is given up**: after forty seconds of "not
   yet" the till stops asking, with nothing signed, and says to take the
   payment in smaller parts.
@@ -898,7 +989,7 @@ wait, and the payment is made when the wallet next asks.
 
 Eight stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
-refused); pieces a card has signed for that the mint has not swapped yet
+refused; for a card that makes its own change, what the mint signed for it); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2

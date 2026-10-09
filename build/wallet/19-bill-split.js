@@ -844,7 +844,10 @@
            * mint takes its signature for nothing else. Their counters go on
            * the record before the request does, as any swap's do. */
           var fixed = unit === 'sat' ? cardSwapFor(incomingProofs) : null;
-          guard = swapGuard(w, 'receive', { unit: unit, amount: tok.amount, into: into || undefined,
+          /* The card's own change (software 1.12) is in that swap too, as outputs this phone has no part in: the amount the record
+           * keeps is what the token came to for this phone, so that what is not found of it later is the mint's fee and not the card's change. */
+          var forCard = (fixed && fixed.change && Array.isArray(fixed.change.outs)) ? fixed.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
+          guard = swapGuard(w, 'receive', { unit: unit, amount: tok.amount - forCard, into: into || undefined,
             expect: fixed ? fixed.amounts.reduce(function (n, a) { return n + Number(a); }, 0)
               : (incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined),
             fixed: fixed ? [{ keysetId: fixed.keyset, start: Number(fixed.counter), count: fixed.amounts.length }] : undefined });
@@ -922,10 +925,14 @@
         var noteOwed = (noted && got > noted.asked && routeOpen()) ? got - noted.asked : 0;
         if (noteOwed > 0 && !(changeFor(wallet, noteOwed) > 0)) noteOwed = 0;
         if (noted && noteOwed > 0) recorded = noted.asked;
+        /* Some of the token may have gone to outputs that are not this phone's: a card's own
+         * change (`opts.toCard`, 08a-flashcard.js), which the card made and the mint signed
+         * in this swap. That is not in `got` and is not the mint's fee either. */
+        var toCard = (opts && Number(opts.toCard) > 0) ? Math.round(Number(opts.toCard)) : 0;
         var entry = {
           dir: 'in',
           sats: recorded,
-          feeSats: Math.max(0, tok.amount - got),
+          feeSats: Math.max(0, tok.amount - got - toCard),
           settled: true,
           state: 'success',
           memo: (opts && typeof opts.memo === 'string' && opts.memo) || 'ecash',
@@ -933,9 +940,9 @@
         };
         // the over-payment breakdown, where the caller has one, so an amend
         // does not drop what the arrival wrote
-        if (opts && Number(opts.changeSats) > 0) {
-          entry.grossSats = Number(opts.grossSats) || got;
-          entry.changeSats = Number(opts.changeSats);
+        if ((opts && Number(opts.changeSats) > 0) || toCard > 0) {
+          entry.grossSats = Number(opts && opts.grossSats) || (got + toCard);
+          entry.changeSats = Math.max(0, Number(opts && opts.changeSats) || 0) + toCard;
         }
         if (noteOwed > 0) { entry.grossSats = got; entry.changeSats = noteOwed; }
         /* What was already charged to this entry stays charged.
@@ -962,7 +969,8 @@
         if (!into || !txSeen(into)) entry.mint = intoMint;
         logTx(entry, into);
         console.log('[foxy] took', got, 'sats of ecash at', hostOf(tok.mint),
-                    tok.amount !== got ? '(' + (tok.amount - got) + ' to the mint fee)' : '');
+                    tok.amount !== got + toCard ? '(' + (tok.amount - got - toCard) + ' to the mint fee)' : '',
+                    toCard ? '(' + toCard + ' went to the card\u2019s own change)' : '');
         return { sats: got, unit: 'sat', amount: got, mint: tok.mint, host: hostOf(tok.mint), switched: switched,
                  hash: entry.hash, changeDue: noteOwed };
       }).then(null, function (e) {

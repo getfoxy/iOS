@@ -6,15 +6,28 @@
  * tests/fixtures/flashcard-transcript.json is a conversation the applet had
  * under jCardSim: every command it was sent and what it answered. It is the
  * card that signs once for a payment (format 4), has 128 places, burns a
- * payment of any number of pieces and takes its PIN sealed (1.9). The others
- * are the same of the cards before it: -18 (no sealed PIN), -17 (its pieces
+ * payment of any number of pieces, takes its PIN sealed and makes its own
+ * change (1.12). The others are the same of the cards before it: -111 (before
+ * it made its own change), -110 (before its signing was made quicker), -19
+ * (before the design was in its record), -18 (no sealed PIN), -17 (its pieces
  * burned inside the payment's transaction), -16 (sixty-four places), and -3,
- * which signs for each piece (format 3). The model is held to all five. The model in
+ * which signs for each piece (format 3). The model is held to all eight. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
  * the answer is a key or a signature, which is another card's to differ in
  * and is verified instead.
+ *
+ * The change the card makes for itself (SPEND_ALL_CHANGE) is made of a nonce
+ * and a blinding factor the card draws. A recording that kept them has them in
+ * the entry (`nonce`, `r`), and the model is given them before the command, so
+ * that the opening it keeps is the applet's. The point it answers is made from
+ * a secret that names the card's key, which is another card's to differ in, so
+ * it is verified and not compared: the applet's is held to the wallet's own
+ * secret for the key the recording's card had, hashed to the curve and blinded
+ * with that r, and the model's to the same for its own key. A recording that
+ * could not read them (a payment given up first) is a `point`, which the model
+ * answers with its own and is held to the shape of: a compressed point.
  */
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +47,8 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 async function replay(T, format, places, software) {
   const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
+  // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
+  const recorded = (T.find((x) => x.kind === 'key') || {}).data;
   // a payment being put to a one-signature card: its places and its outputs, as the commands gave them
   let pay = null;
   // what the model last gave for sealing a PIN: the recording's sixteen bytes (the model is given them) and the model's own PIN key
@@ -42,6 +57,8 @@ async function replay(T, format, places, software) {
     // the card taken out of the field and put back: nothing is sent, and the model is tapped anew
     if (e.kind === 'reset') { card.tap(); pay = null; sealKey = null; continue; }
     const ins = e.apdu.substr(2, 2);
+    // the command's data, where it has any
+    const lc = parseInt(e.apdu.substr(8, 2), 16) || 0, body = e.apdu.substr(10, lc * 2);
     /* A sealed command is sealed again here, by the WALLET's own sealing, to the model's PIN key: the recording's
      * envelope was for the applet's key, which is another card's. What was sealed is in the entry (`clear`), with how
      * it was spoiled on its way, if it was, and the instruction it was sealed for where that was not its own. */
@@ -56,19 +73,39 @@ async function replay(T, format, places, software) {
       apdu = e.apdu.substr(0, 8) + ('0' + (env.length / 2).toString(16)).slice(-2) + env;
       ok(apdu.length === e.apdu.length || apdu.length + 2 === e.apdu.length, e.name + ': an envelope of the recording’s length', apdu.length / 2 + ' bytes, the recording ' + e.apdu.length / 2);
     }
+    // the change the card made for itself was made of these, which the card drew and the recording kept
+    if (e.nonce !== undefined && e.r !== undefined) card.setChange(e.nonce, e.r);
     const got = await card.send(apdu);
     const sw = got.slice(-4), data = got.slice(0, -4);
     ok(sw === e.sw, e.name + ': the status word', 'the card ' + e.sw + ', the model ' + sw);
     if (sw !== e.sw) continue;
     if (format === 4 && e.apdu.slice(0, 2) === 'b0') {
-      const lc = parseInt(e.apdu.substr(8, 2), 16) || 0, body = e.apdu.substr(10, lc * 2);
       if (ins === '22') pay = sw === '9000' ? { slots: (body.match(/../g) || []).map((h) => parseInt(h, 16)), outs: '' } : null;
       else if (ins === '23') { if (pay && sw === '9000') { for (let at = 0; at < body.length; at += 74) pay.outs += String(parseInt(body.substr(at, 8), 16)) + body.substr(at + 8, 66); } else pay = null; }
+      // the card's own change comes after the terminal's outputs, in the message as the swap will name them: its amount and the point it answered
+      else if (ins === '26') { if (pay && sw === '9000') pay.outs += String(parseInt(body.substr(0, 8), 16)) + data; else pay = null; }
       else if (ins !== '24') pay = null;
     }
-    if (e.kind === 'exact' || e.kind === 'sealed') {
+    if (e.nonce !== undefined && e.r !== undefined && ins === '26' && sw === '9000') {
+      /* A change output the card made for itself, from the nonce and blinding factor the recording kept. The secret it is
+       * made from names the card's key, which is another card's to differ in, so the answer is not compared to the byte: it
+       * is held to the WALLET's own secret for the key the recording's card had, which is the applet's answer; and the model's
+       * to the same for its own key. The opening the model keeps is the one asked for. */
+      const first = card.state.slots[pay ? pay.slots[0] : 0], parts = W.cardParse.slot('02' + first.data);
+      const blindedFor = (key) => CT.blindMessage(ctx.window.Uint8Array.from(Buffer.from(W.cardSecret(e.nonce, key, parts.date, card.state.record.refund, 4), 'utf8')), BigInt('0x' + e.r)).B_.toHex(true);
+      ok(!!recorded && e.data === blindedFor(recorded), e.name + ': the applet’s answer is the wallet’s secret for its key, hashed to the curve, plus r times G', e.data.slice(0, 20));
+      ok(data === blindedFor(card.key), e.name + ': and the model’s is the same for its own key', data.slice(0, 20));
+      const amount = parseInt(body.substr(0, 8), 16);
+      ok(card.state.openings.some((x) => x.state === 'draft' && x.nonce === e.nonce && x.r === e.r && x.amount === amount && x.date === parts.date && x.keyset === first.data.substr(0, 16)),
+         e.name + ': the opening kept is the nonce and r, with the payment’s amount, keyset and date');
+      verified += 1;
+    } else if (e.kind === 'exact' || e.kind === 'sealed') {
       ok(data === e.data, e.name + ': the answer', 'the card ' + e.data.slice(0, 60) + ', the model ' + data.slice(0, 60));
       exact += 1;
+    } else if (e.kind === 'point') {
+      // a change output whose nonce and blinding factor the recording could not read: the model drew its own, so the answer is held to what it is
+      ok(e.sw === '9000' && sw === '9000' && /^0[23][0-9a-f]{64}$/.test(data) && /^0[23][0-9a-f]{64}$/.test(e.data), e.name + ': a compressed point (33 bytes, 02 or 03 first)', data.slice(0, 20));
+      verified += 1;
     } else if (e.kind === 'pinkey') {
       /* Sixteen bytes, the key a PIN is sealed to, and the card key's signature over that key. The key is the model's
        * own, and is held to what the recording's is: a compressed point that is not the key the card signs with, signed
@@ -143,6 +180,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const quicker = await replay(read('flashcard-transcript-111.json'), 4, undefined, 11);
   const designed = await replay(read('flashcard-transcript-110.json'), 4, undefined, 10);
   const sealed = await replay(read('flashcard-transcript-19.json'), 4, undefined, 9);
   // the cards before it: 1.8 (no sealed PIN), 1.7 (its pieces burned inside the payment's transaction), and 1.6 (sixty-four places)
@@ -150,7 +188,7 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, designed, sealed, plain, wide, narrow, before];
+  const all = [now, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

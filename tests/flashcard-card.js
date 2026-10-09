@@ -13,6 +13,7 @@
  *     card.tap();                                // the card leaves and comes back
  *     card.leaveAfter(2);                        // it leaves the field two commands from now
  *     card.setNonce(hex)                         // the nonce it last gave is this one (replaying a recording of the applet)
+ *     card.setChange(nonceHex, rHex)             // the next change it makes for itself has this nonce and this blinding factor (same)
  *
  * Not a card: no EEPROM, no torn writes inside a command, and it signs in
  * microseconds. What it has in common is every rule the applet enforces.
@@ -26,6 +27,8 @@ const DAY = 86400;
 // how long a tap is, to the card, for the limit on one tap (the applet's TAP_SECONDS)
 const TAP = 10;
 const MINT_MAX = 80;
+// the order of secp256k1: a blinding factor is under it and not zero
+const CURVE_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
 const ascii = (t) => Buffer.from(t, 'ascii');
 const hex = (bytes) => Buffer.from(bytes).toString('hex');
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
@@ -42,9 +45,9 @@ function makeCard(opts) {
   const FORMAT = o.format === 4 ? 4 : 3;
   /* The card of format 4 is also the one whose second limit is not a ten-second window that refuses (the card of format
    * 3 keeps that, as the applet it models did) but the limit on ONE PAYMENT, with no clock: a payment over it is not
-   * refused, it waits. Every limit's worth past the first costs WAIT_SIGNS signatures of the card's work, each asked for
-   * by a SPEND_ALL_SIGN that answers two bytes (how many are still to come) in place of the signature. Nothing is
-   * counted or remembered from one payment to the next. */
+   * refused, it waits. A limit's worth costs WAIT_SIGNS signatures of the card's work, each asked for by a SPEND_ALL_SIGN
+   * that answers "not yet" (00 01) in place of the signature: before 1.12 every limit's worth past the first, and from 1.12
+   * every one of what leaves the card (`waitsFor`). Nothing is counted or remembered from one payment to the next. */
   /* And how many places it has. The card of format 4 has 128 (1.7), for a deep drawer of small pieces: a place's number
    * is seven bits of a listing's tag, and its short listing is P2 = 3, two bytes a piece. `places: 64` is the card before
    * it (1.6): sixty-four places, six-bit tags, and the brief listing (P2 = 1). */
@@ -61,11 +64,17 @@ function makeCard(opts) {
    * sixteen bytes of the card's that are good once. `software: 8` is the card before that. */
   const SEALED = MANY && o.software !== 8;
   /* `software: 9` is the card before the design was in its record: three bytes after the mint (1.10). `software: 10` is
-   * that card before its signing was made quicker (1.11), which changed nothing on the wire but the version it says. */
+   * that card before its signing was made quicker (1.11), which changed nothing on the wire but the version it says.
+   * `software: 11` is that card before it made its own change (1.12): it knows neither SPEND_ALL_CHANGE nor GET_CHANGE, holds
+   * the day's limit to the pieces whole as a payment begins, and works the wait out there. */
   const DESIGN = SEALED && o.software !== 9;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? 12 : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
+  // the change a payment makes for itself (1.12): eight openings are kept, and GET_CHANGE says three to a page
+  const CHANGE_MOST = 8;
+  const CHANGE_PAGE = 3;
   /* And it is the card made quicker to hold (1.6): GET_PIECES has a brief form (P2 = 1: sixteen bytes a place, to choose
    * from) and a form that gives named places whole (P2 = 2), and LOAD_PROOF takes up to three pieces end to end. What it
    * signs and stores is the same. */
@@ -93,6 +102,11 @@ function makeCard(opts) {
     timeTold: false, timeMarked: false, timeFirst: 0,
     tapOpen: false,
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
+    /* The openings of the change the card has made for itself (1.12), kept from the moment it is made until the piece is
+     * written back: { state, amount, keyset (16 hex), date, nonce (64 hex), r (64 hex) }. A state is 'empty', 'draft' (made
+     * for a payment not yet signed for: let go at the next SPEND_ALL_BEGIN) or 'pending' (signed for; the piece is to come
+     * back). They last as long as the card does, and a tap or a SELECT leaves them. */
+    openings: Array.from({ length: CHANGE_MOST }, () => ({ state: 'empty' })),
     // the owner's public key (hex, 04 || X || Y), given to a card with none or by the owner's proof, and never read out
     owner: null,
     // that the card has paid since it was last tapped (permanent): the next tap may put pieces on with no PIN, for the change
@@ -104,16 +118,31 @@ function makeCard(opts) {
   let leaveIn = -1, gone = false;
   let leaveAt = null;        // { ins, nth }: gone when the nth command of that instruction arrives
   let loseAt = null;         // { ins, nth }: the nth command of that instruction is carried out, and its answer is lost
+  let nextChange = null;     // { nonce, r } (hex): what the next change the card makes is made of, where a test says (`setChange`)
   const sent = [];
 
   const amountOf = (slot) => parseInt(slot.data.substr(16, 8), 16);
   const dateOf = (slot) => parseInt(slot.data.substr(154, 8), 16);
-  const secretOf = (slot) => {
-    let text = '["P2PK",{"nonce":"' + slot.data.substr(24, 64) + '","data":"' + pub + '","tags":[';
-    if (dateOf(slot)) text += '["locktime","' + dateOf(slot) + '"],["refund","' + s.record.refund + '"]' + (FORMAT === 4 ? ',' : '');
+  // the NUT-10 secret of a piece with this nonce (hex) and this date, as the card writes every piece's (the applet's `secretTail`)
+  const secretFor = (nonce, date) => {
+    let text = '["P2PK",{"nonce":"' + nonce + '","data":"' + pub + '","tags":[';
+    if (date) text += '["locktime","' + date + '"],["refund","' + s.record.refund + '"]' + (FORMAT === 4 ? ',' : '');
     // format 4: the flag is every piece's last tag, as the wallet's library writes it
     return text + (FORMAT === 4 ? '["sigflag","SIG_ALL"]' : '') + ']}]';
   };
+  const secretOf = (slot) => secretFor(slot.data.substr(24, 64), dateOf(slot));
+  /* The blinded message of a change output, as the mint will read it (NUT-00): the secret hashed to the curve, and r times
+   * the generator added to that point. Compressed, as hex. */
+  const blinded = (secret, rHex) => CT.blindMessage(own(Buffer.from(secret, 'utf8')), BigInt('0x' + rHex)).B_.toHex(true);
+  // a blinding factor: 32 bytes, under the curve's order and not zero
+  const freshR = () => {
+    for (;;) {
+      const r = BigInt('0x' + crypto.randomBytes(32).toString('hex')) % CURVE_N;
+      if (r !== 0n) return r.toString(16).padStart(64, '0');
+    }
+  };
+  // an opening whose nonce is this one is let go: its piece is on the card
+  const letGo = (nonce) => s.openings.forEach((x, k) => { if (x.state !== 'empty' && x.nonce === nonce) s.openings[k] = { state: 'empty' }; });
   const sign = (digest) => {
     const sig = CT.schnorrSignDigest(own(digest), own(Buffer.from(priv, 'hex')));
     return typeof sig === 'string' ? sig : hex(sig);
@@ -202,11 +231,19 @@ function makeCard(opts) {
     }
     return '';
   };
-  /* What a payment of `total` costs in time: the signatures of work before it is signed. */
-  const waitsFor = (total, carry) => {
+  /* What a payment costs in time: the signatures of work before it is signed, WAIT_SIGNS to a unit and at most 255 units.
+   * `sum` is what its pieces come to, and `carry` is that they wrapped. Before 1.12 the first limit's worth was free:
+   * (ceil(sum / limit) - 1) units. From 1.12 `sum` is what leaves the card (the pieces less the change it made for itself)
+   * and `change` is that it made some: every whole limit's worth is a unit, and so is what is left over one, and so is a
+   * payment within the limit that makes change. A payment within the limit that makes none goes at once. */
+  const waitsFor = (sum, carry, change) => {
     if (s.tapLimit === 0) return 0;
     if (carry) return 255 * WAIT_SIGNS;
-    return Math.min(255, Math.max(0, Math.ceil(total / s.tapLimit) - 1)) * WAIT_SIGNS;
+    if (!OWN_CHANGE) return Math.min(255, Math.max(0, Math.ceil(sum / s.tapLimit) - 1)) * WAIT_SIGNS;
+    let left = sum, units = 0;
+    while (units < 255 && left > s.tapLimit) { left -= s.tapLimit; units += 1; }
+    if (units < 255 && (change || (units > 0 && left !== 0))) units += 1;
+    return units * WAIT_SIGNS;
   };
   /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
    * the tap's, and there a limit whose number does not change keeps its window and its count. A limit needs a time. */
@@ -248,8 +285,8 @@ function makeCard(opts) {
     }
     if (!s.selected) return '6999';
     if (cla !== 0xb0) return '6e00';
-    // a payment begun (SPEND_ALL_BEGIN) is given up by anything that is not its next step
-    if (ins !== 0x23 && ins !== 0x24) s.all = null;
+    // a payment begun (SPEND_ALL_BEGIN) is given up by anything that is not its next step: the outputs, the card's own change, the signature
+    if (ins !== 0x23 && ins !== 0x24 && !(OWN_CHANGE && ins === 0x26)) s.all = null;
     const gated = () => s.pinState !== 0 && !s.verified;            // requirePinIfSet
     const mayWrite = () => s.pinState === 1 && s.verified;           // requirePinSetAndVerified
     const mayLoad = () => s.pinState === 1 && (s.verified || s.grant || s.changeGrant);   // requireLoadAuthority
@@ -366,9 +403,28 @@ function makeCard(opts) {
         }
         return two(next) + body + '9000';
       }
+      case 0x19: {
+        /* GET_CHANGE (1.12): the change the card has made for itself and not yet been handed, three openings to a page (P1 =
+         * the page, from 0): a count, then for each the amount (4), the keyset (8), the date (4), the nonce (32) and the
+         * blinding factor (32). Only pending openings are listed, never drafts. An opening whose piece is on the card by
+         * now, in any place and spent or not, is let go as it is come to and is not listed; it comes to no more of them
+         * than the page it fills. No PIN, and like any command but the payment's own steps, it gives a payment up. */
+        if (!OWN_CHANGE) return '6d00';
+        const held = (nonce) => s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce);
+        let skip = p1 * CHANGE_PAGE, n = 0, said = '';
+        for (let k = 0; k < CHANGE_MOST && n < CHANGE_PAGE; k++) {
+          const x = s.openings[k];
+          if (x.state !== 'pending') continue;
+          if (held(x.nonce)) { s.openings[k] = { state: 'empty' }; continue; }
+          if (skip > 0) { skip -= 1; continue; }
+          said += u32(x.amount) + x.keyset + u32(x.date) + x.nonce + x.r;
+          n += 1;
+        }
+        return ('0' + n.toString(16)).slice(-2) + said + '9000';
+      }
       case 0x22: {
-        // SPEND_ALL_BEGIN: the places a payment is made of, in order. Each once, unspent, all of one date; the limits
-        // are held to what they are worth together. Answers that worth.
+        // SPEND_ALL_BEGIN: the places a payment is made of, in order. Each once, unspent, all of one date. Answers what
+        // they are worth together. The limits are held to that, here (before 1.12), or to what leaves the card, at the signing.
         if (FORMAT !== 4) return '6d00';
         if (gated()) return '6982';
         if (data.length < 1) return '6700';
@@ -387,50 +443,96 @@ function makeCard(opts) {
         }
         const carry = sum > 4294967295;
         const total = carry ? 4294967295 : sum;
-        const no = overLimits(total, carry);
+        /* From 1.12 the day's limit and the wait are held to what leaves the card for good, the pieces less the change it
+         * makes for itself, which is not known until the signing, where both are worked out (`waits` null until then). A sum
+         * that wraps is past any day there is, whatever its change, and is refused here if a day's limit is set. */
+        const no = (!OWN_CHANGE || carry) ? overLimits(total, carry) : '';
         if (no) return no;
+        // change made for a payment that was never signed for is let go
+        s.openings.forEach((x, k) => { if (x.state === 'draft') s.openings[k] = { state: 'empty' }; });
         // the pieces' half of the message is the card's own to build: each one's secret, and its C in hex
-        const waits = waitsFor(total, carry);
-        s.all = { list, total, waits, waited: waits > 0, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
+        const waits = OWN_CHANGE ? null : waitsFor(total, carry, false);
+        s.all = { list, total, carry, waits, waited: waits > 0, change: 0, changes: 0, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
         return u32(total) + '9000';
       }
       case 0x23: {
         // SPEND_ALL_OUTPUTS: the swap's outputs, 37 bytes each (amount 4, blinded message 33), hashed as the mint reads them
         if (FORMAT !== 4) return '6d00';
         if (!s.all) return '6985';
+        // the terminal's outputs come before the card's own change, as the swap will name them: none after it
+        if (s.all.changes > 0) { s.all = null; return '6985'; }
         if (data.length < 37 || data.length % 37 !== 0) { s.all = null; return '6700'; }
         if (!s.all.out) s.all.out = hex(data.subarray(4, 37));
         for (let at = 0; at < data.length; at += 37) s.all.text += String(data.readUInt32BE(at)) + hex(data.subarray(at + 4, at + 37));
         return '9000';
+      }
+      case 0x26: {
+        /* SPEND_ALL_CHANGE (1.12): one change output the card makes for itself, after the terminal's outputs and before the
+         * signature. The amount (4) is all a terminal names: the card draws the nonce and the blinding factor, writes the
+         * secret as it writes its pieces' (its key, the payment's date and refund key, SIG_ALL), hashes it to the curve and
+         * blinds it, so that nothing a terminal chooses can take the change. The amount and the blinded message go into the
+         * message as an output of the terminal's would, and the opening is kept until the piece is written back. Answers the
+         * blinded message. Every refusal after a payment is begun gives the payment up. */
+        if (!OWN_CHANGE) return '6d00';
+        if (!s.all) return '6985';
+        if (data.length !== 4) { s.all = null; return '6700'; }
+        const amount = data.readUInt32BE(0);
+        // the change, with this, may not come to more than the pieces: what leaves the card cannot be less than nothing
+        const made = s.all.change + amount;
+        if (amount === 0 || made > 4294967295 || made > s.all.total) { s.all = null; return '6a80'; }
+        const which = s.openings.findIndex((x) => x.state === 'empty');
+        if (which < 0) { s.all = null; return '6a84'; }
+        // the opening's keyset and date are the payment's, as every piece of it has them
+        const first = s.slots[s.all.list[0]];
+        const own = nextChange || { nonce: crypto.randomBytes(32).toString('hex'), r: freshR() };
+        nextChange = null;
+        const point = blinded(secretFor(own.nonce, dateOf(first)), own.r);
+        s.openings[which] = { state: 'draft', amount, keyset: first.data.substr(0, 16), date: dateOf(first), nonce: own.nonce, r: own.r };
+        s.all.change = made;
+        s.all.changes += 1;
+        s.all.text += String(amount) + point;
+        return point + '9000';
       }
       case 0x24: {
         // SPEND_ALL_SIGN: one signature over the whole message; every piece named is burned as it is given
         if (FORMAT !== 4) return '6d00';
         if (!s.all) return '6985';
         if (gated()) return '6982';
+        const pay = s.all;
+        // what leaves the card for good: the pieces less the change it made for itself (the pieces whole, before 1.12)
+        const net = pay.total - pay.change;
+        if (pay.waits === null) {
+          /* 1.12: the day's limit and the wait are held to it, and worked out at the first command, when the change is
+           * known. Refused (over the day, or for want of a time), the payment is given up. */
+          const refused = overLimits(net, false);
+          if (refused) { s.all = null; return refused; }
+          pay.waits = waitsFor(net, pay.carry, pay.changes > 0);
+          pay.waited = pay.waits > 0;
+        }
         // the wait: one signature of work to a command, and how many are still to come in place of the signature
-        if (s.all.waits > 0) {
-          s.all.waits -= 1;
+        if (pay.waits > 0) {
+          pay.waits -= 1;
           s.waited = (s.waited || 0) + 1;
           // "not yet", and not how many are to come: the count would say what the limit is
           return '0001' + '9000';
         }
-        const pay = s.all;
         s.all = null;
-        const no = overLimits(pay.total, false);
+        const no = overLimits(net, false);
         if (no) return no;
         // a chip whose transaction is full (a card before 1.8, where a test says how much it holds): refused, nothing burned
         if (BURN_MOST && !MANY && pay.list.length > BURN_MOST) return '6a96';
         const dayBegins = s.record.limit !== 0 && s.now >= s.windowStart + DAY;
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
-        if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + pay.total; if (dayBegins) s.windowStart = s.now; }
+        if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + net; if (dayBegins) s.windowStart = s.now; }
         pay.list.forEach((i) => { s.slots[i].status = 2; });
+        // the change the card made for itself is signed for now: its openings stay until the pieces are back
+        s.openings.forEach((x) => { if (x.state === 'draft') x.state = 'pending'; });
         s.changeDue = true;
-        { const e = logEntry(); e.sats = stop(e.sats + pay.total); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + pay.total);
+        { const e = logEntry(); e.sats = stop(e.sats + net); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + net);
           if (pay.waited) e.flags |= 2; }
-        // its receipt: when, how much, the hash of what was signed, and where the first of it went
+        // its receipt: when, how much leaves the card, the hash of what was signed, and where the first of it went
         if (QUICK) {
-          s.receipts.ring[s.receipts.count & 15] = { time: s.now, sats: pay.total, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
+          s.receipts.ring[s.receipts.count & 15] = { time: s.now, sats: net, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
           s.receipts.count = stop(s.receipts.count + 1);
         }
         // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
@@ -498,6 +600,8 @@ function makeCard(opts) {
           const nonce = hex(piece.subarray(12, 44));
           if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
           s.slots[at] = { status: 1, data: hex(piece) };
+          // change the card made for itself, back on the card: its opening is let go (1.12)
+          letGo(nonce);
           // a load the change grant alone allowed spends the note now, not at SELECT: the change is going on
           if (!s.verified && !s.grant) s.changeDue = false;
           return at;
@@ -728,13 +832,21 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION === 10 ? 10 : undefined), burnMost: BURN_MOST });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION === 10 || VERSION === 11) ? VERSION : undefined, burnMost: BURN_MOST });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */
     leaveAfter(n) { leaveIn = n; },
     setNonce(nonceHex) { s.nonce = String(nonceHex).toLowerCase(); },
+    /* The next change the card makes for itself has this nonce and this blinding factor (32 bytes each, as hex; r under the
+     * curve's order and not zero) in place of random ones: what a recording of the applet needs, which draws them itself. */
+    setChange(nonceHex, rHex) {
+      const nonce = String(nonceHex).toLowerCase(), r = String(rHex).toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(nonce) || !/^[0-9a-f]{64}$/.test(r)) throw new Error('a change is made of a nonce and a blinding factor of 32 bytes each');
+      if (BigInt('0x' + r) === 0n || BigInt('0x' + r) >= CURVE_N) throw new Error('a blinding factor is under the curve’s order and not zero');
+      nextChange = { nonce, r };
+    },
     secretOf: (i) => secretOf(s.slots[i]),
     format: FORMAT,
     balance: () => s.slots.reduce((a, x) => (x.status === 1 ? a + amountOf(x) : a), 0),
