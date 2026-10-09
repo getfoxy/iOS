@@ -9809,10 +9809,17 @@
       try { console.log('[foxy] card: read in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (e) {}
       return c;
     };
+    /* Within one tap the card is told the time once, and its key is asked for
+     * once: a second read in the same tap (a write's look after it, say) has
+     * both from the first (`link.one`, which a sheet of the phone has and
+     * nothing else does, and which a re-tap empties: a card that has left the
+     * field has not been told this time it is powered up). */
+    var one = (link && link.one) || null;
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
       mark('chosen');
-      return o.noTime ? 0 : cardTold(t);
+      if (o.noTime || (one && one.told)) return 0;
+      return cardTold(t).then(function (x) { if (one) one.told = true; return x; });
     }).then(function () {
       mark('time');
       // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
@@ -9821,10 +9828,12 @@
       card.info = cardInfoOf(d);
       if (card.info.format !== CARD_FORMAT && card.info.format !== CARD_FORMAT_ALL) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
       mark('what it is');
+      if (one && one.key) return one.key;
       return t.want(cardCommand(CARD_INS.key, 0, '', 0), 'to give its key');
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      if (one) one.key = d;
       mark('key');
       if (link && link.one && link.one.proved === card.key) { card.proved = true; return null; }
       if (o.noAuth) return null;
@@ -10426,7 +10435,8 @@
     });
     var tell = function (info) { try { if (typeof progress === 'function') progress(info); } catch (e) {} };
     var done = [], left = [], sats = 0, back = 0, change = 0, refund = 0, stopped = null, misfit = null;
-    var walk = t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
+    // its used places freed first, where it has any: a card with none is not asked
+    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
       // a locked card frees nothing, and may still have room
       if (!(e && e.card === 'locked')) throw e;
     });
@@ -21923,7 +21933,8 @@
       }
       var t = cardTalk(link);
       var card, ownerPub;
-      return cardLook(link).then(function (c) {
+      // read the short way: what is on the card is no part of setting it up
+      return cardLook(link, { short: true }).then(function (c) {
         card = c;
         if (card.info.locked) throw cardRefused('6986');
         /* A card with an owner is not open, set up or not: it is its owner's, and
@@ -21961,7 +21972,8 @@
       var newPin;
       try { newPin = cardPinHex(o.newPin); } catch (e) { return Promise.reject(e); }
       var t = cardTalk(link);
-      return cardLook(link).then(function (card) {
+      // read the short way: a PIN changes, and what is on the card is not looked at
+      return cardLook(link, { short: true }).then(function (card) {
         // said before anything is signed: nothing here can change a card that has no owner
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
@@ -21986,7 +21998,8 @@
       if (!(sats >= 0 && sats <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
       var t = cardTalk(link);
       var key;
-      return cardLook(link).then(function (card) {
+      // read the short way: a limit is set, and what is on the card is not looked at
+      return cardLook(link, { short: true }).then(function (card) {
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
         key = card.key;
@@ -22004,7 +22017,8 @@
          * read below would act on it: a card told NO LIMIT on purpose would be
          * given the old limit back in the same tap. */
         cardLiftNote(key, 0);
-        return cardLook(link, { mine: true });
+        // as its owner, for the screen: short, since nothing of what is on the card has changed
+        return cardLook(link, { mine: true, short: true });
       });
     },
 
@@ -22229,7 +22243,10 @@
        * of 128 places the short way, before and after: it wants what the card
        * comes to and nothing else of what is on it. Its owner's phone reads
        * it whole, as it always has. */
-      var how = o.owner ? undefined : { short: true };
+      /* Its owner's phone too, now: what it writes it writes down itself
+       * (`cardWriteOwed`), and what else is on the card it reads whole on
+       * the card's own screen, which is where the bookkeeping is. */
+      var how = { short: true };
       return cardLook(link, how).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
         if (o.owner && !card.info.owner) throw cardRefused('6a90');
@@ -22247,7 +22264,8 @@
         }).then(function () { return cardWriteOwed(t, card, o.progress); });
       }).then(function (r) {
         wrote = r;
-        return cardLook(link, o.owner ? { mine: true } : { short: true });
+        // after the write, what the card comes to: the short way for an owner as for a till
+        return cardLook(link, o.owner ? { mine: true, short: true } : { short: true });
       }).then(function (card) {
         // a short read lists no nonces, and says nothing of which pieces have left the card
         if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
@@ -22261,7 +22279,8 @@
     cardAdd: function (link, opts) {
       var o = opts || {};
       if (!o.owner) { try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
-      return cardLook(link).then(function (card) {
+      // the short way: the cut needs the sizes of what is on the card and its room, not the pieces themselves
+      return cardLook(link, { short: true }).then(function (card) {
         return FoxyWallet.cardPrepare(card, o.sats);
       }).then(function () {
         return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin });
@@ -22332,7 +22351,8 @@
       try { w = need(); } catch (e2) { return Promise.reject(e2); }
       var here = mintOf(w);
       var t = cardTalk(link);
-      return cardLook(link).then(function (card) {
+      // read the short way: whether it holds anything is all that is asked of what is on it
+      return cardLook(link, { short: true }).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
         if (card.info.pin !== 'set' || !card.info.hasRecord) throw cardError('no-record', 'Set this card up first.');
         if (canonicalMint(card.record.mint) === here) return null;
@@ -22435,6 +22455,8 @@
       var w;
       try { w = need(); } catch (e) { return Promise.reject(e); }
       if (!card || !card.pieces || !card.pieces.length) return Promise.resolve({ sats: 0, spent: 0 });
+      // a short read lists sizes and no nonces: there is nothing to ask the mint about
+      if (card.bare) return Promise.resolve({ sats: card.balance, spent: 0, at: 0, unchecked: true });
       if (canonicalMint(card.record.mint) !== mintOf(w)) {
         return Promise.reject(cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '.', { mint: canonicalMint(card.record.mint) }));
       }
@@ -22614,7 +22636,10 @@
          * `unsupported` from a phone whose native side has no such step. */
         again: function (line) {
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
-          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {}, function (e) {
+          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {
+            // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
+            link.one.told = false; link.one.key = '';
+          }, function (e) {
             var x = cardError('cancelled', 'The card was not tapped.');
             x.unsupported = /unknown action/i.test(String((e && e.message) || ''));
             throw x;

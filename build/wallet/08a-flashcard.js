@@ -1009,10 +1009,17 @@
       try { console.log('[foxy] card: read in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (e) {}
       return c;
     };
+    /* Within one tap the card is told the time once, and its key is asked for
+     * once: a second read in the same tap (a write's look after it, say) has
+     * both from the first (`link.one`, which a sheet of the phone has and
+     * nothing else does, and which a re-tap empties: a card that has left the
+     * field has not been told this time it is powered up). */
+    var one = (link && link.one) || null;
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
       mark('chosen');
-      return o.noTime ? 0 : cardTold(t);
+      if (o.noTime || (one && one.told)) return 0;
+      return cardTold(t).then(function (x) { if (one) one.told = true; return x; });
     }).then(function () {
       mark('time');
       // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
@@ -1021,10 +1028,12 @@
       card.info = cardInfoOf(d);
       if (card.info.format !== CARD_FORMAT && card.info.format !== CARD_FORMAT_ALL) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
       mark('what it is');
+      if (one && one.key) return one.key;
       return t.want(cardCommand(CARD_INS.key, 0, '', 0), 'to give its key');
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      if (one) one.key = d;
       mark('key');
       if (link && link.one && link.one.proved === card.key) { card.proved = true; return null; }
       if (o.noAuth) return null;
@@ -1626,7 +1635,8 @@
     });
     var tell = function (info) { try { if (typeof progress === 'function') progress(info); } catch (e) {} };
     var done = [], left = [], sats = 0, back = 0, change = 0, refund = 0, stopped = null, misfit = null;
-    var walk = t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
+    // its used places freed first, where it has any: a card with none is not asked
+    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
       // a locked card frees nothing, and may still have room
       if (!(e && e.card === 'locked')) throw e;
     });

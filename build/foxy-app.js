@@ -19327,6 +19327,11 @@ class Component extends DCLogic {
    * is something only the mint knows. */
   fcCheck(card) {
     const W = this.fcW();
+    /* A card read the short way (after a write or a limit set, say) lists no
+     * nonces, so there is nothing to put to the mint: what the screen says of
+     * the mint's word is what the card's own screen found when it was opened,
+     * reading the card whole, and it stands. */
+    if (card.bare) return;
     /* With the mint's word goes when it was given: now, or, where the mint
      * could not be asked, when this phone last had it for these same pieces
      * (`cardCheckedAt`). The screen says that under its title. */
