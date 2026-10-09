@@ -846,8 +846,10 @@ taps once as the screen opens. Dragging the sheet down does not close it.
    words with the written copy.
 3. From Control Center start a screen recording, come back to Foxy for a few
    seconds, stop it.
-4. Tap VERIFY WORDS. Tap a word that is not the first, then the twelve in order,
-   then DONE.
+4. Tap VERIFY WORDS. Tap a word that is not the first, then the back button at
+   the top: the words are shown again (not Foxy's own screen). Tap VERIFY WORDS
+   again, then the twelve in order, then DONE. From the words, the back button
+   leaves the screen.
 
 **Pass:** step 2 shows THAT SCREENSHOT SHOWS YOUR SEED over the screen, and the
 words match. In step 3 the words are hidden, not blurred: "Hidden while the

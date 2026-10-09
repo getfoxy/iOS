@@ -238,6 +238,44 @@ final class SeedScreenTests: XCTestCase {
         }
     }
 
+    /// Back from the quiz goes to the words, not out of the screen; back from
+    /// the words leaves, as it always did.
+    func testBackFromTheQuizIsBackToTheWords() {
+        let list = words("absurd gravity pelican kitchen orbit ribbon marble tunnel velvet sponsor dawn hazard")
+        for startOnQuiz in [false, true] {
+            var answers = 0
+            let screen = SeedShowController(words: list, startOnQuiz: startOnQuiz) { _, _, _ in answers += 1 }
+            screen.loadViewIfNeeded()
+            let drawn = { self.texts(in: screen.view).joined(separator: " ") }
+            if !startOnQuiz {
+                XCTAssertTrue(drawn().contains("YOUR SEED PHRASE"))
+                let verify = self.buttons(in: screen.view).first { ($0.attributedTitle(for: .normal)?.string ?? $0.title(for: .normal) ?? "").contains("VERIFY WORDS") }
+                XCTAssertNotNil(verify, "the words have VERIFY WORDS under them")
+                verify?.sendActions(for: .touchUpInside)
+            }
+            XCTAssertTrue(drawn().contains("Tap the twelve words back in order."), "the quiz, startOnQuiz: \(startOnQuiz)")
+            XCTAssertFalse(drawn().contains("YOUR SEED PHRASE"))
+
+            screen.backTapped()
+            XCTAssertTrue(drawn().contains("YOUR SEED PHRASE"), "back from the quiz shows the words, startOnQuiz: \(startOnQuiz)")
+            XCTAssertFalse(drawn().contains("Tap the twelve words back in order."))
+            XCTAssertEqual(answers, 0, "and the screen has not been left")
+
+            // and from the words, back leaves: the screen answers, once
+            screen.backTapped()
+            XCTAssertEqual(answers, 1, "back from the words leaves the screen, startOnQuiz: \(startOnQuiz)")
+            screen.backTapped()
+            XCTAssertEqual(answers, 1, "and only once")
+        }
+    }
+
+    private func buttons(in view: UIView) -> [UIButton] {
+        var out: [UIButton] = []
+        if let button = view as? UIButton { out.append(button) }
+        for sub in view.subviews { out += buttons(in: sub) }
+        return out
+    }
+
     private func texts(in view: UIView) -> [String] {
         var out: [String] = []
         if let label = view as? UILabel {

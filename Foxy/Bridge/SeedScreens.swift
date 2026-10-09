@@ -710,7 +710,7 @@ class SeedScreenController: UIViewController {
     /// pinned below the column, above `floor` (the safe area unless given).
     func column(in container: UIView, bottom: UIView?, floor: NSLayoutYAxisAnchor? = nil) -> UIStackView {
         let back = SeedStyle.backButton()
-        back.addAction(UIAction { [weak self] _ in self?.close(animated: true) }, for: .touchUpInside)
+        back.addAction(UIAction { [weak self] _ in self?.backTapped() }, for: .touchUpInside)
         let scroll = UIScrollView()
         scroll.indicatorStyle = .white
         scroll.keyboardDismissMode = .interactive
@@ -806,6 +806,12 @@ class SeedScreenController: UIViewController {
 
     // MARK: Leaving
 
+    /// The back button. It leaves the screen, unless a screen has somewhere of
+    /// its own to go back to first.
+    func backTapped() {
+        close(animated: true)
+    }
+
     /// Closed without finishing: the back button, Foxy going to the background,
     /// or the page going. Each screen gives its own answer for that.
     func close(animated: Bool = false) {
@@ -876,6 +882,19 @@ final class SeedShowController: SeedScreenController {
         let deleteAsked = deleteAsked
         let revealed = revealed
         finish(animated: animated) { [answer] in answer(verified, deleteAsked, revealed) }
+    }
+
+    /// Back from the quiz is back to the words. Somebody who has tapped a wrong
+    /// word wants to look at them again, and the back button used to close the
+    /// whole screen and leave them at Foxy's own. What has been tapped in
+    /// order so far is kept for when they return. From the words, and from
+    /// BACKED UP, back leaves as it always did.
+    override func backTapped() {
+        if stage == .quiz {
+            show(.words)
+        } else {
+            close(animated: true)
+        }
     }
 
     private func show(_ next: Stage) {

@@ -18,7 +18,7 @@ final class BridgeTests: XCTestCase {
 
     func testTheTableHoldsExactlyTheDocumentedActions() throws {
         let documented = try documentedActions()
-        XCTAssertEqual(documented.count, 73, "THREAT-MODEL.md §1 lists \(documented.sorted())")
+        XCTAssertEqual(documented.count, 74, "THREAT-MODEL.md §1 lists \(documented.sorted())")
         XCTAssertEqual(Set(FoxyBridge.handlers.keys), documented)
     }
 
