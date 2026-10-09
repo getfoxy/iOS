@@ -1066,8 +1066,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the payment to be made', () => till.state.screen === 'home');
     await settle();
     ok(['Signing piece 1 of 4', 'Signing piece 2 of 4', 'Signing piece 3 of 4', 'Signing piece 4 of 4'].every((t) => R.sheet.indexOf('say: ' + t) >= 0)
-       && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.' && d.balance() === 40 && !stage(R),
-       'each piece was said on the sheet in turn, the sheet ended “Done. Remove the card.”, and the screen is down', R.sheet.slice(-3).join(' / '));
+       && R.sheet[R.sheet.length - 1] === 'end:  ' && d.balance() === 40 && !stage(R),
+       'each piece was said on the sheet in turn, the sheet closed with no words once the card had signed (it was paid exactly: nothing to keep it open for), and the screen is down', R.sheet.slice(-3).join(' / '));
     till.fcLine = was;
     R.nfc = d;
     ok(R.W.cardOwed().length === 0 && d.state.slots.filter((x) => x.status === 1).length === 2, 'no change was needed: the card was not written to');

@@ -370,6 +370,10 @@ that swap and no other. So the order of a payment is turned round:
 
 What that changes:
 
+- **The sheet goes as soon as the card has signed**, where no change is coming:
+  with no words on it, only the phone's own tick as it closes. The wait for the
+  mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
+  Where change is coming the sheet stays, as below.
 - **Exactly, where the card can.** Signing costs the same for one piece as for
   thirty-two, so the pieces are chosen to come to exactly the price (and the
   mint's fee on them) where the card holds them: no change, and no second tap.

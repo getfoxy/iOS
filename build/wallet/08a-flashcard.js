@@ -2860,9 +2860,16 @@
      * finished, the sheet was closed, and the change had no sheet to go in. */
     /* Paid in pieces that come to exactly the price (`more` false: which a
      * card that signs once for a payment mostly is), there is no change to
-     * keep it open for, and it is not said that there is. */
+     * keep the sheet open for. The card's part is over, and its sheet goes at
+     * once, with nothing on it to read: a line that said the card could be
+     * removed was one more thing to read on a sheet that had nothing left to
+     * do. The phone's own tick is all it shows as it closes (a single space
+     * is the least a sheet can be told), and Foxy's own screen says the rest. */
+    if (o.keepSheet && more === false && typeof link.release === 'function') {
+      return Promise.resolve().then(function () { return link.release(' '); }).then(function () {}, function () {});
+    }
     if (o.keepSheet && typeof link.say === 'function') {
-      var line = more === false ? 'Verifying the payment. You can remove the card.' : 'Verifying the payment. Keep this open for your change.';
+      var line = 'Verifying the payment. Keep this open for your change.';
       return Promise.resolve().then(function () { return link.say(line); }).then(function () {}, function () {});
     }
     if (typeof link.release !== 'function') return Promise.resolve();

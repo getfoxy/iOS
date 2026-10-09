@@ -540,8 +540,10 @@ async function world(feePpk, sats) {
        'on the till’s screens: 700 sats paid with one signature and no card to press', (await bal(U.R)) + ', ' + titles.join());
     ok(U.R.sheet.filter((x) => /^begin:/.test(x)).length === 1 && U.R.sheet.filter((x) => /^again:/.test(x)).length === 0 && U.R.sheet.filter((x) => /^end:/.test(x)).length === 1,
        'one sheet and one tap: the card is not asked for again', U.R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
-    ok(U.R.sheet.indexOf('say: Verifying the payment. You can remove the card.') >= 0 && U.R.sheet.every((x) => !/for your change/.test(x)),
-       'while the mint is asked the sheet says the card can go, and nothing of change, since none is coming');
+    ok(U.R.sheet.indexOf('end:  ') >= 0 && U.R.sheet.every((x) => !/Verifying the payment|Remove the card|for your change/.test(x)),
+       'the sheet closes with no words on it: nothing about removing the card, and nothing of change, since none is coming', JSON.stringify(U.R.sheet.filter((x) => /^(end|say):/.test(x))));
+    ok(U.R.trace.indexOf('end') >= 0 && U.R.trace.indexOf('end') < U.R.trace.lastIndexOf('mint /v1/swap'),
+       'and it closes as soon as the card has signed, before the mint is asked: the wait for the mint is on Foxy’s own screen');
     ok(lines.indexOf('Signing') >= 0 && lines.every((t) => !/Signing piece/.test(t)), 'and the line under the heading says Signing, with no count of pieces', lines.join(' / '));
 
     // taken away as it signs: the same sheet looks for the card again, and the payment is made at that tap with nothing more signed
