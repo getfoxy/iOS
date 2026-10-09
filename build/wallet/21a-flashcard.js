@@ -2,7 +2,7 @@
     /* ---- a card that holds ecash (08a-flashcard.js) --------------------- */
 
     /* The pure parts, for the screens and the tests. */
-    cardSecret: function (nonce, cardKey, date, refundKey) { return cardSecret(nonce, cardKey, date, refundKey); },
+    cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
                  tap: cardTapOf, log: cardLogOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
@@ -206,7 +206,8 @@
         }
         try {
           // of a keyset this mint no longer lists, a piece is asked about by the eight bytes there are
-          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
+          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, date: x.date,
+                     secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) });
         } catch (e) {}
       });
       if (!due.length) {
@@ -228,18 +229,43 @@
             if (!/^[0-9a-f]{64}$/.test(key) || String((j && j.pubkey) || '').toLowerCase() !== row.refundKey) {
               throw cardError('no-key', 'This phone\u2019s words do not give the key that card was set up with.');
             }
+            var done = function (sats, hash) {
+              var all = cardsOnFile();
+              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
+              console.log('[foxy] card: ' + sats + ' sats taken back from a card with this phone\u2019s own key');
+              return { sats: sats, hash: hash, later: later };
+            };
+            /* A one-signature card's pieces: this phone's key signs once for
+             * the pieces of each date, over the swap they come back in, as
+             * the card itself would have (`cardSwapPlan`). */
+            if (Number(row.format) === CARD_FORMAT_ALL) {
+              var firstId = '', total = 0;
+              return cardAllGroups(live).reduce(function (chain, group) {
+                return chain.then(function () { return cardSwapPlan(w, group); }).then(function (plan) {
+                  // the library's own signer, given the whole message: (proofs, key, logger, message)
+                  var by = CT.signP2PKProofs([plan.inputs[0]], key, undefined, plan.message)[0];
+                  var one = /** @type {any} */ ({ id: plan.inputs[0].id, amount: plan.inputs[0].amount, secret: plan.inputs[0].secret, C: plan.inputs[0].C,
+                                                  witness: typeof by.witness === 'string' ? by.witness : JSON.stringify(by.witness) });
+                  var good = false;
+                  try { good = CT.isP2PKSpendAuthorised(one, undefined, plan.message) === true; } catch (e) { good = false; }
+                  if (!good) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
+                  cardSwapWrite(plan, null);
+                  var pieces = [one].concat(plan.inputs.slice(1));
+                  var back = { id: 'cardback-' + plan.id, token: CT.getEncodedToken({ mint: mintOf(w), proofs: pieces, unit: 'sat' }),
+                               sats: 0, worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
+                  mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
+                  firstId = firstId || back.id;
+                  return cardSwapTaken(back).then(function (got) { total += (got && got.sats) || 0; });
+                });
+              }, Promise.resolve()).then(function () { return done(total, firstId); });
+            }
             var signed = CT.signP2PKProofs(live, key);
             var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
             if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
             var taken = { id: 'cardback-' + piecesFingerprint(signed), token: CT.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' }),
                           sats: 0, worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
-            return cardSwapTaken(taken).then(function (got) {
-              var all = cardsOnFile();
-              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
-              console.log('[foxy] card: ' + got.sats + ' sats taken back from a card with this phone\u2019s own key');
-              return { sats: got.sats, hash: taken.id, later: later };
-            });
+            return cardSwapTaken(taken).then(function (got) { return done(got.sats, taken.id); });
           });
         });
     },
@@ -290,9 +316,9 @@
       var misfit = cardMintMisfit(w);
       if (misfit) return Promise.reject(misfit);
       var recoverable = !!card.record.refundKey;
-      var date = recoverable ? Math.floor(Date.now() / 1000) + CARD_DATE_AHEAD : 0;
+      var date = recoverable ? cardDateFor(card) : 0;
       return FoxyWallet.sendToken(ladder.sats, { unit: 'sat', lockTo: card.key, lockUntil: date || undefined,
-                                                 refundTo: recoverable ? card.record.refundKey : undefined,
+                                                 refundTo: recoverable ? card.record.refundKey : undefined, sigAll: cardIsAll(card),
                                                  denominations: ladder.denominations, purpose: 'card' })
         .then(function (made) {
           /* Filed first, whatever else is true of it. From this line the
@@ -547,7 +573,7 @@
         return Promise.reject(cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '.', { mint: canonicalMint(card.record.mint) }));
       }
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
-      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset)); });
+      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset), card.info.format); });
       var asking = onCircuit(w, 'card:' + card.key.slice(-16));
       return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
         .then(function (states) {
@@ -589,6 +615,8 @@
       var r = cardHeld(key);
       return r ? { card: r.card, held: Number(r.worth) || 0, want: Number(r.resume.want) || 0, at: Number(r.at) || 0, fresh: cardHeldFresh(r) } : null;
     },
+    /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
+    cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
     cardHeldLetGo: function (key) {
       var w = null;
       try { w = need(); } catch (e) { w = null; }

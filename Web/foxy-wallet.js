@@ -5458,7 +5458,16 @@
         };
       }
     }
-    var recorder = outputsRecorder(w, [], function (list) { rec.outputs = list; writeSwap(rec); });
+    /* `meta.fixed`: the outputs are made already, at these counters, and the
+     * swap can be for no others (a card's one signature is over them:
+     * 08a-flashcard.js). The ranges are on the record from the start; the
+     * body is not run again with other outputs, which that signature would
+     * not be good for; and a mint that says it has signed these outputs
+     * already has done this very swap, so that is an answer lost and found,
+     * and they are restored. */
+    var fixed = (meta && Array.isArray(meta.fixed) && meta.fixed.length) ? meta.fixed.map(copyRange) : null;
+    if (fixed) rec.outputs = fixed.map(copyRange);
+    var recorder = outputsRecorder(w, fixed || [], function (list) { rec.outputs = list; writeSwap(rec); });
     /* A locked send's outputs carry no counter and no seed can rebuild them,
      * so they are written down as they are made rather than named by a range
      * (03-seed-counters-logs.js). Synchronously, before the request: that is
@@ -5483,7 +5492,8 @@
          * restored against for ever. Each attempt records its own,
          * and starts by forgetting the last one's: outputs the mint refused as
          * already signed are not this wallet's to rebuild. */
-        return onceMoreIfSigned(w, label, function () {
+        if (fixed) writeSwap(rec);
+        return (fixed ? function (w0, l0, body) { return body(); } : onceMoreIfSigned)(w, label, function () {
           var stop = null;
           if (locked) {
             rec.locked = [];
@@ -5497,7 +5507,13 @@
                                            function (e) { release(); throw e; });
         }).catch(function (e) {
           // refused, or never sent at all: nothing of it is at the mint to restore
-          if (mintRefused(e) || neverSent(e) || !swapKept(rec.id)) { dropSwap(rec.id); throw e; }
+          /* Fixed outputs the mint has signed before. Either this very swap (its
+           * answer lost, and found below), or this phone's counters are behind
+           * what the mint has seen of its seed: then they are moved on, as any
+           * other swap's are before it tries again (`onceMoreIfSigned`), so
+           * that the next payment set out here is not refused the same way. */
+          if (fixed && alreadySigned(e)) { try { skipSignedCounters(w, COUNTER_SKIPS[1]).then(null, function () {}); } catch (x0) {} }
+          if (!(fixed && alreadySigned(e) && swapKept(rec.id)) && (mintRefused(e) || neverSent(e) || !swapKept(rec.id))) { dropSwap(rec.id); throw e; }
           console.warn('[foxy] ' + label + ': no answer from the mint (' + String((e && e.message) || e).slice(0, 60) +
             '); asking for the outputs it reserved');
           /* A locked send first: its outputs are the money that left, and no
@@ -8798,13 +8814,24 @@
    * date in decimal. tests/fixtures/flashcard-vectors.json is the applet's own
    * output, and tests/flashcard-vectors.js holds this to it byte for byte.
    *
+   * A card of format 4 signs once for a whole payment, and its pieces' secrets
+   * end with one more tag, `["sigflag","SIG_ALL"]` (`cardSignAll`, below);
+   * tests/fixtures/flashcard-vectors-4.json is that applet's output.
+   *
    * It is also, to the character, what cashu-ts writes for a piece locked to
-   * one key (with or without a locktime and one refund key). That is on
+   * one key (with or without a locktime and one refund key, and with that
+   * flag where it is asked for). That is on
    * purpose, and the same test holds it: a card is loaded with an ordinary
    * locked send, and the pieces that send makes are the pieces the card can
    * sign for. An update to the library that wrote the text another way would
    * make pieces no card could spend, and fails that test first. */
   var CARD_FORMAT = 3;
+  /* And the format of a card that signs once for a whole payment (NUT-11
+   * SIG_ALL): every piece's secret ends with that flag as its last tag, and the
+   * card's one signature is over all the pieces and all the outputs they are
+   * swapped for (`cardSignAll`). Both kinds of card are read here; a piece is
+   * written the way its own card writes it. */
+  var CARD_FORMAT_ALL = 4;
   var CARD_SLOT_BYTES = 82;
   var CARD_PIECE_BYTES = 81;
   /* A mint's address as the card keeps it: 80 characters at the most, so that
@@ -8838,18 +8865,22 @@
    * in seconds, 0 for none; with a date the refund key is named too. Throws on
    * anything that is not what a card could hold, since a secret built from a
    * wrong field is a piece nobody can spend. */
-  function cardSecret(nonce, cardKey, date, refundKey) {
+  function cardSecret(nonce, cardKey, date, refundKey, format) {
     var when = Number(date) || 0;
+    var all = Number(format) === CARD_FORMAT_ALL;
     if (!cardHexOk(nonce, 32)) throw new Error('That is not a card piece: its nonce is not 32 bytes.');
     if (!cardHexOk(cardKey, 33) || !/^0[23]/.test(cardKey)) throw new Error('That is not a card’s key.');
     if (!(when >= 0 && when <= 4294967295 && Math.floor(when) === when)) throw new Error('That is not a date a card can hold.');
     var text = '["P2PK",{"nonce":"' + nonce + '","data":"' + cardKey + '","tags":[';
     if (when) {
       if (!cardHexOk(refundKey, 33) || !/^0[23]/.test(refundKey)) throw new Error('A piece with a date needs the key that can take it back.');
-      text += '["locktime","' + String(when) + '"],["refund","' + refundKey + '"]';
+      text += '["locktime","' + String(when) + '"],["refund","' + refundKey + '"]' + (all ? ',' : '');
     }
-    return text + ']}]';
+    // the flag is the last tag, which is where the library puts it
+    return text + (all ? '["sigflag","SIG_ALL"]' : '') + ']}]';
   }
+
+  function cardIsAll(card) { return !!(card && card.info && card.info.format === CARD_FORMAT_ALL); }
 
   function cardU32(hex, at) { return parseInt(hex.substr(at * 2, 8), 16); }
 
@@ -9067,9 +9098,9 @@
   /* The ecash a slot is: the proof a mint would be shown, without its witness.
    * `id` is the keyset's whole name where the caller has a mint to ask
    * (`cardFullId`); without it, the eight bytes as the card holds them. */
-  function cardProofOf(slot, cardKey, refundKey, id) {
+  function cardProofOf(slot, cardKey, refundKey, id, format) {
     return { id: id || slot.keyset, amount: slot.amount, C: slot.C,
-             secret: cardSecret(slot.nonce, cardKey, slot.date, refundKey) };
+             secret: cardSecret(slot.nonce, cardKey, slot.date, refundKey, format) };
   }
 
   /* ---- talking to a card ----------------------------------------------------
@@ -9087,7 +9118,7 @@
    * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
   var CARD_AID = 'f0464f58594341524401';
   var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17', log: '18',
-                   spend: '20', load: '30', clear: '31', setCard: '32', setLimit: '34', time: '35',
+                   spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', load: '30', clear: '31', setCard: '32', setLimit: '34', time: '35',
                    verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45' };
 
   function cardByte(n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }
@@ -9129,6 +9160,7 @@
     if (w === '6a8d') return cardError('in-use', 'That cannot change while the card still holds money.');
     if (w === '6a8e') return cardError('no-refund-key', 'This card was set up as cash and cannot hold a piece that can be taken back.');
     if (w === '6a94') return cardError('on-card', 'That piece is on the card already.');
+    if (w === '6a96') return cardError('too-many', 'That is more pieces than the card signs for at once.');
     return cardError('refused', 'The card refused ' + (doing || 'that') + ' (' + w + ').', { sw: w });
   }
 
@@ -9374,7 +9406,7 @@
       return t.want(cardCommand(CARD_INS.info, 1, '', 0), 'to say what it is');
     }).then(function (d) {
       card.info = cardInfoOf(d);
-      if (card.info.format !== CARD_FORMAT) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
+      if (card.info.format !== CARD_FORMAT && card.info.format !== CARD_FORMAT_ALL) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
       return t.want(cardCommand(CARD_INS.key, 0, '', 0), 'to give its key');
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
@@ -9549,9 +9581,11 @@
     var j = null;
     try { j = JSON.parse(String(secret)); } catch (e) { return null; }
     if (!Array.isArray(j) || j[0] !== 'P2PK' || !j[1] || typeof j[1] !== 'object') return null;
-    var out = { nonce: String(j[1].nonce || ''), key: String(j[1].data || ''), date: 0, refundKey: '' };
+    // `all`: the piece is of a card that signs once for a payment (its secret carries SIG_ALL)
+    var out = { nonce: String(j[1].nonce || ''), key: String(j[1].data || ''), date: 0, refundKey: '', all: false };
     (Array.isArray(j[1].tags) ? j[1].tags : []).forEach(function (tag) {
       if (!Array.isArray(tag)) return;
+      if (tag[0] === 'sigflag') out.all = tag[1] === 'SIG_ALL';
       if (tag[0] === 'locktime') out.date = Number(tag[1]) || 0;
       if (tag[0] === 'refund') out.refundKey = String(tag[1] || '');
     });
@@ -9792,7 +9826,7 @@
           : 'Two of this mint\u2019s sets of keys would read the same on a card, so none of their ecash is put on one.');
       }
       var built = '';
-      try { built = cardSecret(parts.nonce, card.key, parts.date, card.record.refundKey); } catch (e) { built = ''; }
+      try { built = cardSecret(parts.nonce, card.key, parts.date, card.record.refundKey, card.info && card.info.format); } catch (e) { built = ''; }
       if (built !== String(pr.secret)) throw cardError('misfit', 'That ecash is not written the way this card writes it.');
       return { keyset: id, amount: satsOf(pr.amount), nonce: parts.nonce, C: String(pr.C).toLowerCase(), date: parts.date };
     });
@@ -10044,7 +10078,7 @@
       var id = cardFullId(w, x.keyset);
       if (!id) { out.foreign += x.amount; return; }
       if (x.date && x.date < now + margin) { out.stale += x.amount; return; }
-      var proof = /** @type {any} */ (cardProofOf(x, card.key, card.record.refundKey, id));
+      var proof = /** @type {any} */ (cardProofOf(x, card.key, card.record.refundKey, id, card.info.format));
       proof.slot = x.i;
       proof.date = x.date;
       out.pieces.push(proof);
@@ -10383,18 +10417,21 @@
     return found ? found.picked : null;
   }
 
-  /* Have the card sign for these pieces: the PIN, then each in turn. Answers
-   * the pieces with their witnesses. If the card leaves part-way, the ones it
-   * did sign are on the error as `signed`: the card has marked them spent, so
-   * they are not to be dropped.
+  /* What every signing is done under: the card's PIN, verified first, and for
+   * the holder's own phone the limits lifted (`lift`), with `work` done between
+   * and the limits put back after, whether it went well or not.
+   *
+   * A card that signs for each piece (`cardSign`) answers the pieces with
+   * their witnesses; if it leaves part-way, the ones it did sign are on the
+   * error as `signed`: the card has marked them spent, so they are not to be
+   * dropped. A card that signs once for a payment is `cardSignAll`.
    *
    * `lift`: the holder's own phone is taking money off a card that has a daily
    * limit. After the PIN, and before the first piece is asked for, the limit is
    * lifted with the owner's proof; and it is put back at the end, whether the
    * signing went well or not. The old limit is written down first, so a tap that
    * ends between the two is finished by the next one (`cardLook`, `mine`). */
-  function cardSign(t, card, picked, pinHex, lift, progress) {
-    var signed = [];
+  function cardUnderPin(t, card, pinHex, lift, work) {
     var lifted = false;
     // a card that has the limit on one tap is given both numbers in the one command
     var tapWas = card.info && card.info.tapKnown ? (Number(card.info.tapLimit) || 0) : undefined;
@@ -10412,7 +10449,14 @@
         if (e && e.card === 'not-owner') cardLiftNote(card.key, 0);
         throw e;
       });
-    }).then(function () {
+    }).then(work).then(function (r) { return back().then(function () { return r; }); },
+                       function (e) { return back().then(function () { throw e; }); });
+  }
+
+  /* A card that signs for each piece (format 3): each in turn, under the PIN. */
+  function cardSign(t, card, picked, pinHex, lift, progress) {
+    var signed = [];
+    return cardUnderPin(t, card, pinHex, lift, function () {
       var walk = Promise.resolve();
       picked.forEach(function (proof) {
         walk = walk.then(function () {
@@ -10423,15 +10467,382 @@
                         witness: JSON.stringify({ signatures: [sig] }) };
             var good = false;
             try { good = window.CashuTS.isP2PKSpendAuthorised(one) === true; } catch (e) { good = false; }
-            if (!good) throw cardError('bad-signature', 'The card\u2019s signature for a piece was not good. Nothing more was asked of it.');
+            if (!good) throw cardError('bad-signature', 'The card’s signature for a piece was not good. Nothing more was asked of it.');
             signed.push(one);
           });
         });
       });
-      return walk;
-    }).then(function () { return back(); }).then(function () { return signed; }, function (e) {
+      return walk.then(function () { return signed; });
+    }).then(null, function (e) {
       try { e.signed = signed; } catch (x) {}
-      return back().then(function () { throw e; });
+      throw e;
+    });
+  }
+
+  /* ---- one signature for a payment (a card of format 4, NUT-11 SIG_ALL) --------
+   *
+   * A card of format 3 signs for each piece, most of a second apiece, and a
+   * piece's signature is good for any swap: whoever holds it decides where the
+   * money goes. A card of format 4 signs ONCE, over every piece of the payment
+   * and every output those pieces are swapped for:
+   *
+   *     secret_0 C_0 ... secret_n C_n   amount_0 B_0 ... amount_m B_m
+   *
+   * as text, each C and B_ in hex and each amount in decimal, hashed with
+   * SHA-256 (NUT-11 as CDK and Nutshell both check it; the card's spec, section
+   * "SPEND_ALL"). So the swap has to exist before the card is asked: its
+   * outputs are made first (`cardSwapPlan`), the card is told the places and
+   * the outputs and signs (`cardSignGroup`), and the mint is then sent exactly
+   * that swap and no other (`cardSwapFixed`). The signature is the first
+   * piece's witness; the others carry none.
+   *
+   * What it changes for the rest of this file:
+   *
+   *   one date   a mint takes one signature only for pieces whose secrets
+   *              agree in everything but the nonce, so a signature is for
+   *              pieces of one date (`cardDateGroups`). A card is topped up
+   *              with the date it already has while that is far enough off
+   *              (`cardDateFor`), so it is mostly of one date;
+   *   exactly    signing costs the same for one piece as for thirty-two, so a
+   *              payment is made of pieces that come to exactly the price
+   *              where the card holds them (`cardPickAll`): no change, and no
+   *              second tap to take it back;
+   *   all or nothing   the card burns every piece as it signs, in one
+   *              transaction. A card that leaves before its answer arrives has
+   *              signed or it has not, and its next tap here says which: the
+   *              pieces are still on it, or it is asked for the signature
+   *              again (`cardAskedBack`), which it keeps until it gives another.
+   *
+   * CARD_SWAPS is what makes the second and third of those safe: for every
+   * signature asked for, the outputs it is over, by the counter they were made
+   * at. A row is written before the card is asked and is the only thing that
+   * can make the same outputs again; without it the signed pieces could not be
+   * swapped by anybody. `asked` is on a row from then until the signature is
+   * in hand: the pieces, and what the payment was for. */
+  var CARD_SWAPS = 'foxy.flashcard.swaps';
+  // the pieces one signature may be for: the card's own bound
+  var CARD_ALL_MOST = 32;
+  // a top-up keeps the card's date while it is this far off, and takes a new one after
+  var CARD_DATE_REUSE = 90 * 24 * 3600;
+
+  function cardSwapRow(id) {
+    return cardStore(CARD_SWAPS).filter(function (r) { return r && r.id === id; })[0] || null;
+  }
+  function cardSwapDrop(id) {
+    var all = cardStore(CARD_SWAPS);
+    var left = all.filter(function (r) { return !(r && r.id === id); });
+    if (left.length !== all.length) save(CARD_SWAPS, left);
+  }
+  /* The signature is in hand (or was never given): the row is the outputs and nothing else. */
+  function cardSwapSettled(id) {
+    mustSave(CARD_SWAPS, cardStore(CARD_SWAPS).map(function (r) {
+      if (!r || r.id !== id || !r.asked) return r;
+      var plain = {};
+      Object.keys(r).forEach(function (k) { if (k !== 'asked') plain[k] = r[k]; });
+      return plain;
+    }));
+  }
+
+  /* The outputs these pieces were signed for, or null where they are not a
+   * one-signature card's (asked by every swap of a token: `receiveToken`). */
+  function cardSwapFor(list) {
+    var first = Array.isArray(list) && list.length ? cardSecretParts(list[0].secret) : null;
+    if (!first || !first.all) return null;
+    return cardSwapRow(piecesFingerprint(list));
+  }
+
+  function cardAllMessage(inputs, outputs) {
+    return inputs.map(function (p) { return String(p.secret) + String(p.C).toLowerCase(); }).join('')
+      + outputs.map(function (o) { return String(o.amount) + String(o.B_).toLowerCase(); }).join('');
+  }
+  function cardAllDigest(inputs, outputs) {
+    var text = cardAllMessage(inputs, outputs);
+    var bytes = [];
+    // a secret is JSON of hex and digits and a C is hex: one byte a character
+    for (var i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 255);
+    return hexOf(sha256(bytes));
+  }
+  function cardOutsOf(outputData) {
+    return (outputData || []).map(function (o) {
+      return { amount: satsOf(o.blindedMessage.amount), B_: String(o.blindedMessage.B_).toLowerCase() };
+    });
+  }
+  function cardNotSent(message) {
+    var e = /** @type {any} */ (new Error(message));
+    e.noCounters = true;       // the mint was asked nothing (`neverSent`)
+    return e;
+  }
+
+  /* The swap a set of a card's pieces will be spent in, made before the card
+   * is asked to sign: the outputs (from this wallet's seed, at counters taken
+   * now and never handed out again), in the order the mint will be sent them,
+   * and the pieces in the order a token keeps them. Nothing is asked of the
+   * mint, so this is made with no route too. */
+  function cardSwapPlan(w, pieces) {
+    var CT = window.CashuTS;
+    var bare = pieces.map(function (p) { return { id: p.id, amount: p.amount, secret: p.secret, C: p.C }; });
+    var fee = swapFeeFor(w, bare);
+    if (!isFinite(fee) || fee < 0) fee = 0;
+    var net = sumProofs(bare) - fee;
+    if (!(net > 0)) return Promise.reject(cardError('not-enough', 'Those pieces are worth less than the mint charges to take them.'));
+    var ranges = [];
+    var saw = function (r) {
+      if (!r || !r.keysetId || !(Number(r.count) > 0)) return;
+      var same = ranges.some(function (x) { return x.keysetId === String(r.keysetId) && x.start === (Number(r.start) || 0); });
+      if (!same) ranges.push({ keysetId: String(r.keysetId), start: Number(r.start) || 0, count: Number(r.count) });
+    };
+    var off = watchReserved(w, saw);
+    return Promise.resolve().then(function () {
+      // a token gathers the pieces of one keyset together: read back from one, they are in the order the swap will have them
+      var token = CT.getEncodedToken({ mint: mintOf(w), proofs: bare, unit: 'sat' });
+      // shaped as any receipt is, to fill this phone's own pile (`receiveToken`)
+      var shape = shapeOutputs(proofs(mintOf(w), 'sat'), net, mintArrayCap(w) - 16);
+      return w.prepareSwapToReceive(token, { onCountersReserved: saw }, { type: 'deterministic', counter: 0, denominations: shape });
+    }).then(function (pre) {
+      off();
+      var outs = cardOutsOf(pre.keepOutputs);
+      var inputs = pre.inputs.map(function (p) { return { id: String(p.id), amount: satsOf(p.amount), secret: String(p.secret), C: String(p.C) }; });
+      var range = ranges[0];
+      if (ranges.length !== 1 || range.count !== outs.length || range.keysetId !== String(pre.keysetId) || inputs.length !== bare.length) {
+        throw cardNotSent('Foxy could not set out the swap for this payment, so the card was not asked to sign.');
+      }
+      return { id: piecesFingerprint(inputs), keyset: range.keysetId, counter: range.start,
+               amounts: outs.map(function (o) { return o.amount; }), outputs: outs, outputData: pre.keepOutputs, inputs: inputs,
+               sum: sumProofs(inputs), net: net, message: cardAllMessage(inputs, outs), digest: cardAllDigest(inputs, outs) };
+    }, function (e) { off(); throw e; });
+  }
+
+  function cardSwapWrite(plan, asked) {
+    var row = /** @type {any} */ ({ id: plan.id, keyset: plan.keyset, counter: plan.counter, amounts: plan.amounts, digest: plan.digest, at: Date.now() });
+    if (asked) row.asked = asked;
+    // rows nothing has come back for in longer than any card's date is off are let fall
+    var old = Date.now() - (CARD_DATE_AHEAD + 35 * 24 * 3600) * 1000;
+    // never sent on a write that did not land: the card is not asked for a signature nothing could use
+    mustSave(CARD_SWAPS, cardStore(CARD_SWAPS).filter(function (r) { return r && r.id !== plan.id && !(Number(r.at) < old); }).concat([row]), true);
+  }
+
+  /* The same outputs again, from the counter they were made at. The phone
+   * gives a counter's secret once to be used and any number of times to be
+   * restored, and this is a restore: the counters do not move. */
+  function cardOutputsAt(w, spec) {
+    var amounts = (spec.amounts || []).map(function (a) { return Math.round(Number(a)); });
+    var total = amounts.reduce(function (n, a) { return n + a; }, 0);
+    var ready = (w && w.foxyNativeSecrets)
+      ? fetchSecrets(spec.keyset, Number(spec.counter), amounts.length, w.foxyCandidate || null)
+      : Promise.resolve();
+    return ready.then(function () {
+      return w.createOutputData(total, w.getOutputKeyset(spec.keyset), { type: 'deterministic', counter: Number(spec.counter), denominations: amounts });
+    });
+  }
+
+  /* The swap of pieces a card has signed for, with the outputs it signed for
+   * and no others. What is about to be sent is hashed again and held to the
+   * row first: a swap the signature is not over would only be refused, and
+   * one that cannot be set out as it was is not sent at all. */
+  function cardSwapFixed(w, text, spec) {
+    return cardOutputsAt(w, spec).then(function (outputs) {
+      return w.prepareSwapToReceive(text, { keysetId: spec.keyset }, { type: 'custom', data: outputs });
+    }).then(function (pre) {
+      if (cardAllDigest(pre.inputs, cardOutsOf(pre.keepOutputs)) !== spec.digest) {
+        throw cardNotSent('This payment’s swap could not be set out as the card signed for it, so it was not sent.');
+      }
+      return pre;
+    }, function (e) {
+      // not set out at all (the mint's fee or its keys have changed since): nothing was asked of it
+      try { e.noCounters = true; } catch (x) {}
+      throw e;
+    }).then(function (pre) {
+      return w.completeSwap(pre);
+    }).then(function (done) { return (done && done.keep) || []; });
+  }
+
+  /* A card's pieces by their date, earliest first (the undated together). */
+  function cardDateGroups(pieces) {
+    var by = {}, dates = [];
+    (pieces || []).forEach(function (p) {
+      var d = Number(p && p.date) || 0;
+      if (!by[d]) { by[d] = []; dates.push(d); }
+      by[d].push(p);
+    });
+    return dates.sort(function (a, b) { return a - b; }).map(function (d) { return by[d]; });
+  }
+
+  /* What a set of pieces is signed for in: one signature for the pieces of one
+   * date, CARD_ALL_MOST at the most (taking a whole card off is the only thing
+   * that needs more than one). */
+  function cardAllGroups(pieces) {
+    var out = [];
+    cardDateGroups(pieces).forEach(function (g) {
+      for (var at = 0; at < g.length; at += CARD_ALL_MOST) out.push(g.slice(at, at + CARD_ALL_MOST));
+    });
+    return out;
+  }
+
+  /* The pieces a one-signature card pays `want` with: of one date, and
+   * exactly the price (and the fee on them) where a date's pieces make it;
+   * otherwise the set `cardPick` would take from one date, over-paying, with
+   * change to come back. The earliest date that can pay is the one that does,
+   * so the oldest money goes first. With no route (`exactOnly`) only exactly. */
+  function cardPickAll(w, have, want, cap, card, tapCap, exactOnly) {
+    var bound = (cap === null || cap === undefined) ? null : Math.max(0, Number(cap) || 0);
+    var one = (tapCap === null || tapCap === undefined) ? null : Math.max(0, Number(tapCap) || 0);
+    var upper = bound === null ? one : (one === null ? bound : Math.min(bound, one));
+    var groups = cardDateGroups(have);
+    var i;
+    for (i = 0; i < groups.length; i++) {
+      var exact = /** @type {any} */ (cardExactPick(w, groups[i], want, upper));
+      if (exact && exact.length && exact.length <= CARD_ALL_MOST) return exact;
+    }
+    if (exactOnly) return null;
+    for (i = 0; i < groups.length; i++) {
+      var cover = cardPick(w, groups[i], want, cap, card, tapCap);
+      if (cover && cover.length && cover.length <= CARD_ALL_MOST) return cover;
+    }
+    return null;
+  }
+
+  /* The date a top-up's pieces take. A card that signs for each piece is given
+   * a year from now, every time. A one-signature card keeps the date it
+   * already has (on it, or owed to it) while that is CARD_DATE_REUSE off or
+   * more, so that what is put on it today can be spent in one signature with
+   * what was put on it last month. */
+  function cardDateFor(card) {
+    var now = Math.floor(Date.now() / 1000);
+    var fresh = now + CARD_DATE_AHEAD;
+    if (!cardIsAll(card)) return fresh;
+    var held = 0;
+    (card.pieces || []).forEach(function (x) { if (x && Number(x.date) > held) held = Number(x.date); });
+    cardStore(CARD_OWED).forEach(function (r) {
+      if (!r || r.card !== card.key) return;
+      try {
+        ((FoxyWallet.tokenInfo(r.token) || {}).proofs || []).forEach(function (pr) {
+          var parts = cardSecretParts(pr.secret);
+          if (parts && parts.date > held) held = parts.date;
+        });
+      } catch (e) {}
+    });
+    return held >= now + CARD_DATE_REUSE ? held : fresh;
+  }
+
+  /* Have the card sign once for `group`. Resolves { plan, signed }: the pieces
+   * in the swap's order, the first with the signature. `note` is what the
+   * payment is for ({ want, all, memo }), kept with the asking. */
+  function cardSignGroup(t, card, w, group, progress, note) {
+    var slotOf = {};
+    group.forEach(function (p) { slotOf[p.secret] = p.slot; });
+    return cardSwapPlan(w, group).then(function (plan) {
+      var slots = plan.inputs.map(function (p) { return slotOf[p.secret]; });
+      /* Written down before the card is asked. From SIGN on, what the card did
+       * is not known until it answers, and this row is what its next tap is
+       * read against. */
+      cardSwapWrite(plan, { card: card.key, proofs: plan.inputs, want: Math.round(Number(note && note.want) || 0),
+                            all: !!(note && note.all), memo: String((note && note.memo) || ''), at: Date.now() });
+      try { if (typeof progress === 'function') progress({ step: 'signing', i: 1, n: 1, all: true }); } catch (e) {}
+      var asked = false;
+      return t.want(cardCommand(CARD_INS.begin, 0, slots.map(cardByte).join(''), 4), 'to take the pieces of a payment').then(function (d) {
+        if (!cardHexOk(d, 4) || cardU32(d, 0) !== plan.sum) throw cardError('refused', 'The card does not hold what it said it holds.', { sw: '' });
+        var walk = Promise.resolve();
+        // six to a command: 37 bytes each
+        for (var at = 0; at < plan.outputs.length; at += 6) {
+          (function (some) {
+            walk = walk.then(function () {
+              return t.want(cardCommand(CARD_INS.outputs, 0, some.map(function (o) { return cardU32Hex(o.amount) + o.B_; }).join('')), 'to take where a payment goes');
+            });
+          })(plan.outputs.slice(at, at + 6));
+        }
+        return walk;
+      }).then(function () {
+        asked = true;
+        return t.want(cardCommand(CARD_INS.signAll, 0, '', 64), 'to sign for a payment');
+      }).then(function (sig) {
+        var first = /** @type {any} */ ({ id: plan.inputs[0].id, amount: plan.inputs[0].amount, secret: plan.inputs[0].secret, C: plan.inputs[0].C,
+                                          witness: JSON.stringify({ signatures: [sig] }) });
+        var good = false;
+        try { good = cardHexOk(sig, 64) && window.CashuTS.isP2PKSpendAuthorised(first, undefined, plan.message) === true; } catch (e) { good = false; }
+        if (!good) {
+          cardSwapDrop(plan.id);
+          throw cardError('bad-signature', 'The card’s signature for this payment was not good. Nothing more was asked of it.');
+        }
+        return { plan: plan, signed: [first].concat(plan.inputs.slice(1)) };
+      }, function (e) {
+        /* Gone with SIGN asked and no answer: it may have signed, and burned
+         * the pieces as it did. The asking is kept, and its next tap here is
+         * asked for that signature again (`cardAskedBack`). Anything else is a
+         * card that signed nothing. */
+        if (asked && e && e.card === 'gone') {
+          throw cardError('interrupted', 'The card was taken away as it was signing. Nothing is paid yet: tap it again to finish.',
+                          { owed: plan.sum, held: plan.sum, want: Math.round(Number(note && note.want) || 0), resumable: true, made: false });
+        }
+        cardSwapDrop(plan.id);
+        throw e;
+      });
+    });
+  }
+
+  /* The PIN, then a signature for each group in turn (one, but for a whole
+   * card taken off). `keep(signed, plan)` writes a group's row down as soon as
+   * its signature is in hand, and answers it. Resolves { rows, signed }; if
+   * the card leaves between two groups, the rows it did sign for are on the
+   * error as `rows`, with their pieces as `signedAll`. */
+  function cardSignAll(t, card, w, groups, pinHex, lift, progress, keep, note) {
+    var rows = [], signedAll = [];
+    return cardUnderPin(t, card, pinHex, lift, function () {
+      var walk = Promise.resolve();
+      groups.forEach(function (group) {
+        walk = walk.then(function () {
+          return cardSignGroup(t, card, w, group, progress, note).then(function (got) {
+            rows.push(keep(got.signed, got.plan));
+            signedAll = signedAll.concat(got.signed);
+            cardSwapSettled(got.plan.id);
+          });
+        });
+      });
+      return walk.then(function () { return { rows: rows, signed: signedAll }; });
+    }).then(null, function (e) {
+      try { e.rows = rows; e.signedAll = signedAll; } catch (x) {}
+      throw e;
+    });
+  }
+
+  /* What became of signatures this phone asked this card for and never saw
+   * (the card left as it signed). Pieces still on the card were never signed
+   * for, and the asking is forgotten. Pieces gone from it were: the card is
+   * asked for its last signature again, under its PIN, and where that is good
+   * for what was asked the payment is in hand after all. Resolves those, as
+   * [{ spec, signed }]. A signature that is not to be had (the card has signed
+   * for something else since) leaves pieces nobody can spend until their date,
+   * as a piece lost in the air always has. */
+  function cardAskedBack(t, card, pinHex) {
+    if (!cardIsAll(card)) return Promise.resolve([]);
+    var mine = cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked && r.asked.card === card.key; });
+    if (!mine.length) return Promise.resolve([]);
+    var onCard = {};
+    (card.pieces || []).forEach(function (x) { if (x && x.nonce) onCard[x.nonce] = true; });
+    var open = mine.filter(function (r) {
+      var still = (r.asked.proofs || []).some(function (p) { var parts = cardSecretParts(p.secret); return !!(parts && onCard[parts.nonce]); });
+      if (still) cardSwapDrop(r.id);
+      return !still && (r.asked.proofs || []).length > 0;
+    });
+    if (!open.length) return Promise.resolve([]);
+    return t.want(cardCommand(CARD_INS.verify, 0, pinHex), 'its PIN').then(function () {
+      return t.ask(cardCommand(CARD_INS.again, 0, '', 64));
+    }).then(function (r) {
+      var sig = r.sw === '9000' ? r.data : '';
+      var found = [];
+      open.forEach(function (row) {
+        var good = false;
+        try { good = cardHexOk(sig, 64) && window.CashuTS.schnorrVerifyDigest(sig, bytesOfHex(row.digest), card.key) === true; } catch (e) { good = false; }
+        if (!good) {
+          console.warn('[foxy] card: ' + sumProofs(row.asked.proofs) + ' sats it was asked to sign for are gone from it, and its signature for them is not to be had');
+          cardSwapDrop(row.id);
+          return;
+        }
+        var p0 = row.asked.proofs[0];
+        var first = { id: p0.id, amount: p0.amount, secret: p0.secret, C: p0.C, witness: JSON.stringify({ signatures: [sig] }) };
+        found.push({ spec: row, signed: [first].concat(row.asked.proofs.slice(1)) });
+      });
+      if (found.length) console.log('[foxy] card: a signature it gave as it was taken away is had again; that payment is in hand');
+      return found;
     });
   }
 
@@ -10459,6 +10870,8 @@
     if (whole) cardLeft(seen, Object.keys(seen).filter(function (n) { return !here[n]; }));
     row.pieces = seen;
     row.seen = Date.now();
+    // how this card writes a piece's secret, for taking it back with no card to ask
+    if (card.info && card.info.format) row.format = card.info.format;
     all[card.key] = row;
     if (!save(CARDS, all)) console.warn('[foxy] card: what is on a card could not be written down; it can be taken back only from what was known before');
   }
@@ -10744,6 +11157,8 @@
     try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     var t = cardTalk(link);
     var card, picked, worth, fee, row, result, own, cap, tapCap = null, lift = false, released = false, signedNonces = [];
+    // a one-signature card (format 4): the signatures it is asked for, and rows beside this payment's own to swap with it
+    var all4 = false, groups = [], moreRows = [];
     // a payment of this card's held from a tap cut short (`cardHeld`), and one held for another amount, let go after this one
     var held = null, heldProofs = [], heldWorth = 0, letGoAfter = null, tornSats = 0;
     on('reading');
@@ -10757,6 +11172,32 @@
       card = c;
       var no = cardUnusable(card, w);
       if (no) throw no;
+      all4 = cardIsAll(card);
+      /* A signature this phone asked this card for and never saw, had again
+       * (`cardAskedBack`). A payment's is held as a payment the card left part
+       * way through always was: this tap finishes it if it is for the same
+       * amount, and it goes back to the card if it is not (`cardHeld`). The
+       * holder's own taking-off is theirs already, and is swapped with this one. */
+      return cardAskedBack(t, card, pin).then(function (found) {
+        found.forEach(function (f) {
+          var a = f.spec.asked, id = 'card-' + f.spec.id;
+          var sum = sumProofs(f.signed);
+          var cost = swapFeeFor(w, f.signed);
+          if (!isFinite(cost) || cost < 0) cost = 0;
+          if (!cardStore(CARD_TAKEN).some(function (r) { return r && r.id === id; })) {
+            var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: f.signed, unit: 'sat' });
+            var kept = a.all
+              ? { id: id, token: token, sats: Math.max(0, sum - cost), worth: Math.max(0, sum - cost), over: 0, all: true, card: card.key,
+                  memo: a.memo || memo, at: Date.now(), partial: true }
+              : { id: id, token: token, sats: 0, worth: sum, over: sum, all: false, card: card.key, memo: 'card, not completed',
+                  at: Number(a.at) || Date.now(), refund: true, resume: { want: a.want } };
+            mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([kept]));
+            if (a.all && (o.all || o.lift) && !offline) moreRows.push(kept);
+          }
+          cardSwapSettled(f.spec.id);
+        });
+      });
+    }).then(function () {
       own = cardMine(card);
       // this phone's own card, read and proved: what is on it now is written down, as at any other read
       if (own && card.proved) cardRemember(card, card.pieces, true);
@@ -10791,6 +11232,9 @@
       var heldFee = heldProofs.length ? swapFeeFor(w, heldProofs) : 0;
       if (!isFinite(heldFee) || heldFee < 0) heldFee = 0;
       var rest = held ? want + heldFee - heldWorth : want;
+      /* One signature is for the pieces it was given and no others: a payment
+       * held from such a card is whole, or it is not this payment. */
+      if (held && all4 && rest > 0) { letGoAfter = held; held = null; heldProofs = []; heldWorth = 0; heldFee = 0; rest = want; }
       if (held) console.log('[foxy] card: taking up a payment it left part way through: ' + heldWorth + ' of ' + want + ' sats signed, the rest now');
       /* A piece the card was signing as it left: it may have signed it and
        * marked it spent with the answer lost in the air. Then the piece is gone
@@ -10809,6 +11253,7 @@
        * change both to a payer who spent their copy. */
       var least = function (a, b) { return a === null ? b : b === null ? a : Math.min(a, b); };
       var choose = function (limit, one) {
+        if (all4) return cardPickAll(w, have, rest, limit, card, one, offline);
         return offline ? cardExactPick(w, have, rest, least(limit, one)) : cardPick(w, have, rest, limit, card, one);
       };
       if (o.all) {
@@ -10837,7 +11282,8 @@
          * the set is the one that keeps the drawer whole, which may be larger
          * than the payment needs (and was then said to be over the day when
          * it was the tap it was over). */
-        var free = offline ? cardExactPick(w, have, rest, null) : cardPick(w, have, rest, 281474976710655, card, null);
+        var free = all4 ? cardPickAll(w, have, rest, 281474976710655, card, null, offline)
+          : (offline ? cardExactPick(w, have, rest, null) : cardPick(w, have, rest, 281474976710655, card, null));
         var need = (free && free.length) ? sumProofs(free) : 0;
         if (need > 0 && cap !== null && need > cap) {
           throw cardError('limit', 'This card can spend ' + cap + ' sats more today, and this payment needs more than that.',
@@ -10852,6 +11298,16 @@
         throw cardError('inexact', 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly '
           + want + ' sats. Pay an amount it can make, or pay when this phone is online.', { balance: card.balance });
       }
+      /* A one-signature card that holds enough, in pieces of more than one
+       * date (it was topped up near the end of its year): one payment is of one
+       * date's pieces, and no date's alone will do. Said as what it can pay. */
+      if (all4 && (!picked || !picked.length) && !offline && sumProofs(have) >= rest) {
+        var most = cardDateGroups(have).reduce(function (n, g) { return Math.max(n, sumProofs(g)); }, 0);
+        if (most < sumProofs(have)) {
+          throw cardError('two-dates', 'This card’s money was put on it at two different times, and one payment can use only one of them. '
+            + 'The most it can pay at once is ' + most + ' sats: take the payment in two parts.', { balance: card.balance, most: most });
+        }
+      }
       if (!picked || !picked.length) {
         if (usable.stale > 0 && card.balance >= rest) {
           throw own
@@ -10864,6 +11320,14 @@
       worth = sumProofs(picked) + heldWorth;
       fee = swapFeeFor(w, picked.concat(heldProofs));
       if (!isFinite(fee) || fee < 0) fee = 0;
+      /* A one-signature card: a signature for each date's pieces, thirty-two
+       * at the most. A payment is one; a whole card taken off may be several,
+       * each swapped by itself and each paying the mint's fee on its own. */
+      groups = all4 ? cardAllGroups(picked) : [];
+      if (groups.length > 1 && !o.all) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
+      if (groups.length > 1) {
+        fee = groups.reduce(function (n, g) { var f = swapFeeFor(w, g); return n + ((isFinite(f) && f > 0) ? f : 0); }, 0);
+      }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       /* A card that signs for three pieces and refuses the fourth has spent
@@ -10879,17 +11343,35 @@
                         { left: tapCap, need: sumProofs(picked), turns: tap.turns, limit: tap.limit });
       }
       on('signing');
-      return cardSign(t, card, picked, pin, lift, o.progress);
-    }).then(function (fresh) {
+      if (!all4) return cardSign(t, card, picked, pin, lift, o.progress);
+      /* Each signature's row is written down as it arrives, before the card is
+       * asked for the next: the row, with the outputs it was signed for
+       * (CARD_SWAPS), is the only copy of the right to spend those pieces. */
+      return cardSignAll(t, card, w, groups, pin, lift, o.progress, function (signedNow, plan) {
+        var kept = { id: 'card-' + plan.id, token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signedNow, unit: 'sat' }),
+                     sats: o.all ? plan.net : want, worth: o.all ? plan.net : worth - fee, over: o.all ? 0 : worth - fee - want,
+                     all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
+        mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([kept]));
+        return kept;
+      }, { want: want, all: !!o.all, memo: memo });
+    }).then(function (answer) {
+      // a card that signs for each piece answers the pieces; a one-signature card, its rows and the pieces
+      var made = (answer && !Array.isArray(answer) && answer.rows) || [];
+      var fresh = Array.isArray(answer) ? answer : ((answer && answer.signed) || []);
       if (own) cardSpentHere(card.key, fresh.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
       // with what was signed for this payment before the card left, where it was taken up again
       var signed = heldProofs.concat(fresh);
-      var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
-      row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: worth - fee - want,
-              all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
       signedNonces = signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
-      // written down before the card is let go: from here this row is the only copy of the right to spend the pieces (and the held one is part of it)
-      mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([row]));
+      if (made.length) {
+        row = made[0];
+        moreRows = moreRows.concat(made.slice(1));
+      } else {
+        var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
+        row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: worth - fee - want,
+                all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
+        // written down before the card is let go: from here this row is the only copy of the right to spend the pieces (and the held one is part of it)
+        mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([row]));
+      }
       if (offline) {
         var kept = cardKeepOnTrust(row, signed, card, w);
         on('done');
@@ -10898,12 +11380,39 @@
       /* The card has done its part, and the mint's work takes as long as Tor
        * does: it is let go now, and the person is told so, and the rest is
        * done with Foxy's own screen saying so (`cardLetGo`). */
-      return cardLetGo(link, o).then(function () {
+      // whether anything is coming back to the card in this sheet: its change, or a payment held for another amount
+      return cardLetGo(link, o, row.over > 0 || !!letGoAfter).then(function () {
         released = !o.hold;
         on(released ? 'checking' : 'mint', { hash: row.id });
         return cardSwapTaken(row, false);
+      }).then(function (got) {
+        // the other signatures of a whole card taken off, each its own swap
+        return moreRows.reduce(function (chain, r) {
+          return chain.then(function (sum) {
+            return cardSwapTaken(r, false).then(function (g) { return { sats: (sum.sats || 0) + ((g && g.sats) || 0) }; });
+          });
+        }, Promise.resolve(got));
       });
     }, function (e) {
+      /* A one-signature card taken away between two signatures of a whole
+       * card being taken off: what it signed for is off it and is the
+       * holder's, written down already (`cardSignAll`). It is swapped in, and
+       * the next tap takes the rest. */
+      var doneRows = (e && Array.isArray(e.rows)) ? e.rows : [];
+      if (doneRows.length) {
+        var donePieces = (e && e.signedAll) || [];
+        if (own) cardSpentHere(card.key, donePieces.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; }));
+        console.warn('[foxy] card: the card signed for ' + doneRows.length + ' of ' + groups.length + ' parts and left; what it signed is kept as part of the withdrawal');
+        return moreRows.concat(doneRows).reduce(function (chain, r) {
+          return chain.then(function (sum) {
+            return cardSwapTaken(r, false).then(function (g) { return { sats: sum.sats + ((g && g.sats) || 0) }; });
+          });
+        }, Promise.resolve({ sats: 0 })).then(function (sum) {
+          throw cardError('partial', 'The card was taken away before it had signed for all of it. ' + sum.sats
+            + ' sats came off it into this phone; tap it again for the rest.',
+            { sats: sum.sats, left: Math.max(0, card.balance - sumProofs(donePieces)), hash: doneRows[0].id });
+        });
+      }
       /* The card left, or refused, part-way through signing. What it did
        * sign for it has marked spent, and those pieces are the holder's
        * money with only this phone able to move them: they go back to the
@@ -11015,7 +11524,7 @@
    * reads it last), and nothing is sent to a link that has no way to let go
    * (a test's bare model: it is simply not spoken to again). Resolves
    * when the sheet has been told. */
-  function cardLetGo(link, o) {
+  function cardLetGo(link, o, more) {
     if (o.hold || !link) return Promise.resolve();
     /* `o.keepSheet`: the card may go, and the sheet stays up, for the tap that
      * takes its change back in the same sheet once the mint has answered
@@ -11023,8 +11532,12 @@
      * was refused by iOS as often as not. What it says asks for the sheet to
      * be left open: "Remove the card" beside the sheet's own Cancel read as
      * finished, the sheet was closed, and the change had no sheet to go in. */
+    /* Paid in pieces that come to exactly the price (`more` false: which a
+     * card that signs once for a payment mostly is), there is no change to
+     * keep it open for, and it is not said that there is. */
     if (o.keepSheet && typeof link.say === 'function') {
-      return Promise.resolve().then(function () { return link.say('Verifying the payment. Keep this open for your change.'); }).then(function () {}, function () {});
+      var line = more === false ? 'Verifying the payment. You can remove the card.' : 'Verifying the payment. Keep this open for your change.';
+      return Promise.resolve().then(function () { return link.say(line); }).then(function () {}, function () {});
     }
     if (typeof link.release !== 'function') return Promise.resolve();
     return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
@@ -11078,11 +11591,13 @@
       return Promise.resolve({ sats: 0, owed: owed, kept: true });
     }
     var key = (card && card.key) || row.card;
-    var date = 0, refundKey = '';
+    var date = 0, refundKey = '', sigAll = cardIsAll(card);
     try {
       ((FoxyWallet.tokenInfo(row.token) || {}).proofs || []).forEach(function (pr) {
         var parts = cardSecretParts(pr.secret);
         if (!parts) return;
+        // written as the pieces it paid with were: a one-signature card's carry its flag
+        if (parts.all) sigAll = true;
         date = Math.max(date, parts.date || 0);
         if (parts.refundKey) refundKey = parts.refundKey;
       });
@@ -11099,7 +11614,7 @@
     } catch (x1) {}
     try { if (typeof o.making === 'function') o.making(); } catch (x2) {}
     return FoxyWallet.sendToken(back, { unit: 'sat', lockTo: key, lockUntil: dated ? date : undefined,
-                                        refundTo: dated ? refundKey : undefined,
+                                        refundTo: dated ? refundKey : undefined, sigAll: sigAll,
                                         denominations: cardChangeCut(w, back, card, signedNonces),
                                         purpose: 'change', forHash: row.id, owed: owed })
       .then(function (made) {
@@ -16423,7 +16938,15 @@
       var signedAlready = (function () {
         var CT = window.CashuTS;
         if (!locked.length || !CT || !CT.isP2PKSpendAuthorised) return false;
-        try { if (CT.isP2PKSigAll && CT.isP2PKSigAll(tok.proofs)) return false; } catch (e) { return false; }
+        /* One signature over the whole swap (SIG_ALL) is good for the outputs
+         * it was made over and no others. This phone can use it only where it
+         * holds those outputs: a card's payment, set out here before the card
+         * signed (`cardSwapFor`, 08a-flashcard.js). */
+        try {
+          if (CT.isP2PKSigAll && CT.isP2PKSigAll(tok.proofs)) {
+            return !!(locked.length === tok.proofs.length && tok.proofs[0] && tok.proofs[0].witness && cardSwapFor(tok.proofs));
+          }
+        } catch (e) { return false; }
         return locked.every(function (pr) {
           if (!pr || !pr.witness) return false;
           try { return CT.isP2PKSpendAuthorised(pr); } catch (e) { return false; }
@@ -16713,9 +17236,17 @@
            * recoverSwaps on the next connect or resume. */
           // with what the outputs add up to: the token less the mint's input fee on it
           // `into` goes on the record: a lost answer restored later finishes that entry, not a new one
+          /* Pieces a one-signature card signed for are swapped for the outputs
+           * it signed for and no others (`cardSwapFor`, 08a-flashcard.js): the
+           * mint takes its signature for nothing else. Their counters go on
+           * the record before the request does, as any swap's do. */
+          var fixed = unit === 'sat' ? cardSwapFor(incomingProofs) : null;
           guard = swapGuard(w, 'receive', { unit: unit, amount: tok.amount, into: into || undefined,
-            expect: incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined });
+            expect: fixed ? fixed.amounts.reduce(function (n, a) { return n + Number(a); }, 0)
+              : (incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined),
+            fixed: fixed ? [{ keysetId: fixed.keyset, start: Number(fixed.counter), count: fixed.amounts.length }] : undefined });
           return guard.run('receive', function () {
+            if (fixed) return cardSwapFixed(w, FoxyWallet.unwrap(text), fixed).then(function (made) { cardSwapDrop(fixed.id); return made; });
             /* Its outputs fill the pool (shapeOutputs): what comes in is the
              * pieces the next payment needs, not a few large ones to break
              * later. Only when the fee is known, which is what the amount of
@@ -17264,6 +17795,10 @@
            * into the ladder of its amount: 08a-flashcard.js). Whatever the sum
            * of them leaves of the amount, and the fee on them, is filled by the
            * library as it always was. */
+          /* `opts.sigAll`: pieces for a card that signs once for a payment
+           * (08a-flashcard.js). The flag is part of each piece's secret, and
+           * the card can sign for no piece written without it. */
+          if (lockTo && opts && opts.sigAll) /** @type {any} */ (lockOut.options).sigFlag = 'SIG_ALL';
           if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
             lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });
           }
@@ -20446,7 +20981,7 @@
     /* ---- a card that holds ecash (08a-flashcard.js) --------------------- */
 
     /* The pure parts, for the screens and the tests. */
-    cardSecret: function (nonce, cardKey, date, refundKey) { return cardSecret(nonce, cardKey, date, refundKey); },
+    cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
                  tap: cardTapOf, log: cardLogOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
@@ -20650,7 +21185,8 @@
         }
         try {
           // of a keyset this mint no longer lists, a piece is asked about by the eight bytes there are
-          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, secret: cardSecret(nonce, cardKey, x.date, row.refundKey) });
+          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, date: x.date,
+                     secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) });
         } catch (e) {}
       });
       if (!due.length) {
@@ -20672,18 +21208,43 @@
             if (!/^[0-9a-f]{64}$/.test(key) || String((j && j.pubkey) || '').toLowerCase() !== row.refundKey) {
               throw cardError('no-key', 'This phone\u2019s words do not give the key that card was set up with.');
             }
+            var done = function (sats, hash) {
+              var all = cardsOnFile();
+              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
+              console.log('[foxy] card: ' + sats + ' sats taken back from a card with this phone\u2019s own key');
+              return { sats: sats, hash: hash, later: later };
+            };
+            /* A one-signature card's pieces: this phone's key signs once for
+             * the pieces of each date, over the swap they come back in, as
+             * the card itself would have (`cardSwapPlan`). */
+            if (Number(row.format) === CARD_FORMAT_ALL) {
+              var firstId = '', total = 0;
+              return cardAllGroups(live).reduce(function (chain, group) {
+                return chain.then(function () { return cardSwapPlan(w, group); }).then(function (plan) {
+                  // the library's own signer, given the whole message: (proofs, key, logger, message)
+                  var by = CT.signP2PKProofs([plan.inputs[0]], key, undefined, plan.message)[0];
+                  var one = /** @type {any} */ ({ id: plan.inputs[0].id, amount: plan.inputs[0].amount, secret: plan.inputs[0].secret, C: plan.inputs[0].C,
+                                                  witness: typeof by.witness === 'string' ? by.witness : JSON.stringify(by.witness) });
+                  var good = false;
+                  try { good = CT.isP2PKSpendAuthorised(one, undefined, plan.message) === true; } catch (e) { good = false; }
+                  if (!good) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
+                  cardSwapWrite(plan, null);
+                  var pieces = [one].concat(plan.inputs.slice(1));
+                  var back = { id: 'cardback-' + plan.id, token: CT.getEncodedToken({ mint: mintOf(w), proofs: pieces, unit: 'sat' }),
+                               sats: 0, worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
+                  mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
+                  firstId = firstId || back.id;
+                  return cardSwapTaken(back).then(function (got) { total += (got && got.sats) || 0; });
+                });
+              }, Promise.resolve()).then(function () { return done(total, firstId); });
+            }
             var signed = CT.signP2PKProofs(live, key);
             var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
             if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
             var taken = { id: 'cardback-' + piecesFingerprint(signed), token: CT.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' }),
                           sats: 0, worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
-            return cardSwapTaken(taken).then(function (got) {
-              var all = cardsOnFile();
-              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
-              console.log('[foxy] card: ' + got.sats + ' sats taken back from a card with this phone\u2019s own key');
-              return { sats: got.sats, hash: taken.id, later: later };
-            });
+            return cardSwapTaken(taken).then(function (got) { return done(got.sats, taken.id); });
           });
         });
     },
@@ -20734,9 +21295,9 @@
       var misfit = cardMintMisfit(w);
       if (misfit) return Promise.reject(misfit);
       var recoverable = !!card.record.refundKey;
-      var date = recoverable ? Math.floor(Date.now() / 1000) + CARD_DATE_AHEAD : 0;
+      var date = recoverable ? cardDateFor(card) : 0;
       return FoxyWallet.sendToken(ladder.sats, { unit: 'sat', lockTo: card.key, lockUntil: date || undefined,
-                                                 refundTo: recoverable ? card.record.refundKey : undefined,
+                                                 refundTo: recoverable ? card.record.refundKey : undefined, sigAll: cardIsAll(card),
                                                  denominations: ladder.denominations, purpose: 'card' })
         .then(function (made) {
           /* Filed first, whatever else is true of it. From this line the
@@ -20991,7 +21552,7 @@
         return Promise.reject(cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '.', { mint: canonicalMint(card.record.mint) }));
       }
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
-      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset)); });
+      var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset), card.info.format); });
       var asking = onCircuit(w, 'card:' + card.key.slice(-16));
       return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
         .then(function (states) {
@@ -21033,6 +21594,8 @@
       var r = cardHeld(key);
       return r ? { card: r.card, held: Number(r.worth) || 0, want: Number(r.resume.want) || 0, at: Number(r.at) || 0, fresh: cardHeldFresh(r) } : null;
     },
+    /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
+    cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
     cardHeldLetGo: function (key) {
       var w = null;
       try { w = need(); } catch (e) { w = null; }

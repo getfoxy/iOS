@@ -4,7 +4,10 @@
  *     node tests/flashcard-model.js
  *
  * tests/fixtures/flashcard-transcript.json is a conversation the applet had
- * under jCardSim: every command it was sent and what it answered. The model in
+ * under jCardSim: every command it was sent and what it answered. It is the
+ * card that signs once for a payment (format 4); flashcard-transcript-3.json
+ * is the same of the card before it, which signs for each piece (format 3) and
+ * is still in people's hands. The model is held to both. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
@@ -21,21 +24,30 @@ let failed = 0;
 const ok = (good, name, detail) => {
   if (!good) { console.log('FAIL  ' + name + (detail ? ' — ' + detail : '')); failed += 1; }
 };
-const T = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'flashcard-transcript.json'), 'utf8'));
+const read = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
 const ctx = loadReal({});
 const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
-(async () => {
-  const card = makeCard({ window: ctx.window });
+async function replay(T, format) {
+  const card = makeCard({ window: ctx.window, format });
   let exact = 0, verified = 0;
+  // a payment being put to a one-signature card: its places and its outputs, as the commands gave them
+  let pay = null;
   for (const e of T) {
     // the card taken out of the field and put back: nothing is sent, and the model is tapped anew
-    if (e.kind === 'reset') { card.tap(); continue; }
+    if (e.kind === 'reset') { card.tap(); pay = null; continue; }
+    const ins = e.apdu.substr(2, 2);
     const got = await card.send(e.apdu);
     const sw = got.slice(-4), data = got.slice(0, -4);
     ok(sw === e.sw, e.name + ': the status word', 'the card ' + e.sw + ', the model ' + sw);
     if (sw !== e.sw) continue;
+    if (format === 4 && e.apdu.slice(0, 2) === 'b0') {
+      const lc = parseInt(e.apdu.substr(8, 2), 16) || 0, body = e.apdu.substr(10, lc * 2);
+      if (ins === '22') pay = sw === '9000' ? { slots: (body.match(/../g) || []).map((h) => parseInt(h, 16)), outs: '' } : null;
+      else if (ins === '23') { if (pay && sw === '9000') { for (let at = 0; at < body.length; at += 74) pay.outs += String(parseInt(body.substr(at, 8), 16)) + body.substr(at + 8, 66); } else pay = null; }
+      else if (ins !== '24') pay = null;
+    }
     if (e.kind === 'exact') {
       ok(data === e.data, e.name + ': the answer', 'the card ' + e.data.slice(0, 60) + ', the model ' + data.slice(0, 60));
       exact += 1;
@@ -54,15 +66,41 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
       const s = W.cardParse.slot('02' + card.state.slots[slot].data);
       ok(W.cardSecret(s.nonce, card.key, s.date, card.state.record.refund) === card.secretOf(slot), e.name + ': the wallet’s secret for it');
       verified += 1;
+    } else if (e.kind === 'sigall') {
+      /* One signature for the whole payment. The message is built here from
+       * what the commands said and the WALLET's text for each place's secret,
+       * so it is the wallet's reading of the card that the signature is held to. */
+      ok(!!pay, e.name + ': a payment was begun');
+      const text = (pay ? pay.slots : []).map((i) => {
+        const s = W.cardParse.slot('02' + card.state.slots[i].data);
+        return W.cardSecret(s.nonce, card.key, s.date, card.state.record.refund, 4) + s.C;
+      }).join('') + (pay ? pay.outs : '');
+      ok(data.length === 128 && CT.schnorrVerifyMessage(data, text, card.key) === true, e.name + ': one signature over every piece and every output');
+      ok(card.state.lastText === text, e.name + ': the message is the one the wallet builds');
+      ok((pay ? pay.slots : []).every((i) => card.state.slots[i].status === 2), e.name + ': and every piece is burned');
+      pay = null;
+      verified += 1;
+    } else if (e.kind === 'again') {
+      ok(data === card.state.lastSig, e.name + ': the last signature, again');
+      verified += 1;
     } else if (e.kind === 'auth') {
       const reader = Buffer.from(e.apdu.slice(10, 42), 'hex');
       const tag = sha256(Buffer.from('FoxyCard/auth'));
       const digest = sha256(Buffer.concat([tag, tag, reader, Buffer.from(data.slice(0, 32), 'hex'), Buffer.from(card.key, 'hex')]));
       ok(data.length === 160 && CT.schnorrVerifyDigest(data.slice(32), ctx.window.Uint8Array.from(digest), card.key) === true, e.name + ': a signature over both nonces and the key');
       verified += 1;
+    } else {
+      ok(false, e.name + ': a kind of answer this test knows', e.kind);
     }
   }
   ok(T.length >= 100 && exact >= 90 && verified >= 12, 'the transcript is the whole conversation', T.length + ' exchanges, ' + exact + ' exact, ' + verified + ' verified');
+  return { n: T.length, exact, verified };
+}
+
+(async () => {
+  const now = await replay(read('flashcard-transcript.json'), 4);
+  const before = await replay(read('flashcard-transcript-3.json'), 3);
+  const T = { length: now.n + before.n }, exact = now.exact + before.exact, verified = now.verified + before.verified;
 
   // the model's own extras
   const c2 = makeCard({ window: ctx.window });

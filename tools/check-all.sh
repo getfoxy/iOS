@@ -98,6 +98,7 @@ check "flashcard model" 1 node tests/flashcard-model.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
 check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js
 check "flashcard money" 1 node tests/flashcard-money.js
+check "flashcard one signature" 1 node tests/flashcard-sigall.js
 check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js

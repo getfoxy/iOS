@@ -541,7 +541,15 @@
       var signedAlready = (function () {
         var CT = window.CashuTS;
         if (!locked.length || !CT || !CT.isP2PKSpendAuthorised) return false;
-        try { if (CT.isP2PKSigAll && CT.isP2PKSigAll(tok.proofs)) return false; } catch (e) { return false; }
+        /* One signature over the whole swap (SIG_ALL) is good for the outputs
+         * it was made over and no others. This phone can use it only where it
+         * holds those outputs: a card's payment, set out here before the card
+         * signed (`cardSwapFor`, 08a-flashcard.js). */
+        try {
+          if (CT.isP2PKSigAll && CT.isP2PKSigAll(tok.proofs)) {
+            return !!(locked.length === tok.proofs.length && tok.proofs[0] && tok.proofs[0].witness && cardSwapFor(tok.proofs));
+          }
+        } catch (e) { return false; }
         return locked.every(function (pr) {
           if (!pr || !pr.witness) return false;
           try { return CT.isP2PKSpendAuthorised(pr); } catch (e) { return false; }
@@ -831,9 +839,17 @@
            * recoverSwaps on the next connect or resume. */
           // with what the outputs add up to: the token less the mint's input fee on it
           // `into` goes on the record: a lost answer restored later finishes that entry, not a new one
+          /* Pieces a one-signature card signed for are swapped for the outputs
+           * it signed for and no others (`cardSwapFor`, 08a-flashcard.js): the
+           * mint takes its signature for nothing else. Their counters go on
+           * the record before the request does, as any swap's do. */
+          var fixed = unit === 'sat' ? cardSwapFor(incomingProofs) : null;
           guard = swapGuard(w, 'receive', { unit: unit, amount: tok.amount, into: into || undefined,
-            expect: incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined });
+            expect: fixed ? fixed.amounts.reduce(function (n, a) { return n + Number(a); }, 0)
+              : (incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined),
+            fixed: fixed ? [{ keysetId: fixed.keyset, start: Number(fixed.counter), count: fixed.amounts.length }] : undefined });
           return guard.run('receive', function () {
+            if (fixed) return cardSwapFixed(w, FoxyWallet.unwrap(text), fixed).then(function (made) { cardSwapDrop(fixed.id); return made; });
             /* Its outputs fill the pool (shapeOutputs): what comes in is the
              * pieces the next payment needs, not a few large ones to break
              * later. Only when the fee is known, which is what the amount of
@@ -1382,6 +1398,10 @@
            * into the ladder of its amount: 08a-flashcard.js). Whatever the sum
            * of them leaves of the amount, and the fee on them, is filled by the
            * library as it always was. */
+          /* `opts.sigAll`: pieces for a card that signs once for a payment
+           * (08a-flashcard.js). The flag is part of each piece's secret, and
+           * the card can sign for no piece written without it. */
+          if (lockTo && opts && opts.sigAll) /** @type {any} */ (lockOut.options).sigFlag = 'SIG_ALL';
           if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
             lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });
           }

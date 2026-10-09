@@ -20,8 +20,10 @@ does not repeat the protocol. The limits are listed at the end and argued in
   payment with no key proof, the progress lines on the sheet, loading like a
   cash drawer, SWITCH TO a mint, taking a card payment with no connection, and
   letting the card go before the mint is asked (with the put-back tap when the
-  mint refuses), the two-tap payment that signs at most two pieces, and the
-  withdrawal that keeps what a cut-short tap signed. The list of what only a
+  mint refuses), the two-tap payment that signs at most two pieces, the
+  withdrawal that keeps what a cut-short tap signed, and the whole of a card
+  that signs once for a payment (below), which has paid real mints only from
+  the simulator. The list of what only a
   card and a hand can show is
   `DEVICE-TESTS.md` §23.
 - **The time the card is told is interim, and weak** (*The time*, below).
@@ -344,6 +346,84 @@ Where the sheet that comes up again reads no card, the screen says what is
 waiting, with TAP CARD to finish. A card refused, or a bad signature, part way
 through a payment is not taken up again: what the card signed goes back to it.
 
+## A card that signs once for a payment
+
+There are two kinds of card. The first signs for each piece it pays with, most
+of a second apiece, and everything above about signing few pieces and taking
+change at a second tap is written for it. The second (the card's software 1.4,
+which says of itself that it is format 4) signs **once** for a whole payment,
+whatever the number of pieces. Foxy reads which kind a card is and pays with
+either; a piece is written the way its own card writes it.
+
+One signature is over more than the pieces. It is over the pieces **and the
+outputs they are swapped for** (NUT-11's `SIG_ALL`), and a mint takes it for
+that swap and no other. So the order of a payment is turned round:
+
+1. the card is read, and the pieces chosen;
+2. this phone sets out the swap: the outputs, made from its own seed at
+   counters taken now, shaped as any receipt is. Nothing is asked of the mint;
+3. what was set out is written down (`foxy.flashcard.swaps`), and the card is
+   told the places and the outputs and signs once;
+4. the mint is sent exactly that swap. What is about to go is hashed again and
+   held to what was written down first, and a swap that cannot be set out as
+   it was signed for is not sent.
+
+What that changes:
+
+- **Exactly, where the card can.** Signing costs the same for one piece as for
+  thirty-two, so the pieces are chosen to come to exactly the price (and the
+  mint's fee on them) where the card holds them: no change, and no second tap.
+  Where it cannot, the choice is the one the other kind of card makes, with
+  change owed and written back as ever. The change is locked to the card with
+  the same flag, and is money it signs for again.
+- **One date.** A mint takes one signature only for pieces whose secrets agree
+  in everything but the nonce, and a recoverable card's pieces carry a date.
+  So a payment is of one date's pieces. A top-up takes the date the card
+  already has while that is ninety days off or more, and a new year after
+  that, so a card is mostly of one date. A card topped up near the end of its
+  year holds two; a price that neither covers alone is refused before the PIN
+  with `TAKE IT IN TWO PARTS` and the most it can pay at once. The holder's own
+  phone, taking a whole card off, asks for a signature for each date (and for
+  each thirty-two pieces) in the one tap.
+- **All or nothing.** The card burns every piece as it signs, in one
+  transaction, so there is no payment half signed. A card taken away before it
+  signs has burned nothing. A card taken away **as** it signs has burned the
+  pieces, and this phone never heard the signature: it says `NOT PAID YET`, and
+  the card's next tap here settles which it was. Pieces still on the card were
+  never signed for. Pieces gone from it were, and the card is asked for that
+  signature again (it keeps its last), under the PIN: tapped for the same
+  amount the payment is made with nothing more signed, and tapped for another
+  the first goes back to the card as a payment given up does. A card that has
+  signed for another till in between cannot give it again: those pieces can
+  be spent by nobody until their date, when the holder's phone takes them
+  back, as a piece lost in the air always could not.
+- **The signed pieces are of use to this phone only.** Somebody who has them,
+  off this phone or off the air, cannot swap them for outputs of their own:
+  the mint refuses the signature for anything but the swap it was made over,
+  even the same outputs in another order.
+- **A lost answer comes back the same way.** The outputs' counters are on the
+  swap's record before the request goes, as any swap's are, and an answer that
+  never arrives is restored from them. The body is not run again with other
+  outputs, which is what any other swap does when a mint says it has seen the
+  outputs before: here that answer means this very swap was made, and it is
+  restored. A phone whose counters are behind what the mint has seen of its
+  seed is refused once, the pieces go back to the card, and the counters are
+  moved on so that the next payment is made.
+- **With no connection** the swap is set out all the same (it needs no mint),
+  and the outputs wait with the pieces kept on trust.
+- **Taking a lost card back**: this phone's own key signs once for each date's
+  pieces, over the swap they come back in.
+
+What it costs: a signature that names its outputs is good only while the mint
+will still make that swap. A mint that retires the keyset the outputs are on,
+or raises its fee, between the signature and the swap (which matters for a
+payment kept on trust for days) leaves pieces the card's signature can no
+longer spend; on a recoverable card they come back to the holder's phone after
+their date.
+
+The limits are held to what a payment's pieces come to together, by the card,
+before it signs; and the card's log counts the payment once.
+
 ## Change
 
 The card signs whole pieces, so a payment of $0.43 may use a piece worth more.
@@ -649,13 +729,13 @@ wait, and the payment is made when the wallet next asks.
 
 ## What is kept on the phone
 
-Five stores, named in `STORAGE.md`: ecash made for a card and not yet written to
+Six stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`; and the counts it last read from a card's own log, to say what is new. The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped. The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
 
 ## What it does not protect against

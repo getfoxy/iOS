@@ -1366,7 +1366,16 @@
         };
       }
     }
-    var recorder = outputsRecorder(w, [], function (list) { rec.outputs = list; writeSwap(rec); });
+    /* `meta.fixed`: the outputs are made already, at these counters, and the
+     * swap can be for no others (a card's one signature is over them:
+     * 08a-flashcard.js). The ranges are on the record from the start; the
+     * body is not run again with other outputs, which that signature would
+     * not be good for; and a mint that says it has signed these outputs
+     * already has done this very swap, so that is an answer lost and found,
+     * and they are restored. */
+    var fixed = (meta && Array.isArray(meta.fixed) && meta.fixed.length) ? meta.fixed.map(copyRange) : null;
+    if (fixed) rec.outputs = fixed.map(copyRange);
+    var recorder = outputsRecorder(w, fixed || [], function (list) { rec.outputs = list; writeSwap(rec); });
     /* A locked send's outputs carry no counter and no seed can rebuild them,
      * so they are written down as they are made rather than named by a range
      * (03-seed-counters-logs.js). Synchronously, before the request: that is
@@ -1391,7 +1400,8 @@
          * restored against for ever. Each attempt records its own,
          * and starts by forgetting the last one's: outputs the mint refused as
          * already signed are not this wallet's to rebuild. */
-        return onceMoreIfSigned(w, label, function () {
+        if (fixed) writeSwap(rec);
+        return (fixed ? function (w0, l0, body) { return body(); } : onceMoreIfSigned)(w, label, function () {
           var stop = null;
           if (locked) {
             rec.locked = [];
@@ -1405,7 +1415,13 @@
                                            function (e) { release(); throw e; });
         }).catch(function (e) {
           // refused, or never sent at all: nothing of it is at the mint to restore
-          if (mintRefused(e) || neverSent(e) || !swapKept(rec.id)) { dropSwap(rec.id); throw e; }
+          /* Fixed outputs the mint has signed before. Either this very swap (its
+           * answer lost, and found below), or this phone's counters are behind
+           * what the mint has seen of its seed: then they are moved on, as any
+           * other swap's are before it tries again (`onceMoreIfSigned`), so
+           * that the next payment set out here is not refused the same way. */
+          if (fixed && alreadySigned(e)) { try { skipSignedCounters(w, COUNTER_SKIPS[1]).then(null, function () {}); } catch (x0) {} }
+          if (!(fixed && alreadySigned(e) && swapKept(rec.id)) && (mintRefused(e) || neverSent(e) || !swapKept(rec.id))) { dropSwap(rec.id); throw e; }
           console.warn('[foxy] ' + label + ': no answer from the mint (' + String((e && e.message) || e).slice(0, 60) +
             '); asking for the outputs it reserved');
           /* A locked send first: its outputs are the money that left, and no

@@ -1648,6 +1648,40 @@ Needs the same card software as 23c-2.
    refused; the holder's phone then says `TAMPER: a terminal tried 3 times...`
    and TAMPER ON THIS CARD lists a tap of three refusals and nothing signed.
 
+#### 23c-4. A card that signs once for a payment (software 1.4)
+
+A card with the newer software, set up and loaded by this build. An older card
+(1.3 and before) is still paid with as in 23a to 23c.
+
+1. FLASHCARD reads it: its screen is as any card's. Load it: the money goes on
+   in one tap, as before.
+2. A till asks for an amount the card holds exact pieces for (most amounts,
+   after a load): **one tap**, PAYMENT RECEIVED, and no TAP AGAIN for change.
+   The sheet's line reads `Signing`, with no count of pieces. Time it from the
+   PIN to the tick: it should not grow with the amount.
+3. A larger amount, of many pieces: still one tap, and about as long. Note the
+   time; how long the card takes over thirty-two pieces is not known yet.
+4. An amount it cannot make exactly (empty the small pieces first by paying
+   small amounts): one tap, then the change tap, as with an older card. Pay
+   again with that change on the card: it is taken.
+5. Take the card away the instant the sheet says `Signing`. NOT PAID YET. Tap
+   again for the same amount: paid, and the card is out the amount once. Do it
+   several times: each time it is either paid at the second tap with nothing
+   more taken, or was never signed and is paid afresh.
+6. The same, and at the second tap cancel and ask for another amount: the new
+   amount is paid, and what was signed for the first goes back on the card at
+   the change tap.
+7. A per tap limit, then an amount over it: refused before the PIN. An amount
+   under it made of many pieces: paid (the limit is on what they come to).
+8. Top the card up a second time, then pay an amount larger than either load:
+   one tap (both loads carry one date).
+9. WITHDRAW the whole card to its holder's phone: one tap, however many pieces.
+   With more than thirty-two pieces on it, still one tap.
+10. With no connection, a till takes an exact amount on trust; back online it
+    is swapped in and its entry settles.
+11. The card's own log (23c-3) counts each payment once, with the number of
+    pieces it was made of.
+
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the

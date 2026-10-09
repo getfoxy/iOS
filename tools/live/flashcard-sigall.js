@@ -1,0 +1,207 @@
+'use strict';
+/* flashcard-sigall.js — a card that signs once for a payment, at real mints.
+ *
+ *   sh tools/live/local-mint.sh up
+ *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
+ *   (the card repository is https://github.com/getfoxy/card)
+ *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
+ *     node tools/live/flashcard-sigall.js [card port]
+ *
+ * tests/flashcard-sigall.js pays with such a card at a stub mint that holds
+ * NUT-11's SIG_ALL the way this repository reads it. These are CDK's and
+ * Nutshell's own readings: one signature, on the first piece, over every
+ * piece and every output, taken or refused by the mint itself.
+ *
+ * The card is the applet's own class in the JavaCard simulator when a card
+ * server is listening on the port given (or 47436), and the JavaScript model
+ * of it when none is. The wallet is the real one, twice: a holder's phone and
+ * a receiver's, each on the mocked phone every live suite uses.
+ *
+ * What is held to, at each mint: a payment is one signature whatever its
+ * pieces; the receiver has exactly what it asked for; change written back is
+ * money the card can sign for again; and every sat is somewhere it can be
+ * named.
+ *
+ * Fake money only — the local Docker mints. */
+const net = require('net');
+const H = require('./harness');
+const { makeCard } = require('../../tests/flashcard-card');
+
+setTimeout(() => { console.log('WATCHDOG 900s'); process.exit(2); }, 900000).unref();
+
+const R = { pass: 0, fail: 0 };
+const ok = (name, good, detail) => {
+  console.log((good ? '  OK    ' : '  FAIL  ') + name + (detail ? ' — ' + detail : ''));
+  good ? R.pass++ : R.fail++;
+};
+const PORT = Number(process.argv[2]) || 47436;
+const PIN = '1234';
+
+/* The applet over a socket, as the iOS Simulator reaches it; null when no card server is listening. */
+function applet(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect(port, '127.0.0.1');
+    let buf = '';
+    const waiting = [];
+    sock.on('data', (d) => {
+      buf += d.toString('ascii');
+      let at;
+      while ((at = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, at).trim();
+        buf = buf.slice(at + 1);
+        const next = waiting.shift();
+        if (next) next(line);
+      }
+    });
+    sock.on('error', () => resolve(null));
+    sock.on('connect', () => {
+      const ask = (line) => new Promise((res) => { waiting.push(res); sock.write(line + '\n'); });
+      resolve({
+        what: 'the applet, in the JavaCard simulator',
+        fresh: () => ask('ctl new'),
+        tap: async () => { if ((await ask('tap')) !== 'ok') throw new Error('no card on the reader'); },
+        send: async (apdu) => { const said = await ask('apdu ' + apdu); if (said === 'gone') throw new Error('the tag was lost'); return said; },
+        close: () => sock.destroy(),
+      });
+    });
+  });
+}
+
+const held = (b, mint) => {
+  try { return (JSON.parse(b.w.localStorage.getItem('foxy.cashu.proofs.' + mint.replace(/\/+$/, ''))) || []).reduce((n, p) => n + Number(p.amount || 0), 0); }
+  catch (e) { return 0; }
+};
+
+async function at(mintKey, names, real) {
+  const MINT = H.MINTS[mintKey].https;
+  console.log('\n== ' + names[mintKey]);
+  const holder = H.boot({ keychain: { words: '' } });
+  const till = H.boot({ keychain: { words: '' } });
+  await holder.W.seedReady();
+  await till.W.seedReady();
+
+  // every command the card is sent, to count its signatures
+  const sent = [];
+  let card;
+  if (real && !process.env.FOXY_CARD_MODEL) { await real.fresh(); card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); return real.send(a); } }; }
+  else {
+    const m = makeCard({ window: holder.w, format: Number(process.env.FOXY_CARD_MODEL) === 3 ? 3 : 4 });
+    card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); return m.send(a); } };
+  }
+  const signatures = () => sent.filter((a) => a.slice(0, 4) === 'b024').length;
+  const pieces = () => sent.filter((a) => a.slice(0, 4) === 'b022').reduce((n, a) => n + parseInt(a.substr(8, 2), 16), 0);
+  console.log('the card: ' + card.what);
+
+  await holder.W.connect(MINT);
+  await H.mintAndClaim(holder.W, 6000);
+  await holder.W.primeLocks();
+  await till.W.connect(MINT);
+  await till.W.primeLocks();
+  const start = held(holder, MINT);
+
+  await card.tap();
+  await holder.W.cardSetUp(card, { pin: PIN, recoverable: true });
+  await card.tap();
+  const first = await holder.W.cardAdd(card, { sats: 2000, pin: PIN });
+  // a mint with a fee: the load is rounded up by the sat or two the card's own pieces will cost to spend
+  ok('a card that signs once for a payment, set up and loaded', first.card.info.format === 4 && first.card.balance >= 2000 && first.card.balance < 2040,
+     'software ' + first.card.info.version + ', format ' + first.card.info.format + ', ' + first.card.balance + ' on it in ' + first.card.pieces.length + ' pieces');
+  const loadCost = start - held(holder, MINT) - 2000;
+
+  // payments: each one signature, the till with exactly what it asked
+  let asked = 0, changeBack = 0, exact = 0;
+  for (const sats of [1000, 137, 311]) {
+    sent.length = 0;
+    await card.tap();
+    const before = held(till, MINT);
+    const seen = await till.W.cardLook(card, { noAuth: true });
+    const onCard = seen.balance;
+    sent.length = 0;
+    await card.tap();
+    const paid = await till.W.cardPay(card, { sats, pin: PIN });
+    asked += sats;
+    const change = (paid.change && paid.change.sats) || 0;
+    ok(sats + ' sats: ONE signature, for ' + pieces() + ' piece(s), and the mint takes it', paid.sats === sats && signatures() === 1,
+       signatures() + ' signature(s); the till is up ' + (held(till, MINT) - before) + (change ? ', ' + change + ' of change owed to the card' : ', exactly: no change'));
+    if (!change) exact += 1;
+    if (change) {
+      await card.tap();
+      const back = await till.W.cardWrite(card, { pin: PIN });
+      changeBack += change;
+      ok('  its change goes back on at the next tap', back.left === 0 && till.W.cardOwed().length === 0, change + ' sats');
+    }
+    await card.tap();
+    const after = await till.W.cardLook(card, { noAuth: true });
+    ok('  the till has what it asked for, and the card is out that and the mint’s fees', held(till, MINT) - before >= sats && onCard - after.balance >= sats && onCard - after.balance - sats < 40,
+       'till +' + (held(till, MINT) - before) + ', card -' + (onCard - after.balance));
+  }
+  ok('with the pieces it had, at least one payment was made exactly, with no change', exact >= 1, exact + ' of 3');
+
+  // what change put on the card is money it can sign for: the holder takes all of it off, in one tap
+  await card.tap();
+  const left = (await holder.W.cardLook(card)).balance;
+  const hb = held(holder, MINT);
+  sent.length = 0;
+  await card.tap();
+  const off = await holder.W.cardWithdraw(card, { pin: PIN });
+  await card.tap();
+  const empty = await holder.W.cardLook(card);
+  ok('the holder takes the rest off, change and all, in one tap', empty.balance === 0 && held(holder, MINT) - hb === off.sats && off.sats > 0 && left - off.sats < 40,
+     off.sats + ' of ' + left + ' (' + signatures() + ' signature(s) for ' + pieces() + ' pieces; the mint took ' + (left - off.sats) + ')');
+
+  /* A price the card cannot make exactly: loaded in the powers of two of the
+   * amount and no more (the card is told, for the cutting only, that it holds
+   * every size three deep already), so 1,000 needs change. One signature
+   * still; the change is locked to the card with its flag, written back, and
+   * spent again. */
+  {
+    await card.tap();
+    const seen = await holder.W.cardLook(card);
+    const sizes = [];
+    for (let i = 0; i < 46; i++) for (let k = 0; k < 3; k++) sizes.push({ nonce: 'x'.repeat(i + 1) + k, amount: Math.pow(2, i) });
+    await holder.W.cardPrepare(Object.assign({}, seen, { pieces: seen.pieces.concat(sizes) }), 2000);
+    await card.tap();
+    const on = await holder.W.cardWrite(card, { owner: true });
+    const tb = held(till, MINT);
+    sent.length = 0;
+    await card.tap();
+    const paid = await till.W.cardPay(card, { sats: 1000, pin: PIN });
+    const change = (paid.change && paid.change.sats) || 0;
+    ok('a price it cannot make exactly (' + on.card.pieces.map((x) => x.amount).sort((a, b) => b - a).join('+') + '): one signature, and change', paid.sats === 1000 && signatures() === 1 && change > 0,
+       'for ' + pieces() + ' pieces; the till is up ' + (held(till, MINT) - tb) + ' and has made ' + change + ' of change for the card');
+    await card.tap();
+    const back = await till.W.cardWrite(card, { pin: PIN });
+    ok('  the change is written back onto the card', back.left === 0 && till.W.cardOwed().length === 0, change + ' sats, ' + back.card.balance + ' on the card now');
+    sent.length = 0;
+    await card.tap();
+    const again = await till.W.cardPay(card, { sats: 700, pin: PIN });
+    ok('  and is money the card signs for again: 700 more, which only the change can make up', again.sats === 700 && signatures() === 1,
+       'one signature for ' + pieces() + ' pieces' + ((again.change && again.change.sats) ? ', ' + again.change.sats + ' of change' : ', exactly'));
+    if (again.change && again.change.sats) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
+    await card.tap();
+    await holder.W.cardWithdraw(card, { pin: PIN });
+  }
+  await card.tap();
+  const emptied = await holder.W.cardLook(card);
+  empty.balance = emptied.balance;
+
+  const now = held(holder, MINT) + held(till, MINT) + empty.balance;
+  console.log('    where every sat is: ' + start + ' at the start; now ' + held(holder, MINT) + ' in the holder’s phone, ' + held(till, MINT) + ' in the till, ' + empty.balance + ' on the card; '
+    + (start - now) + ' in mint fees (loading cost ' + loadCost + ')');
+  ok('nothing is unaccounted for: what is not held was a fee, and it is small', start - now >= 0 && start - now < 200, String(start - now));
+  ok('nothing is left owed, unanswered or on file', till.W.cardOwed().length === 0 && till.W.cardTaken().length === 0 && holder.W.cardTaken().length === 0
+     && JSON.parse(till.w.localStorage.getItem('foxy.flashcard.swaps') || '[]').length === 0 && JSON.parse(holder.w.localStorage.getItem('foxy.flashcard.swaps') || '[]').length === 0);
+  const trouble = till.rec.error.concat(holder.rec.error).filter((l) => !/card:/.test(l));
+  ok('and neither wallet logged an error', trouble.length === 0, trouble.slice(0, 2).join(' | '));
+}
+
+async function run() {
+  const names = await H.mintNames(['cdk', 'nutshell']);
+  const real = await applet(PORT);
+  await at('cdk', names, real);
+  await at('nutshell', names, real);
+  if (real) real.close();
+  console.log('\n' + R.pass + ' passed, ' + R.fail + ' failed');
+  process.exit(R.fail ? 1 : 0);
+}
+run().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

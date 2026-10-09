@@ -474,9 +474,27 @@ function fakeMint(w, opts) {
      * not a mint, and it shares code with the signer, but it catches a missing
      * witness, a wrong key, the wrong secret signed, and SIG_ALL — which is the
      * whole class of mistake a wallet can make on its own. */
-    const unauthorised = (inputs) => {
+    const unauthorised = (inputs, outputs) => {
       const CT = w.CashuTS;
       if (!CT || !CT.isP2PKSpendAuthorised) return null;
+      /* SIG_ALL, as CDK and Nutshell both hold it (asked of four of them
+       * with the same twelve swaps): if any input carries the flag, every input
+       * must, with the same key and the same tags; and there is ONE signature,
+       * on the first input, over every input's secret and C and every output's
+       * amount and B_. A signature for each piece, or over other outputs, or
+       * pieces of two dates, is refused. */
+      const sigAll = (pr) => {
+        try { return (JSON.parse(pr.secret)[1].tags || []).some((t) => t[0] === 'sigflag' && t[1] === 'SIG_ALL'); } catch (e) { return false; }
+      };
+      if ((inputs || []).some(sigAll)) {
+        try { CT.assertSigAllInputs(inputs); } catch (e) { return 'SIG_ALL inputs must all be SIG_ALL, with one key and the same tags'; }
+        const msg = inputs.map((p) => String(p.secret) + String(p.C)).join('')
+          + (outputs || []).map((o) => String(o.amount) + String(o.B_)).join('');
+        let good = false;
+        try { good = CT.isP2PKSpendAuthorised(inputs[0], undefined, msg) === true; } catch (e) { good = false; }
+        if (!good) return inputs[0].witness ? 'signature for P2PK does not verify' : 'no witness for a P2PK-locked proof';
+        return null;
+      }
       for (const pr of (inputs || [])) {
         if (String((pr && pr.secret) || '').charAt(0) !== '[') continue;
         let allowed = false;
@@ -516,7 +534,7 @@ function fakeMint(w, opts) {
       if (sum(body.inputs) - swapFee !== sum(body.outputs)) return no(11002, 'inputs and outputs do not balance');
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
       if (counterfeit(body.inputs)) return no(10003, 'Proof could not be verified.');
-      const badLock = unauthorised(body.inputs);
+      const badLock = unauthorised(body.inputs, body.outputs);
       if (badLock) return no(11000, badLock);
       if (!spend(body.inputs)) return no(11001, 'Token already spent.');
       record(body.outputs);

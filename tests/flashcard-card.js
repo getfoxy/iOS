@@ -37,6 +37,11 @@ function makeCard(opts) {
   const CT = o.window.CashuTS;
   // the library checks for its own realm's Uint8Array, which a Node Buffer is not
   const own = (buf) => o.window.Uint8Array.from(buf);
+  /* Which card this is. Format 3 signs for one piece at a time (SPEND_PROOF, a signature over that piece's secret).
+   * Format 4 signs once for a whole payment (NUT-11 SIG_ALL): every piece's secret carries the flag, SPEND_PROOF is
+   * gone, and a payment is SPEND_ALL_BEGIN, its outputs, and SPEND_ALL_SIGN. Three unless asked for four. */
+  const FORMAT = o.format === 4 ? 4 : 3;
+  const VERSION = FORMAT === 4 ? 4 : 3;
   const priv = String(o.key || crypto.randomBytes(32).toString('hex'));
   const pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
   const s = {
@@ -63,14 +68,16 @@ function makeCard(opts) {
   };
   let leaveIn = -1, gone = false;
   let leaveAt = null;        // { ins, nth }: gone when the nth command of that instruction arrives
+  let loseAt = null;         // { ins, nth }: the nth command of that instruction is carried out, and its answer is lost
   const sent = [];
 
   const amountOf = (slot) => parseInt(slot.data.substr(16, 8), 16);
   const dateOf = (slot) => parseInt(slot.data.substr(154, 8), 16);
   const secretOf = (slot) => {
     let text = '["P2PK",{"nonce":"' + slot.data.substr(24, 64) + '","data":"' + pub + '","tags":[';
-    if (dateOf(slot)) text += '["locktime","' + dateOf(slot) + '"],["refund","' + s.record.refund + '"]';
-    return text + ']}]';
+    if (dateOf(slot)) text += '["locktime","' + dateOf(slot) + '"],["refund","' + s.record.refund + '"]' + (FORMAT === 4 ? ',' : '');
+    // format 4: the flag is every piece's last tag, as the wallet's library writes it
+    return text + (FORMAT === 4 ? '["sigflag","SIG_ALL"]' : '') + ']}]';
   };
   const sign = (digest) => {
     const sig = CT.schnorrSignDigest(own(digest), own(Buffer.from(priv, 'hex')));
@@ -113,6 +120,20 @@ function makeCard(opts) {
     if (s.log.run >= 3) e.flags |= 1;
     return sw;
   };
+  /* The limits, held to what a payment's pieces are worth together (format 4): '' when it is within them; '6a92' with a
+   * limit and no time; over the day or the tap, written down and refused. */
+  const overLimits = (total, carry) => {
+    if ((s.record.limit !== 0 || s.tapLimit !== 0) && s.now === 0) return '6a92';
+    if (s.record.limit !== 0) {
+      const t = (s.now >= s.windowStart + DAY ? 0 : s.spent) + total;
+      if (carry || t > s.record.limit || t > 4294967295) return refuse('6a8f');
+    }
+    if (s.tapLimit !== 0) {
+      const t = (s.now >= s.tapStart + TAP ? 0 : s.tapSpent) + total;
+      if (carry || t > s.tapLimit || t > 4294967295) return refuse('6a95');
+    }
+    return '';
+  };
   /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
    * the tap's, and there a limit whose number does not change keeps its window and its count. A limit needs a time. */
   const writeLimit = (value) => {
@@ -146,10 +167,14 @@ function makeCard(opts) {
       // clears it (0x30), so a glance or a cut-short tap leaves it standing for the tap that writes the change
       s.verified = false; s.nonce = null; s.grant = false; s.selected = true;
       s.changeGrant = s.changeDue;
-      return '0103' + '9000';
+      // and a payment begun and not signed for is given up
+      s.all = null;
+      return '010' + VERSION + '9000';
     }
     if (!s.selected) return '6999';
     if (cla !== 0xb0) return '6e00';
+    // a payment begun (SPEND_ALL_BEGIN) is given up by anything that is not its next step
+    if (ins !== 0x23 && ins !== 0x24) s.all = null;
     const gated = () => s.pinState !== 0 && !s.verified;            // requirePinIfSet
     const mayWrite = () => s.pinState === 1 && s.verified;           // requirePinSetAndVerified
     const mayLoad = () => s.pinState === 1 && (s.verified || s.grant || s.changeGrant);   // requireLoadAuthority
@@ -157,7 +182,7 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, 3, SLOTS, n(1), n(2), n(0), 7, s.pinState, 3, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [1, VERSION, SLOTS, n(1), n(2), n(0), 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
@@ -182,7 +207,7 @@ function makeCard(opts) {
       }
       case 0x16: {
         const mint = Buffer.from(s.record.mint, 'latin1');
-        return '03' + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
+        return '0' + FORMAT + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
           + s.record.refund + s.record.timeKey + ('0' + mint.length.toString(16)).slice(-2) + hex(mint) + '9000';
       }
       case 0x18: {
@@ -214,7 +239,72 @@ function makeCard(opts) {
         }
         return ('0' + next.toString(16)).slice(-2) + body + '9000';
       }
+      case 0x22: {
+        // SPEND_ALL_BEGIN: the places a payment is made of, in order. Each once, unspent, all of one date; the limits
+        // are held to what they are worth together. Answers that worth.
+        if (FORMAT !== 4) return '6d00';
+        if (gated()) return '6982';
+        if (data.length < 1) return '6700';
+        if (data.length > 32) return '6a96';
+        const list = Array.from(data);
+        let sum = 0;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i] >= SLOTS) return '6a83';
+          const slot = s.slots[list[i]];
+          if (slot.status === 0) return '6a88';
+          if (slot.status === 2) return '6985';
+          for (let j = 0; j < i; j++) if (list[j] === list[i]) return '6a80';
+          if (dateOf(slot) !== dateOf(s.slots[list[0]])) return '6a80';
+          sum += amountOf(slot);
+        }
+        const carry = sum > 4294967295;
+        const total = carry ? 4294967295 : sum;
+        const no = overLimits(total, carry);
+        if (no) return no;
+        // the pieces' half of the message is the card's own to build: each one's secret, and its C in hex
+        s.all = { list, total, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
+        return u32(total) + '9000';
+      }
+      case 0x23: {
+        // SPEND_ALL_OUTPUTS: the swap's outputs, 37 bytes each (amount 4, blinded message 33), hashed as the mint reads them
+        if (FORMAT !== 4) return '6d00';
+        if (!s.all) return '6985';
+        if (data.length < 37 || data.length % 37 !== 0) { s.all = null; return '6700'; }
+        for (let at = 0; at < data.length; at += 37) s.all.text += String(data.readUInt32BE(at)) + hex(data.subarray(at + 4, at + 37));
+        return '9000';
+      }
+      case 0x24: {
+        // SPEND_ALL_SIGN: one signature over the whole message; every piece named is burned as it is given
+        if (FORMAT !== 4) return '6d00';
+        if (!s.all) return '6985';
+        if (gated()) return '6982';
+        const pay = s.all;
+        s.all = null;
+        const no = overLimits(pay.total, false);
+        if (no) return no;
+        const dayBegins = s.record.limit !== 0 && s.now >= s.windowStart + DAY;
+        const tapBegins = s.tapLimit !== 0 && s.now >= s.tapStart + TAP;
+        const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
+        if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + pay.total; if (dayBegins) s.windowStart = s.now; }
+        if (s.tapLimit !== 0) { s.tapSpent = (tapBegins ? 0 : s.tapSpent) + pay.total; if (tapBegins) s.tapStart = s.now; }
+        pay.list.forEach((i) => { s.slots[i].status = 2; });
+        s.changeDue = true;
+        { const e = logEntry(); e.sats = stop(e.sats + pay.total); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + pay.total); }
+        // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
+        s.lastSig = sig;
+        s.lastText = pay.text;
+        return sig + '9000';
+      }
+      case 0x25: {
+        // SPEND_ALL_AGAIN: the last signature given, again
+        if (FORMAT !== 4) return '6d00';
+        if (gated()) return '6982';
+        if (!s.lastSig) return '6a88';
+        return s.lastSig + '9000';
+      }
       case 0x20: {
+        // SPEND_PROOF: format 3's, one piece and a signature over its secret alone. Gone in format 4.
+        if (FORMAT === 4) return '6d00';
         if (gated()) return '6982';
         if (p1 >= SLOTS) return '6a83';
         const slot = s.slots[p1];
@@ -406,15 +496,21 @@ function makeCard(opts) {
         if (leaveAt.nth <= 0) { gone = true; leaveAt = null; return Promise.reject(new Error('the card is not there')); }
       }
       sent.push(a);
+      if (loseAt && a.slice(0, 2) === 'b0' && a.slice(2, 4) === loseAt.ins) {
+        loseAt.nth -= 1;
+        if (loseAt.nth <= 0) { answer(a); gone = true; loseAt = null; return Promise.reject(new Error('the card is not there')); }
+      }
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.all = null; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
+    /* It leaves as it answers the `nth` command of this instruction: the card has done what was asked, and nobody hears. */
+    loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv });
+      const twin = makeCard({ window: o.window, key: priv, format: FORMAT });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },
@@ -422,6 +518,7 @@ function makeCard(opts) {
     leaveAfter(n) { leaveIn = n; },
     setNonce(nonceHex) { s.nonce = String(nonceHex).toLowerCase(); },
     secretOf: (i) => secretOf(s.slots[i]),
+    format: FORMAT,
     balance: () => s.slots.reduce((a, x) => (x.status === 1 ? a + amountOf(x) : a), 0),
   };
 }

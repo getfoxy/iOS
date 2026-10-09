@@ -231,7 +231,8 @@
   fcProgressText(p) {
     const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
     if (!(i > 0 && n > 0)) return '';
-    if (p.step === 'signing') return 'Signing piece ' + i + ' of ' + n;
+    // a card that signs once for a payment has no pieces to count
+    if (p.step === 'signing') return p.all ? 'Signing' : 'Signing piece ' + i + ' of ' + n;
     if (p.step === 'writing') return 'Writing ' + i + ' of ' + n;
     return '';
   }
@@ -500,6 +501,13 @@
        * what to do about it, which is to charge it in parts. */
       'tap-limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S PER TAP LIMIT',
         reason: (e.left !== undefined ? this.fcTapRefusal(e) : said) + safe }),
+      /* A card topped up near the end of its year holds money of two dates,
+       * and one signature is for one of them: said before the PIN was sent,
+       * with the most it can pay at once. */
+      'two-dates': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS',
+        reason: 'This card’s money was put on it at two different times, and one payment can use only one of them. The most it can pay at once is '
+          + this.fcSats(e.most) + '.' + safe }),
+      'too-many': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS', reason: 'That is more pieces than the card signs for at once.' + safe }),
       'old-card': () => ({ tone: 'warn', title: 'NOT ON THIS CARD',
         reason: 'This card’s software has no per tap limit. Its daily limit can still be set.' }),
       'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
@@ -813,6 +821,16 @@
         this.blockedCard('fc-let-go', {
           tone: 'warn', title: 'NOT PAID',
           reason: 'What the card signed goes back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back.',
+          shut: { label: 'OK' },
+        });
+        return;
+      }
+      /* A card that signs once for a payment, taken away as it signed: whether
+       * it signed is the card's to say, at its next tap here. */
+      if (W.cardAskedOpen && W.cardAskedOpen() > 0) {
+        this.blockedCard('fc-let-go', {
+          tone: 'warn', title: 'NOT PAID',
+          reason: 'If the card signed as it was taken away, its next tap on this phone finds that out and puts the money back on it.',
           shut: { label: 'OK' },
         });
       }
