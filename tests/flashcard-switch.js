@@ -234,7 +234,9 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     face(app).press('LATER');
     await settle();
     ok(app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT2 && !app.state.fcMove, 'LATER leaves the card’s screen, and the phone where it was');
-    ok(vals(app).fcNotes.length === 1 && /waiting to go onto this card/.test(vals(app).fcNotes[0].text), 'with the line that says so');
+    // (the card's last tap, from its own log, has a line too by now: the money waiting is said first, and once)
+    ok(vals(app).fcNotes.filter((n) => /waiting to go onto this card/.test(n.text)).length === 1 && /waiting to go onto this card/.test(vals(app).fcNotes[0].text),
+       'with the line that says so, first of the card’s lines');
     app.fcSwitchMint();
     ok(face(app) && face(app).title === 'PUT IT ON FIRST', 'and it is not moved again while that money waits');
     face(app).press('CANCEL');
