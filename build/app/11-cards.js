@@ -71,8 +71,11 @@
     card.appendChild(title);
 
     // pre-line: a card can put its sentences on lines of their own (`tapOfflineCross`)
+    /* `spec.long`: words that may be more than a screen holds (a card's log of
+     * eight taps): they scroll inside the card, so its button stays in reach. */
     const reason = el('font-size:18px;font-weight:500;line-height:1.4;white-space:pre-line;' +
-      'color:rgba(245,241,236,.62);text-align:center;margin-top:7px;max-width:310px');
+      'color:rgba(245,241,236,.62);text-align:center;margin-top:7px;max-width:310px'
+      + (spec.long ? ';max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch' : ''));
     reason.textContent = spec.reason || '';
     card.appendChild(reason);
 

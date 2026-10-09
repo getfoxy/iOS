@@ -30,6 +30,8 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
   const card = makeCard({ window: ctx.window });
   let exact = 0, verified = 0;
   for (const e of T) {
+    // the card taken out of the field and put back: nothing is sent, and the model is tapped anew
+    if (e.kind === 'reset') { card.tap(); continue; }
     const got = await card.send(e.apdu);
     const sw = got.slice(-4), data = got.slice(0, -4);
     ok(sw === e.sw, e.name + ': the status word', 'the card ' + e.sw + ', the model ' + sw);

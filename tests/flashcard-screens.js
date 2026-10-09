@@ -551,6 +551,48 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      && !c.sent.some((a) => /^b040/.test(a)) && !c.sent.some((a) => /^b020/.test(a)) && till.state.screen === 'confirm',
      'a payment over the limit on one tap is refused before the PIN is sent or anything signed, and says to charge it in parts', card(till).reason);
   card(till).press('CLOSE');
+  /* ---- the card's own log, on its holder's screen ------------------------------------- */
+  // one reading of the card by its holder's phone, waited for to its end: the log on the screen is a new one each time
+  const readLog = async (what) => {
+    const was = holder.state.fc && holder.state.fc.log;
+    c.tap();
+    holder.fcRead();
+    await until(what, () => holder.state.fc && holder.state.fc.log && holder.state.fc.log !== was && !stage(H));
+    await settle();
+  };
+  await readLog('the card’s log to be read');
+  {
+    const note = vals(holder).fcNotes.filter((x) => /^Last tap: /.test(x.text))[0];
+    ok(note && /^Last tap: \u20bf[\d,]+, .*\. Press here for this card\u2019s own log\.$/.test(note.text), 'the card’s screen says its last tap, from the card’s own log, in a line that opens the rest', note && note.text);
+    note.tap();
+    ok(card(holder) && card(holder).title === 'THIS CARD\u2019S OWN LOG' && /Kept by the card itself\. No phone or terminal can change it\./.test(card(holder).reason)
+       && /In all: \d+ taps?, \u20bf[\d,]+ signed for, 0 refused\.$/.test(card(holder).reason) && card(holder).has('CLOSE'),
+       'the line opens THIS CARD’S OWN LOG: its last taps, and its totals', card(holder).reason.split('\n').slice(-1)[0]);
+    card(holder).press('CLOSE');
+  }
+  // a terminal that has the PIN asks three times for more than the limit on one tap: the card refuses, writes it down, and marks the tap
+  {
+    // (this card's pieces are all under its limit of 300 by now, so for this the card is given a limit one of them is over)
+    c.state.tapLimit = 100;
+    const big = c.state.slots.findIndex((x) => x.status === 1 && parseInt(x.data.substr(16, 8), 16) > 100);
+    const tampersBefore = c.state.log.tampers;
+    c.tap();
+    const said = [(await c.send('00a404000af0464f5859434152440100')).slice(-4), (await c.send('b04000000431323334')).slice(-4)];
+    for (let i = 0; i < 3; i++) said.push((await c.send('b020' + ('0' + big.toString(16)).slice(-2) + '0040')).slice(-4));
+    ok(big >= 0 && said.join(' ') === '9000 9000 6a95 6a95 6a95' && c.state.log.tampers === tampersBefore + 1, 'three requests over the limit are refused by the card, which marks the tap', said.join(' '));
+    await readLog('the mark to be read');
+    ok(holder.state.fc.log.tampers === tampersBefore + 1, 'the holder’s phone reads the mark from the card');
+    const note = vals(holder).fcNotes.filter((x) => /^TAMPER: /.test(x.text))[0];
+    ok(note && note.text === 'TAMPER: a terminal tried 3 times to take more than this card\u2019s limit. Press here.', 'and its holder’s screen says TAMPER, with how many times it was tried', note && note.text);
+    note.tap();
+    ok(card(holder) && card(holder).title === 'TAMPER ON THIS CARD' && /three times or more within ten seconds/.test(card(holder).reason) && /\u20bf0, 3 refused \u2014 TAMPER/.test(card(holder).reason)
+       && /Since this phone last looked: 1 tap, \u20bf0 signed for, 3 refused\./.test(card(holder).reason),
+       'which opens TAMPER ON THIS CARD: the tap of three refusals and nothing signed, marked, and what is new since this phone last looked',
+       card(holder).reason.split('\n').filter((l) => /TAMPER|Since/.test(l)).join(' / '));
+    card(holder).press('CLOSE');
+    c.state.tapLimit = 300;
+  }
+
   // and it is taken off again, the same way, with NO LIMIT
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');

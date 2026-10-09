@@ -284,6 +284,13 @@ function representative() {
   const TAP = { known: true, limited: true, limit: 2000, spent: 0, left: 2000, turns: 0, noTime: false };
   add('flashcard, a card with a limit on one tap', at('flashcard', { fc: FC({ tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card with a limit on one tap and a daily limit', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  // the card's own log: its last tap in a line under the balance, and a tap the card has marked
+  const LOG = { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0, at: 0 },
+                last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] };
+  const LOG_MARKED = { taps: 42, sats: 213400, refused: 5, tampers: 1, since: { taps: 1, sats: 0, refused: 5, tampers: 1, at: 0 },
+                       last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }].concat(LOG.last) };
+  add('flashcard, a card with its own log', at('flashcard', { fc: FC({ tap: TAP, log: LOG }) }, { wallet: CARDS() }));
+  add('flashcard, a card whose log has a tap marked as a tamper', at('flashcard', { fc: FC({ tap: TAP, log: LOG_MARKED }) }, { wallet: CARDS() }));
   add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
@@ -574,6 +581,11 @@ function cards() {
   // CHANGE LIMIT asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
   add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
   add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}, true));
+  // the card's own log, opened from its line on the card's screen
+  add('card: this card\u2019s own log', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
+    last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
+  add('card: tamper on this card', (a) => { a.state.fc = { log: { taps: 42, sats: 213400, refused: 5, tampers: 1, since: { taps: 1, sats: 0, refused: 5, tampers: 1 },
+    last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }, { time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
   add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
   add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'x' }, {}));

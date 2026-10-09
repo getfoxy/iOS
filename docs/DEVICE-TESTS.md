@@ -1630,6 +1630,24 @@ under CHANGE LIMIT; an older card goes straight to the daily limit).
 5. Set the limit on one tap to NO LIMIT. **Pass:** `Per tap limit removed.`, and
    the daily limit, if there was one, is still there.
 
+#### 23c-3. The card's own log
+
+Needs the same card software as 23c-2.
+
+1. Pay another phone from the card, then read the card on the holder's phone.
+   **Pass:** under the balance, `Last tap:` with what the card signed for (the
+   pieces, which may be more than the price) and the time. Press it. **Pass:**
+   THIS CARD'S OWN LOG lists that tap and the ones before it, newest first, the
+   totals, and `Since this phone last looked:` with the one tap. Read the card
+   again. **Pass:** the tap is still listed, and nothing is said to be new.
+2. Read the card on the second phone (not its owner). **Pass:** no log line.
+3. A tamper cannot be made with Foxy itself, which never asks a card for more
+   than its limit; it is driven in the simulated runs and in the card's own
+   tests. With a desk reader and the card tools: set a limit on one tap, then
+   send three spends of a piece larger than it, with the PIN. **Pass:** each is
+   refused; the holder's phone then says `TAMPER: a terminal tried 3 times...`
+   and TAMPER ON THIS CARD lists a tap of three refusals and nothing signed.
+
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the

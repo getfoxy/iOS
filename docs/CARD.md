@@ -492,6 +492,43 @@ LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and the amount, or
   card in one command, and a limit whose number has not changed keeps its
   window.
 
+## The card's own log
+
+The card keeps an account of its own taps, and nothing else writes it: a spend
+writes it in the same step that burns the piece, and a spend the card refuses
+for being over a limit writes it before it is refused. No command clears it or
+sets it, for the PIN or for the owner, and its counts only go up. It is the one
+record of a card's use that does not depend on any terminal being honest.
+
+- **Four counts**: taps, sats signed for, spends refused for being over a
+  limit, and runs of such refusals (below).
+- **The last eight taps**, newest first: when (the time the card had been
+  told), sats signed for, how many pieces, how many refusals, and a mark.
+- **A tap is one time in a phone's field**, from the card being powered to its
+  being taken away. A terminal that cuts the field to begin again shows as more
+  taps, and the counts count them all, so pushing the eight round hides nothing.
+- **It records what was signed for, not the price.** The card cannot know a
+  price, so it cannot say a payment was too much: the person compares.
+- **TAMPER.** A terminal that keeps to the limits is never refused: it reads
+  what the card has left before it asks. So three or more refusals inside ten
+  seconds of the card's clock are a terminal trying the limit again and again,
+  and the card marks that tap. One refusal at each of three visits is not that.
+  It needs a limit to be set: a card with none refuses nothing.
+
+The holder's phone reads it whenever it reads a card it owns (the owner's proof
+opens it, with no PIN; a till is not shown it). The card's screen says `Last
+tap: ₿12,288, 3:23 PM. Press here for this card's own log.`, or `TAMPER: a
+terminal tried 5 times to take more than this card's limit. Press here.` for as
+long as a marked tap is among the eight. The line opens **THIS CARD'S OWN LOG**
+(or **TAMPER ON THIS CARD**): the taps, the totals, and `Since this phone last
+looked:` what has been added, which the phone works out from the counts it saw
+last time (`foxy.flashcard.logseen`).
+
+What it does not do: it says when and how much, never who; a terminal that
+overcharges within the limits leaves no mark, only the amount; and the times in
+it are the times the card was told, which a terminal built to cheat can choose
+(*The time*).
+
 ## Change PIN, withdraw, and a blocked card
 
 **CHANGE PIN** takes two pads, `NEW PIN` and `NEW PIN AGAIN`, and a tap. The old
@@ -612,13 +649,13 @@ wait, and the payment is made when the wallet next asks.
 
 ## What is kept on the phone
 
-Four stores, named in `STORAGE.md`: ecash made for a card and not yet written to
+Five stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`. The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+Hours Ago`; and the counts it last read from a card's own log, to say what is new. The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
 
 ## What it does not protect against

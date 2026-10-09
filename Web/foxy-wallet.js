@@ -8933,6 +8933,59 @@
              turns: over ? 0 : begun + CARD_TAP, noTime: now === 0 };
   }
 
+  /* GET_LOG: the card's own account of its taps. Only the card writes it: a
+   * spend, in the step that burns the piece, and a spend refused for being
+   * over a limit, before it is refused. No command clears it, and its counts
+   * only go up. Four counts (taps, sats signed for, spends refused for being
+   * over a limit, runs of three such refusals inside ten seconds of the card's
+   * clock), then the last eight taps, newest first: when (the clock the card
+   * had been told), sats signed for, pieces, refusals, and whether the tap is
+   * marked (`tamper`: a third refusal of a run, or one after it, was in it).
+   * A tap here is one time in a phone's field. */
+  function cardLogOf(hex) {
+    var h = String(hex || '').toLowerCase();
+    if (!/^[0-9a-f]*$/.test(h) || h.length < 32 || (h.length - 32) % 24 !== 0 || h.length > 32 + 8 * 24) throw new Error('The card\u2019s log could not be read.');
+    var taps = [];
+    for (var at = 32; at < h.length; at += 24) {
+      taps.push({ time: cardU32(h, at / 2), sats: cardU32(h, at / 2 + 4), pieces: parseInt(h.substr(at + 16, 2), 16),
+                  refused: parseInt(h.substr(at + 18, 2), 16), tamper: (parseInt(h.substr(at + 20, 2), 16) & 1) === 1 });
+    }
+    return { taps: cardU32(h, 0), sats: cardU32(h, 4), refused: cardU32(h, 8), tampers: cardU32(h, 12), last: taps };
+  }
+
+  /* What this phone saw in a card's log when it last read it: the four counts,
+   * by the card's key. The next reading says what has been added since
+   * (`since`), which no terminal can have hidden: the ring holds eight taps and
+   * could be pushed round, but the counts count them all. */
+  var CARD_LOG_SEEN = 'foxy.flashcard.logseen';
+  function cardLogSeen() {
+    var o = load(CARD_LOG_SEEN, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+
+  /* The log read from a card this phone owns (the owner's grant opens it with
+   * no PIN), put on `card.log` with what is new since this phone last looked.
+   * A card whose software keeps no log is left without one. Never fails the
+   * reading it is part of. */
+  function cardLogRead(t, card) {
+    if (!card || card.mine !== true || !(card.info && card.info.tapKnown)) return Promise.resolve(card);
+    return t.ask(cardCommand(CARD_INS.log, 0, '', 0)).then(function (r) {
+      if (r.sw !== '9000') return card;
+      var log;
+      try { log = /** @type {any} */ (cardLogOf(r.data)); } catch (e) { return card; }
+      var all = cardLogSeen();
+      var was = all[card.key];
+      // counts that are behind what was seen are another card's software (it was put on anew): no "since" from those
+      var known = !!(was && log.taps >= was.taps && log.sats >= was.sats && log.refused >= was.refused && log.tampers >= was.tampers);
+      log.since = known ? { taps: log.taps - was.taps, sats: log.sats - was.sats, refused: log.refused - was.refused,
+                            tampers: log.tampers - was.tampers, at: Number(was.at) || 0 } : null;
+      all[card.key] = { taps: log.taps, sats: log.sats, refused: log.refused, tampers: log.tampers, at: Date.now() };
+      try { save(CARD_LOG_SEEN, all); } catch (e2) {}
+      card.log = log;
+      return card;
+    }, function () { return card; });
+  }
+
   /* One slot, as GET_PROOF gives it: status, keyset, amount, nonce, C, date. */
   function cardSlotOf(hex) {
     var h = String(hex || '').toLowerCase();
@@ -9033,7 +9086,7 @@
    * the whole name and not by its first nine bytes, which a card may or may
    * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
   var CARD_AID = 'f0464f58594341524401';
-  var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17',
+  var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17', log: '18',
                    spend: '20', load: '30', clear: '31', setCard: '32', setLimit: '34', time: '35',
                    verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45' };
 
@@ -9371,6 +9424,9 @@
           console.log('[foxy] card: a limit lifted for a withdrawal and not put back is put back now');
           return card;
         }, function () { return card; });
+      }).then(function (c) {
+        // and the card's own log, which the owner's grant opens
+        return cardLogRead(t, c);
       });
     });
   }
@@ -20391,7 +20447,8 @@
 
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey) { return cardSecret(nonce, cardKey, date, refundKey); },
-    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf },
+    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
+                 tap: cardTapOf, log: cardLogOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
     cardTimeKey: CARD_TIME_KEY,
     cardPick: function (w, have, want, cap, card, tapCap) { return cardPick(w, have, want, cap, card, tapCap); },

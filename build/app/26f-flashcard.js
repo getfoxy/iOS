@@ -1246,6 +1246,8 @@
       day: card.day || null,
       // the limit on one tap: { known, limited, limit, left, turns }; `known` false on a card whose software has none
       tap: card.tap || null,
+      // the card's own log, where this phone is its owner and the card keeps one: counts, the last eight taps, what is new
+      log: card.log || null,
       owner: !!(card.info && card.info.owner),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
@@ -1718,6 +1720,38 @@
     if (done) done(sats);
   }
 
+  /* ---- the card's own log -----------------------------------------------------
+   *
+   * Kept by the card and written by nothing else: every tap in which it signed
+   * for anything, or refused to because a limit was reached (08a-flashcard.js,
+   * `cardLogOf`). The card cannot know a price, so it cannot say a payment was
+   * too much; it says what it signed for and when, and the person judges. What
+   * it can say by itself is that a terminal asked for more than its limit
+   * three times or more inside ten seconds, which a terminal that keeps to the
+   * limits never does once: that tap is marked. */
+  fcLogCard() {
+    const log = (this.state.fc || {}).log;
+    if (!log || !log.last) return;
+    const marked = log.last.some((x) => x.tamper);
+    const n = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+    const line = (x) => this.fcWhen(x.time) + ': ' + this.fcSats(x.sats)
+      + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : '')
+      + (x.refused ? ', ' + x.refused + ' refused' : '') + (x.tamper ? ' \u2014 TAMPER' : '');
+    const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
+      ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcSats(log.since.sats) + ' signed for'
+        + (log.since.refused > 0 ? ', ' + log.since.refused + ' refused' : '') + '.\n\n'
+      : '';
+    this.blockedCard('fc-log', {
+      long: true,
+      tone: marked ? 'warn' : 'ask', title: marked ? 'TAMPER ON THIS CARD' : 'THIS CARD\u2019S OWN LOG',
+      reason: (marked ? 'A terminal asked this card for more than its limit allows, three times or more within ten seconds. The card refused each time and wrote it down.\n\n' : '')
+        + 'Kept by the card itself. No phone or terminal can change it.\n\n' + since
+        + log.last.map(line).join('\n')
+        + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcSats(log.sats) + ' signed for, ' + log.refused + ' refused.',
+      shut: { label: 'CLOSE' },
+    });
+  }
+
   /* CHANGE LIMIT. */
   fcSetLimit() {
     const fc = this.state.fc;
@@ -2159,6 +2193,22 @@
         + ((fc && fc.key === r.key) ? 'this card. Press here, then tap it.' : this.fcName(r.key) + '. Press here, then tap that card.'),
       tap: () => this.fcWriteAsk({}),
     }));
+
+    /* The card's own log, which only the card writes: its last tap, in a line
+     * that opens the rest. A tap the card has marked (a terminal asked for
+     * more than its limit, three times or more inside ten seconds) is said as
+     * that, for as long as it is among the eight the card keeps. */
+    const log = fc && fc.log;
+    if (on && log && log.last && log.last.length) {
+      const marked = log.last.filter((x) => x.tamper);
+      const tried = marked.reduce((n, x) => n + (Number(x.refused) || 0), 0);
+      notes.push({
+        text: marked.length
+          ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
+          : 'Last tap: ' + this.fcSats(log.last[0].sats) + ', ' + this.fcWhen(log.last[0].time) + '. Press here for this card\u2019s own log.',
+        tap: () => this.fcLogCard(),
+      });
+    }
 
     const rows = (!W || fc || !this.FC_RECOVERABLE) ? [] : W.cardsList().map(r => ({
       name: this.fcName(r.key),

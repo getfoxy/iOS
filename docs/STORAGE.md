@@ -119,6 +119,7 @@ answers, and so do its counters (below, "Migration").
 | `foxy.flashcard.taken` | pieces a card has signed for that the mint has not swapped yet, as tokens. The card marks them spent and will not sign again, so this is the only copy of the right to spend them until the swap lands | no | **yes**: the tokens |
 | `foxy.flashcard.cards` | the cards this phone loaded as recoverable: each card's key, and for each piece its amount, its date and whether it was still there at the last read. Read to list them and to take a lost card's money back after its date. Not written for a cash card | no | which cards you loaded, and how much |
 | `foxy.flashcard.checked` | per card (twenty at most): when the mint last said every piece on it was good, and which pieces that was about. Only read to say "verified 2 hours ago" on a phone with no connection | no | which cards this phone has read |
+| `foxy.flashcard.logseen` | per card this phone owns: the four counts it last read from the card's own log (taps, sats signed for, refusals, marked runs), and when. Only read to say what the log has gained since this phone last looked | no | which cards this phone has read, and how much each had signed for by then |
 | `foxy.mint.spread` | when A LOT AT ONE MINT was last shown, and whether it was turned off | no | no |
 
 *Removed:* `foxyTheme` (light or dark) was listed here. Nothing in the current

@@ -593,6 +593,69 @@ let L0 = null;
     ok(read.tap && read.tap.known === false && read.tap.limited === false && read.day.limit === 600, 'and is read as it always was: its day, and no tap', JSON.stringify(read.tap));
     await settle();
   }
+  /* ---- 13c: the card's own log ----------------------------------------------------------
+   * Kept by the card: only a spend, and a spend it refuses for being over a limit, write it. The owner's phone reads
+   * it with its proof and no PIN, and says what is new since it last looked. */
+  {
+    const G = await world(0);
+    const clock = { ms: Date.now() };
+    G.H.phone.clockMs = () => clock.ms;
+    G.R.phone.clockMs = () => clock.ms;
+    await binaryLoad(G.H, G.card, 2000);            // 1024 512 256 128 64 16
+    const model = () => G.card.state.log;
+    G.card.tap();
+    const first = await G.H.W.cardLook(G.card, { mine: true });
+    ok(first.log && first.log.taps === 0 && first.log.sats === 0 && first.log.last.length === 0 && (first.log.since === null || first.log.since.taps === 0),
+       'a card that has paid nothing has an empty log: setting it up and loading it are not in it', JSON.stringify(first.log));
+
+    clock.ms += 60000;
+    G.card.tap();
+    const p1 = await G.R.W.cardPay(G.card, { sats: 500, pin: '1234' });
+    if (p1.change && p1.change.sats > 0 && !p1.change.written) { G.card.tap(); await G.R.W.cardWrite(G.card, { change: true }); }
+    G.card.tap();
+    const asTill = await G.R.W.cardLook(G.card);
+    ok(!asTill.log, 'a till, which is not the card’s owner, is not shown the log');
+    G.card.tap();
+    const second = await G.H.W.cardLook(G.card, { mine: true });
+    const signed = model().sats;
+    ok(signed >= 500 && second.log.taps === 1 && second.log.sats === signed && second.log.last.length === 1
+       && second.log.last[0].sats === signed && second.log.last[0].pieces >= 1 && second.log.last[0].refused === 0 && second.log.last[0].tamper === false
+       && Math.abs(second.log.last[0].time - Math.floor(clock.ms / 1000)) <= 1,
+       'a payment is one tap in it: when, what the card signed for (the pieces, not the price) and how many pieces', JSON.stringify(second.log.last[0]));
+    ok(second.log.since && second.log.since.taps === 1 && second.log.since.sats === signed && second.log.since.refused === 0,
+       'and the owner’s phone says what is new since it last looked: one tap', JSON.stringify(second.log.since));
+    G.card.tap();
+    const third = await G.H.W.cardLook(G.card, { mine: true });
+    ok(third.log.taps === 1 && third.log.since.taps === 0 && third.log.since.sats === 0, 'looked at again, nothing is new, and the tap is still there');
+
+    // a terminal that has the PIN and asks for more than the limit on one tap, three times: refused, written down, marked
+    G.card.tap();
+    await G.H.W.cardSetLimit(G.card, { sats: 100, tap: true });
+    clock.ms += 60000;
+    G.card.tap();
+    const big = G.card.state.slots.findIndex((x) => x.status === 1 && parseInt(x.data.substr(16, 8), 16) > 100);
+    const balBefore = G.card.balance();
+    const said = [];
+    said.push((await G.card.send('00a404000af0464f5859434152440100')).slice(-4));
+    said.push((await G.card.send('b04000000431323334')).slice(-4));
+    for (let i = 0; i < 3; i++) said.push((await G.card.send('b020' + ('0' + big.toString(16)).slice(-2) + '0040')).slice(-4));
+    ok(big >= 0 && said.join(' ') === '9000 9000 6a95 6a95 6a95' && G.card.balance() === balBefore, 'the card refuses each of the three, and nothing is burned', said.join(' '));
+    G.card.tap();
+    const after = await G.H.W.cardLook(G.card, { mine: true });
+    ok(after.log.taps === 2 && after.log.refused === 3 && after.log.tampers === 1 && after.log.last[0].tamper === true && after.log.last[0].refused === 3
+       && after.log.last[0].sats === 0 && after.log.last[1].tamper === false && after.log.since.taps === 1 && after.log.since.tampers === 1 && after.log.since.refused === 3,
+       'the owner’s phone finds a second tap, of three refusals and nothing signed for, marked by the card; the payment before it is not', JSON.stringify(after.log.last));
+
+    // a card whose software keeps no log is read as it always was
+    const older = { tap: () => G.card.tap(), send: (a) => G.card.send(/^b0010100/i.test(a) ? 'b0010000' + a.slice(8) : a) };
+    G.card.tap();
+    G.card.sent.length = 0;
+    const plain = await G.H.W.cardLook(older, { mine: true });
+    ok(!plain.log && !G.card.sent.some((a) => /^b018/.test(a)), 'a card whose software has no log is not asked for one', String(!!plain.log));
+    ok(H.W.cardParse.log('0000000200000f1f0000000c000000026b49d26e00000064010200006b49d20000000ebb0c0a0100').last.length === 2
+       && (() => { try { H.W.cardParse.log('00'); return false; } catch (e) { return true; } })(), 'and a log that is not one is not read as one');
+    await settle();
+  }
   /* ---- 14: a terminal with the PIN cannot write a piece twice ------------------------ */
   {
     // What a card signs for is a piece's secret, which its nonce makes; its amount is only what the day is charged. A

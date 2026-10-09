@@ -47,6 +47,11 @@ function makeCard(opts) {
     now: 0, windowStart: 0, spent: 0,
     // the limit on one tap, which to the card is TAP seconds of that clock: the limit, when this tap began, what it has signed for in it
     tapLimit: 0, tapStart: 0, tapSpent: 0,
+    /* The card's own log (the applet's cardLog): counts that only go up, the run of over-limit refusals in hand, and a
+     * ring of the last eight taps. A tap, here, is one time in the field: `tapOpen` is gone with the power (`tap()`). */
+    log: { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
+           ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0 })) },
+    tapOpen: false,
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
     // the owner's public key (hex, 04 || X || Y), given to a card with none or by the owner's proof, and never read out
     owner: null,
@@ -87,6 +92,27 @@ function makeCard(opts) {
     return p256Verify(s.owner, message, hex(data.subarray(1, 1 + len))) ? { at: 1 + len, value } : { sw: '6a91' };
   };
   const unspent = () => s.slots.some((x) => x.status === 1);
+  /* The log's entry for this time in the field, begun (the count of taps up by one, its place in the ring cleared and
+   * given the clock) if nothing in it has been written down yet. */
+  const stop = (n) => Math.min(4294967295, n);
+  const logEntry = () => {
+    if (!s.tapOpen) s.log.taps = stop(s.log.taps + 1);
+    const at = (((s.log.taps & 0xff) - 1) & 7);
+    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: 0 }; s.tapOpen = true; }
+    return s.log.ring[at];
+  };
+  /* A spend over a limit, written down and then refused: the third in a run inside one tap's ten seconds of the clock
+   * marks the tap and counts the run. A clock that is behind the run's start (a new time key) begins a new run. */
+  const refuse = (sw) => {
+    const e = logEntry();
+    s.log.refused = stop(s.log.refused + 1);
+    if (e.refused < 255) e.refused += 1;
+    if (s.log.run === 0 || s.now < s.log.runAt || s.now >= s.log.runAt + TAP) { s.log.runAt = s.now; s.log.run = 1; }
+    else if (s.log.run < 255) s.log.run += 1;
+    if (s.log.run === 3) s.log.tampers = stop(s.log.tampers + 1);
+    if (s.log.run >= 3) e.flags |= 1;
+    return sw;
+  };
   /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
    * the tap's, and there a limit whose number does not change keeps its window and its count. A limit needs a time. */
   const writeLimit = (value) => {
@@ -159,6 +185,19 @@ function makeCard(opts) {
         return '03' + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
           + s.record.refund + s.record.timeKey + ('0' + mint.length.toString(16)).slice(-2) + hex(mint) + '9000';
       }
+      case 0x18: {
+        // GET_LOG: for the PIN verified in this tap or the owner's grant; the four counts, then the taps the ring holds, newest first
+        if (s.pinState !== 0 && !s.verified && !s.grant) return '6982';
+        const byte = (v) => ('0' + (v & 0xff).toString(16)).slice(-2);
+        const held = s.log.taps < 8 ? s.log.taps : 8;
+        const newest = (((s.log.taps & 0xff) - 1) & 7);
+        let out = u32(s.log.taps) + u32(s.log.sats) + u32(s.log.refused) + u32(s.log.tampers);
+        for (let k = 0; k < held; k++) {
+          const e = s.log.ring[(newest - k) & 7];
+          out += u32(e.time) + u32(e.sats) + byte(e.pieces) + byte(e.refused) + byte(e.flags) + '00';
+        }
+        return out + '9000';
+      }
       case 0x17: {
         // every unspent piece and every place's state, a page at a time (the applet's GET_PIECES): the first place to
         // report is P1; the answer opens with the first place it does not cover, then an entry for each place that is
@@ -187,7 +226,7 @@ function makeCard(opts) {
           if (s.now === 0) return '6a92';
           begins = s.now >= s.windowStart + DAY;
           total = (begins ? 0 : s.spent) + amountOf(slot);
-          if (total > s.record.limit || total > 4294967295) return '6a8f';
+          if (total > s.record.limit || total > 4294967295) return refuse('6a8f');
         }
         // and the limit on one tap, the same way, against a window of TAP seconds that only the clock ends
         let tapBegins = false, tapTotal = 0;
@@ -195,12 +234,14 @@ function makeCard(opts) {
           if (s.now === 0) return '6a92';
           tapBegins = s.now >= s.tapStart + TAP;
           tapTotal = (tapBegins ? 0 : s.tapSpent) + amountOf(slot);
-          if (tapTotal > s.tapLimit || tapTotal > 4294967295) return '6a95';
+          if (tapTotal > s.tapLimit || tapTotal > 4294967295) return refuse('6a95');
         }
         const digest = sha256(Buffer.from(secretOf(slot), 'utf8'));
         slot.status = 2;
         if (s.record.limit !== 0) { if (begins) s.windowStart = s.now; s.spent = total; }
         if (s.tapLimit !== 0) { if (tapBegins) s.tapStart = s.now; s.tapSpent = tapTotal; }
+        // the card's own account of it, with the burn
+        { const e = logEntry(); e.sats = stop(e.sats + amountOf(slot)); if (e.pieces < 255) e.pieces += 1; s.log.sats = stop(s.log.sats + amountOf(slot)); }
         // and the next tap may put the change on with no PIN
         s.changeDue = true;
         return sign(digest) + '9000';
@@ -368,13 +409,13 @@ function makeCard(opts) {
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
       const twin = makeCard({ window: o.window, key: priv });
-      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false });
+      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */

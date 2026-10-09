@@ -299,6 +299,16 @@
   "markup": "8855cec8084dd10792676b5d184a09964d3916dfe13fec8811076a4fbf8f2e01",
   "vals": "f02a7c14f1d65a8c9a14a9f6ab4341d0cea0ff0e60cb2ac082e140bfffe009be"
  },
+ "flashcard, a card with its own log": {
+  "file": "318-flashcard-a-card-with-its-own-log.html",
+  "markup": "96d4acda4307c848985d77220fbfef3b0503c2360cf29e3f65414be6d0b5f8eb",
+  "vals": "f79d5adb454fa34d7f9b91811aba286f1c8a32cf6528964674984863d88003fd"
+ },
+ "flashcard, a card whose log has a tap marked as a tamper": {
+  "file": "319-flashcard-a-card-whose-log-has-a-tap-marked-as-a-tamper.html",
+  "markup": "9d35a7e031086b8fac8dbe654f715669dcb9f70662d27608f3eab4a4f35455b6",
+  "vals": "cb0fdd8207c42e6d212ab7c7970253be2150638a3ccae93ab052fab2306ae196"
+ },
  "flashcard, a new card": {
   "file": "263-flashcard-a-new-card.html",
   "markup": "ec1dd3f26313142b09ea1645e075cbb5a3ffd1f0e93bfd0d47cbd00f8cbcbd0b",
@@ -1187,6 +1197,16 @@
  "card: set per tap limit, the warning": {
   "file": "314-card-set-per-tap-limit-the-warning.html",
   "markup": "0c78874ad046a1fcad254ee6a7332657200d978027b3e4b47d100219a3b814b0",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: this card’s own log": {
+  "file": "320-card-this-card-s-own-log.html",
+  "markup": "c4df3e20dde61aa61a20911ade95a0f7a1779678bec05a9cc1f473b8ed368550",
+  "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
+ },
+ "card: tamper on this card": {
+  "file": "321-card-tamper-on-this-card.html",
+  "markup": "7f1911440a62fc9eeb58c348b27cfcff198bba3ec7e705c709ebcd1d9e7e88cb",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: a till, over the card’s per tap limit": {
