@@ -33,15 +33,23 @@ final class CardGateTests: XCTestCase {
     }
 
     func testOnlyTheInstructionsThePageUsesAreCarried() {
-        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these twenty
-        let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "20", "30", "31", "32", "34", "35", "40", "41", "42", "43", "44", "45"]
-        XCTAssertEqual(carried.count, 20)
+        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these twenty-five
+        let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "18", "20", "22", "23", "24", "25",
+                       "30", "31", "32", "34", "35", "40", "41", "42", "43", "44", "45"]
+        XCTAssertEqual(carried.count, 25)
         XCTAssertEqual(CardGate.instructions, Set(carried.map { UInt8($0, radix: 16)! }), "exactly these, and the table says so")
         for ins in carried {
             XCTAssertNotNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins)")
         }
         XCTAssertEqual(CardGate.read(bytes("b040000004" + "31323334")), .applet(0x40), "a PIN to check")
         XCTAssertEqual(CardGate.read(bytes("b020050040")), .applet(0x20), "sign for the piece in place 5")
+        // one signature for a payment: the places, the outputs (37 bytes each), the signature, and the last one again
+        XCTAssertEqual(CardGate.read(bytes("b0220000" + "03" + "000507" + "04")), .applet(0x22), "the places a payment is made of")
+        XCTAssertEqual(CardGate.read(bytes("b0230000" + "25" + String(repeating: "ab", count: 37))), .applet(0x23), "one output of its swap")
+        XCTAssertEqual(CardGate.read(bytes("b0230000" + "de" + String(repeating: "ab", count: 222))), .applet(0x23), "six of them")
+        XCTAssertEqual(CardGate.read(bytes("b024000040")), .applet(0x24), "sign for the payment")
+        XCTAssertEqual(CardGate.read(bytes("b025000040")), .applet(0x25), "the last signature again")
+        XCTAssertEqual(CardGate.read(bytes("b018000000")), .applet(0x18), "the card's own log")
         XCTAssertEqual(CardGate.read(bytes("b035000006" + "01020304" + "00" + "00")), .applet(0x35), "the time, signed")
         XCTAssertEqual(CardGate.read(bytes("b0450000" + "03" + "300100")), .applet(0x45), "the owner's grant to load")
         XCTAssertEqual(CardGate.read(bytes("b0430000" + "03" + "040102")), .applet(0x43), "an owner key")
@@ -52,7 +60,7 @@ final class CardGateTests: XCTestCase {
         XCTAssertFalse(CardGate.allows(bytes("b017000000"), selected: false), "not before the applet is chosen")
         // 33 (the limit with the PIN, for a card with no owner) and 50 (lock the card for good) are not sent by the page, so
         // they are refused; and the others are ones the page never asks for, the signing upstream had, and nothing at all
-        for ins in ["33", "50", "12", "18", "21", "00", "ff", "a4"] {
+        for ins in ["33", "50", "12", "21", "26", "00", "ff", "a4"] {
             XCTAssertNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins) is not one the page sends")
         }
         XCTAssertNil(CardGate.read(bytes("b033000004" + "00000000")), "the PIN form of the limit, with its data")

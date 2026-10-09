@@ -9398,19 +9398,31 @@
     var o = opts || {};
     var t = cardTalk(link);
     var card = /** @type {any} */ ({ proved: false });
+    /* How long each part of the read took, for the one line the log gets of
+     * it: times and nothing else. A read that has grown slow says where. */
+    var began = Date.now(), last = began, took = [];
+    var mark = function (name) { var now = Date.now(); took.push(name + ' ' + (now - last)); last = now; };
+    var said = function (c) {
+      try { console.log('[foxy] card: read in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (e) {}
+      return c;
+    };
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
+      mark('chosen');
       return o.noTime ? 0 : cardTold(t);
     }).then(function () {
+      mark('time');
       // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
       return t.want(cardCommand(CARD_INS.info, 1, '', 0), 'to say what it is');
     }).then(function (d) {
       card.info = cardInfoOf(d);
       if (card.info.format !== CARD_FORMAT && card.info.format !== CARD_FORMAT_ALL) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
+      mark('what it is');
       return t.want(cardCommand(CARD_INS.key, 0, '', 0), 'to give its key');
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      mark('key');
       if (o.noAuth) return null;
       var mine = new Uint8Array(16);
       window.crypto.getRandomValues(mine);
@@ -9427,17 +9439,20 @@
         card.proved = true;
       });
     }).then(function () {
+      if (!o.noAuth) mark('proof');
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
       card.record = cardRecordOf(d);
+      mark('record');
       return cardSlotsRead(t, card.info);
     }).then(function (slots) {
+      mark('pieces');
       card.slots = slots;
       card.pieces = card.slots.filter(function (x) { return x.state === 'unspent'; });
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
       card.day = cardDayOf(card.info);
       card.tap = cardTapOf(card.info);
-      if (!o.mine || !card.info.owner || card.info.locked) return card;
+      if (!o.mine || !card.info.owner || card.info.locked) return said(card);
       /* Whether this phone is the owner, and a limit it lifted and did not put back */
       return cardGrant(t, card.key).then(function (yes) {
         card.mine = yes;
@@ -9457,9 +9472,10 @@
           return card;
         }, function () { return card; });
       }).then(function (c) {
+        mark('owner');
         // and the card's own log, which the owner's grant opens
         return cardLogRead(t, c);
-      });
+      }).then(function (c) { mark('log'); return said(c); });
     });
   }
 

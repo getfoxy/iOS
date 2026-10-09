@@ -112,6 +112,24 @@ async function replay(T, format) {
   c2.tap();
   ok((await c2.send('b001000000')).slice(-4) === '6999', 'and back in the field it must be selected again');
 
+  /* What the page sends and what the phone carries are one list. The phone's
+   * gate (Foxy/Flashcard/CardGate.swift) lets through the instructions it
+   * names and no others, and nothing but a phone and a card shows what it
+   * stops: the card's own log, and then every payment with a card that signs
+   * once, were built and tested here against the model while the phone was
+   * refusing to send them. */
+  {
+    const page = fs.readFileSync(path.join(__dirname, '..', 'build', 'wallet', '08a-flashcard.js'), 'utf8');
+    const table = (/var CARD_INS = \{([\s\S]*?)\};/.exec(page) || [])[1] || '';
+    const sends = Array.from(new Set((table.match(/'[0-9a-f]{2}'/g) || []).map((x) => x.slice(1, 3)))).sort();
+    const gate = fs.readFileSync(path.join(__dirname, '..', 'Foxy', 'Flashcard', 'CardGate.swift'), 'utf8');
+    const set = (/static let instructions: Set<UInt8> = \[([\s\S]*?)\n    \]/.exec(gate) || [])[1] || '';
+    const carries = Array.from(new Set((set.replace(/\/\/.*$/gm, '').match(/0x[0-9A-Fa-f]{2}/g) || []).map((x) => x.slice(2).toLowerCase()))).sort();
+    ok(sends.length >= 20, 'the page’s own table of instructions is read', String(sends.length));
+    ok(sends.filter((x) => carries.indexOf(x) < 0).length === 0, 'the phone carries every instruction the page sends', 'not carried: ' + sends.filter((x) => carries.indexOf(x) < 0).join(' '));
+    ok(carries.filter((x) => sends.indexOf(x) < 0).length === 0, 'and none the page does not', 'carried and never sent: ' + carries.filter((x) => sends.indexOf(x) < 0).join(' '));
+  }
+
   console.log(failed ? failed + ' flashcard-model check(s) failed'
     : 'the model answers all ' + T.length + ' commands as the card did (' + exact + ' to the byte, ' + verified + ' signatures verified)');
   process.exit(failed ? 1 : 0);
