@@ -27,7 +27,12 @@ const net = require('net');
 const H = require('./harness');
 const { makeCard } = require('../../tests/flashcard-card');
 
-setTimeout(() => { console.log('WATCHDOG 900s'); process.exit(2); }, 900000).unref();
+/* FOXY_CARD_CHIP=1: the card on the port is a real one, in a reader on this
+ * Mac (the card repository's tools/chip). One card, which nothing here can
+ * make new again, so one mint (FOXY_CARD_MINT, or CDK); and a chip is slower
+ * than a simulator, so it is given longer. */
+const CHIP = !!process.env.FOXY_CARD_CHIP;
+setTimeout(() => { console.log('WATCHDOG ' + (CHIP ? 3600 : 900) + 's'); process.exit(2); }, CHIP ? 3600000 : 900000).unref();
 
 const R = { pass: 0, fail: 0 };
 const ok = (name, good, detail) => {
@@ -57,7 +62,7 @@ function applet(port) {
     sock.on('connect', () => {
       const ask = (line) => new Promise((res) => { waiting.push(res); sock.write(line + '\n'); });
       resolve({
-        what: 'the applet, in the JavaCard simulator',
+        what: CHIP ? 'the applet, on the chip in the reader' : 'the applet, in the JavaCard simulator',
         fresh: () => ask('ctl new'),
         tap: async () => { if ((await ask('tap')) !== 'ok') throw new Error('no card on the reader'); },
         send: async (apdu) => { const said = await ask('apdu ' + apdu); if (said === 'gone') throw new Error('the tag was lost'); return said; },
@@ -260,8 +265,18 @@ async function at(mintKey, names, real) {
     }
     ok('eight prices in a row are each paid exactly, with one signature, the card read in one command, and no change',
        made === 8 && held(till, MINT) - tb === prices.reduce((a, b) => a + b, 0), made + ' of 8; the till is up ' + (held(till, MINT) - tb));
+    // its drawer filled again, and the whole card taken off: more pieces than an older card had places, in one signature
     await card.tap();
-    await holder.W.cardWithdraw(card, { pin: PIN });
+    const refilled = await holder.W.cardAdd(card, { sats: 6000, pin: PIN });
+    const hb3 = held(holder, MINT);
+    sent.length = 0;
+    await card.tap();
+    const whole = await holder.W.cardWithdraw(card, { pin: PIN });
+    await card.tap();
+    const none = await holder.W.cardLook(card);
+    ok('a card with its drawer filled again comes off whole in ONE signature for more than sixty-four pieces',
+       none.balance === 0 && signatures() === 1 && pieces() === refilled.card.pieces.length && pieces() > 64 && held(holder, MINT) - hb3 === whole.sats,
+       signatures() + ' signature(s) for ' + pieces() + ' of its ' + refilled.card.pieces.length + ' pieces, ' + whole.sats + ' sats');
 
     // most of a small card: more than thirty-two pieces, one signature
     await card.tap();
@@ -371,8 +386,8 @@ async function at(mintKey, names, real) {
 async function run() {
   const names = await H.mintNames(['cdk', 'nutshell']);
   const real = await applet(PORT);
-  await at('cdk', names, real);
-  await at('nutshell', names, real);
+  if (CHIP && !real) { console.log('no card is listening on ' + PORT); process.exit(1); }
+  for (const mint of (CHIP ? [process.env.FOXY_CARD_MINT || 'cdk'] : ['cdk', 'nutshell'])) await at(mint, names, real);
   if (real) real.close();
   console.log('\n' + R.pass + ' passed, ' + R.fail + ' failed');
   process.exit(R.fail ? 1 : 0);
