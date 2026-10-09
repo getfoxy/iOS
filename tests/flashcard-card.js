@@ -60,9 +60,10 @@ function makeCard(opts) {
   /* And whether it takes its PIN sealed (1.9): enciphered to a key the card keeps for that and nothing else, under
    * sixteen bytes of the card's that are good once. `software: 8` is the card before that. */
   const SEALED = MANY && o.software !== 8;
-  /* `software: 9` is the card before the design was in its record: three bytes after the mint (1.10). */
+  /* `software: 9` is the card before the design was in its record: three bytes after the mint (1.10). `software: 10` is
+   * that card before its signing was made quicker (1.11), which changed nothing on the wire but the version it says. */
   const DESIGN = SEALED && o.software !== 9;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? 10 : 9) : 8) : 7) : 6) : 3;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   /* And it is the card made quicker to hold (1.6): GET_PIECES has a brief form (P2 = 1: sixteen bytes a place, to choose
@@ -727,7 +728,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : undefined, burnMost: BURN_MOST });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION === 10 ? 10 : undefined), burnMost: BURN_MOST });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },
