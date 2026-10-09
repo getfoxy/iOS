@@ -1192,6 +1192,43 @@ async function world(feePpk, sats, make) {
     await settle();
   }
 
+  /* ---- 13: the drawer is shaped by the limit on one tap --------------------
+   * With a limit, a top-up cuts nothing larger than the largest power of two
+   * under it, so a payment under the limit never falls on a piece the card
+   * waits for. A lower limit set on a loaded card, with the PIN, has the money
+   * off and back under it in the same tap; without the PIN the card is left as
+   * it is, and says what it holds above the limit. A limit too small for the
+   * places fills them with pieces under it and leaves the rest above, said. */
+  {
+    const D = await world(0, 60000);
+    D.card.tap();
+    await D.H.W.cardSetLimit(D.card, { sats: 1000, tap: true });
+    D.card.tap();
+    const put = await D.H.W.cardAdd(D.card, { sats: 20000, owner: true });
+    const sizes = deep(D.card);
+    ok(put.card.pieces.every((x) => x.amount <= 512) && [1, 2, 4, 8, 16, 32, 64, 128, 256].every((a) => sizes[a] >= 8),
+       'with a limit of 1,000 on one tap, a top-up of 20,000 cuts nothing larger than 512, eight deep below it', JSON.stringify(sizes));
+    ok(D.H.W.cardAboveLimit(put.card) === 0 && (put.card.aboveLimit || 0) === 0, 'and nothing of it is above the limit');
+    D.card.tap();
+    D.card.sent.length = 0;
+    const low = await D.H.W.cardSetLimit(D.card, { sats: 300, tap: true, pin: '1234' });
+    ok(low.recut === true && low.balance === 20000 && low.pieces.every((x) => x.amount <= 256) && low.aboveLimit === 0 && count(D.card, '24') === 1,
+       'set lower, with the PIN, the card\u2019s money comes off in one signature and goes back cut under the new limit, in the same tap',
+       low.pieces.length + ' pieces, ' + low.balance + ' sats, ' + count(D.card, '24') + ' SIGN');
+    D.card.tap();
+    const told = await D.H.W.cardSetLimit(D.card, { sats: 100, tap: true });
+    const expect = low.pieces.filter((x) => x.amount > 100).reduce((n, x) => n + x.amount, 0);
+    ok(!told.recut && told.aboveLimit === expect && expect > 0 && told.balance === 20000,
+       'set lower with no PIN, the card is left as it is, and says what it holds in pieces above the limit', told.aboveLimit + ' of ' + told.balance);
+    D.card.tap();
+    const tiny = await D.H.W.cardSetLimit(D.card, { sats: 20, tap: true, pin: '1234' });
+    const under = tiny.pieces.filter((x) => x.amount <= 16).length;
+    const over = tiny.pieces.filter((x) => x.amount > 20).reduce((n, x) => n + x.amount, 0);
+    ok(tiny.recut === true && tiny.balance === 20000 && tiny.aboveLimit === over && over > 0 && under >= 64 && tiny.pieces.length <= 128,
+       'a limit of 20 on 20,000 sats: the places fill with pieces under it, the rest stays above, and the card says how much', tiny.pieces.length + ' pieces, ' + over + ' above');
+    await settle();
+  }
+
   await settle();
   console.log('\n' + (failed ? failed + ' flashcard-sigall check(s) failed' : 'all flashcard-sigall checks pass'));
   process.exit(failed ? 1 : 0);

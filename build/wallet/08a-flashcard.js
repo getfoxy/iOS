@@ -1512,6 +1512,55 @@
     return !!(card && card.info && card.info.wide && card.info.many);
   }
 
+  /* The largest piece a top-up cuts for a card with a limit on one tap: the
+   * largest power of two at or under the limit. A payment up to the limit is
+   * then made from pieces that never need the holding a larger piece does
+   * (a piece above the limit is paid from only with the card's wait). Only
+   * where the card is cut deep and its reader knows the limit, which the
+   * card says to its owner's phone and to no till; and never above the mint's
+   * own largest (`biggest`), which bounds every cut. 0: no such cap. */
+  function cardLimitCap(card, biggest) {
+    var most = Math.max(0, Math.floor(Number(biggest) || 0));
+    var limit = Math.floor(Number(card && card.info && card.info.tapLimit) || 0);
+    if (!(limit > 0) || !cardIsDeep(card)) return most;
+    var cap = 1;
+    while (cap * 2 <= limit) cap *= 2;
+    return most > 0 ? Math.min(cap, most) : cap;
+  }
+
+  /* What a card holds in pieces larger than its limit on one tap: the money a
+   * till holds longer for. 0 where there is no limit, or none are. */
+  function cardAboveLimit(card) {
+    var limit = Math.floor(Number(card && card.info && card.info.tapLimit) || 0);
+    if (!(limit > 0) || !cardIsDeep(card)) return 0;
+    return ((card && card.pieces) || []).reduce(function (n, x) { var a = satsOf(x.amount); return a > limit ? n + a : n; }, 0);
+  }
+
+  /* The pieces for `sats` to go onto `card`, no piece above `cap`
+   * (`cardLimitCap`) where they fit the room. Where the money is too much for
+   * the places at that size, as much of it as fits is cut under the cap and
+   * the rest goes in the plain powers of two, no larger than the mint's own
+   * (`biggest`): `above` says how much is in such pieces, for the screen. */
+  function cardCutUnder(card, sats, room, cap, biggest, have) {
+    var n = Math.max(0, Math.floor(Number(sats) || 0));
+    var most = Math.max(1, Math.floor(Number(room) || 1));
+    var top = Math.max(0, Math.floor(Number(biggest) || 0));
+    var fits = function (cut, places) { return !!cut && !(cut.extra > 0) && cut.denominations.length <= places; };
+    if (!(cap > 0) || (top > 0 && cap >= top)) return Object.assign({ above: 0 }, cardCutFor(card, n, most, top, have));
+    var whole = cardCutFor(card, n, most, cap, have);
+    if (fits(whole, most)) return Object.assign({ above: 0 }, whole);
+    for (var under = n - cap; under >= 0; under -= cap) {
+      var over = cardLadder(n - under, most, top, null, true);
+      var left = most - over.denominations.length;
+      if (over.extra > 0 || left < 1) continue;
+      var small = under > 0 ? cardCutFor(card, under, left, cap, have) : { sats: 0, extra: 0, denominations: [] };
+      if (!fits(small, left)) continue;
+      return { sats: n, extra: 0, above: n - under,
+               denominations: over.denominations.concat(small.denominations).sort(function (a, b) { return b - a; }) };
+    }
+    return Object.assign({ above: 0 }, whole);
+  }
+
   /* What a card holds, as the amounts of its pieces, for cutting more for it
    * (`cardLadder`'s `have`): the pieces it was read with, less the ones named in
    * `except` (nonces; they have been signed and are leaving), and the pieces

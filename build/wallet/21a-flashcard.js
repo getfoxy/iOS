@@ -152,6 +152,29 @@
         cardLiftNote(key, 0);
         // as its owner, for the screen: short, since nothing of what is on the card has changed
         return cardLook(link, { mine: true, short: true });
+      }).then(function (card) {
+        /* A limit on one tap set on a card that holds pieces larger than it:
+         * with the PIN (`o.pin`), the card's money is taken off and put back
+         * cut under the limit, in this same tap (`cardLimitCap`), so that no
+         * payment under the limit falls on a piece the card waits for. Without
+         * the PIN the card is left as it is, and `aboveLimit` says how much of
+         * its money is in such pieces. A card of sixty-four places, or one
+         * that signs for eight at a time, is not cut that way at all. */
+        card.aboveLimit = cardAboveLimit(card);
+        if (!(o.tap && sats > 0 && o.pin && card.aboveLimit > 0 && cardIsDeep(card))) return card;
+        var on = function (step) { try { if (typeof o.on === 'function') o.on(step); } catch (e) {} };
+        return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on, progress: o.progress, hold: true }).then(function (got) {
+          return cardLook(link, { mine: true, short: true }).then(function (c) { return FoxyWallet.cardPrepare(c, got.sats); });
+        }).then(function () {
+          on('writing');
+          return FoxyWallet.cardWrite(link, { owner: true, progress: o.progress });
+        }).then(function (r) {
+          var c = r.card;
+          c.recut = true;
+          c.aboveLimit = cardAboveLimit(c);
+          console.log('[foxy] card: its money is cut again under its new limit on one tap, in ' + c.pieces.length + ' pieces');
+          return c;
+        });
       });
     },
 
@@ -314,9 +337,15 @@
        * that is too many; `rounded` says by how much. A few more places are kept
        * for what the mint's fee may add. */
       // a card of 128 places is cut deep instead: eight of each small size, as far as the money goes (`cardDeepLadder`)
-      var ladder = cardCutFor(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardMaxPiece(w), cardHeldAmounts(card));
+      /* And nothing larger than its limit on one tap, where it has one this phone was told
+       * (`cardLimitCap`): a payment under the limit is then never made from a piece the
+       * card waits for. Where that is more pieces than the places left, the rest goes in
+       * larger ones (`cardCutUnder`), and `above` says how much. */
+      var biggest = cardMaxPiece(w);
+      var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
       var room = card.info.empty + card.info.spent;
       if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
+      if (ladder.above > 0) console.log('[foxy] card: ' + ladder.above + ' sats of a top-up go on in pieces above the card\u2019s limit on one tap: the places for smaller ran out');
       /* Whether this mint's ecash fits a card, asked before any is made. It
        * was asked after: the pieces were made, locked to the card, found not
        * to fit, and the error left them filed nowhere. */
@@ -412,8 +441,8 @@
     cardAdd: function (link, opts) {
       var o = opts || {};
       if (!o.owner) { try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
-      // the short way: the cut needs the sizes of what is on the card and its room, not the pieces themselves
-      return cardLook(link, { short: true }).then(function (card) {
+      // the short way, as its owner: the cut needs the sizes of what is on the card, its room and its limit, not the pieces themselves
+      return cardLook(link, { short: true, mine: true }).then(function (card) {
         return FoxyWallet.cardPrepare(card, o.sats);
       }).then(function () {
         return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin });
@@ -584,6 +613,9 @@
      * whose money was taken back, lists pieces the mint has already seen
      * spent. Resolves { sats, spent }: what the card says it holds, and how
      * much of that the mint says is gone. Rejects `other-mint`, `no-route`. */
+    /* What a card holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those. */
+    cardAboveLimit: function (card) { return cardAboveLimit(card); },
+
     cardCheck: function (card) {
       var w;
       try { w = need(); } catch (e) { return Promise.reject(e); }

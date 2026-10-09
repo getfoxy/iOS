@@ -191,6 +191,12 @@ altered to look like one, sees it.
    pieces, a dozen places kept free), and takes as long to write: about nine
    seconds for a hundred pieces. What the card holds counts towards each
    size, so a top-up fills what has been spent from first.
+   A card with a **per tap limit** is cut to it: nothing larger than the
+   largest power of two under the limit, so a payment under the limit is never
+   made from a piece the card waits for. Where that is more pieces than the
+   places left (a small limit on a large balance), the places fill with pieces
+   under the limit and the rest goes in larger ones; the card's screen says how
+   much, `$X IN PIECES ABOVE THE LIMIT · A TILL HOLDS LONGER FOR THOSE`.
 4. A tap writes them, and reads them back. The screen says `GETTING IT READY`
    while the swap runs, then the states of a tap. **ON THE CARD** gives the new
    balance.
@@ -660,6 +666,15 @@ follows is the one a card has now.
   day, or a window of seconds. This limit counts nothing against time and
   remembers nothing from one payment to the next, so there is nothing to
   replay: a payment is judged by its own size, every time.
+- **The drawer is cut to it.** A top-up onto a card with this limit cuts
+  nothing larger than the largest power of two under the limit (*Adding
+  money*). A limit set lower than pieces the card already holds asks the PIN
+  at CONFIRMATION (`It holds $X in pieces larger than that: with your PIN
+  they are recut under the new limit in the same tap`): in that one tap the
+  money comes off, is swapped at the mint and goes back cut under the limit,
+  which at a mint that charges for inputs costs what a withdrawal and a top-up
+  cost. Without the PIN the card is left as it is, and its screen says what it
+  holds above the limit.
 - **A payment over it waits.** For every limit's worth past the first, the
   card does about three seconds of its own work before it signs, and nothing is
   taken until that is done. The till's screen says `Over the card's per tap

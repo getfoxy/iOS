@@ -19316,6 +19316,8 @@ class Component extends DCLogic {
       first: dates.length ? Math.min.apply(null, dates) : 0,
       last: dates.length ? Math.max.apply(null, dates) : 0,
       check: (card.pieces || []).length ? 'asking' : 'none',
+      // what it holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those
+      above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
     } });
     if ((card.pieces || []).length) this.fcCheck(card);
     // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
@@ -19737,6 +19739,7 @@ class Component extends DCLogic {
         amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
         warn: 'This card will pay up to this straight away. For every limit more, it has to be held 3 seconds longer. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
+          + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats)) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
@@ -19783,8 +19786,21 @@ class Component extends DCLogic {
     const done = this._fcLimitDone;
     this._fcLimitDone = null;
     this.fcLimitLeave();
-    // zero is a choice here: NO LIMIT
+    /* A limit on one tap, lower than pieces the card holds: with the PIN the
+     * card's money is recut under it in the same tap (the wallet's
+     * cardSetLimit), so the PIN is asked first. Zero is a choice: NO LIMIT. */
+    if (done && this._fcLimitTap && sats > 0 && this.fcAbove(this._fcCard, sats) > 0) {
+      this.fcAskPin({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (pin) => done(sats, usd, pin));
+      return;
+    }
     if (done) done(sats, usd);
+  }
+
+  /* What a card holds in pieces larger than `limit`: the pieces a till holds
+   * longer for. Only a card cut deep is cut to a limit; 0 for any other. */
+  fcAbove(card, limit) {
+    if (!card || !card.info || !card.info.wide || !card.info.many || !(limit > 0)) return 0;
+    return (card.pieces || []).reduce((n, x) => (Number(x.amount) > limit ? n + Number(x.amount) : n), 0);
   }
 
   /* ---- the card's own log -----------------------------------------------------
@@ -19880,21 +19896,22 @@ class Component extends DCLogic {
     this.blockedCard('fc-limit-which', {
       tone: 'ask', title: 'CHANGE LIMIT',
       reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away. More than that and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
-      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, true, usd), true),
+      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
       shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },
     });
   }
 
-  /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked. `tap`: the limit on one tap. */
-  fcLimitRun(sats, tap, usd) {
+  /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked, unless the card holds
+   * pieces larger than a new limit on one tap (`pin`): then its money is recut under the limit in the same tap. */
+  fcLimitRun(sats, tap, usd, pin) {
     const W = this.fcW();
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats, tap: !!tap, usd: tap ? usd : 0 }); })
+    this.fcTap({}, (link, on, progress) => { on('writing'); return W.cardSetLimit(link, { sats, tap: !!tap, usd: tap ? usd : 0, pin, on, progress }); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((tap ? 'Per tap limit ' : 'Daily limit ') + (sats > 0 ? 'set.' : 'removed.'));
-      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd) }));
+        this.toast((tap ? 'Per tap limit ' : 'Daily limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin) }));
   }
 
   /* ---- its mint -------------------------------------------------------------
@@ -20437,6 +20454,9 @@ class Component extends DCLogic {
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
       fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
       fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase() : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
+      // under the limits, where the card holds pieces larger than its limit on one tap
+      fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,
+      fcAboveLine: (fc && fc.above > 0) ? this.fcPrice(fc.above).toUpperCase() + ' IN PIECES ABOVE THE LIMIT \u00b7 A TILL HOLDS LONGER FOR THOSE' : '',
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // what has been done with this card, on this phone: only for a card that is one (it has a key and a record)
