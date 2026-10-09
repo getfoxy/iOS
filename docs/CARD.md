@@ -302,7 +302,7 @@ or two buttons. The ones a payment can end in:
 | CARD BLOCKED | too many wrong PINs; the card pays again when its owner sets a new PIN on it |
 | NOT ENOUGH ON THE CARD | what it holds |
 | OVER THE CARD'S DAILY LIMIT | what is left of today, and when the day turns; said before the PIN is sent |
-| OVER THE CARD'S PER TAP LIMIT | the most the card pays in one tap, and to charge it in parts; or what this tap has left, and to tap again in ten seconds; said before the PIN is sent |
+| OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the screen says `Keep holding` and counts down. (An older card, whose limit was a window: the most it pays in one tap, or what the tap has left) |
 | A DIFFERENT MINT | the card's mint and this phone's. Adding funds to a card that holds money: "You need to withdraw all funds on the card before you can switch mints." and CLOSE. To an empty card, on its owner's phone: SWITCH TO <MINT>, which goes to the amount and moves the card in the tap that writes the funds; on any other phone, that only the phone that set the card up can switch it |
 | NO CHANGE WHILE OFFLINE | no connection, and the card has no pieces that make the price exactly; said before the PIN |
 | TAKEN ON TRUST | no connection: kept, not paid, swapped in when online |
@@ -541,36 +541,51 @@ How it behaves:
 
 ### The limit on one tap
 
-A second limit: the most the card will sign for in **one tap**. It is set the
-same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
-LIMIT: a warning, SET PER TAP LIMIT (`A per tap limit is the most this card will
-pay in one tap. A larger amount has to be charged in parts, a tap for each, ten
-seconds apart.`), the amount (`What is the most this card should pay in one
-tap?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE APPLYING A PER TAP
-LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and the amount, or
-`PER TAP $2.00 · DAILY $5.00` where it has both.
+A second limit: the most the card pays in **one tap straight away**. It is set
+the same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
+LIMIT: a warning, SET PER TAP LIMIT (`A per tap limit is the most this card
+pays in one tap straight away. For every limit more than that, the card has to
+be held 3 seconds longer before it pays. Lift the card and the payment stops,
+with nothing taken.`), the amount (`What is the most this card should pay in
+one tap straight away?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE
+APPLYING A PER TAP LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and
+the amount, or `PER TAP $2.00 · DAILY $5.00` where it has both.
 
-- **A tap, to the card, is ten seconds of its own clock**, from the first piece
-  it signs. Nothing a terminal sends begins a new one: not the PIN again, not
-  choosing the card again, not a reset. A limit that a new PIN entry began again
-  was tried on this card first, and a terminal that had the PIN sent it between
-  every two pieces. Only the clock ends a tap, and the clock moves only when the
-  card is told a later signed time (*The time*, and its weakness, which this
-  limit shares with the daily one).
-- **It counts the pieces signed, not the price**, as the day does, and change
-  written back gives it nothing back.
-- **A payment over it is refused before the PIN is sent**: OVER THE CARD'S PER
-  TAP LIMIT, with `Charge it in parts, a tap for each.` A payment larger than
-  the limit is made as more than one charge, ten seconds apart; one charge is
-  not split over several taps.
-- **Within it, the card still pays with pieces that keep its drawer whole**
-  (*Paying at a till*): the tap's limit is not used up for later by a larger
-  piece, as the day's is. No set of pieces comes to more than the tap has left.
+This is the card that signs once for a payment (software 1.5). An older card's
+second limit was a window of ten seconds of its clock, and refused; what
+follows is the one a card has now.
+
+- **It asks no clock, and refuses nothing.** The card's clock is only the last
+  time it was told (*The time*), and whoever can tell it a time can turn a
+  day, or a window of seconds. This limit counts nothing against time and
+  remembers nothing from one payment to the next, so there is nothing to
+  replay: a payment is judged by its own size, every time.
+- **A payment over it waits.** For every limit's worth past the first, the
+  card does about three seconds of its own work before it signs, and nothing is
+  taken until that is done. The till's screen says `Over the card's per tap
+  limit. Keep holding:` and counts the seconds down as the card does. Lifted in
+  the wait, the card has paid nothing and the till holds nothing; tapped again,
+  it waits the whole of it again.
+- **What it buys.** A terminal that has the PIN can take one limit for each
+  second or so that the card is held, by many small payments or one large one
+  that waits, and no faster. Money leaves the card about as fast as an honest
+  payment of that size would, so a card lifted when the payment ought to be
+  over has lost about what it ought to have paid. It is a rate and not a
+  ceiling: the daily limit is the ceiling, and that one does ask the clock.
+- **It counts the pieces signed, not the price**, so the pieces for such a card
+  are chosen to overpay the least where they cannot come to the price exactly.
+- **A wait longer than a tap lasts is not begun**: over forty seconds, the
+  payment is refused before the PIN is sent, with the wait it would be and the
+  most that can be taken at a time.
+- **It is kept in dollars.** The card holds sats and has no price. A limit typed
+  in dollars is kept as dollars on the phone that set it
+  (`foxy.flashcard.pace`), and when that phone reads its own card and the price
+  has moved by more than a fiftieth, it sets the card's sats to match, with its
+  proof and no PIN. Between those reads the card keeps the sats it has. A limit
+  typed in sats stays in sats.
 - **The owner takes money off at any limit**: both limits are lifted in one
   command and put back in one, and written down first, as the daily limit is.
-- **Setting one limit does not begin the other's count again.** Both go to the
-  card in one command, and a limit whose number has not changed keeps its
-  window.
+  Its own withdrawal does not wait.
 
 ## The card's own log
 
@@ -646,8 +661,8 @@ the card the time once, before anything that depends on the day is read.
 inside the app.** Its private half is a constant named `InterimCardTime` in
 `Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy of
 the app, and in the tests. That is on purpose and is documented where it is
-used. It makes the daily limit, and the limit on one tap with it, **as weak as
-trusting the receiver's clock**:
+used. It makes the daily limit **as weak as trusting the receiver's clock** (the
+limit on one tap asks no clock, and is not weakened by this):
 
 - an honest receiver cannot be talked into taking more than a day's limit by
   accident, and the holder's own spending is held to the day;
@@ -729,13 +744,13 @@ wait, and the payment is made when the wallet next asks.
 
 ## What is kept on the phone
 
-Six stores, named in `STORAGE.md`: ecash made for a card and not yet written to
+Seven stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped. The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; and the dollars a card's per tap limit was set in (`foxy.flashcard.pace`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
 
 ## What it does not protect against

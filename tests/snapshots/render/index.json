@@ -246,8 +246,8 @@
  },
  "fcLimitConfirm, a per tap limit, to be confirmed": {
   "file": "310-fclimitconfirm-a-per-tap-limit-to-be-confirmed.html",
-  "markup": "5f43a99c3e5cada5bd6a31d81ecffde54918b78299182b49e1efac74bde521a2",
-  "vals": "0e436419f87fdc8132fced8233a591ace020f4484bad6bc02f7c33547b583c60"
+  "markup": "6a9f0dbf97654ee836d5b555f80124bb425f1f7a4ea2e58c504770a2dbf752df",
+  "vals": "062d87a61a0e67b2445b00b9fb232e75efd85b25b25cdcc6e74e88428b656366"
  },
  "switchMint, asking which mint a card moves to": {
   "file": "255-switchmint-asking-which-mint-a-card-moves-to.html",
@@ -301,8 +301,8 @@
  },
  "flashcard, a card with its own log": {
   "file": "318-flashcard-a-card-with-its-own-log.html",
-  "markup": "96d4acda4307c848985d77220fbfef3b0503c2360cf29e3f65414be6d0b5f8eb",
-  "vals": "f79d5adb454fa34d7f9b91811aba286f1c8a32cf6528964674984863d88003fd"
+  "markup": "ee74f18eee117268a51756172ab2fa34d4216a2399f16c2387242c75e8eaa740",
+  "vals": "e50a5af9789d491af8772f7a788ae7a33c0bfb910b300669679fcab311a9ff84"
  },
  "flashcard, a card whose log has a tap marked as a tamper": {
   "file": "319-flashcard-a-card-whose-log-has-a-tap-marked-as-a-tamper.html",
@@ -1191,22 +1191,22 @@
  },
  "card: change limit, which of the two": {
   "file": "313-card-change-limit-which-of-the-two.html",
-  "markup": "ee14c1483bee9ad4bf17df1bca415a4e9348c29c5dc844cee3e84f2ce61faadd",
+  "markup": "44c824eb08c484b01f54d6935493eeaa36d58336c849ba80884836d07da6413d",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: set per tap limit, the warning": {
   "file": "314-card-set-per-tap-limit-the-warning.html",
-  "markup": "0c78874ad046a1fcad254ee6a7332657200d978027b3e4b47d100219a3b814b0",
+  "markup": "7bb7906319853ce772fb456cefd0e73196631b1c598003e83a3254fed41e181d",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: this card’s own log": {
   "file": "320-card-this-card-s-own-log.html",
-  "markup": "c4df3e20dde61aa61a20911ade95a0f7a1779678bec05a9cc1f473b8ed368550",
+  "markup": "0a25860d83120e02d0ff9dd13fd2296d29c54fc39890619c780c96b80fd8b984",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: tamper on this card": {
   "file": "321-card-tamper-on-this-card.html",
-  "markup": "7f1911440a62fc9eeb58c348b27cfcff198bba3ec7e705c709ebcd1d9e7e88cb",
+  "markup": "58c1bbed72e5b87430e7e1e2dbd088ffe76abb44014448937f7c33e9852c4dd3",
   "vals": "d063db1dcca6c7aceeeec276a941c9f4936421f91ddef067fac498733b796e4c"
  },
  "card: a till, over the card’s per tap limit": {

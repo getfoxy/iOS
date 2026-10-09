@@ -83,13 +83,17 @@ async function at(mintKey, names, real) {
   // every command the card is sent, to count its signatures
   const sent = [];
   let card;
-  if (real && !process.env.FOXY_CARD_MODEL) { await real.fresh(); card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); return real.send(a); } }; }
+  const seeing = (a, answer) => answer.then((r) => { if (String(a).toLowerCase().slice(0, 4) === 'b022' && /9000$/.test(r)) lastSum = parseInt(String(r).slice(0, 8), 16); return r; });
+  if (real && !process.env.FOXY_CARD_MODEL) { await real.fresh(); card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); return seeing(a, real.send(a)); } }; }
   else {
     const m = makeCard({ window: holder.w, format: Number(process.env.FOXY_CARD_MODEL) === 3 ? 3 : 4 });
-    card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); return m.send(a); } };
+    card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); return seeing(a, m.send(a)); } };
   }
   const signatures = () => sent.filter((a) => a.slice(0, 4) === 'b024').length;
   const pieces = () => sent.filter((a) => a.slice(0, 4) === 'b022').reduce((n, a) => n + parseInt(a.substr(8, 2), 16), 0);
+  // what the pieces of the last payment came to, as the card answered SPEND_ALL_BEGIN
+  let lastSum = 0;
+  const pieceSum = () => lastSum;
   console.log('the card: ' + card.what);
 
   await holder.W.connect(MINT);
@@ -136,6 +140,37 @@ async function at(mintKey, names, real) {
        'till +' + (held(till, MINT) - before) + ', card -' + (onCard - after.balance));
   }
   ok('with the pieces it had, at least one payment was made exactly, with no change', exact >= 1, exact + ' of 3');
+
+  /* The limit on one payment, which asks no clock and is waited for: over it
+   * the card does four signatures of work for every limit's worth past the
+   * first, a SIGN command each, and only then signs. The mint sees nothing of
+   * that: the one signature it is sent is the same kind as any other. */
+  {
+    await card.tap();
+    await holder.W.cardSetLimit(card, { sats: 100, tap: true });
+    await card.tap();
+    const onIt = (await till.W.cardLook(card, { noAuth: true })).balance;
+    const tb = held(till, MINT);
+    sent.length = 0;
+    const counted = [];
+    await card.tap();
+    const paid = await till.W.cardPay(card, { sats: 250, pin: PIN, progress: (p) => { if (p.step === 'waiting' && !p.ahead) counted.push(p.left); } });
+    await card.tap();
+    const left = (await till.W.cardLook(card, { noAuth: true })).balance;
+    const change = (paid.change && paid.change.sats) || 0;
+    const waits = signatures() - 1;
+    ok('a per tap limit of 100, and 250 asked: the card waits, then signs once, and the mint takes it',
+       paid.sats === 250 && waits === 4 * (Math.ceil((onIt - left) / 100) - 1) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => waits - 1 - i).join(','),
+       waits + ' waits for ' + (onIt - left) + ' sats of pieces, counted down ' + counted.join(' ') + '; the till is up ' + (held(till, MINT) - tb));
+    if (change) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
+    sent.length = 0;
+    await card.tap();
+    const small = await till.W.cardPay(card, { sats: 100, pin: PIN });
+    ok('  and 100, at the limit (or a sat over it for the mint\u2019s fee), waits nothing or once', small.sats === 100 && signatures() === 1 + 4 * (Math.ceil(pieceSum() / 100) - 1) && signatures() <= 5, signatures() + ' SIGN command(s)');
+    if (small.change && small.change.sats) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
+    await card.tap();
+    await holder.W.cardSetLimit(card, { sats: 0, tap: true });
+  }
 
   // what change put on the card is money it can sign for: the holder takes all of it off, in one tap
   await card.tap();

@@ -31,7 +31,7 @@ const takeLimitSteps = (app, sats, which) => {
   if (sats > 0) keyIn(app, sats); else app.fcLimitConfirm(0);
   app.fcLimitSpec().go();
 };
-const TAP_WARNING = 'A per tap limit is the most this card will pay in one tap. A larger amount has to be charged in parts, a tap for each, ten seconds apart.\n\n'
+const TAP_WARNING = 'A per tap limit is the most this card pays in one tap straight away. For every limit more than that, the card has to be held 3 seconds longer before it pays. Lift the card and the payment stops, with nothing taken.\n\n'
   + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
   + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
   + 'Do you wish to continue?';
@@ -471,7 +471,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === c.balance() && holder.state.fc.ownedHere === true);
   ok(holder.state.fc.ownedHere === true && vals(holder).fcLimitLine === 'NO LIMIT', 'the card is read again, and this phone is found to be its owner');
   holder.fcSetLimit();
-  ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap.\n\nDAILY: the most it will spend in one day.',
+  ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away. More than that and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
                                            'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
      'CHANGE LIMIT asks which of the card’s two limits: PER TAP LIMIT, DAILY LIMIT, or CANCEL', card(holder) && card(holder).all);
   card(holder).press('CANCEL');
@@ -522,13 +522,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(card(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
      'PER TAP LIMIT opens a warning of its own, like the daily limit’s: what it is, who can change it, CONTINUE and CANCEL', card(holder) && card(holder).all);
   card(holder).press('CONTINUE');
-  ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.fcLimitQuestion() === 'What is the most this card should pay in one tap?',
+  ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.fcLimitQuestion() === 'What is the most this card should pay in one tap straight away?',
      'CONTINUE asks for the amount on the same keypad, in its own words', holder.fcLimitQuestion());
   keyIn(holder, 300);
   {
     const cf = holder.fcLimitSpec();
     ok(cf.amountLabel === 'YOU ARE APPLYING A PER TAP LIMIT OF:' && cf.amount === '\u20bf 300' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
-       && cf.warn === 'This card will pay no more than this in one tap. A larger amount has to be charged in parts, a tap for each. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+       && cf.warn === 'This card will pay up to this straight away. For every limit more, it has to be held 3 seconds longer. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
        'the confirmation says the amount and what it means', JSON.stringify([cf.amountLabel, cf.amount]));
   }
   c.tap();
@@ -598,7 +598,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   card(holder).press('PER TAP LIMIT');
   card(holder).press('CONTINUE');
   holder.fcLimitConfirm(0);
-  ok(holder.fcLimitSpec().amountLabel === 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.' && holder.fcLimitSpec().warn === 'One tap will be able to pay as much as the card holds, up to its daily limit.',
+  ok(holder.fcLimitSpec().amountLabel === 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.' && holder.fcLimitSpec().warn === 'One tap will be able to pay as much as the card holds straight away, up to its daily limit.',
      'NO LIMIT under the keypad removes it, and the confirmation says what that means', holder.fcLimitSpec().warn);
   c.tap();
   holder.fcLimitSpec().go();

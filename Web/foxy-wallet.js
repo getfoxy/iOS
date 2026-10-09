@@ -8906,6 +8906,10 @@
               * seconds of its own clock, when the current tap began, and what
               * it has signed for in it. `tapKnown`: this card has such a limit
               * to set (an older card's software has none). */
+             /* `paced`: the limit on one tap is not a window that refuses but a
+              * limit on one payment that makes a larger one wait (`cardWaitSigns`):
+              * the card says so in what it can do. */
+             paced: (b(6) & 8) !== 0,
              tapKnown: tapKnown, tapLimit: tapKnown ? cardU32(h, 30) : 0,
              tapStart: tapKnown ? cardU32(h, 34) : 0, tapSpent: tapKnown ? cardU32(h, 38) : 0,
              /* This tap is the one after a payment: the card lets pieces be put
@@ -8955,13 +8959,65 @@
   function cardTapOf(info) {
     var limit = Number(info && info.tapLimit) || 0;
     var known = !!(info && info.tapKnown);
-    if (!limit) return { known: known, limited: false, limit: 0, spent: 0, left: null, turns: 0, noTime: false };
+    if (!limit) return { known: known, paced: !!(info && info.paced), limited: false, limit: 0, spent: 0, left: null, turns: 0, noTime: false };
+    /* A card whose limit is on one payment, and is waited for: nothing is
+     * counted, nothing is left or used up, and no clock is asked. */
+    if (info.paced) return { known: known, paced: true, limited: true, limit: limit, spent: 0, left: null, turns: 0, noTime: false };
     var now = Number(info.now) || 0;
     var begun = Number(info.tapStart) || 0;
     var over = now >= begun + CARD_TAP;
     var spent = over ? 0 : (Number(info.tapSpent) || 0);
-    return { known: known, limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent),
+    return { known: known, paced: false, limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent),
              turns: over ? 0 : begun + CARD_TAP, noTime: now === 0 };
+  }
+
+  /* ---- the limit on one payment, which is waited for ---------------------------
+   *
+   * A card that says it is `paced` keeps one number, the most it signs for in
+   * one payment at once. It refuses nothing over it. For every limit's worth
+   * past the first, whole or in part, it does CARD_WAIT_SIGNS signatures of
+   * work before it signs, one for each SPEND_ALL_SIGN it is sent, and answers
+   * each with how many are still to come. It counts against no clock and
+   * remembers nothing from one payment to the next, so there is nothing a
+   * terminal can replay or reset: a payment is judged by its own size, every
+   * time. What the wait is charged on is what the PIECES come to, which is
+   * why the pieces for such a card are chosen to overpay the least.
+   *
+   * The dollars its holder set it in are kept here (CARD_PACE), because the
+   * card can hold only sats and has no price: the holder's own phone sets the
+   * card's sats to match again when it reads the card and the price has moved
+   * (`cardLook`, `price`). */
+  var CARD_WAIT_SIGNS = 4;
+  // the longest a till asks anybody to hold a card for, in seconds: a payment that would wait longer is not begun
+  var CARD_WAIT_MOST = 40;
+  var CARD_PACE = 'foxy.flashcard.pace';
+  // how far the price may move before the card's sats are set again
+  var CARD_PACE_DRIFT = 0.02;
+
+  function cardWaitSigns(limit, sats) {
+    var l = Math.round(Number(limit) || 0), n = Math.round(Number(sats) || 0);
+    if (!(l > 0) || !(n > l)) return 0;
+    return Math.min(255, Math.ceil(n / l) - 1) * CARD_WAIT_SIGNS;
+  }
+  function cardWaitSeconds(signs) { return Math.ceil((Number(signs) || 0) * (CARD_SIGN_SECONDS + 0.06)); }
+
+  function cardPaceAll() {
+    var o = load(CARD_PACE, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+  /* The dollars a card's limit was set in, or none (`usd` 0: set in sats, or no limit). */
+  function cardPaceNote(cardKey, usd) {
+    var all = cardPaceAll();
+    if (usd > 0) all[cardKey] = { usd: Math.round(Number(usd) * 100) / 100, at: Date.now() };
+    else delete all[cardKey];
+    save(CARD_PACE, all);
+  }
+  /* What that figure is in sats at `price` (dollars a bitcoin), or 0 where there is no figure or no price. */
+  function cardPaceSats(cardKey, price) {
+    var row = cardPaceAll()[cardKey];
+    var p = Number(price) || 0;
+    if (!row || !(row.usd > 0) || !(p > 0)) return 0;
+    return Math.max(1, Math.round(row.usd / p * 100000000));
   }
 
   /* GET_LOG: the card's own account of its taps. Only the card writes it: a
@@ -8979,7 +9035,9 @@
     var taps = [];
     for (var at = 32; at < h.length; at += 24) {
       taps.push({ time: cardU32(h, at / 2), sats: cardU32(h, at / 2 + 4), pieces: parseInt(h.substr(at + 16, 2), 16),
-                  refused: parseInt(h.substr(at + 18, 2), 16), tamper: (parseInt(h.substr(at + 20, 2), 16) & 1) === 1 });
+                  refused: parseInt(h.substr(at + 18, 2), 16), tamper: (parseInt(h.substr(at + 20, 2), 16) & 1) === 1,
+                  // a payment in that tap was over the card's limit on one payment, and was waited for
+                  waited: (parseInt(h.substr(at + 20, 2), 16) & 2) === 2 });
     }
     return { taps: cardU32(h, 0), sats: cardU32(h, 4), refused: cardU32(h, 8), tampers: cardU32(h, 12), last: taps };
   }
@@ -9473,6 +9531,20 @@
         }, function () { return card; });
       }).then(function (c) {
         mark('owner');
+        /* The limit on one payment was set in dollars, and the price has
+         * moved: the card's sats are set to match, with the owner's proof. */
+        var want = (c.mine && c.info.paced) ? cardPaceSats(c.key, o.price) : 0;
+        var has = Number(c.info.tapLimit) || 0;
+        if (!(want > 0) || !(has > 0) || Math.abs(want - has) <= has * CARD_PACE_DRIFT) return c;
+        return cardLimitTo(t, c.key, c.info.limit, want).then(function () {
+          console.log('[foxy] card: its limit on one payment is set to the sats its dollars are worth now');
+          c.info.tapLimit = want;
+          c.tap = cardTapOf(c.info);
+          c.repaced = want;
+          mark('limit');
+          return c;
+        }, function () { return c; });
+      }).then(function (c) {
         // and the card's own log, which the owner's grant opens
         return cardLogRead(t, c);
       }).then(function (c) { mark('log'); return said(c); });
@@ -10699,7 +10771,7 @@
    * otherwise the set `cardPick` would take from one date, over-paying, with
    * change to come back. The earliest date that can pay is the one that does,
    * so the oldest money goes first. With no route (`exactOnly`) only exactly. */
-  function cardPickAll(w, have, want, cap, card, tapCap, exactOnly) {
+  function cardPickAll(w, have, want, cap, card, tapCap, exactOnly, least) {
     var bound = (cap === null || cap === undefined) ? null : Math.max(0, Number(cap) || 0);
     var one = (tapCap === null || tapCap === undefined) ? null : Math.max(0, Number(tapCap) || 0);
     var upper = bound === null ? one : (one === null ? bound : Math.min(bound, one));
@@ -10710,6 +10782,14 @@
       if (exact && exact.length && exact.length <= CARD_ALL_MOST) return exact;
     }
     if (exactOnly) return null;
+    /* `least`: the card waits by what its pieces come to (`cardWaitSigns`), so
+     * the set that overpays the least is the quickest, whatever its size. */
+    if (least) {
+      for (i = 0; i < groups.length; i++) {
+        var cheap = cardPickUnder(w, groups[i], want, upper === null ? 281474976710655 : upper);
+        if (cheap && cheap.length && cheap.length <= CARD_ALL_MOST) return cheap;
+      }
+    }
     for (i = 0; i < groups.length; i++) {
       var cover = cardPick(w, groups[i], want, cap, card, tapCap);
       if (cover && cover.length && cover.length <= CARD_ALL_MOST) return cover;
@@ -10768,8 +10848,24 @@
         }
         return walk;
       }).then(function () {
-        asked = true;
-        return t.want(cardCommand(CARD_INS.signAll, 0, '', 64), 'to sign for a payment');
+        /* SIGN, and SIGN again while the card says it is waiting (two bytes:
+         * how many signatures of work are still to come). Nothing is burned
+         * until the last of them, so a card that leaves in the wait has
+         * signed nothing, and is known to have signed nothing because the
+         * card itself said more were to come. Only the SIGN that may be the
+         * signing one is not known about if its answer is lost. */
+        var left = -1, polls = 0;
+        var again = function () {
+          asked = !(left > 0);
+          return t.want(cardCommand(CARD_INS.signAll, 0, '', 64), 'to sign for a payment').then(function (d) {
+            if (!cardHexOk(d, 2)) return d;
+            left = parseInt(d, 16);
+            if (++polls > 1100) throw cardError('refused', 'The card kept waiting and did not sign.', { sw: '' });
+            try { if (typeof progress === 'function') progress({ step: 'waiting', left: left, seconds: cardWaitSeconds(left) }); } catch (e) {}
+            return again();
+          });
+        };
+        return again();
       }).then(function (sig) {
         var first = /** @type {any} */ ({ id: plan.inputs[0].id, amount: plan.inputs[0].amount, secret: plan.inputs[0].secret, C: plan.inputs[0].C,
                                           witness: JSON.stringify({ signatures: [sig] }) });
@@ -11233,8 +11329,9 @@
        * set of pieces may come to more, and one that would is not asked for.
        * It is not something a larger piece uses up for later, as the day is,
        * so a set chosen to keep the drawer whole is still chosen under it. */
-      tapCap = (tap.limited && !lift) ? tap.left : null;
-      if (((day.limited && day.noTime) || (tap.limited && tap.noTime)) && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
+      // a limit on one payment that is waited for caps nothing (`paced`): it is paid for in time, below
+      tapCap = (tap.limited && !tap.paced && !lift) ? tap.left : null;
+      if (((day.limited && day.noTime) || (tap.limited && !tap.paced && tap.noTime)) && !lift) throw cardError('no-time', 'The card has not been told the time, and cannot spend under a limit until it has.');
       /* The same payment, taken up again: what the card signed for it before
        * it left counts, and only the rest is signed now. Held for another
        * amount, or too long ago, it is let go once this payment is done. */
@@ -11269,7 +11366,7 @@
        * change both to a payer who spent their copy. */
       var least = function (a, b) { return a === null ? b : b === null ? a : Math.min(a, b); };
       var choose = function (limit, one) {
-        if (all4) return cardPickAll(w, have, rest, limit, card, one, offline);
+        if (all4) return cardPickAll(w, have, rest, limit, card, one, offline, !!(tap.paced && tap.limited && !lift));
         return offline ? cardExactPick(w, have, rest, least(limit, one)) : cardPick(w, have, rest, limit, card, one);
       };
       if (o.all) {
@@ -11343,6 +11440,19 @@
       if (groups.length > 1 && !o.all) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       if (groups.length > 1) {
         fee = groups.reduce(function (n, g) { var f = swapFeeFor(w, g); return n + ((isFinite(f) && f > 0) ? f : 0); }, 0);
+      }
+      /* What the card will make this payment wait, known before its PIN is
+       * sent: said to the screen, and where it is longer than anybody holds a
+       * card, the payment is not begun and the most that can be taken is said. */
+      if (tap.paced && tap.limited && !lift) {
+        var signs = groups.reduce(function (n, g) { return n + cardWaitSigns(tap.limit, sumProofs(g)); }, 0);
+        var secs = cardWaitSeconds(signs);
+        if (secs > CARD_WAIT_MOST) {
+          var mostNow = (Math.floor(CARD_WAIT_MOST / cardWaitSeconds(CARD_WAIT_SIGNS)) + 1) * tap.limit;
+          throw cardError('tap-limit', 'This card would have to be held for ' + secs + ' seconds to pay this. Take it in parts of '
+            + mostNow + ' sats or less.', { left: mostNow, need: sumProofs(picked), limit: tap.limit, wait: secs, paced: true });
+        }
+        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', left: signs, seconds: secs, ahead: true }); } catch (eW) {} }
       }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
@@ -21131,7 +21241,10 @@
         key = card.key;
         if (o.tap) {
           if (!card.info.tapKnown) throw cardError('old-card', 'This card\u2019s software has no limit on one tap.');
-          return cardLimitTo(t, key, card.info.limit, sats);
+          return cardLimitTo(t, key, card.info.limit, sats).then(function () {
+            // the dollars it was set in, where it was (`o.usd`), so that the card's sats follow the price (`cardLook`)
+            cardPaceNote(key, sats > 0 ? Number(o.usd) || 0 : 0);
+          });
         }
         return cardLimitTo(t, key, sats);
       }).then(function () {
@@ -21612,6 +21725,10 @@
     },
     /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
     cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
+    /* The limit on one payment, as its holder set it: the dollars, or 0 (`cardPaceNote`); and what a payment
+     * of `sats` waits on a card with that limit, in seconds. */
+    cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
+    cardWait: function (limit, sats) { return cardWaitSeconds(cardWaitSigns(limit, sats)); },
     cardHeldLetGo: function (key) {
       var w = null;
       try { w = need(); } catch (e) { w = null; }

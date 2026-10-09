@@ -1609,26 +1609,35 @@ and load it), a phone whose build carries the NFC entitlement
 
 #### 23c-2. The limit on one tap
 
-Needs a card with the software that has it (its screen offers PER TAP LIMIT
-under CHANGE LIMIT; an older card goes straight to the daily limit).
+Needs a card with the software that waits (1.5: its screen offers PER TAP LIMIT
+under CHANGE LIMIT, and a charge over the limit is not refused).
 
 1. On the holder's phone: CHANGE LIMIT. **Pass:** a card asks which, PER TAP
-   LIMIT or DAILY LIMIT, with CANCEL. PER TAP LIMIT, CONTINUE, an amount,
-   CONFIRM, tap. **Pass:** no PIN is asked; `Per tap limit set.`; the card's
-   screen says PER TAP LIMIT and the amount (or both limits on one line).
-2. On the second phone, charge the card more than that limit. **Pass:** OVER THE
-   CARD'S PER TAP LIMIT, before the PIN pad's tap reaches the card for anything
-   but a read: nothing is taken, and it says to charge it in parts.
-3. Charge it an amount within the limit, and again straight away for another
-   amount within it that together come to more. **Pass:** the first is paid;
-   the second is paid if ten seconds have passed since the first tap (typing the
-   amount and the PIN takes longer than that), and otherwise is refused with
-   what the tap has left and `Tap it again in ten seconds.`
-4. On the holder's phone, WITHDRAW everything. **Pass:** it comes off whatever
-   the limits, and afterwards the card's screen shows the same limits as
-   before.
-5. Set the limit on one tap to NO LIMIT. **Pass:** `Per tap limit removed.`, and
+   LIMIT or DAILY LIMIT, with CANCEL. PER TAP LIMIT, CONTINUE, an amount in
+   dollars, CONFIRM, tap. **Pass:** no PIN is asked; `Per tap limit set.`; the
+   card's screen says PER TAP LIMIT and the amount (or both limits on one line).
+2. On the second phone, charge the card an amount at or under the limit.
+   **Pass:** paid as fast as any payment. Charge it again straight away: the
+   same. Nothing is remembered from the first.
+3. Charge it about twice the limit. **Pass:** the sheet and the screen say
+   `Over the card's per tap limit. Keep holding:` with seconds that count
+   down, about three for each limit over; then PAYMENT RECEIVED. Time it.
+4. Charge it about three times the limit and lift the card while it counts.
+   **Pass:** nothing is taken (read the card on the holder's phone: the same
+   balance). Tap again: it counts the whole wait again, and pays.
+5. Charge it far more than the limit (a wait over forty seconds). **Pass:**
+   refused before the PIN reaches the card, saying how long it would have to be
+   held and what can be taken at a time.
+6. On the holder's phone, WITHDRAW everything. **Pass:** it comes off with no
+   wait, and afterwards the card's screen shows the same limits as before.
+7. Dollars: set a per tap limit in dollars. Read the card again on the holder's
+   phone on a day the price has moved by more than a fiftieth. **Pass:** the
+   log says the card's limit was set to what its dollars are worth now, and the
+   card's screen shows the same dollars as before.
+8. Set the limit on one tap to NO LIMIT. **Pass:** `Per tap limit removed.`, and
    the daily limit, if there was one, is still there.
+9. The longest wait a phone holds: with a small limit, charge an amount that
+   waits thirty seconds or more. Note whether the sheet stays up to the end.
 
 #### 23c-3. The card's own log
 

@@ -136,7 +136,10 @@
         key = card.key;
         if (o.tap) {
           if (!card.info.tapKnown) throw cardError('old-card', 'This card\u2019s software has no limit on one tap.');
-          return cardLimitTo(t, key, card.info.limit, sats);
+          return cardLimitTo(t, key, card.info.limit, sats).then(function () {
+            // the dollars it was set in, where it was (`o.usd`), so that the card's sats follow the price (`cardLook`)
+            cardPaceNote(key, sats > 0 ? Number(o.usd) || 0 : 0);
+          });
         }
         return cardLimitTo(t, key, sats);
       }).then(function () {
@@ -617,6 +620,10 @@
     },
     /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
     cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
+    /* The limit on one payment, as its holder set it: the dollars, or 0 (`cardPaceNote`); and what a payment
+     * of `sats` waits on a card with that limit, in seconds. */
+    cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
+    cardWait: function (limit, sats) { return cardWaitSeconds(cardWaitSigns(limit, sats)); },
     cardHeldLetGo: function (key) {
       var w = null;
       try { w = need(); } catch (e) { w = null; }

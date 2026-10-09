@@ -41,7 +41,14 @@ function makeCard(opts) {
    * Format 4 signs once for a whole payment (NUT-11 SIG_ALL): every piece's secret carries the flag, SPEND_PROOF is
    * gone, and a payment is SPEND_ALL_BEGIN, its outputs, and SPEND_ALL_SIGN. Three unless asked for four. */
   const FORMAT = o.format === 4 ? 4 : 3;
-  const VERSION = FORMAT === 4 ? 4 : 3;
+  /* The card of format 4 is also the one whose second limit is not a ten-second window that refuses (the card of format
+   * 3 keeps that, as the applet it models did) but the limit on ONE PAYMENT, with no clock: a payment over it is not
+   * refused, it waits. Every limit's worth past the first costs WAIT_SIGNS signatures of the card's work, each asked for
+   * by a SPEND_ALL_SIGN that answers two bytes (how many are still to come) in place of the signature. Nothing is
+   * counted or remembered from one payment to the next. */
+  const VERSION = FORMAT === 4 ? 5 : 3;
+  const PACED = FORMAT === 4;
+  const WAIT_SIGNS = 4;
   const priv = String(o.key || crypto.randomBytes(32).toString('hex'));
   const pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
   const s = {
@@ -123,16 +130,18 @@ function makeCard(opts) {
   /* The limits, held to what a payment's pieces are worth together (format 4): '' when it is within them; '6a92' with a
    * limit and no time; over the day or the tap, written down and refused. */
   const overLimits = (total, carry) => {
-    if ((s.record.limit !== 0 || s.tapLimit !== 0) && s.now === 0) return '6a92';
+    if (s.record.limit !== 0 && s.now === 0) return '6a92';
     if (s.record.limit !== 0) {
       const t = (s.now >= s.windowStart + DAY ? 0 : s.spent) + total;
       if (carry || t > s.record.limit || t > 4294967295) return refuse('6a8f');
     }
-    if (s.tapLimit !== 0) {
-      const t = (s.now >= s.tapStart + TAP ? 0 : s.tapSpent) + total;
-      if (carry || t > s.tapLimit || t > 4294967295) return refuse('6a95');
-    }
     return '';
+  };
+  /* What a payment of `total` costs in time: the signatures of work before it is signed. */
+  const waitsFor = (total, carry) => {
+    if (s.tapLimit === 0) return 0;
+    if (carry) return 255 * WAIT_SIGNS;
+    return Math.min(255, Math.max(0, Math.ceil(total / s.tapLimit) - 1)) * WAIT_SIGNS;
   };
   /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
    * the tap's, and there a limit whose number does not change keeps its window and its count. A limit needs a time. */
@@ -140,9 +149,10 @@ function makeCard(opts) {
     const both = value.length === 8;
     const day = value.readUInt32BE(0);
     const tap = both ? value.readUInt32BE(4) : 0;
-    if ((day !== 0 || (both && tap !== 0)) && s.now === 0) return '6a92';
+    // the limit on one payment asks no clock, and so needs no time; the day's does
+    if ((day !== 0 || (!PACED && both && tap !== 0)) && s.now === 0) return '6a92';
     if (!both || day !== s.record.limit) { s.record.limit = day; s.windowStart = s.now; s.spent = 0; }
-    if (both && tap !== s.tapLimit) { s.tapLimit = tap; s.tapStart = s.now; s.tapSpent = 0; }
+    if (both && tap !== s.tapLimit) { s.tapLimit = tap; if (!PACED) { s.tapStart = s.now; s.tapSpent = 0; } }
     return '9000';
   };
   const u32of = (n) => u32(Number(n));
@@ -182,11 +192,11 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, VERSION, SLOTS, n(1), n(2), n(0), 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [1, VERSION, SLOTS, n(1), n(2), n(0), PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
-          + (p1 === 1 ? u32(s.tapLimit) + u32(s.tapStart) + u32(s.tapSpent) : '') + '9000';
+          + (p1 === 1 ? u32(s.tapLimit) + (PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '') + '9000';
       }
       case 0x10: return pub + '9000';
       case 0x11: return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
@@ -262,7 +272,8 @@ function makeCard(opts) {
         const no = overLimits(total, carry);
         if (no) return no;
         // the pieces' half of the message is the card's own to build: each one's secret, and its C in hex
-        s.all = { list, total, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
+        const waits = waitsFor(total, carry);
+        s.all = { list, total, waits, waited: waits > 0, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
         return u32(total) + '9000';
       }
       case 0x23: {
@@ -278,18 +289,23 @@ function makeCard(opts) {
         if (FORMAT !== 4) return '6d00';
         if (!s.all) return '6985';
         if (gated()) return '6982';
+        // the wait: one signature of work to a command, and how many are still to come in place of the signature
+        if (s.all.waits > 0) {
+          s.all.waits -= 1;
+          s.waited = (s.waited || 0) + 1;
+          return ('000' + s.all.waits.toString(16)).slice(-4) + '9000';
+        }
         const pay = s.all;
         s.all = null;
         const no = overLimits(pay.total, false);
         if (no) return no;
         const dayBegins = s.record.limit !== 0 && s.now >= s.windowStart + DAY;
-        const tapBegins = s.tapLimit !== 0 && s.now >= s.tapStart + TAP;
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
         if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + pay.total; if (dayBegins) s.windowStart = s.now; }
-        if (s.tapLimit !== 0) { s.tapSpent = (tapBegins ? 0 : s.tapSpent) + pay.total; if (tapBegins) s.tapStart = s.now; }
         pay.list.forEach((i) => { s.slots[i].status = 2; });
         s.changeDue = true;
-        { const e = logEntry(); e.sats = stop(e.sats + pay.total); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + pay.total); }
+        { const e = logEntry(); e.sats = stop(e.sats + pay.total); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + pay.total);
+          if (pay.waited) e.flags |= 2; }
         // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
         s.lastSig = sig;
         s.lastText = pay.text;

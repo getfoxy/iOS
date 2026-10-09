@@ -229,6 +229,12 @@
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
    * card's work, or '' for a step with none. */
   fcProgressText(p) {
+    /* A card made to wait by its own limit on one tap (08a-flashcard.js,
+     * `cardWaitSigns`): how long is left, counted down as the card says. */
+    if (p && p.step === 'waiting') {
+      const s = Math.max(1, Math.round(Number(p.seconds) || 0));
+      return 'Over the card\u2019s per tap limit. Keep holding: ' + s + (s === 1 ? ' second' : ' seconds');
+    }
     const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
     if (!(i > 0 && n > 0)) return '';
     // a card that signs once for a payment has no pieces to count
@@ -442,7 +448,8 @@
      * only when the PIN has been given (`fcLeaveAmount`). */
     if (flow === 'cardAdd') this.fcAddPin(sats);
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
-    else if (flow === 'cardLimit') this.fcLimitConfirm(sats);
+    // a limit typed in dollars is kept in dollars (`fcLimitRun`): the card holds sats, and the price moves
+    else if (flow === 'cardLimit') this.fcLimitConfirm(sats, this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0);
   }
 
   /* Off the keypad and back to the card's own screen, once an amount has
@@ -581,6 +588,11 @@
   /* Why a payment was over the limit on one tap: what the tap has left where
    * some of it is used (a tap is ten seconds to the card), or the limit. */
   fcTapRefusal(e) {
+    // a card whose limit on one tap is waited for: said as the wait it would be, and what can be taken instead
+    if (e.paced) {
+      return 'To pay this the card would have to be held for ' + e.wait + ' seconds, which is longer than a tap lasts. Its per tap limit is '
+        + this.fcBoth(e.limit) + ': take ' + this.fcBoth(e.left) + ' or less at a time.';
+    }
     if (e.turns > 0 && e.left < e.limit) {
       return 'The card has ' + this.fcBoth(e.left) + ' left in this tap. Tap it again in ten seconds.';
     }
@@ -1240,7 +1252,8 @@
   fcRead(open) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link) => W.cardLook(link, { mine: true }))
+    // with the price, so that a limit this phone set in dollars is kept at those dollars (08a-flashcard.js, `cardLook`)
+    this.fcTap({}, (link) => W.cardLook(link, { mine: true, price: (this.px && this.px()) || 0 }))
       .then((card) => this.fcShow(card, open), (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
@@ -1647,7 +1660,7 @@
     this._fcLimitTap = !!tap;
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: 'A per tap limit is the most this card will pay in one tap. A larger amount has to be charged in parts, a tap for each, ten seconds apart.\n\n'
+      reason: 'A per tap limit is the most this card pays in one tap straight away. For every limit more than that, the card has to be held 3 seconds longer before it pays. Lift the card and the payment stops, with nothing taken.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
@@ -1666,12 +1679,13 @@
 
   /* What the keypad asks, for whichever limit is being set (23-render-home-and-amount.js). */
   fcLimitQuestion() {
-    return this._fcLimitTap ? 'What is the most this card should pay in one tap?' : 'What would you like the daily limit to be?';
+    return this._fcLimitTap ? 'What is the most this card should pay in one tap straight away?' : 'What would you like the daily limit to be?';
   }
 
   /* After NEXT on the keypad, or NO LIMIT under it: the confirmation, over it. */
-  fcLimitConfirm(sats) {
-    this.setState(p => ({ screen: 'fcLimitConfirm', stack: p.stack.concat([p.screen]), fcLimit: { sats: Math.max(0, Math.round(Number(sats) || 0)) } }));
+  fcLimitConfirm(sats, usd) {
+    this.setState(p => ({ screen: 'fcLimitConfirm', stack: p.stack.concat([p.screen]),
+                          fcLimit: { sats: Math.max(0, Math.round(Number(sats) || 0)), usd: Math.max(0, Number(usd) || 0) } }));
   }
 
   /* The confirmation shell's contents (confirmSpec). */
@@ -1682,13 +1696,14 @@
       return !(sats > 0) ? {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
         amount: 'NO LIMIT', amountSub: '', rows: [],
-        warn: 'One tap will be able to pay as much as the card holds' + (((this.state.fc || {}).limit || 0) > 0 ? ', up to its daily limit.' : '.'),
+        warn: 'One tap will be able to pay as much as the card holds straight away' + (((this.state.fc || {}).limit || 0) > 0 ? ', up to its daily limit.' : '.'),
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
-        warn: 'This card will pay no more than this in one tap. A larger amount has to be charged in parts, a tap for each. '
+        warn: 'This card will pay up to this straight away. For every limit more, it has to be held 3 seconds longer. '
+          + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
@@ -1731,11 +1746,12 @@
 
   fcLimitConfirmed() {
     const sats = ((this.state.fcLimit || {}).sats) || 0;
+    const usd = ((this.state.fcLimit || {}).usd) || 0;
     const done = this._fcLimitDone;
     this._fcLimitDone = null;
     this.fcLimitLeave();
     // zero is a choice here: NO LIMIT
-    if (done) done(sats);
+    if (done) done(sats, usd);
   }
 
   /* ---- the card's own log -----------------------------------------------------
@@ -1752,11 +1768,13 @@
     if (!log || !log.last) return;
     const marked = log.last.some((x) => x.tamper);
     const n = (count, one, many) => count + ' ' + (count === 1 ? one : many);
-    const line = (x) => this.fcWhen(x.time) + ': ' + this.fcSats(x.sats)
+    // in dollars, at the price now: the card keeps sats and knows no price
+    const line = (x) => this.fcWhen(x.time) + ': ' + this.fcPrice(x.sats)
       + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : '')
+      + (x.waited ? ', over the per tap limit' : '')
       + (x.refused ? ', ' + x.refused + ' refused' : '') + (x.tamper ? ' \u2014 TAMPER' : '');
     const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
-      ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcSats(log.since.sats) + ' signed for'
+      ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.since.sats) + ' signed for'
         + (log.since.refused > 0 ? ', ' + log.since.refused + ' refused' : '') + '.\n\n'
       : '';
     this.blockedCard('fc-log', {
@@ -1765,7 +1783,8 @@
       reason: (marked ? 'A terminal asked this card for more than its limit allows, three times or more within ten seconds. The card refused each time and wrote it down.\n\n' : '')
         + 'Kept by the card itself. No phone or terminal can change it.\n\n' + since
         + log.last.map(line).join('\n')
-        + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcSats(log.sats) + ' signed for, ' + log.refused + ' refused.',
+        + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.sats) + ' signed for, ' + log.refused + ' refused.'
+        + (((this.px && this.px()) || 0) > 0 ? '\n\nIn dollars at the price now.' : ''),
       shut: { label: 'CLOSE' },
     });
   }
@@ -1782,22 +1801,22 @@
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
     this.blockedCard('fc-limit-which', {
       tone: 'ask', title: 'CHANGE LIMIT',
-      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap.\n\nDAILY: the most it will spend in one day.',
-      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats, true), true),
+      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away. More than that and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
+      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, true, usd), true),
       shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },
     });
   }
 
   /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked. `tap`: the limit on one tap. */
-  fcLimitRun(sats, tap) {
+  fcLimitRun(sats, tap, usd) {
     const W = this.fcW();
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats, tap: !!tap }); })
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetLimit(link, { sats, tap: !!tap, usd: tap ? usd : 0 }); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast((tap ? 'Per tap limit ' : 'Daily limit ') + (sats > 0 ? 'set.' : 'removed.'));
-      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd) }));
   }
 
   /* ---- its mint -------------------------------------------------------------
@@ -2223,7 +2242,7 @@
       notes.push({
         text: marked.length
           ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
-          : 'Last tap: ' + this.fcSats(log.last[0].sats) + ', ' + this.fcWhen(log.last[0].time) + '. Press here for this card\u2019s own log.',
+          : 'Last tap: ' + this.fcPrice(log.last[0].sats) + ', ' + this.fcWhen(log.last[0].time) + '. Press here for this card\u2019s own log.',
         tap: () => this.fcLogCard(),
       });
     }

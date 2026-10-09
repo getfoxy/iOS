@@ -15,7 +15,7 @@
  */
 const { funded, binaryLoad, why, history, settle, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 const { makeCard } = require('./flashcard-card');
-const { appOn, until, pad, stage } = require('./flashcard-ui-kit');
+const { appOn, until, pad, stage, card: uiCard } = require('./flashcard-ui-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -50,7 +50,7 @@ async function world(feePpk, sats) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.4', 'a card that signs once for a payment is read as what it is', seen.info.version + ', format ' + seen.info.format);
+  ok(seen.info.format === 4 && seen.info.version === '1.5' && seen.info.paced === true, 'a card that signs once for a payment is read as what it is', seen.info.version + ', format ' + seen.info.format);
   card.tap();
   const added = await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
   ok(added.sats === 2000 && card.balance() === 2000, '2,000 sats are put on it', String(card.balance()));
@@ -206,31 +206,129 @@ async function world(feePpk, sats) {
     await settle();
   }
 
-  /* ---- 8: the limits are held to what the pieces come to together --------- */
+  /* ---- 8: the limit on one payment is waited for, and asks no clock ---------
+   * The card refuses nothing over it. For every limit's worth past the first
+   * it does four signatures of work before it signs, a SIGN command each, and
+   * nothing is burned until the last. Nothing is counted from one payment to
+   * the next, and no time is asked. */
   {
     const L = await world(0, 9000);
     L.card.tap();
     await L.H.W.cardAdd(L.card, { sats: 3000, pin: '1234' });
     L.card.tap();
-    await L.H.W.cardSetLimit(L.card, { sats: 1000 });
-    L.card.tap();
-    await L.H.W.cardSetLimit(L.card, { sats: 400, tap: true });
+    const set = await L.H.W.cardSetLimit(L.card, { sats: 400, tap: true });
+    ok(set.info.tapLimit === 400 && set.tap.paced === true && set.tap.limited === true && set.tap.left === null,
+       'a per tap limit of 400 is set, and is read as one that is waited for', JSON.stringify(set.tap));
+    // at the limit: straight away
     L.card.tap();
     L.card.sent.length = 0;
-    const over = await L.R.W.cardPay(L.card, { sats: 500, pin: '1234' }).then(() => null, (x) => x);
-    ok(over && over.card === 'tap-limit' && count(L.card, '40') === 0, 'a payment over the limit on one tap is refused before the PIN', over && over.card);
+    const at = await L.R.W.cardPay(L.card, { sats: 400, pin: '1234' });
+    ok(at.sats === 400 && count(L.card, '24') === 1, 'a payment of the limit is signed for at once', count(L.card, '24') + ' SIGN');
+    // and again, at once: nothing is remembered of the one before
     L.card.tap();
-    const fine = await L.R.W.cardPay(L.card, { sats: 300, pin: '1234' });
-    ok(fine.sats === 300 && (await bal(L.R)) === 300, 'one under it is paid', String(await bal(L.R)));
-    // a till that asks the card itself for more than the tap allows is refused by the card, and nothing is burned
+    L.card.sent.length = 0;
+    const at2 = await L.R.W.cardPay(L.card, { sats: 400, pin: '1234' });
+    ok(at2.sats === 400 && count(L.card, '24') === 1, 'and so is the next, a moment later: nothing is counted from one payment to the next');
+    // over it: one limit more is four signatures of work, then the signature
     L.card.tap();
-    await L.card.send('00a404000af0464f5859434152440100');
-    await L.card.send('b040000004' + Buffer.from('1234').toString('hex'));
-    // one piece of 512: within what is left of the day (700), and over the tap (400)
-    const big = L.card.state.slots.map((x, i) => ({ i, a: x.status === 1 ? parseInt(x.data.substr(16, 8), 16) : 0 })).filter((x) => x.a === 512).slice(0, 1);
-    const onBefore = L.card.balance();
-    const said = await L.card.send('b0220000' + ('0' + big.length.toString(16)).slice(-2) + big.map((x) => ('0' + x.i.toString(16)).slice(-2)).join(''));
-    ok(said.slice(-4) === '6a95' && L.card.balance() === onBefore, 'and the card itself refuses a set that comes to more, before anything is signed', said.slice(-4));
+    L.card.sent.length = 0;
+    const said = [];
+    const steps = [];
+    const over = await L.R.W.cardPay(L.card, { sats: 500, pin: '1234', on: (st) => steps.push(st), progress: (p) => { if (p.step === 'waiting') said.push(p.left + (p.ahead ? ' ahead' : '')); } });
+    ok(over.sats === 500 && (await bal(L.R)) === 1300 && count(L.card, '24') === 5,
+       'a payment of 500 is made, after the card has been asked four times to wait', count(L.card, '24') + ' SIGN commands');
+    ok(said.join(',') === '4 ahead,3,2,1,0', 'the screen is told the wait before the PIN is sent, and then as the card counts it down', said.join(','));
+    ok(L.card.state.log.ring.some((e) => (e.flags & 2) === 2), 'and the card’s own log marks that tap as over its limit');
+    // the pieces are chosen to overpay the least, since the card waits by what the pieces come to
+    {
+      const C = await world(0, 9000);
+      await binaryLoad(C.H, C.card, 2000);          // 1024 512 256 128 64 16
+      C.card.tap();
+      await C.H.W.cardSetLimit(C.card, { sats: 300, tap: true });
+      C.card.tap();
+      C.card.sent.length = 0;
+      const p = await C.R.W.cardPay(C.card, { sats: 250, pin: '1234' });
+      ok(p.sats === 250 && count(C.card, '24') === 1 && C.card.balance() === 2000 - 256,
+         'a price with no exact set is paid with the pieces that overpay it least (256 for 250), not a large one that would wait', 'card ' + C.card.balance() + ', ' + count(C.card, '24') + ' SIGN');
+      if (p.change && p.change.sats) { C.card.tap(); await C.R.W.cardWrite(C.card, { pin: '1234' }); }
+      await settle();
+    }
+    // lifted in the wait: nothing is burned, and the next tap waits in full again
+    L.card.tap();
+    const before = L.card.balance();
+    L.card.leaveBefore('24', 3);
+    const gone = await L.R.W.cardPay(L.card, { sats: 700, pin: '1234' }).then(() => null, (x) => x);
+    ok(gone && gone.card === 'gone' && L.card.balance() === before && L.R.W.cardTaken().length === 0 && swaps(L.R).length === 0,
+       'a card lifted while it waits has burned nothing, and the till holds nothing of it', gone && gone.card);
+    L.card.tap();
+    L.card.sent.length = 0;
+    const then = await L.R.W.cardPay(L.card, { sats: 700, pin: '1234' });
+    // what it waits is by what its pieces came to, which may be over the price where no exact set is left
+    const signedFor = before - L.card.balance();
+    ok(then.sats === 700 && signedFor >= 700 && count(L.card, '24') === 1 + 4 * (Math.ceil(signedFor / 400) - 1),
+       'and tapped again it waits the whole of it again, and pays', signedFor + ' sats of pieces, ' + count(L.card, '24') + ' SIGN');
+    if (then.change && then.change.sats) { L.card.tap(); await L.R.W.cardWrite(L.card, { pin: '1234' }); }
+    // longer than anybody holds a card: not begun, and what can be taken is said
+    L.card.tap();
+    await L.H.W.cardSetLimit(L.card, { sats: 10, tap: true });
+    L.card.tap();
+    L.card.sent.length = 0;
+    const long = await L.R.W.cardPay(L.card, { sats: 600, pin: '1234' }).then(() => null, (x) => x);
+    ok(long && long.card === 'tap-limit' && long.paced === true && long.wait > 40 && long.left > 0 && count(L.card, '40') === 0,
+       'a payment the card would make wait longer than a tap lasts is refused before the PIN, with the wait and the most that can be taken', long && long.message);
+    // the holder's own phone lifts the limit to take money off, and puts it back
+    L.card.tap();
+    L.card.sent.length = 0;
+    const hb = await bal(L.H);
+    const onIt = L.card.balance();
+    const off = await L.H.W.cardWithdraw(L.card, { pin: '1234' });
+    L.card.tap();
+    const after = await L.H.W.cardLook(L.card, { mine: true });
+    ok(off.sats === onIt && (await bal(L.H)) === hb + onIt && count(L.card, '24') === 1 && after.info.tapLimit === 10,
+       'its holder takes everything off in one signature with no wait, and the limit is back after', count(L.card, '24') + ' SIGN, limit ' + after.info.tapLimit);
+    // no clock: a card never told the time takes the limit and spends under it
+    {
+      const N = await world(0, 9000);
+      const raw = makeCard({ window: N.H.window, format: 4 });
+      await raw.send('00a404000af0464f5859434152440100');
+      const answer = await raw.send('b0010100' + '00');
+      ok(answer.substr(12, 2) === '0f', 'the card says of itself that its limit on one payment is waited for', answer.substr(12, 2));
+      await settle();
+    }
+    await settle();
+  }
+
+  /* ---- 8b: the limit is kept in dollars --------------------------------------
+   * The card holds sats and has no price. The phone that set the limit keeps
+   * the dollars it was set in, and when it reads its own card and the price
+   * has moved, sets the card's sats to match. */
+  {
+    const D = await world(0, 9000);
+    D.card.tap();
+    await D.H.W.cardAdd(D.card, { sats: 2000, pin: '1234' });
+    D.card.tap();
+    // $1.00 at $100,000 a bitcoin is 1,000 sats
+    await D.H.W.cardSetLimit(D.card, { sats: 1000, tap: true, usd: 1 });
+    ok(D.H.W.cardPaceUsd(D.card.key) === 1, 'a limit set in dollars is kept in dollars on the phone that set it');
+    D.card.tap();
+    D.card.sent.length = 0;
+    const same = await D.H.W.cardLook(D.card, { mine: true, price: 101000 });
+    ok(same.info.tapLimit === 1000 && !same.repaced && count(D.card, '34') === 0, 'a price that has moved a little leaves the card as it is', String(same.info.tapLimit));
+    D.card.tap();
+    const moved = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    ok(moved.info.tapLimit === 1250 && moved.repaced === 1250 && moved.tap.limit === 1250, 'a price that has moved is followed: the card’s sats are set to what the dollars are worth now', String(moved.info.tapLimit));
+    D.card.tap();
+    const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000 });
+    ok(read.info.tapLimit === 1250 && !read.repaced, 'another phone, which did not set it, changes nothing', String(read.info.tapLimit));
+    D.card.tap();
+    const noPrice = await D.H.W.cardLook(D.card, { mine: true });
+    ok(noPrice.info.tapLimit === 1250 && !noPrice.repaced, 'nor does the holder’s phone with no price to go by');
+    D.card.tap();
+    await D.H.W.cardSetLimit(D.card, { sats: 700, tap: true });
+    ok(D.H.W.cardPaceUsd(D.card.key) === 0, 'and a limit set in sats is left in sats');
+    D.card.tap();
+    const sats = await D.H.W.cardLook(D.card, { mine: true, price: 20000 });
+    ok(sats.info.tapLimit === 700 && !sats.repaced, 'whatever the price does', String(sats.info.tapLimit));
     await settle();
   }
 
@@ -463,6 +561,68 @@ async function world(feePpk, sats) {
        'taken away as it signs: paid at the next tap, the card out 300 once, and asked only for the signature it had already given', (await bal(U.R)) + ', card ' + U.card.balance());
     ok(U.R.sheet.filter((x) => /^begin:/.test(x)).length === 1 && U.R.sheet.indexOf('again: Hold the card here again to finish paying') >= 0 && titles.length === 0,
        'in the same sheet, which asks for the card again, with no card to press', U.R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' ' + titles.join());
+    await settle();
+  }
+
+  /* ---- 16: the limit on the screens: set in dollars, waited for at a till, read in dollars ---- */
+  {
+    const V = await world(0, 9000);
+    V.card.tap();
+    await V.H.W.cardAdd(V.card, { sats: 3000, pin: '1234' });
+    const holder = appOn(V.H);
+    holder.price = 100000;                       // a dollar is 1,000 sats
+    V.H.nfc = V.card;
+    holder.goFlashcard();
+    await until('the card to be read', () => !!holder.state.fc);
+    holder.fcSetLimit();
+    const which = uiCard(holder);
+    ok(which && which.title === 'CHANGE LIMIT' && /straight away/.test(which.reason), 'CHANGE LIMIT says what the per tap limit is now: the most it pays straight away', which && which.reason);
+    which.press('PER TAP LIMIT');
+    ok(/held 3 seconds longer/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason), 'and its warning says a larger payment waits, and that lifting the card stops it');
+    uiCard(holder).press('CONTINUE');
+    holder.state.amount = '0.50';
+    holder.state.unit = 'USD';
+    holder.fcAmountNext();
+    ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 500 && holder.state.fcLimit.usd === 0.5 && /kept at this many dollars/.test(holder.fcLimitSpec().warn),
+       'an amount typed in dollars is confirmed as dollars that the phone will keep the card to', holder.fcLimitSpec().warn);
+    holder.fcLimitSpec().go();
+    await until('the limit to be set', () => holder.toasts.some((t) => /Per tap limit set/.test(t)));
+    ok(V.card.state.tapLimit === 500 && V.H.W.cardPaceUsd(V.card.key) === 0.5, 'the card is given the sats, and the phone keeps the dollars', V.card.state.tapLimit + ' sats, $' + V.H.W.cardPaceUsd(V.card.key));
+    // the price moves, and the holder opens FLASHCARD again: the card follows, with nothing asked
+    holder.price = 50000;
+    holder.setState({ fc: null, screen: 'home', stack: [] });
+    holder.goFlashcard();
+    await until('the card to be read again', () => !!holder.state.fc);
+    await settle();
+    ok(V.card.state.tapLimit === 1000, 'when the price has halved, the next read sets the card to twice the sats: the same dollars', String(V.card.state.tapLimit));
+
+    // a till, charging more than the limit: it says to keep holding, and counts
+    const till = appOn(V.R, { screen: 'confirm' });
+    till.price = 50000;
+    const lines = [];
+    const text0 = till.fcProgressText.bind(till);
+    till.fcProgressText = (p) => { const t = text0(p); if (t && lines[lines.length - 1] !== t) lines.push(t); return t; };
+    till.wantedSats = () => 1500;
+    V.R.nfc = V.card;
+    V.R.sheet.length = 0;
+    V.card.sent.length = 0;
+    till.payByCard();
+    pad(till).type('1234');
+    await until('the waited payment to be made', () => V.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(V.R));
+    await settle();
+    const waited = lines.filter((t) => /Keep holding/.test(t));
+    ok((await bal(V.R)) === 1500 && count(V.card, '24') === 5, 'a charge of one and a half limits is paid after the card has waited once', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
+    ok(waited.length >= 2 && /^Over the card’s per tap limit\. Keep holding: \d+ seconds?$/.test(waited[0]), 'and the till said to keep holding, with the seconds counting down', waited.join(' / '));
+    if (V.R.W.cardOwed().length) { V.card.tap(); await V.R.W.cardWrite(V.card, { pin: '1234' }); }
+
+    // the card's own log, on its holder's phone: in dollars, and that tap marked
+    holder.setState({ fc: null, screen: 'home', stack: [] });
+    holder.goFlashcard();
+    await until('the card to be read for its log', () => !!holder.state.fc && !!holder.state.fc.log);
+    holder.fcLogCard();
+    const logCard = uiCard(holder);
+    ok(logCard && /\$\d/.test(logCard.reason) && !/₿/.test(logCard.reason) && /over the per tap limit/.test(logCard.reason) && /In dollars at the price now\./.test(logCard.reason),
+       'the card’s own log is read in dollars, and says which tap was over the limit', logCard && logCard.reason.replace(/\n+/g, ' | ').slice(0, 260));
     await settle();
   }
 
