@@ -54,7 +54,7 @@ async function world(feePpk, sats, make) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.9' && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
+  ok(seen.info.format === 4 && seen.info.version === '1.10' && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
      'a card that signs once for a payment is read as what it is, with its 128 places', seen.info.version + ', format ' + seen.info.format + ', ' + seen.info.slots + ' places');
   card.tap();
   card.sent.length = 0;

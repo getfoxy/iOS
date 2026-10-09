@@ -102,8 +102,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,CHANGE LIMIT' && v.fcHistoryVis === 'visible' && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function',
      'with ADD FUNDS and WITHDRAW, CHANGE PIN and CHANGE LIMIT under them, and its history at the top');
-  ok(v.fcDesign === 'FL1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1' && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
-     'the card is drawn in the design FL1, as is one that names a design this build cannot draw; every design has a code of three characters', v.fcDesign);
+  ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
+     && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
+     'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
   ok(v.fcVerified === 'Verified Just Now' && v.fcVerifiedShown === true, 'and under its title, that it is verified: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
@@ -565,12 +566,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   H.phone.clockMs = () => Math.max(Date.now(), c.state.now * 1000 + 1000);
   await readLog('the card’s log to be read');
   {
-    const note = vals(holder).fcNotes.filter((x) => /^Last tap: /.test(x.text))[0];
-    ok(note && /^Last tap: \u20bf[\d,]+, .*\. Press here for this card\u2019s own log\.$/.test(note.text), 'the card’s screen says its last tap, from the card’s own log, in a line that opens the rest', note && note.text);
-    note.tap();
+    const notes = vals(holder).fcNotes.filter((x) => /^Last tap: |^TAMPER: /.test(x.text));
+    ok(notes.length === 0 && holder.state.fc.log && holder.state.fc.log.last.length > 0,
+       'the card’s screen says nothing of a log the card has nothing to accuse in: what the card did is in this phone’s history', JSON.stringify(notes.map((x) => x.text)));
+    holder.fcLogCard();
     ok(card(holder) && card(holder).title === 'THIS CARD\u2019S OWN LOG' && /Kept by the card itself\. No phone or terminal can change it\./.test(card(holder).reason)
        && /In all: \d+ taps?, \u20bf[\d,]+ signed for, 0 refused\.$/.test(card(holder).reason) && card(holder).has('CLOSE'),
-       'the line opens THIS CARD’S OWN LOG: its last taps, and its totals', card(holder).reason.split('\n').slice(-1)[0]);
+       'the log itself is still there to open: THIS CARD’S OWN LOG, its last taps, and its totals', card(holder).reason.split('\n').slice(-1)[0]);
     card(holder).press('CLOSE');
   }
   // a terminal that has the PIN asks three times for more than the limit on one tap: the card refuses, writes it down, and marks the tap

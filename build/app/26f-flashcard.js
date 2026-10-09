@@ -1315,6 +1315,8 @@
       first: dates.length ? Math.min.apply(null, dates) : 0,
       last: dates.length ? Math.max.apply(null, dates) : 0,
       check: (card.pieces || []).length ? 'asking' : 'none',
+      // the design it is drawn in: what the card says, or what this phone wrote down for it (`FoxyWallet.cardLook`)
+      design: String(card.design || ''),
       // what it holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those
       above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
     } });
@@ -1453,7 +1455,7 @@
 
   fcSetUpRun(pin, recoverable) {
     const W = this.fcW();
-    this.fcTap({ body: 'Setting it up at ' + this.mintName() + '.' }, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable }); })
+    this.fcTap({ body: 'Setting it up at ' + this.mintName() + '.' }, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable, design: this.FC_SETUP_DESIGN }); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -2281,11 +2283,17 @@
    * repository (https://github.com/getfoxy/card), so that anybody can see which are. FL1 is the first
    * Flash design, and the one design drawn so far (build/markup.html, the
    * card on the FLASHCARD screen). A card does not yet say which design it
-   * is, so every card is drawn as FC_DESIGN. */
+   * is, so a card is drawn as the design this phone wrote down for it when it
+   * set it up (FC_SETUP_DESIGN), and FC_DESIGN where it wrote none. */
   FC_DESIGNS = {
     FL1: { name: 'Flash, first design', by: 'Flash' },
+    FX1: { name: 'Foxy, first design', by: 'Foxy' },
   };
   FC_DESIGN = 'FL1';
+  /* The design this phone gives the cards it sets up, written on its own file
+   * for each (the card itself does not yet carry one): a card of this phone's
+   * is drawn as Foxy's, and a card read at it as a till as Flash's. */
+  FC_SETUP_DESIGN = 'FX1';
 
   /* The design to draw a card in: the one it names, where it names one this
    * build can draw, and FC_DESIGN otherwise. */
@@ -2325,10 +2333,11 @@
       tap: () => this.fcWriteAsk({}),
     }));
 
-    /* The card's own log, which only the card writes: its last tap, in a line
-     * that opens the rest. A tap the card has marked (a terminal asked for
-     * more than its limit, three times or more inside ten seconds) is said as
-     * that, for as long as it is among the eight the card keeps. */
+    /* The card's own log, which only the card writes, is on this screen only
+     * when the card has something to accuse: a tap it marked (a terminal
+     * asked for more than its limit, three times or more inside ten seconds)
+     * or a false time it was told. What else the card did is in this phone's
+     * history, which has it already; the log itself opens from the mark. */
     const log = fc && fc.log;
     if (on && log && log.last && log.last.length) {
       const marked = log.last.filter((x) => x.tamper);
@@ -2336,15 +2345,14 @@
       // a false time: the card saw it (told twice in a tap, far apart), or this phone does (the card's clock is ahead of its own)
       // (a mark made in a tap that signed for nothing is in the card's count of marked things and in no entry: new since this phone last looked)
       const falseTime = log.last.some((x) => x.clock) || fc.clockAhead > 0 || (!marked.length && !!log.since && log.since.tampers > 0);
-      const lastTap = log.last[0];
-      notes.push({
-        text: marked.length
-          ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
-          : falseTime ? 'TAMPER: this card has been told a false time. Press here.'
-          : 'Last tap: ' + ((lastTap.sats > 0 || !(lastTap.loaded > 0)) ? this.fcPrice(lastTap.sats) : this.fcPrice(lastTap.loaded) + ' put on')
-            + ', ' + this.fcWhen(lastTap.time) + '. Press here for this card\u2019s own log.',
-        tap: () => this.fcLogCard(),
-      });
+      if (marked.length || falseTime) {
+        notes.push({
+          text: marked.length
+            ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
+            : 'TAMPER: this card has been told a false time. Press here.',
+          tap: () => this.fcLogCard(),
+        });
+      }
     }
 
     const rows = (!W || fc || !this.FC_RECOVERABLE) ? [] : W.cardsList().map(r => ({

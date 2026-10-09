@@ -737,13 +737,14 @@ record of a card's use that does not depend on any terminal being honest.
   It needs a limit to be set: a card with none refuses nothing.
 
 The holder's phone reads it whenever it reads a card it owns (the owner's proof
-opens it, with no PIN; a till is not shown it). The card's screen says `Last
-tap: ₿12,288, 3:23 PM. Press here for this card's own log.`, or `TAMPER: a
-terminal tried 5 times to take more than this card's limit. Press here.` for as
-long as a marked tap is among the eight. The line opens **THIS CARD'S OWN LOG**
-(or **TAMPER ON THIS CARD**): the taps, the totals, and `Since this phone last
-looked:` what has been added, which the phone works out from the counts it saw
-last time (`foxy.flashcard.logseen`).
+opens it, with no PIN; a till is not shown it). The card's screen says nothing
+of it unless the card has something to accuse: `TAMPER: a terminal tried 5
+times to take more than this card's limit. Press here.` for as long as a marked
+tap is among the eight, or `TAMPER: this card has been told a false time. Press
+here.` What else the card did is in this phone's history, which has it already.
+The line opens **TAMPER ON THIS CARD**: the taps, the totals, and `Since this
+phone last looked:` what has been added, which the phone works out from the
+counts it saw last time (`foxy.flashcard.logseen`).
 
 What it does not do: it says when and how much, never who; a terminal that
 overcharges within the limits leaves no mark, only the amount; and the times in
@@ -903,6 +904,16 @@ written down before the card is let go; the cards this phone loaded as recoverab
 said a card's pieces were good, so a phone with no connection can say `Verified 2
 Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); and the receipts read from this phone's own cards (`foxy.flashcard.receipts`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
+
+**The card's face.** A card is drawn in a design named by a code of three
+characters (`docs/CARD-DESIGNS.md` in the card repository): FL1 is Flash's,
+FX1 is Foxy's, a picture of orange fur with a sleeping fox. A card of software
+1.10 carries its code in its record, written at set-up and read back by every
+phone; for a card before that, the phone that set it up writes the code it
+chose on a note of its own (`foxy.flashcard.designs`, by the card's key: not
+the list of cards it can take back, which a cash card is never on), and any
+other phone draws it as FL1. This phone sets up its cards as FX1.
+
 
 ## What it does not protect against
 

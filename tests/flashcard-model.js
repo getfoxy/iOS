@@ -143,12 +143,13 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const sealed = await replay(read('flashcard-transcript-19.json'), 4, undefined, 9);
   // the cards before it: 1.8 (no sealed PIN), 1.7 (its pieces burned inside the payment's transaction), and 1.6 (sixty-four places)
   const plain = await replay(read('flashcard-transcript-18.json'), 4, undefined, 8);
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, plain, wide, narrow, before];
+  const all = [now, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

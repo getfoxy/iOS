@@ -60,7 +60,9 @@ function makeCard(opts) {
   /* And whether it takes its PIN sealed (1.9): enciphered to a key the card keeps for that and nothing else, under
    * sixteen bytes of the card's that are good once. `software: 8` is the card before that. */
   const SEALED = MANY && o.software !== 8;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? 9 : 8) : 7) : 6) : 3;
+  /* `software: 9` is the card before the design was in its record: three bytes after the mint (1.10). */
+  const DESIGN = SEALED && o.software !== 9;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? 10 : 9) : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   /* And it is the card made quicker to hold (1.6): GET_PIECES has a brief form (P2 = 1: sixteen bytes a place, to choose
@@ -75,7 +77,7 @@ function makeCard(opts) {
   const s = {
     pin: null, pinState: 0, tries: 3, locked: false,
     // limit: the most the card signs for in a day, sats; 0 is none. timeKey: who may tell it the time (hex, 04 || X || Y)
-    record: { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '' },
+    record: { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '', design: '' },
     // the card's own clock and its day: the latest signed time it has taken, when this day began, what it has signed for since
     now: 0, windowStart: 0, spent: 0,
     // the limit on one tap, which to the card is TAP seconds of that clock: the limit, when this tap began, what it has signed for in it
@@ -241,7 +243,7 @@ function makeCard(opts) {
       s.changeGrant = s.changeDue;
       // and a payment begun and not signed for is given up
       s.all = null;
-      return '010' + VERSION + '9000';
+      return '01' + ('0' + VERSION.toString(16)).slice(-2) + '9000';
     }
     if (!s.selected) return '6999';
     if (cla !== 0xb0) return '6e00';
@@ -281,7 +283,8 @@ function makeCard(opts) {
       case 0x16: {
         const mint = Buffer.from(s.record.mint, 'latin1');
         return '0' + FORMAT + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
-          + s.record.refund + s.record.timeKey + ('0' + mint.length.toString(16)).slice(-2) + hex(mint) + '9000';
+          + s.record.refund + s.record.timeKey + ('0' + mint.length.toString(16)).slice(-2) + hex(mint)
+          + (DESIGN ? (s.record.design ? hex(Buffer.from(s.record.design, 'latin1')) : '000000') : '') + '9000';
       }
       case 0x18: {
         // GET_LOG: for the PIN verified in this tap or the owner's grant; the four counts, then the taps the ring holds, newest first
@@ -531,14 +534,23 @@ function makeCard(opts) {
         if (unspent()) return '6a8d';
         if (rec.length < 101) return '6700';
         const mintLen = rec[99];
-        if (mintLen < 1 || mintLen > MINT_MAX || rec.length !== 100 + mintLen) return '6700';
+        const withDesign = DESIGN && rec.length === 103 + mintLen;
+        if (mintLen < 1 || mintLen > (DESIGN ? 77 : MINT_MAX) || (rec.length !== 100 + mintLen && !withDesign)) return '6700';
+        let design = '';
+        if (withDesign) {
+          const d = rec.subarray(100 + mintLen, 103 + mintLen);
+          if (d.some((v) => v !== 0)) {
+            if (!d.every((v) => (v >= 0x41 && v <= 0x5a) || (v >= 0x30 && v <= 0x39))) return '6a80';
+            design = Buffer.from(d).toString('latin1');
+          }
+        }
         const refund = rec.subarray(1, 34);
         if (refund[0] === 0) { if (refund.some((v) => v !== 0)) return '6a80'; }
         else if (refund[0] !== 2 && refund[0] !== 3) return '6a80';
         const timeKey = rec.subarray(34, 99);
         if (timeKey[0] !== 4) return '6a80';
         const newKey = hex(timeKey) !== s.record.timeKey;
-        s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: hex(timeKey), mint: rec.subarray(100).toString('latin1') };
+        s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: hex(timeKey), mint: rec.subarray(100, 100 + mintLen).toString('latin1'), design: design };
         // a different time key is the one thing that sends the card's clock, and the day it was counting, back to nothing
         if (newKey) { s.now = 0; s.windowStart = 0; s.spent = 0; s.tapStart = 0; s.tapSpent = 0; }
         return '9000';
@@ -715,7 +727,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : undefined, burnMost: BURN_MOST });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : undefined, burnMost: BURN_MOST });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },

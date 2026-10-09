@@ -31,6 +31,8 @@
         // a card this phone can take back: what is on it now is written down for the day it is lost
         var mine = cardsOnFile()[card.key];
         if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces, true);
+        // the design it is drawn in: the card's own word where it has one, else what this phone wrote down for it at set-up
+        if (!card.design) card.design = cardDesignNoted(card.key);
         // anything this phone made for this card and lost track of is found again here (`cardAdopt`)
         try { cardAdopt(card); } catch (e) { console.warn('[foxy] card: looking for ecash made for this card failed:', (e && e.message) || e); }
         return card;
@@ -79,7 +81,8 @@
         return o.recoverable ? cardRefundKey(card.key) : '';
       }).then(function (refund) {
         if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
-        var record = cardRecordHex(refund, mint);
+        // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
+        var record = cardRecordHex(refund, mint, undefined, cardCanDesign(card) ? String(o.design || '') : '');
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         return cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
@@ -90,7 +93,12 @@
         });
       }).then(function () {
         console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with no limit');
-        return cardLook(link, { mine: true });
+        /* The design this phone chose for it (`o.design`, a code of three
+         * characters), written down here for a card whose software cannot
+         * carry it (before 1.10): its own note, not the list of cards this
+         * phone can take back, which a cash card is never on. */
+        cardDesignNote(card.key, o.design);
+        return FoxyWallet.cardLook(link, { mine: true });
       });
     },
 
@@ -520,7 +528,7 @@
         if (canonicalMint(card.record.mint) === here) return null;
         if (card.pieces.length) throw cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.');
         if (!card.info.owner) throw cardRefused('6a90');
-        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey);
+        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '');
         return cardOwned(t, card.key, 'set-card', record).then(function (data) {
           return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {

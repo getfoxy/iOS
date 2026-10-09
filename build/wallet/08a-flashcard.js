@@ -37,7 +37,7 @@
   /* A mint's address as the card keeps it: 80 characters at the most, so that
    * the owner's proof and the whole record fit one command (the card's spec,
    * docs/FOXY-CARD-DAILY-LIMIT.md in https://github.com/getfoxy/card, section 4). */
-  var CARD_MINT_MAX = 80;
+  var CARD_MINT_MAX = 77;   // 80 before the design (card software 1.10): the proof, the record, the mint and it in one APDU
   var CARD_DAY = 86400;
 
   /* ---- INTERIM: the key a card checks the time against -------------------------
@@ -132,18 +132,54 @@
              changeDue: h.length >= 60 && b(29) === 1 };
   }
 
-  /* GET_CARD: format, set, unit, limit, refund key, time key, mint. */
+  /* GET_CARD: format, set, unit, limit, refund key, time key, mint, and, from
+   * card software 1.10, the card's design after the mint: a code of three
+   * characters naming its face (docs/CARD-DESIGNS.md), or three zeros for none.
+   * A card before 1.10 answers nothing after the mint. */
   function cardRecordOf(hex) {
     var h = String(hex || '').toLowerCase();
     if (!/^[0-9a-f]*$/.test(h) || h.length < 212) throw new Error('The card’s record could not be read.');
     var mintLen = parseInt(h.substr(210, 2), 16);
-    if (h.length !== (106 + mintLen) * 2) throw new Error('The card’s record could not be read.');
+    var withDesign = h.length === (109 + mintLen) * 2;
+    if (h.length !== (106 + mintLen) * 2 && !withDesign) throw new Error('The card’s record could not be read.');
     var refund = h.substr(14, 66);
     var timeKey = h.substr(80, 130);
     var mint = '';
     for (var i = 0; i < mintLen; i++) mint += String.fromCharCode(parseInt(h.substr(212 + i * 2, 2), 16));
+    var design = '';
+    if (withDesign) {
+      for (var k = 0; k < 3; k++) design += String.fromCharCode(parseInt(h.substr(212 + (mintLen + k) * 2, 2), 16));
+      if (!/^[A-Z0-9]{3}$/.test(design)) design = '';
+    }
     return { format: parseInt(h.substr(0, 2), 16), set: h.substr(2, 2) === '01', unit: parseInt(h.substr(4, 2), 16) === 0 ? 'sat' : 'other',
-             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, timeKey: /^0+$/.test(timeKey) ? '' : timeKey, mint: mint };
+             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, timeKey: /^0+$/.test(timeKey) ? '' : timeKey, mint: mint,
+             design: design, designKnown: withDesign };
+  }
+
+  /* The design this phone chose for a card whose software cannot carry one
+   * (before 1.10), by the card's key: { key: code }. Its own small note, apart
+   * from the cards this phone can take back (`cardsOnFile`), which a cash
+   * card is never on. */
+  var CARD_DESIGNS = 'foxy.flashcard.designs';
+  function cardDesignNote(key, design) {
+    var code = String(design || '').toUpperCase();
+    if (!key || !/^[A-Z0-9]{3}$/.test(code)) return;
+    var all = load(CARD_DESIGNS, {});
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    all[key] = code;
+    save(CARD_DESIGNS, all);
+  }
+  function cardDesignNoted(key) {
+    var all = load(CARD_DESIGNS, {});
+    var code = (all && typeof all === 'object' && !Array.isArray(all)) ? String(all[key] || '') : '';
+    return /^[A-Z0-9]{3}$/.test(code) ? code : '';
+  }
+
+  /* Whether a card's software carries a design in its record (1.10 and on): a
+   * card before that refuses a record with one, by its length. */
+  function cardCanDesign(card) {
+    var v = String((card && card.info && card.info.version) || '').split('.');
+    return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 10);
   }
 
   /* What a card has left of its day, worked out from what it says of itself:
@@ -1064,6 +1100,8 @@
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
       card.record = cardRecordOf(d);
+      // the design the card names for its face, where its software carries one; a phone's own file may say otherwise for an older card
+      card.design = card.record.design || '';
       mark('record');
       /* The brief listing, where the caller is a till about to choose pieces
        * (`o.brief`) and the card has it. Not where this phone holds anything
@@ -1075,6 +1113,12 @@
        * card of 128 places, where the whole listing of a deep drawer is
        * thirty commands and the short one is one. */
       card.bare = !!(((o.brief && card.info.quick) || (o.short && card.info.wide)) && !cardNoncesWanted(card.key));
+      // a read that would have been short and is whole instead says why: the log is what shows a tap that reads more than it needs
+      if (!card.bare && ((o.brief && card.info.quick) || (o.short && card.info.wide))) {
+        var askedRows = cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked && r.asked.card === card.key; }).length;
+        var heldRows = cardStore(CARD_TAKEN).filter(function (r) { return r && r.resume && r.card === card.key; }).length;
+        console.log('[foxy] card: read whole where a short read would do: ' + askedRows + ' signature(s) asked of this card and not settled, ' + heldRows + ' payment(s) held from a tap cut short');
+      }
       return cardSlotsRead(t, card.info, card.bare);
     }).then(function (slots) {
       mark('pieces');
@@ -1871,14 +1915,18 @@
    * address as text. Throws where the address is one a card cannot hold.
    * `timeKey` is the card's own where it has one (a card moved to another mint
    * keeps its clock), and otherwise the interim key. */
-  function cardRecordHex(refundKey, mint, timeKey) {
+  function cardRecordHex(refundKey, mint, timeKey, design) {
     var at = String(mint || '');
     if (!at || at.length > CARD_MINT_MAX || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
     var key = String(timeKey || CARD_TIME_KEY).toLowerCase();
     if (!/^04[0-9a-f]{128}$/.test(key)) throw cardError('bad-key', 'That is not a key a card can check a time against.');
     var hex = '';
     for (var i = 0; i < at.length; i++) hex += cardByte(at.charCodeAt(i));
-    return '00' + (refundKey || new Array(67).join('0')) + key + cardByte(at.length) + hex;
+    // the design after the mint, only for a card whose software takes it (`cardCanDesign`): a code of three characters
+    var code = String(design || '').toUpperCase();
+    var tail = '';
+    if (/^[A-Z0-9]{3}$/.test(code)) for (var k = 0; k < 3; k++) tail += cardByte(code.charCodeAt(k));
+    return '00' + (refundKey || new Array(67).join('0')) + key + cardByte(at.length) + hex + tail;
   }
 
   /* A card on its way to another mint, told so.
@@ -1904,7 +1952,7 @@
       return Promise.reject(cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.'));
     }
     var record;
-    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey); } catch (e) { return Promise.reject(e); }
+    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : ''); } catch (e) { return Promise.reject(e); }
     return cardOwned(t, card.key, 'set-card', record).then(function (data) {
       return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
     }).then(function () {
