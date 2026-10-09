@@ -105,14 +105,14 @@ const newCard = (ctx, key) => makeCard({ window: ctx.window, key });
 
 /* Money onto a card cut the old way, in the powers of two the amount is made of and no more (a card is cut like a
  * cash drawer now, and has an exact set for any price): for a test that needs a card with no exact set, so that a
- * payment needs change. The card is told, for the cutting only, that it already holds every size three deep, so no
+ * payment needs change. The card is told, for the cutting only, that it already holds every size eight deep (as deep as any drawer is cut), so no
  * gap is filled and no rung deepened. Written at a tap with the owner's proof, or the PIN (`o.pin`). */
 async function binaryLoad(ctx, card, sats, o) {
   const opts = o || {};
   card.tap();
   const seen = await ctx.W.cardLook(card);
   const sizes = [];
-  for (let i = 0; i < 46; i++) for (let k = 0; k < 3; k++) sizes.push({ nonce: 'x'.repeat(i + 1) + k, amount: Math.pow(2, i) });
+  for (let i = 0; i < 46; i++) for (let k = 0; k < 8; k++) sizes.push({ nonce: 'x'.repeat(i + 1) + k, amount: Math.pow(2, i) });
   await ctx.W.cardPrepare(Object.assign({}, seen, { pieces: seen.pieces.concat(sizes) }), sats);
   card.tap();
   return ctx.W.cardWrite(card, opts.pin ? { pin: opts.pin } : { owner: true });

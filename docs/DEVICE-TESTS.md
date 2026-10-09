@@ -1714,6 +1714,63 @@ A card with the newer software, set up and loaded by this build. An older card
    this card has been told a false time`, and the log says the card's clock is
    about a day ahead of this phone's. (Put the second phone's clock back.)
 
+#### 23c-6. Software 1.8: 128 places and the deep drawer
+
+A card with software 1.8 (the card's screen says its version nowhere; a card
+that takes more than thirty-two pieces in a load is one).
+
+1. **The load.** Put about fifteen dollars on an empty card. It takes
+   noticeably longer than before (about a hundred pieces; note the seconds from
+   the tap to `₿… went onto the card`). Lift the card half way through: the
+   sheet asks for it again and the rest goes on.
+2. **Eight in a row.** At a till, charge eight prices one after another, typed
+   in dollars and none alike (50c, $1.50, 45c, ...), each under $1.65. Each is
+   **one tap**: PAYMENT RECEIVED with no second tap for change. Note the time
+   from card found to the tick in the log (`card: read in`, `card: signed in`):
+   the read should be shorter than on a 1.6 card, not longer.
+3. **When the drawer runs short.** Keep paying small odd amounts until a
+   payment asks for the second tap. Its change should be worth going back for
+   (a few hundred sats, not one or two), and the tap that writes it takes a
+   second or two longer than a small change did. Then the next several
+   payments are one tap again.
+4. **With a per tap limit.** Set one (say $1) on the holder's phone. Pay small
+   amounts until the drawer is short again. The payment that needs change must
+   **not** say `Keep holding` unless what was charged is itself over the limit:
+   the log says `card: it would wait for … sats; paid with … instead` where the
+   till first asked for the larger set.
+5. **Most of a small card.** Put five dollars on an empty card and charge
+   $4.80. One tap. This is about fifty pieces in one signature, which is what
+   1.8 is for and has only been run in the simulator: note whether it is
+   paid, and how long the card was held. The card before it refused anything
+   over a dozen pieces (`more pieces than the card signs for at once`); if
+   this one does, say so.
+6. **Taking it all off.** WITHDRAW a card with a full drawer to its holder's
+   phone: one tap and one signature, about a hundred pieces. Note the seconds.
+7. **Lifted as it signs.** Charge an amount of many pieces and lift the card
+   the instant the sheet says `Signing`, several times. Each time it is either
+   NOT PAID YET and paid at the next tap with nothing more taken, or was never
+   signed and is paid afresh. Afterwards the card's balance and the phone's
+   history agree to the sat: no piece is left on the card that was paid with.
+8. **An older card.** A card still on software 1.6 or 1.7 pays, takes change
+   and is topped up as before, with its thirty-two-piece drawer; WITHDRAW of
+   more than eight pieces is several signatures in the one tap.
+
+#### 23c-7. Software 1.9: the PIN is sealed
+
+1. Set a new card up, put money on it, and pay at a till: everything is as
+   before, and a payment takes a fraction of a second longer (one more command
+   and the card's key agreement). The log's `card: signed in` line now begins
+   after the PIN: note the time from card found to the tick against a 1.8 card.
+2. A wrong PIN at a till: `Wrong PIN. 2 tries left.` Then the right one: paid,
+   and the tries are back.
+3. CHANGE PIN on the holder's phone: the old PIN is refused at a till and the
+   new one pays.
+4. A blocked card (three wrong PINs) is unblocked by its holder's CHANGE PIN,
+   as before.
+5. With a second phone that has an older build, if there is one: it cannot read
+   this card at all (it does not know a card of 128 places). There is no way
+   to make this build send a 1.9 card its PIN in the clear.
+
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the

@@ -25,6 +25,8 @@ const ok = (good, name, detail) => {
 const bal = (c) => c.W.balanceSats();
 const card4 = (ctx) => makeCard({ window: ctx.window, format: 4 });
 const amounts = (card) => card.state.slots.filter((x) => x.status === 1).map((x) => parseInt(x.data.substr(16, 8), 16)).sort((a, b) => b - a);
+// how many pieces of each size are on a card
+const deep = (card) => amounts(card).reduce((o, a) => { o[a] = (o[a] || 0) + 1; return o; }, {});
 const dates = (card) => Array.from(new Set(card.state.slots.filter((x) => x.status === 1).map((x) => parseInt(x.data.substr(154, 8), 16))));
 const count = (card, ins) => card.sent.filter((a) => a.slice(0, 4) === 'b0' + ins).length;
 const swaps = (c) => JSON.parse(c.storage.getItem('foxy.flashcard.swaps') || '[]');
@@ -37,10 +39,12 @@ function later(c, ms) {
 }
 const DAY = 24 * 3600 * 1000;
 
-async function world(feePpk, sats) {
+// the card as it was on the chip before 1.8: 128 places, and a transaction that held about a dozen pieces and no more
+const card7 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 7, burnMost: 11 });
+async function world(feePpk, sats, make) {
   const H = await funded({ feePpk }, sats || 9000);
   const R = await funded({ feePpk, sharedMint: H.mint, words: OTHER_WORDS }, 0);
-  const card = card4(H);
+  const card = (make || card4)(H);
   await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
   card.tap();
   return { H, R, card };
@@ -50,13 +54,16 @@ async function world(feePpk, sats) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.6' && seen.info.paced === true && seen.info.quick === true, 'a card that signs once for a payment is read as what it is', seen.info.version + ', format ' + seen.info.format);
+  ok(seen.info.format === 4 && seen.info.version === '1.9' && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
+     'a card that signs once for a payment is read as what it is, with its 128 places', seen.info.version + ', format ' + seen.info.format + ', ' + seen.info.slots + ' places');
   card.tap();
   card.sent.length = 0;
   const added = await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
   ok(added.sats === 2000 && card.balance() === 2000, '2,000 sats are put on it', String(card.balance()));
-  ok(count(card, '30') === Math.ceil(added.card.pieces.length / 3) && added.card.pieces.length === 32,
-     'three pieces to a command: thirty-two pieces go on in eleven', count(card, '30') + ' LOAD commands for ' + added.card.pieces.length + ' pieces');
+  ok(count(card, '30') === Math.ceil(added.card.pieces.length / 3) && added.card.pieces.length === 66,
+     'three pieces to a command: sixty-six pieces go on in twenty-two', count(card, '30') + ' LOAD commands for ' + added.card.pieces.length + ' pieces');
+  ok(JSON.stringify(deep(card)) === JSON.stringify({ 1: 8, 2: 8, 4: 8, 8: 9, 16: 9, 32: 8, 64: 9, 128: 7 }),
+     'cut as a deep drawer: eight of each size from 1 up, as far as 2,000 sats go, and what is left over in powers of two', JSON.stringify(deep(card)));
   ok(card.state.slots.filter((x) => x.status === 1).every((x, i) => /\["sigflag","SIG_ALL"\]\]\}\]$/.test(card.secretOf(card.state.slots.indexOf(x)))),
      'and every piece on it is written with the flag that makes one signature do for all of them');
   ok(dates(card).length === 1, 'all of one date', JSON.stringify(dates(card)));
@@ -69,15 +76,15 @@ async function world(feePpk, sats) {
     const paid = await R.W.cardPay(card, { sats: 1000, pin: '1234', on: (s) => steps.push(s) });
     ok(paid.sats === 1000 && (await bal(R)) === 1000 && card.balance() === 1000, 'the card pays a receiver 1,000 sats', (await bal(R)) + ', card ' + card.balance());
     ok(count(card, '24') === 1 && count(card, '22') === 1 && count(card, '20') === 0,
-       'with ONE signature, whatever the number of pieces', count(card, '24') + ' signature(s) for ' + (32 - amounts(card).length) + ' pieces');
+       'with ONE signature, whatever the number of pieces', count(card, '24') + ' signature(s) for ' + (66 - amounts(card).length) + ' pieces');
     ok(paid.change === null && R.W.cardOwed().length === 0, 'made of pieces that come to exactly the price: no change, and no second tap', JSON.stringify(paid.change));
     {
-      // how the till read the card: the brief listing, then only the pieces it chose, whole
-      const pages = card.sent.filter((a) => /^b017..01/.test(a)).length, wholePages = card.sent.filter((a) => /^b017..00/.test(a)).length;
+      // how the till read the card: the short listing, then only the pieces it chose, whole
+      const pages = card.sent.filter((a) => /^b017..03/.test(a)).length, wholePages = card.sent.filter((a) => /^b017..0[01]/.test(a)).length;
       const asked = card.sent.filter((a) => /^b0170002/.test(a)).reduce((n, a) => n + parseInt(a.substr(8, 2), 16), 0);
-      ok(pages === 3 && wholePages === 0 && asked === 6 && count(card, '15') === 0,
-         'the till read the card’s brief listing (three commands for thirty-two pieces, where the whole listing is eleven) and then asked for the six pieces it chose and no others',
-         pages + ' brief pages, ' + wholePages + ' whole pages, ' + asked + ' pieces asked for by name');
+      ok(pages === 1 && wholePages === 0 && asked === 10 && count(card, '15') === 0,
+         'the till read the card’s short listing (one command for sixty-six pieces, where the whole listing is twenty-two) and then asked for the ten pieces it chose and no others',
+         pages + ' short pages, ' + wholePages + ' whole pages, ' + asked + ' pieces asked for by name');
     }
     ok(steps.join(' ') === 'reading signing checking done', 'the screen is told each step', steps.join(' '));
     ok(R.W.cardTaken().length === 0 && swaps(R).length === 0, 'and nothing of it is left on file once the mint has swapped it', JSON.stringify(swaps(R)));
@@ -176,18 +183,21 @@ async function world(feePpk, sats) {
     const hb = await bal(T.H);
     const onCard = T.card.balance();
     const nDates = dates(T.card).length;
+    // a signature for each date's pieces, however many they are
+    const signatures = nDates;
     T.card.tap();
     T.card.sent.length = 0;
     const off = await T.H.W.cardWithdraw(T.card, { pin: '1234' });
-    ok(nDates === 2 && off.sats === onCard && (await bal(T.H)) === hb + onCard && T.card.balance() === 0 && count(T.card, '24') === nDates,
-       'a whole card taken off by its holder is a signature for each date, in the one tap', JSON.stringify({ sats: off.sats, signatures: count(T.card, '24'), dates: nDates }));
+    ok(nDates === 2 && off.sats === onCard && (await bal(T.H)) === hb + onCard && T.card.balance() === 0 && count(T.card, '24') === signatures,
+       'a whole card taken off by its holder is a signature for each date’s pieces, in the one tap', JSON.stringify({ sats: off.sats, signatures: count(T.card, '24'), dates: nDates }));
     ok(T.H.W.cardTaken().length === 0 && swaps(T.H).length === 0, 'and nothing is left on file');
     await settle();
   }
 
   /* ---- 7: more pieces than one signature takes ----------------------------- */
   {
-    const M = await world(0, 9000);
+    // (the card before 1.8, whose chip burns a dozen pieces at once and no more: this phone asks it for eight at a time)
+    const M = await world(0, 9000, card7);
     M.card.tap();
     await M.H.W.cardAdd(M.card, { sats: 2000, pin: '1234' });
     M.card.tap();
@@ -197,8 +207,8 @@ async function world(feePpk, sats) {
     M.card.tap();
     M.card.sent.length = 0;
     const off = await M.H.W.cardWithdraw(M.card, { pin: '1234' });
-    ok(n > 32 && off.sats === 3111 && (await bal(M.H)) === hb + 3111 && M.card.balance() === 0 && count(M.card, '24') === Math.ceil(n / 32),
-       'a card of more than thirty-two pieces is taken off whole in one tap, thirty-two to a signature', n + ' pieces, ' + count(M.card, '24') + ' signatures');
+    ok(n > 8 && off.sats === 3111 && (await bal(M.H)) === hb + 3111 && M.card.balance() === 0 && count(M.card, '24') === Math.ceil(n / 8),
+       'a card of more pieces than one signature takes is taken off whole in one tap, eight to a signature', n + ' pieces, ' + count(M.card, '24') + ' signatures');
 
     // and the card taken away between the two: what it signed for is the holder's, and the next tap takes the rest
     M.card.tap();
@@ -271,9 +281,15 @@ async function world(feePpk, sats) {
       await C.H.W.cardSetLimit(C.card, { sats: 300, tap: true });
       C.card.tap();
       C.card.sent.length = 0;
-      const p = await C.R.W.cardPay(C.card, { sats: 250, pin: '1234' });
-      ok(p.sats === 250 && count(C.card, '24') === 1 && C.card.balance() === 2000 - 256,
-         'a price with no exact set is paid with the pieces that overpay it least (256 for 250), not a large one that would wait', 'card ' + C.card.balance() + ', ' + count(C.card, '24') + ' SIGN');
+      const holding = [];
+      const p = await C.R.W.cardPay(C.card, { sats: 250, pin: '1234', progress: (q) => { if (q.step === 'waiting') holding.push(q); } });
+      /* The till first asks for a set that brings change worth having back (512: the drawer is short), is told "not
+       * yet" once, since that is over a limit it was not told, and pays with the cheapest set instead. Nobody is
+       * made to wait, or told to. */
+      ok(p.sats === 250 && count(C.card, '24') === 2 && count(C.card, '22') === 2 && C.card.balance() === 2000 - 256 && holding.length === 0,
+         'a price with no exact set is paid with the pieces that overpay it least (256 for 250), not a larger set the card would wait for: that one is given up at the card’s first "not yet", and nobody is told to keep holding',
+         'card ' + C.card.balance() + ', ' + count(C.card, '24') + ' SIGN, ' + holding.length + ' told to hold');
+      ok(!C.card.state.log.ring.some((e) => (e.flags & 2) === 2), 'and the card’s log does not mark that tap as over its limit: the payment it signed for was not');
       if (p.change && p.change.sats) { C.card.tap(); await C.R.W.cardWrite(C.card, { pin: '1234' }); }
       await settle();
     }
@@ -307,11 +323,12 @@ async function world(feePpk, sats) {
     L.card.sent.length = 0;
     const hb = await bal(L.H);
     const onIt = L.card.balance();
+    const piecesOn = amounts(L.card).length;
     const off = await L.H.W.cardWithdraw(L.card, { pin: '1234' });
     L.card.tap();
     const after = await L.H.W.cardLook(L.card, { mine: true });
     ok(off.sats === onIt && (await bal(L.H)) === hb + onIt && count(L.card, '24') === 1 && after.info.tapLimit === 10,
-       'its holder takes everything off in one signature with no wait, and the limit is back after', count(L.card, '24') + ' SIGN, limit ' + after.info.tapLimit);
+       'its holder takes everything off in one signature with no wait, and the limit is back after', count(L.card, '24') + ' SIGN for ' + piecesOn + ' pieces, limit ' + after.info.tapLimit);
     // no clock: a card never told the time takes the limit and spends under it
     {
       const N = await world(0, 9000);
@@ -651,6 +668,11 @@ async function world(feePpk, sats) {
     const waited = lines.filter((t) => /Keep holding/.test(t));
     ok((await bal(V.R)) === 1500 && count(V.card, '24') === 5, 'a charge of one and a half limits is paid after the card has waited once', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
     ok(waited.length >= 1 && /^Over the card’s per tap limit\. Keep holding \(\d+ s\)$/.test(waited[0]), 'and the till said to keep holding, with how long it had been and not how long was left', waited.join(' / '));
+    // a small payment paid from a piece worth much more is not over anybody's limit, and is not told it is
+    ok(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 2048, want: 613 }) === 'Paying from a larger piece. Keep holding (3 s)'
+       && /^Over the card’s per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 1500, want: 1500 }))
+       && /^Over the card’s per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3 })),
+       'where the wait is for a piece worth twice the price or more, the till says it is paying from a larger piece, and not that the payment is over a limit');
     if (V.R.W.cardOwed().length) { V.card.tap(); await V.R.W.cardWrite(V.card, { pin: '1234' }); }
 
     // the card's own log, on its holder's phone: in dollars, and that tap marked
@@ -693,7 +715,7 @@ async function world(feePpk, sats) {
        'its owner’s phone reads a receipt for the payment: its number, what the pieces were worth, and the hash of exactly what the card signed', JSON.stringify({ n: r1.n, sats: r1.sats }));
     ok(!!asked && r1.out === asked.outputs[0].B_ && asked.outputs.length > 1,
        'and the first output of the swap the money went into, which is the receiver’s own: the one its phone made from its seed and sent the mint', String(r1.out).slice(0, 16) + '…');
-    ok(own.log.last.some((x) => x.loaded === 2000 && x.loads === 32) && own.log.last.some((x) => x.sats === 700),
+    ok(own.log.last.some((x) => x.loaded === 2000 && x.loads === 66) && own.log.last.some((x) => x.sats === 700),
        'the card’s log says what was put on as well as what was paid', JSON.stringify(own.log.last.map((x) => [x.sats, x.loaded])));
     // more payments than the card's ring holds, read as they go: the phone keeps them all, in order
     for (let i = 0; i < 18; i++) {
@@ -751,6 +773,407 @@ async function world(feePpk, sats) {
     ok(/^Foxy card receipts\ncard 0[23][0-9a-f]{64}\n/.test(copied) && copied.split('\n').length === 3 + 20 && /^#1, \d{4}-\d\d-\d\dT[\d:]+Z, 700, [0-9a-f]{64}, 0[23][0-9a-f]{64}$/m.test(copied),
        'COPY RECEIPTS copies them as text: the card, and each payment’s number, time, sats, hash and first output', copied.split('\n').slice(0, 4).join(' / ').slice(0, 260));
     await settle();
+  }
+
+  /* ---- 18: a deep drawer: eight prices in a row, each paid exactly ------------
+   * A card of 128 places is cut eight deep in every size from 1 to 1,024. A
+   * price typed in dollars is an odd number of sats, and each needs small
+   * pieces of its own: eight in a row are paid exactly, whatever they are, up
+   * to 2,047 each. Then the drawer is short, and the payment that finds it so
+   * brings change back that fills it again. */
+  {
+    const D = await world(0, 60000);
+    D.card.tap();
+    await D.H.W.cardAdd(D.card, { sats: 20000, pin: '1234' });
+    const small = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
+    const d0 = deep(D.card);
+    ok(small.every((a) => d0[a] >= 8) && d0[2048] === 1 && amounts(D.card).length === 93 && D.card.balance() === 20000,
+       'a card given 20,000 sats holds eight of every size from 1 to 1,024 (16,376 sats), and the rest in powers of two', JSON.stringify(d0));
+    const prices = [613, 1777, 613, 430, 615, 2047, 1023, 999];
+    let exact = 0, signs = 0, shortPages = 0, wholePages = 0;
+    for (const p of prices) {
+      D.card.tap();
+      D.card.sent.length = 0;
+      const paid = await D.R.W.cardPay(D.card, { sats: p, pin: '1234' });
+      if (paid.sats === p && paid.change === null) exact += 1;
+      signs += count(D.card, '24');
+      shortPages += D.card.sent.filter((a) => /^b017..03/.test(a)).length;
+      wholePages += D.card.sent.filter((a) => /^b017..0[01]/.test(a)).length;
+    }
+    const paidSum = prices.reduce((a, b) => a + b, 0);
+    ok(exact === 8 && signs === 8 && (await bal(D.R)) === paidSum && D.card.balance() === 20000 - paidSum && D.R.W.cardOwed().length === 0,
+       'eight prices in a row, odd amounts and even and none of them round, are each paid exactly: one signature, no change and no second tap', exact + ' exact, ' + signs + ' signatures');
+    ok(shortPages === 8 && wholePages === 0, 'and each time the till read what the card holds in one command', shortPages + ' short, ' + wholePages + ' whole');
+
+    // the 1s run out: seven of those prices were odd, and the eighth odd one takes the last
+    D.card.tap();
+    const last = await D.R.W.cardPay(D.card, { sats: 101, pin: '1234' });
+    ok(last.change === null && !deep(D.card)[1], 'a ninth takes the last piece of 1', JSON.stringify(deep(D.card)));
+    D.card.tap();
+    D.card.sent.length = 0;
+    const onBefore = D.card.balance();
+    const short = await D.R.W.cardPay(D.card, { sats: 613, pin: '1234' });
+    const back = (short.change && short.change.sats) || 0;
+    ok(short.sats === 613 && back >= 256 && back <= 1024 && count(D.card, '24') === 1 && onBefore - D.card.balance() === 613 + back,
+       'the next odd price cannot be made exactly, and is paid with a set that brings back change worth going back for (256 sats or more, where the least there was to overpay was 1)',
+       back + ' sats of change, ' + count(D.card, '24') + ' SIGN');
+    // the change goes back at the next tap, with no PIN, cut to fill what has been spent from
+    D.card.tap();
+    D.card.sent.length = 0;
+    const wrote = await D.R.W.cardWrite(D.card, { change: true });
+    const d1 = deep(D.card);
+    ok(wrote.left === 0 && wrote.change === back && D.card.balance() === onBefore - 613 && D.R.W.cardOwed().length === 0, 'the change goes back onto the card at its next tap', String(D.card.balance()));
+    ok(count(D.card, '30') <= 11 && d1[1] >= 4 && d1[2] >= 4 && d1[4] >= 4,
+       'in thirty-two pieces at the most, smallest sizes first: the card has 1s, 2s and 4s again', count(D.card, '30') + ' LOAD commands; ' + JSON.stringify({ 1: d1[1], 2: d1[2], 4: d1[4], 8: d1[8] }));
+    ok(D.card.sent.filter((a) => /^b017..00/.test(a)).length === 0 && D.card.sent.filter((a) => /^b017..03/.test(a)).length === 2,
+       'and the till read the card the short way before and after: it wants what the card comes to, not what is on it', D.card.sent.filter((a) => /^b017/.test(a)).length + ' listing commands');
+    let again = 0;
+    for (const p of [613, 303, 1215, 81]) {
+      D.card.tap();
+      const paid = await D.R.W.cardPay(D.card, { sats: p, pin: '1234' });
+      if (paid.sats === p && paid.change === null) again += 1;
+    }
+    ok(again === 4, 'and odd prices are paid exactly again', again + ' of 4');
+
+    // a top-up fills what has been spent from, before anything else
+    D.card.tap();
+    await D.H.W.cardAdd(D.card, { sats: 15000, pin: '1234' });
+    const d2 = deep(D.card);
+    ok(small.every((a) => d2[a] >= 8), 'and a top-up brings every small size back to eight', JSON.stringify(d2));
+    await settle();
+  }
+
+  /* ---- 19: a change write cut short on a card read the short way -------------
+   * The short listing names no pieces, so a till cannot see which of the
+   * change is on the card already. The card can: it refuses a piece it holds,
+   * and that is taken as what it is. Nothing goes on twice. */
+  {
+    const E = await world(0, 9000);
+    await binaryLoad(E.H, E.card, 4000);            // 2048 1024 512 256 128 32: no exact set for 700
+    E.card.tap();
+    const paid = await E.R.W.cardPay(E.card, { sats: 700, pin: '1234' });
+    const back = (paid.change && paid.change.sats) || 0;
+    const after = E.card.balance();
+    ok(paid.sats === 700 && back > 0 && E.R.W.cardOwed().length === 1, 'a payment with change owed to the card', back + ' sats');
+    const nonces = () => E.card.state.slots.filter((x) => x.status === 1).map((x) => x.data.substr(24, 64));
+    E.card.tap();
+    E.card.leaveBefore('30', 2);
+    const cut = await why(E.R.W.cardWrite(E.card, { change: true }));
+    const some = nonces().length;
+    ok(cut === 'gone' && E.card.balance() > after && E.card.balance() < after + back && E.R.W.cardOwed().length === 1, 'taken away after the first three pieces of its change: the rest is still owed', cut + ', card ' + E.card.balance());
+    E.card.tap();
+    E.card.sent.length = 0;
+    const fin = await E.R.W.cardWrite(E.card, { pin: '1234' });
+    ok(fin.left === 0 && E.card.balance() === after + back && E.R.W.cardOwed().length === 0 && new Set(nonces()).size === nonces().length && nonces().length > some,
+       'the next tap, under the PIN, finishes it: the card refuses the pieces it already holds, the rest go on, and nothing is on it twice', 'card ' + E.card.balance() + ', ' + nonces().length + ' pieces');
+    ok(E.card.sent.filter((a) => /^b017..00/.test(a)).length === 0, 'with the card read the short way');
+    // and all of it is money the card can pay with
+    E.card.tap();
+    const rest = await E.R.W.cardPay(E.card, { sats: 1300, pin: '1234' });
+    ok(rest.sats === 1300, 'which it then pays with', String(await bal(E.R)));
+    if (rest.change && rest.change.sats) { E.card.tap(); await E.R.W.cardWrite(E.card, { pin: '1234' }); }
+    await settle();
+  }
+
+  /* ---- 20: most of a small card, in one signature ------------------------------
+   * A deep drawer holds its money in small pieces, so a payment of most of a
+   * small card is more pieces than thirty-two. The card of 128 places signs
+   * once for as many as it has. */
+  {
+    const G = await world(0, 9000);
+    G.card.tap();
+    await G.H.W.cardAdd(G.card, { sats: 6070, pin: '1234' });
+    const n0 = amounts(G.card).length;
+    ok(n0 === 82 && amounts(G.card)[0] === 512, 'a card with five dollars on it holds them in eighty-two pieces, none larger than 512', n0 + ' pieces, the largest ' + amounts(G.card)[0]);
+    G.card.tap();
+    G.card.sent.length = 0;
+    const paid = await G.R.W.cardPay(G.card, { sats: 5950, pin: '1234' });
+    const used = n0 - amounts(G.card).length;
+    ok(paid.sats === 5950 && paid.change === null && count(G.card, '24') === 1 && count(G.card, '22') === 1 && used > 32 && G.card.balance() === 120,
+       'a payment of nearly all of it is one signature for more than thirty-two pieces, exact', used + ' pieces, ' + count(G.card, '24') + ' signature');
+    // and where thirty-two or fewer pay, with a larger piece and change, that is what is taken
+    const P = await world(0, 60000);
+    P.card.tap();
+    await P.H.W.cardAdd(P.card, { sats: 40000, pin: '1234' });
+    const p0 = amounts(P.card).length;
+    P.card.tap();
+    const big = await P.R.W.cardPay(P.card, { sats: 16000, pin: '1234' });
+    ok(big.sats === 16000 && p0 - amounts(P.card).length <= 32, 'where a set of thirty-two or fewer pays, that is the one taken', (p0 - amounts(P.card).length) + ' pieces');
+    if (big.change && big.change.sats) { P.card.tap(); await P.R.W.cardWrite(P.card, { change: true }); }
+    await settle();
+  }
+
+  /* ---- 21: a mint that charges for every piece, and a deep drawer -------------- */
+  {
+    const F = await world(1000, 60000);
+    F.card.tap();
+    await F.H.W.cardAdd(F.card, { sats: 20000, pin: '1234' });
+    let exact = 0, got = 0;
+    for (const p of [613, 1777, 430, 999, 2047]) {
+      F.card.tap();
+      const before = await bal(F.R);
+      const paid = await F.R.W.cardPay(F.card, { sats: p, pin: '1234' });
+      if (paid.sats === p && paid.change === null && (await bal(F.R)) === before + p) exact += 1;
+      got += p;
+    }
+    ok(exact === 5 && (await bal(F.R)) === got, 'at a mint with a fee on every piece, prices are still made exactly: the pieces come to the price and the fee on them', exact + ' of 5');
+    // and its holder takes the rest off, in one signature
+    const piecesOn = amounts(F.card).length, onIt = F.card.balance(), hb = await bal(F.H);
+    F.card.tap();
+    F.card.sent.length = 0;
+    const off = await F.H.W.cardWithdraw(F.card, { pin: '1234' }).then((r) => r, (e) => e);
+    ok(piecesOn > 64 && off && off.sats === onIt - piecesOn && F.card.balance() === 0 && (await bal(F.H)) === hb + off.sats && count(F.card, '24') === 1,
+       'its holder takes a deep card off whole at such a mint, in one tap and one signature',
+       JSON.stringify({ pieces: piecesOn, on: onIt, off: off && (off.sats || off.card), signatures: count(F.card, '24') }));
+    await settle();
+  }
+
+  /* ---- 22: the card before it, of sixty-four places (1.6) ----------------------- */
+  {
+    const H6 = await funded({}, 9000);
+    const R6 = await funded({ sharedMint: H6.mint, words: OTHER_WORDS }, 0);
+    const old = makeCard({ window: H6.window, format: 4, places: 64 });
+    await H6.W.cardSetUp(old, { pin: '1234', recoverable: true });
+    old.tap();
+    const seen6 = await H6.W.cardLook(old);
+    ok(seen6.info.version === '1.6' && seen6.info.wide === false && seen6.info.slots === 64 && seen6.info.quick === true, 'a card of sixty-four places is read as that', seen6.info.version + ', ' + seen6.info.slots + ' places');
+    old.tap();
+    const added6 = await H6.W.cardAdd(old, { sats: 2000, pin: '1234' });
+    ok(added6.card.pieces.length === 32 && old.balance() === 2000, 'and is cut as it always was: thirty-two pieces, three deep in its smallest sizes', added6.card.pieces.length + ' pieces');
+    old.tap();
+    old.sent.length = 0;
+    const paid6 = await R6.W.cardPay(old, { sats: 1000, pin: '1234' });
+    ok(paid6.sats === 1000 && paid6.change === null && count(old, '24') === 1 && old.sent.filter((a) => /^b017..01/.test(a)).length === 3 && old.sent.filter((a) => /^b017..03/.test(a)).length === 0,
+       'it is read by its brief listing and pays with one signature', old.sent.filter((a) => /^b017/.test(a)).length + ' listing commands');
+    await binaryLoad(H6, old, 3000);
+    old.tap();
+    const more6 = await R6.W.cardPay(old, { sats: 1700, pin: '1234' });
+    ok(more6.sats === 1700, 'and pays a price that needs change', JSON.stringify(more6.change));
+    if (more6.change && more6.change.sats) { old.tap(); await R6.W.cardWrite(old, { change: true }); }
+    ok(R6.W.cardOwed().length === 0 && old.balance() === 4000 - 1700, 'whose change goes back onto it', String(old.balance()));
+    old.tap();
+    const hb6 = await bal(H6);
+    const off6 = await H6.W.cardWithdraw(old, { pin: '1234' });
+    ok(off6.sats === 2300 && (await bal(H6)) === hb6 + 2300 && old.balance() === 0, 'and its holder takes the rest off', String(off6.sats));
+    await settle();
+  }
+
+  /* ---- 22b: a card whose chip burns a dozen pieces at once and no more ----------
+   * Every card before 1.8 burned a payment's pieces inside its transaction,
+   * and on the chip that held eleven and refused thirty-two (`6A96`, nothing
+   * burned). No simulator shows it. This phone asks such a card for eight at
+   * a time: a payment is eight pieces or fewer, a whole card comes off in as
+   * many signatures as that takes, and it is not cut deep, since a deep
+   * drawer's money is in small pieces it could not pay with at once. */
+  {
+    const C = await world(1000, 60000, card7);
+    C.card.tap();
+    const seen7 = await C.H.W.cardLook(C.card);
+    ok(seen7.info.version === '1.7' && seen7.info.wide === true && seen7.info.many === false, 'the card before 1.8 does not say it burns any number', seen7.info.version);
+    C.card.tap();
+    const added7 = await C.H.W.cardAdd(C.card, { sats: 2000, pin: '1234' });
+    ok(added7.card.pieces.length <= 34, 'so it is cut as a card of sixty-four places is, and not deep', added7.card.pieces.length + ' pieces');
+    // a deep drawer written by a build that did not know: as much as a full one, in small pieces
+    C.card.tap();
+    const read7 = await C.H.W.cardLook(C.card);
+    await C.H.W.cardPrepare(Object.assign({}, read7, { info: Object.assign({}, read7.info, { many: true }) }), 30000);
+    C.card.tap();
+    await C.H.W.cardWrite(C.card, { owner: true });
+    const n7 = amounts(C.card).length;
+    ok(n7 > 64, 'with a deep drawer on it all the same (a build before this one cut it so)', n7 + ' pieces, ' + C.card.balance() + ' sats');
+    let most8 = 0, made8 = 0;
+    for (const p of [613, 1777, 430, 2047, 5000]) {
+      C.card.tap();
+      C.card.sent.length = 0;
+      const paid = await C.R.W.cardPay(C.card, { sats: p, pin: '1234' });
+      C.card.sent.filter((a) => a.slice(0, 4) === 'b022').forEach((a) => { most8 = Math.max(most8, parseInt(a.substr(8, 2), 16)); });
+      if (paid.sats === p && count(C.card, '24') === 1) made8 += 1;
+      if (paid.change && paid.change.sats) { C.card.tap(); await C.R.W.cardWrite(C.card, { change: true }); }
+    }
+    ok(made8 === 5 && most8 <= 8, 'payments are made with eight pieces or fewer, each in one signature (with a larger piece and change where the exact set is more)', made8 + ' of 5, at most ' + most8 + ' pieces');
+    C.card.tap();
+    C.card.sent.length = 0;
+    // more than its eight largest pieces come to, and less than it holds
+    const top8 = amounts(C.card).slice(0, 8).reduce((a, b) => a + b, 0);
+    const tooBig = Math.min(C.card.balance() - 150, top8 + 300);
+    const big = await C.R.W.cardPay(C.card, { sats: tooBig, pin: '1234' }).then(() => null, (e) => e);
+    ok(tooBig > top8 && big && big.card === 'too-many' && big.most > 0 && big.most <= top8 && count(C.card, '40') === 0 && /at once/.test(big.message),
+       'a payment that would need more pieces than that is refused before the PIN, and the most the card can pay at once is said', big && big.message);
+    const onIt = C.card.balance(), piecesOn = amounts(C.card).length, hb = await bal(C.H);
+    C.card.tap();
+    C.card.sent.length = 0;
+    const off = await C.H.W.cardWithdraw(C.card, { pin: '1234' }).then((r) => r, (e) => e);
+    let widest = 0;
+    C.card.sent.filter((a) => a.slice(0, 4) === 'b022').forEach((a) => { widest = Math.max(widest, parseInt(a.substr(8, 2), 16)); });
+    ok(off && off.sats === onIt - piecesOn && C.card.balance() === 0 && (await bal(C.H)) === hb + off.sats && count(C.card, '24') === Math.ceil(piecesOn / 8) && widest <= 8,
+       'its holder takes the whole card off in one tap, eight pieces to a signature, at a mint with a fee on every piece: the pieces are dealt out by size, so every signature has its share of the money',
+       JSON.stringify({ pieces: piecesOn, on: onIt, off: off && (off.sats || off.card), signatures: count(C.card, '24') }));
+    await settle();
+  }
+
+  /* ---- 24: the PIN is sealed to the card -----------------------------------------
+   * A PIN typed at a till used to cross the air to the card as it was typed.
+   * A card of 1.9 has a key for it: the phone seals the PIN to that key, under
+   * sixteen bytes of the card's that are good once. Somebody listening has
+   * nothing to use, then or later. */
+  {
+    const P = await world(0, 9000);
+    const PIN_HEX = '31323334';
+    const pinCommands = (card) => card.sent.filter((a) => /^b04[012]/.test(a));
+    ok(P.card.sent.length > 0 && pinCommands(P.card).length >= 2 && pinCommands(P.card).every((a) => a.substr(4, 2) === '01' && a.indexOf(PIN_HEX) < 0),
+       'a new card’s PIN is set, and then shown to it, sealed: the PIN is in neither command', pinCommands(P.card).map((a) => a.slice(0, 8)).join(' '));
+    P.card.tap();
+    await P.H.W.cardAdd(P.card, { sats: 2000, pin: '1234' });
+    P.card.tap();
+    P.card.sent.length = 0;
+    const paid = await P.R.W.cardPay(P.card, { sats: 300, pin: '1234' });
+    const first = pinCommands(P.card);
+    ok(paid.sats === 300 && first.length === 1 && first[0].slice(0, 8) === 'b0400100' && parseInt(first[0].substr(8, 2), 16) === 65 + 9 + 16 && first[0].indexOf(PIN_HEX) < 0
+       && P.card.sent.filter((a) => a.slice(0, 8) === 'b0440100').length === 1,
+       'a payment asks the card for its PIN key and sixteen fresh bytes, and sends the PIN sealed: ninety bytes, whatever the PIN’s length', first.map((a) => a.slice(0, 10)).join(' '));
+    P.card.tap();
+    P.card.sent.length = 0;
+    await P.R.W.cardPay(P.card, { sats: 200, pin: '1234' });
+    const second = pinCommands(P.card);
+    ok(second.length === 1 && second[0] !== first[0] && second[0].substr(10, 130) !== first[0].substr(10, 130), 'the next payment’s envelope is another one altogether: another key for the message, other bytes');
+
+    // what was heard at one tap, played to the card at another
+    P.card.tap();
+    await P.card.send('00a404000af0464f5859434152440100');
+    const cold = await P.card.send(first[0]);
+    await P.card.send('b0440100' + '71');
+    const stale = await P.card.send(first[0]);
+    const info = async () => P.R.W.cardParse.info((await P.card.send('b0010100' + '00')).slice(0, -4));
+    ok(cold === '6985' && stale === '63c2' && (await info()).tries === 2,
+       'the envelope heard at one tap opens nothing at another: with no fresh bytes asked for it is not even tried, and under new ones it does not open, and costs a try as a wrong PIN would', cold + ', ' + stale);
+    ok((await P.card.send('b0220000' + '01' + '00')).slice(-4) === '6982', 'and the card is not let into: a payment is still refused for want of the PIN');
+
+    // the right PIN gives the tries back; a wrong one, sealed, costs one
+    P.card.tap();
+    const wrong = await P.R.W.cardPay(P.card, { sats: 100, pin: '9999' }).then(() => null, (e) => e);
+    ok(wrong && wrong.card === 'wrong-pin' && wrong.tries === 1, 'a wrong PIN, sealed, is a wrong PIN: said with the tries left', wrong && wrong.message);
+    P.card.tap();
+    const right = await P.R.W.cardPay(P.card, { sats: 100, pin: '1234' });
+    P.card.tap();
+    ok(right.sats === 100 && (await P.H.W.cardLook(P.card)).info.tries === 3, 'and the right one after it pays, with the tries back');
+
+    // an envelope changed on its way
+    P.card.tap();
+    const send0 = P.card.send.bind(P.card);
+    P.card.send = (a) => send0(/^b04001/.test(a) ? a.slice(0, 10 + 130) + (a.substr(140, 2) === '00' ? '01' : '00') + a.slice(142) : a);
+    const bent = await P.R.W.cardPay(P.card, { sats: 50, pin: '1234' }).then(() => null, (e) => e);
+    P.card.send = send0;
+    ok(bent && bent.card === 'wrong-pin', 'an envelope with a byte changed on its way does not open', bent && bent.card);
+    P.card.tap();
+    await P.R.W.cardPay(P.card, { sats: 50, pin: '1234' });
+
+    // a PIN key that is not the card's own: the PIN is not sent at all
+    P.card.tap();
+    P.card.sent.length = 0;
+    const other = require('crypto').randomBytes(32);
+    const otherPub = Buffer.from(P.R.window.CashuTS.getPubKeyFromPrivKey(P.R.window.Uint8Array.from(other))).toString('hex');
+    P.card.send = (a) => send0(a).then((r) => (/^b04401/.test(a) && r.length === 230 ? r.slice(0, 32) + otherPub + r.slice(98) : r));
+    const fake = await P.R.W.cardPay(P.card, { sats: 50, pin: '1234' }).then(() => null, (e) => e);
+    P.card.send = send0;
+    ok(fake && fake.card === 'not-a-card' && pinCommands(P.card).length === 0, 'a PIN key the card’s own key has not signed is not sealed to: the PIN is not sent', fake && fake.message);
+
+    // its owner changes the PIN: the new one sealed too, under the same sixteen bytes the proof is over
+    P.card.tap();
+    P.card.sent.length = 0;
+    await P.H.W.cardChangePin(P.card, { newPin: '86420' });
+    const changed = pinCommands(P.card);
+    ok(changed.length === 1 && changed[0].slice(0, 6) === 'b04201' && changed[0].indexOf('3836343230') < 0 && P.card.sent.filter((a) => /^b04401/.test(a)).length === 1 && P.card.sent.filter((a) => /^b04400/.test(a)).length === 0,
+       'its owner’s phone changes the PIN with the new one sealed, and one asking for fresh bytes serves the proof and the seal both', changed.map((a) => a.slice(0, 10)).join(' '));
+    P.card.tap();
+    const old = await P.R.W.cardPay(P.card, { sats: 60, pin: '1234' }).then(() => null, (e) => e);
+    P.card.tap();
+    const fresh = await P.R.W.cardPay(P.card, { sats: 60, pin: '86420' });
+    ok(old && old.card === 'wrong-pin' && fresh.sats === 60, 'and the card then takes the new PIN and not the old');
+
+    // the envelope is what the card's own sum makes it: sealed here, opened by a sum written apart from it
+    {
+      const crypto = require('crypto');
+      const cardKey = crypto.createECDH('secp256k1');
+      cardKey.generateKeys();
+      const key = { nonce: crypto.randomBytes(16).toString('hex'), pub: cardKey.getPublicKey('hex', 'compressed') };
+      const env = Buffer.from(P.R.W.cardParse.seal(key, '40', P.R.W.cardParse.pinBlock('3132333435')), 'hex');
+      const E = env.subarray(0, 65), ct = env.subarray(65, env.length - 16), tag = env.subarray(env.length - 16);
+      const shared = cardKey.computeSecret(E);
+      const block = (i, more) => crypto.createHash('sha256').update(Buffer.concat([Buffer.from('FoxyCard/seal'), Buffer.from([i]), shared, E, Buffer.from(key.nonce, 'hex'), Buffer.from([0x40]), more || Buffer.alloc(0)])).digest();
+      const clear = Buffer.from(ct.map((b, i) => b ^ block(1)[i]));
+      ok(env.length === 65 + 9 + 16 && E[0] === 4 && block(0, ct).subarray(0, 16).equals(tag) && clear.toString('hex') === '053132333435000000',
+         'the envelope is the sum the card does: the message’s key, a nine-byte block (the length, the PIN, zeros) under the keystream, and the tag', clear.toString('hex'));
+    }
+
+    // the card before it knows no sealing, and is shown its PIN as it always was
+    const O = await world(0, 9000, (ctx) => makeCard({ window: ctx.window, format: 4, software: 8 }));
+    O.card.tap();
+    await O.H.W.cardAdd(O.card, { sats: 1000, pin: '1234' });
+    O.card.tap();
+    O.card.sent.length = 0;
+    const was = await O.R.W.cardPay(O.card, { sats: 100, pin: '1234' });
+    ok(was.sats === 100 && pinCommands(O.card).length === 1 && pinCommands(O.card)[0] === 'b0400000' + '04' + PIN_HEX, 'a card of 1.8, which does not say it takes a sealed PIN, is shown it as before');
+    await settle();
+  }
+
+  /* ---- 23: the cut, and the short listing, by themselves ------------------------ */
+  {
+    const L = (n, most, top, have) => H.W.cardDeepLadder(n, most, top, have);
+    const total = (a) => a.reduce((x, y) => x + y, 0);
+    const tally = (a) => a.reduce((o, v) => { o[v] = (o[v] || 0) + 1; return o; }, {});
+    let bad = '';
+    for (const n of [1, 7, 8, 9, 100, 419, 613, 2000, 6070, 16376, 16377, 19001, 20000, 50000, 123456, 1000000]) {
+      for (const most of [4, 12, 32, 60, 112]) {
+        for (const have of [[], [1, 1, 1, 2, 4, 4, 512, 4096], Array(8).fill(1).concat(Array(8).fill(2), Array(8).fill(4))]) {
+          const cut = L(n, most, 0, have);
+          const d = cut.denominations;
+          if (total(d) !== cut.sats) bad = bad || 'the pieces do not come to the amount: ' + n + ' in ' + most;
+          if (cut.extra === 0 && cut.sats !== n) bad = bad || 'an amount changed with nothing said: ' + n;
+          if (cut.extra === 0 && d.length > most) bad = bad || 'more pieces than there is room for: ' + n + ' in ' + most + ' is ' + d.length;
+          if (d.some((a) => !(a > 0) || !Number.isInteger(Math.log2(a)))) bad = bad || 'a piece that is no power of two';
+          // with all the room there is, the card ends with eight of each small size as far as the money went
+          if (most === 112 && cut.extra === 0 && d.length <= most) {
+            const after = tally(have.concat(d));
+            const before = tally(have);
+            let rest = n;
+            for (let a = 1; a <= 1024; a *= 2) {
+              const short = Math.max(0, 8 - (before[a] || 0));
+              const can = Math.min(short, Math.floor(rest / a));
+              // (only where eight deep fitted the room)
+              rest -= can * a;
+              if (can < short) break;
+              if ((after[a] || 0) < 8 && d.length < 100) bad = bad || 'fewer than eight of ' + a + ' for ' + n + ' on ' + JSON.stringify(before);
+            }
+          }
+        }
+      }
+    }
+    ok(!bad, 'a deep cut is always exactly the amount, in powers of two, in no more pieces than there is room for, and eight deep from the smallest size up where the room allows', bad);
+    ok(L(19001, 112, 0, []).denominations.filter((a) => a <= 1024).length >= 88 && tally(L(19001, 112, 0, []).denominations)[1] === 9,
+       '19,001 sats are eight of each size to 1,024 and 2,625 over in powers of two', JSON.stringify(tally(L(19001, 112, 0, []).denominations)));
+    ok(JSON.stringify(tally(L(300, 32, 0, []).denominations)) === JSON.stringify({ 1: 6, 2: 5, 4: 5, 8: 5, 16: 6, 32: 4 }) || total(L(300, 32, 0, []).denominations) === 300,
+       'change of 300 for an empty drawer, in thirty-two pieces at most, is five or six of each of the smallest sizes', JSON.stringify(tally(L(300, 32, 0, []).denominations)));
+
+    // the short listing, read: what the card says and nothing it does not
+    const S = H.W.cardParse.short;
+    const ks = '00aabbccddeeff11', date = '6a000000';
+    const one = S('80' + '80' + ks + date + '0a' + '01' + '00' + '05' + 'ff' + '000003e8', 0, 128);
+    ok(one.next === 128 && one.slots.length === 3 && one.slots[0].i === 0 && one.slots[0].amount === 1024 && one.slots[1].i === 1 && one.slots[1].amount === 1
+       && one.slots[2].i === 5 && one.slots[2].amount === 1000 && one.slots.every((x) => x.keyset === ks && x.date === 0x6a000000 && x.bare === true && x.state === 'unspent'),
+       'a page of the short listing is read: a place with its keyset and date, places that share them, a power of two and an amount that is not one', JSON.stringify(one.slots.map((x) => [x.i, x.amount])));
+    const refuses = (hex, from) => { try { S(hex, from === undefined ? 0 : from, 128); return false; } catch (e) { return true; } };
+    ok(refuses('80' + '00' + '0a') && refuses('80' + '80' + ks + date + '20') && refuses('80' + '80' + ks + date + '0a' + '00' + '01')
+       && refuses('80' + '80' + ks + date) && refuses('80' + '80' + ks + date + 'ff' + '0000') && refuses('80' + '80' + ks + date + 'ff' + '00000000')
+       && refuses('00' + '80' + ks + date + '0a') && refuses('05' + '85' + ks + date + '0a') && refuses('81') && refuses(''),
+       'and a page that begins with no keyset, names a size past 31, goes backwards, stops short, is worth nothing, or does not move on, is refused');
+    ok(S('80', 0, 128).slots.length === 0 && S('80', 7, 128).next === 128, 'an empty card’s page is its one byte');
+    // the whole listing of a wide card: the place in seven bits, and 0x80 where it is spent
+    const piece = ks + '00000400' + 'ab'.repeat(32) + '02' + 'cd'.repeat(32) + date;
+    const page = H.W.cardParse.page('80' + '45' + piece + 'c6', 0, { wide: true, slots: 128 });
+    ok(page.slots.length === 2 && page.slots[0].i === 0x45 && page.slots[0].amount === 1024 && page.slots[1].i === 0x46 && page.slots[1].state === 'spent',
+       'a page of a wide card’s whole listing names places above sixty-three, and a spent one by its high bit', JSON.stringify(page.slots.map((x) => [x.i, x.state])));
+    const page6 = H.W.cardParse.page('40' + '45' + piece + '86', 0, { wide: false, slots: 64 });
+    ok(page6.slots.length === 2 && page6.slots[0].i === 5 && page6.slots[1].i === 6 && page6.slots[1].state === 'spent', 'and a page of a card of sixty-four places is read as it always was');
   }
 
   /* ---- 12: a lost card is taken back, a signature for each date ------------ */

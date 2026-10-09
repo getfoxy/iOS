@@ -5,9 +5,11 @@
  *
  * tests/fixtures/flashcard-transcript.json is a conversation the applet had
  * under jCardSim: every command it was sent and what it answered. It is the
- * card that signs once for a payment (format 4); flashcard-transcript-3.json
- * is the same of the card before it, which signs for each piece (format 3) and
- * is still in people's hands. The model is held to both. The model in
+ * card that signs once for a payment (format 4), has 128 places, burns a
+ * payment of any number of pieces and takes its PIN sealed (1.9). The others
+ * are the same of the cards before it: -18 (no sealed PIN), -17 (its pieces
+ * burned inside the payment's transaction), -16 (sixty-four places), and -3,
+ * which signs for each piece (format 3). The model is held to all five. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
@@ -29,16 +31,32 @@ const ctx = loadReal({});
 const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
-async function replay(T, format) {
-  const card = makeCard({ window: ctx.window, format });
+async function replay(T, format, places, software) {
+  const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
   // a payment being put to a one-signature card: its places and its outputs, as the commands gave them
   let pay = null;
+  // what the model last gave for sealing a PIN: the recording's sixteen bytes (the model is given them) and the model's own PIN key
+  let sealKey = null;
   for (const e of T) {
     // the card taken out of the field and put back: nothing is sent, and the model is tapped anew
-    if (e.kind === 'reset') { card.tap(); pay = null; continue; }
+    if (e.kind === 'reset') { card.tap(); pay = null; sealKey = null; continue; }
     const ins = e.apdu.substr(2, 2);
-    const got = await card.send(e.apdu);
+    /* A sealed command is sealed again here, by the WALLET's own sealing, to the model's PIN key: the recording's
+     * envelope was for the applet's key, which is another card's. What was sealed is in the entry (`clear`), with how
+     * it was spoiled on its way, if it was, and the instruction it was sealed for where that was not its own. */
+    let apdu = e.apdu;
+    if (e.kind === 'sealed') {
+      ok(!!sealKey, e.name + ': a PIN key was asked for before it');
+      let env = sealKey ? W.cardParse.seal(sealKey, e.for || ins, e.clear) : '';
+      if (e.spoil === 'tag') env = env.slice(0, -2) + ('0' + (parseInt(env.slice(-2), 16) ^ 1).toString(16)).slice(-2);
+      else if (e.spoil === 'body') env = env.slice(0, 130) + ('0' + (parseInt(env.substr(130, 2), 16) ^ 1).toString(16)).slice(-2) + env.slice(132);
+      else if (e.spoil === 'point') env = '04' + '00'.repeat(64) + env.slice(130);
+      else ok(!e.spoil, e.name + ': a way of spoiling this test knows', e.spoil);
+      apdu = e.apdu.substr(0, 8) + ('0' + (env.length / 2).toString(16)).slice(-2) + env;
+      ok(apdu.length === e.apdu.length || apdu.length + 2 === e.apdu.length, e.name + ': an envelope of the recording’s length', apdu.length / 2 + ' bytes, the recording ' + e.apdu.length / 2);
+    }
+    const got = await card.send(apdu);
     const sw = got.slice(-4), data = got.slice(0, -4);
     ok(sw === e.sw, e.name + ': the status word', 'the card ' + e.sw + ', the model ' + sw);
     if (sw !== e.sw) continue;
@@ -48,9 +66,21 @@ async function replay(T, format) {
       else if (ins === '23') { if (pay && sw === '9000') { for (let at = 0; at < body.length; at += 74) pay.outs += String(parseInt(body.substr(at, 8), 16)) + body.substr(at + 8, 66); } else pay = null; }
       else if (ins !== '24') pay = null;
     }
-    if (e.kind === 'exact') {
+    if (e.kind === 'exact' || e.kind === 'sealed') {
       ok(data === e.data, e.name + ': the answer', 'the card ' + e.data.slice(0, 60) + ', the model ' + data.slice(0, 60));
       exact += 1;
+    } else if (e.kind === 'pinkey') {
+      /* Sixteen bytes, the key a PIN is sealed to, and the card key's signature over that key. The key is the model's
+       * own, and is held to what the recording's is: a compressed point that is not the key the card signs with, signed
+       * by that one. The sixteen bytes the model is given are the recording's, as for an owner's proof. */
+      const key = data.substr(32, 66), sig = data.substr(98, 128);
+      ok(data.length === 226 && e.data.length === 226 && /^0[23]/.test(key) && key !== card.key, e.name + ': sixteen bytes, a key that is not the card’s signing key, and a signature');
+      let good = false;
+      try { good = CT.schnorrVerifyDigest(sig, ctx.window.Uint8Array.from(sha256(Buffer.concat([Buffer.from('FoxyCard/pinkey'), Buffer.from(key, 'hex')]))), card.key) === true; } catch (x) { good = false; }
+      ok(good, e.name + ': the card’s own key has signed the PIN key');
+      card.setNonce(e.data.substr(0, 32));
+      sealKey = { nonce: e.data.substr(0, 32), pub: key };
+      verified += 1;
     } else if (e.kind === 'nonce') {
       // sixteen bytes the card made up. The recording's own are the ones its proofs after this were made from
       ok(data.length === 32 && /^[0-9a-f]+$/.test(data) && /^[0-9a-f]{32}$/.test(e.data), e.name + ': sixteen bytes');
@@ -113,8 +143,13 @@ async function replay(T, format) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  // the cards before it: 1.8 (no sealed PIN), 1.7 (its pieces burned inside the payment's transaction), and 1.6 (sixty-four places)
+  const plain = await replay(read('flashcard-transcript-18.json'), 4, undefined, 8);
+  const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
+  const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const T = { length: now.n + before.n }, exact = now.exact + before.exact, verified = now.verified + before.verified;
+  const all = [now, plain, wide, narrow, before];
+  const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras
   const c2 = makeCard({ window: ctx.window });

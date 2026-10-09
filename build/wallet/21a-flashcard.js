@@ -3,7 +3,7 @@
 
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
-    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
+    cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
                  tap: cardTapOf, log: cardLogOf },
     /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
     cardTimeKey: CARD_TIME_KEY,
@@ -12,6 +12,7 @@
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
+    cardDeepLadder: function (sats, most, biggest, have) { return cardDeepLadder(sats, most, biggest, have); },
     /* What a card holds, as the amounts of its pieces, for cutting more for it. */
     cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
     cardMaxPiece: function () { try { return cardMaxPiece(need()); } catch (e) { return 0; } },
@@ -78,8 +79,9 @@
       }).then(function (refund) {
         if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
         var record = cardRecordHex(refund, mint);
-        return t.want(cardCommand(CARD_INS.setPin, 0, pin), 'its new PIN').then(function () {
-          return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+        // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
+        return cardFirstPin(t, card, pin).then(function () {
+          return cardVerify(t, card, pin);
         }).then(function () {
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
         }).then(function () {
@@ -102,15 +104,12 @@
       var newPin;
       try { newPin = cardPinHex(o.newPin); } catch (e) { return Promise.reject(e); }
       var t = cardTalk(link);
-      var key;
       return cardLook(link).then(function (card) {
         // said before anything is signed: nothing here can change a card that has no owner
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
-        key = card.key;
-        return cardOwned(t, key, 'change-pin', newPin);
-      }).then(function (data) {
-        return t.want(cardCommand(CARD_INS.changePin, 0, data), 'its new PIN');
+        // the owner's proof over the new PIN, and the PIN sealed where the card takes it so
+        return cardNewPin(t, card, newPin);
       }).then(function () { return true; });
     },
 
@@ -243,7 +242,7 @@
              * the card itself would have (`cardSwapPlan`). */
             if (Number(row.format) === CARD_FORMAT_ALL) {
               var firstId = '', total = 0;
-              return cardAllGroups(live).reduce(function (chain, group) {
+              return cardAllGroups(live, CARD_SWAP_MOST).reduce(function (chain, group) {
                 return chain.then(function () { return cardSwapPlan(w, group); }).then(function (plan) {
                   // the library's own signer, given the whole message: (proofs, key, logger, message)
                   var by = CT.signP2PKProofs([plan.inputs[0]], key, undefined, plan.message)[0];
@@ -310,7 +309,8 @@
        * that needs more has a shallower drawer, and is rounded up only where even
        * that is too many; `rounded` says by how much. A few more places are kept
        * for what the mint's fee may add. */
-      var ladder = cardLadder(want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardMaxPiece(w), cardHeldAmounts(card));
+      // a card of 128 places is cut deep instead: eight of each small size, as far as the money goes (`cardDeepLadder`)
+      var ladder = cardCutFor(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardMaxPiece(w), cardHeldAmounts(card));
       var room = card.info.empty + card.info.spent;
       if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
       /* Whether this mint's ecash fits a card, asked before any is made. It
@@ -368,7 +368,12 @@
       }
       var t = cardTalk(link);
       var wrote;
-      return cardLook(link).then(function (card) {
+      /* A till putting change back (or anything, under the PIN) reads a card
+       * of 128 places the short way, before and after: it wants what the card
+       * comes to and nothing else of what is on it. Its owner's phone reads
+       * it whole, as it always has. */
+      var how = o.owner ? undefined : { short: true };
+      return cardLook(link, how).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
         if (o.owner && !card.info.owner) throw cardRefused('6a90');
         // not the tap after a payment after all (a read came between, say): the PIN is what writes
@@ -376,7 +381,7 @@
         // what was found for this card is asked of the mint before any of it is written
         return cardOwedPrune(card).then(null, function () { return 0; }).then(function () {
           if (o.change && !o.owner) return null;
-          if (!o.owner) return t.want(cardCommand(CARD_INS.verify, 0, pin), 'its PIN');
+          if (!o.owner) return cardVerify(t, card, pin);
           return cardGrant(t, card.key).then(function (yes) {
             if (!yes) throw cardRefused('6a91');
           });
@@ -385,9 +390,10 @@
         }).then(function () { return cardWriteOwed(t, card, o.progress); });
       }).then(function (r) {
         wrote = r;
-        return cardLook(link, { mine: !!o.owner });
+        return cardLook(link, o.owner ? { mine: true } : { short: true });
       }).then(function (card) {
-        if (card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
+        // a short read lists no nonces, and says nothing of which pieces have left the card
+        if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
         return { card: card, sats: wrote.sats, back: wrote.back || 0, change: wrote.change || 0, refund: wrote.refund || 0,
                  left: wrote.left.length, why: wrote.why || '' };
       });

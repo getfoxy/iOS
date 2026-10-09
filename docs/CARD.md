@@ -34,7 +34,7 @@ does not repeat the protocol. The limits are listed at the end and argued in
 
 ## What a card is
 
-A card holds up to 64 pieces of ecash, each locked to the card's own key, and
+A card holds up to 128 pieces of ecash (64 with software before 1.7), each locked to the card's own key, and
 the card signs a spend of a piece only when the right PIN has been given. It
 also keeps its PIN, the address of the one mint its pieces are at, an owner's
 public key, a clock, and a daily limit. It has no battery and no network.
@@ -173,6 +173,24 @@ altered to look like one, sees it.
    every one, most of a second each, which is longer than a person holds a
    card. A withdrawal cut short keeps what the card signed, and the next tap
    takes the rest (*Change PIN, withdraw, and a blocked card*).
+
+   **A card of 128 places that burns any number of pieces at once (software
+   1.8) is cut deeper, and differently.** A
+   price typed in dollars is an odd number of sats, so every payment needs a
+   1 or a 2 or a 4 of its own, and nothing larger can stand in for one (two
+   256s make a 512; nothing but 1s makes a 1). Three deep, the third payment
+   in a row was already being paid with a piece too big and made up for in
+   change. Such a card signs once for a payment however many pieces it is
+   made of, so pieces cost nothing at a till, and it has the places: it gets
+   **eight of each size from 1 to 1,024**, smallest first as far as the money
+   goes, and the rest of the amount in powers of two. 16,376 sats fill that
+   drawer, in eighty-eight pieces, and it pays eight prices in a row exactly,
+   whatever they are, up to 2,047 sats each. A card with less on it has the
+   small sizes eight deep and its money in nothing large: 6,070 sats are
+   eighty-two pieces, none over 512. A load may be most of the card (112
+   pieces, a dozen places kept free), and takes as long to write: about nine
+   seconds for a hundred pieces. What the card holds counts towards each
+   size, so a top-up fills what has been spent from first.
 4. A tap writes them, and reads them back. The screen says `GETTING IT READY`
    while the swap runs, then the states of a tap. **ON THE CARD** gives the new
    balance.
@@ -374,6 +392,58 @@ What that changes:
   with no words on it, only the phone's own tick as it closes. The wait for the
   mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
   Where change is coming the sheet stays, as below.
+- **The PIN is sealed to the card (software 1.9).** A PIN typed at a till
+  crossed the air to the card as it was typed, and anybody listening to the
+  tap had it. A bank card's PIN is enciphered to a key of the card's, and so
+  is this one. The card has a key for it and nothing else (never the key it
+  signs payments with). Asked, it gives sixteen fresh bytes, that key, and its
+  signing key's signature over that key; the phone checks the signature, makes
+  a key pair for the one message, and sends the PIN under a keystream hashed
+  from the secret the two keys share, the card's sixteen bytes and the
+  command, with a tag over it. The card does the same sum. The sixteen bytes
+  are good once, so what was heard at one tap opens nothing at another and
+  cannot be put to the card again; an envelope the card cannot open costs a
+  try of the PIN, as a wrong PIN does; and what is sealed is always nine
+  bytes, so its length says nothing of the PIN's. A new card's first PIN and
+  a PIN changed by its owner go the same way (the owner's proof and the seal
+  under the same sixteen bytes). It costs one more command and one key
+  agreement on the card, a fraction of a second. A card that does not say it
+  takes a sealed PIN is shown it as before. What it does not do is in *What it
+  does not protect against*.
+- **A card of 128 places (1.7) is read in one command.** Its short listing
+  is two bytes a piece (the place and the power of two it is worth, with the
+  keyset and date only where they change), so a till reads a drawer of a
+  hundred pieces in one answer, and then asks for the pieces it chose. A till
+  that writes change back reads it the same way before and after: it wants
+  what the card comes to, not what is on it. That listing names no pieces, so
+  a write that was cut short is finished by the card itself: it refuses a
+  piece it already holds, and that is taken as what it is.
+- **Eight in a row, and then change that is worth the second tap.** With a
+  deep drawer a price is nearly always made exactly. When none is, the drawer
+  is short of some small size, and the set that overpays least would bring
+  back a sat or two: one piece, and the payment after it short again. So a
+  till takes the cheapest set that brings back 256 sats or more (and no more
+  than 1,024), and that change is cut to fill the small sizes, in thirty-two
+  pieces at the most. One second tap in ten payments or so, where it would be
+  one in two. The larger set may be over a per tap limit the till is not
+  told: the card then answers "not yet" before it has signed anything, and
+  the till pays with the cheapest set after all, at once. Nobody is told to
+  keep holding for the sake of change.
+- **How many pieces one signature is for.** A card burns the pieces of a
+  payment as it signs. Before software 1.8 it did so inside one transaction,
+  a status byte a piece, and the chip's transaction holds few: on the card
+  itself eleven pieces were signed for and thirty-two were refused, with
+  nothing burned. No simulator shows that, since a simulator's transaction
+  has no size. So a card that does not say it burns any number is asked for
+  **eight pieces at the most**: a payment is paid with a larger piece and
+  change where its exact set is more, a payment no eight pieces cover is
+  refused before the PIN with `TAKE IT IN PARTS` and the most the card can
+  pay at once, and a whole card comes off in as many signatures as it takes,
+  in the one tap. Such a card is not cut deep. A card of 1.8 commits the
+  payment with one byte and marks its pieces after (finishing at its next
+  command, should it leave the field first), and says so: it is asked for
+  thirty-two pieces or fewer wherever such a set pays, and for as many as it
+  has where nothing that few does, which is most of a small card.
 - **A card of software 1.6 is quicker to hold.** A till reads its brief
   listing (what each piece is worth, its date and its keyset: three commands
   for a full card where the whole listing is eleven), chooses, and asks for
@@ -410,7 +480,11 @@ What that changes:
   year holds two; a price that neither covers alone is refused before the PIN
   with `TAKE IT IN TWO PARTS` and the most it can pay at once. The holder's own
   phone, taking a whole card off, asks for a signature for each date (and for
-  each thirty-two pieces) in the one tap.
+  each eight pieces, on a card before 1.8) in the one tap. Where that is more
+  than one, the pieces are dealt out by size, a piece to each signature in
+  turn, so that each has its share of the money: cut as they lay, a run of
+  small pieces made a signature's worth that came to no more than the mint's
+  fee on them, and the taking stopped there.
 - **All or nothing.** The card burns every piece as it signs, in one
   transaction, so there is no payment half signed. A card taken away before it
   signs has burned nothing. A card taken away **as** it signs has burned the
@@ -590,7 +664,11 @@ follows is the one a card has now.
   card does about three seconds of its own work before it signs, and nothing is
   taken until that is done. The till's screen says `Over the card's per tap
   limit. Keep holding` and how long it has been; how long is left it cannot
-  say, because the card does not tell it. Lifted in the wait, the card has
+  say, because the card does not tell it. (The card waits by what its pieces
+  come to, so a small payment made with a piece worth twice the price or more
+  waits too: the screen then says `Paying from a larger piece. Keep holding`,
+  since it is the piece that is over the limit and not the payment.) Lifted in
+  the wait, the card has
   paid nothing and the till holds nothing; tapped again, it waits the whole of
   it again.
 - **The limit is its owner's to know.** The card says it to the phone that
@@ -820,9 +898,20 @@ matter to a person:
 - **A receiver's phone that shows one amount and asks the card for more.** The
   limit does not check a payment, and nothing on the card can. Looking at the
   card's balance afterwards finds it out; it does not undo it.
-- **The PIN in the clear**, over a few centimetres, to a phone that may not be
-  honest. A pretend card can collect a PIN typed for it, and a receiver has no
-  way to know a stranger's card is real. It loses nothing if it is not.
+- **The PIN, typed on a phone that may not be honest.** Whoever's phone it is
+  typed on has it. A card of software 1.9 takes it sealed, which keeps it from
+  anybody listening to the tap, then or later; it does nothing about the phone
+  it was typed on. A pretend card can still collect a PIN typed for it: it
+  signs its own PIN key with its own key, and a receiver has no way to know a
+  stranger's card is real (it loses nothing if it is not). A card before 1.9
+  is shown its PIN in the clear, over a few centimetres.
+- **A terminal that puts points of its own choosing to the card's PIN key.**
+  An envelope that does not open costs a try of the PIN, so a card with a PIN
+  set allows two before it blocks. A new card's first PIN and an owner's
+  change of PIN have no try to cost; if the chip's key agreement did not check
+  that a point is on the curve, enough such askings could find the PIN key,
+  and with it the PIN in any tap that was also recorded. The PIN key is not
+  the key the card signs with, and nothing else is sealed to it.
 - **Pieces a terminal writes that the mint will refuse.** The card has no DLEQ
   check, so it cannot tell. A later payment that picks such a piece spends a day's
   limit on nothing.

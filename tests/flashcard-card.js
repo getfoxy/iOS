@@ -21,7 +21,6 @@ const crypto = require('crypto');
 const { p256Verify } = require('./harness');
 
 const AID = 'f0464f58594341524401';
-const SLOTS = 64;
 const PAGE_MAX = 255;
 const DAY = 86400;
 // how long a tap is, to the card, for the limit on one tap (the applet's TAP_SECONDS)
@@ -46,7 +45,22 @@ function makeCard(opts) {
    * refused, it waits. Every limit's worth past the first costs WAIT_SIGNS signatures of the card's work, each asked for
    * by a SPEND_ALL_SIGN that answers two bytes (how many are still to come) in place of the signature. Nothing is
    * counted or remembered from one payment to the next. */
-  const VERSION = FORMAT === 4 ? 6 : 3;
+  /* And how many places it has. The card of format 4 has 128 (1.7), for a deep drawer of small pieces: a place's number
+   * is seven bits of a listing's tag, and its short listing is P2 = 3, two bytes a piece. `places: 64` is the card before
+   * it (1.6): sixty-four places, six-bit tags, and the brief listing (P2 = 1). */
+  const WIDE = FORMAT === 4 && o.places !== 64;
+  const SLOTS = WIDE ? 128 : 64;
+  /* And how many pieces it burns at once. The card of 1.8 commits a payment with one byte and marks its pieces after, so
+   * a payment is of as many places as it has, and it says so (bit 6). `software: 7` is the card of 128 places before
+   * that (1.7), which burned every piece inside the payment's transaction. No simulator's transaction has a size, so
+   * the model's has none either unless a test gives it one: `burnMost` is how many pieces the chip's held (about a
+   * dozen, on the card itself), and a payment of more is refused at its signing, `6A96`, with nothing burned. */
+  const MANY = WIDE && o.software !== 7;
+  const BURN_MOST = Number(o.burnMost) > 0 ? Number(o.burnMost) : 0;
+  /* And whether it takes its PIN sealed (1.9): enciphered to a key the card keeps for that and nothing else, under
+   * sixteen bytes of the card's that are good once. `software: 8` is the card before that. */
+  const SEALED = MANY && o.software !== 8;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? 9 : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   /* And it is the card made quicker to hold (1.6): GET_PIECES has a brief form (P2 = 1: sixteen bytes a place, to choose
@@ -55,6 +69,9 @@ function makeCard(opts) {
   const QUICK = FORMAT === 4;
   const priv = String(o.key || crypto.randomBytes(32).toString('hex'));
   const pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
+  // the key a PIN is sealed to: the card's own, for that and nothing else
+  const pinPriv = String(o.pinKey || crypto.randomBytes(32).toString('hex'));
+  const pinPub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(pinPriv, 'hex'))));
   const s = {
     pin: null, pinState: 0, tries: 3, locked: false,
     // limit: the most the card signs for in a day, sats; 0 is none. timeKey: who may tell it the time (hex, 04 || X || Y)
@@ -99,6 +116,43 @@ function makeCard(opts) {
     return typeof sig === 'string' ? sig : hex(sig);
   };
   const none = (n) => Buffer.alloc(n);
+  /* A sealed command opened (the applet's `unseal`): the sender's public key for this message (65, uncompressed), the
+   * bytes under a keystream, a tag (16). The secret is the x of the point the card's PIN key and that key share; a block
+   * is SHA-256 of the label, a counter, the secret, the sender's key, the card's sixteen bytes and the instruction; block
+   * 0, with the sealed bytes after it, is the tag, and blocks 1 on are the keystream. Answers { sw } where it is not to
+   * be tried at all, { bad } where it does not open, and { clear } where it does. `spend`: the sixteen bytes are used
+   * up by this (an owner's command leaves them for its proof to use). */
+  const SEAL = ascii('FoxyCard/seal');
+  const unseal = (insByte, data, spend) => {
+    if (data.length < 65 + 1 + 16) return { sw: '6700' };
+    const nonce = s.nonce;
+    if (spend) s.nonce = null;
+    if (!nonce) return { sw: '6985' };
+    const E = data.subarray(0, 65), ct = data.subarray(65, data.length - 16), tag = data.subarray(data.length - 16);
+    let shared;
+    try {
+      if (E[0] !== 4) throw new Error('not a point');
+      const dh = crypto.createECDH('secp256k1');
+      dh.setPrivateKey(Buffer.from(pinPriv, 'hex'));
+      shared = dh.computeSecret(E);
+    } catch (e) { s.nonce = null; return { bad: true }; }
+    const block = (i, more) => sha256(Buffer.concat([SEAL, Buffer.from([i]), shared, E, Buffer.from(nonce, 'hex'), Buffer.from([insByte]), more || none(0)]));
+    if (!block(0, ct).subarray(0, 16).equals(tag)) { s.nonce = null; return { bad: true }; }
+    const clear = Buffer.alloc(ct.length);
+    for (let at = 0; at < ct.length; at += 32) {
+      const ks = block(1 + at / 32);
+      for (let k = 0; k < 32 && at + k < ct.length; k++) clear[at + k] = ct[at + k] ^ ks[k];
+    }
+    return { clear };
+  };
+  /* The PIN block that ends a sealed command's data: its length, the PIN, zeros to eight. Answers the data with the PIN
+   * itself in the block's place, or null where the block is not one. */
+  const unblock = (clear) => {
+    if (clear.length < 9) return null;
+    const b = clear.subarray(clear.length - 9);
+    if (b[0] < 4 || b[0] > 8) return null;
+    return Buffer.concat([clear.subarray(0, clear.length - 9), b.subarray(1, 1 + b[0])]);
+  };
   /* The owner's proof at the front of an owner's command's data: its length (1), an ECDSA signature (P-256, SHA-256,
    * DER) by the owner key over label || nonce || everything after it. Answers { sw } when it is refused, and
    * { at, value } (where the value begins, and what it is) when it is the owner's. The nonce is spent by being tried. */
@@ -200,7 +254,7 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, VERSION, SLOTS, n(1), n(2), n(0), QUICK ? 31 : PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [1, VERSION, SLOTS, n(1), n(2), n(0), SEALED ? 255 : MANY ? 127 : WIDE ? 63 : QUICK ? 31 : PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
@@ -262,7 +316,8 @@ function makeCard(opts) {
         // not empty: a tag of (state << 6 | place), and the piece (81 bytes) only for an unspent place. A page is at
         // most 255 bytes.
         const how = QUICK ? p2 : 0;
-        if (how > 2) return '6a86';
+        // the card of 128 places has no brief listing (its tags could not name the places) and has the short one instead
+        if (WIDE ? (how === 1 || how > 3) : how > 2) return '6a86';
         // P2 = 2: the places named, whole (status and the 81 bytes), in the order asked
         if (how === 2) {
           if (data.length < 1 || data.length > 3) return '6700';
@@ -270,6 +325,27 @@ function makeCard(opts) {
           return Array.from(data).map((i) => '0' + s.slots[i].status + (s.slots[i].data || '00'.repeat(81))).join('') + '9000';
         }
         if (p1 >= SLOTS) return '6a83';
+        const two = (v) => ('0' + (v & 0xff).toString(16)).slice(-2);
+        /* P2 = 3: the short listing. An entry for each UNSPENT place: the place, with 0x80 where its keyset and date
+         * follow (the first entry of an answer, and wherever they are not the entry before's); then the power of two it is
+         * worth, or ff and the amount. Spent places are not in it. */
+        if (how === 3) {
+          let at = p1, size = 1, said = '', prev = null;
+          for (; at < SLOTS; at += 1) {
+            const x = s.slots[at];
+            if (x.status !== 1) continue;
+            const named = !prev || prev.data.substr(0, 16) !== x.data.substr(0, 16) || prev.data.substr(154, 8) !== x.data.substr(154, 8);
+            const amount = amountOf(x);
+            const power = (amount > 0 && Number.isInteger(Math.log2(amount))) ? Math.log2(amount) : -1;
+            const cost = 2 + (named ? 12 : 0) + (power < 0 ? 4 : 0);
+            if (size + cost > PAGE_MAX) break;
+            size += cost;
+            said += two(at | (named ? 0x80 : 0)) + (named ? x.data.substr(0, 16) + x.data.substr(154, 8) : '')
+              + (power < 0 ? 'ff' + x.data.substr(16, 8) : two(power));
+            prev = x;
+          }
+          return two(at) + said + '9000';
+        }
         // P2 = 1: the brief listing: for an unspent place its keyset, amount and date, sixteen bytes
         const brief = how === 1;
         let next = p1, len = 1, body = '';
@@ -279,11 +355,12 @@ function makeCard(opts) {
           if (len + cost > PAGE_MAX) break;
           len += cost;
           if (x.status !== 0) {
-            body += ('0' + ((x.status << 6) | next).toString(16)).slice(-2)
+            // the tag: of a card of sixty-four places, the state and the place in six bits; of a card of 128, the place, and 0x80 where it is spent
+            body += two(WIDE ? (next | (x.status === 2 ? 0x80 : 0)) : ((x.status << 6) | next))
               + (x.status !== 1 ? '' : brief ? x.data.substr(0, 24) + x.data.substr(154, 8) : x.data);
           }
         }
-        return ('0' + next.toString(16)).slice(-2) + body + '9000';
+        return two(next) + body + '9000';
       }
       case 0x22: {
         // SPEND_ALL_BEGIN: the places a payment is made of, in order. Each once, unspent, all of one date; the limits
@@ -291,7 +368,8 @@ function makeCard(opts) {
         if (FORMAT !== 4) return '6d00';
         if (gated()) return '6982';
         if (data.length < 1) return '6700';
-        if (data.length > 32) return '6a96';
+        // thirty-two pieces to a signature; the card of 128 places signs for as many as it has
+        if (data.length > (WIDE ? 128 : 32)) return '6a96';
         const list = Array.from(data);
         let sum = 0;
         for (let i = 0; i < list.length; i++) {
@@ -337,6 +415,8 @@ function makeCard(opts) {
         s.all = null;
         const no = overLimits(pay.total, false);
         if (no) return no;
+        // a chip whose transaction is full (a card before 1.8, where a test says how much it holds): refused, nothing burned
+        if (BURN_MOST && !MANY && pay.list.length > BURN_MOST) return '6a96';
         const dayBegins = s.record.limit !== 0 && s.now >= s.windowStart + DAY;
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
         if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + pay.total; if (dayBegins) s.windowStart = s.now; }
@@ -502,25 +582,56 @@ function makeCard(opts) {
         return u32(s.now) + '9000';
       }
       case 0x40: {
+        if (SEALED && p1 > 1) return '6a86';
         if (s.pinState === 0) return '6984';
         if (s.tries === 0) return '6983';
+        if (SEALED && p1 === 1) {
+          // sealed: an envelope that does not open costs a try, as a wrong PIN does
+          const got = unseal(0x40, data, true);
+          if (got.sw) return got.sw;
+          if (got.bad) return failPin();
+          const pinOnly = got.clear.length === 9 ? unblock(got.clear) : null;
+          if (!pinOnly) return '6700';
+          if (hex(pinOnly) !== s.pin) return failPin();
+          s.tries = 3; s.verified = true;
+          return '9000';
+        }
         if (data.length < 4 || data.length > 8) return '6700';
         if (hex(data) !== s.pin) return failPin();
         s.tries = 3; s.verified = true;
         return '9000';
       }
       case 0x41: {
+        if (SEALED && p1 > 1) return '6a86';
         if (s.locked) return '6986';
         if (s.owner) return '6a91';
         if (unspent()) return '6a8d';
-        if (data.length < 4 || data.length > 8) return '6700';
-        s.pin = hex(data); s.pinState = 1; s.tries = 3; s.verified = false;
+        let first = data;
+        if (SEALED && p1 === 1) {
+          const got = unseal(0x41, data, true);
+          if (got.sw) return got.sw;
+          if (got.bad) return '6a80';
+          first = got.clear.length === 9 ? unblock(got.clear) : null;
+          if (!first) return '6700';
+        }
+        if (first.length < 4 || first.length > 8) return '6700';
+        s.pin = hex(first); s.pinState = 1; s.tries = 3; s.verified = false;
         return '9000';
       }
       case 0x42: {
+        if (SEALED && p1 > 1) return '6a86';
         if (s.locked) return '6986';
         if (!s.owner) return '6a90';
-        const got = ownerProof('FoxyCard/change-pin', data);
+        let proved = data;
+        if (SEALED && p1 === 1) {
+          // sealed under the same sixteen bytes the proof is over: opening it leaves them for the proof to use up
+          const open = unseal(0x42, data, false);
+          if (open.sw) return open.sw;
+          if (open.bad) return '6a80';
+          proved = unblock(open.clear);
+          if (!proved) return '6700';
+        }
+        const got = ownerProof('FoxyCard/change-pin', proved);
         if (got.sw) return got.sw;
         if (got.value.length < 4 || got.value.length > 8) return '6700';
         s.pin = hex(got.value); s.pinState = 1; s.tries = 3; s.verified = false;
@@ -541,6 +652,13 @@ function makeCard(opts) {
         return '9000';
       }
       case 0x44: {
+        /* P1 = 1, on a card that takes its PIN sealed: the sixteen bytes, the key a PIN is sealed to (33), and the
+         * card's own key's signature over that key (64). Asked by anybody: a card with no owner has a PIN to be set. */
+        if (SEALED && p1 === 1) {
+          s.nonce = crypto.randomBytes(16).toString('hex');
+          return s.nonce + pinPub + sign(sha256(Buffer.concat([ascii('FoxyCard/pinkey'), Buffer.from(pinPub, 'hex')]))) + '9000';
+        }
+        if (SEALED && p1 !== 0) return '6a86';
         if (!s.owner) return '6a90';
         s.nonce = crypto.randomBytes(16).toString('hex');
         return s.nonce + '9000';
@@ -597,7 +715,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, format: FORMAT });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : undefined, burnMost: BURN_MOST });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
       return twin;
     },

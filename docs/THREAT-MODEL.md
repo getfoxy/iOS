@@ -1249,7 +1249,9 @@ Superseded from the earlier list:
 ### Added later
 
 - **A chip card that holds ecash has limits of its own.** A terminal built to
-  cheat, the card's PIN typed in the clear on the receiving phone, a time key
+  cheat, the card's PIN typed on the receiving phone (and sent to a card
+  before software 1.9 in the clear; sealed to the card's own key from 1.9), a
+  time key
   that is public while the time is interim, and a card payment taken on trust
   when the till has no route are each argued in `CARD.md`, *What it does not
   protect against*. The bridge actions that serve a card are in §1.

@@ -234,6 +234,10 @@
     if (p && p.step === 'waiting') {
       // how long it will be is the card's to know and it does not say (that would say what its limit is): how long it has been
       const s = Math.max(1, Math.round(Number(p.seconds) || 0));
+      /* The card waits by what its pieces come to. A small payment made
+       * with a piece worth much more than the price is not over anybody's
+       * limit, and was being told it was: it is the piece that is. */
+      if (p.want > 0 && p.sum >= 2 * p.want) return 'Paying from a larger piece. Keep holding (' + s + ' s)';
       return 'Over the card\u2019s per tap limit. Keep holding (' + s + ' s)';
     }
     const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
@@ -515,7 +519,13 @@
       'two-dates': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS',
         reason: 'This card’s money was put on it at two different times, and one payment can use only one of them. The most it can pay at once is '
           + this.fcSats(e.most) + '.' + safe }),
-      'too-many': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS', reason: 'That is more pieces than the card signs for at once.' + safe }),
+      /* A card whose money is in more pieces than it signs for in one go:
+       * said before the PIN was sent, with the most it can pay at once, where
+       * that is known; and as the card's own refusal where it is the card
+       * that said so. */
+      'too-many': () => ({ tone: 'warn', title: 'TAKE IT IN PARTS',
+        reason: (e.most > 0 ? 'This card can pay ' + this.fcSats(e.most) + ' at once. Its money is in more pieces than it signs for in one go.'
+          : 'That is more pieces than the card signs for at once.') + safe }),
       'old-card': () => ({ tone: 'warn', title: 'NOT ON THIS CARD',
         reason: 'This card’s software has no per tap limit. Its daily limit can still be set.' }),
       'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
