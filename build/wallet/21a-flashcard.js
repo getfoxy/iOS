@@ -624,6 +624,8 @@
      * of `sats` waits on a card with that limit, in seconds. */
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
     cardWait: function (limit, sats) { return cardWaitSeconds(cardWaitSigns(limit, sats)); },
+    /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
+    cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     cardHeldLetGo: function (key) {
       var w = null;
       try { w = need(); } catch (e) { w = null; }

@@ -149,19 +149,21 @@ async function at(mintKey, names, real) {
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 100, tap: true });
     await card.tap();
-    const onIt = (await till.W.cardLook(card, { noAuth: true })).balance;
+    const asTill = await till.W.cardLook(card, { noAuth: true });
+    ok('  the limit is its owner\u2019s to read: the till is told none', asTill.info.tapLimit === 0 && asTill.info.paced === true, 'the till reads ' + asTill.info.tapLimit);
+    const onIt = asTill.balance;
     const tb = held(till, MINT);
     sent.length = 0;
     const counted = [];
     await card.tap();
-    const paid = await till.W.cardPay(card, { sats: 250, pin: PIN, progress: (p) => { if (p.step === 'waiting' && !p.ahead) counted.push(p.left); } });
+    const paid = await till.W.cardPay(card, { sats: 250, pin: PIN, progress: (p) => { if (p.step === 'waiting') counted.push(p.polls); } });
     await card.tap();
     const left = (await till.W.cardLook(card, { noAuth: true })).balance;
     const change = (paid.change && paid.change.sats) || 0;
     const waits = signatures() - 1;
     ok('a per tap limit of 100, and 250 asked: the card waits, then signs once, and the mint takes it',
-       paid.sats === 250 && waits === 4 * (Math.ceil((onIt - left) / 100) - 1) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => waits - 1 - i).join(','),
-       waits + ' waits for ' + (onIt - left) + ' sats of pieces, counted down ' + counted.join(' ') + '; the till is up ' + (held(till, MINT) - tb));
+       paid.sats === 250 && waits === 4 * (Math.ceil((onIt - left) / 100) - 1) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => i + 1).join(','),
+       waits + ' waits for ' + (onIt - left) + ' sats of pieces, each answered "not yet" and no more; the till is up ' + (held(till, MINT) - tb));
     if (change) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     sent.length = 0;
     await card.tap();
@@ -170,6 +172,21 @@ async function at(mintKey, names, real) {
     if (small.change && small.change.sats) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 0, tap: true });
+  }
+
+  /* Its receipts, read by its holder's phone: one for each payment the card has signed, each with the first output of
+   * the swap the mint took, and the hash of what was signed. */
+  {
+    await card.tap();
+    const own = await holder.W.cardLook(card, { mine: true });
+    const list = holder.W.cardReceipts(own.key);
+    ok('the holder\u2019s phone reads a receipt for every payment the card has signed, and its log says what was put on',
+       !!own.receipts && own.receipts.count === list.length && list.length >= 5 && list.every((r) => /^0[23][0-9a-f]{64}$/.test(r.out) && /^[0-9a-f]{64}$/.test(r.hash) && r.sats > 0)
+       && own.log.last.some((x) => x.loaded > 0),
+       list.length + ' receipts, the last for ' + list[list.length - 1].sats + ' sats');
+    await card.tap();
+    const other = await till.W.cardLook(card, { mine: true });
+    ok('  and the till is given none', !other.receipts && !other.log);
   }
 
   // what change put on the card is money it can sign for: the holder takes all of it off, in one tap

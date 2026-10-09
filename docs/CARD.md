@@ -374,6 +374,17 @@ What that changes:
   with no words on it, only the phone's own tick as it closes. The wait for the
   mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
   Where change is coming the sheet stays, as below.
+- **A card of software 1.6 is quicker to hold.** A till reads its brief
+  listing (what each piece is worth, its date and its keyset: three commands
+  for a full card where the whole listing is eleven), chooses, and asks for
+  only the pieces it chose, checking each against what the listing said. Not
+  where this phone holds a signature it never saw or a payment cut short for
+  that card: those are settled by the pieces' own nonces, and the whole
+  listing is read. A load sends three pieces to a command. The card itself
+  takes in a payment's pieces several times faster (it keeps their text
+  ready from loading). Its holder's own phone no longer asks the card to
+  prove its key before taking money off: the signature it then asks for is
+  that proof.
 - **Nothing is asked of the card twice.** Its slowest answer is the proof that
   it holds its key (most of a second, and often two on a phone). A sheet asks
   for it once at the most: a tap that writes used to ask before the write and
@@ -578,9 +589,16 @@ follows is the one a card has now.
 - **A payment over it waits.** For every limit's worth past the first, the
   card does about three seconds of its own work before it signs, and nothing is
   taken until that is done. The till's screen says `Over the card's per tap
-  limit. Keep holding:` and counts the seconds down as the card does. Lifted in
-  the wait, the card has paid nothing and the till holds nothing; tapped again,
-  it waits the whole of it again.
+  limit. Keep holding` and how long it has been; how long is left it cannot
+  say, because the card does not tell it. Lifted in the wait, the card has
+  paid nothing and the till holds nothing; tapped again, it waits the whole of
+  it again.
+- **The limit is its owner's to know.** The card says it to the phone that
+  holds its owner's key and to no other: a till reads none, and is told only
+  "not yet" while the card waits, never how long. A till that knew the limit
+  would charge just under it, over and over, and never be made to wait. It
+  can still find it by trying, a second or so a try; that is time, once, and
+  is all that hiding can buy.
 - **What it buys.** A terminal that has the PIN can take one limit for each
   second or so that the card is held, by many small payments or one large one
   that waits, and no faster. Money leaves the card about as fast as an honest
@@ -589,9 +607,9 @@ follows is the one a card has now.
   ceiling: the daily limit is the ceiling, and that one does ask the clock.
 - **It counts the pieces signed, not the price**, so the pieces for such a card
   are chosen to overpay the least where they cannot come to the price exactly.
-- **A wait longer than a tap lasts is not begun**: over forty seconds, the
-  payment is refused before the PIN is sent, with the wait it would be and the
-  most that can be taken at a time.
+- **A wait longer than a tap lasts is given up**: after forty seconds of "not
+  yet" the till stops asking, with nothing signed, and says to take the
+  payment in smaller parts.
 - **It is kept in dollars.** The card holds sats and has no price. A limit typed
   in dollars is kept as dollars on the phone that set it
   (`foxy.flashcard.pace`), and when that phone reads its own card and the price
@@ -638,6 +656,31 @@ What it does not do: it says when and how much, never who; a terminal that
 overcharges within the limits leaves no mark, only the amount; and the times in
 it are the times the card was told, which a terminal built to cheat can choose
 (*The time*).
+
+### What was put on, a false time, and receipts
+
+A card of software 1.6 writes three more things, and its holder's phone reads
+them with the log.
+
+- **What was put on.** Each tap's line says what was put onto the card in it
+  as well as what the card signed for: `$2.00 put on`.
+- **A false time.** The card cannot know the time, but it can see being told
+  it twice in one tap, more than two minutes apart, and marks that tap; and
+  this phone can see a card whose clock is more than five minutes ahead of its
+  own. Either way the card's screen says `TAMPER: this card has been told a
+  false time`, and the log says which it was. A till whose own clock is wrong
+  does the second by accident; a terminal walking the clock forward to turn
+  the card's day does both. The daily limit rests on that clock and cannot be
+  relied on while it is ahead.
+- **Receipts.** For every payment the card keeps when, what its pieces were
+  worth, a hash of exactly what it signed, and the first output of the swap
+  the money went into. It gives them to its owner's phone only, sixteen back;
+  the phone keeps what it reads (`foxy.flashcard.receipts`). An output is
+  made from its receiver's seed: nobody can tell whose it is by looking, and
+  anybody shown a wallet's seed can make that wallet's outputs again and find
+  this one among them. So a receipt does not say who took a payment; it lets
+  a wallet be shown to be the one that did, or not. COPY RECEIPTS on the log
+  copies them as text, for whoever has to be shown.
 
 ## Change PIN, withdraw, and a blocked card
 
@@ -759,13 +802,13 @@ wait, and the payment is made when the wallet next asks.
 
 ## What is kept on the phone
 
-Seven stores, named in `STORAGE.md`: ecash made for a card and not yet written to
+Eight stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; and the dollars a card's per tap limit was set in (`foxy.flashcard.pace`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); and the receipts read from this phone's own cards (`foxy.flashcard.receipts`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
 
 ## What it does not protect against

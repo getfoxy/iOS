@@ -80,6 +80,20 @@ async function replay(T, format) {
       ok((pay ? pay.slots : []).every((i) => card.state.slots[i].status === 2), e.name + ': and every piece is burned');
       pay = null;
       verified += 1;
+    } else if (e.kind === 'receipt') {
+      /* A page of receipts: the count, then for each when, what the pieces were worth, the hash of what was signed and
+       * the first output. All of it is the recording's to the byte but the hash, which is over the card's own key. */
+      ok(data.length === e.data.length && data.slice(0, 8) === e.data.slice(0, 8), e.name + ': the count of payments, and as many receipts', data.slice(0, 8) + ' / ' + e.data.slice(0, 8));
+      for (let at = 8; at + 146 <= data.length; at += 146) {
+        ok(data.substr(at, 16) === e.data.substr(at, 16) && data.substr(at + 80, 66) === e.data.substr(at + 80, 66), e.name + ': a receipt\u2019s clock, worth and first output');
+        ok(/^[0-9a-f]{64}$/.test(data.substr(at + 16, 64)) && data.substr(at + 16, 64) !== '0'.repeat(64), e.name + ': and a hash');
+      }
+      // the newest is of the payment the model last signed: the hash of that very message
+      if (data.length > 8 && card.state.lastText) {
+        const newest = card.state.receipts.ring[(card.state.receipts.count - 1) & 15];
+        ok(newest.hash === sha256(Buffer.from(card.state.lastText, 'utf8')).toString('hex'), e.name + ': the newest receipt is the hash of the message last signed');
+      }
+      verified += 1;
     } else if (e.kind === 'again') {
       ok(data === card.state.lastSig, e.name + ': the last signature, again');
       verified += 1;

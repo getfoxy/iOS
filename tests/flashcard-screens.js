@@ -560,6 +560,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until(what, () => holder.state.fc && holder.state.fc.log && holder.state.fc.log !== was && !stage(H));
     await settle();
   };
+  // the card's clock has been moved on by the tests above; this phone's is put where the card's is, so that the card is not
+  // ahead of the phone that reads it (which the screen would say, and rightly: tests/flashcard-sigall.js)
+  H.phone.clockMs = () => Math.max(Date.now(), c.state.now * 1000 + 1000);
   await readLog('the card’s log to be read');
   {
     const note = vals(holder).fcNotes.filter((x) => /^Last tap: /.test(x.text))[0];

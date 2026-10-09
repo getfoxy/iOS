@@ -15,7 +15,7 @@
  */
 const { funded, binaryLoad, why, history, settle, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 const { makeCard } = require('./flashcard-card');
-const { appOn, until, pad, stage, card: uiCard } = require('./flashcard-ui-kit');
+const { appOn, until, pad, stage, card: uiCard, vals } = require('./flashcard-ui-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -50,10 +50,13 @@ async function world(feePpk, sats) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.5' && seen.info.paced === true, 'a card that signs once for a payment is read as what it is', seen.info.version + ', format ' + seen.info.format);
+  ok(seen.info.format === 4 && seen.info.version === '1.6' && seen.info.paced === true && seen.info.quick === true, 'a card that signs once for a payment is read as what it is', seen.info.version + ', format ' + seen.info.format);
   card.tap();
+  card.sent.length = 0;
   const added = await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
   ok(added.sats === 2000 && card.balance() === 2000, '2,000 sats are put on it', String(card.balance()));
+  ok(count(card, '30') === Math.ceil(added.card.pieces.length / 3) && added.card.pieces.length === 32,
+     'three pieces to a command: thirty-two pieces go on in eleven', count(card, '30') + ' LOAD commands for ' + added.card.pieces.length + ' pieces');
   ok(card.state.slots.filter((x) => x.status === 1).every((x, i) => /\["sigflag","SIG_ALL"\]\]\}\]$/.test(card.secretOf(card.state.slots.indexOf(x)))),
      'and every piece on it is written with the flag that makes one signature do for all of them');
   ok(dates(card).length === 1, 'all of one date', JSON.stringify(dates(card)));
@@ -68,6 +71,14 @@ async function world(feePpk, sats) {
     ok(count(card, '24') === 1 && count(card, '22') === 1 && count(card, '20') === 0,
        'with ONE signature, whatever the number of pieces', count(card, '24') + ' signature(s) for ' + (32 - amounts(card).length) + ' pieces');
     ok(paid.change === null && R.W.cardOwed().length === 0, 'made of pieces that come to exactly the price: no change, and no second tap', JSON.stringify(paid.change));
+    {
+      // how the till read the card: the brief listing, then only the pieces it chose, whole
+      const pages = card.sent.filter((a) => /^b017..01/.test(a)).length, wholePages = card.sent.filter((a) => /^b017..00/.test(a)).length;
+      const asked = card.sent.filter((a) => /^b0170002/.test(a)).reduce((n, a) => n + parseInt(a.substr(8, 2), 16), 0);
+      ok(pages === 3 && wholePages === 0 && asked === 6 && count(card, '15') === 0,
+         'the till read the card’s brief listing (three commands for thirty-two pieces, where the whole listing is eleven) and then asked for the six pieces it chose and no others',
+         pages + ' brief pages, ' + wholePages + ' whole pages, ' + asked + ' pieces asked for by name');
+    }
     ok(steps.join(' ') === 'reading signing checking done', 'the screen is told each step', steps.join(' '));
     ok(R.W.cardTaken().length === 0 && swaps(R).length === 0, 'and nothing of it is left on file once the mint has swapped it', JSON.stringify(swaps(R)));
     const e = history(R).filter((x) => x.hash === paid.hash)[0] || {};
@@ -234,10 +245,23 @@ async function world(feePpk, sats) {
     L.card.sent.length = 0;
     const said = [];
     const steps = [];
-    const over = await L.R.W.cardPay(L.card, { sats: 500, pin: '1234', on: (st) => steps.push(st), progress: (p) => { if (p.step === 'waiting') said.push(p.left + (p.ahead ? ' ahead' : '')); } });
+    // what a till can read of the card says nothing of the limit: it is the holder's, and the holder's phone hears it
+    const tillSees = await L.R.W.cardLook(L.card, { mine: true });
+    L.card.tap();
+    const ownerSees = await L.H.W.cardLook(L.card, { mine: true });
+    ok(tillSees.info.tapLimit === 0 && tillSees.tap.limited === false && ownerSees.info.tapLimit === 400,
+       'the card says its per tap limit to its owner’s phone and to no other: a till reads none', 'till ' + tillSees.info.tapLimit + ', owner ' + ownerSees.info.tapLimit);
+    L.card.tap();
+    L.card.sent.length = 0;
+    const answers = [];
+    const send0 = L.card.send.bind(L.card);
+    L.card.send = (a) => send0(a).then((r) => { if (String(a).slice(0, 4) === 'b024' && r.length === 8) answers.push(r.slice(0, 4)); return r; });
+    const over = await L.R.W.cardPay(L.card, { sats: 500, pin: '1234', on: (st) => steps.push(st), progress: (p) => { if (p.step === 'waiting') said.push(p.polls); } });
+    L.card.send = send0;
     ok(over.sats === 500 && (await bal(L.R)) === 1300 && count(L.card, '24') === 5,
        'a payment of 500 is made, after the card has been asked four times to wait', count(L.card, '24') + ' SIGN commands');
-    ok(said.join(',') === '4 ahead,3,2,1,0', 'the screen is told the wait before the PIN is sent, and then as the card counts it down', said.join(','));
+    ok(said.join(',') === '1,2,3,4' && answers.join(',') === '0001,0001,0001,0001',
+       'the card says only "not yet", never how many waits are left, and the screen counts what has been', said.join(',') + ' / ' + answers.join(','));
     ok(L.card.state.log.ring.some((e) => (e.flags & 2) === 2), 'and the card’s own log marks that tap as over its limit');
     // the pieces are chosen to overpay the least, since the card waits by what the pieces come to
     {
@@ -258,24 +282,26 @@ async function world(feePpk, sats) {
     const before = L.card.balance();
     L.card.leaveBefore('24', 3);
     const gone = await L.R.W.cardPay(L.card, { sats: 700, pin: '1234' }).then(() => null, (x) => x);
-    ok(gone && gone.card === 'gone' && L.card.balance() === before && L.R.W.cardTaken().length === 0 && swaps(L.R).length === 0,
-       'a card lifted while it waits has burned nothing, and the till holds nothing of it', gone && gone.card);
+    ok(gone && gone.card === 'interrupted' && gone.resumable === true && L.card.balance() === before && L.R.W.cardTaken().length === 0,
+       'a card lifted while it waits has burned nothing, and the till holds nothing of it: it is asked to tap again', gone && gone.card);
     L.card.tap();
     L.card.sent.length = 0;
     const then = await L.R.W.cardPay(L.card, { sats: 700, pin: '1234' });
     // what it waits is by what its pieces came to, which may be over the price where no exact set is left
     const signedFor = before - L.card.balance();
-    ok(then.sats === 700 && signedFor >= 700 && count(L.card, '24') === 1 + 4 * (Math.ceil(signedFor / 400) - 1),
-       'and tapped again it waits the whole of it again, and pays', signedFor + ' sats of pieces, ' + count(L.card, '24') + ' SIGN');
+    ok(then.sats === 700 && signedFor >= 700 && count(L.card, '24') === 1 + 4 * (Math.ceil(signedFor / 400) - 1) && count(L.card, '25') === 0 && swaps(L.R).length === 0,
+       'and tapped again it is seen to have signed nothing (its pieces are still on it), waits the whole of it again, and pays', signedFor + ' sats of pieces, ' + count(L.card, '24') + ' SIGN');
     if (then.change && then.change.sats) { L.card.tap(); await L.R.W.cardWrite(L.card, { pin: '1234' }); }
     // longer than anybody holds a card: not begun, and what can be taken is said
     L.card.tap();
     await L.H.W.cardSetLimit(L.card, { sats: 10, tap: true });
     L.card.tap();
     L.card.sent.length = 0;
+    const onBefore = L.card.balance();
     const long = await L.R.W.cardPay(L.card, { sats: 600, pin: '1234' }).then(() => null, (x) => x);
-    ok(long && long.card === 'tap-limit' && long.paced === true && long.wait > 40 && long.left > 0 && count(L.card, '40') === 0,
-       'a payment the card would make wait longer than a tap lasts is refused before the PIN, with the wait and the most that can be taken', long && long.message);
+    ok(long && long.card === 'tap-limit' && long.paced === true && long.hidden === true && count(L.card, '24') === 55 && L.card.balance() === onBefore
+       && swaps(L.R).length === 0 && L.R.W.cardTaken().length === 0,
+       'a payment the card makes wait longer than a tap lasts is given up, with nothing signed and nothing kept, and said as that', long && long.message);
     // the holder's own phone lifts the limit to take money off, and puts it back
     L.card.tap();
     L.card.sent.length = 0;
@@ -292,7 +318,7 @@ async function world(feePpk, sats) {
       const raw = makeCard({ window: N.H.window, format: 4 });
       await raw.send('00a404000af0464f5859434152440100');
       const answer = await raw.send('b0010100' + '00');
-      ok(answer.substr(12, 2) === '0f', 'the card says of itself that its limit on one payment is waited for', answer.substr(12, 2));
+      ok((parseInt(answer.substr(12, 2), 16) & 8) === 8, 'the card says of itself that its limit on one payment is waited for', answer.substr(12, 2));
       await settle();
     }
     await settle();
@@ -319,7 +345,10 @@ async function world(feePpk, sats) {
     ok(moved.info.tapLimit === 1250 && moved.repaced === 1250 && moved.tap.limit === 1250, 'a price that has moved is followed: the card’s sats are set to what the dollars are worth now', String(moved.info.tapLimit));
     D.card.tap();
     const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000 });
-    ok(read.info.tapLimit === 1250 && !read.repaced, 'another phone, which did not set it, changes nothing', String(read.info.tapLimit));
+    D.card.tap();
+    const still = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    ok(read.info.tapLimit === 0 && !read.repaced && still.info.tapLimit === 1250 && !still.repaced,
+       'another phone, which did not set it, is not told the limit and changes nothing', 'the other reads ' + read.info.tapLimit + ', the card still has ' + still.info.tapLimit);
     D.card.tap();
     const noPrice = await D.H.W.cardLook(D.card, { mine: true });
     ok(noPrice.info.tapLimit === 1250 && !noPrice.repaced, 'nor does the holder’s phone with no price to go by');
@@ -621,7 +650,7 @@ async function world(feePpk, sats) {
     await settle();
     const waited = lines.filter((t) => /Keep holding/.test(t));
     ok((await bal(V.R)) === 1500 && count(V.card, '24') === 5, 'a charge of one and a half limits is paid after the card has waited once', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
-    ok(waited.length >= 2 && /^Over the card’s per tap limit\. Keep holding: \d+ seconds?$/.test(waited[0]), 'and the till said to keep holding, with the seconds counting down', waited.join(' / '));
+    ok(waited.length >= 1 && /^Over the card’s per tap limit\. Keep holding \(\d+ s\)$/.test(waited[0]), 'and the till said to keep holding, with how long it had been and not how long was left', waited.join(' / '));
     if (V.R.W.cardOwed().length) { V.card.tap(); await V.R.W.cardWrite(V.card, { pin: '1234' }); }
 
     // the card's own log, on its holder's phone: in dollars, and that tap marked
@@ -630,8 +659,97 @@ async function world(feePpk, sats) {
     await until('the card to be read for its log', () => !!holder.state.fc && !!holder.state.fc.log);
     holder.fcLogCard();
     const logCard = uiCard(holder);
-    ok(logCard && /\$\d/.test(logCard.reason) && !/₿/.test(logCard.reason) && /over the per tap limit/.test(logCard.reason) && /In dollars at the price now\./.test(logCard.reason),
-       'the card’s own log is read in dollars, and says which tap was over the limit', logCard && logCard.reason.replace(/\n+/g, ' | ').slice(0, 260));
+    ok(logCard && /\$\d/.test(logCard.reason) && !/₿/.test(logCard.reason) && /over the per tap limit/.test(logCard.reason) && /In dollars at the price now\./.test(logCard.reason)
+       && /put on/.test(logCard.reason) && /Receipts kept on this phone: 1 of 1 payment/.test(logCard.reason) && logCard.has('COPY RECEIPTS'),
+       'the card’s own log is read in dollars, says which tap was over the limit and what was put on, and offers its receipts', logCard && logCard.reason.replace(/\n+/g, ' | ').slice(0, 260));
+    await settle();
+  }
+
+  /* ---- 17: receipts, and a false time ------------------------------------------
+   * For each payment the card keeps when, how much, the hash of what it signed
+   * and the first output the money went into, and gives them to its owner's
+   * phone and to no other. The output is the receiver's own (made from its
+   * seed): it is in the swap the till itself sent. And the card's clock: told
+   * twice in one tap, far apart, the card writes it down; ahead of this
+   * phone's, this phone says so. */
+  {
+    const X = await world(0, 9000);
+    X.card.tap();
+    await X.H.W.cardAdd(X.card, { sats: 2000, pin: '1234' });
+    let asked = null;
+    X.R.fate = (m) => { if (!asked && /\/v1\/swap$/.test(String(m.url || ''))) asked = JSON.parse(m.body); return null; };
+    X.card.tap();
+    await X.R.W.cardPay(X.card, { sats: 700, pin: '1234' });
+    X.R.fate = null;
+    const signedText = X.card.state.lastText;
+    X.card.tap();
+    const tillRead = await X.R.W.cardLook(X.card, { mine: true });
+    ok(!tillRead.receipts && !tillRead.log && X.R.W.cardReceipts(X.card.key).length === 0, 'a till is given no receipts and no log of the card');
+    X.card.tap();
+    const own = await X.H.W.cardLook(X.card, { mine: true });
+    const r1 = (own.receipts && own.receipts.list[0]) || {};
+    ok(own.receipts && own.receipts.count === 1 && own.receipts.fresh === 1 && r1.n === 1 && r1.sats === 700
+       && r1.hash === require('crypto').createHash('sha256').update(signedText, 'utf8').digest('hex'),
+       'its owner’s phone reads a receipt for the payment: its number, what the pieces were worth, and the hash of exactly what the card signed', JSON.stringify({ n: r1.n, sats: r1.sats }));
+    ok(!!asked && r1.out === asked.outputs[0].B_ && asked.outputs.length > 1,
+       'and the first output of the swap the money went into, which is the receiver’s own: the one its phone made from its seed and sent the mint', String(r1.out).slice(0, 16) + '…');
+    ok(own.log.last.some((x) => x.loaded === 2000 && x.loads === 32) && own.log.last.some((x) => x.sats === 700),
+       'the card’s log says what was put on as well as what was paid', JSON.stringify(own.log.last.map((x) => [x.sats, x.loaded])));
+    // more payments than the card's ring holds, read as they go: the phone keeps them all, in order
+    for (let i = 0; i < 18; i++) {
+      X.card.tap();
+      await X.R.W.cardPay(X.card, { sats: 10 + i, pin: '1234' });
+      if (X.R.W.cardOwed().length) { X.card.tap(); await X.R.W.cardWrite(X.card, { pin: '1234' }); }
+      if (i === 8 || i === 17) { X.card.tap(); await X.H.W.cardLook(X.card, { mine: true }); }
+    }
+    const kept = X.H.W.cardReceipts(X.card.key);
+    ok(kept.length === 19 && kept.every((x, i) => x.n === i + 1) && kept[18].sats >= 27 && X.card.state.receipts.count === 19,
+       'the card holds its last sixteen; this phone, reading as it goes, has all nineteen in order', kept.length + ' kept, the card has signed ' + X.card.state.receipts.count);
+    X.card.tap();
+    X.card.sent.length = 0;
+    const again = await X.H.W.cardLook(X.card, { mine: true });
+    ok(again.receipts.fresh === 0 && X.card.sent.filter((a) => /^b01801/.test(a)).length === 1, 'with nothing new, one command says so', X.card.sent.filter((a) => /^b01801/.test(a)).length + ' command');
+
+    // told the time twice in one tap, three hours apart, with nothing signed in it
+    X.card.tap();
+    const ringBefore = JSON.stringify(X.card.state.log.ring), marksBefore = X.card.state.log.tampers;
+    await X.H.W.cardLook(X.card);
+    X.H.phone.clockMs = () => Date.now() + 3 * 3600 * 1000;
+    await X.H.W.cardLook(X.card);
+    X.H.phone.clockMs = () => Date.now();
+    ok(X.card.state.log.tampers === marksBefore + 1 && JSON.stringify(X.card.state.log.ring) === ringBefore,
+       'a card told the time twice in one tap, hours apart, counts it, and its taps are not pushed out of its log by it', 'marked ' + X.card.state.log.tampers);
+    // its holder's screen, at the next reading
+    const holder = appOn(X.H);
+    holder.price = 100000;
+    X.H.nfc = X.card;
+    holder.goFlashcard();
+    await until('the card to be read', () => !!holder.state.fc && !!holder.state.fc.log);
+    ok(holder.state.fc.clockAhead > 3 * 3600 - 600 && holder.state.fc.clockAhead < 3 * 3600 + 600 && holder.state.fc.log.since.tampers === 1,
+       'its owner’s phone sees that the card’s clock is ahead of its own, and that the card has marked something since it last looked', holder.state.fc.clockAhead + ' seconds');
+    const noteText = vals(holder).fcNotes.map((x) => x.text).join(' | ');
+    ok(/TAMPER: this card has been told a false time/.test(noteText), 'the card’s screen says so under its balance', noteText.slice(0, 120));
+    holder.fcLogCard();
+    const lc = uiCard(holder);
+    ok(lc && lc.title === 'TAMPER ON THIS CARD' && /told this card the time twice in one tap/.test(lc.reason) && /clock is 3 hours ahead of this phone/.test(lc.reason),
+       'and its log says TAMPER, and why: told the time twice, and a clock that is ahead', lc && lc.reason.replace(/\n+/g, ' | ').slice(0, 300));
+    lc.press('CLOSE');
+    // and where the same tap goes on to pay, the payment's own line is marked
+    X.card.tap();
+    await X.R.W.cardLook(X.card);
+    X.R.phone.clockMs = () => Date.now() + 9 * 3600 * 1000;
+    await X.R.W.cardPay(X.card, { sats: 5, pin: '1234' });
+    X.R.phone.clockMs = () => Date.now();
+    if (X.R.W.cardOwed().length) { X.card.tap(); await X.R.W.cardWrite(X.card, { pin: '1234' }); }
+    X.card.tap();
+    const marked = await X.H.W.cardLook(X.card, { mine: true });
+    ok(marked.log.last.some((x) => x.clock === true && x.sats >= 5), 'a tap in which the clock was moved twice and something was then signed for has its own line marked');
+    holder.fcCopyReceipts = holder.fcCopyReceipts.bind(holder);
+    let copied = '';
+    holder.copySecret = (t) => { copied = t; return true; };
+    holder.fcCopyReceipts();
+    ok(/^Foxy card receipts\ncard 0[23][0-9a-f]{64}\n/.test(copied) && copied.split('\n').length === 3 + 20 && /^#1, \d{4}-\d\d-\d\dT[\d:]+Z, 700, [0-9a-f]{64}, 0[23][0-9a-f]{64}$/m.test(copied),
+       'COPY RECEIPTS copies them as text: the card, and each payment’s number, time, sats, hash and first output', copied.split('\n').slice(0, 4).join(' / ').slice(0, 260));
     await settle();
   }
 

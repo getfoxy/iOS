@@ -46,9 +46,13 @@ function makeCard(opts) {
    * refused, it waits. Every limit's worth past the first costs WAIT_SIGNS signatures of the card's work, each asked for
    * by a SPEND_ALL_SIGN that answers two bytes (how many are still to come) in place of the signature. Nothing is
    * counted or remembered from one payment to the next. */
-  const VERSION = FORMAT === 4 ? 5 : 3;
+  const VERSION = FORMAT === 4 ? 6 : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
+  /* And it is the card made quicker to hold (1.6): GET_PIECES has a brief form (P2 = 1: sixteen bytes a place, to choose
+   * from) and a form that gives named places whole (P2 = 2), and LOAD_PROOF takes up to three pieces end to end. What it
+   * signs and stores is the same. */
+  const QUICK = FORMAT === 4;
   const priv = String(o.key || crypto.randomBytes(32).toString('hex'));
   const pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
   const s = {
@@ -63,6 +67,10 @@ function makeCard(opts) {
      * ring of the last eight taps. A tap, here, is one time in the field: `tapOpen` is gone with the power (`tap()`). */
     log: { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
            ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0 })) },
+    // the quicker card's receipts: a count of every payment it has signed, and the last sixteen (when, how much, the
+    // hash of what was signed, the first output it went to)
+    receipts: { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) },
+    timeTold: false, timeMarked: false, timeFirst: 0,
     tapOpen: false,
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
     // the owner's public key (hex, 04 || X || Y), given to a card with none or by the owner's proof, and never read out
@@ -112,7 +120,7 @@ function makeCard(opts) {
   const logEntry = () => {
     if (!s.tapOpen) s.log.taps = stop(s.log.taps + 1);
     const at = (((s.log.taps & 0xff) - 1) & 7);
-    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: 0 }; s.tapOpen = true; }
+    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: s.timeMarked ? 4 : 0, loads: 0, loaded: 0 }; s.tapOpen = true; }
     return s.log.ring[at];
   };
   /* A spend over a limit, written down and then refused: the third in a run inside one tap's ten seconds of the clock
@@ -192,11 +200,12 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, VERSION, SLOTS, n(1), n(2), n(0), PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [1, VERSION, SLOTS, n(1), n(2), n(0), QUICK ? 31 : PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
-          + (p1 === 1 ? u32(s.tapLimit) + (PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '') + '9000';
+          // the quicker card says its limit on one payment to its owner only (the grant, in this tap): zeros to anyone else
+          + (p1 === 1 ? u32(QUICK && !s.grant ? 0 : s.tapLimit) + (PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '') + '9000';
       }
       case 0x10: return pub + '9000';
       case 0x11: return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
@@ -222,14 +231,28 @@ function makeCard(opts) {
       }
       case 0x18: {
         // GET_LOG: for the PIN verified in this tap or the owner's grant; the four counts, then the taps the ring holds, newest first
-        if (s.pinState !== 0 && !s.verified && !s.grant) return '6982';
         const byte = (v) => ('0' + (v & 0xff).toString(16)).slice(-2);
+        if (QUICK && p1 === 1) {
+          // the receipts: the count of every payment signed, then up to three, newest first, from P2 back. The owner's grant and nothing less
+          if (s.pinState !== 0 && !s.grant) return '6982';
+          const n = s.receipts.count, kept = n < 16 ? n : 16, last = (((n & 0xff) - 1) & 15);
+          let said = u32(n);
+          for (let k = p2; k < kept && k < p2 + 3; k++) {
+            const r = s.receipts.ring[(last - k) & 15];
+            said += u32(r.time) + u32(r.sats) + r.hash + r.out;
+          }
+          return said + '9000';
+        }
+        if (QUICK && p1 !== 0) return '6a86';
+        if (s.pinState !== 0 && !s.verified && !s.grant) return '6982';
         const held = s.log.taps < 8 ? s.log.taps : 8;
         const newest = (((s.log.taps & 0xff) - 1) & 7);
         let out = u32(s.log.taps) + u32(s.log.sats) + u32(s.log.refused) + u32(s.log.tampers);
         for (let k = 0; k < held; k++) {
           const e = s.log.ring[(newest - k) & 7];
-          out += u32(e.time) + u32(e.sats) + byte(e.pieces) + byte(e.refused) + byte(e.flags) + '00';
+          // the quicker card's entry is sixteen bytes: what was put on in the tap after what was signed for
+          out += u32(e.time) + u32(e.sats) + byte(e.pieces) + byte(e.refused) + byte(e.flags)
+            + (QUICK ? byte(Math.min(255, e.loads || 0)) + u32(e.loaded || 0) : '00');
         }
         return out + '9000';
       }
@@ -238,14 +261,27 @@ function makeCard(opts) {
         // report is P1; the answer opens with the first place it does not cover, then an entry for each place that is
         // not empty: a tag of (state << 6 | place), and the piece (81 bytes) only for an unspent place. A page is at
         // most 255 bytes.
+        const how = QUICK ? p2 : 0;
+        if (how > 2) return '6a86';
+        // P2 = 2: the places named, whole (status and the 81 bytes), in the order asked
+        if (how === 2) {
+          if (data.length < 1 || data.length > 3) return '6700';
+          if (Array.from(data).some((i) => i >= SLOTS)) return '6a83';
+          return Array.from(data).map((i) => '0' + s.slots[i].status + (s.slots[i].data || '00'.repeat(81))).join('') + '9000';
+        }
         if (p1 >= SLOTS) return '6a83';
+        // P2 = 1: the brief listing: for an unspent place its keyset, amount and date, sixteen bytes
+        const brief = how === 1;
         let next = p1, len = 1, body = '';
         for (; next < SLOTS; next += 1) {
           const x = s.slots[next];
-          const cost = x.status === 1 ? 82 : x.status === 2 ? 1 : 0;
+          const cost = x.status === 1 ? (brief ? 17 : 82) : x.status === 2 ? 1 : 0;
           if (len + cost > PAGE_MAX) break;
           len += cost;
-          if (x.status !== 0) body += ('0' + ((x.status << 6) | next).toString(16)).slice(-2) + (x.status === 1 ? x.data : '');
+          if (x.status !== 0) {
+            body += ('0' + ((x.status << 6) | next).toString(16)).slice(-2)
+              + (x.status !== 1 ? '' : brief ? x.data.substr(0, 24) + x.data.substr(154, 8) : x.data);
+          }
         }
         return ('0' + next.toString(16)).slice(-2) + body + '9000';
       }
@@ -281,6 +317,7 @@ function makeCard(opts) {
         if (FORMAT !== 4) return '6d00';
         if (!s.all) return '6985';
         if (data.length < 37 || data.length % 37 !== 0) { s.all = null; return '6700'; }
+        if (!s.all.out) s.all.out = hex(data.subarray(4, 37));
         for (let at = 0; at < data.length; at += 37) s.all.text += String(data.readUInt32BE(at)) + hex(data.subarray(at + 4, at + 37));
         return '9000';
       }
@@ -293,7 +330,8 @@ function makeCard(opts) {
         if (s.all.waits > 0) {
           s.all.waits -= 1;
           s.waited = (s.waited || 0) + 1;
-          return ('000' + s.all.waits.toString(16)).slice(-4) + '9000';
+          // "not yet", and not how many are to come: the count would say what the limit is
+          return '0001' + '9000';
         }
         const pay = s.all;
         s.all = null;
@@ -306,6 +344,11 @@ function makeCard(opts) {
         s.changeDue = true;
         { const e = logEntry(); e.sats = stop(e.sats + pay.total); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + pay.total);
           if (pay.waited) e.flags |= 2; }
+        // its receipt: when, how much, the hash of what was signed, and where the first of it went
+        if (QUICK) {
+          s.receipts.ring[s.receipts.count & 15] = { time: s.now, sats: pay.total, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
+          s.receipts.count = stop(s.receipts.count + 1);
+        }
         // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
         s.lastSig = sig;
         s.lastText = pay.text;
@@ -358,19 +401,35 @@ function makeCard(opts) {
         if (!s.owner) return '6a90';
         if (!s.record.set) return '6a8c';
         if (s.now === 0) return '6a92';
-        const at = s.slots.findIndex((x) => x.status === 0);
-        if (at < 0) return '6a84';
-        if (data.length !== 81) return '6700';
-        if (data.readUInt32BE(77) !== 0 && s.record.refund.slice(0, 2) === '00') return '6a8e';
-        if ((data[44] !== 2 && data[44] !== 3) || data.readUInt32BE(8) === 0) return '6a80';
-        // a piece is on the card once: the card signs a piece's secret, which its nonce makes, and takes its amount on the
-        // terminal's word, so a nonce that is in any slot, spent or not, is refused (a freed slot holds nothing)
-        const nonce = hex(data.subarray(12, 44));
-        if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
-        s.slots[at] = { status: 1, data: hex(data) };
-        // a load the change grant alone allowed spends the note now, not at SELECT: the change is going on
-        if (!s.verified && !s.grant) s.changeDue = false;
-        return ('0' + at.toString(16)).slice(-2) + '9000';
+        if (s.slots.findIndex((x) => x.status === 0) < 0) return '6a84';
+        // one piece, or (the quicker card) up to three end to end: each as one alone would be, in order
+        if (data.length < 81 || data.length % 81 !== 0 || data.length > (QUICK ? 243 : 81)) return '6700';
+        const one = (piece) => {
+          const at = s.slots.findIndex((x) => x.status === 0);
+          if (at < 0) return '6a84';
+          if (piece.readUInt32BE(77) !== 0 && s.record.refund.slice(0, 2) === '00') return '6a8e';
+          if ((piece[44] !== 2 && piece[44] !== 3) || piece.readUInt32BE(8) === 0) return '6a80';
+          // a piece is on the card once: the card signs a piece's secret, which its nonce makes, and takes its amount on the
+          // terminal's word, so a nonce that is in any slot, spent or not, is refused (a freed slot holds nothing)
+          const nonce = hex(piece.subarray(12, 44));
+          if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
+          s.slots[at] = { status: 1, data: hex(piece) };
+          // a load the change grant alone allowed spends the note now, not at SELECT: the change is going on
+          if (!s.verified && !s.grant) s.changeDue = false;
+          return at;
+        };
+        // the first that cannot be stored stops it: first, with its own word; after others, they stand and are the answer
+        let stored = '', put = 0, n = 0;
+        for (let k = 0; k * 81 < data.length; k++) {
+          const got = one(data.subarray(k * 81, k * 81 + 81));
+          if (typeof got === 'string') { if (k === 0) return got; break; }
+          stored += ('0' + got.toString(16)).slice(-2);
+          put += data.readUInt32BE(k * 81 + 8);
+          n += 1;
+        }
+        // the quicker card's own account of it: what was put on in this tap
+        if (QUICK && n > 0) { const e = logEntry(); e.loaded = stop((e.loaded || 0) + put); e.loads = Math.min(255, (e.loads || 0) + n); }
+        return stored + '9000';
       }
       case 0x31: {
         if (s.locked) return '6986';
@@ -427,7 +486,19 @@ function makeCard(opts) {
         if (!s.record.set) return '6a8c';
         const message = Buffer.concat([ascii('FoxyCard/time'), data.subarray(0, 4)]);
         if (!p256Verify(s.record.timeKey, message, hex(data.subarray(5)))) return '6a93';
-        if (data.readUInt32BE(0) > s.now) s.now = data.readUInt32BE(0);
+        /* Told again in one time in the field, more than two minutes past where the first telling left the clock: not
+         * refused, and written down, once for this time in the field. It begins no entry in the log (no PIN is needed
+         * here, and marks would push the taps out of the ring): the count of marked things goes up, the tap's entry is
+         * marked if it has one, and if it gets one later (`logEntry`). */
+        const told = data.readUInt32BE(0);
+        const jumped = QUICK && s.timeTold && !s.timeMarked && s.timeFirst !== 0 && s.timeFirst + 120 <= 4294967295 && told > s.timeFirst + 120;
+        if (told > s.now) s.now = told;
+        if (QUICK && !s.timeTold) { s.timeTold = true; s.timeFirst = s.now; }
+        if (jumped) {
+          s.timeMarked = true;
+          s.log.tampers = stop(s.log.tampers + 1);
+          if (s.tapOpen) logEntry().flags |= 4;
+        }
         return u32(s.now) + '9000';
       }
       case 0x40: {
@@ -519,7 +590,7 @@ function makeCard(opts) {
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.all = null; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* It leaves as it answers the `nth` command of this instruction: the card has done what was asked, and nobody hears. */

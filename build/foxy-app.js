@@ -18233,8 +18233,9 @@ class Component extends DCLogic {
     /* A card made to wait by its own limit on one tap (08a-flashcard.js,
      * `cardWaitSigns`): how long is left, counted down as the card says. */
     if (p && p.step === 'waiting') {
+      // how long it will be is the card's to know and it does not say (that would say what its limit is): how long it has been
       const s = Math.max(1, Math.round(Number(p.seconds) || 0));
-      return 'Over the card\u2019s per tap limit. Keep holding: ' + s + (s === 1 ? ' second' : ' seconds');
+      return 'Over the card\u2019s per tap limit. Keep holding (' + s + ' s)';
     }
     const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
     if (!(i > 0 && n > 0)) return '';
@@ -18590,6 +18591,8 @@ class Component extends DCLogic {
    * some of it is used (a tap is ten seconds to the card), or the limit. */
   fcTapRefusal(e) {
     // a card whose limit on one tap is waited for: said as the wait it would be, and what can be taken instead
+    // the card does not say what its limit is to a till: only that this was too long to hold it for
+    if (e.paced && e.hidden) return 'To pay this the card would have to be held longer than a tap lasts. It has a per tap limit: take it in smaller parts.';
     if (e.paced) {
       return 'To pay this the card would have to be held for ' + e.wait + ' seconds, which is longer than a tap lasts. Its per tap limit is '
         + this.fcBoth(e.limit) + ': take ' + this.fcBoth(e.left) + ' or less at a time.';
@@ -19291,6 +19294,9 @@ class Component extends DCLogic {
       tap: card.tap || null,
       // the card's own log, where this phone is its owner and the card keeps one: counts, the last eight taps, what is new
       log: card.log || null,
+      // its receipts, as this phone has them: { count, list, fresh }; and how far its clock is ahead of this phone's, in seconds
+      receipts: card.receipts || null,
+      clockAhead: Math.round(Number(card.clockAhead) || 0),
       owner: !!(card.info && card.info.owner),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
@@ -19776,29 +19782,74 @@ class Component extends DCLogic {
    * three times or more inside ten seconds, which a terminal that keeps to the
    * limits never does once: that tap is marked. */
   fcLogCard() {
-    const log = (this.state.fc || {}).log;
+    const fc = this.state.fc || {};
+    const log = fc.log;
     if (!log || !log.last) return;
-    const marked = log.last.some((x) => x.tamper);
+    const refusals = log.last.some((x) => x.tamper);
+    const counted = !refusals && !!log.since && log.since.tampers > 0;
+    const clock = log.last.some((x) => x.clock) || fc.clockAhead > 0 || counted;
+    const marked = refusals || clock;
     const n = (count, one, many) => count + ' ' + (count === 1 ? one : many);
     // in dollars, at the price now: the card keeps sats and knows no price
-    const line = (x) => this.fcWhen(x.time) + ': ' + this.fcPrice(x.sats)
-      + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : '')
-      + (x.waited ? ', over the per tap limit' : '')
-      + (x.refused ? ', ' + x.refused + ' refused' : '') + (x.tamper ? ' \u2014 TAMPER' : '');
+    const line = (x) => {
+      const said = [];
+      const put = x.loaded > 0 || x.loads > 0;
+      // what it signed for (which is the pieces, and may be more than the price), unless the tap only put money on
+      if (x.sats > 0 || x.pieces > 0 || !put) said.push(this.fcPrice(x.sats) + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : ''));
+      if (put) said.push(this.fcPrice(x.loaded) + ' put on');
+      if (x.waited) said.push('over the per tap limit');
+      if (x.refused) said.push(x.refused + ' refused');
+      return this.fcWhen(x.time) + ': ' + said.join(', ')
+        + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '');
+    };
     const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
       ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.since.sats) + ' signed for'
         + (log.since.refused > 0 ? ', ' + log.since.refused + ' refused' : '') + '.\n\n'
       : '';
-    this.blockedCard('fc-log', {
+    const ahead = fc.clockAhead > 0
+      ? 'This card’s clock is ' + this.fcSpan(fc.clockAhead) + ' ahead of this phone’s: it has been told a time that had not come. Its daily limit cannot be relied on.\n\n'
+      : '';
+    const receipts = fc.receipts && fc.receipts.count > 0
+      ? '\n\nReceipts kept on this phone: ' + fc.receipts.list.length + ' of ' + n(fc.receipts.count, 'payment', 'payments')
+        + '. Each names the swap its money went into, which can be matched to the wallet that took it.'
+      : '';
+    this.blockedCard('fc-log', Object.assign({
       long: true,
-      tone: marked ? 'warn' : 'ask', title: marked ? 'TAMPER ON THIS CARD' : 'THIS CARD\u2019S OWN LOG',
-      reason: (marked ? 'A terminal asked this card for more than its limit allows, three times or more within ten seconds. The card refused each time and wrote it down.\n\n' : '')
+      tone: marked ? 'warn' : 'ask', title: marked ? 'TAMPER ON THIS CARD' : 'THIS CARD’S OWN LOG',
+      reason: (refusals ? 'A terminal asked this card for more than its limit allows, three times or more within ten seconds. The card refused each time and wrote it down.\n\n' : '')
+        + ((log.last.some((x) => x.clock) || counted) ? 'A terminal told this card the time twice in one tap, more than two minutes apart. No phone’s clock does that: it is how a daily limit is got round.\n\n' : '')
+        + ahead
         + 'Kept by the card itself. No phone or terminal can change it.\n\n' + since
         + log.last.map(line).join('\n')
         + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.sats) + ' signed for, ' + log.refused + ' refused.'
-        + (((this.px && this.px()) || 0) > 0 ? '\n\nIn dollars at the price now.' : ''),
+        + (((this.px && this.px()) || 0) > 0 ? '\n\nIn dollars at the price now.' : '')
+        + receipts,
       shut: { label: 'CLOSE' },
-    });
+    }, receipts ? { retry: 'COPY RECEIPTS', go: () => this.fcCopyReceipts() } : {}));
+  }
+
+  /* A length of time in words, for how far a clock is out. */
+  fcSpan(seconds) {
+    const s = Math.max(0, Math.round(Number(seconds) || 0));
+    if (s < 5400) return Math.max(1, Math.round(s / 60)) + ' minutes';
+    if (s < 172800) return Math.round(s / 3600) + ' hours';
+    return Math.round(s / 86400) + ' days';
+  }
+
+  /* The card's receipts as text, for whoever has to be shown them: the card,
+   * and for each payment its number, when (the card's clock, in UTC), what
+   * the pieces were worth in sats, the hash of what the card signed, and the
+   * first output of the swap it went into. */
+  fcCopyReceipts() {
+    const fc = this.state.fc || {};
+    const W = this.fcW();
+    const list = (W && W.cardReceipts) ? W.cardReceipts(fc.key) : [];
+    if (!list.length) { this.toast('No receipts to copy.', true); return; }
+    const text = ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, by the card’s clock), sats, sha256 of the message signed, first output (B_)']
+      .concat(list.map((r) => '#' + r.n + ', ' + new Date(r.time * 1000).toISOString().replace('.000Z', 'Z') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
+      .join('\n');
+    const copied = this.copySecret ? this.copySecret(text) : false;
+    this.toast(copied ? 'Receipts copied.' : 'Could not copy the receipts.', !copied);
   }
 
   /* CHANGE LIMIT. */
@@ -20251,10 +20302,16 @@ class Component extends DCLogic {
     if (on && log && log.last && log.last.length) {
       const marked = log.last.filter((x) => x.tamper);
       const tried = marked.reduce((n, x) => n + (Number(x.refused) || 0), 0);
+      // a false time: the card saw it (told twice in a tap, far apart), or this phone does (the card's clock is ahead of its own)
+      // (a mark made in a tap that signed for nothing is in the card's count of marked things and in no entry: new since this phone last looked)
+      const falseTime = log.last.some((x) => x.clock) || fc.clockAhead > 0 || (!marked.length && !!log.since && log.since.tampers > 0);
+      const lastTap = log.last[0];
       notes.push({
         text: marked.length
           ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
-          : 'Last tap: ' + this.fcPrice(log.last[0].sats) + ', ' + this.fcWhen(log.last[0].time) + '. Press here for this card\u2019s own log.',
+          : falseTime ? 'TAMPER: this card has been told a false time. Press here.'
+          : 'Last tap: ' + ((lastTap.sats > 0 || !(lastTap.loaded > 0)) ? this.fcPrice(lastTap.sats) : this.fcPrice(lastTap.loaded) + ' put on')
+            + ', ' + this.fcWhen(lastTap.time) + '. Press here for this card\u2019s own log.',
         tap: () => this.fcLogCard(),
       });
     }
@@ -20358,6 +20415,8 @@ class Component extends DCLogic {
       fcLimitLine: !(fc && fc.hasRecord) ? ''
         : (limited && tapped) ? 'PER TAP ' + this.fcPrice(fc.tap.limit) + ' \u00b7 DAILY ' + this.fcPrice(day.limit)
         : tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit)
+        // another phone's card says its daily limit and keeps its per tap limit to its owner: it is not said to have none
+        : (fc.tap && fc.tap.paced && fc.ownedHere !== true) ? (limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO DAILY LIMIT')
         : limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT',
       // under the balance, where there is a limit: what the day has left, and when it turns
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,

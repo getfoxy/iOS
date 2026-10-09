@@ -1691,6 +1691,29 @@ A card with the newer software, set up and loaded by this build. An older card
 11. The card's own log (23c-3) counts each payment once, with the number of
     pieces it was made of.
 
+#### 23c-5. Software 1.6: speed, the hidden limit, receipts, a false time
+
+1. **Speed.** Time a payment of many pieces from card found to the tick, and a
+   whole card taken off. The log's `card: signed in` line says what each part
+   took: note the milliseconds for the pieces (it was 79 a piece) and for the
+   outputs. A load of thirty pieces: note the time (it was about 60 ms a piece).
+2. **The limit is hidden.** Set a per tap limit on the holder's phone. Read
+   the card on a second phone (FLASHCARD in its menu). **Pass:** it shows the
+   daily limit or `NO DAILY LIMIT`, and no per tap limit.
+3. Charge it over the limit on the second phone. **Pass:** `Over the card's per
+   tap limit. Keep holding (N s)`, counting up, then PAYMENT RECEIVED.
+4. Charge it far over the limit. **Pass:** after about forty seconds the till
+   gives up and says to take it in smaller parts; nothing is taken.
+5. **Receipts.** Pay with the card a few times, then read it on the holder's
+   phone and open its log. **Pass:** `Receipts kept on this phone: N of N
+   payments`, and COPY RECEIPTS copies one line a payment. On the second
+   phone the card has no log line at all.
+6. **What was put on.** The log's lines say `put on` for the loads.
+7. **A false time.** Set a second phone's clock a day ahead by hand, and read
+   the card on it. Then read the card on the holder's phone. **Pass:** `TAMPER:
+   this card has been told a false time`, and the log says the card's clock is
+   about a day ahead of this phone's. (Put the second phone's clock back.)
+
 #### 23d. What a card cannot be made to do
 
 1. With the card blocked (23c), read it on the holder's phone. **Pass:** the
