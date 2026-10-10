@@ -86,10 +86,11 @@ function makeCard(opts) {
   const COSTED = SHAPED && o.software !== 13;
   const HEADERS = COSTED && o.software !== 14;
   const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? 15 : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
-  /* The least work a block header must show (the applet's FLOOR_BITS, 0x1800FFFF: a target of 2^184), as `bits`. A test that
+  /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
+   * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
    * of a hash); the card of the tests is the real one unless it is asked. */
-  const FLOOR_BITS = o.floorBits === undefined ? 0x1800FFFF : (Number(o.floorBits) >>> 0);
+  const FLOOR_BITS = o.floorBits === undefined ? 0x17087BC0 : (Number(o.floorBits) >>> 0);
   const TOP = (1n << 256n) - 1n;
   /* The target a header's `bits` name (the applet's `targetOf`): the three-byte mantissa placed `exponent` bytes up from the
    * bottom. `bits` is the header's four bytes read as a little-endian number, so the exponent is the top byte. null for a
