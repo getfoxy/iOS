@@ -291,6 +291,11 @@ function representative() {
                        last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }].concat(LOG.last) };
   add('flashcard, a card with its own log', at('flashcard', { fc: FC({ tap: TAP, log: LOG }) }, { wallet: CARDS() }));
   add('flashcard, a card whose log has a tap marked as a tamper', at('flashcard', { fc: FC({ tap: TAP, log: LOG_MARKED }) }, { wallet: CARDS() }));
+  // the change this card made for itself (software 1.12) that no till has handed back, as its owner's read left it: a line for each state it is in
+  const OWES = (parts) => ({ sats: parts.reduce((n, p) => n + p.sats, 0), parts });
+  add('flashcard, change a till never handed over, fetched and put on', at('flashcard', { fc: FC({ owes: OWES([{ state: 'put', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
+  add('flashcard, change the till has not made yet', at('flashcard', { fc: FC({ owes: OWES([{ state: 'unmade', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
+  add('flashcard, change owed in two states, under the limits', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP, owes: OWES([{ state: 'put', sats: 280, count: 3 }, { state: 'unmade', sats: 112, count: 2 }]) }) }, { wallet: CARDS() }));
   add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));

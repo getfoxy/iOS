@@ -1889,6 +1889,20 @@
     return { id: String(s.id), amount: Number(String(s.amount)), C_: String(s.C_).toLowerCase(), dleq: d };
   }
 
+  /* The signatures the mint has already given for some blinded messages, asked for by them (NUT-09 restore): by blinded
+   * message, in the form `cardSigOf` keeps. `outs`: [{ amount, B_, id }], `id` the keyset's whole name. The mint answers
+   * the outputs it knows and no others (an output it never signed is not in the answer), and an answer is paired to its
+   * blinded message by what the mint says it is for. Rejects where the mint does not answer in half a minute. */
+  function cardRestoreSigs(w, outs, label) {
+    var CT = window.CashuTS;
+    var asked = outs.map(function (o) { return { amount: CT.Amount.from(o.amount), B_: o.B_, id: o.id }; });
+    return withTimeout(Promise.resolve(w.mint.restore({ outputs: asked })), 30000, label).then(function (res) {
+      var back = (res && res.outputs) || [], list = (res && res.signatures) || [], sigs = {};
+      back.forEach(function (o, i) { if (o && o.B_ && list[i]) sigs[String(o.B_).toLowerCase()] = cardSigOf(list[i]); });
+      return sigs;
+    });
+  }
+
   /* The card's own change of a payment the mint has swapped, owed to it. Where the
    * swap's answer was there it is done already (`cardSwapFixed`). Where the answer
    * was lost and found after, the mint is asked for the signatures by the blinded
@@ -1905,11 +1919,8 @@
     var w;
     try { w = need(); } catch (e0) { return Promise.reject(e0); }
     if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
-    var CT = window.CashuTS;
-    var outs = spec.change.outs.map(function (o) { return { amount: CT.Amount.from(o.amount), B_: o.B_, id: spec.keyset }; });
-    return withTimeout(Promise.resolve(w.mint.restore({ outputs: outs })), 30000, 'the mint’s word on the card’s change').then(function (res) {
-      var back = (res && res.outputs) || [], list = (res && res.signatures) || [], sigs = {};
-      back.forEach(function (o, i) { if (o && o.B_ && list[i]) sigs[String(o.B_).toLowerCase()] = cardSigOf(list[i]); });
+    var outs = spec.change.outs.map(function (o) { return { amount: o.amount, B_: o.B_, id: spec.keyset }; });
+    return cardRestoreSigs(w, outs, 'the mint’s word on the card’s change').then(function (sigs) {
       var made = cardBlindRow(spec, sigs, w);
       if (!made) throw cardError('waiting', 'The mint has not said what it signed for the card’s change yet.', { id: row.id });
       var ours = made.id;
@@ -1942,9 +1953,13 @@
    *
    * A row of the card's own change (`blind`) is finished here from the card's
    * openings, read once for all of them (`cardBlindPieces`). One that cannot be
-   * finished (`stuck`) is kept, marked, and left out of what is owed. */
-  function cardWriteOwed(t, card, progress) {
-    var mine = cardStore(CARD_OWED).filter(function (r) { return r && r.card === card.key && !r.stuck; });
+   * finished (`stuck`) is kept, marked, and left out of what is owed.
+   *
+   * `only`, where given, is the ids of the rows to write and no others (the owner's
+   * phone, writing the change it fetched: `cardOwnerChange`), and `known` the
+   * card's openings where they have been read in this tap already. */
+  function cardWriteOwed(t, card, progress, only, known) {
+    var mine = cardStore(CARD_OWED).filter(function (r) { return r && r.card === card.key && !r.stuck && (!Array.isArray(only) || only.indexOf(r.id) >= 0); });
     if (!mine.length) return Promise.resolve({ sats: 0, back: 0, change: 0, refund: 0, done: [], left: [] });
     /* What is on the card already, by nonce, where the read gave nonces. A
      * short read gives none: then the card itself says which pieces it
@@ -1958,7 +1973,7 @@
       if (row.blind) { toWrite += row.blind.length; return; }
       try { cardPiecesOf(row.token, card).forEach(function (piece) { if (!onCard[piece.nonce]) toWrite += 1; }); } catch (e) {}
     });
-    var openings = null;
+    var openings = Array.isArray(known) ? known : null;
     var openingsOf = function () {
       if (openings) return Promise.resolve(openings);
       return cardOpenings(t).then(function (list) { openings = list; return list; });
@@ -2048,6 +2063,8 @@
             // written: marked on the token's own note, so it is never taken for one that was not (`cardAdopt`). A payment put back has no note, nor has the card's own change
             if (row.kind !== 'putback' && !row.blind) { try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x0) {} }
             if (row.kind === 'change' && row.forHash) { try { amendTx(row.forHash, { changeState: 'given back', changeKept: true }); } catch (x) {} }
+            // change this phone fetched for a payment it does not know the entry of (`cardOwnerChange`)
+            else if (row.fetched) { try { cardFetchedNote(row); } catch (x2) {} }
           }, function (e) { stopped = e; left.push(row.id); });
         }, function (e) { stopped = e; left.push(row.id); });
       });
@@ -2063,6 +2080,340 @@
       var why = stopped || misfit;
       return { sats: sats, back: back, change: change, refund: refund, done: done, left: left, why: why ? (why.card || 'refused') : '' };
     });
+  }
+
+  /* ---- change a till never handed over (software 1.12; the card's owner finishes it) -----
+   *
+   * A till that owes a card's change finishes the pieces at the second tap, from the
+   * card's openings and the signatures it kept (`cardWriteOwed`). One that never taps
+   * the card again (its phone died, or it was simply never held to the card a second
+   * time) leaves them. The change is at the mint all the same, locked to the card's key,
+   * so that nobody but the card can spend it, and the card still has what each piece is
+   * made of until the piece is written back. So the card's owner finishes it, with no
+   * help from the till:
+   *
+   *   1. the openings are read from the card (`GET_CHANGE`, no PIN);
+   *   2. each makes the blinded message it was (`cardOpeningB`);
+   *   3. the mint is asked for the signatures it already gave for them (NUT-09 restore,
+   *      `cardRestoreSigs`), which it keeps for every output it has signed;
+   *   4. what comes back is kept as the row the till would have kept (`cardBlindRow`,
+   *      marked `fetched`), before anything else is done with it;
+   *   5. and written onto the card in the same tap, with the owner's grant and no PIN, if
+   *      the tap allows (`cardWriteOwed`: the blinding taken off, the DLEQ checked, three
+   *      pieces to a command), the card letting each opening go as its piece lands.
+   *
+   * What the mint has not signed is still an opening, and nothing can be done for it from
+   * here: the till never made the swap, the holder's money is in the pieces the card
+   * burned, and the take-back by the refund key brings them home after their date. It
+   * is said as that (`unmade`). What this phone owes already, as the till (a row of
+   * `blind` for the same outputs), is the till's to finish, as before.
+   *
+   * The wait on the mint is what the card can be held for: a tap that cannot wait goes
+   * on, the answer is kept when it comes (the row is filed whenever the mint says), and the
+   * next tap of its owner writes it. */
+  var CARD_FETCH_WAIT = 15000;
+  // the mint's word on a card's openings while it is being asked, by card and the blinded messages: a second asking joins the first
+  var cardFetches = {};
+  var CARD_OWES_ORDER = ['put', 'fetched', 'fetching', 'unmade', 'offline', 'away', 'silent', 'stuck'];
+
+  /* Which of a card's openings this phone has an answer for already, and which not: each as { op, B_ }, by
+   *   `stuck`  a row of the change kept as one that cannot be finished (`cardWriteOwed`);
+   *   `here`   a row of it, owed to the card, to be written (the till's own, or fetched earlier);
+   *   `ask`    nothing: the mint is asked;
+   *   `bad`    an opening that is not a blinded message at all. */
+  function cardOwesPlan(card, openings) {
+    var by = {};
+    cardStore(CARD_OWED).forEach(function (r) {
+      if (!r || r.card !== card.key || !Array.isArray(r.blind)) return;
+      r.blind.forEach(function (b) { if (b && b.B_) by[String(b.B_).toLowerCase()] = r; });
+    });
+    var plan = /** @type {{ stuck: any[], here: any[], ask: any[], bad: any[] }} */ ({ stuck: [], here: [], ask: [], bad: [] });
+    openings.forEach(function (op) {
+      var item = /** @type {any} */ ({ op: op, B_: cardOpeningB(card, op), state: '', row: null });
+      if (!item.B_) { plan.bad.push(item); return; }
+      var row = by[item.B_.toLowerCase()];
+      if (!row) { plan.ask.push(item); return; }
+      item.row = row;
+      (row.stuck ? plan.stuck : plan.here).push(item);
+    });
+    return plan;
+  }
+
+  /* Why the mint cannot be asked from here, or '': there is no road to it, or the card is at another one. */
+  function cardFetchBar(card) {
+    var w = wallet;
+    if (!w || !routeOpen()) return 'offline';
+    if (!card.record || canonicalMint(card.record.mint) !== mintOf(w)) return 'away';
+    return '';
+  }
+
+  /* The mint asked for its signatures on openings: Resolves { rows, unmade, blocked }, `rows` being the rows of change to be
+   * written (not filed: `cardFetching` does that), `unmade` the openings the mint has not signed, and `blocked` those that
+   * cannot be finished from here ({ item, why }: the card's keyset is none of this mint's, or its keys for the size are not
+   * to be had). A keyset this mint no longer signs with is loaded first, as its keys are needed to take the blinding off. */
+  function cardAskChange(w, card, items) {
+    var blocked = [], sendable = [], ids = {};
+    items.forEach(function (it) {
+      var id = cardFullId(w, it.op.keyset);
+      if (!id) { blocked.push({ item: it, why: 'keyset' }); return; }
+      it.id = id;
+      sendable.push(it);
+      ids[id] = true;
+    });
+    var missing = Object.keys(ids).filter(function (id) { return !keysetFor(w, id); });
+    var loaded = (missing.length && typeof w.ensureOperableKeysets === 'function')
+      ? withTimeout(Promise.resolve(w.ensureOperableKeysets(missing)), 20000, 'the keys of a card’s keyset').then(function () {}, function () {})
+      : Promise.resolve();
+    return loaded.then(function () {
+      sendable = sendable.filter(function (it) {
+        var ks = keysetFor(w, it.id);
+        if (ks && ks.keys && ks.keys[String(it.op.amount)]) return true;
+        blocked.push({ item: it, why: 'keys' });
+        return false;
+      });
+      if (!sendable.length) return { rows: [], unmade: [], blocked: blocked };
+      return cardRestoreSigs(w, sendable.map(function (it) { return { amount: it.op.amount, B_: it.B_, id: it.id }; }), 'the mint’s word on the change a card is owed').then(function (sigs) {
+        var groups = {}, unmade = [], rows = [];
+        sendable.forEach(function (it) {
+          var s = sigs[it.B_.toLowerCase()];
+          // the mint's answer for this blinded message, of this size and this keyset and no other
+          if (!s || satsOf(s.amount) !== it.op.amount || String(s.id).toLowerCase() !== it.id.toLowerCase()) { unmade.push(it); return; }
+          var k = it.id + '|' + it.op.date;
+          (groups[k] = groups[k] || []).push(it);
+        });
+        Object.keys(groups).forEach(function (k) {
+          var g = groups[k];
+          // as the till would have kept it: the outputs of one keyset and one date, with the mint's signature for each and its key for the size
+          var spec = { id: '', keyset: g[0].id, change: { card: card.key, mint: canonicalMint(mintOf(w)), date: g[0].op.date, forHash: '',
+                       outs: g.map(function (it) { return { amount: it.op.amount, B_: it.B_ }; }) } };
+          var row = cardBlindRow(spec, sigs, w);
+          if (!row) { g.forEach(function (it) { blocked.push({ item: it, why: 'keys' }); }); return; }
+          row.id = 'fetch-' + piecesFingerprint(row.blind.map(function (b) { return { secret: b.B_ }; }));
+          row.fetched = true;
+          rows.push(row);
+        });
+        return { rows: rows, unmade: unmade, blocked: blocked };
+      });
+    });
+  }
+
+  /* The rows fetched, filed as owed to the card before anyone is told of them. No output that is owed already is filed again
+   * (a second asking that landed first, or a set of openings that overlaps one asked after earlier): the signatures are the
+   * same, and a piece is written once. */
+  function cardFileFetched(rows) {
+    if (!rows.length) return;
+    var have = {};
+    cardStore(CARD_OWED).forEach(function (r) {
+      if (!r || !Array.isArray(r.blind)) return;
+      r.blind.forEach(function (b) { if (b && b.B_) have[String(b.B_).toLowerCase()] = true; });
+    });
+    var fresh = [];
+    rows.forEach(function (row) {
+      var keep = row.blind.filter(function (b) { return !have[String(b.B_).toLowerCase()]; });
+      if (!keep.length) return;
+      if (keep.length === row.blind.length) { fresh.push(row); return; }
+      fresh.push(Object.assign({}, row, { blind: keep, id: 'fetch-' + piecesFingerprint(keep.map(function (b) { return { secret: b.B_ }; })),
+                                          sats: keep.reduce(function (n, b) { return n + b.amount; }, 0) }));
+    });
+    if (!fresh.length) return;
+    mustSave(CARD_OWED, cardStore(CARD_OWED).concat(fresh));
+  }
+
+  /* The asking, once for each set of openings at a time, and its rows filed whenever the mint's word comes, in the tap that
+   * asked or after it. */
+  function cardFetching(w, card, items) {
+    var key = card.key + '|' + items.map(function (it) { return it.B_.toLowerCase(); }).sort().join(',');
+    if (cardFetches[key]) return cardFetches[key];
+    var asking = Promise.resolve().then(function () { return cardAskChange(w, card, items); }).then(function (r) {
+      delete cardFetches[key];
+      cardFileFetched(r.rows);
+      return r;
+    }, function (e) { delete cardFetches[key]; throw e; });
+    cardFetches[key] = asking;
+    return asking;
+  }
+
+  /* A promise's outcome within `ms`: { value }, { error } or { late } (still going), and never a rejection. The clock is
+   * stopped as soon as there is an outcome. */
+  function cardWithin(promise, ms) {
+    return new Promise(function (resolve) {
+      var timer = setTimeout(function () { resolve({ late: true }); }, ms);
+      promise.then(function (v) { clearTimeout(timer); resolve({ value: v }); }, function (e) { clearTimeout(timer); resolve({ error: e }); });
+    });
+  }
+
+  /* Where a card's openings stand, as the screen says it. `items` are { op, state }; the states, in the order they are
+   * said, are in CARD_OWES_ORDER: `put` (fetched and written in this tap), `fetched` (the signatures are here and the
+   * pieces are to go on), `fetching` (the mint has not answered yet), `unmade` (it has not signed them: the till has not
+   * made its swap), `offline` (no road to the mint), `away` (the card is at another mint), `silent` (the mint did not
+   * answer), `stuck` (cannot be finished). Answers { sats, count, parts: [{ state, sats, count }], wrote }. */
+  function cardOwesFrom(items, wrote) {
+    var by = {};
+    items.forEach(function (it) {
+      var x = by[it.state] = by[it.state] || { state: it.state, sats: 0, count: 0 };
+      x.sats += it.op.amount;
+      x.count += 1;
+    });
+    var parts = [];
+    CARD_OWES_ORDER.forEach(function (s) { if (by[s]) parts.push(by[s]); });
+    return { sats: items.reduce(function (n, it) { return n + it.op.amount; }, 0), count: items.length, parts: parts, wrote: wrote || 0 };
+  }
+
+  /* A card that lists no openings has had every piece written, by whoever got there first (the till, late, or another phone of
+   * its owner's), or has lost them. The rows this phone fetched for it that are still on file are settled as a write would settle
+   * them, with nothing put on the card, so that a line saying change is waiting to go on is not left standing for money that is
+   * on it. Resolves null: the card owes nothing. */
+  function cardFetchedStale(t, card, o) {
+    var ids = cardStore(CARD_OWED).filter(function (r) {
+      return r && r.card === card.key && r.fetched && !r.stuck && Array.isArray(r.blind);
+    }).map(function (r) { return r.id; });
+    if (!ids.length) return Promise.resolve(null);
+    return cardWriteOwed(t, card, o.progress, ids, []).then(function () { return null; }, function () { return null; });
+  }
+
+  /* The owner's phone, reading its card (`opts.mine`, the grant given): the openings are read, and the change a till has not
+   * handed over is fetched and, in this tap, put on. Resolves what `cardOwesFrom` says, with `wrote` (sats put on the card now)
+   * and, where the mint was still being asked as the tap went on, `later`: a promise of the same as it stands once it has
+   * answered. Null when the card has no openings. `opts.on` is told 'mint' while the mint is asked, and `opts.progress` of
+   * each piece written. Never rejects for the mint, nor for a card that leaves: those are what it says. */
+  function cardOwnerChange(t, card, opts) {
+    var o = opts || {};
+    var items = /** @type {any[]} */ ([]), openings = /** @type {any[]} */ ([]);
+    var later = /** @type {any} */ (null);
+    return cardOpenings(t).then(function (list) {
+      openings = list;
+      if (!list.length) return cardFetchedStale(t, card, o);
+      var plan = cardOwesPlan(card, list);
+      plan.stuck.concat(plan.bad).forEach(function (it) { it.state = 'stuck'; items.push(it); });
+      plan.here.forEach(function (it) { it.state = 'fetched'; items.push(it); });
+      var ask = plan.ask;
+      items = items.concat(ask);
+      var bar = ask.length ? cardFetchBar(card) : '';
+      if (bar) ask.forEach(function (it) { it.state = bar; });
+      var answered = Promise.resolve();
+      if (ask.length && !bar) {
+        try { if (typeof o.on === 'function') o.on('mint'); } catch (e) {}
+        // said on the sheet and the screen: what the card is being held for
+        try { if (typeof o.progress === 'function') o.progress({ step: 'fetching', sats: ask.reduce(function (n, it) { return n + it.op.amount; }, 0) }); } catch (e3) {}
+        console.log('[foxy] card: ' + ask.length + ' piece(s) of its change, ' + ask.reduce(function (n, it) { return n + it.op.amount; }, 0)
+          + ' sats, are not owed by this phone; the mint is asked what it signed for them');
+        var w;
+        try { w = need(); } catch (e0) { w = null; }
+        if (!w) {
+          ask.forEach(function (it) { it.state = 'offline'; });
+        } else {
+          var asking = cardFetching(w, card, ask);
+          // what the mint said, on the openings: a row (fetched), nothing (not made yet), or something that cannot be done from here
+          var apply = function (r) {
+            var rowOf = {}, why = {};
+            r.rows.forEach(function (row) { row.blind.forEach(function (b) { rowOf[String(b.B_).toLowerCase()] = row; }); });
+            r.blocked.forEach(function (x) { why[x.item.B_.toLowerCase()] = x.why; });
+            ask.forEach(function (it) {
+              var k = it.B_.toLowerCase();
+              if (rowOf[k]) { it.state = 'fetched'; it.row = rowOf[k]; }
+              else if (why[k]) { it.state = 'stuck'; it.why = why[k]; }
+              else it.state = 'unmade';
+            });
+            var made = r.rows.reduce(function (n, row) { return n + row.sats; }, 0), none = r.unmade.reduce(function (n, it) { return n + it.op.amount; }, 0);
+            console.log('[foxy] card: the mint signed ' + made + ' sats of the change the card is owed' + (none > 0 ? '; ' + none + ' sats it has not signed (the till has not made its swap)' : ''));
+          };
+          var wait = Number(FoxyWallet._cardFetchWait);
+          answered = cardWithin(asking, wait >= 0 ? wait : CARD_FETCH_WAIT).then(function (res) {
+            if (res.late) {
+              ask.forEach(function (it) { it.state = 'fetching'; });
+              // the answer is filed when it comes (`cardFetching`); what the screen says of it then is told after
+              later = asking.then(apply, function () { ask.forEach(function (it) { it.state = 'silent'; }); }).then(function () { return cardOwesFrom(items, 0); });
+              console.log('[foxy] card: the mint has not answered yet; its word on the card’s change is kept when it does, and the next tap puts it on');
+              return;
+            }
+            if (res.error) {
+              console.warn('[foxy] card: the mint would not say what it signed for the card’s change:', (res.error && res.error.message) || res.error);
+              ask.forEach(function (it) { it.state = 'silent'; });
+              return;
+            }
+            apply(res.value);
+          });
+        }
+      }
+      return answered.then(function () {
+        // what this phone fetched is put on the card in this tap: the owner's grant lets it, and the card is there
+        var ids = cardStore(CARD_OWED).filter(function (r) {
+          return r && r.card === card.key && r.fetched && !r.stuck && Array.isArray(r.blind);
+        }).map(function (r) { return r.id; });
+        var mine = items.filter(function (it) { return it.row && it.row.fetched && it.state === 'fetched'; });
+        if (!ids.length || !mine.length) return null;
+        try { if (typeof o.on === 'function') o.on('writing'); } catch (e2) {}
+        return cardWriteOwed(t, card, o.progress, ids, openings).then(function () {}, function (e) {
+          // the card left, or would not take it: the rows are still owed, and the next tap writes them
+          console.warn('[foxy] card: the change fetched for it could not be put on in this tap:', (e && e.message) || e);
+        });
+      }).then(function () {
+        /* Each opening by where its output stands now, in whatever row holds it: gone from the store is written; kept apart
+         * because it cannot be finished is stuck; otherwise it is still to go on. One that never had a row is as the mint left it. */
+        var byB = {};
+        cardStore(CARD_OWED).forEach(function (r) {
+          if (r && Array.isArray(r.blind)) r.blind.forEach(function (b) { if (b && b.B_) byB[String(b.B_).toLowerCase()] = r; });
+        });
+        items.forEach(function (it) {
+          if (!it.row) return;
+          var cur = byB[it.B_.toLowerCase()];
+          if (!cur) { if (it.row.fetched) it.state = 'put'; return; }
+          if (cur.stuck) it.state = 'stuck';
+        });
+        // what went on in this tap is what its openings were worth: the card listed each only while its piece was not on it
+        var wrote = items.reduce(function (n, it) { return it.state === 'put' ? n + it.op.amount : n; }, 0);
+        var owes = /** @type {any} */ (cardOwesFrom(items, wrote));
+        if (later) owes.later = later;
+        return owes;
+      });
+    });
+  }
+
+  /* The owner's read of a card, with its change finished (`opts.change` of `FoxyWallet.cardLook`): the card as read, with
+   * `owes` on it where it has openings, and, if change was put on it in this tap, the card as it now is. Never fails the read. */
+  function cardOwnerFinish(link, opts, card) {
+    var o = opts || {};
+    if (!(card && card.mine === true && card.info && card.info.ownChange && !card.info.locked && card.info.pin !== 'blocked')) return Promise.resolve(card);
+    var t = cardTalk(link);
+    return cardOwnerChange(t, card, o).then(function (owes) {
+      if (!owes) return card;
+      if (!(owes.wrote > 0)) { card.owes = owes; return card; }
+      // what is on the card now, for the screen: read again as it was, without the change
+      var again = Object.assign({}, o);
+      delete again.change;
+      return cardLook(link, again).then(function (fresh) {
+        fresh.owes = owes;
+        return fresh;
+      }, function () {
+        // gone as it was put on: the card as it was read, with what went on added to its balance
+        card.balance = (Number(card.balance) || 0) + owes.wrote;
+        card.owes = owes;
+        return card;
+      });
+    }, function (e) {
+      console.warn('[foxy] card: the change a till never handed over could not be looked into:', (e && e.message) || e);
+      return card;
+    });
+  }
+
+  /* The entries of this phone's own that were waiting for change, now that it has been fetched and put on the card. A payment
+   * this phone took as a till and lost the row of change for is the only one with an entry here; nothing says which payment a
+   * card's openings were for, so an entry is taken where the sums say so and not otherwise: the one whose change is what was
+   * written, or all of the card's that are waiting if together they are. Those with a row of their own still owed are left to it. */
+  function cardFetchedNote(row) {
+    var sats = Math.round(Number(row.sats) || 0);
+    var list = load(K.log, []);
+    var owedFor = {};
+    cardStore(CARD_OWED).forEach(function (r) { if (r && r.forHash) owedFor[r.forHash] = true; });
+    cardStore(CARD_DUE).forEach(function (d) { if (d && d.forHash) owedFor[d.forHash] = true; });
+    var waiting = (Array.isArray(list) ? list : []).filter(function (e) {
+      return e && e.dir === 'in' && e.card === row.card && e.changeState === 'not handed' && Number(e.changeSats) > 0 && !owedFor[e.hash];
+    });
+    // the list is newest first: the oldest entry that fits is the payment longest waiting
+    var exact = waiting.filter(function (e) { return Math.round(Number(e.changeSats)) === sats; });
+    var pick = exact.length ? exact.slice(-1)
+      : (waiting.length && waiting.reduce(function (n, e) { return n + Math.round(Number(e.changeSats)); }, 0) === sats ? waiting : []);
+    pick.forEach(function (e) { amendTx(e.hash, { changeState: 'given back', changeKept: true }); });
   }
 
   /* Ecash this phone made for this card that is not on file as owed to it.

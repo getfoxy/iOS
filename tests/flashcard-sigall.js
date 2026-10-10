@@ -661,7 +661,8 @@ async function world(feePpk, sats, make) {
     const which = uiCard(holder);
     ok(which && which.title === 'CHANGE LIMIT' && /straight away/.test(which.reason), 'CHANGE LIMIT says what the per tap limit is now: the most it pays straight away', which && which.reason);
     which.press('PER TAP LIMIT');
-    ok(/held 3 seconds longer/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason), 'and its warning says a larger payment waits, and that lifting the card stops it');
+    ok(/holds the card 3 seconds/.test(uiCard(holder).reason) && /3 seconds for every limit’s worth/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason),
+       'and its warning says a payment that makes change, or is over the limit, waits, and that lifting the card stops it');
     uiCard(holder).press('CONTINUE');
     holder.state.amount = '0.50';
     holder.state.unit = 'USD';

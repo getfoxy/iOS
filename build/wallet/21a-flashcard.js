@@ -25,9 +25,23 @@
     /* What a card says with no PIN (`cardLook`), after telling it the time.
      * `opts.mine`: also whether this phone is its owner (`card.mine`), for a
      * holder's own screen. Rejects with `card` on the error naming why:
-     * not-a-card, wrong-signer, gone. */
+     * not-a-card, wrong-signer, gone.
+     *
+     * `opts.change`, with `mine` and a card of software 1.12 or later whose owner
+     * this phone is: the change the card has made for itself and nobody has handed
+     * back is looked into as well (`cardOwnerChange`). Its openings are read; what
+     * this phone owes already is the till's to write; what it does not is fetched
+     * from the mint (NUT-09) and, in this tap, put on the card with the owner's
+     * grant. `card.owes` says where it stands: { sats, count, parts: [{ state, sats,
+     * count }], wrote, later }, and the card is read again if anything went on.
+     * `opts.on` is told 'mint' while the mint is asked and 'writing' as the pieces
+     * go on; `opts.progress` of what the card is held for ({ step: 'fetching' }) and of
+     * each piece written. A tap that cannot wait for the mint goes on (`_cardFetchWait`),
+     * and `owes.later` is a promise of the same once it has answered. */
     cardLook: function (link, opts) {
       return cardLook(link, opts).then(function (card) {
+        return (opts && opts.change) ? cardOwnerFinish(link, opts, card) : card;
+      }).then(function (card) {
         // a card this phone can take back: what is on it now is written down for the day it is lost
         var mine = cardsOnFile()[card.key];
         if (mine && mine.refundKey && mine.refundKey === card.record.refundKey) cardRemember(card, card.pieces, true);
@@ -536,6 +550,9 @@
         });
       }).then(function () { return FoxyWallet.cardLook(link); });
     },
+
+    // how long an owner's tap waits for the mint's word on the change a card is owed, in milliseconds; the suites set it short
+    _cardFetchWait: CARD_FETCH_WAIT,
 
     /* What is waiting to be written onto cards: [{ id, card, sats, kind, mint }]. Not what cannot be: a card's
      * own change (1.12) that its card no longer has the means to finish (`cardStuck`) is kept, and not promised. */

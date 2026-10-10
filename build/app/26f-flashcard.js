@@ -242,6 +242,8 @@
       if (p.want > 0 && p.sum >= 2 * p.want) return 'Paying from a larger piece. Keep holding (' + s + ' s)';
       return 'Over the card\u2019s per tap limit. Keep holding (' + s + ' s)';
     }
+    // the card is owed change that no till has handed back, and the mint is being asked for it (08a-flashcard.js, `cardOwnerChange`)
+    if (p && p.step === 'fetching') return 'Asking the mint for the change this card is owed. Keep holding';
     const i = Math.round(Number(p && p.i)), n = Math.round(Number(p && p.n));
     if (!(i > 0 && n > 0)) return '';
     // a card that signs once for a payment has no pieces to count
@@ -1274,13 +1276,25 @@
 
   /* ---- MENU > FLASHCARD: reading a card ---------------------------------- */
 
-  /* `open`: the card's screen is opened by what is read (the menu's way in). */
+  /* `open`: the card's screen is opened by what is read (the menu's way in).
+   *
+   * The owner's read also looks into the change the card has made for itself and no till has handed
+   * back (`change`, 08a-flashcard.js `cardOwnerChange`): fetched from the mint, and put on the card
+   * in this tap when there is any, with the sheet saying so. */
   fcRead(open) {
     const W = this.fcW();
     if (!W) return;
     // with the price, so that a limit this phone set in dollars is kept at those dollars (08a-flashcard.js, `cardLook`)
-    this.fcTap({}, (link) => W.cardLook(link, { mine: true, price: (this.px && this.px()) || 0 }))
-      .then((card) => this.fcShow(card, open), (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
+    this.fcTap({}, (link, on, progress) => W.cardLook(link, { mine: true, price: (this.px && this.px()) || 0, change: true, on, progress })
+      .then((card) => {
+        if (card && card.owes && card.owes.wrote > 0) link.doneText = 'Done. ' + this.fcSats(card.owes.wrote) + ' of change is back on the card.';
+        return card;
+      }))
+      .then((card) => {
+        this.fcShow(card, open);
+        // change a till never handed over has been fetched and put on: said in passing, as change put back always is
+        if (card && card.owes && card.owes.wrote > 0) { this.haptic && this.haptic('success'); this.refreshBalance(); this.loadHistory(); }
+      }, (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
   /* What a card said, kept for the screen. Only on the FLASHCARD screen, or
@@ -1321,10 +1335,36 @@
       design: String(card.design || ''),
       // what it holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those
       above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
+      // the change it made for itself that no till has handed back, as its owner's read left it (08a-flashcard.js, `cardOwnerChange`)
+      owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { sats: card.owes.sats, parts: card.owes.parts } : null,
     } });
+    this.fcOwesLater(card);
     if ((card.pieces || []).length) this.fcCheck(card);
     // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
     if (W && W.cardOwedCheck) W.cardOwedCheck(card).then((gone) => { if (gone) this.forceUpdate(); }, () => {});
+  }
+
+  /* What the line under the balance says of the change the card is owed (`fc.owes`), by where it stands. */
+  FC_OWES = {
+    put: 'FETCHED AND PUT ON',
+    fetched: 'FETCHED, WAITING TO GO ON',
+    fetching: 'BEING FETCHED',
+    unmade: 'NOT YET MADE BY THE TILL',
+    offline: 'NO CONNECTION TO FETCH IT',
+    away: 'AT ANOTHER MINT',
+    silent: 'THE MINT DID NOT ANSWER',
+    stuck: 'CANNOT BE FINISHED',
+  };
+
+  /* The mint was still being asked for the card's change when its owner's tap went on: when it has answered, the line
+   * says where that stands (what was fetched is owed to the card and goes on at the next tap), if it is the card on show. */
+  fcOwesLater(card) {
+    const later = card && card.owes && card.owes.later;
+    if (!later || typeof later.then !== 'function') return;
+    later.then((o) => {
+      if (!o || !o.parts || !this.state.fc || this.state.fc.key !== card.key || this._fcCard !== card) return;
+      this.setState({ fc: Object.assign({}, this.state.fc, { owes: { sats: o.sats, parts: o.parts } }) });
+    }, () => {});
   }
 
   /* The mint's word on what the card says it holds. A card is a list of
@@ -2427,6 +2467,10 @@
       : fc.checkedAt ? ['Verified ' + this.fcAgo(nowMs - fc.checkedAt), DIMMED]
       : ['Not Verified', AMBER];
 
+    /* Under the limits: the change this card made for itself that no till has handed back (software 1.12), what it comes to and
+     * where it stands, one line for each state it is in. Dollars first and the sats after, as the balance is. */
+    const owes = (on && fc && fc.owes && fc.owes.parts) || [];
+
     const px = this.px ? this.px() : 0;
     return {
       isFlashcard: on,
@@ -2466,6 +2510,9 @@
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,
       fcAboveLine: (fc && fc.above > 0) ? this.fcPrice(fc.above).toUpperCase() + ' IN PIECES ABOVE THE LIMIT \u00b7 A TILL HOLDS LONGER FOR THOSE' : '',
+      // and under those, the change it is owed
+      fcOwesShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0,
+      fcOwesLines: owes.map((p) => ({ text: 'CHANGE OWED TO THIS CARD \u00b7 ' + this.fcBoth(p.sats) + ' \u2014 ' + (this.FC_OWES[p.state] || '') })),
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // what has been done with this card, on this phone: only for a card that is one (it has a key and a record)

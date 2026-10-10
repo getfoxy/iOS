@@ -1250,6 +1250,120 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(g.FC_HOLD_MS === 150000, 'the longest a confirmation waits for a change tap is two and a half minutes');
   }
 
+  /* ---- the change a till never handed over, on its owner's screen ----------------------------------------------------------
+   * A card of software 1.12 makes a payment's change itself; if its till never taps it again, its owner's phone fetches the change
+   * from the mint and puts it on (tests/flashcard-owed.js has the wallet's side). The FLASHCARD screen says so in one line under the
+   * balance, in dollars first and the sats after, for each state the change is in. */
+  {
+    const { makeCard } = require('./flashcard-card');
+    const offline = (W) => W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
+    const online = (W) => W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    const lines = (a) => vals(a).fcOwesLines.map((l) => l.text);
+    const OH = await funded({}, 9000);
+    const T1 = await funded({ sharedMint: OH.mint, words: OTHER_WORDS }, 0);
+    const T2 = await funded({ sharedMint: OH.mint, words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' }, 0);
+    const owner = appOn(OH);
+    owner.price = 100000;                     // a dollar is 1,000 sats
+    await owner.refreshBalance();
+    const oc = makeCard({ window: OH.window, format: 4 });
+    await OH.W.cardSetUp(oc, { pin: '1234' });
+    await binaryLoad(OH, oc, 2000);           // 1024 512 256 128 64 16: no exact set for 1000
+    const dies = (T) => T.storage.setItem('foxy.flashcard.owed', '[]');
+    const open = () => oc.state.openings.filter((x) => x.state === 'pending').reduce((n, x) => n + x.amount, 0);
+    const readIt = async () => {
+      OH.nfc = oc;
+      owner.setState({ fc: null });
+      owner.fcRead(true);
+      await until('the card to be read', () => !!owner.state.fc);
+    };
+
+    // nothing owed: no line
+    await readIt();
+    ok(vals(owner).fcOwesShown === false && lines(owner).length === 0 && owner.state.fc.owes === null, 'a card with no openings has no line about change');
+
+    // a till that dies: the owner’s read fetches the change and says so, and so does the phone’s sheet
+    oc.tap();
+    const paid = await T1.W.cardPay(oc, { sats: 1000, pin: '1234' });
+    dies(T1);
+    OH.sheet.length = 0;
+    await readIt();
+    await settle();
+    let v = vals(owner);
+    ok(v.fcOwesShown === true && lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · $0.28 (₿280) — FETCHED AND PUT ON' && owner.state.fc.balance === 1000,
+       'a till that never handed its change over: the owner’s screen says the 280 owed to the card, in dollars first and the sats after, were fetched and put on', lines(owner).join('|'));
+    ok(OH.sheet[OH.sheet.length - 1] === 'end: Done. ₿280 of change is back on the card.' && OH.sheet.indexOf('say: Keep the card there: asking the mint') >= 0 && OH.sheet.indexOf('say: Asking the mint for the change this card is owed. Keep holding') >= 0,
+       'and the phone’s sheet said the mint was being asked, and ends saying the change is back on the card', OH.sheet.filter((x) => /^(say|end):/.test(x)).slice(-4).join(' / '));
+    ok(paid.change.sats === 280 && open() === 0 && oc.balance() === 1000, 'the card holds it', String(oc.balance()));
+
+    // the till has not made its swap: not yet made
+    oc.tap();
+    T1.fate = (m) => (/\/v1\/swap$/.test(String(m.url || '')) ? '0\n' : null);
+    const lost = await T1.W.cardPay(oc, { sats: 300, pin: '1234' }).then(() => null, (e) => e);
+    T1.fate = null;
+    const owedLater = open();
+    ok(lost && lost.card === 'waiting' && owedLater > 0, 'a payment whose swap never reaches the mint leaves the card change to make', String(owedLater));
+    await readIt();
+    v = vals(owner);
+    ok(v.fcOwesShown === true && lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(owedLater) + ' — NOT YET MADE BY THE TILL' && owner.state.fc.balance === oc.balance(),
+       'a change the mint has not signed yet: NOT YET MADE BY THE TILL, with what is owed', lines(owner).join('|'));
+    owner.price = 0;
+    ok(lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · ₿' + owedLater + ' — NOT YET MADE BY THE TILL', 'and in sats alone where this phone has no price', lines(owner).join('|'));
+    owner.price = 100000;
+
+    // both at once: each state on a line of its own, in the order they are said
+    oc.tap();
+    const first = await T2.W.cardPay(oc, { sats: 100, pin: '1234' });
+    dies(T2);
+    const both = open();
+    const fetchedPart = both - owedLater;
+    ok(first.change && first.change.sats === fetchedPart && fetchedPart > 0, 'another till pays and dies too', String(fetchedPart));
+    await readIt();
+    ok(lines(owner).join('|') === ['CHANGE OWED TO THIS CARD · ' + owner.fcBoth(fetchedPart) + ' — FETCHED AND PUT ON',
+                                   'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(owedLater) + ' — NOT YET MADE BY THE TILL'].join('|'),
+       'two states at once: a line for each, what was put on first', lines(owner).join('|'));
+
+    // no connection
+    offline(OH.W);
+    await readIt();
+    ok(lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(owedLater) + ' — NO CONNECTION TO FETCH IT', 'with no connection it says so', lines(owner).join('|'));
+    online(OH.W);
+
+    // a mint that is slow: BEING FETCHED, and the line follows what the mint says when it does
+    const dead = await funded({ sharedMint: OH.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
+    oc.tap();
+    const third = await dead.W.cardPay(oc, { sats: 50, pin: '1234' });
+    dies(dead);
+    const slow = third.change.sats;
+    const real = OH.W._scanResult.bind(OH.W), held = [], ids = new Set();
+    OH.fate = (m) => { if (/\/v1\/restore$/.test(String(m.url || ''))) ids.add(m.id); return null; };
+    OH.W._scanResult = (id, text, err) => { if (ids.has(id)) { held.push([id, text, err]); return undefined; } return real(id, text, err); };
+    OH.W._cardFetchWait = 40;
+    const heldBalance = oc.balance();
+    await readIt();
+    const beingFetched = lines(owner);
+    // (which of the openings the mint has signed for and which not is its to say: all that are asked after are being fetched until it does)
+    ok(beingFetched.join('|') === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(owedLater + slow) + ' — BEING FETCHED' && oc.balance() === heldBalance,
+       'a mint that has not answered when the tap goes on: BEING FETCHED, for all that is asked after, and nothing written', beingFetched.join('|'));
+    OH.W._scanResult = real;
+    OH.fate = null;
+    held.splice(0).forEach((a) => real(a[0], a[1], a[2]));
+    await until('the line to follow the mint’s answer', () => lines(owner).some((l) => /FETCHED, WAITING TO GO ON$/.test(l)));
+    ok(lines(owner).join('|').indexOf('BEING FETCHED') < 0 && lines(owner).some((l) => l === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(slow) + ' — FETCHED, WAITING TO GO ON'),
+       'when the mint answers the line says it is fetched and waiting to go on', lines(owner).join('|'));
+    ok(vals(owner).fcNotes.some((n) => /is waiting to go onto this card/.test(n.text)) && OH.W.cardOwed().length === 1 && OH.W.cardOwed()[0].sats === slow,
+       'and it is among what this phone owes the card, as the line above the buttons says', vals(owner).fcNotes.map((n) => n.text).join(' | '));
+    // the line under the screen’s buttons: pressed, and the next tap puts it on, as change always has
+    OH.W._cardFetchWait = 15000;
+    OH.nfc = oc;
+    oc.tap();
+    oc.sent.length = 0;
+    vals(owner).fcNotes.filter((n) => /is waiting to go onto this card/.test(n.text))[0].tap();
+    await until('the change to be put on', () => OH.W.cardOwed().length === 0);
+    await settle();
+    ok(owner.toasts.some((t) => t === '₿' + slow + ' of change is back on the card.') && oc.balance() === heldBalance + slow && !oc.sent.some((a) => /^b040/.test(a)),
+       'pressed, the tap writes it with no PIN, and says the change is back on the card', owner.toasts.slice(-2).join(' | '));
+  }
+
   failed += until.failed;
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);

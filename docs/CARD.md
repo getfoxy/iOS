@@ -673,10 +673,43 @@ What it means for the holder:
   signatures by the blinded messages (NUT-09) when it finds the payment was made,
   and where the mint cannot say, notes it as due and asks again whenever it
   connects.
-- **If a till never hands the change over**, the card still has what each piece is
-  made of until the piece is written back, so the owner's phone can finish it by
-  asking the mint for the signatures (NUT-09) and unblinding them. That is not
-  built yet.
+- **If a till never hands the change over**, the card's owner fetches it. The change
+  is at the mint, locked to the card's key, so nobody can spend it but the card;
+  and the card still has what each piece is made of until the piece is written
+  back. So the owner's phone, reading the card on its FLASHCARD screen, reads the
+  openings too (`GET_CHANGE`, no PIN), makes the blinded message each one was, and
+  asks the mint for the signatures it already gave for them (NUT-09, `POST
+  /v1/restore`, which answers the outputs it knows and no others). What comes
+  back is kept as the row a till would have kept, before anything else is done
+  with it, and put on the card in the same tap with the owner's own grant and no
+  PIN: the blinding taken off, the DLEQ checked where the mint gave one, three
+  pieces to a command, and the card lets each opening go as its piece lands. The
+  sheet says `Keep the card there: asking the mint` and ends `Done. ₿280 of change
+  is back on the card.` Openings this phone owes itself (it was the till) are not
+  asked of the mint: it has the signatures, and the change tap finishes them as
+  before. A phone that is not the card's owner reads none of this.
+
+  The card's screen says where it stands, in one line under the balance for each
+  state the change is in, dollars first and the sats after: `CHANGE OWED TO THIS
+  CARD · $0.28 (₿280) —` **FETCHED AND PUT ON**; **FETCHED, WAITING TO GO ON** (the
+  card left, or the tap could not wait; the next read, or the line in the warning
+  colour, puts it on); **BEING FETCHED** (the mint had not answered when the tap
+  went on: the answer is kept when it comes, and the line follows it);
+  **NOT YET MADE BY THE TILL**; **NO CONNECTION TO FETCH IT**; **AT ANOTHER MINT**
+  (the mint to ask is the card's); **THE MINT DID NOT ANSWER**; and **CANNOT BE
+  FINISHED** (a signature that did not check out, kept apart as ever).
+
+  Not yet made is the case where the till signed (the card burned its pieces and
+  made its change) but never sent the swap, so the mint has signed nothing for the
+  card's outputs. Nothing can be done for those from here and they stay openings,
+  asked after again at every read; the holder's money is in the pieces the card
+  burned, which the take-back by the refund key brings home after their date on a
+  card that can be taken back, and which the till's swap finishes if it ever
+  comes. Whoever finishes first wins and nothing is written twice: the card
+  refuses a piece it already holds, and a till that taps afterwards finds the
+  pieces on the card and writes nothing. The wait on the mint is fifteen seconds;
+  a card is only to be held so long. What the mint learns is that something asked
+  after outputs it signed itself, from a circuit of its own.
 
 A card before 1.12 is paid as it always was, and the wait is by what its pieces
 come to (*The limit on one tap*).

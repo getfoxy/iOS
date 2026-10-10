@@ -96,6 +96,7 @@ check "pin pad"        1 node tests/pin-pad.js
 check "flashcard vectors" 1 node tests/flashcard-vectors.js
 check "flashcard model" 1 node tests/flashcard-model.js
 check "flashcard change" 1 node tests/flashcard-change.js
+check "flashcard owed change" 1 node tests/flashcard-owed.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
 check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js
 check "flashcard money" 1 node tests/flashcard-money.js
