@@ -171,7 +171,8 @@ async function at(mintKey, names, real) {
     ok('a daily limit on a card that has seen no block has a day with no start; a real block header, shown before the first payment, gives it one',
        before.limit === 1000000 && before.now === 0 && before.windowStart === 0 && told === '9000' && took === u32(TIP_TIME) + '9000'
        && seen.info.now === TIP_TIME && seen.info.windowStart === TIP_TIME && seen.record.headerHash === TIP_HASH && seen.day.turns === TIP_TIME + 86400,
-       'the clock was ' + before.now + ' and is ' + seen.info.now + ', the day begins at ' + seen.info.windowStart + ' and turns at ' + seen.day.turns);
+       'the clock was ' + before.now + ' and is ' + seen.info.now + ', the day begins at ' + seen.info.windowStart + ' and turns at ' + seen.day.turns
+       + ' (TELL_TIME answered ' + told + ', SET_HEADER ' + took + ')');
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 0 });
   }
