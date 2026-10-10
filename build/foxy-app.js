@@ -5644,12 +5644,20 @@ class Component extends DCLogic {
     /* With nothing to retry, CLOSE is the only thing to do — so it takes the
      * primary treatment rather than sitting there as a grey afterthought. */
     const alone = !(spec.retry && (spec.back || spec.go));
+    /* `shut.pill`: a second choice that is as much a choice as the first
+     * (CHANGE CARD LIMITS' DAILY LIMIT under PER TAP LIMIT), drawn as a button
+     * in the shape the confirmation's second button has, not as grey words. */
     const shut = alone
       ? el('height:60px;border-radius:30px;background:#F2802E;color:#fff;' +
            'display:flex;align-items:center;justify-content:center;font-size:20px;' +
            'font-weight:800;letter-spacing:0.02em;cursor:pointer')
-      : el('height:52px;display:flex;align-items:center;justify-content:center;' +
-           'font-size:18px;font-weight:800;color:rgba(245,241,236,.55);cursor:pointer');
+      : (spec.shut && spec.shut.pill)
+        ? el('height:60px;border-radius:30px;border:2px solid #2A2A2A;background:#101010;' +
+             'box-shadow:0 8px 18px rgba(0,0,0,.6);box-sizing:border-box;' +
+             'display:flex;align-items:center;justify-content:center;font-size:20px;' +
+             'font-weight:800;letter-spacing:0.02em;color:#F5F1EC;cursor:pointer')
+        : el('height:52px;display:flex;align-items:center;justify-content:center;' +
+             'font-size:18px;font-weight:800;color:rgba(245,241,236,.55);cursor:pointer');
     /* A card can name its second choice and give it something to do
      * (PAYING ANOTHER … USER's CONTINUE OVER LIGHTNING). Tapping outside the
      * card still only closes it. */
@@ -19496,12 +19504,15 @@ class Component extends DCLogic {
   }
 
   /* ---- a new card ----------------------------------------------------------
-   * A PIN, typed twice; a notice, once, that this phone becomes the card's owner
-   * and what that means; then whether a lost card's money can come back (while
+   * A PIN, typed twice; then whether a lost card's money can come back (while
    * FC_RECOVERABLE offers it); then one tap that writes the PIN, the record and,
-   * last, the owner. No limit is asked for or suggested: a new card has none, and
-   * one is set later from CHANGE LIMIT. The PIN is typed here, once, and never
-   * again to add funds. The mint is this phone's, shown and not chosen. */
+   * last, the owner; then home. Nothing is read between the PIN and the tap and
+   * nothing after it (a notice that this phone becomes the owner, and one that
+   * the card is cash, were two screens before a card that holds nothing; what
+   * they said is in docs/CARD.md). No limit is asked for or suggested: a new
+   * card has none, and one is set later from CHANGE LIMIT. The PIN is typed
+   * here, once, and never again to add funds. The mint is this phone's, shown
+   * and not chosen. */
   fcSetUp() {
     if (!this.state.fc) return;
     // no mint is asked: the card is told this phone's mint and given a key from this phone's words
@@ -19514,20 +19525,9 @@ class Component extends DCLogic {
       subtitle: 'So a mistyped digit does not become the card’s PIN.',
     }, (b) => {
       if (a !== b) { first('Those did not match. Start again.'); return; }
-      this.fcSetUpOwner(a);
+      if (this.FC_RECOVERABLE) this.fcSetUpKind(a); else this.fcSetUpRun(a, false);
     }));
     first('');
-  }
-
-  /* The one place that says what making this phone the owner means. */
-  fcSetUpOwner(pin) {
-    this.blockedCard('fc-owner', {
-      tone: 'ask', title: 'SET UP THIS CARD',
-      reason: 'This phone can reset this card’s PIN and limit. Whoever holds the card and this phone’s seed phrase holds its money.',
-      retry: 'CONTINUE',
-      go: () => { if (this.FC_RECOVERABLE) this.fcSetUpKind(pin); else this.fcSetUpRun(pin, false); },
-      shut: { label: 'CANCEL' },
-    });
   }
 
   fcSetUpRun(pin, recoverable) {
@@ -19536,19 +19536,9 @@ class Component extends DCLogic {
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        /* What cash means, said once, where the card becomes one: there is
-         * nobody to ask for it back. Its PIN is part of that. The card
-         * blocks itself for good after three wrong ones in a row, and what
-         * is on a blocked cash card can be spent by nobody but this phone,
-         * which can unblock it. */
-        this.blockedCard('fc-ready', {
-          tone: 'ask', title: 'THE CARD IS READY',
-          reason: recoverable
-            ? 'It holds nothing yet. What you put on it can be taken back by this phone a year later, if the card is lost.'
-            : 'It holds nothing yet. It is cash: whoever has the card and its PIN has the money.',
-          chip: recoverable ? '' : 'Lose the card and the money on it is gone.',
-          retry: 'ADD FUNDS', go: () => this.fcAdd(), shut: { label: 'LATER' },
-        });
+        // set up, and home, said in a line: the card's screen, with ADD FUNDS on it, is a tap away under FLASHCARD
+        this.setState({ screen: 'home', stack: [] });
+        this.toast('The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
   }
 
@@ -19774,16 +19764,19 @@ class Component extends DCLogic {
    * were opened for them gone: `sats` is 0 for NO LIMIT.
    *
    * A card has a second limit, on ONE TAP, asked for by the same three steps
-   * in its own words (`tap`). To the card a tap is ten seconds of its own
-   * clock, so a payment above the limit is charged in parts, a tap for each. */
+   * in its own words (`tap`): for the card that makes its own change the first
+   * step is HOW TAP LIMIT WORKS (26g-tap-limit-explainer.js), the rule played
+   * out, and for the card of 1.12 a warning in its own words. */
   fcLimitAsk(done, tap) {
     this._fcLimitDone = done;
     this._fcLimitTap = !!tap;
+    if (tap && this.fcShaped()) {
+      this.fcTapLimitExplainer({ go: () => this.fcAmount('cardLimit'), cancel: () => { this._fcLimitDone = null; } });
+      return;
+    }
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: (this.fcShaped()
-        ? 'A per tap limit is the most this card pays in one tap straight away, change or no change: the sheet says when change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
-        : 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n')
+      reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
@@ -20004,13 +19997,12 @@ class Component extends DCLogic {
     /* Which of the two. A card whose software has no limit on one tap (an
      * older one) has the one limit, and is asked for it as it always was. */
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
+    // the question and the two, each a button: what each limit is comes on its own screen
     this.blockedCard('fc-limit-which', {
-      tone: 'ask', title: 'CHANGE LIMIT',
-      reason: 'This card has two limits.\n\nPER TAP: ' + (this.fcShaped()
-        ? 'the most it will pay in one tap straight away, change or no change. Over that, it has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that.'
-        : 'the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.') + '\n\nDAILY: the most it will spend in one day.',
+      tone: 'ask', title: 'CHANGE CARD LIMITS',
+      reason: 'Which limit would you like to add or change?',
       retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
-      shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
+      shut: { label: 'DAILY LIMIT', pill: true, tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },
     });
   }
@@ -20627,6 +20619,187 @@ class Component extends DCLogic {
     };
   }
 
+  /* ---- HOW TAP LIMIT WORKS ------------------------------------------------
+   *
+   * What PER TAP LIMIT opens before the amount is asked (26f-flashcard.js,
+   * `fcLimitAsk`): the rule of a limit on one tap, played. Each statement
+   * comes up large in the middle of the screen and drops into its place in a
+   * list, so that the whole rule is on the screen when the buttons come: a
+   * payment within the limit is as quick as any tap, and every limit's worth
+   * over it holds the card a few seconds longer. The example is a ten-dollar
+   * limit, and the seconds beside each tier are what a card that makes its
+   * own change takes (the card's wait schedule: about five seconds over the
+   * limit, two more for every limit's worth beyond that, on top of a tap of
+   * two to five); they are the design's, not computed. A tap anywhere skips
+   * the statement on the screen; once the list is whole, a tap on it plays
+   * it again. A phone that asks for less motion is shown the whole list at
+   * once.
+   *
+   * Plain DOM over the page, as the stage (26e-loaders.js) and the cards
+   * (11-cards.js) are, with the app's two buttons under it: CANCEL in the
+   * shape of the confirmation's second button, CONTINUE as the fur button
+   * the card's screen has. `o.go` is CONTINUE, `o.cancel` CANCEL; neither
+   * does anything until the list is whole. `this._fcExplainer` is the screen
+   * for the suites: `finish()`, `play()`, `close()`, `done()`. */
+  FC_EXPLAINER = { limit: 10, secs: ['2–5', '8', '10', '12'], speed: 1.4 };
+
+  fcTapLimitExplainer(o) {
+    this.fcExplainerClose();
+    const opts = o || {};
+    const E = this.FC_EXPLAINER;
+    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const items = [
+      { kind: 'text', text: 'Any payment request over your limit requires you to tap and hold your card longer.' },
+      { kind: 'limit', limit: '$' + E.limit },
+    ].concat(E.secs.map((s, k) => ({
+      kind: 'tier',
+      range: money(k * E.limit + 0.01) + ' – ' + money((k + 1) * E.limit),
+      secs: s + ' SEC', long: 'Tap for ' + s + ' seconds',
+      bar: Math.round(parseInt(s.split('–').pop(), 10) / 12 * 100) + '%',
+    }))).concat([{ kind: 'more' }]);
+
+    const SORA = 'font-family:Sora,system-ui,sans-serif;';
+    const FIG = 'font-family:Figtree,Sora,system-ui,sans-serif;';
+    const bar = (w, h) => '<div style="height:' + h + 'px;border-radius:' + Math.ceil(h / 2) + 'px;background:#222;overflow:hidden">'
+      + '<div style="width:' + w + ';height:100%;border-radius:' + Math.ceil(h / 2) + 'px;background:#EB6A2E"></div></div>';
+    const rowHTML = (it) => it.kind === 'text'
+      ? '<div style="margin:0 0 10px;text-align:center;' + SORA + 'font-weight:700;font-size:21px;line-height:1.35;letter-spacing:-.01em;text-wrap:balance">' + esc(it.text) + '</div>'
+      : it.kind === 'limit'
+        ? '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-radius:18px;background:#BFE3EC;color:#0F2A33">'
+          + '<div style="' + SORA + 'font-weight:800;font-size:14px;letter-spacing:.14em">EXAMPLE LIMIT</div>'
+          + '<div style="' + SORA + 'font-weight:800;font-size:28px;letter-spacing:-.02em">' + esc(it.limit) + '</div></div>'
+        : it.kind === 'tier'
+          ? '<div style="display:flex;flex-direction:column;gap:7px;padding:10px 16px 11px;border-radius:16px;background:#111;border:1px solid #232323">'
+            + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">'
+            + '<div style="' + SORA + 'font-weight:700;font-size:16px;letter-spacing:-.01em">' + esc(it.range) + '</div>'
+            + '<div style="' + SORA + 'font-weight:800;font-size:16px;color:#EB6A2E;white-space:nowrap">' + esc(it.secs) + '</div></div>'
+            + bar(it.bar, 5) + '</div>'
+          : '<div style="text-align:center;' + SORA + 'font-weight:700;font-size:16px;letter-spacing:.06em;color:#9A9A9A">And so on…</div>';
+    const sTier = (it) => '<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:26px 22px;border-radius:30px;background:#111;'
+      + 'border:1.5px solid #2E2E2E;box-shadow:0 0 60px rgba(235,106,46,.18)">'
+      + '<div style="' + FIG + 'font-weight:600;font-size:17px;letter-spacing:.06em;color:#9A9A9A">PAYMENT OF</div>'
+      + '<div style="' + SORA + 'font-weight:800;font-size:32px;letter-spacing:-.02em">' + esc(it.range) + '</div>'
+      + '<div style="' + SORA + 'font-weight:800;font-size:26px;color:#EB6A2E">' + esc(it.long) + '</div>'
+      + '<div style="align-self:stretch">' + bar(it.bar, 8) + '</div></div>';
+    const spotHTML = (it, i) => it.kind === 'text'
+      ? '<div style="' + SORA + 'font-weight:800;font-size:27px;line-height:1.3;letter-spacing:-.01em;text-wrap:balance">' + esc(it.text) + '</div>'
+      : it.kind === 'limit'
+        ? '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 20px;border-radius:30px;background:#BFE3EC;color:#0F2A33;box-shadow:0 0 60px rgba(191,227,236,.25)">'
+          + '<div style="' + SORA + 'font-weight:800;font-size:16px;letter-spacing:.16em">EXAMPLE LIMIT</div>'
+          + '<div style="' + SORA + 'font-weight:800;font-size:72px;line-height:1;letter-spacing:-.03em">' + esc(it.limit) + '</div></div>'
+          + '<div style="margin-top:14px">' + sTier(items[i + 1]) + '</div>'
+        : it.kind === 'tier' ? sTier(it)
+          : '<div style="' + SORA + 'font-weight:800;font-size:34px;letter-spacing:.02em;color:#BDBDBD">And so on…</div>';
+
+    const el = (style, html) => { const d = document.createElement('div'); d.style.cssText = style; if (html) d.innerHTML = html; return d; };
+    const root = el('position:fixed;inset:0;z-index:2147483350;display:flex;flex-direction:column;overflow:hidden;background:#050505;color:#fff;'
+      + SORA + '-webkit-font-smoothing:antialiased;animation:foxyIn .18s ease');
+    root.id = 'foxy-explainer';
+    // the dots the design has behind it
+    root.appendChild(el('position:absolute;inset:0;pointer-events:none;opacity:.35;'
+      + 'background-image:radial-gradient(rgba(255,255,255,.55) 1px,transparent 1.6px),radial-gradient(rgba(191,227,236,.3) 1px,transparent 1.5px);'
+      + 'background-size:53px 61px,31px 37px;background-position:9px 14px,21px 5px'));
+    const title = el('position:relative;margin:0;padding:calc(28px + env(safe-area-inset-top)) 28px 0;text-align:center;'
+      + 'font-weight:800;font-size:21px;letter-spacing:.02em;text-transform:uppercase');
+    title.textContent = 'How tap limit works';
+    root.appendChild(title);
+    const list = el('position:relative;flex:1 1 auto;display:flex;flex-direction:column;gap:12px;padding:26px 28px 0');
+    list.innerHTML = items.map((it) => '<div style="opacity:0;transition:opacity .45s ease">' + rowHTML(it) + '</div>').join('');
+    root.appendChild(list);
+    const tap = el('position:absolute;inset:0;cursor:pointer');
+    root.appendChild(tap);
+    const spot = el('position:absolute;left:50%;top:47%;width:330px;max-width:calc(100% - 40px);pointer-events:none;text-align:center;'
+      + 'opacity:0;transform:translate(-50%,-50%) scale(.8)');
+    root.appendChild(spot);
+    const btns = el('position:relative;display:flex;flex-direction:column;gap:12px;padding:16px 32px calc(24px + env(safe-area-inset-bottom));'
+      + 'opacity:0;pointer-events:none;transition:opacity .5s ease');
+    const cancel = el('height:60px;border-radius:30px;border:2px solid #2A2A2A;background:#101010;box-shadow:0 8px 18px rgba(0,0,0,.6);'
+      + 'display:flex;align-items:center;justify-content:center;' + SORA + 'font-weight:800;font-size:20px;letter-spacing:.02em;color:#fff;cursor:pointer');
+    cancel.textContent = 'CANCEL';
+    // the card screen's fur button (build/markup.html, SET UP THIS CARD), shine and all
+    const go = el('height:60px;border-radius:30px;background-color:var(--acc);'
+      + 'background-image:radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),'
+      + 'linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url(\'foxy-fur.webp\');'
+      + 'background-repeat:no-repeat,no-repeat,no-repeat;background-size:auto,auto,150% auto;background-position:center,center,50% 34%;'
+      + 'position:relative;overflow:hidden;isolation:isolate;display:flex;align-items:center;justify-content:center;'
+      + SORA + 'font-size:20px;font-weight:800;letter-spacing:0.02em;color:#fff;cursor:pointer;box-shadow:inset 0 2px 0 rgba(255,255,255,.4)');
+    go.className = 'fxShine fxShine1';
+    go.textContent = 'CONTINUE';
+    btns.appendChild(cancel);
+    btns.appendChild(go);
+    root.appendChild(btns);
+    const rows = Array.prototype.slice.call(list.children);
+
+    let step = 0, phase = 'enter', done = false, timers = [];
+    const later = (fn, ms) => { timers.push(setTimeout(fn, ms)); };
+    const clear = () => { timers.forEach(clearTimeout); timers = []; };
+    const setSpot = (t, op, tr) => { spot.style.transition = tr; spot.style.transform = t; spot.style.opacity = op; };
+    const finish = () => {
+      clear(); done = true; phase = 'end';
+      rows.forEach((r) => { r.style.opacity = 1; });
+      spot.innerHTML = ''; spot.style.opacity = 0;
+      btns.style.opacity = 1; btns.style.pointerEvents = 'auto'; tap.style.pointerEvents = 'none';
+    };
+    const enter = () => {
+      phase = 'enter';
+      spot.innerHTML = spotHTML(items[step], step);
+      setSpot('translate(-50%,-50%) scale(.8)', 0, 'none');
+      void spot.offsetWidth;
+      later(show, 60);
+    };
+    const show = () => {
+      phase = 'show';
+      setSpot('translate(-50%,-50%) scale(1)', 1, 'transform .55s cubic-bezier(.2,.9,.25,1.12), opacity .35s ease');
+      const k = items[step].kind;
+      later(drop, (k === 'text' ? 3600 : k === 'more' ? 1300 : k === 'limit' ? 3800 : 1900) * E.speed);
+    };
+    const drop = () => {
+      phase = 'drop';
+      const pair = items[step].kind === 'limit';
+      const a = rows[step].getBoundingClientRect(), b = pair ? rows[step + 1].getBoundingClientRect() : a;
+      const r = { cx: Math.min(a.left, b.left) + Math.max(a.width, b.width) / 2, cy: (a.top + b.bottom) / 2, w: Math.max(a.width, b.width), h: b.bottom - a.top };
+      const s = spot.getBoundingClientRect();
+      const fit = Math.min(1, r.h / s.height, r.w / s.width);
+      const sc = isFinite(fit) ? Math.max(.25, fit) : 1;
+      const dx = r.cx - (s.left + s.width / 2), dy = r.cy - (s.top + s.height / 2);
+      setSpot('translate(-50%,-50%) translate(' + (isFinite(dx) ? dx : 0) + 'px,' + (isFinite(dy) ? dy : 0) + 'px) scale(' + sc + ')', 0,
+              'transform .65s cubic-bezier(.65,0,.3,1), opacity .45s ease .2s');
+      rows.forEach((row, i) => { row.style.opacity = i < step ? .4 : (i === step || (pair && i === step + 1)) ? 1 : 0; });
+      later(() => {
+        const nx = step + (pair ? 2 : 1);
+        if (nx < items.length) { step = nx; rows.forEach((row, i) => { if (i < step) row.style.opacity = .4; }); enter(); }
+        else finish();
+      }, 700);
+    };
+    const play = () => {
+      clear(); step = 0; done = false; phase = 'enter';
+      btns.style.opacity = 0; btns.style.pointerEvents = 'none'; tap.style.pointerEvents = 'auto';
+      rows.forEach((r) => { r.style.opacity = 0; });
+      enter();
+    };
+    tap.addEventListener('click', () => { if (phase === 'show') { clear(); drop(); } });
+    list.addEventListener('click', () => { if (done) play(); });
+    const close = () => {
+      clear();
+      root.remove();
+      if (this._fcExplainer && this._fcExplainer.root === root) this._fcExplainer = null;
+    };
+    cancel.addEventListener('click', () => { if (!done) return; close(); if (opts.cancel) opts.cancel(); });
+    go.addEventListener('click', () => { if (!done) return; close(); if (opts.go) opts.go(); });
+    document.body.appendChild(root);
+    this._fcExplainer = { root, finish, play, close, done: () => done, step: () => step };
+    let still = false;
+    try { still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { still = false; }
+    if (still) finish(); else later(play, 400);
+    console.log('[foxy] card: how tap limit works' + (still ? ', shown whole' : ''));
+  }
+
+  /* The screen taken down, timers and all: before another, and by whoever
+   * leaves the card's flow another way. */
+  fcExplainerClose() {
+    if (this._fcExplainer) this._fcExplainer.close();
+  }
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */

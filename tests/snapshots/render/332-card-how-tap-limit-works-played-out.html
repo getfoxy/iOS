@@ -1,4 +1,4 @@
-<!-- card: set up this card, this phone becomes its owner -->
+<!-- card: how tap limit works, played out -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -518,25 +518,78 @@
 </div>
 </div>
 <!-- on document.body -->
-<div style="position: fixed; inset: 0px; z-index: 2147483400; background: rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; justify-content: flex-end; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
-<div style="position: relative; isolation: isolate;">
-<div style="position: absolute; left: 0px; right: 0px; top: -290px; height: 330px; pointer-events: none; z-index: 0; background: radial-gradient(128% 100% at 50% 100%, rgba(191, 227, 236, 0.3) 0%, rgba(191, 227, 236, 0.14) 42%, rgba(0, 0, 0, 0) 78%);">
+<div style="position: fixed; inset: 0px; z-index: 2147483350; display: flex; flex-direction: column; overflow: hidden; background: rgb(5, 5, 5); color: rgb(255, 255, 255); font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease;" id="foxy-explainer">
+<div style="position: absolute; inset: 0px; pointer-events: none; opacity: 0.35; background-image: radial-gradient(rgba(255, 255, 255, 0.55) 1px, transparent 1.6px), radial-gradient(rgba(191, 227, 236, 0.3) 1px, transparent 1.5px); background-size: 53px 61px, 31px 37px; background-position: 9px 14px, 21px 5px;">
 </div>
-<div style="position: relative; z-index: 1; background: rgb(20, 21, 24); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; align-items: center; box-shadow: inset 0 2px 0 #BFE3EC; border-top: 1px solid rgb(191, 227, 236);">
-<div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(191, 227, 236, 0.13); display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 800; line-height: 1; color: rgb(191, 227, 236);">
-<svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-<path d="M12 2.6 4.8 5.5v6c0 4.4 3 8.5 7.2 9.9 4.2-1.4 7.2-5.5 7.2-9.9v-6L12 2.6Z" stroke="#BFE3EC" stroke-width="1.8" stroke-linejoin="round">
-</path>
-<path d="m8.8 11.9 2.3 2.3 4.1-4.5" stroke="#BFE3EC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-</path>
-</svg>
+<div style="position: relative; margin: 0px; text-align: center; font-weight: 800; font-size: 21px; letter-spacing: 0.02em; text-transform: uppercase;">How tap limit works</div>
+<div style="position: relative; flex: 1 1 auto; display: flex; flex-direction: column; gap: 12px; padding: 26px 28px 0px;">
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="margin:0 0 10px;text-align:center;font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:21px;line-height:1.35;letter-spacing:-.01em;text-wrap:balance">Any payment request over your limit requires you to tap and hold your card longer.</div>
 </div>
-<div style="font-size: 22px; font-weight: 800; letter-spacing: -0.022em; color: rgb(245, 241, 236); text-align: center; margin-top: 16px;">SET UP THIS CARD</div>
-<div style="font-size: 18px; font-weight: 500; line-height: 1.4; white-space: pre-line; color: rgba(245, 241, 236, 0.62); text-align: center; margin-top: 7px; max-width: 310px;">This phone can reset this card’s PIN and limit. Whoever holds the card and this phone’s seed phrase holds its money.</div>
-<div style="align-self: stretch; display: flex; flex-direction: column; gap: 12px; margin-top: 22px;">
-<div style="height: 60px; border-radius: 30px; background: rgb(242, 128, 46); color: rgb(255, 255, 255); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer;">CONTINUE</div>
-<div style="height: 52px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: rgba(245, 241, 236, 0.55); cursor: pointer;">CANCEL</div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-radius:18px;background:#BFE3EC;color:#0F2A33">
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:14px;letter-spacing:.14em">EXAMPLE LIMIT</div>
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:28px;letter-spacing:-.02em">$10</div>
 </div>
 </div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="display:flex;flex-direction:column;gap:7px;padding:10px 16px 11px;border-radius:16px;background:#111;border:1px solid #232323">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:16px;letter-spacing:-.01em">$0.01 – $10.00</div>
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:16px;color:#EB6A2E;white-space:nowrap">2–5 SEC</div>
+</div>
+<div style="height:5px;border-radius:3px;background:#222;overflow:hidden">
+<div style="width:42%;height:100%;border-radius:3px;background:#EB6A2E">
+</div>
+</div>
+</div>
+</div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="display:flex;flex-direction:column;gap:7px;padding:10px 16px 11px;border-radius:16px;background:#111;border:1px solid #232323">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:16px;letter-spacing:-.01em">$10.01 – $20.00</div>
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:16px;color:#EB6A2E;white-space:nowrap">8 SEC</div>
+</div>
+<div style="height:5px;border-radius:3px;background:#222;overflow:hidden">
+<div style="width:67%;height:100%;border-radius:3px;background:#EB6A2E">
+</div>
+</div>
+</div>
+</div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="display:flex;flex-direction:column;gap:7px;padding:10px 16px 11px;border-radius:16px;background:#111;border:1px solid #232323">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:16px;letter-spacing:-.01em">$20.01 – $30.00</div>
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:16px;color:#EB6A2E;white-space:nowrap">10 SEC</div>
+</div>
+<div style="height:5px;border-radius:3px;background:#222;overflow:hidden">
+<div style="width:83%;height:100%;border-radius:3px;background:#EB6A2E">
+</div>
+</div>
+</div>
+</div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="display:flex;flex-direction:column;gap:7px;padding:10px 16px 11px;border-radius:16px;background:#111;border:1px solid #232323">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:16px;letter-spacing:-.01em">$30.01 – $40.00</div>
+<div style="font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:16px;color:#EB6A2E;white-space:nowrap">12 SEC</div>
+</div>
+<div style="height:5px;border-radius:3px;background:#222;overflow:hidden">
+<div style="width:100%;height:100%;border-radius:3px;background:#EB6A2E">
+</div>
+</div>
+</div>
+</div>
+<div style="opacity: 1; transition: opacity .45s ease;">
+<div style="text-align:center;font-family:Sora,system-ui,sans-serif;font-weight:700;font-size:16px;letter-spacing:.06em;color:#9A9A9A">And so on…</div>
+</div>
+</div>
+<div style="position: absolute; inset: 0px; cursor: pointer; pointer-events: none;">
+</div>
+<div style="position: absolute; left: 50%; top: 47%; width: 330px; max-width: calc(100% - 40px); pointer-events: none; text-align: center; opacity: 0; transform: translate(-50%,-50%) scale(.8);">
+</div>
+<div style="position: relative; display: flex; flex-direction: column; gap: 12px; opacity: 1; pointer-events: auto; transition: opacity .5s ease;">
+<div style="height: 60px; border-radius: 30px; background: rgb(16, 16, 16); box-shadow: 0 8px 18px rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 20px; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; border: 2px solid rgb(42, 42, 42);">CANCEL</div>
+<div style="height: 60px; border-radius: 30px; background-color: var(--acc); background-image: radial-gradient(120% 84% at 26% 0%, rgba(255, 240, 220, 0.26), rgba(255, 240, 220, 0) 62%), linear-gradient(168deg, rgba(247, 154, 60, 0.62), rgba(232, 98, 42, 0.72) 48%, rgba(194, 74, 27, 0.78)), url(&quot;foxy-fur.webp&quot;); background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; position: relative; overflow: hidden; isolation: isolate; display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; box-shadow: inset 0 2px 0 rgba(255,255,255,.4);" class="fxShine fxShine1">CONTINUE</div>
 </div>
 </div>

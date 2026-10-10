@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { funded, binaryLoad, why, history, settle, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 const { makeCard } = require('./flashcard-card');
-const { appOn, until, pad, stage, card: uiCard, vals } = require('./flashcard-ui-kit');
+const { appOn, until, pad, stage, card: uiCard, explainer: uiExplainer, vals } = require('./flashcard-ui-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -684,12 +684,11 @@ async function world(feePpk, sats, make) {
     await until('the card to be read', () => !!holder.state.fc);
     holder.fcSetLimit();
     const which = uiCard(holder);
-    ok(which && which.title === 'CHANGE LIMIT' && /straight away/.test(which.reason), 'CHANGE LIMIT says what the per tap limit is now: the most it pays straight away', which && which.reason);
+    ok(which && which.title === 'CHANGE CARD LIMITS' && which.reason === 'Which limit would you like to add or change?', 'CHANGE CARD LIMITS asks which limit, in one line', which && which.reason);
     which.press('PER TAP LIMIT');
-    ok(/change or no change/.test(uiCard(holder).reason) && /the sheet says when change is coming/.test(uiCard(holder).reason)
-       && /about 5 seconds, and 2 seconds more for every limit’s worth beyond that/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason),
-       'and its warning says a payment goes straight away, change or no change, that the sheet says when change is coming, that one over the limit waits about 5 seconds and 2 more for every limit’s worth beyond that, and that lifting the card stops it');
-    uiCard(holder).press('CONTINUE');
+    ok(uiExplainer(holder) && !uiCard(holder) && uiExplainer(holder).title === 'How tap limit works', 'and PER TAP LIMIT opens HOW TAP LIMIT WORKS, the rule played out', uiExplainer(holder) && uiExplainer(holder).title);
+    uiExplainer(holder).finish();
+    uiExplainer(holder).press('CONTINUE');
     holder.state.amount = '0.50';
     holder.state.unit = 'USD';
     holder.fcAmountNext();

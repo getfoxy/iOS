@@ -20,14 +20,15 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const { appOn, until, pad, card, stage, vals, settle, keyIn } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, stage, vals, settle, keyIn } = require('./flashcard-ui-kit');
 
 /* The daily limit's three steps, as a person takes them: the warning's CONTINUE, an amount on the keypad
  * (or NO LIMIT under it, for 0), and the confirmation's CONFIRM. */
 const takeLimitSteps = (app, sats, which) => {
-  // CHANGE LIMIT asks which of the card's two limits first
-  if (card(app) && card(app).title === 'CHANGE LIMIT') card(app).press(which || 'DAILY LIMIT');
-  card(app).press('CONTINUE');
+  // CHANGE CARD LIMITS asks which of the card's two limits first
+  if (card(app) && card(app).title === 'CHANGE CARD LIMITS') card(app).press(which || 'DAILY LIMIT');
+  // the limit on one tap opens HOW TAP LIMIT WORKS, whose buttons come when it has played; the daily limit's warning has CONTINUE at once
+  if (explainer(app)) { explainer(app).finish(); explainer(app).press('CONTINUE'); } else card(app).press('CONTINUE');
   if (sats > 0) keyIn(app, sats); else app.fcLimitConfirm(0);
   app.fcLimitSpec().go();
 };
@@ -81,24 +82,16 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(pad(holder).title === 'CHOOSE A PIN' && /did not match/.test(pad(holder).note), 'and two that differ start it again', pad(holder).note);
   pad(holder).type('1234');
   pad(holder).type('1234');
-  ok(!pad(holder) && card(holder) && card(holder).title === 'SET UP THIS CARD'
-       && card(holder).all === ['SET UP THIS CARD',
-         'This phone can reset this card’s PIN and limit. Whoever holds the card and this phone’s seed phrase holds its money.',
-         'CONTINUE', 'CANCEL'].join(' | ') && !c.state.owner,
-     'the PIN given, the screen that makes this phone the card’s owner says what that means, once, before the card is touched; no limit is asked for', card(holder) && card(holder).all);
-  card(holder).press('CANCEL');
-  ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && c.state.pinState === 0 && !c.state.owner,
-     'CANCEL on it ends the set-up: nothing was written to the card');
-  holder.fcSetUp();
-  pad(holder).type('1234'); pad(holder).type('1234');
-  card(holder).press('CONTINUE');
-  ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && holder.state.flow !== 'cardLimit',
-     'CONTINUE goes to the tap: there is no limit to choose, and no amount is asked');
-  await until('the card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
+  ok(!pad(holder) && !card(holder) && holder.state.screen === 'flashcard' && holder.state.flow !== 'cardLimit' && !c.state.owner,
+     'the PIN given twice, the tap begins: nothing to read first, no limit to choose, and no amount asked');
+  await until('the card to be set up', () => holder.state.screen === 'home' && !!c.state.owner);
   ok(c.state.record.limit === 0 && c.state.owner && holder.state.fc.limit === 0 && holder.state.fc.owner && holder.state.fc.ownedHere === true,
      'one tap gave the card its PIN, its record and its owner, and no limit', JSON.stringify({ limit: c.state.record.limit }));
-  ok(/It is cash/.test(card(holder).reason) && !/limit/i.test(card(holder).reason) && /Lose the card and the money on it is gone/.test(card(holder).all),
-     'and what cash means is said where the card becomes one', card(holder).all);
+  ok(!card(holder) && !pad(holder) && holder.state.stack.length === 0 && holder.toasts.indexOf('The card is set up.') >= 0,
+     'and the person is home, told so in a line, with nothing to read or press', holder.toasts.slice(-1)[0]);
+  // the card's screen again, the way the menu opens it
+  holder.goFlashcard();
+  await until('the card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.ownedHere === true);
   v = vals(holder);
   ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
      'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
@@ -114,7 +107,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
   c.tap();
-  card(holder).press('ADD FUNDS');
+  holder.fcAdd();
   ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'SATS' && holder.state.stack.slice(-1)[0] === 'flashcard',
      'ADD FUNDS asks how much on the SET AMOUNT screen (in sats here: this phone has no price to say dollars at)');
   keyIn(holder, 99999);
@@ -477,9 +470,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === c.balance() && holder.state.fc.ownedHere === true);
   ok(holder.state.fc.ownedHere === true && vals(holder).fcLimitLine === 'NO LIMIT', 'the card is read again, and this phone is found to be its owner');
   holder.fcSetLimit();
-  ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, change or no change. Over that, it has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that.\n\nDAILY: the most it will spend in one day.',
-                                           'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-     'CHANGE LIMIT asks which of the card’s two limits: PER TAP LIMIT, DAILY LIMIT, or CANCEL, and says the rule of software 1.13 in plain words', card(holder) && card(holder).all);
+  ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
+     'CHANGE LIMIT asks which of the card’s two limits, in one line: PER TAP LIMIT, DAILY LIMIT, or CANCEL', card(holder) && card(holder).all);
   card(holder).press('CANCEL');
   ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard', 'CANCEL there changes nothing');
   holder.fcSetLimit();
@@ -528,11 +520,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const was = holder._fcCard;
     holder._fcCard = Object.assign({}, was, { info: Object.assign({}, was.info, { format: 4, shaped: false }) });
     holder.fcSetLimit();
-    ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
-                                             'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-       'a card of software 1.12 is told its own rule at CHANGE LIMIT: paying exactly, change or more than that held longer', card(holder) && card(holder).all);
+    ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
+       'a card of software 1.12 is asked the same question at CHANGE LIMIT', card(holder) && card(holder).all);
     card(holder).press('PER TAP LIMIT');
-    ok(card(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING_OLD, 'CONTINUE', 'CANCEL'].join(' | '), 'and in the warning: change holds the card 3 seconds, and 3 seconds for every limit’s worth over it', card(holder) && card(holder).all);
+    ok(card(holder) && !explainer(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING_OLD, 'CONTINUE', 'CANCEL'].join(' | '),
+       'and is told its own rule in a warning, not the played rule of the card that makes change: change holds the card 3 seconds, and 3 seconds for every limit’s worth over it', card(holder) && card(holder).all);
     card(holder).press('CANCEL');
     holder.state.fcLimit = { sats: 300, usd: 0 };
     holder._fcLimitTap = true;
@@ -551,9 +543,22 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   }
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');
-  ok(card(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
-     'PER TAP LIMIT opens a warning of its own, like the daily limit’s: what it is, who can change it, CONTINUE and CANCEL', card(holder) && card(holder).all);
-  card(holder).press('CONTINUE');
+  {
+    const x = explainer(holder);
+    ok(x && !card(holder) && x.title === 'How tap limit works' && !x.done, 'PER TAP LIMIT opens HOW TAP LIMIT WORKS, a screen of its own, which plays before its buttons come', x && x.all);
+    x.finish();
+    const y = explainer(holder);
+    ok(y.done && y.all === ['How tap limit works', 'Any payment request over your limit requires you to tap and hold your card longer.', 'EXAMPLE LIMIT', '$10',
+                            '$0.01 \u2013 $10.00', '2\u20135 SEC', '$10.01 \u2013 $20.00', '8 SEC', '$20.01 \u2013 $30.00', '10 SEC', '$30.01 \u2013 $40.00', '12 SEC',
+                            'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
+       'played out, it is the rule as a list: the ten-dollar example, four tiers with their seconds, and so on, then CANCEL and CONTINUE', y.all);
+    y.press('CANCEL');
+    ok(!explainer(holder) && holder.state.screen === 'flashcard' && holder._fcLimitDone === null, 'CANCEL takes it down and changes nothing');
+  }
+  holder.fcSetLimit();
+  card(holder).press('PER TAP LIMIT');
+  explainer(holder).finish();
+  explainer(holder).press('CONTINUE');
   ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.fcLimitQuestion() === 'What is the most this card should pay in one tap straight away?',
      'CONTINUE asks for the amount on the same keypad, in its own words', holder.fcLimitQuestion());
   keyIn(holder, 300);
@@ -632,7 +637,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   // and it is taken off again, the same way, with NO LIMIT
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');
-  card(holder).press('CONTINUE');
+  explainer(holder).finish();
+  explainer(holder).press('CONTINUE');
   holder.fcLimitConfirm(0);
   ok(holder.fcLimitSpec().amountLabel === 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.' && holder.fcLimitSpec().warn === 'One tap will be able to pay as much as the card holds straight away, up to its daily limit.',
      'NO LIMIT under the keypad removes it, and the confirmation says what that means', holder.fcLimitSpec().warn);
@@ -938,14 +944,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.fcSetUp();
   pad(holder).type('4321');
   pad(holder).type('4321');
-  card(holder).press('CONTINUE');
   ok(!pad(holder) && card(holder) && card(holder).title === 'IF THE CARD IS LOST' && card(holder).has('RECOVERABLE') && card(holder).has('LIKE CASH'),
-     'and set-up has its one choice: recoverable, or like cash', card(holder) && card(holder).title);
+     'and set-up has its one choice, straight after the PIN: recoverable, or like cash', card(holder) && card(holder).title);
   rc.tap();
   card(holder).press('RECOVERABLE');
-  await until('the second card to be set up', () => card(holder) && card(holder).title === 'THE CARD IS READY');
+  await until('the second card to be set up', () => holder.state.screen === 'home' && !!rc.state.owner);
   ok(holder.state.fc.mine && holder.state.fc.recoverable, 'chosen recoverable, it is this phone\u2019s to take back');
-  card(holder).press('LATER');
+  holder.goFlashcard();
+  await until('the second card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.mine === true);
+  await settle();
   rc.tap();
   holder.fcAdd();
   keyIn(holder, 1024);

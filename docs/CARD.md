@@ -103,15 +103,16 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    Press **SET UP THIS CARD**.
 3. **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN**. The PIN pad
    is the lock screen's.
-4. The notice, titled SET UP THIS CARD: `This phone can reset this card's PIN
-   and limit. Whoever holds the card and this phone's seed phrase holds its
-   money.` CONTINUE or CANCEL. It is the one place that says what making this
-   phone the owner means.
-5. One tap writes the PIN, then the card's record (this phone's mint, and for
+4. One tap writes the PIN, then the card's record (this phone's mint, and for
    a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
-6. **THE CARD IS READY**: that it is cash, that whoever has the card and its PIN
-   has the money, and that if the card is lost the money on it is gone.
+5. Home, with a line: `The card is set up.` Nothing is read between the PIN
+   and the tap, and nothing after it; the card's screen, with ADD FUNDS, is
+   under FLASHCARD in the menu. What two notices used to say stands: this
+   phone is the card's owner, so it can reset the card's PIN and limits, and
+   whoever holds the card and this phone's seed phrase holds its money; and a
+   card is cash, so whoever has it and its PIN has what is on it, and a lost
+   card's money is gone.
 
 No limit is asked for and none is suggested. A new card has none.
 
@@ -787,10 +788,11 @@ The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
 
-**CHANGE LIMIT** on the card's screen first asks which of the card's two limits:
-**PER TAP LIMIT** or **DAILY LIMIT** (*The limit on one tap*, below; a card whose
-software has only the daily limit is not asked). Each has three steps and then a
-tap. The daily limit's:
+**CHANGE LIMIT** on the card's screen first asks which of the card's two limits,
+under CHANGE CARD LIMITS: `Which limit would you like to add or change?`, with
+**PER TAP LIMIT** and **DAILY LIMIT**, each a button, and CANCEL (*The limit on
+one tap*, below; a card whose software has only the daily limit is not asked).
+Each has three steps and then a tap. The daily limit's:
 
 1. A full-screen warning, SET DAILY LIMIT: `A daily limit is the most this card
    will spend in one day. It starts again by itself each day.` and `Only this
@@ -839,12 +841,14 @@ How it behaves:
 
 A second limit: the most the card pays in **one tap straight away**. It is set
 the same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
-LIMIT: a warning, SET PER TAP LIMIT (`A per tap limit is the most this card
-pays in one tap straight away, change or no change: the sheet says when change
-is coming. Over the limit, the card has to be held
-about 5 seconds, and 2 seconds more for every limit's worth beyond that. Lift
-the card and the payment stops, with nothing taken.`; a card of 1.12 is told its
-own rule), the amount (`What is the most this card should pay in
+LIMIT: **HOW TAP LIMIT WORKS**, a screen that plays the rule as a short
+animation and leaves it on the screen as a list (`Any payment request over your
+limit requires you to tap and hold your card longer.`, an EXAMPLE LIMIT of $10,
+then `$0.01 – $10.00` 2–5 SEC, `$10.01 – $20.00` 8 SEC, `$20.01 – $30.00` 10
+SEC, `$30.01 – $40.00` 12 SEC, `And so on…`; a tap skips the statement on the
+screen, and a phone that asks for less motion is shown the list at once), with
+CANCEL and CONTINUE once it has played (a card of 1.12, which pays exactly or
+holds the card, is told its own rule in a warning instead), the amount (`What is the most this card should pay in
 one tap straight away?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE
 APPLYING A PER TAP LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and
 the amount, or `PER TAP $2.00 · DAILY $5.00` where it has both.

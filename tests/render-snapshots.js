@@ -595,7 +595,9 @@ function cards() {
   add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
   // CHANGE LIMIT asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
   add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
-  add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}, true));
+  add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
+  // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
+  add('card: how tap limit works, played out', (a) => { a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
   // the card's own log, opened from its line on the card's screen
   add('card: this card\u2019s own log', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
     last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
@@ -610,7 +612,6 @@ function cards() {
   add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
   add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'x' }, {}));
-  add('card: set up this card, this phone becomes its owner', (a) => a.fcSetUpOwner('1234'));
   add('card: a till, over the card\u2019s daily limit, with what is left today', (a) => a.fcFailed({ card: 'limit', left: 1200, need: 2000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a till, over what a card can spend in a day', (a) => a.fcFailed({ card: 'limit', left: 5000, need: 9000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: another phone\u2019s card', (a) => a.fcFailed({ card: 'not-owner', message: 'x' }, {}));
@@ -666,7 +667,7 @@ function cards() {
 }
 
 // what a view leaves behind on the instance, cleared before the next
-const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff',
+const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
   '_meltEl', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt'];
 
 (async () => {

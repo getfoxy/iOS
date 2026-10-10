@@ -122,12 +122,20 @@
     /* With nothing to retry, CLOSE is the only thing to do — so it takes the
      * primary treatment rather than sitting there as a grey afterthought. */
     const alone = !(spec.retry && (spec.back || spec.go));
+    /* `shut.pill`: a second choice that is as much a choice as the first
+     * (CHANGE CARD LIMITS' DAILY LIMIT under PER TAP LIMIT), drawn as a button
+     * in the shape the confirmation's second button has, not as grey words. */
     const shut = alone
       ? el('height:60px;border-radius:30px;background:#F2802E;color:#fff;' +
            'display:flex;align-items:center;justify-content:center;font-size:20px;' +
            'font-weight:800;letter-spacing:0.02em;cursor:pointer')
-      : el('height:52px;display:flex;align-items:center;justify-content:center;' +
-           'font-size:18px;font-weight:800;color:rgba(245,241,236,.55);cursor:pointer');
+      : (spec.shut && spec.shut.pill)
+        ? el('height:60px;border-radius:30px;border:2px solid #2A2A2A;background:#101010;' +
+             'box-shadow:0 8px 18px rgba(0,0,0,.6);box-sizing:border-box;' +
+             'display:flex;align-items:center;justify-content:center;font-size:20px;' +
+             'font-weight:800;letter-spacing:0.02em;color:#F5F1EC;cursor:pointer')
+        : el('height:52px;display:flex;align-items:center;justify-content:center;' +
+             'font-size:18px;font-weight:800;color:rgba(245,241,236,.55);cursor:pointer');
     /* A card can name its second choice and give it something to do
      * (PAYING ANOTHER … USER's CONTINUE OVER LIGHTNING). Tapping outside the
      * card still only closes it. */

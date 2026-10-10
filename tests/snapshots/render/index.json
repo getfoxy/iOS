@@ -1226,12 +1226,17 @@
  },
  "card: change limit, which of the two": {
   "file": "313-card-change-limit-which-of-the-two.html",
-  "markup": "37fdce0b1ccf61f98902699b4b6f9d523791c50f5298d7c374598502379394fd",
+  "markup": "4e966f35ed2fd55521ca9a23c7b282e4659ac6122239f3c83cacb8eb00270b26",
   "vals": "03baf0bf9f9f381f126047e11143c535dd88880d96e537badf1ed846a330f813"
  },
- "card: set per tap limit, the warning": {
-  "file": "314-card-set-per-tap-limit-the-warning.html",
-  "markup": "63fed6ddc4b0f33ecbe210ecec63f8cd8a870068b73ce3a7f63bed84480bd557",
+ "card: set per tap limit on a card of 1.12, the warning": {
+  "file": "331-card-set-per-tap-limit-on-a-card-of-1-12-the-warning.html",
+  "markup": "d72db36fb08c0e9f701c26741cecd175c932e37d3b5a3cb704626e20487c96f3",
+  "vals": "03baf0bf9f9f381f126047e11143c535dd88880d96e537badf1ed846a330f813"
+ },
+ "card: how tap limit works, played out": {
+  "file": "332-card-how-tap-limit-works-played-out.html",
+  "markup": "6585bb23f389c6ac6cf91e5d24573cd119599d0e6f11a1b2e5dd5b1eaad11ac6",
   "vals": "03baf0bf9f9f381f126047e11143c535dd88880d96e537badf1ed846a330f813"
  },
  "card: this card’s own log": {
@@ -1267,11 +1272,6 @@
  "card: a per tap limit on a card whose software has none": {
   "file": "317-card-a-per-tap-limit-on-a-card-whose-software-has-none.html",
   "markup": "07c58ed57786b79e8a24ec04aa3632c99095c387fc54ef70a69b016579811aa0",
-  "vals": "03baf0bf9f9f381f126047e11143c535dd88880d96e537badf1ed846a330f813"
- },
- "card: set up this card, this phone becomes its owner": {
-  "file": "273-card-set-up-this-card-this-phone-becomes-its-owner.html",
-  "markup": "5c68bc78e3fb92f7c3eb2ef7f257b58377fa6d9ec72edf023ca2849978d3090f",
   "vals": "03baf0bf9f9f381f126047e11143c535dd88880d96e537badf1ed846a330f813"
  },
  "card: a till, over the card’s daily limit, with what is left today": {

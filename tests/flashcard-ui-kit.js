@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js']
+const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js']
   .map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
 
 /* The four parts as a class over this page's window, and an app of it with
@@ -126,6 +126,19 @@ function card(a) {
     has(label) { return texts.indexOf(label) >= 0; },
   };
 }
+/* HOW TAP LIMIT WORKS (build/app/26g-tap-limit-explainer.js): its title and every line on it, whether it has played out
+ * (`done`), `finish()` to end the playing, and its buttons, which do nothing until it has. */
+function explainer(a) {
+  const x = a._fcExplainer;
+  if (!x || !x.root || !x.root.parentNode) return null;
+  const texts = leaves(x.root).map((d) => d.textContent).filter((t) => t);
+  return {
+    title: texts[0], all: texts.join(' | '), done: x.done(),
+    finish() { x.finish(); },
+    press(label) { click(leaves(x.root).filter((d) => d.textContent === label)[0]); },
+    has(label) { return texts.indexOf(label) >= 0; },
+  };
+}
 const stage = (ctx) => { const el = ctx.window.document.getElementById('foxy-stage'); return el ? el.getAttribute('data-stage') : ''; };
 const vals = (a) => a.renderFlashcard({ s: a.state, sc: a.state.screen });
 const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
@@ -135,4 +148,4 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
 
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, stage, vals, settle, keyIn };
+module.exports = { appOn, tick, until, pad, card, explainer, stage, vals, settle, keyIn };

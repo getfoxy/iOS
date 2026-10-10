@@ -1519,13 +1519,13 @@ and load it), a phone whose build carries the NFC entitlement
    and SET UP THIS CARD. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
    to it at all, and times out.
-3. SET UP THIS CARD, a PIN twice, tap. Nothing is asked about a lost card:
-   cards are cash for now. **Pass:** THE CARD IS READY, saying it is cash and
-   that a lost card, a forgotten PIN or three wrong PINs in a row lose what
-   is on it. LATER, and the screen is home's shape: history and a cross at
-   the top with FLASHCARD and "Verified Just Now" between them, the card,
+3. SET UP THIS CARD, a PIN twice, tap. Nothing is read between the PIN and
+   the tap, nothing is asked about a lost card (cards are cash for now), and
+   nothing is read after it. **Pass:** home, with the line `The card is set
+   up.` MENU, FLASHCARD, tap: the screen is home's shape: history and a cross
+   at the top with FLASHCARD and "Verified Just Now" between them, the card,
    and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
-   over ADD FUNDS, WITHDRAW, CHANGE PIN and SET LIMIT.
+   over ADD FUNDS, WITHDRAW, CHANGE PIN and CHANGE LIMIT.
 
 #### 23b. Money on, and off
 
@@ -1616,8 +1616,11 @@ and load it), a phone whose build carries the NFC entitlement
 Needs a card with the software that waits (1.5: its screen offers PER TAP LIMIT
 under CHANGE LIMIT, and a charge over the limit is not refused).
 
-1. On the holder's phone: CHANGE LIMIT. **Pass:** a card asks which, PER TAP
-   LIMIT or DAILY LIMIT, with CANCEL. PER TAP LIMIT, CONTINUE, an amount in
+1. On the holder's phone: CHANGE LIMIT. **Pass:** CHANGE CARD LIMITS asks
+   which, with PER TAP LIMIT and DAILY LIMIT as two buttons and CANCEL under
+   them. PER TAP LIMIT: HOW TAP LIMIT WORKS plays, each line large and then
+   in its place (a tap skips one; with Reduce Motion on, the list comes at
+   once), and CANCEL and CONTINUE come when it has. CONTINUE, an amount in
    dollars, CONFIRM, tap. **Pass:** no PIN is asked; `Per tap limit set.`; the
    card's screen says PER TAP LIMIT and the amount (or both limits on one line).
 2. On the second phone, charge the card an amount at or under the limit.

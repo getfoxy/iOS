@@ -1494,12 +1494,15 @@
   }
 
   /* ---- a new card ----------------------------------------------------------
-   * A PIN, typed twice; a notice, once, that this phone becomes the card's owner
-   * and what that means; then whether a lost card's money can come back (while
+   * A PIN, typed twice; then whether a lost card's money can come back (while
    * FC_RECOVERABLE offers it); then one tap that writes the PIN, the record and,
-   * last, the owner. No limit is asked for or suggested: a new card has none, and
-   * one is set later from CHANGE LIMIT. The PIN is typed here, once, and never
-   * again to add funds. The mint is this phone's, shown and not chosen. */
+   * last, the owner; then home. Nothing is read between the PIN and the tap and
+   * nothing after it (a notice that this phone becomes the owner, and one that
+   * the card is cash, were two screens before a card that holds nothing; what
+   * they said is in docs/CARD.md). No limit is asked for or suggested: a new
+   * card has none, and one is set later from CHANGE LIMIT. The PIN is typed
+   * here, once, and never again to add funds. The mint is this phone's, shown
+   * and not chosen. */
   fcSetUp() {
     if (!this.state.fc) return;
     // no mint is asked: the card is told this phone's mint and given a key from this phone's words
@@ -1512,20 +1515,9 @@
       subtitle: 'So a mistyped digit does not become the card’s PIN.',
     }, (b) => {
       if (a !== b) { first('Those did not match. Start again.'); return; }
-      this.fcSetUpOwner(a);
+      if (this.FC_RECOVERABLE) this.fcSetUpKind(a); else this.fcSetUpRun(a, false);
     }));
     first('');
-  }
-
-  /* The one place that says what making this phone the owner means. */
-  fcSetUpOwner(pin) {
-    this.blockedCard('fc-owner', {
-      tone: 'ask', title: 'SET UP THIS CARD',
-      reason: 'This phone can reset this card’s PIN and limit. Whoever holds the card and this phone’s seed phrase holds its money.',
-      retry: 'CONTINUE',
-      go: () => { if (this.FC_RECOVERABLE) this.fcSetUpKind(pin); else this.fcSetUpRun(pin, false); },
-      shut: { label: 'CANCEL' },
-    });
   }
 
   fcSetUpRun(pin, recoverable) {
@@ -1534,19 +1526,9 @@
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        /* What cash means, said once, where the card becomes one: there is
-         * nobody to ask for it back. Its PIN is part of that. The card
-         * blocks itself for good after three wrong ones in a row, and what
-         * is on a blocked cash card can be spent by nobody but this phone,
-         * which can unblock it. */
-        this.blockedCard('fc-ready', {
-          tone: 'ask', title: 'THE CARD IS READY',
-          reason: recoverable
-            ? 'It holds nothing yet. What you put on it can be taken back by this phone a year later, if the card is lost.'
-            : 'It holds nothing yet. It is cash: whoever has the card and its PIN has the money.',
-          chip: recoverable ? '' : 'Lose the card and the money on it is gone.',
-          retry: 'ADD FUNDS', go: () => this.fcAdd(), shut: { label: 'LATER' },
-        });
+        // set up, and home, said in a line: the card's screen, with ADD FUNDS on it, is a tap away under FLASHCARD
+        this.setState({ screen: 'home', stack: [] });
+        this.toast('The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
   }
 
@@ -1772,16 +1754,19 @@
    * were opened for them gone: `sats` is 0 for NO LIMIT.
    *
    * A card has a second limit, on ONE TAP, asked for by the same three steps
-   * in its own words (`tap`). To the card a tap is ten seconds of its own
-   * clock, so a payment above the limit is charged in parts, a tap for each. */
+   * in its own words (`tap`): for the card that makes its own change the first
+   * step is HOW TAP LIMIT WORKS (26g-tap-limit-explainer.js), the rule played
+   * out, and for the card of 1.12 a warning in its own words. */
   fcLimitAsk(done, tap) {
     this._fcLimitDone = done;
     this._fcLimitTap = !!tap;
+    if (tap && this.fcShaped()) {
+      this.fcTapLimitExplainer({ go: () => this.fcAmount('cardLimit'), cancel: () => { this._fcLimitDone = null; } });
+      return;
+    }
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: (this.fcShaped()
-        ? 'A per tap limit is the most this card pays in one tap straight away, change or no change: the sheet says when change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
-        : 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n')
+      reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
@@ -2002,13 +1987,12 @@
     /* Which of the two. A card whose software has no limit on one tap (an
      * older one) has the one limit, and is asked for it as it always was. */
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
+    // the question and the two, each a button: what each limit is comes on its own screen
     this.blockedCard('fc-limit-which', {
-      tone: 'ask', title: 'CHANGE LIMIT',
-      reason: 'This card has two limits.\n\nPER TAP: ' + (this.fcShaped()
-        ? 'the most it will pay in one tap straight away, change or no change. Over that, it has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that.'
-        : 'the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.') + '\n\nDAILY: the most it will spend in one day.',
+      tone: 'ask', title: 'CHANGE CARD LIMITS',
+      reason: 'Which limit would you like to add or change?',
       retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
-      shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
+      shut: { label: 'DAILY LIMIT', pill: true, tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },
     });
   }
