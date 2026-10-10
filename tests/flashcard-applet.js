@@ -27,7 +27,7 @@ const TIP_TIME = 1791614069;
 const TIP_HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
 const OLD = '00e0ff3f5c9163e913a6431d7ef2fce013c71bc6a96a9fdaad1a020000000000000000000db1148f11b5c527caef5a8f54ed8bab7a2096b40d2a204b5c8e7f38d3501c5f7273c86af01e02177f6bf671';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
-const SELECT = '00a4040009f0464f58594341524400';
+const SELECT = '00a404000af0464f5859434152440100';
 
 const PORT = Number(process.argv[2]) || 47435;
 let failed = 0;

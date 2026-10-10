@@ -49,7 +49,7 @@ const TIP = '00c02133b973a14eab498ae41fd2054685e7250b36c4bd758ca8010000000000000
 const TIP_TIME = 1791614069;
 const TIP_HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
-const SELECT = '00a4040009f0464f58594341524400';
+const SELECT = '00a404000af0464f5859434152440100';
 
 /* The applet over a socket, as the iOS Simulator reaches it; null when no card server is listening. */
 function applet(port) {
