@@ -599,7 +599,9 @@ async function at(mintKey, names, real) {
     if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
     await card.tap();
     const counted = await till.W.cardLook(card, { noAuth: true });
-    ok('and the card counts it, for anybody who reads it: 200 of 300', counted.noPin.spent === 200 && counted.noPin.left === 100, JSON.stringify(counted.noPin));
+    // what left the card for good: the 200, and the sat or two a mint with a fee takes with it
+    const spentOnce = counted.noPin.spent;
+    ok('and the card counts it, for anybody who reads it: 200 of 300, and the mint\u2019s fee with it', spentOnce >= 200 && spentOnce <= 202 && counted.noPin.left === 300 - spentOnce, JSON.stringify(counted.noPin));
     // over what is left: the wallet knows from the read, and says so before the card is asked
     sent.length = 0;
     await card.tap();
@@ -609,14 +611,17 @@ async function at(mintKey, names, real) {
     // and the card's own word, asked all the same: begin one place and sign, which the card refuses, 6A94, and gives up
     await card.tap();
     const look = await till.W.cardLook(card, { noAuth: true });
-    const one = look.pieces.slice().sort((a, b) => b.amount - a.amount)[0];
+    // places worth more than what is left of the allowance, largest first
+    const places = [];
+    let worth = 0;
+    for (const x of look.pieces.slice().sort((a, b) => b.amount - a.amount)) { places.push(x.i); worth += x.amount; if (worth > look.noPin.left) break; }
     await card.send(SELECT);
-    const begun = await card.send('b0220000' + '01' + ('0' + one.i.toString(16)).slice(-2));
+    const begun = await card.send('b0220000' + ('0' + places.length.toString(16)).slice(-2) + places.map((i) => ('0' + i.toString(16)).slice(-2)).join(''));
     const refused = await card.send('b024000040');
     ok('asked all the same, the card begins and refuses to sign: 6A94, nothing signed, the payment given up', /9000$/.test(begun) && /6a94$/i.test(refused), begun.slice(-12) + ', ' + refused);
     await card.tap();
     const after = await till.W.cardLook(card, { noAuth: true });
-    ok('and it is nothing: the pieces are all there, and the count is as it was', after.balance === look.balance && after.noPin.spent === 200, after.balance + ' on it, ' + after.noPin.spent + ' counted');
+    ok('and it is nothing: the pieces are all there, and the count is as it was', after.balance === look.balance && after.noPin.spent === spentOnce, after.balance + ' on it, ' + after.noPin.spent + ' counted');
     // with the PIN, the whole payment
     sent.length = 0;
     await card.tap();
@@ -625,7 +630,7 @@ async function at(mintKey, names, real) {
     if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
     await card.tap();
     const kept = await till.W.cardLook(card, { noAuth: true });
-    ok('which counts nothing against the allowance', kept.noPin.spent === 200 && kept.noPin.left === 100, JSON.stringify(kept.noPin));
+    ok('which counts nothing against the allowance', kept.noPin.spent === spentOnce && kept.noPin.left === 300 - spentOnce, JSON.stringify(kept.noPin));
     await card.tap();
     const mine = await holder.W.cardLook(card, { mine: true });
     ok('the owner’s log marks the taps made with no PIN', mine.log && mine.log.last.length >= 2 && mine.log.last[0].noPin === false && mine.log.last.some((x) => x.noPin === true),
