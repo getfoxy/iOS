@@ -20649,15 +20649,16 @@ class Component extends DCLogic {
     const E = this.FC_EXPLAINER;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // every statement in one shape, whatever its kind, so that a reader of the list needs no cases
+    const item = (kind, o) => Object.assign({ kind, text: '', limit: '', range: '', secs: '', long: '', bar: '' }, o || {});
     const items = [
-      { kind: 'text', text: 'Any payment request over your limit requires you to tap and hold your card longer.' },
-      { kind: 'limit', limit: '$' + E.limit },
-    ].concat(E.secs.map((s, k) => ({
-      kind: 'tier',
+      item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),
+      item('limit', { limit: '$' + E.limit }),
+    ].concat(E.secs.map((s, k) => item('tier', {
       range: money(k * E.limit + 0.01) + ' – ' + money((k + 1) * E.limit),
       secs: s + ' SEC', long: 'Tap for ' + s + ' seconds',
       bar: Math.round(parseInt(s.split('–').pop(), 10) / 12 * 100) + '%',
-    }))).concat([{ kind: 'more' }]);
+    }))).concat([item('more')]);
 
     const SORA = 'font-family:Sora,system-ui,sans-serif;';
     const FIG = 'font-family:Figtree,Sora,system-ui,sans-serif;';
@@ -20734,12 +20735,12 @@ class Component extends DCLogic {
     let step = 0, phase = 'enter', done = false, timers = [];
     const later = (fn, ms) => { timers.push(setTimeout(fn, ms)); };
     const clear = () => { timers.forEach(clearTimeout); timers = []; };
-    const setSpot = (t, op, tr) => { spot.style.transition = tr; spot.style.transform = t; spot.style.opacity = op; };
+    const setSpot = (t, op, tr) => { spot.style.transition = tr; spot.style.transform = t; spot.style.opacity = String(op); };
     const finish = () => {
       clear(); done = true; phase = 'end';
-      rows.forEach((r) => { r.style.opacity = 1; });
-      spot.innerHTML = ''; spot.style.opacity = 0;
-      btns.style.opacity = 1; btns.style.pointerEvents = 'auto'; tap.style.pointerEvents = 'none';
+      rows.forEach((r) => { r.style.opacity = '1'; });
+      spot.innerHTML = ''; spot.style.opacity = '0';
+      btns.style.opacity = '1'; btns.style.pointerEvents = 'auto'; tap.style.pointerEvents = 'none';
     };
     const enter = () => {
       phase = 'enter';
@@ -20765,17 +20766,17 @@ class Component extends DCLogic {
       const dx = r.cx - (s.left + s.width / 2), dy = r.cy - (s.top + s.height / 2);
       setSpot('translate(-50%,-50%) translate(' + (isFinite(dx) ? dx : 0) + 'px,' + (isFinite(dy) ? dy : 0) + 'px) scale(' + sc + ')', 0,
               'transform .65s cubic-bezier(.65,0,.3,1), opacity .45s ease .2s');
-      rows.forEach((row, i) => { row.style.opacity = i < step ? .4 : (i === step || (pair && i === step + 1)) ? 1 : 0; });
+      rows.forEach((row, i) => { row.style.opacity = i < step ? '.4' : (i === step || (pair && i === step + 1)) ? '1' : '0'; });
       later(() => {
         const nx = step + (pair ? 2 : 1);
-        if (nx < items.length) { step = nx; rows.forEach((row, i) => { if (i < step) row.style.opacity = .4; }); enter(); }
+        if (nx < items.length) { step = nx; rows.forEach((row, i) => { if (i < step) row.style.opacity = '.4'; }); enter(); }
         else finish();
       }, 700);
     };
     const play = () => {
       clear(); step = 0; done = false; phase = 'enter';
-      btns.style.opacity = 0; btns.style.pointerEvents = 'none'; tap.style.pointerEvents = 'auto';
-      rows.forEach((r) => { r.style.opacity = 0; });
+      btns.style.opacity = '0'; btns.style.pointerEvents = 'none'; tap.style.pointerEvents = 'auto';
+      rows.forEach((r) => { r.style.opacity = '0'; });
       enter();
     };
     tap.addEventListener('click', () => { if (phase === 'show') { clear(); drop(); } });
