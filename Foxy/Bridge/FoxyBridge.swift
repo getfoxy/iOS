@@ -1380,6 +1380,31 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// Hand the result back to the promise waiting in JavaScript.
     /// The request itself, once the URL, the route and the host are settled.
     private func sendMintRequest(id: String, body: [String: Any], url: URL, method: String) {
+        /* Plain http to an onion: URLSession will not send it (App Transport
+         * Security refuses plain http, and plain http is what an onion speaks),
+         * so it goes through Tor's SOCKS port the way the price feed's onion
+         * does (OnionPost.get). GET only, which is all a block explorer is
+         * asked (build/wallet/08b-block-headers.js); a POST to an onion goes
+         * the way it did. The answer is handed on in the same shape as a
+         * mint's: the status, a line break, the body. */
+        if method == "GET", url.scheme == "http", let name = url.host, OnionAddress.isHost(name) {
+            let circuit = MintCircuit.label(body["circuit"])
+            #if DEBUG
+            DebugLog.write("onion GET \(url.path) on circuit \(circuit.prefix(6))")
+            #endif
+            OnionPost.get(url, circuit: circuit, timeout: 25) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let answer):
+                        self.resolve(id: id, text: "\(answer.status)\n" + answer.body, error: nil)
+                    case .failure(let why):
+                        print("[foxy] onion request to", name, "failed:", why.text)
+                        self.resolve(id: id, text: nil, error: "\(name) could not be asked over Tor: \(why.text)")
+                    }
+                }
+            }
+            return
+        }
         var mreq = URLRequest(url: url)
         mreq.httpMethod = method                       // GET or POST (mintMethod)
         mreq.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
