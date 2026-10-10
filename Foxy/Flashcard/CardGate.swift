@@ -20,7 +20,7 @@ enum CardGate {
     /// The applet's class byte.
     static let appletClass: UInt8 = 0xB0
 
-    /// The instructions the page uses, and no others the applet has: twenty-nine.
+    /// The instructions the page uses, and no others the applet has: thirty.
     /// tests/flashcard-model.js holds this list to the page's own (`CARD_INS`,
     /// build/wallet/08a-flashcard.js), both ways: an instruction the page sends and
     /// the phone does not carry is a card that cannot be used.
@@ -46,6 +46,7 @@ enum CardGate {
         0x43,                                       // give it its owner key, or change it
         0x44,                                       // a nonce to answer with the owner's proof
         0x45,                                       // the owner's grant to load, in this tap, with no PIN
+        0x51,                                       // reset the card to what it was in its packet (software 1.17), under the owner's proof
     ]
 
     /// A short command at its longest: four of header, a length, 255 of data

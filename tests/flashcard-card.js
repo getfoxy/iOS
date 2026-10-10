@@ -9,13 +9,14 @@
  * had under jCardSim and compares every answer.
  *
  *     const card = makeCard({ window, key });  // window: the page's (its CashuTS signs); key: 64 hex
- *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.16 (`software: 15` and before are the cards before it)
+ *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.17 (`software: 16` and before are the cards before it)
  *     makeCard({ window, format: 4, floorBits: 0x207fffff })   // the least work a block header must show: the real floor unless a test mines its own headers
  *     const answer = await card.send('b001000000');
  *     card.tap();                                // the card leaves and comes back
  *     card.leaveAfter(2);                        // it leaves the field two commands from now
  *     card.setNonce(hex)                         // the nonce it last gave is this one (replaying a recording of the applet)
  *     card.setChange(nonceHex, rHex)             // the next change it makes for itself has this nonce and this blinding factor (same)
+     card.setNewKey(privHex)                    // the key the next RESET gives it (replaying a recording of the applet); also `card.key`, which is whatever it has now
  *
  * Not a card: no EEPROM, no torn writes inside a command, and it signs in
  * microseconds. What it has in common is every rule the applet enforces.
@@ -35,6 +36,8 @@ const ascii = (t) => Buffer.from(t, 'ascii');
 const hex = (bytes) => Buffer.from(bytes).toString('hex');
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
+// the confirming byte of RESET (the applet's RESET_CONFIRM_BYTE), as LOCK_CARD has 0xDE
+const RESET_CONFIRM = 0xad;
 
 function makeCard(opts) {
   const o = opts || {};
@@ -79,7 +82,8 @@ function makeCard(opts) {
    * (`COSTED`), and whose clock is a time under a signature (SET_TIME, a time key in its record, 73-byte receipts and
    * 16-byte log entries, `6a92` for a limit and no time); `software: 15` is the card whose clock is
    * the time in the newest Bitcoin block header it has taken (`HEADERS`: SET_HEADER and TELL_TIME, no time key, 77-byte
-   * receipts and 20-byte entries, and a first day on trust); the card with no `software` is 1.16 (below). */
+   * receipts and 20-byte entries, and a first day on trust); `software: 16` is the card whose PIN is optional (below); the card with no
+   * `software` is the latest, 1.17 (below). */
   const DESIGN = SEALED && o.software !== 9;
   const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
   const SHAPED = OWN_CHANGE && o.software !== 12;
@@ -91,7 +95,11 @@ function makeCard(opts) {
    * NO-PIN ALLOWANCE (the third of the SET_LIMIT_OWNER's twelve bytes): what it signs for in the day's window with no PIN, over
    * which it refuses the signature with 6a94 (the PIN is wanted for the whole payment) and gives the payment up. */
   const NOPIN = HEADERS && o.software !== 15;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? 16 : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  /* 1.17: the owner can RESET the card (INS 0x51, P2 = 0xAD, the owner's proof over "FoxyCard/reset"): it reads as a card out of its packet, with
+   * a new key, and keeps its clock and its software. And the first limit's worth over the limit on one payment waits ten signatures where
+   * 1.13 to 1.16 waited seven (`WAIT_OVER`); the further ones are three still. `software: 16` is the card before it. */
+  const RESET = NOPIN && o.software !== 16;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? 17 : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -110,7 +118,7 @@ function makeCard(opts) {
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   // software 1.13 and on: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
-  const WAIT_OVER = 7, WAIT_MORE = 3, UNITS_MOST = 255;
+  const WAIT_OVER = RESET ? 10 : 7, WAIT_MORE = 3, UNITS_MOST = 255;
   // the change a payment makes for itself (1.12): eight openings are kept, and GET_CHANGE says three to a page
   const CHANGE_MOST = 8;
   const CHANGE_PAGE = 3;
@@ -118,8 +126,10 @@ function makeCard(opts) {
    * from) and a form that gives named places whole (P2 = 2), and LOAD_PROOF takes up to three pieces end to end. What it
    * signs and stores is the same. */
   const QUICK = FORMAT === 4;
-  const priv = String(o.key || crypto.randomBytes(32).toString('hex'));
-  const pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
+  // the card's key: made again by a RESET (1.17), which is another keypair
+  let priv = String(o.key || crypto.randomBytes(32).toString('hex'));
+  let pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
+  let nextKey = null;        // the private key (hex) the next RESET gives the card, where a test says (`setNewKey`)
   // the key a PIN is sealed to: the card's own, for that and nothing else
   const pinPriv = String(o.pinKey || crypto.randomBytes(32).toString('hex'));
   const pinPub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(pinPriv, 'hex'))));
@@ -959,12 +969,47 @@ function makeCard(opts) {
         s.locked = true;
         return '9000';
       }
+      case 0x51: {
+        /* RESET (1.17): the owner gives the card back to what it was in its packet. Checked in this order: the confirming bytes (P1 = 0, P2 = 0xAD,
+         * else 6B00); an owner (6A90); the owner's proof over "FoxyCard/reset" and an empty value (6A91; anything after the proof is 6700); a
+         * LOCKED card also needs the PIN verified in this tap (6982; a blocked PIN is no bar to a card that is not locked, and the PIN is
+         * not asked of one that is not); and nothing unspent (6A8D). Then, whole: every place empty; no PIN (three tries) and no owner; no record, no
+         * limit, no allowance, no window, no count; no log and no receipts; no change in hand, no signature to give again; no lock; and a NEW KEY. What it keeps is
+         * its clock (`now`, and the last header's hash; the ratchet, the hardest difficulty taken, goes to nothing, as a new record
+         * does it) and its software. */
+        if (!RESET) return '6d00';
+        if (p1 !== 0 || p2 !== RESET_CONFIRM) return '6b00';
+        if (!s.owner) return '6a90';
+        const got = ownerProof('FoxyCard/reset', data);
+        if (got.sw) return got.sw;
+        if (got.value.length !== 0) return '6700';
+        if (s.locked && !s.verified) return '6982';
+        if (unspent()) return '6a8d';
+        s.slots.forEach((x) => { x.status = 0; x.data = ''; });
+        s.pin = null; s.pinState = 0; s.tries = 3; s.verified = false; s.locked = false;
+        s.owner = null; s.nonce = null; s.grant = false; s.changeGrant = false; s.changeDue = false;
+        s.record = { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '', design: '' };
+        s.windowStart = 0; s.spent = 0; s.noPinLimit = 0; s.noPinSpent = 0; s.tapLimit = 0; s.tapStart = 0; s.tapSpent = 0;
+        s.log = { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
+                  ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0, told: 0 })) };
+        s.receipts = { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, told: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) };
+        s.tapOpen = false; s.tapPaid = false; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0;
+        s.openings = Array.from({ length: CHANGE_MOST }, () => ({ state: 'empty' }));
+        s.all = null; s.lastSig = null; s.lastNoPin = false; delete s.lastText; s.waited = 0;
+        s.hardest = 0;
+        nextChange = null;
+        priv = nextKey || crypto.randomBytes(32).toString('hex');
+        nextKey = null;
+        pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
+        return '9000';
+      }
       default: return '6d00';
     }
   }
 
   return {
-    key: pub,
+    // whatever key it has now (a RESET gives it another)
+    get key() { return pub; },
     state: s,
     sent,
     /* An APDU in, the answer out, both hex. Rejects once the card has left. */
@@ -992,13 +1037,19 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 15) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 16) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, told: 0 });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */
     leaveAfter(n) { leaveIn = n; },
     setNonce(nonceHex) { s.nonce = String(nonceHex).toLowerCase(); },
+    // the private key (32 bytes, hex) the next RESET gives it, in place of a random one: what a recording of the applet needs
+    setNewKey(privHex) {
+      const k = String(privHex).toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(k)) throw new Error('a key is 32 bytes');
+      nextKey = k;
+    },
     /* The next change the card makes for itself has this nonce and this blinding factor (32 bytes each, as hex; r under the
      * curve's order and not zero) in place of random ones: what a recording of the applet needs, which draws them itself. */
     setChange(nonceHex, rHex) {

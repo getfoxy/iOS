@@ -24,10 +24,11 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 const bal = (c) => c.W.balanceSats();
-// the latest card the model has: software 1.16, whose PIN is optional (tests/flashcard-nopin.js). Its wait and its change are those of 1.14, whose change
+// the card of software 1.16, whose PIN is optional (tests/flashcard-nopin.js). Its wait and its change are those of 1.14, whose change
 // counts toward its wait for what it cost, two for every three pieces; 1.15 changed the clock (tests/flashcard-clock.js); a payment made WITH the PIN is the
-// same on all of them
-const card4 = (ctx) => makeCard({ window: ctx.window, format: 4 });
+// same on all of them. The tables of this suite are of seven signatures for the first limit's worth over, which 1.13 to 1.16 wait; the latest card, 1.17,
+// waits ten (tests/flashcard-reset.js), and can be reset there too
+const card4 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 16 });
 // the card before it (1.14): the same wait and the same change, and a clock that is a time told under a signature, which a terminal can be made to lie about
 const card14 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 14 });
 // the card before it (1.13): the same, but it takes one wait off for each piece of change it made

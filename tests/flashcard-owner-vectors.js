@@ -61,10 +61,10 @@ const N = BigInt('0x' + V.n);
     const sig = asked && !asked[1] ? JSON.parse(asked[0]) : {};
     ok(Object.keys(sig).join() === 'sig' && p256Verify(c.pub, Buffer.from(s.message, 'hex'), sig.sig), 'cardOwnerSign answers a signature the file’s key accepts, and nothing else');
     for (const bad of [{ label: 'lock' }, { label: 'time' }, { label: 'FoxyCard/load' }, { label: 'change-pin', value: '313233' }, { label: 'set-limit', value: '00' },
-                       { label: 'load', value: '00' }, { label: 'set-owner', value: '04' }, { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
+                       { label: 'load', value: '00' }, { label: 'reset', value: '00' }, { label: 'set-owner', value: '04' }, { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
       const body = Object.assign({ action: 'cardOwnerSign', key: c.cardKey, label: 'load', nonce: s.nonce, value: '' }, bad);
       const r = await Promise.resolve(phone.answer(null, body));
-      ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the five, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
+      ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the six, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
     }
   }
   console.log('\n' + (failed ? failed + ' flashcard-owner-vectors check(s) failed' : 'all flashcard-owner-vectors checks pass'));

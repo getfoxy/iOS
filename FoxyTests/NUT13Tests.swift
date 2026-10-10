@@ -329,11 +329,11 @@ final class NUT13Tests: XCTestCase {
 
     // MARK: What the owner key may sign
 
-    /// The five names, and nothing the card also signs or verifies: LOCK_CARD and the time are not here.
-    func testTheLabelsAreFiveAndNoNameStartsAnother() {
+    /// The six names, and nothing the card also signs or verifies: LOCK_CARD and the time are not here.
+    func testTheLabelsAreSixAndNoNameStartsAnother() {
         let names = CardOwner.Label.allCases.map { $0.rawValue }
-        XCTAssertEqual(Set(names), ["change-pin", "set-limit", "set-owner", "set-card", "load"])
-        XCTAssertEqual(names.count, 5)
+        XCTAssertEqual(Set(names), ["change-pin", "set-limit", "set-owner", "set-card", "load", "reset"])
+        XCTAssertEqual(names.count, 6)
         for a in names {
             for b in names where a != b {
                 XCTAssertFalse(a.hasPrefix(b), "\(a) starts with \(b), so a signature could name either")
@@ -416,9 +416,9 @@ final class NUT13Tests: XCTestCase {
     }
 
     /// {key, label, nonce, value} as the page sends them: whole and exact, or nothing.
-    func testASignRequestIsTheFiveLabelsAndTheirValuesAndNothingElse() throws {
+    func testASignRequestIsTheSixLabelsAndTheirValuesAndNothingElse() throws {
         let ok: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "000186a0"),
-                                      ("set-owner", "04" + String(repeating: "ab", count: 64)), ("load", ""),
+                                      ("set-owner", "04" + String(repeating: "ab", count: 64)), ("load", ""), ("reset", ""),
                                       ("set-card", NUT13.hex(record(length: 24)))]
         for (label, value) in ok {
             let request = try XCTUnwrap(CardOwner.signRequest(sign(label, value)), "\(label) \(value.prefix(8))")
@@ -432,7 +432,7 @@ final class NUT13Tests: XCTestCase {
         let upper = try XCTUnwrap(CardOwner.signRequest(sign("set-limit", "000186A0", key: secp256k1G.uppercased(), nonce: nonceText.uppercased())))
         XCTAssertEqual(upper.value, [0, 1, 0x86, 0xA0])
         XCTAssertEqual(upper.key, bytes(secp256k1G))
-        // a label that is not one of the five, however near: LOCK_CARD and the time in particular
+        // a label that is not one of the six, however near: LOCK_CARD and the time in particular
         let labels: [Any] = ["lock", "time", "auth", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "FoxyCard/change-pin", "", " ",
                              "Load", "LOAD", "Change-Pin", "change-pin ", " load", "load\n", "load\0", "change_pin", "changePin", "setLimit",
                              "set-allowance", "set-", "set", "change-pin,load", 5, true, ["load"], ["label": "load"]]
@@ -443,6 +443,7 @@ final class NUT13Tests: XCTestCase {
         XCTAssertNil(CardOwner.signRequest(sign(nil, "")), "no label")
         // a value that is not that label's, or not hex at all
         XCTAssertNil(CardOwner.signRequest(sign("load", "00")), "load takes nothing")
+        XCTAssertNil(CardOwner.signRequest(sign("reset", "00")), "reset takes nothing")
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "313233")), "three digits")
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "3132333g")))
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "313233343")), "odd")

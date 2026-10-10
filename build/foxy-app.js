@@ -19618,9 +19618,10 @@ class Component extends DCLogic {
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        // set up, and home, said in a line: the card's screen, with ADD FUNDS on it, is a tap away under FLASHCARD
-        this.setState({ screen: 'home', stack: [] });
         this.toast('The card is set up.');
+        // set up with a PIN: home, said in a line (the card's screen, with ADD FUNDS on it, is a tap away under FLASHCARD);
+        // with none: the card's screen, where ADD PIN now is
+        if (pin) this.setState({ screen: 'home', stack: [] });
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
   }
 

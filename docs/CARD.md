@@ -214,6 +214,49 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
     adding funds from a phone that is not the owner's, and the recut that a per tap limit can need.
   - *At a till*, *Paying at a till*, below.
 
+## Resetting a card (software 1.17)
+
+From software 1.17 a card's owner can give it back to what it was in its packet, so that another person can set it up.
+This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC.md`.
+
+- **What the card does.** RESET (instruction 51, P1 = 0, P2 = 0xAD) under the owner's proof over `FoxyCard/reset` and an
+  empty value (nothing else may follow it). The card then has no PIN (three tries), no owner, no record, no limit, no
+  allowance, no log, no receipts, no change in hand and no lock, and **a new key** (the old key tied two owners' payments
+  together). It keeps its clock (what it reads now and the hash of the last header; the ratchet goes to nothing, as a new
+  record does it) and its software. It refuses a card with anything unspent on it (`6A8D`), one with no owner (`6A90`), a
+  proof that is not the owner's (`6A91`), and a LOCKED card whose PIN was not verified in the same tap (`6982`); an
+  unlocked card asks for no PIN, and a blocked PIN is no bar to it (the owner is resetting, not unblocking).
+- **The owner's key.** The proof is the owner's, so native signs for a sixth label, `reset` (empty value). A lock and the
+  time are still not signed for.
+- **`cardReset(link, { pin })`.** Reads the card as its owner, proves ownership, verifies the PIN first where the card is
+  locked, and sends RESET. Resolves `{ reset: true, key }` (the card's old key). Rejects, with `card`: `old-card`
+  (before 1.17), `no-owner`, `not-owner` (these words are not the card's; costs no try), `has-money` ("Take the money off
+  the card first."), `locked` (a locked card and no PIN, said before the card is sent anything), `bad-pin`, `wrong-pin`,
+  `blocked` (a locked card whose PIN is blocked cannot be reset), `gone`, `change-owed` and `unsettled` (below). Nothing is
+  changed by any of them. The key the tap had kept (`link.one`) is forgotten, so a read after it asks the card for its new key.
+- **`cardEmptyAndReset(link, { pin, on, progress })`.** For the app: a card holding money has all of it taken off to this
+  phone (as WITHDRAW all does, with the owner's proof) and is then reset, in the one call and the one tap. Resolves
+  `{ reset: true, key, withdrew, hash }`. Everything that can be known is checked before the money moves, so a card that
+  cannot be reset is not emptied. If the card goes after the money came off, the rejection carries `withdrew` and `hash`; the
+  card is then empty and the next tap resets it.
+- **What it will not lose.** A reset wipes the card's record of the change it made for itself (what the mint's signatures are
+  unblinded with), and that change is locked to the key the reset destroys. So the owner's read first finishes it (asks
+  the mint, puts the pieces on the card, in this tap; `cardEmptyAndReset` then takes them off with the rest), and where it
+  cannot (no road to the mint, the till has not made its swap) the card is not reset: `change-owed`, "The card is owed
+  change from its last payment. Tap it once more first.", with `owes.openings`. In the same way, ecash this phone has made
+  for the card and not yet written to it, change it is due, a signature asked of the card and never seen, and a payment
+  held from a cut-short tap are `unsettled` (`owes`: counts and `sats`). `cardReset(link, { abandon: true })` resets all the
+  same and gives up the rows owed to the old key; the pieces stay locked to it, and a card set up as recoverable gives
+  them back to this phone's key after their date (`cardTakeBack`).
+- **What the phone forgets, and keeps.** Of the old key: the pace rows (the dollars a limit was set in), the receipts it
+  copied, a lifted limit's note, when the card was last checked, the design it noted for it, and where its log was read to.
+  It keeps the card's row among the cards it can take back (a piece the card signed away that its receiver never swapped is
+  still this phone's to take back after its date), and the withdrawal that emptied the card is an ordinary history line;
+  the reset has no line of its own.
+- **The wait.** Software 1.17 asks ten signatures for the first limit's worth over the limit on one payment and three for
+  each after; 1.13 to 1.16 ask seven and three. `info.waitOver` says which a card has, and `cardWaitSigns` and `cardWait`
+  take it as their last argument (without it, seven).
+
 ## Adding money
 
 **ADD FUNDS** on the card's screen.
@@ -747,7 +790,8 @@ What it means for the holder:
   least for the wait's sake. **From software 1.13** a payment within the limit
   goes at once, with change or without (a thirty-second over the limit counts as
   within it: a limit set in dollars at one moment and a price in dollars at
-  another lands a few sats over). Over it the card does seven signatures of work,
+  another lands a few sats over). Over it the card does seven signatures of work
+  (ten from software 1.17: `info.waitOver`),
   about five seconds, for the first limit's worth over the limit and three more,
   about two seconds, for every limit's worth after that, whole or in part. The
   change the card made counts toward them as work done, for what it cost: **from
@@ -769,7 +813,7 @@ What it means for the holder:
   outputs and the change were sent, and gives the payment up: the swap's row is
   dropped, nothing is burned.
 - **One payment a tap at full speed (1.13).** A second payment signed in the
-  same time in the field waits as one over the limit does, seven signatures and
+  same time in the field waits as one over the limit does, seven signatures (ten from 1.17) and
   its own count where that is more, whether the card has a limit or not, unless
   the owner's grant is in the tap. Without it a terminal that has the PIN could
   take a limit's worth a second for as long as the card is held. A new SELECT
@@ -973,7 +1017,8 @@ follows is the one a card has now.
   holds above the limit.
 - **A payment over it waits.** The card does signatures of its own work before
   it signs, and nothing is taken until that is done. From software 1.13: nothing
-  within the limit (change or no change); about five seconds, seven signatures,
+  within the limit (change or no change); about five seconds, seven signatures
+  (ten from 1.17: about eight seconds),
   for the first limit's worth over it, and about two seconds, three, for every
   limit's worth after that, less what the change the card made counts for: two
   for every three pieces from 1.14, one for each piece in 1.13 (a piece is about
@@ -1391,6 +1436,8 @@ matter to a person:
   `tests/flashcard-nopin.js` pins
   software 1.16: a card with no PIN, ADD PIN, the allowance and its dollars, the early and the card's own `pin-needed`
   with nothing left pending, the shared window, the log's mark, and a card of 1.15 that keeps asking for its PIN;
+  `tests/flashcard-reset.js` pins software 1.17: the model's RESET byte for byte, `cardReset` and `cardEmptyAndReset` and every
+  refusal, what is forgotten and kept, a card set up afresh by another person, change the card is owed, and the ten-signature wait;
   `tests/flashcard-release.js`
   pins the card being let go before the mint, a refusal and its put-back tap, a
   lost answer, and the circuit made ready as the sheet opens. `tests/flashcard-applet.js` is

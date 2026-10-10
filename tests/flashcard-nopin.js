@@ -87,7 +87,9 @@ async function world(pin, o) {
     const P = await funded({}, 0);
     const c = newCard(P, undefined, { format: 4 });
     const read = async (apdu) => { const r = await c.send(apdu); return { sw: r.slice(-4), data: r.slice(0, -4) }; };
-    ok((await c.send(SEL)) === '01109000', 'a card of 1.16 says 1.16 when chosen');
+    ok((await c.send(SEL)) === '01119000', 'the latest card says 1.17 when chosen');
+    const sixteen = newCard(P, undefined, { format: 4, software: 16 });
+    ok((await sixteen.send(SEL)) === '01109000', 'and a card of 1.16 (`software: 16`) says 1.16');
     const fresh = await read('b001010000');
     ok(fresh.sw === '9000' && fresh.data.length === 84 && fresh.data.slice(68) === '0000000000000000' && fresh.data.substr(14, 2) === '00',
        'GET_INFO P1=1 is 42 bytes; on a new card there is no PIN (byte 7) and bytes 34 to 41 are nothing', fresh.data.slice(0, 20) + ' ... ' + fresh.data.slice(60));

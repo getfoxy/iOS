@@ -581,7 +581,7 @@ final class SeedActionsTests: XCTestCase {
         case .setLimit: return "000186a0"
         case .setOwner: return "04" + String(repeating: "ab", count: 64)
         case .setCard: return "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
-        case .load: return ""
+        case .load, .reset: return ""
         }
     }
 

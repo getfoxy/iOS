@@ -33,10 +33,10 @@ final class CardGateTests: XCTestCase {
     }
 
     func testOnlyTheInstructionsThePageUsesAreCarried() {
-        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these twenty-nine
+        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these thirty
         let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "18", "19", "20", "22", "23", "24", "25", "26",
-                       "30", "31", "32", "34", "35", "36", "37", "40", "41", "42", "43", "44", "45"]
-        XCTAssertEqual(carried.count, 29)
+                       "30", "31", "32", "34", "35", "36", "37", "40", "41", "42", "43", "44", "45", "51"]
+        XCTAssertEqual(carried.count, 30)
         XCTAssertEqual(CardGate.instructions, Set(carried.map { UInt8($0, radix: 16)! }), "exactly these, and the table says so")
         for ins in carried {
             XCTAssertNotNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins)")
@@ -59,6 +59,7 @@ final class CardGateTests: XCTestCase {
         XCTAssertEqual(CardGate.read(bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04")), .applet(0x36), "a block header")
         XCTAssertEqual(CardGate.read(bytes("b0370000" + "04" + "6ac9dc75")), .applet(0x37), "the phone's own time, as a note")
         XCTAssertEqual(CardGate.read(bytes("b0450000" + "03" + "300100")), .applet(0x45), "the owner's grant to load")
+        XCTAssertEqual(CardGate.read(bytes("b05100ad" + "03" + "300100")), .applet(0x51), "a reset (software 1.17), under the owner's proof")
         XCTAssertEqual(CardGate.read(bytes("b0430000" + "03" + "040102")), .applet(0x43), "an owner key")
         XCTAssertEqual(CardGate.read(bytes("b034000005" + "0102030405")), .applet(0x34), "the limit, with the owner's proof")
         XCTAssertEqual(CardGate.read(bytes("b017000000")), .applet(0x17), "which pieces it holds, from place 0")

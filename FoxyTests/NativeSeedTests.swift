@@ -118,9 +118,9 @@ final class NativeSeedTests: XCTestCase {
         XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": key + "11"]), .refuse("bad request"), "68 characters")
     }
 
-    /// cardOwnerSign {key, label, nonce, value}: the five labels, each with the shape of
+    /// cardOwnerSign {key, label, nonce, value}: the six labels, each with the shape of
     /// value it takes, and nothing else; refused before the seed is read.
-    func testCardOwnerSignTakesFiveLabelsAndTheirValuesAndNothingElse() throws {
+    func testCardOwnerSignTakesSixLabelsAndTheirValuesAndNothingElse() throws {
         let key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
         let nonce = "000102030405060708090a0b0c0d0e0f"
         let owner = "04" + String(repeating: "ab", count: 64)
@@ -131,7 +131,7 @@ final class NativeSeedTests: XCTestCase {
         }
         // whole requests: each label, a value of its shape
         let whole: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "00000000"),
-                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"), ("set-owner", owner), ("set-card", record), ("load", "")]
+                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"), ("set-owner", owner), ("set-card", record), ("load", ""), ("reset", "")]
         for (label, value) in whole {
             switch FoxyBridge.cardOwnerSignCheck(body(label, value)) {
             case .ok(let request):
@@ -143,7 +143,7 @@ final class NativeSeedTests: XCTestCase {
                 XCTFail("\(label) was refused: \(why)")
             }
         }
-        // a label that is not one of the five, and in particular not a lock or a time, however it is written
+        // a label that is not one of the six, and in particular not a lock or a time, however it is written
         for label in ["lock", "time", "auth", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "", "Load", "LOAD", "change-pin ", "set-allowance"] as [Any] {
             XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
         }
@@ -151,7 +151,7 @@ final class NativeSeedTests: XCTestCase {
             XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
         }
         // a value of another label's shape, or not hex, or not text
-        let wrong: [(String, Any)] = [("load", "00"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
+        let wrong: [(String, Any)] = [("load", "00"), ("reset", "00"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
                                       ("set-limit", "000000"), ("set-limit", "0000000000"), ("set-owner", String(owner.dropFirst(2))),
                                       ("set-owner", "02" + String(owner.dropFirst(2))), ("set-card", String(record.dropLast(2))),
                                       ("set-card", record + "6d"), ("set-card", ""), ("change-pin", "31323334 "), ("change-pin", "0x31323334"),

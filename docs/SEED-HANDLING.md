@@ -157,7 +157,7 @@ plain message.
 | `p2pkPubkeys` | `{start, count}`, count 1 to 300, no index past 20,000 | the same shape, nothing moved: the walk that finds which index a token in hand is locked to |
 | `p2pkKey` | `{index}` | `{index, privkey, pubkey}`, inside 1,000 of the last index reserved or inside a range this session's walk served; "outside the lock-key window" |
 | `cardOwnerKey` | `{key}`, a card's compressed public key: 66 hex characters, either case, starting 02 or 03 | `{"pub": "<130 lowercase hex>"}`, the owner PUBLIC key, `04` and X and Y; "bad request" before the seed is read, "no seed" |
-| `cardOwnerSign` | `{key, label, nonce, value}`: the key as above; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed" |
+| `cardOwnerSign` | `{key, label, nonce, value}`: the key as above; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed" |
 | `seedShow` | `{verify}` | `{"verified": true}` or `{"verified": false}` once the screen closes |
 | `seedEnter` | `{}` | `{"candidate": id}`; "cancelled" |
 | `seedAdopt` | `{candidate}` | `{"adopted": true}` or `{"adopted": false, "same": true}`; "Nothing was changed.", "unknown candidate" |
@@ -305,8 +305,8 @@ or the seed.
   not happen). The same twelve words derive the same key for the same card on a
   new phone, and a different card has a different one. **The private key never
   leaves native code, and neither does the seed.** The page can get three things:
-  the owner public key; a signature for one of a fixed list of five labels
-  (`change-pin`, `set-limit`, `set-owner`, `set-card`, `load`) over
+  the owner public key; a signature for one of a fixed list of six labels
+  (`change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`) over
   `"FoxyCard/" + label`, the card's 16-byte nonce and a value that must have the
   shape that label's command takes; and, from `cardTime`, a signed time (for a card of software 1.14 or before; a card of 1.15 is shown Bitcoin block headers and takes none). Any other
   label, in particular `lock` and `time`, and any other shape, is "bad request"

@@ -389,6 +389,9 @@ enum CardOwner {
         case setOwner = "set-owner"
         case setCard = "set-card"
         case load
+        /// RESET, card software 1.17: the card is given back to what it was in its packet, with a new key. The owner's proof is over
+        /// the label and the nonce, and no value, as for load.
+        case reset
 
         /// Whether `value` has the shape this label's command takes, which is
         /// what the card will read it as:
@@ -400,7 +403,8 @@ enum CardOwner {
         ///  - set-card: the card's record, unit (1), refund key (33), time key (65, the
         ///    first of them 04, or all zeros: a card of software 1.15 and on has no time
         ///    key and reads none), mint length L (1, from 1 to 80) and the mint (L bytes);
-        ///  - load: nothing.
+        ///  - load: nothing;
+        ///  - reset: nothing.
         func accepts(_ value: [UInt8]) -> Bool {
             switch self {
             case .changePin:
@@ -413,7 +417,7 @@ enum CardOwner {
                 guard value.count >= 100, value[34] == 0x04 || value[34..<99].allSatisfy({ $0 == 0 }) else { return false }
                 let mint = Int(value[99])
                 return (1...80).contains(mint) && value.count == 100 + mint
-            case .load:
+            case .load, .reset:
                 return value.isEmpty
             }
         }
@@ -450,7 +454,7 @@ enum CardOwner {
     }
 
     /// cardOwnerSign's {key, label, nonce, value}: the key as above; a label that is exactly one
-    /// of the five names; a nonce of 32 hex characters; and a value in hex that has the
+    /// of the six names; a nonce of 32 hex characters; and a value in hex that has the
     /// shape the label takes (an empty string for load). Nothing is read until this has passed.
     static func signRequest(_ body: [String: Any]) -> SignRequest? {
         guard let key = key(from: body["key"]),

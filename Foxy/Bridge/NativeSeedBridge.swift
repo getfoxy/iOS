@@ -159,8 +159,8 @@ extension FoxyBridge {
     }
 
     /// cardOwnerSign {key, label, nonce, value}: the key as above; the label exactly
-    /// one of change-pin, set-limit, set-owner, set-card and load; the nonce 32 hex
-    /// characters; the value hex of the shape that label takes (empty for load).
+    /// one of change-pin, set-limit, set-owner, set-card, load and reset; the nonce 32 hex
+    /// characters; the value hex of the shape that label takes (empty for load and reset).
     /// CardOwner.signRequest holds the rules, so the Mac's tests run them.
     static func cardOwnerSignCheck(_ body: [String: Any]) -> NativeCheck<CardOwner.SignRequest> {
         guard let request = CardOwner.signRequest(body) else { return .refuse("bad request") }
@@ -407,7 +407,7 @@ extension FoxyBridge {
     }
 
     /// {key, label, nonce, value} → {"sig"}: the owner key's signature for one of
-    /// five labels and the shape of value it takes, which is all the page can have
+    /// six labels and the shape of value it takes, which is all the page can have
     /// signed. Refused with "bad request", before the seed is read, otherwise.
     func handleCardOwnerSign(id: String, body: [String: Any]) {
         switch Self.cardOwnerSignCheck(body) {

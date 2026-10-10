@@ -90,11 +90,12 @@ function values(i) {
     'set-owner': next.pub,
     'set-card': record,
     'load': Buffer.alloc(0),
+    'reset': Buffer.alloc(0),
   };
 }
 
 /* what a card verifies: "FoxyCard/" + label || nonce (16) || value */
-const LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load'];
+const LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load', 'reset'];
 
 const cases = owners.map((o, i) => {
   const { priv, pub } = keyObjects(o.d, o.pub);

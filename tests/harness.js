@@ -791,7 +791,7 @@ function p2pkAt(parent, index) {
  * public half and signatures, and that is what these answer. */
 const P256_ORDER = BigInt('0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551');
 /* The labels native signs for, and no others (never "lock", never "time"). */
-const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load'];
+const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load', 'reset'];
 /* INTERIM: the private half of the key a card's time is signed by. It is built into the app, so it is no secret
  * (Foxy/Flashcard/CardTime.swift holds the same value, and tests/flashcard-daily.js holds the two together). */
 const INTERIM_TIME_PRIVATE = '5d3aa8864437b69bc699905ded587014b3d1f7e0de402684e5eec162d540b2ca';
@@ -1163,7 +1163,7 @@ function nativePhone(opts) {
       return ok({ pub: p256Public(cardOwnerScalar(seedNow(), key)) });
     },
     /* handleCardOwnerSign, SeedActions.cardOwnerSign: a signature (ECDSA, SHA-256,
-     * DER) over "FoxyCard/" + label || nonce (16) || value, for one of five fixed
+     * DER) over "FoxyCard/" + label || nonce (16) || value, for one of six fixed
      * labels and the shape each takes. Every check comes before the seed is read.
      * Nothing else is signed: not "lock", not "time". */
     cardOwnerSign(m) {
@@ -1181,6 +1181,8 @@ function nativePhone(opts) {
         'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99]
           && (value[34] === 4 || value.subarray(34, 99).every((b) => b === 0)),
         'load': value.length === 0,
+        // RESET (card software 1.17): the proof is over the label and a nonce alone
+        'reset': value.length === 0,
       }[m.label];
       if (!shaped) return no(SAYS.bad);
       if (!words()) return no(SAYS.noSeed);

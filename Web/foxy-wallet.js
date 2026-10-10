@@ -8905,6 +8905,8 @@
     var headers = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 15));
     // software 1.16 and on: the PIN is optional, and bytes 34 to 41 of the long answer are the no-PIN allowance and what is spent of it
     var noPinKnown = tapKnown && b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 16));
+    // software 1.17 and on: the owner can reset the card to what it was in its packet (RESET, `FoxyWallet.cardReset`)
+    var resetKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 17));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -8941,6 +8943,12 @@
               * needed a PIN as well. */
              noPinKnown: noPinKnown, noPin: { limit: noPinKnown ? cardU32(h, 34) : 0, spent: noPinKnown ? cardU32(h, 38) : 0 },
              pinSet: b(7) !== 0, setUp: b(11) === 1 && (b(7) !== 0 || noPinKnown),
+             /* `resetKnown`: the card's software is 1.17 or later, whose owner can reset it (the version says so, as for `costed`):
+              * no PIN, no owner, no record, no limits, no log and a new key, with its clock and its software kept. */
+             resetKnown: resetKnown,
+             /* `waitOver`: the signatures a card of this software asks for the first limit's worth over its limit on one payment:
+              * seven on 1.13 to 1.16, ten from 1.17 (`cardWaitSigns`). */
+             waitOver: resetKnown ? CARD_WAIT_OVER_17 : CARD_WAIT_OVER,
              /* This tap is the one after a payment: the card lets pieces be put
               * on with no PIN (the change). Said by the card for this tap only. */
              changeDue: h.length >= 60 && b(29) === 1,
@@ -9156,6 +9164,9 @@
   var CARD_WAIT_SIGNS = 4;
   // software 1.13: the signatures for the first limit's worth over the limit, and for each further one; at most 255 limits' worth count
   var CARD_WAIT_OVER = 7;
+  /* and from software 1.17 the first limit's worth over takes ten (`info.waitOver` says which a card has; the version says so,
+   * as for `costed`): the further ones are three still. */
+  var CARD_WAIT_OVER_17 = 10;
   var CARD_WAIT_MORE = 3;
   var CARD_WAIT_UNITS = 255;
   // the longest a till asks anybody to hold a card for, in seconds: a payment that would wait longer is not begun
@@ -9177,29 +9188,33 @@
    *
    *     leaves <= limit + limit/32        0  (a limit set in dollars at one moment and a price in
    *                                           dollars at another lands a few sats over)
-   *     otherwise              7 + 3 * (ceil(leaves / limit) - 2)
+   *     otherwise              7 + 3 * (ceil(leaves / limit) - 2)      (10 + ... on a card of software 1.17 and on: `over`)
    *
    * less what the change made counts for, never below 0: two for every three pieces
    * (floor(2 * made / 3)) on a card that is `costed`, one for each piece on the card of
    * 1.13. A second payment is at least one limit's worth over, 7, with a limit or
-   * without one, and takes the same off. */
-  function cardWaitSigns(limit, leaves, made, second, costed) {
+   * without one, and takes the same off.
+   * `over`: the signatures for the first limit's worth over the limit, which the card says by its software (`info.waitOver`):
+   * 7 from 1.13 to 1.16 (and where it is not given), 10 from 1.17. */
+  function cardWaitSigns(limit, leaves, made, second, costed, over) {
+    var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
     var l = Math.round(Number(limit) || 0), n = Math.round(Number(leaves) || 0);
     var pieces = Math.max(0, Math.round(Number(made) || 0));
     var done = costed ? Math.floor(2 * pieces / 3) : pieces;
-    if (!(l > 0)) return second ? Math.max(0, CARD_WAIT_OVER - done) : 0;
+    if (!(l > 0)) return second ? Math.max(0, first - done) : 0;
     var units = n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
     if (second && units <= 1) units = 2;
     if (units <= 1) return 0;
-    return Math.max(0, CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 2) - done);
+    return Math.max(0, first + CARD_WAIT_MORE * (units - 2) - done);
   }
   /* The most limits' worth a payment can be of and still be waited for in no more
    * than CARD_WAIT_MOST seconds (software 1.13 and on), to say what can be taken. It
    * takes nothing off for change, so it is the same whatever the card counts that
    * for (`costed`) and a part of that size is waited for no longer than that. */
-  function cardWaitUnitsMost() {
+  function cardWaitUnitsMost(over) {
+    var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
     var units = 2;
-    while (units < CARD_WAIT_UNITS && cardWaitSeconds(CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 1)) <= CARD_WAIT_MOST) units += 1;
+    while (units < CARD_WAIT_UNITS && cardWaitSeconds(first + CARD_WAIT_MORE * (units - 1)) <= CARD_WAIT_MOST) units += 1;
     return units;
   }
   /* The same by the rule of software 1.12: the card counts what leaves it for
@@ -9640,7 +9655,11 @@
                    /* 35 is SET_TIME, a time under a signature, for a card of software 1.14 and before. From 1.15 the card's clock is
                     * the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
                    time: '35', header: '36', tell: '37',
-                   verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45' };
+                   verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45',
+                   /* 50 is LOCK_CARD, which this phone never sends (a lock is for ever, and the owner's key cannot be asked to sign for it).
+                    * 51 is RESET (1.17 and on): the owner's proof over "FoxyCard/reset" and P2 = CARD_RESET_CONFIRM. */
+                   reset: '51' };
+  var CARD_RESET_CONFIRM = 0xad;
 
   function cardByte(n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }
 
@@ -12992,6 +13011,82 @@
     });
   }
 
+  /* ---- a card reset (software 1.17): what is checked first, and what is forgotten after ----------------------------------------
+   *
+   * The card wipes everything it keeps, and some of that is the only record of money: the openings of the change it made for itself
+   * (the nonce and blinding factor the mint's signatures are unblinded with) and the signature it would give again. This phone keeps
+   * rows of money made for the old key, which nothing can write to the card again. So before it resets a card this phone looks at
+   * what is open, and says so (`unsettled`) rather than lose it; the owner's `abandon` is the way to give that money up. */
+
+  /* What is open for this card, from this phone's own rows: { owed, due, asked, held, sats }, counts of each and the sats the owed
+   * and due rows come to. */
+  function cardOpenRows(key) {
+    var owed = cardStore(CARD_OWED).filter(function (r) { return r && r.card === key; });
+    var due = cardStore(CARD_DUE).filter(function (d) { return d && d.card === key; });
+    var asked = cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked && r.asked.card === key; });
+    var held = cardStore(CARD_TAKEN).filter(function (r) { return r && r.resume && r.card === key; });
+    var sats = 0;
+    owed.concat(due).forEach(function (r) { sats += Math.max(0, Math.round(Number(r.sats) || 0)); });
+    return { owed: owed.length, due: due.length, asked: asked.length, held: held.length, sats: sats };
+  }
+
+  /* The card as its owner reads it for a reset, with everything refused that can be known before anything is asked of it:
+   * `old-card`, `no-owner`, `not-owner`, `locked` (no PIN given), `change-owed` and `unsettled`. The money on it is the caller's to judge
+   * (`o.money`: it is not refused here). The change the card made for itself is looked into first (`opts.change` of `cardLook`),
+   * so that what the mint has signed is fetched and put on the card, which the caller then finds there. */
+  function cardResetLook(link, t, o, pin) {
+    var card;
+    return FoxyWallet.cardLook(link, { short: true, mine: true, change: true }).then(function (c) {
+      card = c;
+      var info = card.info;
+      if (!info.resetKnown) throw cardError('old-card', 'This card’s software cannot be reset.');
+      if (!info.owner) throw cardRefused('6a90');
+      // an unlocked card is asked to accept this phone's grant in the read; a locked one is not, and the reset command is the proof
+      if (card.mine === false) throw cardRefused('6a91');
+      if (!o.money && info.unspent > 0) throw cardError('has-money', 'Take the money off the card first.', { sats: card.balance });
+      if (info.locked && !pin) throw cardError('locked', 'This card is locked. It can be reset only with its PIN.');
+      if (o.abandon) return card;
+      var open = cardOpenRows(card.key);
+      var count = function () { return open.owed + open.due + open.asked + open.held; };
+      var openings = info.ownChange ? cardOpenings(t) : Promise.resolve([]);
+      return openings.then(function (list) {
+        open.openings = list.length;
+        open.sats += list.reduce(function (n, x) { return n + x.amount; }, 0);
+        if (open.openings > 0) {
+          /* The card wipes the openings of the change it made for itself, and that change is locked to the key it destroys: it would be lost.
+           * The owner's read above has already tried to fetch it and put it on (the card then holds it, and the caller takes it off);
+           * what is left is change the mint has not signed or cannot be asked for now. */
+          console.log('[foxy] card: not reset: it is owed ' + open.openings + ' piece(s) of change');
+          throw cardError('change-owed', 'The card is owed change from its last payment. Tap it once more first.', { owes: open, sats: open.sats });
+        }
+        if (count() > 0) {
+          console.log('[foxy] card: not reset: ' + open.owed + ' row(s) owed to it, ' + open.due + ' due, ' + open.asked + ' signature(s) asked of it, ' + open.held + ' payment(s) held');
+          throw cardError('unsettled', 'This card still has money on its way. Let that finish first, then reset it.', { owes: open, sats: open.sats });
+        }
+        return card;
+      });
+    });
+  }
+
+  /* Everything this phone kept under a card's key that is not money, dropped; and, if the owner gives up what is open
+   * (`abandon`), the rows of money owed to that key and the signatures asked of it too. The card's row in the cards this phone can
+   * take back (`CARDS`) is kept: a piece the card signed away that its receiver never swapped is this phone's to take back after
+   * its date, whatever the card has become. */
+  function cardForget(key, abandon) {
+    var drop = function (store) {
+      var all = load(store, {});
+      if (all && typeof all === 'object' && !Array.isArray(all) && Object.prototype.hasOwnProperty.call(all, key)) { delete all[key]; save(store, all); }
+    };
+    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_DESIGNS, CARD_LOG_SEEN].forEach(drop);
+    if (!abandon) return;
+    var keep = function (r) { return !(r && r.card === key); };
+    var owed = cardStore(CARD_OWED);
+    if (owed.filter(keep).length !== owed.length) mustSave(CARD_OWED, owed.filter(keep));
+    var due = cardStore(CARD_DUE);
+    if (due.filter(keep).length !== due.length) mustSave(CARD_DUE, due.filter(keep));
+    cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked && r.asked.card === key; }).forEach(function (r) { cardSwapSettled(r.id); });
+  }
+
   /* What this phone last knew to be on a card it can take back: the pieces'
    * own fields, by nonce. A card that is lost is taken back from this, so it
    * is added to whenever the card is loaded or read here, and never trimmed
@@ -13540,8 +13635,8 @@
           var back = worth - fee - want;
           var cut = back > 0 ? cardOwnChangeCut(w, card, groups[0] || [], back) : [];
           var madeBy = cut.reduce(function (n, a) { return n + a; }, 0);
-          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second, costed);
-          unitsMost = cardWaitUnitsMost();
+          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second, costed, card.info.waitOver);
+          unitsMost = cardWaitUnitsMost(card.info.waitOver);
         } else {
           // 1.12: what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole
           signs = ownChange ? cardWaitSigns12(tap.limit, want + fee, worth - fee > want)
@@ -14131,7 +14226,28 @@
     return h.replace(/^0+/, '').slice(0, 8);
   }
 
-  /* What this phone has kept: { hex, time, hash, bits, at } (`at`: when it was fetched, in ms), or null. It is read again
+  /* The last few blocks this phone has fetched, by hash: their heights and times, for a card whose clock is at a block
+   * this phone fetched before the one it keeps now ("Block #…" on its screen). Twenty are kept; nothing is decided by them. */
+  var CARD_HEIGHTS = 'foxy.flashcard.heights';
+  function headerRemember(hash, height, time) {
+    if (!(height > 0)) return;
+    var list = load(CARD_HEIGHTS, []);
+    if (!Array.isArray(list)) list = [];
+    list = list.filter(function (x) { return x && x.hash !== hash; });
+    list.unshift({ hash: hash, height: height, time: time });
+    save(CARD_HEIGHTS, list.slice(0, 20));
+  }
+  /* The height of a block this phone has fetched, by its hash: 0 for one it has not. */
+  function headerHeightOf(hash) {
+    var kept = headerKept();
+    if (kept && kept.hash === hash && kept.height > 0) return kept.height;
+    var list = load(CARD_HEIGHTS, []);
+    var found = Array.isArray(list) ? list.filter(function (x) { return x && x.hash === hash; })[0] : null;
+    return (found && found.height > 0) ? found.height : 0;
+  }
+
+  /* What this phone has kept: { hex, time, hash, bits, at, height } (`at`: when it was fetched, in ms; `height` as the source
+   * said it, 0 when none did), or null. It is read again
    * from its 80 bytes, and what is stored beside them is not believed. */
   function headerKept() {
     var rec = load(CARD_HEADER, null);
@@ -14140,7 +14256,7 @@
     try {
       var h = headerParse(rec.hex);
       if (!h.worked) return null;
-      return { hex: h.hex, time: h.time, hash: h.hash, bits: h.bits, at: at };
+      return { hex: h.hex, time: h.time, hash: h.hash, bits: h.bits, at: at, height: Number(rec.height) || 0 };
     } catch (e) { return null; }
   }
 
@@ -14180,7 +14296,12 @@
       return get('/api/block/' + tip + '/header').then(function (body) {
         var header = headerParse(headerText(body));
         if (header.hash !== tip) throw new Error('the header it gave is not the block it named');
-        return { source: source.name, tip: tip, header: header };
+        /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
+         * decided by it. A source that will not say it leaves it 0. */
+        return get('/api/blocks/tip/height').then(function (h) {
+          var height = parseInt(headerText(h), 10);
+          return { source: source.name, tip: tip, header: header, height: (height > 0 && height < 100000000) ? height : 0 };
+        }, function () { return { source: source.name, tip: tip, header: header, height: 0 }; });
       });
     });
   }
@@ -14239,8 +14360,10 @@
         say('the block ' + headerShort(chosen.hash) + ' is older than the one kept, ' + headerShort(before.hash) + '; the one kept stands');
         return { kept: before, fetched: false, why: 'older' };
       }
-      var rec = { hex: chosen.hex, time: chosen.time, hash: chosen.hash, at: Date.now() };
+      var height = usable.map(function (u) { return u.height; }).filter(function (n) { return n > 0; })[0] || 0;
+      var rec = { hex: chosen.hex, time: chosen.time, hash: chosen.hash, at: Date.now(), height: height };
       save(CARD_HEADER, rec);
+      headerRemember(chosen.hash, height, chosen.time);
       if (usable.length >= 2) say('block ' + headerShort(chosen.hash) + ' (time ' + chosen.time + ') is the tip of ' + usable.map(function (u) { return u.source; }).join(' and '));
       return { kept: headerKept(), fetched: true, why: usable.length >= 2 ? 'agree' : 'one' };
     });
@@ -23583,6 +23706,7 @@
      * `headerShort` is a block hash as a line of text says it. `_headersOff` is for the suites: the fetches that happen on
      * their own (Tor up, the app back, a card tapped) are not made. */
     headerKept: function () { return headerKept(); },
+    headerHeightOf: function (hash) { return headerHeightOf(hash); },
     headerRefresh: function (opts) { return headerRefresh(opts); },
     headerShort: function (hash) { return headerShort(hash); },
     _headersOff: false,
@@ -23596,7 +23720,7 @@
      * pieces less the change the card makes; `made`, the pieces of it; `second`, a payment signed in this time in the field
      * already; `costed`, a card of 1.14 or later, whose change counts for what it cost, two signatures for every three pieces,
      * where 1.13 took one off for each: `info.costed`), 1.12, and before it (the pieces whole). */
-    cardWaitSigns: function (limit, leaves, made, second, costed) { return cardWaitSigns(limit, leaves, made, second, costed); },
+    cardWaitSigns: function (limit, leaves, made, second, costed, over) { return cardWaitSigns(limit, leaves, made, second, costed, over); },
     cardWaitSigns12: function (limit, net, change) { return cardWaitSigns12(limit, net, change); },
     cardWaitSignsBefore: function (limit, sats) { return cardWaitSignsBefore(limit, sats); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
@@ -23701,7 +23825,9 @@
       }).then(function (refund) {
         if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
-        var record = cardRecordHex(refund, mint, undefined, cardCanDesign(card) ? String(o.design || '') : '', card.info.headers);
+        // a card that names a design already (written at the factory, or by hand) keeps it; else the one this phone chose
+        var design = cardCanDesign(card) ? String((card.record && card.record.design) || o.design || '') : '';
+        var record = cardRecordHex(refund, mint, undefined, design, card.info.headers);
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         return (noPin ? Promise.resolve() : cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
@@ -23716,7 +23842,7 @@
          * characters), written down here for a card whose software cannot
          * carry it (before 1.10): its own note, not the list of cards this
          * phone can take back, which a cash card is never on. */
-        cardDesignNote(card.key, o.design);
+        cardDesignNote(card.key, (card.record && card.record.design) || o.design);
         return FoxyWallet.cardLook(link, { mine: true });
       });
     },
@@ -23765,6 +23891,84 @@
         console.log('[foxy] card: a PIN is added to a card that had none; every payment asks for it until a no-PIN limit is set');
         return cardLook(link, { mine: true, short: true });
       });
+    },
+
+    /* RESET (software 1.17 and on): the owner gives the card back to what it was in its packet, so that another person can set it up.
+     * Under the owner's proof over "FoxyCard/reset" and nothing else; a LOCKED card also needs its PIN, verified in this tap
+     * (`opts.pin`), and an unlocked one needs none (a blocked PIN is no bar). The card then has no PIN (three tries), no owner,
+     * no record, no limits, allowance, log or receipts, and a NEW KEY; it keeps its clock and its software. It must hold no money:
+     * it is `has-money` while any piece is unspent (`cardEmptyAndReset` takes the money off first). One tap. Resolves
+     * { reset: true, key: <the card's old key> }. After it, everything this phone kept under the old key that is not money (the
+     * pace rows, the receipts it copied, a lifted limit's note, the day's note of when it was checked, its design, and where it had read
+     * the log to) is dropped, and the same tap's later reads ask the card for its new key.
+     *
+     * Rejects, with `card`: `old-card` (software before 1.17), `no-owner`, `not-owner` (these words are not the ones the card was set
+     * up with: costs no try and changes nothing), `has-money` ("Take the money off the card first."), `locked` (a locked card, no PIN
+     * given, or the card's 6982), `bad-pin` (a PIN that is not 4 to 8 digits), `wrong-pin` (with `tries`), `blocked` (a locked card
+     * whose PIN is blocked cannot be reset), `gone`, `change-owed` and `unsettled`.
+     *
+     * `change-owed` ("The card is owed change from its last payment. Tap it once more first."): the card keeps what the change it made for
+     * itself is made of, and a reset wipes it; the change is locked to the key the reset destroys, so it would be lost. The owner's read
+     * first finishes it (asks the mint for what it signed, puts it on the card, in this same tap); where that cannot be done now (no road to
+     * the mint, the till has not made its swap) the card is not reset and nothing is changed, `e.owes` says what ({ openings, sats }). What was
+     * put on by it is money on the card (`has-money` for `cardReset`; `cardEmptyAndReset` takes it off with the rest).
+     *
+     * `unsettled` is this phone's own guard, not the card's: the reset wipes the card's memory of the change it made for itself
+     * and the signature it would give again, and this phone's own rows of money owed to the card (ecash locked to the old key,
+     * which nothing could ever write to the card again). While any of it is open the card is not reset and nothing is changed:
+     * `e.owes` says what ({ openings, owed, due, asked, held, sats }). `opts.abandon: true` resets all the same, and the rows owed to the
+     * old key are dropped, which loses what they hold (the pieces stay locked to the old key; a card set up as recoverable gives
+     * them back to this phone's key after their date, `cardTakeBack`). */
+    cardReset: function (link, opts) {
+      var o = opts || {};
+      var pin = '';
+      if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
+      var t = cardTalk(link);
+      var card;
+      return cardResetLook(link, t, o, pin).then(function (c) {
+        card = c;
+        if (card.info.unspent > 0) throw cardError('has-money', 'Take the money off the card first.', { sats: card.balance });
+        return card.info.locked && pin ? cardVerify(t, card, pin) : null;
+      }).then(function () {
+        // the owner's proof over the label and an empty value; the card's own word is the truth (a card that is not this phone's says 6A91)
+        return cardOwned(t, card.key, 'reset', '');
+      }).then(function (data) {
+        return t.ask(cardCommand(CARD_INS.reset, 0, data, undefined, CARD_RESET_CONFIRM));
+      }).then(function (r) {
+        if (r.sw === '6a8d') throw cardError('has-money', 'Take the money off the card first.');
+        if (r.sw === '6982') throw cardError('locked', 'This card is locked. It can be reset only with its PIN.');
+        if (r.sw !== '9000') throw cardRefused(r.sw, 'to be reset');
+        // the card is another card now: its key, and the proof of it, are asked for again in this tap
+        if (link && link.one) { delete link.one.key; link.one.proved = null; }
+        cardForget(card.key, !!o.abandon);
+        console.log('[foxy] card: a card is reset; this phone has forgotten what it kept for its old key');
+        return { reset: true, key: card.key };
+      });
+    },
+
+    /* RESET for the app: a card that holds money has all of it taken off to this phone first (as `cardWithdraw` all does, with the
+     * owner's proof and the PIN where the card wants it: `opts.pin`), and is then reset, in the one tap. Resolves
+     * { reset: true, key, withdrew: <sats> } (`withdrew` is 0 for an empty card, which is just `cardReset`). Everything is checked
+     * that can be before the money is moved, so a card that cannot be reset is not emptied: the rejections are `cardReset`'s.
+     * A failure after the money came off carries `e.withdrew` (the sats now on this phone) and `e.hashes`; the card is then
+     * empty and the next tap resets it (`cardReset`). `opts.on` and `opts.progress` are `cardWithdraw`'s. */
+    cardEmptyAndReset: function (link, opts) {
+      var o = opts || {};
+      var pin = '';
+      if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
+      var t = cardTalk(link);
+      var withdrew = 0, hash = '';
+      var late = function (e) { if (e && typeof e === 'object' && withdrew > 0) { e.withdrew = withdrew; e.hash = hash; } throw e; };
+      return cardResetLook(link, t, Object.assign({}, o, { money: true }), pin).then(function (card) {
+        if (!(card.info.unspent > 0)) return null;
+        return FoxyWallet.cardWithdraw(link, { pin: pin ? o.pin : undefined, on: o.on, progress: o.progress, hold: true }).then(function (got) {
+          withdrew = got.sats; hash = got.hash;
+        });
+      }).then(function () {
+        return FoxyWallet.cardReset(link, o);
+      }).then(function (r) {
+        return { reset: true, key: r.key, withdrew: withdrew, hash: hash };
+      }).then(null, late);
     },
 
     /* The card's daily limit: the most it signs for in one day, in sats, set to
@@ -24371,7 +24575,9 @@
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
     // and the no-PIN allowance's (software 1.16): the dollars it was set in, or 0
     cardNoPinUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.noPinUsd > 0) ? r.noPinUsd : 0; },
-    cardWait: function (limit, sats, made, second, costed) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second, costed)); },
+    /* `over` (the sixth): the card's `info.waitOver`, the signatures for the first limit's worth over (7 to software 1.16, 10 from 1.17);
+     * without it the answer is by the older rule. */
+    cardWait: function (limit, sats, made, second, costed, over) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second, costed, over)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     cardHeldLetGo: function (key) {
@@ -24501,7 +24707,7 @@
          * `unsupported` from a phone whose native side has no such step. */
         again: function (line) {
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
-          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {
+          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 63000).then(function () {
             // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
             // and it has signed nothing in it (`cardPaid`: a second payment in one time in the field waits)
             link.one.told = false; link.one.key = ''; link.one.paid = 0;
@@ -24555,7 +24761,7 @@
           });
         });
       };
-      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 70000).then(run, function (e) {
+      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 63000).then(run, function (e) {
         var why = String((e && e.message) || '');
         if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');

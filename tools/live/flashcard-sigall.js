@@ -87,8 +87,8 @@ const changeCredit = (made, info) => (info.costed ? Math.floor(2 * made / 3) : m
 
 /* The SIGN commands a payment waits before the signature under a limit on one payment, by the card's software: what leaves the card for
  * good (the pieces less the change it made for itself) and how many pieces of that change it made (`made`).
- *   1.13 and on (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven for the first
- *        limit's worth over it and three for each after, a part counting as one (255 at most), less what the change made counts for
+ *   1.13 and on (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven (ten from 1.17:
+ *        info.waitOver) for the first limit's worth over it and three for each after, a part counting as one (255 at most), less what the change made counts for
  *        (`changeCredit`: one for each piece in 1.13, two for every three from 1.14).
  *   1.12 (info.ownChange): four for every limit's worth over the limit, a part counting as one, and four for a payment within it that
  *        made change.
@@ -96,7 +96,7 @@ const changeCredit = (made, info) => (info.costed ? Math.floor(2 * made / 3) : m
 const waitsFor = (leaves, limit, made, info) => {
   if (info.shaped) {
     const units = leaves <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(leaves / limit));
-    return units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - changeCredit(made, info));
+    return units <= 1 ? 0 : Math.max(0, (info.waitOver || 7) + 3 * (units - 2) - changeCredit(made, info));
   }
   if (!info.ownChange) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
   return leaves > limit ? 4 * Math.ceil(leaves / limit) : (made > 0 ? 4 : 0);
@@ -678,6 +678,30 @@ async function at(mintKey, names, real) {
     } else {
       console.log('    (a card with no PIN is not made on a chip that cannot be made new: the simulator and the model do that)');
     }
+  }
+
+  /* RESET (software 1.17): the owner gives the card back to what it was in its packet, with whatever is on it taken off first, in the one
+   * tap; another person (the till's words) sets it up, and the first owner is no longer its owner. Not run before there is a 1.17 card to run
+   * it on (the applet of the card repository's tools/cardsim, or the model). */
+  if (first.card.info.resetKnown) {
+    await card.tap();
+    const oldKey = (await holder.W.cardLook(card, { mine: true, short: true })).key;
+    await card.tap();
+    const gave = await holder.W.cardEmptyAndReset(card, { pin: PIN });
+    ok('the owner resets the card (what is on it comes off first, in the one tap)', gave.reset === true && gave.key === oldKey, JSON.stringify({ withdrew: gave.withdrew }));
+    await card.tap();
+    const fresh = await holder.W.cardLook(card, { mine: true });
+    ok('and it reads as a card out of its packet: a new key, no owner, no record, no PIN, three tries, nothing on it',
+       fresh.key !== oldKey && !fresh.info.owner && !fresh.info.hasRecord && fresh.info.pin === 'none' && fresh.info.tries === 3 && fresh.balance === 0 && fresh.info.limit === 0,
+       JSON.stringify([fresh.info.owner, fresh.info.hasRecord, fresh.info.pin, fresh.info.tries]));
+    await card.tap();
+    const taken = await till.W.cardSetUp(card, { pin: PIN, recoverable: true });
+    ok('another person sets it up, and is its owner', taken.info.owner === true && taken.mine === true && taken.key === fresh.key, taken.key.slice(0, 12));
+    await card.tap();
+    const old = await holder.W.cardChangePin(card, { newPin: '4321' }).then(() => null, (e) => e);
+    ok('the first owner can no longer change its PIN', !!old && old.card === 'not-owner', old && old.card);
+    await card.tap();
+    await till.W.cardReset(card);
   }
 
   await card.tap();
