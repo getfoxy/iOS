@@ -109,9 +109,9 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
 4. One tap writes the PIN (none, after NO PIN), then the card's record (this phone's mint, and for
    a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
-5. Home, with a line: `The card is set up.` Nothing is read between the PIN
-   and the tap, and nothing after it; the card's screen, with ADD FUNDS, is
-   under FLASHCARD in the menu. What two notices used to say stands: this
+5. The card's screen, with a line: `The card is set up.` (with a PIN and with none alike; back from it is where the person
+   was). Nothing is read between the PIN
+   and the tap, and nothing after it; the screen is the card's own, with ADD FUNDS. What two notices used to say stands: this
    phone is the card's owner, so it can reset the card's PIN and limits, and
    whoever holds the card and this phone's seed phrase holds its money; and a
    card is cash, so whoever has it and its PIN has what is on it, and a lost
@@ -262,7 +262,7 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 - **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
   `Block #970809` (above). Under the balance the limit line says `NO LIMIT`, `DAILY LIMIT $5` and so on, and for a card
   with no PIN adds a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`. The old CLOCK line is gone.
-  The row under ADD FUNDS and WITHDRAW is **HISTORY**, **CHANGE PIN** (**ADD PIN** on a card with none) and **CHANGE LIMIT**,
+  The row under ADD FUNDS and WITHDRAW is **HISTORY**, **CHANGE PIN** (**ADD PIN** on a card with none) and **LIMITS**,
   drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its label under it. HISTORY is for
   any card with a record; the other two are the owner's. The card is drawn in the design it names (`FL1` stays `FL1`, before
   and after set-up); a card that names none is drawn in, and given, this phone's own.
@@ -458,38 +458,52 @@ mint refuses*.
 
 Apple's sheet comes up whenever the phone is looking for a card. Its big title
 and its CANCEL belong to iOS and cannot be changed. One line of text on it is
-Foxy's and changes during a tap, and Foxy's own screen sits behind it with the
-amount and says the same. iOS ends a session after a minute.
+Foxy's and changes during a tap. Foxy's own screen sits behind it, from the
+design (`build/app/26h-tap-screen.js`): a card comes down behind a phone with
+three waves rising, and under it a title and the amount. The sheet takes the
+bottom of the screen; nothing is drawn there but CANCEL, under the sheet's own.
+iOS ends a session after a minute.
 
-| Step | Foxy's screen | The sheet's line |
-|---|---|---|
-| waiting | TAP BEHIND THE PHONE (CANCEL is here only) | Tap behind the phone. |
-| reading | READING THE CARD | Reading the card |
-| found | (the same) | Scanning. Hold still. |
-| signing | KEEP THE CARD THERE, and under it the piece | Signing piece 3 of 9 |
-| the card's change (1.12 and on) | (the same) | Making change 2 of 4. |
-| a wait (1.13: only over the limit) | (the same) | Over per tap limit (then `x2` as the second limit's worth begins, `x3` the third, and so on: ten askings for the first on 1.17, seven before it, three for each after) |
-| a wait for change, or a second payment in one tap | (the same) | Keep holding. |
-| the change is owed (the owner's read) | (the same) | Asking for change owed. |
-| signed | VERIFYING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. (the sheet ends here) |
-| the change | MAKING THE CHANGE, and under it that the payment is made | (no sheet) |
-| writing | WRITING TO THE CARD, and under it the piece | Writing 2 of 4 |
-| done | REMOVE THE CARD | Done. |
-| asking again | (the same) | Hold for change. / Hold for the rest. / Hold to finish paying / Tap to put back signatures. / Tap behind the phone. |
-| the card wants its PIN | (the same) | Enter the card's PIN (a note, not an error) |
-| the mint refused a payment | TAP TO PUT BACK | Payment did not go through. |
+The sheet's line, by step:
 
-A payment at a till has three screens of its own in place of these, drawn from
-the design: **TAP TO VERIFY** (a card's outline, with arrows flying into its
-mark) from the PIN until the card has signed, **VERIFYING CARD** (the card, with
-a spinner) while the mint is asked and the change is made, and **TAP TO
-CONFIRM** (on orange) from the moment the card is asked for again until its
-change is back on it. A card that leaves part way through a tap turns that
-tap's screen into **TAP AGAIN** ("The last tap didn't finish..."), on the same
-ground, from the moment it is lost until the tap is finished. Each says one
-thing and does not change as the card works: the sheet says the steps. They sit in the top half of the screen, above where the
-sheet comes up. The sheet dims whatever is behind it; that is the phone's own
-doing and an app cannot turn it off.
+| Step | The sheet's line |
+|---|---|
+| waiting | Tap behind the phone. |
+| reading | Reading the card (and Scanning. Hold still. from the phone's link) |
+| signing | Signing piece 3 of 9 |
+| the card's change (1.12 and on) | Making change 2 of 4. |
+| a wait (1.13: only over the limit) | Over per tap limit (then `x2` as the second limit's worth begins, `x3` the third, and so on: ten askings for the first on 1.17, seven before it, three for each after) |
+| a wait for change, or a second payment in one tap | Keep holding. |
+| the change is owed (the owner's read) | Asking for change owed. |
+| signed | Done. (the sheet ends here), or Hold for change. when change is coming |
+| writing | Writing 2 of 4 |
+| asking again | Hold for change. / Hold for the rest. / Hold to finish paying / Tap to put back signatures. / Tap behind the phone. |
+| the card wants its PIN | Enter the card's PIN (a note, not an error) |
+| the mint refused a payment | Payment did not go through. |
+
+The screen behind it has two grounds and says one thing in each state. While no card
+is connected it is light blue (ink #0F2A33, no fur); from the moment the phone's
+link reports a card connected until the card is lost or the sheet ends it is orange
+(#EB6A2E, ink #1A0A04, the fur over it). The card in the picture is the card
+screen's own face at 250 px: FX1 is the picture and FL1 the face drawn in CSS, by
+the card's design, and FX1 at a till until a card has been read. It loops (comes
+down, the waves rise) while a card is wanted, and stays settled behind the phone
+once it is there; for a person who asks for less motion it is just drawn settled.
+
+| Title | When | Ground | Card |
+|---|---|---|---|
+| TAP BEHIND PHONE | waiting for the first contact (CANCEL is here only) | light | loops |
+| KEEP HOLDING · 7 s | in contact, the card being asked; the seconds count up from the contact, a whole second at a time, with no estimate (change takes it past two seconds, a wait over the limit past five) | orange | settled |
+| VERIFYING CARD | the card has signed and is still there: the mint is asked, and change is fetched or written | orange | settled |
+| REMOVE | the card has signed and is let go, nothing more is wanted of it | orange | settled |
+| TAP FOR CHANGE | the card has signed and contact broke before the change went on, or the second tap of a payment is waiting for the card | light | loops |
+| PLEASE TAP AGAIN | contact broke part way and the same sheet asks for the card again (also the tap after the PIN pad, and a refused payment going back on the card) | light | loops |
+| ENTER PIN | the sheet ended asking for the PIN; the pad is up over the screen, which goes with the pad's back button, or is taken up by the tap that follows it as PLEASE TAP AGAIN | light | settled |
+
+There is no countdown anywhere: the till cannot know the count, and the card does
+not say it. Each title is one line, made smaller on a narrow phone if it would not
+fit. The screen is drawn from what the wallet reports and what the phone's link
+says (`connected`, `lost`); the sheet's lines are not repeated on it.
 
 A flow that goes on to speak to the card again (a renewal writes to it, a move
 reads it last) holds it instead, as it always did: the sheet stays open through the
@@ -731,7 +745,7 @@ later part of a bigger change.)
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
 
-1. **SEND.** The PIN, and the first tap, under TAP TO VERIFY. The card signs its
+1. **SEND.** The PIN, and the first tap, under KEEP HOLDING. The card signs its
    one or two pieces and may be taken away.
 2. **VERIFY.** The phone's sheet stays up and says `Hold for change.` while the swap runs and the change is made; Foxy's screen
    behind it says VERIFYING CARD. "Paid" first, since the card's part is over
@@ -740,11 +754,11 @@ one way of paying:
    the card`, which beside its own Cancel read as finished, and it was closed
    before the change.)
 3. **RECEIVE.** The same sheet says `Tap the card again for its change` and the
-   screen says TAP TO CONFIRM; the tap writes it, with no PIN: the card allows
+   screen says TAP FOR CHANGE (VERIFYING CARD once it is found); the tap writes it, with no PIN: the card allows
    the tap after a payment to load. The sheet ends `Done. ₿212 of change is back
    on the card.` A card that leaves while its change is being written has used
    that one tap up, and wants its PIN for the rest: the same sheet asks for it
-   again (TAP AGAIN) and gives it the PIN typed for this payment, so nobody is
+   again (PLEASE TAP AGAIN) and gives it the PIN typed for this payment, so nobody is
    asked for it twice. The PIN is held for the length of the one payment's sheet
    and no longer; a change tap in a sheet of its own, later, asks for it on the
    pad as it always did.
@@ -759,7 +773,7 @@ one way of paying:
 There is one sheet for all of it: a second sheet opened for the change was
 refused by iOS as often as not. iOS ends a sheet after a minute; where the mint
 is slower than that, or the sheet was closed, a new sheet comes up for the
-change, with TAP TO CONFIRM up from the payment until that tap is over, so the
+change, with TAP FOR CHANGE up from the payment until that tap is over, so the
 till is never looking at its home screen in between; and where that reads no
 card, **TAP TO RECEIVE** stays up with TAP CARD. A payment the mint refuses
 after the card signed is put back in the same sheet too (`The payment did not
@@ -861,7 +875,7 @@ What it means for the holder:
   its pieces have dates, is not slowed. Nothing a till does in one sheet makes a
   second payment today: a payment begun and given up, a refusal and the change
   tap are none.
-- **The change tap is as before**: the second tap, no PIN, TAP TO CONFIRM. The till
+- **The change tap is as before**: the second tap, no PIN, TAP FOR CHANGE. The till
   reads the card's openings (`GET_CHANGE`, three a page, once in the tap), finds
   the one each output of its is (it makes the blinded message from the opening's
   nonce and factor again, and the two are the same), takes the blinding off the
@@ -963,7 +977,7 @@ The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
 
-**CHANGE LIMIT** on the card's screen first asks which of the card's limits,
+**LIMITS** on the card's screen first asks which of the card's limits,
 under CHANGE CARD LIMITS: `Which limit would you like to add or change?`, with
 **PER TAP LIMIT**, **DAILY LIMIT** and, on a card that has a PIN (software 1.16
 and on), **NO PIN LIMIT**, each a button, and CANCEL (*The limit on

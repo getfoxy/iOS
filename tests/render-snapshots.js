@@ -613,21 +613,32 @@ function cards() {
   add('overlay: PIN set-up', (a) => a.pinSetup(() => {}));
   // the same pad asking for a card's PIN, and for an amount with a second answer (26f-flashcard.js)
   add('overlay: a card\u2019s PIN, to pay, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay $0.43 (\u20bf500). The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.', cta: 'PAY $0.43' }, () => {}));
-  add('stage: hold the card to the phone', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('hold'); });
-  add('stage: keep the card there', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('mint'); });
+  /* The screen behind the card sheet (26h-tap-screen.js), one view for each of its states, and the card in each design; the
+   * seconds of KEEP HOLDING are fixed so the view does not move with the clock */
+  const behind = (o, fn) => (a) => { a._fcTapO = Object.assign({ amount: '$25.75' }, o || {}); a.fcHeldSeconds = () => 7; a.fcStage('hold'); if (fn) fn(a); };
+  const link = (a, stage) => a.fcTapEvent({ stage, text: '' });
+  add('stage: tap behind phone', behind());
+  add('stage: keep holding', behind({}, (a) => link(a, 'connected')));
+  add('stage: verifying card', behind({}, (a) => { link(a, 'connected'); a.fcStage('mint'); }));
+  add('stage: remove', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); }));
+  add('stage: tap for change', behind({ look: 'receive' }));
+  add('stage: please tap again', behind({}, (a) => { link(a, 'connected'); link(a, 'lost'); }));
+  add('stage: enter pin', behind({}, (a) => { link(a, 'connected'); a.fcTapPin(); }));
+  add('stage: keep holding, a card of the drawn design', behind({}, (a) => { link(a, 'connected'); a.fcTapSeen(''); }));
+  add('stage: tap behind phone, no amount', behind({ amount: '' }));
   add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
   // the daily limit's first step, what making this phone a card's owner says, and what a till says when a card cannot cover a payment
   add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
-  // CHANGE LIMIT on a card of software 1.16 that has a PIN: the third limit, under the other two
+  // LIMITS on a card of software 1.16 that has a PIN: the third limit, under the other two
   add('card: change limit, which of the three', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true }, pinSet: true, noPinKnown: true, pin: 'set' }; a.fcSetLimit(); });
   // the pad that asks for a new card's PIN has NO PIN under it, and the one that adds a PIN says what a card with none is
   add('overlay: a new card\u2019s PIN, with NO PIN under it', (a) => { a.state.fc = { noPinKnown: true, pinSet: false, setUp: false }; a.fcSetUp(); });
   add('overlay: ADD PIN, the first pad', (a) => { a.state.fc = { owner: true, ownedHere: true, setUp: true, pinSet: false, noPinKnown: true }; a.fcPinAdd(); });
   // a till whose first tap, with no PIN, found the card wants one
   add('overlay: a card\u2019s PIN, for the second tap', (a) => a.fcPayAsk(500));
-  // CHANGE LIMIT asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
+  // LIMITS asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
   add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
   add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
   // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
@@ -677,17 +688,8 @@ function cards() {
   // a till with no route: taken on trust and not paid, and the price a card cannot make exactly
   add('card: taken on trust, a card payment with no route', (a) => a.fcTrusted({ sats: 592 }));
   add('card: no change while offline', (a) => a.fcFailed({ card: 'inexact', message: 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly 1000 sats. Pay an amount it can make, or pay when this phone is online.' }, { taken: true }));
-  add('stage: signing piece 3 of 9', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('signing'); a.fcLine('Signing piece 3 of 9'); });
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
   // a card payment is two taps: SEND, then RECEIVE its change, then COMPLETE
-  // a card payment's own three screens (FC_LOOKS), and the one for a refused payment going back on the card
-  add('stage: a card payment, tap to verify', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('hold'); });
-  add('stage: a card payment, verifying card', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('checking'); });
-  add('stage: a card payment, tap to confirm', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75' }; a.fcStage('receive'); });
-  // the card left part way through a tap: TAP AGAIN, on the ground of the tap it left
-  add('stage: a card payment, tap again to verify', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', lost: true }; a.fcStage('reading'); });
-  add('stage: a card payment, tap again to confirm', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', lost: true }; a.fcStage('receive'); });
-  add('stage: a card payment, tap to put back', (a) => { a._fcTapO = { look: 'pay', amount: '$25.75', putBack: true }; a.fcStage('receive'); });
   add('card: tap to receive the change of a payment', (a) => a.fcChangeWaiting(212, 1180));
   add('card: a payment cut short, not paid', (a) => a.fcFailed({ card: 'interrupted', owed: 512, made: true, message: 'x' }, { paying: true, taken: true }));
   add('card: change the mint did not make yet', (a) => a.fcChangeLater(824, 200));
@@ -695,9 +697,6 @@ function cards() {
   add('card: a payment taken up again that the card could not finish', (a) => a.fcShortHeld({ balance: 1, still: 5, torn: 4, letGo: { sats: 72, made: true } }, 77));
   add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
   add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
-  // the card has signed and been let go; the sheet is gone and our own screen waits for the mint
-  add('stage: checking with the mint, the card let go', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('checking'); a.fcLine('You can remove the card.'); });
-  add('stage: making the change, the card let go', (a) => { a._fcTapO = { amount: '\u20bf 1,180' }; a.fcStage('making'); a.fcLine('The payment is made.'); });
   add('card: a payment the mint refused, the card to be tapped again', (a) => a.fcFailed({ card: 'putback', owed: 600, limited: true, message: 'x' }, { paying: true, taken: true }));
   add('card: a payment the mint refused, a card with no limit', (a) => a.fcFailed({ card: 'putback', owed: 88, limited: false, message: 'x' }, { paying: true, taken: true }));
   add('card: a withdrawal the mint refused', (a) => a.fcFailed({ card: 'putback', owed: 1024, limited: true, message: 'x' }, { taken: true }));
@@ -715,7 +714,7 @@ function cards() {
 
 // what a view leaves behind on the instance, cleared before the next
 const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
-  '_meltEl', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt'];
+  '_meltEl', '_fcTapO', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt'];
 
 (async () => {
   const { w, errors } = mount();

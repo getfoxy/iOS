@@ -207,7 +207,9 @@
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    this._stageT = null; this._stageQrT = null;
+    // the card screen's count of seconds (26h-tap-screen.js)
+    clearInterval(this._fcCountT);
+    this._stageT = null; this._stageQrT = null; this._fcCountT = null;
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
     return true;

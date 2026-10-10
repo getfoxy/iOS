@@ -957,7 +957,10 @@
     _card: function (ev) {
       var fn = FoxyWallet._onCard;
       if (typeof fn !== 'function' || !ev || typeof ev !== 'object') return;
-      try { fn({ stage: String(ev.stage || ''), text: String(ev.text || '') }); } catch (e) { console.warn('[foxy] card progress watcher:', e && e.message); }
+      var said = { stage: String(ev.stage || ''), text: String(ev.text || '') };
+      // a card read at this tap says its design ('seen'), for the screen behind the sheet to draw it as itself
+      if (ev.design !== undefined) said.design = String(ev.design || '');
+      try { fn(said); } catch (e) { console.warn('[foxy] card progress watcher:', e && e.message); }
     },
 
     /* ---- a tap ------------------------------------------------------------

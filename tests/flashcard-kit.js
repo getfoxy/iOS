@@ -28,6 +28,12 @@ function page(o) {
   let mint2 = null;
   let ctx = null;
   const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
+  /* What the phone's link reports to the page as a tap goes on (Foxy/Flashcard/CardLink.swift: connected, say, lost, end),
+   * in order with the replies (`ctx.events` is every one, for a test to read). */
+  const report = (w, stage, text) => {
+    ctx.events.push(stage + (text ? ': ' + text : ''));
+    setTimeout(() => { if (w.FoxyWallet._card) w.FoxyWallet._card({ stage, text: text || '' }); }, 0);
+  };
   ctx = loadReal({
     storage: opts.storage,
     spare: !!opts.spare,
@@ -60,27 +66,30 @@ function page(o) {
         if (ctx.nfc === 'off') return reply(w, m.id, null, 'NFC is not available on this phone');
         if (!ctx.nfc) return reply(w, m.id, null, 'the session was cancelled');
         ctx.nfc.tap();
+        report(w, 'connected', 'Reading the card');
         return reply(w, m.id, 'ok');
       }
       if (m.action === 'cardSend') {
         // the sheet has ended: the phone has no session to carry a command (Foxy/Bridge/FoxyBridge+Flashcard.swift)
         if (ctx.ended) { ctx.refusedAfterEnd += 1; return reply(w, m.id, null, 'the tag was lost'); }
         if (!ctx.nfc || ctx.nfc === 'off') return reply(w, m.id, null, 'no card');
-        return ctx.nfc.send(m.apdu).then((r) => reply(w, m.id, r), () => reply(w, m.id, null, 'the tag was lost'));
+        return ctx.nfc.send(m.apdu).then((r) => reply(w, m.id, r), () => { report(w, 'lost', 'The card was lost.'); reply(w, m.id, null, 'the tag was lost'); });
       }
-      if (m.action === 'cardSay') { ctx.sheet.push('say: ' + m.text); return reply(w, m.id, 'ok'); }
+      if (m.action === 'cardSay') { ctx.sheet.push('say: ' + m.text); report(w, 'say', m.text); return reply(w, m.id, 'ok'); }
       // the same sheet looks for the card again (FoxyBridge+Flashcard.swift, handleCardAgain): the card is tapped anew, or none is
       if (m.action === 'cardAgain') {
         ctx.sheet.push('again: ' + m.text);
         if (ctx.ended) return reply(w, m.id, null, 'the session was cancelled');
         if (!ctx.nfc || ctx.nfc === 'off') { ctx.ended = true; return reply(w, m.id, null, 'the session was cancelled'); }
         ctx.nfc.tap();
+        report(w, 'connected', 'Reading the card');
         return reply(w, m.id, 'ok');
       }
       if (m.action === 'cardEnd') {
         ctx.sheet.push(m.error ? 'error: ' + m.error : 'end: ' + m.text);
         ctx.trace.push(m.error ? 'error' : 'end');
         ctx.ended = true;
+        report(w, 'end', m.error || m.text);
         return reply(w, m.id, 'ok');
       }
       const got = phone.answer(w, m);
@@ -98,6 +107,7 @@ function page(o) {
   ctx.deaf = !!opts.deaf;
   ctx.nfc = null;
   ctx.sheet = [];
+  ctx.events = [];
   ctx.trace = [];
   ctx.circuits = [];
   ctx.explorer = null;

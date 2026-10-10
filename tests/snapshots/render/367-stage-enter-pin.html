@@ -1,4 +1,4 @@
-<!-- stage: a card payment, tap again to confirm -->
+<!-- stage: enter pin -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -518,72 +518,70 @@
 </div>
 </div>
 <!-- on document.body -->
-<div id="foxy-stage" data-stage="card" data-look="confirmAgain" style="position: fixed; inset: 0px; z-index: 2147483300; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; background: rgb(235, 106, 46); color: rgb(26, 10, 4); font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease;">
-<div style="position:absolute;inset:0;background-image:url(snow-fur.jpg);background-size:cover;mix-blend-mode:soft-light;opacity:.5;pointer-events:none">
+<div id="foxy-stage" data-stage="card" data-look="pin" style="position: fixed; inset: 0px; z-index: 2147483300; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; font-family: Sora, system-ui, sans-serif; transition: background-color .35s ease,color .35s ease; animation: foxyIn .18s ease; background-color: rgb(191, 227, 236); color: rgb(15, 42, 51);" data-scheme="01" data-loop="0">
+<div data-tap-fur="" style="position: absolute; inset: 0px; background-image: url(&quot;snow-fur.jpg&quot;); background-size: cover; mix-blend-mode: soft-light; opacity: 0; pointer-events: none; transition: opacity .35s ease;">
 </div>
-<div style="position:relative;flex:0 0 auto;height:224px;margin-top:8px;display:flex;align-items:center;justify-content:center">
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit0 7.8s linear 0s infinite">
-<path d="M5 14 L16 3 L27 14">
+<div style="position:relative;width:100%;max-width:430px;margin:0 auto;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">
+<div style="position:relative;flex:0 0 auto;height:269px;overflow:hidden">
+<div data-tap-card="" style="position: absolute; left: 50%; top: 40px; width: 250px; margin-left: -125px; aspect-ratio: 1.585 / 1; border-radius: 15px; overflow: hidden; animation: none; box-shadow: 0 14px 30px rgba(15,42,51,.28);">
+<div data-card-design="FX1" style="container-type:inline-size;width:100%">
+<div data-card-face="" style="width:100cqw;height:63.02cqw;border-radius:4.17cqw;box-sizing:border-box;position:relative;overflow:hidden;background:repeating-linear-gradient(92deg,rgba(255,255,255,.05) 0 1px,rgba(255,255,255,0) 1px 3px),repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,rgba(0,0,0,0) 1px 4px),radial-gradient(circle at 22% 8%,rgba(255,255,255,.14),rgba(255,255,255,0) 46%),linear-gradient(146deg,#3A3B3D 0%,#1B1C1E 38%,#101113 72%,#26272A 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6)">
+<div style="position:absolute;inset:3.52cqw;border-radius:2.34cqw;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5);pointer-events:none">
+</div>
+<div style="position:absolute;inset:4.56cqw;border-radius:1.82cqw;background:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px);pointer-events:none">
+</div>
+<div style="position:absolute;inset:6.25cqw;border-radius:1.04cqw;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,.5),rgba(0,0,0,0) 72%);pointer-events:none">
+</div>
+<div style="position:absolute;left:50%;top:50%;width:31.25cqw;height:31.25cqw;transform:translate(-50%,-50%);border-radius:50%;background:linear-gradient(150deg,#2E2F32,#121315);box-shadow:inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;pointer-events:none">
+<svg viewBox="0 0 236.5 366" style="height:16.15cqw;width:10.43cqw;display:block;opacity:.5">
+<path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505">
 </path>
-<path d="M16 4 L16 37">
+<path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C">
 </path>
-</svg>
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit1 7.8s linear 1.3s infinite">
-<path d="M5 14 L16 3 L27 14">
-</path>
-<path d="M16 4 L16 37">
-</path>
-</svg>
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit2 7.8s linear 2.6s infinite">
-<path d="M5 14 L16 3 L27 14">
-</path>
-<path d="M16 4 L16 37">
-</path>
-</svg>
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit3 7.8s linear 3.9s infinite">
-<path d="M5 14 L16 3 L27 14">
-</path>
-<path d="M16 4 L16 37">
-</path>
-</svg>
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit4 7.8s linear 5.2s infinite">
-<path d="M5 14 L16 3 L27 14">
-</path>
-<path d="M16 4 L16 37">
-</path>
-</svg>
-<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="#0A84FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;animation:cvHit5 7.8s linear 6.5s infinite">
-<path d="M5 14 L16 3 L27 14">
-</path>
-<path d="M16 4 L16 37">
-</path>
-</svg>
-<div style="position:relative;width:345px;max-width:calc(100% - 30px);aspect-ratio:1.586;border-radius:16px;overflow:hidden;background:transparent;border:3px dashed #1A0A04;box-sizing:border-box;animation:cvTap 1.3s ease-out 3.2s infinite">
-<div style="position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;animation:cvBounce 1.3s ease-out 3.2s infinite">
-<svg viewBox="0 0 40 40" width="60" height="60" fill="none" stroke="#0A84FF" stroke-width="3.5" stroke-linecap="round">
-<circle cx="20" cy="20" r="16.5">
-</circle>
-<path d="M13.5 13.5l13 13M26.5 13.5l-13 13">
+<path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9">
 </path>
 </svg>
 </div>
-<div style="position:absolute;left:24px;top:20px;font-weight:800;font-size:23px;color:#1A0A04">FLASHcard</div>
-<div style="position:absolute;left:24px;top:82px;width:54px;height:42px;border-radius:9px;border:2.5px dashed #1A0A04;box-sizing:border-box">
+<div style="position:absolute;left:9.92cqw;top:8.75cqw;width:15.18cqw;height:13.78cqw;border-radius:1.56cqw;background:linear-gradient(150deg,#E8E4D8,#A9A392);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5);overflow:hidden">
+<div style="position:absolute;left:0;right:0;top:33%;height:1px;background:rgba(70,68,60,.4)">
 </div>
-<div style="position:absolute;right:20px;bottom:18px;width:44px;height:44px;border-radius:50%;background:#BFE3EC;display:flex;align-items:center;justify-content:center">
-<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0F2A33" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-<path d="M5 12.5l4.5 4.5L19 7.5">
+<div style="position:absolute;left:0;right:0;top:66%;height:1px;background:rgba(70,68,60,.4)">
+</div>
+<div style="position:absolute;top:0;bottom:0;left:33%;width:1px;background:rgba(70,68,60,.4)">
+</div>
+<div style="position:absolute;top:0;bottom:0;left:66%;width:1px;background:rgba(70,68,60,.4)">
+</div>
+</div>
+<div style="position:absolute;right:7.81cqw;bottom:6.25cqw;display:flex;flex-direction:column;align-items:center;gap:2px">
+<div style="font-size:5.99cqw;font-weight:800;line-height:1;color:rgba(255,255,255,.5)">₿</div>
+<div style="font-family:Sora,sans-serif;font-size:2.86cqw;font-weight:600;letter-spacing:0.24em;color:rgba(255,255,255,.42)">BEARER</div>
+</div>
+</div>
+</div>
+</div>
+<svg viewBox="0 0 220 60" width="220" height="60" fill="none" style="position:absolute;left:50%;top:83px;margin-left:-110px;z-index:2;overflow:visible">
+<g stroke="#0A84FF" stroke-width="4" stroke-linecap="round">
+<path data-tap-wave="" d="M70 40 Q110 14 150 40" style="opacity: 0; animation: none;">
 </path>
+<path data-tap-wave="" d="M52 34 Q110 -4 168 34" style="opacity: 0; animation: none;">
+</path>
+<path data-tap-wave="" d="M34 28 Q110 -22 186 28" style="opacity: 0; animation: none;">
+</path>
+</g>
 </svg>
+<div style="position:absolute;left:50%;top:119px;width:300px;height:150px;margin-left:-150px;z-index:3;border-radius:46px 46px 0 0;background:#0F2A33;box-shadow:0 -8px 24px rgba(15,42,51,.25);padding:8px 8px 0;box-sizing:border-box">
+<div style="width:100%;height:100%;border-radius:38px 38px 0 0;background:linear-gradient(180deg,#1E4450,#163842);position:relative">
+<div style="position:absolute;left:50%;top:12px;width:70px;height:20px;margin-left:-35px;border-radius:999px;background:#0A1B21">
+</div>
 </div>
 </div>
 </div>
 <div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">
-<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;text-transform:uppercase">Tap again</h1>
-<p data-stage-line="1" style="margin:0;font-family:Figtree,Sora,system-ui,sans-serif;font-weight:500;font-size:19px;line-height:1.45;color:#2E1206;text-wrap:pretty">The last tap didn’t finish...</p>
-<div style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em">$25.75</div>
+<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;text-transform:uppercase" data-sig="pin:-1">ENTER PIN</h1>
+<div data-tap-amount="" style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em">$25.75</div>
 </div>
 <div style="position: relative; z-index: 1; margin-top: auto;">
-<div style="width: 100%; height: 60px; border-radius: 18px; box-sizing: border-box; background: rgba(255, 255, 255, 0.35); font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(26, 10, 4); display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px solid rgb(26, 10, 4); visibility: hidden;" data-stage-button="1">CANCEL</div>
+<div style="width: 100%; height: 60px; border-radius: 18px; box-sizing: border-box; background: rgba(255, 255, 255, 0.35); font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.04em; text-transform: uppercase; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px rgb(15, 42, 51); visibility: hidden; color: rgb(15, 42, 51);" data-stage-button="1">CANCEL</div>
+</div>
 </div>
 </div>

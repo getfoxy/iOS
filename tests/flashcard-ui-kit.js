@@ -1,8 +1,9 @@
 'use strict';
 /* flashcard-ui-kit.js — the FLASHCARD screens, made drivable.
  *
- * The screens are build/app/26f-flashcard.js over the PIN pad, the cards and
- * the stage screens (10-pin.js, 11-cards.js, 26e-loaders.js). Those four parts
+ * The screens are build/app/26f-flashcard.js (and the screen behind the card
+ * sheet, 26h-tap-screen.js) over the PIN pad, the cards and the stage screens
+ * (10-pin.js, 11-cards.js, 26e-loaders.js). Those parts
  * are made into a class here and run against the real wallet, a test mint and
  * the model of the card (flashcard-kit.js), with the rest of the app class
  * stood in for. Keys are pressed on the pad and buttons on the cards; a card
@@ -10,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js']
+const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js']
   .map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
 
 /* The four parts as a class over this page's window, and an app of it with
@@ -139,6 +140,37 @@ function explainer(a) {
     has(label) { return texts.indexOf(label) >= 0; },
   };
 }
+/* The screen behind the card sheet (build/app/26h-tap-screen.js), as a person sees it: which of its states, on which ground,
+ * what it says, whether the card moves, whether CANCEL shows, and the design the card is drawn in. Null when it is not up. */
+const behind = (ctx) => {
+  const up = ctx.window.document.getElementById('foxy-stage');
+  if (!up || up.getAttribute('data-stage') !== 'card' || !up.getAttribute('data-look')) return null;
+  const q = (sel) => up.querySelector(sel);
+  const btn = q('[data-stage-button]');
+  const fur = q('[data-tap-fur]');
+  return {
+    look: up.getAttribute('data-look'), scheme: up.getAttribute('data-scheme'),
+    title: q('h1').textContent, amount: q('[data-tap-amount]').textContent,
+    loop: up.getAttribute('data-loop') === '1', cancel: !!btn && btn.style.visibility === 'visible',
+    design: q('[data-card-design]').getAttribute('data-card-design'), fur: fur ? fur.style.opacity : '',
+    cardMoves: q('[data-tap-card]').style.animation !== 'none',
+  };
+};
+/* Every state the screen goes through on `app` (a state is recorded when it differs from the one before), until `.stop()`. */
+const watchBehind = (app, ctx) => {
+  const seen = /** @type {any[]} */ ([]);
+  const draw = app.fcTapDraw.bind(app);
+  app.fcTapDraw = () => {
+    draw();
+    const b = behind(ctx);
+    // `at`: how many lines the sheet had shown when this state came up
+    if (b && (!seen.length || seen[seen.length - 1].look !== b.look)) seen.push(Object.assign({ at: ctx.sheet.length }, b));
+  };
+  seen.stop = () => { app.fcTapDraw = draw; };
+  seen.path = () => seen.map((x) => x.look).join(' > ');
+  seen.titles = () => seen.map((x) => x.title).join(' > ');
+  return seen;
+};
 const stage = (ctx) => { const el = ctx.window.document.getElementById('foxy-stage'); return el ? el.getAttribute('data-stage') : ''; };
 const vals = (a) => a.renderFlashcard({ s: a.state, sc: a.state.screen });
 const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
@@ -148,4 +180,4 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
 
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, explainer, stage, vals, settle, keyIn };
+module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn };

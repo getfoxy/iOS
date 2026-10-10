@@ -20,7 +20,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const { appOn, until, pad, card, explainer, stage, vals, settle, keyIn } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn } = require('./flashcard-ui-kit');
 
 /* The daily limit's three steps, as a person takes them: the warning's CONTINUE, an amount on the keypad
  * (or NO LIMIT under it, for 0), and the confirmation's CONFIRM. */
@@ -86,23 +86,21 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   pad(holder).type('1234');
   ok(!pad(holder) && !card(holder) && holder.state.screen === 'flashcard' && holder.state.flow !== 'cardLimit' && !c.state.owner,
      'the PIN given twice, the tap begins: nothing to read first, no limit to choose, and no amount asked');
-  await until('the card to be set up', () => holder.state.screen === 'home' && !!c.state.owner);
+  await until('the card to be set up', () => holder.state.screen === 'flashcard' && !!c.state.owner && holder.state.fc && holder.state.fc.owner);
   ok(c.state.record.limit === 0 && c.state.owner && holder.state.fc.limit === 0 && holder.state.fc.owner && holder.state.fc.ownedHere === true,
      'one tap gave the card its PIN, its record and its owner, and no limit', JSON.stringify({ limit: c.state.record.limit }));
-  ok(!card(holder) && !pad(holder) && holder.state.stack.length === 0 && holder.toasts.indexOf('The card is set up.') >= 0,
-     'and the person is home, told so in a line, with nothing to read or press', holder.toasts.slice(-1)[0]);
-  // the card's screen again, the way the menu opens it
-  holder.goFlashcard();
-  await until('the card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.ownedHere === true);
+  ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && holder.state.stack.slice(-1)[0] === 'home' && holder.toasts.indexOf('The card is set up.') >= 0,
+     'and the person stays on the card’s screen, told so in a line, with nothing to read or press; back from it is where they were', holder.toasts.slice(-1)[0]);
+  await settle();
   v = vals(holder);
   ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
      'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
-  ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT' && v.fcRowShown === true && v.fcResetVis === 'hidden' && v.fcHistoryVis === undefined
+  ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,LIMITS' && v.fcRowShown === true && v.fcResetVis === 'hidden' && v.fcHistoryVis === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcReset === 'function',
-     'with ADD FUNDS and WITHDRAW, and a row of HISTORY, CHANGE PIN and CHANGE LIMIT under them, and RESET CARD at the top, there for a card of 1.17 and not for this older one');
+     'with ADD FUNDS and WITHDRAW, and a row of HISTORY, CHANGE PIN and LIMITS under them, and RESET CARD at the top, there for a card of 1.17 and not for this older one');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
      'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
@@ -210,10 +208,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      && R.sheet.indexOf('end: Enter the card’s PIN') >= 0 && !R.sheet.some((x) => /^error:/.test(x)),
      'a card with a PIN and no no PIN limit ends that tap asking for the PIN (not as an error), and the pad comes up on a button that says TAP AGAIN',
      pad(till).cta + ' | ' + R.sheet.slice(-1)[0]);
-  ok(!c.sent.some((a) => /^b040/.test(a)) && !c.sent.some((a) => /^b020/.test(a)) && (await R.W.balanceSats()) === 0 && !stage(R),
-     'nothing was signed or taken, no PIN was sent, and no screen of ours is left over the pad');
+  ok(!c.sent.some((a) => /^b040/.test(a)) && !c.sent.some((a) => /^b020/.test(a)) && (await R.W.balanceSats()) === 0,
+     'nothing was signed or taken, and no PIN was sent');
+  ok(behind(R) && behind(R).look === 'pin' && behind(R).title === 'ENTER PIN' && behind(R).scheme === '01' && !behind(R).loop && !behind(R).cancel,
+     'the screen behind the pad stays up, as ENTER PIN on the light ground, with the card settled and no CANCEL', JSON.stringify(behind(R)));
   pad(till).back();
-  ok(!pad(till) && till.state.screen === 'confirm', 'back from it is back to the invoice');
+  ok(!pad(till) && till.state.screen === 'confirm' && !stage(R), 'back from it is back to the invoice, and the screen behind it goes with it');
   till.payByCard();
   await until('the PIN pad', () => !!pad(till));
   pad(till).type('0000');
@@ -228,9 +228,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   R.fate = (m) => {
     if (!atMint && /\/v1\/swap$/.test(String(m.url || ''))) {
       const up = R.window.document.getElementById('foxy-stage');
-      atMint = { kind: stage(R), look: up && up.getAttribute('data-look'), head: up && up.querySelector('h1') && up.querySelector('h1').textContent, line: up && up.querySelector('[data-stage-line]') && up.querySelector('[data-stage-line]').textContent,
-                 button: up && up.querySelector('[data-stage-button]') && up.querySelector('[data-stage-button]').style.visibility, ended: R.ended,
-                 amount: up && up.textContent.indexOf('\u20bf1,000') >= 0 };
+      atMint = Object.assign({ kind: stage(R), ended: R.ended }, behind(R));
     }
     return null;
   };
@@ -245,16 +243,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const heldFor = [];
   const hold0 = till.fcHoldConfirm.bind(till);
   till.fcHoldConfirm = (hash) => { heldOnce = true; heldFor.push(hash); hold0(hash); };
-  // which of the payment's screens was up after each step of the tap, and what the sheet had last been told by then
-  const looks = [];
-  const look0 = till.fcLookStage.bind(till);
-  till.fcLookStage = (step) => {
-    look0(step);
-    const up = R.window.document.getElementById('foxy-stage');
-    const now = (up && up.getAttribute('data-look')) || '';
-    if (looks[looks.length - 1] !== now) looks.push(now);
-    if (now === 'confirm' && looks.confirmAt === undefined) looks.confirmAt = R.sheet.length;
-  };
+  // which of the screen's states was up, in turn, and what the sheet had been told when the card was asked for again
+  const looks = watchBehind(till, R);
   pad(till).type('1234');
   /* Tap 1, SEND: the card signs the fewest pieces that cover it (two 512s for 1,000 here) and may go: the sheet stays up
    * and says so while the mint is asked. Then the same sheet asks for the card again, and its change (the 24 over) goes
@@ -270,12 +260,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'one sheet for the whole payment: as the card has signed it says to hold for the change (and nothing that reads as finished), asks for the card again, and ends saying the change is back',
      R.sheet.filter((x) => /^(begin|again|end|error):|^say: Hold for change\./.test(x)).join(' / '));
   ok(R.sheet.every((x) => !/Remove the card\. Verifying/.test(x)), 'the sheet no longer says “Remove the card” beside its own Cancel, which read as over and got it closed before the change');
-  ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.head === 'Verifying card' && atMint.line === 'This may take a few seconds...' && atMint.button === 'hidden' && atMint.amount,
-     'behind it, our own screen said VERIFYING CARD over the amount, with nothing to press', JSON.stringify(atMint));
-  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt <= R.sheet.indexOf('again: Hold for change.'),
-     'the payment’s three screens in turn: TAP TO VERIFY while the card signs, VERIFYING CARD while the mint is asked, and TAP TO CONFIRM from the moment the card is asked for again, before it is found',
-     looks.join(' > '));
-  till.fcLookStage = look0;
+  ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.title === 'VERIFYING CARD' && atMint.scheme === '03' && !atMint.cancel
+     && !atMint.loop && atMint.amount === '\u20bf1,000',
+     'behind it, our own screen said VERIFYING CARD over the amount, on the warm ground, the card settled, with nothing to press', JSON.stringify(atMint));
+  const changeAt = looks.filter((x) => x.look === 'change')[0];
+  ok(looks.path() === 'hold > keep > verify > change > verify' && changeAt && changeAt.at <= R.sheet.indexOf('again: Hold for change.')
+     && looks.titles() === 'TAP BEHIND PHONE > KEEP HOLDING \u00b7 0 s > VERIFYING CARD > TAP FOR CHANGE > VERIFYING CARD',
+     'the payment’s screens in turn: TAP BEHIND PHONE, KEEP HOLDING while the card is in contact and signs, VERIFYING CARD while the mint is asked and the card is still there, TAP FOR CHANGE from the moment the card is asked for again (before it is found), and VERIFYING CARD while the change goes on',
+     looks.path() + ' | ' + looks.titles());
+  looks.stop();
   ok((await R.W.balanceSats()) === 1000 && titles.length === 0, 'the right PIN: 1,000 sats paid, with no card to press at any point', titles.join(', '));
   ok(heldOnce && released.join() === 'the change is back on the card',
      'PAYMENT RECEIVED was held while the change was taken, and went up the moment it was back on the card', JSON.stringify({ heldOnce, released }));
@@ -313,7 +306,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const watch = setInterval(() => {
     const up = R.window.document.getElementById('foxy-stage');
     const lookNow = (up && up.getAttribute('data-look')) || '';
-    if (lookNow === 'confirm') seenConfirm = true;
+    if (lookNow === 'change') seenConfirm = true;
     if (till.state.screen === 'home' && !up && !card(till)) bare += 1;
   }, 20);
   R.sheet.length = 0;
@@ -328,7 +321,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   clearInterval(watch);
   sheets = R.sheet.filter((x) => /^begin:/.test(x)).length;
   ok(bare === 0 && seenConfirm && sheets === 2,
-     'the sheet gone with the change still to take: TAP TO CONFIRM stays up through the pause and the second sheet, and the till’s home screen is never what is showing between the payment and its change',
+     'the sheet gone with the change still to take: TAP FOR CHANGE stays up through the pause and the second sheet, and the till’s home screen is never what is showing between the payment and its change',
      JSON.stringify({ bare, seenConfirm, sheets }));
   ok(released.length === 0, 'and PAYMENT RECEIVED is still held: the change is waiting, and the card says so', released.join());
   c2.send = send2;
@@ -385,20 +378,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const shown = till2.blockedCard.bind(till2);
     till2.blockedCard = (k, sp) => { titles.push((sp && sp.title) || k); return shown(k, sp); };
     RT.sheet.length = 0;
-    // the payment's screens, in the order they went up, and what TAP AGAIN said and when
-    const seen = [];
-    const drawLook = till2.fcLookStage.bind(till2);
-    const watchLooks = (list) => (step) => {
-      drawLook(step);
-      const up = RT.window.document.getElementById('foxy-stage');
-      const now = (up && up.getAttribute('data-look')) || '';
-      if (list[list.length - 1] !== now) list.push(now);
-      if (/Again$/.test(now) && !list.words) {
-        list.words = up.querySelector('h1').textContent + ' / ' + up.querySelector('[data-stage-line]').textContent;
-        list.asked = RT.sheet.filter((x) => /^again: Hold/.test(x)).length;
-      }
-    };
-    till2.fcLookStage = watchLooks(seen);
+    // the screen's states, in the order they went up, and how many times the sheet had asked for the card again by then
+    const seen = watchBehind(till2, RT);
     till2.payByCard();
     await until('the PIN pad', () => !!pad(till2));
     // the tap with the PIN is the one that leaves, before its second signature (the first, with none, only found out it was wanted)
@@ -407,9 +388,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     pad(till2).type('1234');
     await until('the payment to be finished by the next tap', () => till2.state.screen === 'home' && !RT.W.cardHeldPayment(c3.key) && RT.W.cardTaken().length === 0 && !stage(R));
     await settle();
-    ok(seen.join(' > ') === 'tap > tapAgain > verify' && seen.words === 'Tap again / The last tap didn\u2019t finish...' && seen.asked === 0,
-       'the card lost part way through signing: the screen says TAP AGAIN, on TAP TO VERIFY’s ground, from the moment it is lost (before the sheet has asked for it again) until it has signed',
-       seen.join(' > ') + '; ' + seen.words);
+    seen.stop();
+    const again1 = seen.filter((x) => x.look === 'again')[1];
+    ok(seen.path() === 'hold > keep > pin > again > keep > again > keep > remove' && again1 && again1.title === 'PLEASE TAP AGAIN' && again1.scheme === '01' && again1.loop
+       && RT.sheet.slice(0, again1.at).filter((x) => /^again: Hold/.test(x)).length === 0 && seen[seen.length - 1].title === 'REMOVE',
+       'the card lost part way through signing: the screen says PLEASE TAP AGAIN, on the light ground with the card looping, from the moment it is lost (before the sheet has asked for it again), then KEEP HOLDING when it is found, and REMOVE once it has signed (the first tap having ended asking for the PIN, which the screen waited under the pad as ENTER PIN)',
+       seen.path() + ' | ' + seen.titles());
     const got = (await RT.W.balanceSats()) - rb;
     const begins = RT.sheet.filter((x) => /^begin:/.test(x));
     const agains = RT.sheet.filter((x) => /^again:/.test(x));
@@ -419,7 +403,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     till2.blockedCard = shown;
 
     /* The card lost while its change was being written: what went on stays on, the same sheet asks again, and the
-     * screen says TAP AGAIN on TAP TO CONFIRM's ground until the rest is on. */
+     * screen says PLEASE TAP AGAIN until the rest is on. */
     {
       const HC = await funded({ sharedMint: H.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 2000);
       const c5 = newCard(HC);
@@ -430,8 +414,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       RT.nfc = c5;
       let taps = 0;
       const tap5 = c5.tap;
-      const seen5 = [];
-      till2.fcLookStage = watchLooks(seen5);
+      const seen5 = watchBehind(till2, RT);
       const sentBefore = c5.sent.length;
       RT.sheet.length = 0;
       till2.payByCard();
@@ -444,8 +427,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await settle();
       c5.tap = tap5;
       const lines5 = RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x));
-      ok(seen5.join(' > ') === 'tap > verify > confirm > confirmAgain' && seen5.words === 'Tap again / The last tap didn\u2019t finish...',
-         'the card lost part way through taking its change: TAP AGAIN, on TAP TO CONFIRM’s ground, until the rest is on', seen5.join(' > ') + '; ' + seen5.words);
+      seen5.stop();
+      ok(seen5.path() === 'hold > keep > pin > again > keep > verify > change > verify > again > verify' && seen5[8].title === 'PLEASE TAP AGAIN',
+         'the card lost part way through taking its change: PLEASE TAP AGAIN (not TAP FOR CHANGE, for some of it went on), and VERIFYING CARD again while the rest goes on', seen5.path() + ' | ' + seen5.titles());
       ok(lines5.filter((x) => /^begin:/.test(x)).length === 1 && lines5.filter((x) => x === 'again: Hold for change.').length === 2
          && lines5[lines5.length - 1] === 'end: Done.' && taps === 3,
          'in the one sheet: asked for its change, asked again when it left, and ended with the change back', lines5.join(' / '));
@@ -454,7 +438,6 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       ok(!pad(till2) && pins5 === 2,
          'the rest went on with the PIN typed for this payment, given to the card again (once to pay, once for the rest), and nobody was asked for it twice', String(pins5));
     }
-    till2.fcLookStage = drawLook;
 
     // the tap to finish reads no card: NOT PAID YET, with TAP CARD to finish and CANCEL to give it back
     const c4 = newCard(HL);
@@ -494,7 +477,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(holder.state.fc.ownedHere === true && vals(holder).fcLimitLine === 'NO LIMIT', 'the card is read again, and this phone is found to be its owner');
   holder.fcSetLimit();
   ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-     'CHANGE LIMIT asks which of the card’s two limits, in one line: PER TAP LIMIT, DAILY LIMIT, or CANCEL', card(holder) && card(holder).all);
+     'LIMITS asks which of the card’s two limits, in one line: PER TAP LIMIT, DAILY LIMIT, or CANCEL', card(holder) && card(holder).all);
   card(holder).press('CANCEL');
   ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard', 'CANCEL there changes nothing');
   holder.fcSetLimit();
@@ -537,14 +520,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'its screen shows the daily limit, what is left today, and when the day turns', [v.fcLimitLine, v.fcDayLeft, v.fcDayTurns].join(' | '));
 
   /* ---- the limit on one tap ----------------------------------------------------------
-   * The other choice under CHANGE LIMIT, asked for by the same three steps in its own words. */
+   * The other choice under LIMITS, asked for by the same three steps in its own words. */
   {
     // a card read as the one before the latest (software 1.12) has that card's rule in its words: it does not wait by the newest
     const was = holder._fcCard;
     holder._fcCard = Object.assign({}, was, { info: Object.assign({}, was.info, { format: 4, shaped: false }) });
     holder.fcSetLimit();
     ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-       'a card of software 1.12 is asked the same question at CHANGE LIMIT', card(holder) && card(holder).all);
+       'a card of software 1.12 is asked the same question at LIMITS', card(holder) && card(holder).all);
     card(holder).press('PER TAP LIMIT');
     ok(card(holder) && !explainer(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING_OLD, 'CONTINUE', 'CANCEL'].join(' | '),
        'and is told its own rule in a warning, not the played rule of the card that makes change: change holds the card 3 seconds, and 3 seconds for every limit’s worth over it', card(holder) && card(holder).all);
@@ -993,7 +976,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'and set-up has its one choice, straight after the PIN: recoverable, or like cash', card(holder) && card(holder).title);
   rc.tap();
   card(holder).press('RECOVERABLE');
-  await until('the second card to be set up', () => holder.state.screen === 'home' && !!rc.state.owner);
+  await until('the second card to be set up', () => holder.state.screen === 'flashcard' && !!rc.state.owner && holder.state.fc && holder.state.fc.owner);
   ok(holder.state.fc.mine && holder.state.fc.recoverable, 'chosen recoverable, it is this phone\u2019s to take back');
   holder.goFlashcard();
   await until('the second card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.mine === true);
@@ -1132,8 +1115,6 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await H.W.cardSetUp(d, { pin: '1234' });
     await binaryLoad(H, d, 1000);            // 512 256 128 64 32 8, cut the old way so that a price takes pieces and not a drawer's small ones
     const lines = [];
-    const was = till.fcLine.bind(till);
-    till.fcLine = (t) => { lines.push(t); was(t); };
     // the tap is held half-way, so the screen can be looked at while the card is still on the phone
     let let_go = null;
     const gate = new Promise((r) => { let_go = r; });
@@ -1145,27 +1126,153 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the PIN pad', () => !!pad(till));
     pad(till).type('1234');
     await until('the card to be asked to sign', () => R.sheet.indexOf('say: Signing piece 1 of 4') >= 0);
-    const behind = () => { const up = R.window.document.getElementById('foxy-stage'); return up ? up.getAttribute('data-look') + ': ' + up.querySelector('h1').textContent + ' / ' + up.querySelector('[data-stage-line]').textContent : ''; };
-    ok(lines.indexOf('Signing piece 1 of 4') >= 0 && behind() === 'tap: Tap to verify / Tap for a few seconds...',
-       'the sheet says the piece being signed; the screen behind it is TAP TO VERIFY and says the one thing to do', behind());
-    // what the phone’s own link says, pushed to the page as it happens
-    R.W._card({ stage: 'connected', text: 'Scanning. Hold still.' });
-    ok(lines.indexOf('Scanning. Hold still.') >= 0 && behind() === 'tap: Tap to verify / Tap for a few seconds...', 'and what the phone’s link pushes (the card found) does not change it either', behind());
+    const hold1 = behind(R);
+    ok(R.events.indexOf('connected: Reading the card') >= 0 && hold1 && hold1.look === 'keep' && hold1.scheme === '03' && /^KEEP HOLDING \u00b7 \d+ s$/.test(hold1.title)
+       && !hold1.loop && !hold1.cancel && hold1.fur === '0.5',
+       'the sheet says the piece being signed; the screen behind it is KEEP HOLDING with the seconds, on the warm ground with the fur, the card settled and no CANCEL', JSON.stringify(hold1));
+    /* The count is the seconds since the card connected, a whole second at a time, and runs only while it is on the screen. */
+    const counted = [];
+    const t0 = till._fcTapO.t;
+    t0.since = Date.now() - 7400;
+    till.fcTapTick();
+    counted.push(behind(R).title);
+    t0.since = Date.now() - 12000;
+    till.fcTapTick();
+    counted.push(behind(R).title);
+    ok(counted.join(' / ') === 'KEEP HOLDING \u00b7 7 s / KEEP HOLDING \u00b7 12 s' && !!till._fcCountT
+       && R.window.document.querySelector('h1 span').style.textTransform === 'none',
+       'the count goes up from the contact in whole seconds ("KEEP HOLDING · 7 s"), with the unit left lowercase, off a timer that is running', counted.join(' / '));
+    // what the phone’s own link says, pushed to the page as it happens, changes nothing it should not
     R.W._card({ stage: 'say', text: 'Signing piece 1 of 4' });
+    ok(behind(R).look === 'keep' && behind(R).title === 'KEEP HOLDING \u00b7 12 s', 'and what the sheet says is not repeated on the screen, nor does it start the count again', behind(R).title);
     let_go();
     await until('the payment to be made', () => till.state.screen === 'home');
     await settle();
     ok(['Signing piece 1 of 4', 'Signing piece 2 of 4', 'Signing piece 3 of 4', 'Signing piece 4 of 4'].every((t) => R.sheet.indexOf('say: ' + t) >= 0)
        && R.sheet[R.sheet.length - 1] === 'end:  ' && d.balance() === 40 && !stage(R),
        'each piece was said on the sheet in turn, the sheet closed with no words once the card had signed (it was paid exactly: nothing to keep it open for), and the screen is down', R.sheet.slice(-3).join(' / '));
-    till.fcLine = was;
+    ok(!till._fcCountT, 'and the count stopped with the screen: no timer is left running');
     R.nfc = d;
     ok(R.W.cardOwed().length === 0 && d.state.slots.filter((x) => x.status === 1).length === 2, 'no change was needed: the card was not written to');
 
     // a push with no tap under way changes nothing and breaks nothing
     R.W._card({ stage: 'say', text: 'stray' });
     R.W._card(null);
-    ok(!R.window.document.querySelector('[data-stage-line]'), 'a push with no tap under way draws nothing');
+    ok(!R.window.document.getElementById('foxy-stage'), 'a push with no tap under way draws nothing');
+
+    /* ---- the screen behind the card sheet, state by state (build/app/26h-tap-screen.js) ---------------------
+     * Driven as the wallet and the phone's link drive it: the steps of a tap, and the link's "connected" and "lost". */
+    {
+      const S = appOn(R);
+      const begin = (o) => { S._fcTapO = Object.assign({ amount: '$25.75' }, o || {}); S.fcStage('hold'); };
+      const link = (stage) => S.fcTapEvent({ stage, text: '' });
+      const LIGHT = '01', WARM = '03';
+      // the two grounds, the fur, the loop, CANCEL, the title and the amount of each state
+      const is = (b, look, title, scheme, loop, cancel) => !!b && b.look === look && b.title === title && b.scheme === scheme && b.loop === loop && b.cancel === cancel
+        && b.amount === '$25.75' && b.fur === (scheme === WARM ? '0.5' : '0') && b.cardMoves === loop;
+
+      begin();
+      let b = behind(R);
+      ok(is(b, 'hold', 'TAP BEHIND PHONE', LIGHT, true, true) && b.design === 'FX1', 'waiting for a card: TAP BEHIND PHONE on the light ground, no fur, the card and waves looping, CANCEL there, the card drawn as FX1 until one has been read', JSON.stringify(b));
+      const up = R.window.document.getElementById('foxy-stage');
+      ok(/white-space:\s*nowrap/.test(up.querySelector('h1').getAttribute('style')) && /font-size:\s*31px/.test(up.querySelector('h1').getAttribute('style'))
+         && /font-size:\s*42px/.test(up.querySelector('[data-tap-amount]').getAttribute('style')) && up.querySelectorAll('[data-tap-wave]').length === 3
+         && /width:\s*250px/.test(up.querySelector('[data-tap-card]').getAttribute('style')) && up.querySelector('[data-tap-card] [data-card-face]'),
+         'the title is 31px on one line, the amount 42px, there are three waves, and the card is 250px wide and the card screen’s own face');
+      ok(/background-color: rgb\(191, 227, 236\)/.test(up.getAttribute('style')) && /color: rgb\(15, 42, 51\)/.test(up.getAttribute('style')),
+         'the light ground is #BFE3EC with #0F2A33 ink');
+
+      link('connected');
+      b = behind(R);
+      ok(is(b, 'keep', 'KEEP HOLDING \u00b7 0 s', WARM, false, false), 'a card connected: KEEP HOLDING · 0 s, the warm ground with the fur, the card settled, and CANCEL gone', JSON.stringify(b));
+      ok(/background-color: rgb\(235, 106, 46\)/.test(up.getAttribute('style')) && /color: rgb\(26, 10, 4\)/.test(up.getAttribute('style')), 'the warm ground is #EB6A2E with #1A0A04 ink');
+      S._fcTapO.t.since = Date.now() - 3000;
+      S.fcTapTick();
+      ok(behind(R).title === 'KEEP HOLDING \u00b7 3 s', 'the count goes up a second at a time, from the contact', behind(R).title);
+      S._fcTapO.t.since = Date.now() - 31000;
+      S.fcTapTick();
+      ok(behind(R).title === 'KEEP HOLDING \u00b7 31 s', 'and keeps going past the seconds a wait over the limit takes', behind(R).title);
+
+      // contact broke before anything was signed: the loop starts again to say so
+      link('lost');
+      b = behind(R);
+      ok(is(b, 'again', 'PLEASE TAP AGAIN', LIGHT, true, false) && !S._fcCountT, 'contact broke mid-tap: PLEASE TAP AGAIN on the light ground, the loop running again, no CANCEL, and the count stopped', JSON.stringify(b));
+      link('connected');
+      ok(behind(R).title === 'KEEP HOLDING \u00b7 0 s' && behind(R).scheme === WARM && !behind(R).loop && !!S._fcCountT, 'found again: the count begins afresh from this contact', behind(R).title);
+
+      // signed, with the sheet kept for the change: the card is still there
+      S.fcStage('mint');
+      b = behind(R);
+      ok(is(b, 'verify', 'VERIFYING CARD', WARM, false, false) && !S._fcCountT, 'the card has signed and the mint is asked, the card still there: VERIFYING CARD, settled, with no count', JSON.stringify(b));
+      S.fcStage('change');
+      ok(behind(R).look === 'verify', 'and while the change is made it is the same');
+      // lost before any of the change went on: it is the change that is asked for
+      link('lost');
+      b = behind(R);
+      ok(is(b, 'change', 'TAP FOR CHANGE', LIGHT, true, false), 'contact broke after signing and before the change went on: TAP FOR CHANGE on the light ground, looping', JSON.stringify(b));
+      link('connected');
+      ok(behind(R).look === 'verify', 'the card found for the change: VERIFYING CARD while it goes on');
+      // lost with some of the change on
+      S._fcTapO.t.wrote = true;
+      link('lost');
+      ok(behind(R).look === 'again' && behind(R).title === 'PLEASE TAP AGAIN', 'contact broke with some of the change on: PLEASE TAP AGAIN, as it is the same tap going on', behind(R).title);
+
+      // the card let go, nothing more wanted of it (the sheet is gone)
+      S.fcStage('checking');
+      b = behind(R);
+      ok(is(b, 'remove', 'REMOVE', WARM, false, false), 'the card has signed and nothing more is needed of it: REMOVE, on the warm ground, settled', JSON.stringify(b));
+      link('lost');
+      ok(behind(R).look === 'remove', 'and the card going is not “lost” then');
+
+      // the second tap of a payment, asked for before the card is found
+      begin({ look: 'receive' });
+      b = behind(R);
+      ok(is(b, 'change', 'TAP FOR CHANGE', LIGHT, true, true), 'the second tap, before the card is found: TAP FOR CHANGE, looping, with CANCEL as on any tap not yet begun', JSON.stringify(b));
+      link('connected');
+      ok(behind(R).look === 'verify', 'and in contact, the change going on: VERIFYING CARD');
+      // a payment the mint refused, going back on the card
+      begin({ putBack: true });
+      ok(behind(R).look === 'again' && behind(R).scheme === LIGHT && behind(R).loop, 'a refused payment going back on the card asks for the card with PLEASE TAP AGAIN', behind(R).title);
+
+      // the sheet ended asking for the PIN; the pad is up; the tap after it asks again
+      begin();
+      link('connected');
+      S.fcTapPin();
+      b = behind(R);
+      ok(is(b, 'pin', 'ENTER PIN', LIGHT, false, false), 'the sheet ended asking for the PIN: ENTER PIN, on the light ground, the card settled', JSON.stringify(b));
+      link('lost');
+      link('connected');
+      ok(behind(R).look === 'pin', 'and nothing the link says moves it while the pad is up');
+      // (the next tap is what brings it back: the payment flow above, and this)
+      S._fcTapO = { amount: '$25.75', pinAgain: true };
+      S.fcStage('hold');
+      b = behind(R);
+      ok(is(b, 'again', 'PLEASE TAP AGAIN', LIGHT, true, true), 'the tap after the pad starts as PLEASE TAP AGAIN, looping, with CANCEL (nothing has been asked of the card yet)', JSON.stringify(b));
+
+      // the design of the card: FX1 until a card has been read at a till, then the card’s own
+      S.fcTapSeen('');
+      ok(behind(R).design === 'FL1', 'a card read at a till that names no design is drawn as FL1, the drawn face', behind(R).design);
+      S.fcTapSeen('FX1');
+      ok(behind(R).design === 'FX1', 'and one that names FX1 as FX1, the picture', behind(R).design);
+      begin();
+      S.state.fc = { design: 'FL1' };
+      S.fcTapDraw();
+      ok(behind(R).design === 'FL1', 'a card already on the phone’s screen is drawn in its own design from the start', behind(R).design);
+      S.state.fc = null;
+
+      // no amount: nothing under the title
+      begin({ amount: '' });
+      ok(behind(R).amount === '' && R.window.document.querySelector('[data-tap-amount]').style.display === 'none', 'a tap with no amount draws none');
+
+      // the screen is the stage’s: down, and nothing left running
+      link('connected');
+      ok(!!S._fcCountT, 'a count is running while KEEP HOLDING is up');
+      S.hideStage('card');
+      ok(!stage(R) && !S._fcCountT && !S._stageT, 'taken down, the count and the timeout stop with it');
+      S.fcTapTick();
+      ok(!stage(R) && !S._fcCountT, 'and a tick that comes after draws nothing');
+      S._fcTapO = {};
+    }
 
     /* ---- with no route: the HIGH RISK card first, a yes or a no, the exact set only ------ */
     const offline = () => R.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
@@ -1505,11 +1612,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line (with a PIN, home)', owner.state.screen);
     await look();
     v = vals(owner);
-    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,ADD PIN,CHANGE LIMIT' && v.fcLimitLine === 'NO LIMIT | NO PIN',
-       'its screen has ADD PIN in CHANGE PIN’s place, and CHANGE LIMIT', v.fcLinks.map((k) => k.label).join());
+    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,ADD PIN,LIMITS' && v.fcLimitLine === 'NO LIMIT | NO PIN',
+       'its screen has ADD PIN in CHANGE PIN’s place, and LIMITS', v.fcLinks.map((k) => k.label).join());
     owner.fcSetLimit();
     ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-       'CHANGE LIMIT offers a card with no PIN its two limits and no NO PIN LIMIT: there is nothing to pay without', card(owner) && card(owner).all);
+       'LIMITS offers a card with no PIN its two limits and no NO PIN LIMIT: there is nothing to pay without', card(owner) && card(owner).all);
     card(owner).press('CANCEL');
 
     /* its owner puts money on it and takes some off with no PIN asked for; a till is paid in one tap */
@@ -1555,7 +1662,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.pinState === 1 && n.state.pin === Buffer.from('4321').toString('hex') && n.state.noPinLimit === 0 && owner.state.fc.pinSet === true && owner.state.screen === 'flashcard',
        'one tap gave the card the PIN, with no allowance, and said so in a line', owner.toasts.slice(-1)[0]);
     v = vals(owner);
-    ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT' && v.fcNoPinShown === false, 'and ADD PIN is CHANGE PIN again', v.fcLinks.map((k) => k.label).join());
+    ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,LIMITS' && v.fcNoPinShown === false, 'and ADD PIN is CHANGE PIN again', v.fcLinks.map((k) => k.label).join());
 
     /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
@@ -1575,7 +1682,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await look();
     owner.fcSetLimit();
     ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'NO PIN LIMIT', 'CANCEL'].join(' | '),
-       'on a card with a PIN, CHANGE LIMIT has a third button, NO PIN LIMIT, under DAILY LIMIT', card(owner) && card(owner).all);
+       'on a card with a PIN, LIMITS has a third button, NO PIN LIMIT, under DAILY LIMIT', card(owner) && card(owner).all);
     card(owner).press('NO PIN LIMIT');
     ok(card(owner) && card(owner).all === ['SET NO PIN LIMIT', NOPIN_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
        'NO PIN LIMIT opens its warning: what it is, that over it the PIN is asked for the whole payment, that only payments with no PIN count', card(owner) && card(owner).all);
@@ -1766,7 +1873,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   /* ---- software 1.17: RESET CARD, the row under the card, the block, and FLASHCARD on the send screen --------------------------
    * The card of 1.17 can be reset by its owner: a warning, then one tap (the money on it comes off to this phone first, and a
    * locked card or one that holds money and has a PIN asks for the PIN on the pad), and the person is home with a line. The
-   * row of HISTORY, CHANGE PIN and CHANGE LIMIT is drawn as the receive screen's row; the card's clock is said as a block under
+   * row of HISTORY, CHANGE PIN and LIMITS is drawn as the receive screen's row; the card's clock is said as a block under
    * the title; and money goes onto a card held to this phone from the send screen, with no card on show. */
   {
     const H2 = await funded({}, 30000);
@@ -1798,8 +1905,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await setUpWith(owner, H2, n, '1234');
     await look(owner, H2, n);
     v = vals(owner);
-    ok(owner.state.fc.resetKnown === true && v.fcResetVis === 'visible' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT',
-       'a card of 1.17 read by its owner: RESET CARD at the top, and the row of HISTORY, CHANGE PIN and CHANGE LIMIT', v.fcResetVis);
+    ok(owner.state.fc.resetKnown === true && v.fcResetVis === 'visible' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,LIMITS',
+       'a card of 1.17 read by its owner: RESET CARD at the top, and the row of HISTORY, CHANGE PIN and LIMITS', v.fcResetVis);
     ok(v.fcLinks.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcLinks[0].path !== v.fcLinks[1].path, 'each a button with its own drawing');
     ok(owner.state.fc.headers === true && v.fcBlockShown === true && v.fcBlockLine === 'No block yet' && VERIFIED_AT.test(v.fcVerified),
        'a card shown no block says "No block yet" under the time it was verified', v.fcBlockLine);

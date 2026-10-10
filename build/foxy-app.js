@@ -17776,7 +17776,9 @@ class Component extends DCLogic {
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    this._stageT = null; this._stageQrT = null;
+    // the card screen's count of seconds (26h-tap-screen.js)
+    clearInterval(this._fcCountT);
+    this._stageT = null; this._stageQrT = null; this._fcCountT = null;
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
     return true;
@@ -18101,59 +18103,21 @@ class Component extends DCLogic {
    * of an older software always needs it, and is asked the same way.
    */
 
-  /* A tap, step by step: the heading on our screen, and the line on the
-   * phone's sheet. The wallet names the steps as it reaches them. */
+  /* A tap, step by step: the line on the phone's sheet. The wallet names the steps as it reaches them; the screen behind
+   * the sheet is drawn from where the tap has got to (26h-tap-screen.js), not from these. */
   FC_STEPS = {
-    hold: ['TAP BEHIND<br>THE PHONE', 'Tap behind the phone.'],
-    reading: ['READING<br>THE CARD', 'Reading the card'],
-    signing: ['KEEP THE CARD<br>THERE', 'Keep holding.'],
-    mint: ['KEEP THE CARD<br>THERE', 'Asking the mint'],
-    change: ['PUTTING CHANGE<br>BACK ON THE CARD', 'Putting change back on the card'],
-    /* The card has signed and been let go, and these are said on our screen
-     * alone (`fcTap`'s `on`). A payment at a till has screens of its own for
-     * all of this (FC_LOOKS); these are every other tap's. */
-    checking: ['VERIFYING<br>WITH THE MINT', ''],
-    making: ['MAKING<br>THE CHANGE', ''],
-    writing: ['WRITING<br>TO THE CARD', 'Keep holding.'],
-    resetting: ['RESETTING<br>THE CARD', 'Keep holding.'],
-    done: ['REMOVE<br>THE CARD', 'Done.'],
+    hold: 'Tap behind the phone.',
+    reading: 'Reading the card',
+    signing: 'Keep holding.',
+    mint: 'Asking the mint',
+    change: 'Putting change back on the card',
+    /* The card has signed and been let go, and these are said on our screen alone (`fcTap`'s `on`): there is no sheet. */
+    checking: '',
+    making: '',
+    writing: 'Keep holding.',
+    resetting: 'Keep holding.',
+    done: 'Done.',
   };
-  /* ---- the three screens of a card payment ---------------------------------
-   *
-   * Drawn from the design's own markup, as the loaders are (26e-loaders.js):
-   * TAP TO VERIFY while the card is held and signs, VERIFYING CARD while the
-   * mint is asked and the change is made, TAP TO CONFIRM from the moment the
-   * card is asked for again until its change is back on it. Then the
-   * payment's own confirmation. What the app changes: the phone's sheet is the
-   * phone's own (the design draws one for reference), the texture is the fur
-   * already in the bundle (snow-fur.jpg, the same picture), and the amount is
-   * the payment's.
-   *
-   * Everything is in the top half, above where the phone's sheet comes up. The
-   * sheet dims what is behind it; that is the phone's doing and no app can
-   * turn it off, so the ground is light and the ink dark, which is what still
-   * reads under it. The words do not change as the card works: the sheet says
-   * each step, and this screen says the one thing to do.
-   *
-   * `tapAgain` and `confirmAgain` are the same two with TAP AGAIN on them, for
-   * a card that left part way through that tap: up from the moment it is lost
-   * (the sheet is asking for it again by then) until the tap is finished.
-   *
-   * `back` is TAP TO CONFIRM's ground for the one other thing a second tap of
-   * a payment can be: a payment the mint refused, going back on the card.
-   * Their keyframes are in the page's stylesheet (build/markup.html). */
-  FC_LOOKS = {
-    tap: { ground: '#BFE3EC', ink: '#0F2A33', sub: '#1E4450', title: 'Tap to verify', line: 'Tap for a few seconds...', ask: true },
-    verify: { ground: '#BFE3EC', ink: '#0F2A33', sub: '#1E4450', title: 'Verifying card', line: 'This may take a few seconds...',
-              chip: 'linear-gradient(135deg,#E6F4F8,#8FB9C6)' },
-    confirm: { ground: '#EB6A2E', ink: '#1A0A04', sub: '#2E1206', title: 'Tap to confirm', line: 'Tap for a few seconds...', ask: true, fur: true, tick: true },
-    tapAgain: { ground: '#BFE3EC', ink: '#0F2A33', sub: '#1E4450', title: 'Tap again', line: 'The last tap didn\u2019t finish...', ask: true },
-    confirmAgain: { ground: '#EB6A2E', ink: '#1A0A04', sub: '#2E1206', title: 'Tap again', line: 'The last tap didn\u2019t finish...', ask: true, fur: true, tick: true },
-    back: { ground: '#EB6A2E', ink: '#1A0A04', sub: '#2E1206', title: 'Tap to put back', line: 'Payment did not go through.', ask: true, fur: true },
-  };
-  // which of them a step of the tap is said with (`receive`: the card asked for again, before it is found)
-  FC_LOOK_OF = { hold: 'tap', reading: 'tap', signing: 'tap', mint: 'tap', checking: 'verify', making: 'verify', change: 'verify',
-                 receive: 'confirm', writing: 'confirm' };
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // how near its date a card's own phone starts saying RENEW
   FC_RENEW_DAYS = 30;
@@ -18236,21 +18200,37 @@ class Component extends DCLogic {
   fcTap(o, fn) {
     const W = this.fcW();
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
-    this._fcTapO = o || {};
+    /* The tap that follows the PIN pad (the last sheet ended asking for it) starts as PLEASE TAP AGAIN, on the screen
+     * the last tap left up (26h-tap-screen.js). */
+    const was = document.getElementById('foxy-stage');
+    const afterPin = !!(was && was.getAttribute('data-stage') === 'card' && was.getAttribute('data-look') === 'pin');
+    this._fcTapO = Object.assign({}, o || {});
+    delete this._fcTapO.t;
+    if (afterPin) this._fcTapO.pinAgain = true;
     this.fcStage('hold');
-    /* What the phone's own link says is happening, as it says it: the card
-     * found ("Scanning. Hold still."), each line put on the sheet, the card
-     * lost. The screen behind the sheet shows the same line. */
-    if (W.onCard) W.onCard((ev) => { if (ev && ev.text && ev.stage !== 'end') this.fcLine(ev.text); });
-    const over = () => { if (W.onCard) W.onCard(null); this.hideStage('card'); };
-    return W.cardSession((o && o.sheet) || this.FC_STEPS.hold[1], (link) => {
+    /* What the phone's own link says is happening, as it says it: the card found, the card lost. The sheet's lines are
+     * ours already, and the screen behind it does not repeat them. */
+    if (W.onCard) W.onCard((ev) => this.fcTapEvent(ev));
+    /* The screen comes down with the tap, except when the sheet ended asking for the PIN: it stays up under the pad, and
+     * the tap that follows takes it up again. */
+    const over = (pinNeeded) => {
+      if (W.onCard) W.onCard(null);
+      if (pinNeeded) this.fcTapPin(); else this.hideStage('card');
+    };
+    return W.cardSession((o && o.sheet) || this.FC_STEPS.hold, (link) => {
       const on = (step, info) => {
-        const words = this.FC_STEPS[step];
-        if (!words) return;
+        const line = this.FC_STEPS[step];
+        if (line === undefined) return;
         // the card has been let go and the sheet is gone: nothing to say on it, and "remove the card" has been said
         if (link.released && step === 'done') return;
-        this.fcStage(step);
-        if (!link.released) link.say(words[1]);
+        // a card that says which design it is (a till does not know until it has read it)
+        if (info && Object.prototype.hasOwnProperty.call(info, 'design')) this.fcTapSeen(info.design);
+        // a step of the card's own work means it is in the field, whether or not the phone has said so
+        if (this.FC_TAP_CONTACT[step]) this.fcContact();
+        /* 'checking' and 'making' are said whether or not the sheet is still up: with it kept for the change the card is
+         * still there, and the screen is told it is (mint, change), not that it can go. */
+        this.fcStage(!link.released && step === 'checking' ? 'mint' : !link.released && step === 'making' ? 'change' : step);
+        if (!link.released) link.say(line);
         const paying = !!(this._fcTapO && this._fcTapO.paying);
         /* The card's part is over. The mint's work can take as long as Tor does
          * (this screen is not the sheet, which iOS ends after a minute), and what
@@ -18265,25 +18245,22 @@ class Component extends DCLogic {
         if (step === 'checking') {
           clearTimeout(this._stageT);
           this._stageT = setTimeout(() => this.hideStage('card'), 180000);
-          this.fcLine('You can remove the card.');
           /* The card has signed for a payment: its PAYMENT RECEIVED waits from
            * here, before the mint has said paid, until its change is back on
            * the card or is left for later. Held as this payment's and no
            * other's (`info.hash`, its entry). */
           if (paying) this.fcHoldConfirm(info && info.hash);
         }
-        if (step === 'making') {
-          this.fcLine('The payment is made.');
-          if (paying) this.fcHoldConfirm(info && info.hash);
-        }
+        if (step === 'making' && paying) this.fcHoldConfirm(info && info.hash);
       };
-      /* Which piece, of how many: said on the sheet and on the screen at once,
-       * before the card is asked, so the line is up for as long as it works on
-       * that piece and a person keeps holding. */
+      /* Which piece, of how many: said on the sheet before the card is asked, so the line is up for as long as it works
+       * on that piece and a person keeps holding. A card that has said its design (`design`) is drawn as it. */
       const progress = (p) => {
+        if (p && Object.prototype.hasOwnProperty.call(p, 'design')) this.fcTapSeen(p.design);
+        // a piece being written: some of the change is going on, and contact breaking now breaks it part way
+        if (p && p.step === 'writing' && Math.round(Number(p.i)) > 0) this.fcTapState().wrote = true;
         const text = this.fcProgressText(p);
         if (!text) return;
-        this.fcLine(text);
         link.say(text);
       };
       on('reading');
@@ -18291,12 +18268,12 @@ class Component extends DCLogic {
       // a tap that goes on to the mint opens the road to it as the sheet opens, not when the card has signed
     }, { warm: !!(o && o.warm), again: (o && typeof o.again === 'function') ? (e) => {
       const line = o.again(e);
-      /* The card left and the same sheet is about to ask for it again: a
-       * payment's screen says TAP AGAIN from now until this tap is finished. */
-      if (line && this._fcTapO && this._fcTapO.look) { this._fcTapO.lost = true; this.fcStage('lost'); }
+      /* The card left and the same sheet is about to ask for it again: the screen says so from now until the card is
+       * found. */
+      if (line) this.fcTapLost();
       return line;
-    } : null }).then((r) => { over(); return r; },
-            (e) => { over(); throw e; });
+    } : null }).then((r) => { over(false); return r; },
+            (e) => { over(!!(e && e.card === 'pin-needed')); throw e; });
   }
 
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
@@ -18342,159 +18319,17 @@ class Component extends DCLogic {
     this.haptic && this.haptic('triple', true);
   }
 
-  /* The line under the heading on the card's screen: what the card is doing
-   * now. Made the first time it is needed, above the dots. */
-  fcLine(text) {
-    if (!this.stageUp('card')) return;
-    const up = document.getElementById('foxy-stage');
-    // a payment's screens say one thing each and leave the steps to the sheet (FC_LOOKS)
-    if (up && up.getAttribute('data-look')) return;
-    const h = up && up.querySelector('h1');
-    if (!h || !h.parentElement) return;
-    let line = /** @type {HTMLElement | null} */ (up.querySelector('[data-stage-line]'));
-    if (!line) {
-      line = document.createElement('p');
-      line.setAttribute('data-stage-line', '1');
-      line.style.cssText = 'margin:0;max-width:300px;text-align:center;font-family:Sora,system-ui,sans-serif;'
-        + 'font-weight:800;font-size:19px;line-height:1.3;letter-spacing:.01em;color:#13333C';
-      const col = h.parentElement;
-      const dots = Array.from(col.children).filter((el) => el.querySelector && el.querySelector('span'))[0];
-      col.insertBefore(line, dots || null);
-    }
-    line.textContent = String(text);
-  }
-
+  /* The screen behind the sheet, for this step of the tap (26h-tap-screen.js). The steps that change what is true of
+   * the tap are noted first: the card has signed (`mint`, `change`), has been let go (`checking`, `making`, `done`),
+   * is asked for again (`receive`), or has been lost (`lost`). */
   fcStage(step) {
-    const words = this.FC_STEPS[step] || this.FC_STEPS.hold;
-    const o = this._fcTapO || {};
-    if (o.look) { this.fcLookStage(step); return; }
-    if (!this.stageUp('card')) {
-      this.stageScreen('card', {
-        art: 'card', title: words[0], amount: o.amount || '', body: o.body || '',
-        dots: true, forMs: 120000, button: 'CANCEL', keep: true,
-        // the session ends as cancelled, and that is what takes this screen down
-        go: () => { const W = this.fcW(); if (W) W.cardStop(); },
-      });
-    }
-    const up = document.getElementById('foxy-stage');
-    if (!up) return;
-    const h = up.querySelector('h1');
-    if (h) h.innerHTML = words[0];
-    /* CANCEL is offered only while nothing has been asked of the card. After
-     * that the way to stop is to finish: a card pulled away half-way has
-     * signed for some of its money, and getting that back to it is a second
-     * tap nobody needed. */
-    const b = /** @type {HTMLElement | null} */ (up.querySelector('[data-stage-button]'));
-    if (b) b.style.visibility = step === 'hold' ? 'visible' : 'hidden';
-  }
-
-  /* One of a payment's screens (FC_LOOKS), for this step of its tap. Drawn
-   * again only when the step is said with a different one, so a card that
-   * signs piece after piece, or is written to, does not make the screen blink.
-   * `o.look` is 'pay' (the payment's own tap: the three in turn) or 'receive'
-   * (a tap that only takes the change: TAP TO CONFIRM throughout). */
-  fcLookStage(step) {
-    const o = this._fcTapO || {};
-    const was = document.getElementById('foxy-stage');
-    const cur = (was && was.getAttribute('data-stage') === 'card' && was.getAttribute('data-look')) || '';
-    // a step that names no screen of its own (`done`, `lost`) keeps the one that is up
-    let name = o.look === 'receive' ? 'confirm' : (this.FC_LOOK_OF[step] || cur.replace(/Again$/, '') || 'tap');
-    // signed: whatever was lost on the way is behind it, and the change's tap starts as TAP TO CONFIRM
-    if (name === 'verify') o.lost = false;
-    if (name === 'confirm' && o.putBack) name = 'back';
-    // the card left part way through this tap (`fcTap`'s `again`, and the taps that take one up): TAP AGAIN
-    if (o.lost && (name === 'tap' || name === 'confirm')) name += 'Again';
-    if (cur !== name) {
-      this.hideStage();
-      const k = this.FC_LOOKS[name];
-      const root = document.createElement('div');
-      root.id = 'foxy-stage';
-      root.setAttribute('data-stage', 'card');
-      root.setAttribute('data-look', name);
-      root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;display:flex;flex-direction:column;overflow:hidden;'
-        + 'box-sizing:border-box;padding-top:env(safe-area-inset-top);background:' + k.ground + ';color:' + k.ink + ';'
-        + 'font-family:Sora,system-ui,sans-serif;-webkit-font-smoothing:antialiased;animation:foxyIn .18s ease';
-      root.innerHTML = this.fcLookHtml(name, o.amount || '');
-      /* CANCEL, where the phone's sheet would be: under it on a phone, whose
-       * sheet has its own, and the way out wherever there is no sheet. */
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'position:relative;z-index:1;margin-top:auto;padding:20px 24px calc(44px + env(safe-area-inset-bottom))';
-      const b = document.createElement('div');
-      b.style.cssText = 'width:100%;height:60px;border-radius:18px;box-sizing:border-box;border:2px solid ' + k.ink + ';'
-        + 'background:rgba(255,255,255,.35);font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;'
-        + 'letter-spacing:.04em;text-transform:uppercase;color:' + k.ink + ';display:flex;align-items:center;'
-        + 'justify-content:center;cursor:pointer';
-      b.textContent = 'CANCEL';
-      b.setAttribute('data-stage-button', '1');
-      // the session ends as cancelled, and that is what takes this screen down
-      b.addEventListener('click', () => { const W = this.fcW(); if (W) W.cardStop(); });
-      wrap.appendChild(b);
-      root.appendChild(wrap);
-      document.body.appendChild(root);
-      if (this.syncPreview) this.syncPreview();
-      console.log('[foxy] screen: card, ' + name);
-      // the rule every stage keeps: one that outlives what it waited for hides a working app
-      this._stageT = setTimeout(() => this.hideStage('card'), name === 'verify' ? 180000 : 120000);
-    }
-    // offered only while nothing has been asked of the card, as on every card tap (`fcStage`)
-    const up = document.getElementById('foxy-stage');
-    const btn = /** @type {HTMLElement | null} */ (up && up.querySelector('[data-stage-button]'));
-    if (btn) btn.style.visibility = step === 'hold' ? 'visible' : 'hidden';
-  }
-
-  /* The markup of one of them: the card (an outline to be tapped, with the
-   * arrows flying into its mark, or the card itself with a spinner while the
-   * mint is asked), then the heading, the line and the amount. */
-  fcLookHtml(name, amount) {
-    const k = this.FC_LOOKS[name] || this.FC_LOOKS.tap;
-    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g,
-      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const BLUE = '#0A84FF';
-    // six arrows, one landing every 1.3 s, each on a path of its own (named whole, so the build can find each)
-    const arrows = !k.ask ? '' : ['animation:cvHit0 7.8s linear 0s infinite', 'animation:cvHit1 7.8s linear 1.3s infinite',
-      'animation:cvHit2 7.8s linear 2.6s infinite', 'animation:cvHit3 7.8s linear 3.9s infinite',
-      'animation:cvHit4 7.8s linear 5.2s infinite', 'animation:cvHit5 7.8s linear 6.5s infinite'].map((fly) =>
-      '<svg viewBox="0 0 32 40" width="26" height="32" fill="none" stroke="' + BLUE + '" stroke-width="4" stroke-linecap="round" '
-      + 'stroke-linejoin="round" style="position:absolute;z-index:1;left:50%;top:50%;margin:-16px 0 0 -13px;opacity:0;'
-      + fly + '">'
-      + '<path d="M5 14 L16 3 L27 14"></path><path d="M16 4 L16 37"></path></svg>').join('');
-    const shape = 'position:relative;width:345px;max-width:calc(100% - 30px);aspect-ratio:1.586;border-radius:16px;overflow:hidden;';
-    const name23 = 'position:absolute;left:24px;top:20px;font-weight:800;font-size:23px;color:';
-    const chip = 'position:absolute;left:24px;top:82px;width:54px;height:42px;border-radius:9px;';
-    const corner = k.tick
-      ? '<div style="position:absolute;right:20px;bottom:18px;width:44px;height:44px;border-radius:50%;background:#BFE3EC;display:flex;'
-        + 'align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0F2A33" '
-        + 'stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></div>'
-      : '<svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="' + k.ink + '" stroke-width="2.2" stroke-linecap="round" '
-        + 'style="position:absolute;right:20px;bottom:18px"><path d="M8 8.5a5 5 0 0 1 0 7"></path><path d="M11.5 6a8.5 8.5 0 0 1 0 12"></path>'
-        + '<path d="M15 3.5a12 12 0 0 1 0 17"></path></svg>';
-    const card = k.ask
-      ? '<div style="' + shape + 'background:transparent;border:3px dashed ' + k.ink + ';box-sizing:border-box;'
-        + 'animation:cvTap 1.3s ease-out 3.2s infinite">'
-        + '<div style="position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;'
-        + 'animation:cvBounce 1.3s ease-out 3.2s infinite"><svg viewBox="0 0 40 40" width="60" height="60" fill="none" stroke="' + BLUE + '" '
-        + 'stroke-width="3.5" stroke-linecap="round"><circle cx="20" cy="20" r="16.5"></circle>'
-        + '<path d="M13.5 13.5l13 13M26.5 13.5l-13 13"></path></svg></div>'
-        + '<div style="' + name23 + k.ink + '">FLASHcard</div>'
-        + '<div style="' + chip + 'border:2.5px dashed ' + k.ink + ';box-sizing:border-box"></div>'
-        + corner + '</div>'
-      : '<div style="' + shape + 'background:' + k.ink + ';box-shadow:0 20px 40px rgba(15,42,51,.35)">'
-        + '<div style="' + name23 + k.ground + '">FLASHcard</div>'
-        + '<div style="' + chip + 'background:' + k.chip + '"></div>'
-        + '<div style="position:absolute;right:22px;bottom:20px;width:58px;height:58px;border-radius:50%;'
-        + 'border:5px solid rgba(191,227,236,.22);border-top-color:' + k.ground + ';box-sizing:border-box;'
-        + 'animation:cvSpin .9s linear infinite"></div></div>';
-    return (k.fur ? '<div style="position:absolute;inset:0;background-image:url(snow-fur.jpg);background-size:cover;'
-        + 'mix-blend-mode:soft-light;opacity:.5;pointer-events:none"></div>' : '')
-      + '<div style="position:relative;flex:0 0 auto;height:224px;margin-top:8px;display:flex;align-items:center;justify-content:center">'
-      + arrows + card + '</div>'
-      + '<div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">'
-      + '<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;'
-      + 'text-transform:uppercase">' + esc(k.title) + '</h1>'
-      + '<p data-stage-line="1" style="margin:0;font-family:Figtree,Sora,system-ui,sans-serif;font-weight:500;font-size:19px;'
-      + 'line-height:1.45;color:' + k.sub + ';text-wrap:pretty">' + esc(k.line) + '</p>'
-      + (amount ? '<div style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em">' + esc(amount) + '</div>' : '')
-      + '</div>';
+    const t = this.fcTapState();
+    if (step !== 'hold') t.touched = true;
+    if (step === 'mint' || step === 'change') t.signed = true;
+    if (step === 'checking' || step === 'making' || step === 'done') { t.signed = true; t.gone = true; t.connected = false; }
+    if (step === 'receive') { t.signed = true; t.connected = false; t.gone = false; }
+    if (step === 'lost') { t.lost = true; t.connected = false; }
+    this.fcTapDraw();
   }
 
   /* A card's PIN, on the pad the lock uses. `o`: title, subtitle, warn, and
@@ -18512,7 +18347,8 @@ class Component extends DCLogic {
       cta: opt.cta || 'NEXT',
       gate: true,
       second: opt.second || null,
-      back: () => { if (opt.onBack) opt.onBack(); },
+      /* backed out of: the screen left up under the pad by a tap that ended asking for the PIN (ENTER PIN) goes with it */
+      back: () => { this.hideStage('card'); if (opt.onBack) opt.onBack(); },
       onSubmit: (pin) => { this.pinDismiss(); then(pin); },
     });
   }
@@ -18591,6 +18427,8 @@ class Component extends DCLogic {
     const opt = o || {};
     const kind = String((e && e.card) || '');
     const said = String((e && e.message) || 'That did not work.');
+    // whatever is said next is said on its own: the screen of a tap that ended asking for the PIN, and no pad followed, goes
+    this.hideStage('card');
     const safe = opt.taken ? ' Nothing was taken.' : '';
     const again = opt.again ? { retry: 'TRY AGAIN', go: opt.again, shut: { label: 'CANCEL' } } : {};
     console.log('[foxy] card: ' + (kind || 'failed') + ' — ' + said);
@@ -18881,7 +18719,7 @@ class Component extends DCLogic {
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
-    this.fcTap({ amount: this.fcPrice(sats), look: 'pay', lost: !!resuming,
+    this.fcTap({ amount: this.fcPrice(sats), lost: !!resuming,
                  sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: true,
                  /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                  again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
@@ -18956,7 +18794,7 @@ class Component extends DCLogic {
     clearTimeout(this._fcResumeT);
     this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
-    this._fcTapO = { look: 'pay', amount: this.fcPrice(sats), paying: true, lost: true };
+    this._fcTapO = { amount: this.fcPrice(sats), paying: true, lost: true };
     this.fcStage('reading');
     this.fcHeldClock();
   }
@@ -19163,7 +19001,7 @@ class Component extends DCLogic {
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
     const looks = opt.receive ? this.fcReceiveLook(Math.round(Number(opt.paid) || 0), Math.round(Number(opt.sats) || 0)) : {};
-    this.fcTap({ amount: looks.amount || (opt.sats ? this.stageMoney(opt.sats) : ''), look: looks.look || '', lost: !!opt.lost,
+    this.fcTap({ amount: looks.amount || (opt.sats ? this.stageMoney(opt.sats) : ''), look: looks.look || '', lost: !!opt.lost, wrote: !!opt.lost,
                  sheet: opt.sheet || (opt.receive ? 'Hold for change.' : ''),
                  // what went on stays on: the same sheet asks for the card again for the rest
                  again: (e) => (e && e.card === 'gone') ? 'Hold for the rest.' : '' },
@@ -19313,7 +19151,8 @@ class Component extends DCLogic {
     this._fcResumeT = setTimeout(() => this.fcWriteAsk(Object.assign({}, o, { sheet: 'Hold for the rest.', lost: true })), 2500);
     // a payment's second tap, which the card left part way through: TAP AGAIN stays up through the pause
     if (o && o.receive) {
-      this._fcTapO = Object.assign(this.fcReceiveLook(Math.round(Number(o.paid) || 0), Math.round(Number(o.sats) || 0)), { lost: true });
+      // (some of it went on: that is why the card is asked for again)
+      this._fcTapO = Object.assign(this.fcReceiveLook(Math.round(Number(o.paid) || 0), Math.round(Number(o.sats) || 0)), { lost: true, wrote: true });
       this.fcStage('receive');
     }
   }
@@ -19621,17 +19460,17 @@ class Component extends DCLogic {
   /* ---- a new card ----------------------------------------------------------
    * A PIN, typed twice (or NO PIN, under the pad, for a card of software 1.16 and on); then whether a lost card's money can come back (while
    * FC_RECOVERABLE offers it); then one tap that writes the PIN, the record and,
-   * last, the owner; then home. Nothing is read between the PIN and the tap and
+   * last, the owner; then the card's screen, with a line saying it is set up. Nothing is read between the PIN and the tap and
    * nothing after it (a notice that this phone becomes the owner, and one that
    * the card is cash, were two screens before a card that holds nothing; what
    * they said is in docs/CARD.md). No limit is asked for or suggested: a new
-   * card has none, and one is set later from CHANGE LIMIT. The PIN is typed
+   * card has none, and one is set later from LIMITS. The PIN is typed
    * here, once, and never again to add funds. The mint is this phone's, shown
    * and not chosen. */
   fcSetUp() {
     const fc = this.state.fc;
     if (!fc) return;
-    // a card of software 1.16 and on may be without a PIN: NO PIN under the pad is one tap, and home
+    // a card of software 1.16 and on may be without a PIN: NO PIN under the pad is one tap, and the card's screen
     const second = (fc.noPinKnown && !fc.pinSet) ? { label: 'NO PIN', go: () => this.fcSetUpNoPin() } : null;
     // no mint is asked: the card is told this phone's mint and given a key from this phone's words
     const first = (warn) => this.fcAskPin({
@@ -19655,14 +19494,11 @@ class Component extends DCLogic {
 
   fcSetUpRun(pin, recoverable) {
     const W = this.fcW();
-    this.fcTap({ body: 'Setting it up at ' + this.mintName() + '.' }, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable, design: this.FC_SETUP_DESIGN }); })
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetUp(link, { pin, recoverable, design: this.FC_SETUP_DESIGN }); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast('The card is set up.');
-        // set up with a PIN: home, said in a line (the card's screen, with ADD FUNDS on it, is a tap away under FLASHCARD);
-        // with none: the card's screen, where ADD PIN now is
-        if (pin) this.setState({ screen: 'home', stack: [] });
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
   }
 
@@ -19921,7 +19757,7 @@ class Component extends DCLogic {
 
   /* ---- the daily limit ---------------------------------------------------------
    *
-   * The most the card signs for in one day. CHANGE LIMIT asks for it in three
+   * The most the card signs for in one day. LIMITS asks for it in three
    * steps, and the owner's phone sets it with its proof and
    * no PIN:
    *
@@ -20191,7 +20027,7 @@ class Component extends DCLogic {
     this.toast(copied ? 'Receipts copied.' : 'Could not copy the receipts.', !copied);
   }
 
-  /* CHANGE LIMIT. */
+  /* LIMITS. */
   fcSetLimit() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -20395,7 +20231,7 @@ class Component extends DCLogic {
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    this.fcTap({ amount: this.stageMoney(m.sats), body: 'The first of two taps: the money comes off the card.', warm: true },
+    this.fcTap({ amount: this.stageMoney(m.sats), warm: true },
       (link, on) => W.cardWithdraw(link, { pin, on, hold: true }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
@@ -20456,7 +20292,7 @@ class Component extends DCLogic {
     const W = this.fcW();
     const m = this.state.fcMove;
     const to = this.mintNameOf(m.to);
-    this.fcTap({ amount: this.stageMoney(made.sats), body: 'The second tap: the money goes back on, at ' + to + '.' },
+    this.fcTap({ amount: this.stageMoney(made.sats) },
       (link, on) => { on('writing'); return W.cardWrite(link, { owner: true }); })
       .then((r) => {
         this.fcMoveEnd(r.card);
@@ -20519,7 +20355,7 @@ class Component extends DCLogic {
       title: 'CARD PIN',
       subtitle: 'To renew ' + this.fcBoth(fc.balance) + ' for another year.',
       cta: 'RENEW',
-    }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), body: 'This takes longer than a payment. Keep the card there.', warm: true },
+    }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), warm: true },
       (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
       .then((r) => {
         (r.hashes || []).forEach(h => this.txIsNew(h));
@@ -20670,7 +20506,7 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     if (!W || !fc) return;
     const money = fc.balance > 0;
-    this.fcTap({ amount: money ? this.stageMoney(fc.balance) : '', body: 'Resetting the card. Keep it there.', warm: money },
+    this.fcTap({ amount: money ? this.stageMoney(fc.balance) : '', warm: money },
       (link, on, progress) => {
         // the card is held through the money coming off and the reset: the steps that say it may go are not said
         const held = (step, info) => { if (step !== 'done' && step !== 'checking') on(step, info); };
@@ -20730,7 +20566,7 @@ class Component extends DCLogic {
     const W = this.fcW();
     if (!W) return;
     let made = null;
-    this.fcTap({ amount: this.stageMoney(sats), body: 'Putting money on the card.', warm: true },
+    this.fcTap({ amount: this.stageMoney(sats), warm: true },
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
@@ -20864,7 +20700,7 @@ class Component extends DCLogic {
       : ['', ON_CARD];
 
     /* The card's mint and what it holds are in the pill, as home's are, and
-     * under what it holds how much of its limit is left. CHANGE LIMIT is where
+     * under what it holds how much of its limit is left. LIMITS is where
      * it is changed. */
     // a card in the last month before its date: said where the money waiting for a card is said, and renewed from there
     if (on && fc && near && !past && fc.balance > 0) {
@@ -20880,7 +20716,7 @@ class Component extends DCLogic {
     ].concat(!usable ? [] : [
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', tap: () => (addable ? this.fcPinAdd() : this.fcChangePin()),
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
-      { label: 'CHANGE LIMIT', tap: () => this.fcSetLimit(),
+      { label: 'LIMITS', tap: () => this.fcSetLimit(),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
     ]);
     /* RESET CARD at the top left, for the card's owner (software 1.17 and on): a locked card is not asked whether this phone owns it,
@@ -21192,6 +21028,296 @@ class Component extends DCLogic {
   fcExplainerClose() {
     if (this._fcExplainer) this._fcExplainer.close();
   }
+  /* ---- the screen behind the card sheet --------------------------------------
+   *
+   * Foxy's own screen while the phone's NFC sheet is up, from the design: a card
+   * comes down behind a phone with three waves rising, the title says what to do,
+   * and the amount is under it. Everything is in the top half, where the sheet
+   * (the phone's own, drawn nowhere here) leaves room; the bottom holds only
+   * CANCEL, which is under the sheet's own on a phone.
+   *
+   * Two grounds. Light blue while no card is connected (TAP BEHIND PHONE, and the
+   * asking again: TAP FOR CHANGE, PLEASE TAP AGAIN, ENTER PIN); orange, with the
+   * fur over it, from the moment the sheet reports a card connected (KEEP
+   * HOLDING, VERIFYING CARD, REMOVE) until it is lost or the sheet ends. The card
+   * and the waves loop while a card is wanted and settle behind the phone once it
+   * is there; the page's stylesheet stops the loop for a person who asks for
+   * less motion (build/markup.html, `[data-look]`), and the card is then just
+   * drawn settled.
+   *
+   * What it says, by where the tap has got to (`fcTapLook`):
+   *
+   *   TAP BEHIND PHONE         waiting for the first contact
+   *   KEEP HOLDING · N s       in contact, the card being asked; N counts up from
+   *                            the contact, a whole second at a time
+   *   VERIFYING CARD           the card has signed and is still there: the mint is
+   *                            asked, and change is fetched or written
+   *   REMOVE                   the card has signed and nothing more is wanted of it
+   *   TAP FOR CHANGE           the card has signed and contact broke before the
+   *                            change went on (or the second tap is waiting for it)
+   *   PLEASE TAP AGAIN         contact broke part way, and the same sheet asks again
+   *   ENTER PIN                the sheet ended asking for the PIN; the pad is up
+   *
+   * The sheet's own line is the wallet's and 26f's (FC_STEPS, fcProgressText);
+   * nothing of it is repeated here, and no estimate of how long a tap will take:
+   * the till cannot know the count, and the card does not say it.
+   *
+   * The card in the animation is the card screen's own face (build/markup.html,
+   * `[data-card-face]`) at 250px: its design is the card's (FX1 is the picture,
+   * FL1 the drawn face), FX1 until a card has been read at a till.
+   */
+  FC_TAP_FACE = '<div data-card-face style="width:100cqw;height:63.02cqw;border-radius:4.17cqw;box-sizing:border-box;position:relative;overflow:hidden;background:repeating-linear-gradient(92deg,rgba(255,255,255,.05) 0 1px,rgba(255,255,255,0) 1px 3px),repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,rgba(0,0,0,0) 1px 4px),radial-gradient(circle at 22% 8%,rgba(255,255,255,.14),rgba(255,255,255,0) 46%),linear-gradient(146deg,#3A3B3D 0%,#1B1C1E 38%,#101113 72%,#26272A 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6)"><div style="position:absolute;inset:3.52cqw;border-radius:2.34cqw;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5);pointer-events:none"></div><div style="position:absolute;inset:4.56cqw;border-radius:1.82cqw;background:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px);pointer-events:none"></div><div style="position:absolute;inset:6.25cqw;border-radius:1.04cqw;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,.5),rgba(0,0,0,0) 72%);pointer-events:none"></div><div style="position:absolute;left:50%;top:50%;width:31.25cqw;height:31.25cqw;transform:translate(-50%,-50%);border-radius:50%;background:linear-gradient(150deg,#2E2F32,#121315);box-shadow:inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;pointer-events:none"><svg viewBox="0 0 236.5 366" style="height:16.15cqw;width:10.43cqw;display:block;opacity:.5"><path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg></div><div style="position:absolute;left:9.92cqw;top:8.75cqw;width:15.18cqw;height:13.78cqw;border-radius:1.56cqw;background:linear-gradient(150deg,#E8E4D8,#A9A392);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;right:0;top:33%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;left:0;right:0;top:66%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:33%;width:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:66%;width:1px;background:rgba(70,68,60,.4)"></div></div><div style="position:absolute;right:7.81cqw;bottom:6.25cqw;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="font-size:5.99cqw;font-weight:800;line-height:1;color:rgba(255,255,255,.5)">₿</div><div style="font-family:Sora,sans-serif;font-size:2.86cqw;font-weight:600;letter-spacing:0.24em;color:rgba(255,255,255,.42)">BEARER</div></div></div>';
+  FC_TAP_GROUNDS = {
+    '01': { ground: '#BFE3EC', ink: '#0F2A33', shadow: '0 14px 30px rgba(15,42,51,.28)' },
+    '03': { ground: '#EB6A2E', ink: '#1A0A04', shadow: '0 14px 30px rgba(26,10,4,.32)' },
+  };
+  FC_TAP_TITLES = {
+    hold: 'TAP BEHIND PHONE', keep: 'KEEP HOLDING · ', verify: 'VERIFYING CARD', remove: 'REMOVE',
+    change: 'TAP FOR CHANGE', again: 'PLEASE TAP AGAIN', pin: 'ENTER PIN',
+  };
+  // the steps that mean the card is in the field, whether or not the phone has said so
+  FC_TAP_CONTACT = { reading: 1, signing: 1, writing: 1, resetting: 1, mint: 1, change: 1 };
+
+  /* What this tap knows of the card so far. It lives on the tap's own options (`_fcTapO.t`), so a tap that begins
+   * has none of the one before. `o.lost` and `o.wrote` are said by whatever begins a tap that follows a card leaving
+   * (and by the flows as it leaves): taken once into the state. */
+  fcTapState() {
+    const o = this._fcTapO || (this._fcTapO = {});
+    if (!o.t) {
+      o.t = {
+        connected: false, since: 0,
+        // something has been asked of the card, or the card has been found: CANCEL goes
+        touched: false,
+        // the card has signed (a payment's second tap, and a put back, begin so)
+        signed: o.look === 'receive' || !!o.putBack,
+        // the card is let go and nothing more is wanted of it
+        gone: false,
+        lost: false, wrote: false,
+        // the sheet ended asking for the PIN; and the tap that follows the pad
+        pin: false, pinAgain: !!o.pinAgain,
+        design: '',
+      };
+    }
+    const t = o.t;
+    if (o.lost) { t.lost = true; t.connected = false; o.lost = false; }
+    if (o.wrote) { t.wrote = true; o.wrote = false; }
+    return t;
+  }
+
+  /* Contact: the card is in the field. `again` is a connection the phone reported, which starts the count afresh. */
+  fcContact(again) {
+    const t = this.fcTapState();
+    if (t.gone || t.pin) return;
+    if (again || !t.connected) { t.connected = true; t.since = Date.now(); }
+    t.lost = false;
+    t.touched = true;
+  }
+
+  /* The card left, and the same sheet is about to ask for it again. */
+  fcTapLost() {
+    const t = this.fcTapState();
+    if (t.gone || t.pin) return;
+    t.lost = true;
+    t.connected = false;
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* The sheet ended asking for the PIN: the pad comes up over this, and the tap that follows it starts as PLEASE TAP AGAIN. */
+  fcTapPin() {
+    const t = this.fcTapState();
+    t.pin = true;
+    t.connected = false;
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* A card read at this tap has said which design it is (`info.design` of a step, `design` of a progress report). */
+  fcTapSeen(code) {
+    this.fcTapState().design = this.fcDesignOf({ design: code });
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* What the phone's own link reports (`FoxyWallet.onCard`): the card found, the card lost. */
+  fcTapEvent(ev) {
+    if (!ev || !this.stageUp('card')) return;
+    if (ev.stage === 'seen') { this.fcTapSeen(ev.design); return; }
+    if (ev.stage === 'connected') {
+      this.fcContact(true);
+      this.fcTapDraw();
+    } else if (ev.stage === 'lost') {
+      this.fcTapLost();
+    }
+  }
+
+  /* The seconds since the card connected. */
+  fcHeldSeconds() {
+    const t = this.fcTapState();
+    return t.connected ? Math.max(0, Math.floor((Date.now() - t.since) / 1000)) : 0;
+  }
+
+  /* Which screen this is, from where the tap has got to. */
+  fcTapLook() {
+    const o = this._fcTapO || {};
+    const t = this.fcTapState();
+    let key;
+    if (t.pin) key = 'pin';
+    else if (t.gone) key = 'remove';
+    else if (t.connected) key = t.signed ? 'verify' : 'keep';
+    // contact broke: before any of the change went on it is the change that is asked for, and otherwise it is the tap
+    else if (t.lost) key = (t.signed && !t.wrote) ? 'change' : 'again';
+    else if (o.putBack) key = 'again';
+    else if (t.signed) key = 'change';
+    // the tap that follows the PIN pad: nothing has been asked of the card yet, and it was asked before
+    else if (t.pinAgain) key = 'again';
+    else key = 'hold';
+    const warm = key === 'keep' || key === 'verify' || key === 'remove';
+    return {
+      key, scheme: warm ? '03' : '01',
+      // the card is wanted, and the loop says so; once it is there it stays settled
+      loop: key === 'hold' || key === 'again' || key === 'change',
+      // nothing has been asked of the card: the one way out is here (after that, finishing is)
+      cancel: !t.touched && !t.connected && (key === 'hold' || key === 'again' || key === 'change'),
+    };
+  }
+
+  /* The screen, made once for a tap and kept: what changes is its ground, its title, and whether the card moves. */
+  fcTapBuild() {
+    this.hideStage();
+    const root = document.createElement('div');
+    root.id = 'foxy-stage';
+    root.setAttribute('data-stage', 'card');
+    root.setAttribute('data-look', 'hold');
+    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;display:flex;flex-direction:column;overflow:hidden;'
+      + 'box-sizing:border-box;padding-top:env(safe-area-inset-top);font-family:Sora,system-ui,sans-serif;'
+      + '-webkit-font-smoothing:antialiased;transition:background-color .35s ease,color .35s ease;animation:foxyIn .18s ease';
+    const BLUE = '#0A84FF';
+    const wave = (d, delay) => '<path data-tap-wave d="' + d + '" style="opacity:0;animation:cvWave 4.2s ease-out ' + delay + 's infinite"></path>';
+    root.innerHTML =
+      '<div data-tap-fur style="position:absolute;inset:0;background-image:url(snow-fur.jpg);background-size:cover;'
+      + 'mix-blend-mode:soft-light;opacity:0;pointer-events:none;transition:opacity .35s ease"></div>'
+      + '<div style="position:relative;width:100%;max-width:430px;margin:0 auto;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">'
+      + '<div style="position:relative;flex:0 0 auto;height:269px;overflow:hidden">'
+      + '<div data-tap-card style="position:absolute;left:50%;top:40px;width:250px;margin-left:-125px;aspect-ratio:1.585;'
+      + 'border-radius:15px;overflow:hidden;animation:cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite">'
+      + '<div data-card-design="FX1" style="container-type:inline-size;width:100%">' + this.FC_TAP_FACE + '</div></div>'
+      + '<svg viewBox="0 0 220 60" width="220" height="60" fill="none" style="position:absolute;left:50%;top:83px;margin-left:-110px;z-index:2;overflow:visible">'
+      + '<g stroke="' + BLUE + '" stroke-width="4" stroke-linecap="round">'
+      + wave('M70 40 Q110 14 150 40', 0) + wave('M52 34 Q110 -4 168 34', .25) + wave('M34 28 Q110 -22 186 28', .5)
+      + '</g></svg>'
+      + '<div style="position:absolute;left:50%;top:119px;width:300px;height:150px;margin-left:-150px;z-index:3;'
+      + 'border-radius:46px 46px 0 0;background:#0F2A33;box-shadow:0 -8px 24px rgba(15,42,51,.25);padding:8px 8px 0;box-sizing:border-box">'
+      + '<div style="width:100%;height:100%;border-radius:38px 38px 0 0;background:linear-gradient(180deg,#1E4450,#163842);position:relative">'
+      + '<div style="position:absolute;left:50%;top:12px;width:70px;height:20px;margin-left:-35px;border-radius:999px;background:#0A1B21"></div>'
+      + '</div></div></div>'
+      + '<div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">'
+      + '<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;'
+      + 'text-transform:uppercase"></h1>'
+      + '<div data-tap-amount style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em"></div>'
+      + '</div></div>';
+    /* CANCEL, where the phone's sheet would be: under it on a phone, whose sheet has its own, and the way out wherever
+     * there is no sheet. */
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;z-index:1;margin-top:auto;padding:20px 24px calc(44px + env(safe-area-inset-bottom))';
+    const b = document.createElement('div');
+    b.style.cssText = 'width:100%;height:60px;border-radius:18px;box-sizing:border-box;border:2px solid;'
+      + 'background:rgba(255,255,255,.35);font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;'
+      + 'letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;cursor:pointer';
+    b.textContent = 'CANCEL';
+    b.setAttribute('data-stage-button', '1');
+    // the session ends as cancelled, and that is what takes this screen down
+    b.addEventListener('click', () => { const W = this.fcW(); if (W) W.cardStop(); });
+    wrap.appendChild(b);
+    root.firstElementChild.nextElementSibling.appendChild(wrap);
+    document.body.appendChild(root);
+    // the rule every stage keeps: one that outlives what it waited for hides a working app
+    this._stageT = setTimeout(() => this.hideStage('card'), 120000);
+    return root;
+  }
+
+  /* Draw the screen for where the tap has got to: made if it is not up, and otherwise changed in place, so that the
+   * card does not start again when only the title has moved. */
+  fcTapDraw() {
+    const o = this._fcTapO || {};
+    const k = this.fcTapLook();
+    let root = document.getElementById('foxy-stage');
+    const fresh = !(root && root.getAttribute('data-stage') === 'card' && root.getAttribute('data-look'));
+    if (fresh) root = this.fcTapBuild();
+    if (!root) return;
+    const g = this.FC_TAP_GROUNDS[k.scheme];
+    const was = root.getAttribute('data-look');
+    root.setAttribute('data-look', k.key);
+    root.setAttribute('data-scheme', k.scheme);
+    root.style.backgroundColor = g.ground;
+    root.style.color = g.ink;
+    const fur = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-fur]'));
+    if (fur) fur.style.opacity = k.scheme === '03' ? '.5' : '0';
+    // the card's design: FX1 is its picture and FL1 the face drawn in CSS (build/markup.html)
+    const t = this.fcTapState();
+    const design = t.design || (this.state && this.state.fc ? this.fcDesignOf(this.state.fc) : 'FX1');
+    const face = root.querySelector('[data-card-design]');
+    if (face && face.getAttribute('data-card-design') !== design) face.setAttribute('data-card-design', design);
+    const card = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-card]'));
+    if (card) card.style.boxShadow = g.shadow;
+    // the loop starts when a card is wanted and stops where it is when it is there
+    const looping = root.getAttribute('data-loop') === '1';
+    if (k.loop !== looping || fresh) {
+      root.setAttribute('data-loop', k.loop ? '1' : '0');
+      if (card) card.style.animation = k.loop ? 'cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite' : 'none';
+      Array.from(root.querySelectorAll('[data-tap-wave]')).forEach((w, i) => {
+        /** @type {HTMLElement} */ (w).style.animation = k.loop ? 'cvWave 4.2s ease-out ' + (i * 0.25) + 's infinite' : 'none';
+      });
+    }
+    const amount = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount]'));
+    if (amount) {
+      amount.textContent = o.amount || '';
+      amount.style.display = o.amount ? '' : 'none';
+    }
+    this.fcTapTitle(root, k);
+    const btn = /** @type {HTMLElement | null} */ (root.querySelector('[data-stage-button]'));
+    if (btn) { btn.style.visibility = k.cancel ? 'visible' : 'hidden'; btn.style.color = g.ink; btn.style.borderColor = g.ink; }
+    // the count runs only while it is on the screen
+    if (k.key === 'keep' && !this._fcCountT) this._fcCountT = setInterval(() => this.fcTapTick(), 500);
+    else if (k.key !== 'keep') { clearInterval(this._fcCountT); this._fcCountT = null; }
+    if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key);
+    if (fresh && this.syncPreview) this.syncPreview();
+  }
+
+  /* The title, one line: KEEP HOLDING carries the seconds, whose unit stays lowercase. */
+  fcTapTitle(root, k) {
+    const h = /** @type {HTMLElement | null} */ (root.querySelector('h1'));
+    if (!h) return;
+    const secs = k.key === 'keep' ? this.fcHeldSeconds() : -1;
+    const sig = k.key + ':' + secs;
+    if (h.getAttribute('data-sig') !== sig) {
+      h.setAttribute('data-sig', sig);
+      h.textContent = this.FC_TAP_TITLES[k.key];
+      if (secs >= 0) {
+        const u = document.createElement('span');
+        u.style.textTransform = 'none';
+        u.textContent = secs + ' s';
+        h.appendChild(u);
+      }
+    }
+    // one line, whatever the phone's width: smaller when it would not fit (the design is 31px on 430)
+    try {
+      h.style.fontSize = '31px';
+      const col = h.parentElement;
+      const room = col ? col.clientWidth - 64 : 0;
+      const need = h.scrollWidth;
+      if (room > 0 && need > room) h.style.fontSize = Math.max(18, Math.floor(310 * room / need) / 10) + 'px';
+    } catch (e) { /* no layout to measure */ }
+  }
+
+  /* One turn of the count: it stops by itself when the screen it was counting for is gone. */
+  fcTapTick() {
+    const root = document.getElementById('foxy-stage');
+    if (!root || root.getAttribute('data-stage') !== 'card' || root.getAttribute('data-look') !== 'keep') {
+      clearInterval(this._fcCountT);
+      this._fcCountT = null;
+      return;
+    }
+    this.fcTapTitle(root, { key: 'keep' });
+  }
+
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */

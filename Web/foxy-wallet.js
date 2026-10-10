@@ -8942,7 +8942,10 @@
               * whether a PIN exists (a blocked one does). `setUp`: the card has its record and can be used: before 1.16 that
               * needed a PIN as well. */
              noPinKnown: noPinKnown, noPin: { limit: noPinKnown ? cardU32(h, 34) : 0, spent: noPinKnown ? cardU32(h, 38) : 0 },
-             pinSet: b(7) !== 0, setUp: b(11) === 1 && (b(7) !== 0 || noPinKnown),
+             pinSet: b(7) !== 0,
+             /* `setUp`: a record and, before 1.16, a PIN; from 1.16 a record and an OWNER, which set-up writes last: a card
+              * whose record was written by hand (a design put on it before it is set up) is not set up, and reads as new */
+             setUp: b(11) === 1 && (noPinKnown ? b(16) === 1 : b(7) !== 0),
              /* `resetKnown`: the card's software is 1.17 or later, whose owner can reset it (the version says so, as for `costed`):
               * no PIN, no owner, no record, no limits, no log and a new key, with its clock and its software kept. */
              resetKnown: resetKnown,
@@ -10215,6 +10218,8 @@
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
       card.record = cardRecordOf(d, card.info);
+      // the screen behind the sheet draws the card as itself from here on
+      try { if (FoxyWallet._card) FoxyWallet._card({ stage: 'seen', text: '', design: card.record.design || '' }); } catch (e) {}
       // a card of 1.15 and on says its clock's proof in its record: the hardest difficulty it has taken, and the hash of the last header
       if (card.info.headers) { card.info.headerBits = card.record.headerBits; card.info.headerHash = card.record.headerHash; }
       // the design the card names for its face, where its software carries one; a phone's own file may say otherwise for an older card
@@ -24647,7 +24652,10 @@
     _card: function (ev) {
       var fn = FoxyWallet._onCard;
       if (typeof fn !== 'function' || !ev || typeof ev !== 'object') return;
-      try { fn({ stage: String(ev.stage || ''), text: String(ev.text || '') }); } catch (e) { console.warn('[foxy] card progress watcher:', e && e.message); }
+      var said = { stage: String(ev.stage || ''), text: String(ev.text || '') };
+      // a card read at this tap says its design ('seen'), for the screen behind the sheet to draw it as itself
+      if (ev.design !== undefined) said.design = String(ev.design || '');
+      try { fn(said); } catch (e) { console.warn('[foxy] card progress watcher:', e && e.message); }
     },
 
     /* ---- a tap ------------------------------------------------------------

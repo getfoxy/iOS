@@ -1521,11 +1521,11 @@ and load it), a phone whose build carries the NFC entitlement
    to it at all, and times out.
 3. SET UP THIS CARD, a PIN twice, tap. Nothing is read between the PIN and
    the tap, nothing is asked about a lost card (cards are cash for now), and
-   nothing is read after it. **Pass:** home, with the line `The card is set
-   up.` MENU, FLASHCARD, tap: the screen is home's shape: history and a cross
+   nothing is read after it. **Pass:** the card's screen stays up, with the line `The card is set
+   up.` (Back from it is where you were; MENU, FLASHCARD, tap, shows the same screen.) The screen is home's shape: history and a cross
    at the top with FLASHCARD and "Verified Just Now" between them, the card,
    and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
-   over ADD FUNDS, WITHDRAW, CHANGE PIN and CHANGE LIMIT. (On a card of
+   over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS. (On a card of
    software 1.16, NO PIN is under the button of CHOOSE A PIN: 23c-10.)
 
 #### 23b. Money on, and off
@@ -1558,18 +1558,24 @@ and load it), a phone whose build carries the NFC entitlement
    the PIN is typed only if the card wants it: 23c-10. The card tested so far is
    an earlier one, which ends that first tap asking for the PIN, and is tapped
    again once it has been typed.)
-   **Pass:** behind the sheet the screen is TAP TO VERIFY (light blue, a card's
-   outline, arrows flying into its mark) over the amount; the sheet reads the
-   card and counts the pieces it signs ("Signing piece 2 of 4"), and the moment
-   the last is signed says "Hold for change." while
-   the screen says VERIFYING CARD; then, where there is change,
-   the sheet asks for the card again and the screen is TAP TO CONFIRM (orange)
-   until the change is back; and after that the ordinary paid screen. Time two
+   **Pass:** behind the sheet the screen is TAP BEHIND PHONE (light blue, a card
+   coming down behind a phone with three waves rising, looping) over the amount;
+   the moment the card connects it turns orange with the fur and the card
+   settles, saying KEEP HOLDING · 0 s and counting up a second at a time; the
+   sheet reads the card and counts the pieces it signs ("Signing piece 2 of 4"),
+   and the moment the last is signed says "Hold for change." while the screen
+   says VERIFYING CARD; then, where there is change, the sheet asks for the card
+   again and the screen is TAP FOR CHANGE (light blue, looping) until the card
+   is found, VERIFYING CARD while the change goes on; and after that the
+   ordinary paid screen. Where nothing is owed back, the screen says REMOVE once
+   the card has signed. Check that each title is on one line, the card is the
+   right design (the picture for a Foxy card, the drawn face otherwise) and the
+   count matches your own count of the seconds. Time two
    things apart: from the sheet opening to "Verifying" (how long the card is
    held; the model says about 1.2 seconds for one piece, with the phone finding
    the card on top), and from there to the second tap being asked for (the
    mint's part, over Tor). These are the numbers that decide whether the card is
-   usable at a till. Look at how much of the three screens the sheet's dimming
+   usable at a till. Look at how much of the screen the sheet's dimming
    leaves readable.
 2. Load a card with 2,000 sats and pay it 600. **Pass:** two pieces are signed
    (512 and 128), and the card's part is done in under three seconds; the same
@@ -1578,7 +1584,7 @@ and load it), a phone whose build carries the NFC entitlement
    price no two pieces cover. **Pass:** the fewest pieces that do are signed, and
    the same second tap puts the change back.
 2a. Close the sheet (its Cancel) while it says "Verifying the payment".
-   **Pass:** the payment still stands; TAP TO CONFIRM is on the screen at once
+   **Pass:** the payment still stands; TAP FOR CHANGE is on the screen at once
    and stays (the home screen is not seen), a new sheet comes up by itself for
    the change, and PAYMENT RECEIVED goes up when it is back, for the right
    amount. Close that sheet too. **Pass:** TAP TO RECEIVE, with TAP CARD and
@@ -1586,11 +1592,19 @@ and load it), a phone whose build carries the NFC entitlement
    away. **Pass:** its PAYMENT RECEIVED is its own amount, and the first's does
    not come up again.
 2c. Lift the card away part way through the first tap, and again part way
-   through the change. **Pass:** each time the screen turns to TAP AGAIN ("The
-   last tap didn't finish...") on the ground it was on (light blue for the
-   payment, orange for the change), the same sheet asks for the card, and the
+   through the change. **Pass:** each time the screen turns to PLEASE TAP AGAIN
+   (light blue, the card looping) the moment the card is lost (or TAP FOR CHANGE,
+   if none of the change had gone on yet), the same sheet asks for the card, the
+   count begins again from the new contact, and the
    next tap finishes: the payment is made, the change is all back, and no PIN
    pad comes up for the rest of the change.
+2d. The screen behind the sheet, on its own. On a card with a PIN and no no PIN limit, pay at the till: **Pass:** the sheet ends
+   with `Enter the card's PIN`, the pad comes up (ENTER PIN is under it), and after the PIN the sheet comes up with PLEASE TAP
+   AGAIN behind it, the card looping. Back from the pad leaves the invoice with nothing behind it. Turn on Reduce Motion
+   (Settings, Accessibility, Motion): **Pass:** the card is drawn settled behind the phone and does not move, in every state.
+   On the smallest phone you have, KEEP HOLDING · 12 s is still on one line. Open FLASHCARD, tap a card of this phone's own,
+   and one of a Flash card: **Pass:** the card in the picture is the card's own design once it is read. Look at how much of the
+   amount the sheet covers on each phone.
 2b. Pay from one card online several times (a few thousand sats each, from a
    card of forty thousand or so), then put the receiving phone in airplane mode
    and pay it three odd amounts. **Pass:** each offline payment is taken (HIGH
@@ -1619,9 +1633,9 @@ and load it), a phone whose build carries the NFC entitlement
 #### 23c-2. The limit on one tap
 
 Needs a card with the software that waits (1.5: its screen offers PER TAP LIMIT
-under CHANGE LIMIT, and a charge over the limit is not refused).
+under LIMITS, and a charge over the limit is not refused).
 
-1. On the holder's phone: CHANGE LIMIT. **Pass:** CHANGE CARD LIMITS asks
+1. On the holder's phone: LIMITS. **Pass:** CHANGE CARD LIMITS asks
    which, with PER TAP LIMIT and DAILY LIMIT as two buttons and CANCEL under
    them. PER TAP LIMIT: HOW TAP LIMIT WORKS plays, each line large and then
    in its place (a tap skips one; with Reduce Motion on, the list comes at
@@ -1872,8 +1886,8 @@ Needs a card on software 1.16 (`01 10` at SELECT), the holder's phone, and a sec
 on a real card.
 
 1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** CHOOSE A PIN has a second button,
-   NO PIN, under its grey one. Press it. **Pass:** the pad goes, the sheet comes up at once, and one tap sets the card up: home,
-   `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was, and CHANGE LIMIT, and its limit line reads
+   NO PIN, under its grey one. Press it. **Pass:** the pad goes, the sheet comes up at once, and one tap sets the card up: the card's screen,
+   `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was, and LIMITS, and its limit line reads
    `NO LIMIT | NO PIN`. A card of 1.15 or before is
    offered no NO PIN.
 2. **It pays in one tap.** ADD FUNDS (no PIN asked), then on the till RECEIVE, an amount, CARD. **Pass:** no pad. The sheet
@@ -1885,7 +1899,7 @@ on a real card.
 4. **A card with a PIN, no limit.** On the till: RECEIVE, an amount, CARD. **Pass:** the sheet comes up at once and ends
    after the read with `Enter the card's PIN` (not in red); the PIN pad comes up, `TAP AGAIN` on its button; type the PIN,
    TAP AGAIN, tap: paid. Back from the pad leaves the invoice up. Count the taps: two.
-5. **NO PIN LIMIT.** CHANGE LIMIT. **Pass:** CHANGE CARD LIMITS has PER TAP LIMIT, DAILY LIMIT, NO PIN LIMIT, CANCEL (a card
+5. **NO PIN LIMIT.** LIMITS. **Pass:** CHANGE CARD LIMITS has PER TAP LIMIT, DAILY LIMIT, NO PIN LIMIT, CANCEL (a card
    with no PIN has no third). NO PIN LIMIT, CONTINUE, a few dollars, NEXT, CONFIRM, tap. **Pass:** no PIN asked;
    `No PIN limit set.`; under the balance `NO PIN UP TO $5.00`, and a line `NO PIN UP TO $5.00 · LEFT TODAY $5.00`.
 6. **Within it, one tap.** On the till charge less than the limit. **Pass:** no pad; the card pays in the first tap. The
@@ -1908,7 +1922,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    mint's word was had, in the phone's clock) and `Block #970809` (the block the card's clock is at; `No block yet` on a card
    shown none). A round button at the top left (the reset arrow), and under ADD FUNDS and WITHDRAW a row of three round buttons
    with their labels under them, the size and the look of NOTE, COPY, SCAN and CARD on the receive screen: HISTORY, CHANGE PIN
-   (ADD PIN on a card with none) and CHANGE LIMIT. No CLOCK line. The card art is as big as before and nothing is crowded.
+   (ADD PIN on a card with none) and LIMITS. No CLOCK line. The card art is as big as before and nothing is crowded.
 2. **The limit line.** On a card with no PIN: `NO LIMIT | NO PIN`; with a daily limit, `DAILY LIMIT $5 | NO PIN`. With a PIN, no
    `| NO PIN`.
 3. **RESET CARD on an empty card.** The top-left button. **Pass:** one warning (the PIN, the owner, the limits and the log are
@@ -1930,7 +1944,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 9. **A card with a PIN.** Same, with a card that has one (any phone's). **Pass:** the sheet ends `Enter the card's PIN` in no red,
    the pad comes up with `TAP AGAIN`, and the second tap writes the money. Nothing was made for the card before the PIN. A wrong
    PIN leaves the money owed to the card; TRY AGAIN asks again.
-10. **HOW TAP LIMIT WORKS.** CHANGE LIMIT, PER TAP LIMIT. **Pass:** the rows say `ABOUT 2–5 SEC`, `ABOUT 10 SEC`, `ABOUT 12 SEC`,
+10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** the rows say `ABOUT 2–5 SEC`, `ABOUT 10 SEC`, `ABOUT 12 SEC`,
     `ABOUT 14 SEC`. Time a charge over the limit: about eight seconds extra for the first limit's worth, and the till's sheet reads
     `Over per tap limit`, `x2`, `x3` as it goes on.
 
