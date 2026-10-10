@@ -3,6 +3,7 @@ import Foundation
 import Network
 #else
 import CoreNFC
+import UIKit
 #endif
 
 /* One tap of a card: the phone's NFC session, and the card found in it.
@@ -90,6 +91,10 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         active = false
         session.alertMessage = opening
         Self.sessionOpen = true
+        /* Foxy put away with the sheet still waiting for a card: the wait ends here. iOS has let go of the sheet by
+         * then, at times with no word to the delegate, and a page left waiting on it ran to its own timeout with
+         * CANCEL under a sheet that was no longer there. */
+        NotificationCenter.default.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         // said, so a sheet that sees no card leaves a trace: one did, for twenty seconds, with nothing in the diary
         print("[card] sheet: open")
         session.begin()
@@ -152,6 +157,13 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         }
         self.session = nil
         card = nil
+        /* A sheet still waiting for a card is told it is over here, not by the
+         * delegate: a session iOS has already let go of (the sheet gone while
+         * the app was away, with no word to the delegate) answers nothing to
+         * `invalidate`, and the page's wait would run to its own timeout, with
+         * CANCEL pressed and nothing happening. Told here, the delegate finds
+         * nothing left to tell. */
+        if let tell = found { found = nil; tell(.cancelled) }
         if let error, !error.isEmpty {
             onProgress?("end", error)
             session.invalidate(errorMessage: error)
@@ -160,6 +172,13 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
             onProgress?("end", text ?? "")
             session.invalidate()
         }
+    }
+
+    @objc private func wentAway() {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
+        guard session != nil, card == nil, found != nil else { return }
+        print("[card] sheet: Foxy was put away while it waited for a card; the wait ends")
+        end(error: "Foxy was put away", text: nil)
     }
 
     func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {
@@ -174,6 +193,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
         print("[card] sheet: ended — \(error.localizedDescription)")
         Self.sessionOpen = false
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         // refused as it opened, with a card still being waited for: opened again shortly (`open`)
         let code = (error as? NFCReaderError)?.code
         if !active, found != nil, self.session === session, refusals < 3,

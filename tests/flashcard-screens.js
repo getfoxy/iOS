@@ -1477,10 +1477,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     n.sent.length = 0;
     pad(owner).press('NO PIN');
     ok(!pad(owner) && !card(owner) && !n.state.owner, 'NO PIN takes the pad down and begins the tap: nothing to read first, nothing more to answer');
-    await until('the card to be set up with no PIN', () => owner.state.screen === 'home' && !!n.state.owner);
+    await until('the card to be set up with no PIN', () => !!n.state.owner && owner.toasts.indexOf('The card is set up.') >= 0);
     ok(n.state.pinState === 0 && n.state.pin === null && n.state.record.set && n.state.record.limit === 0 && !n.sent.some((a) => /^b04[01]/.test(a))
-       && owner.toasts.indexOf('The card is set up.') >= 0 && owner.state.stack.length === 0,
-       'one tap gave the card its record and its owner and no PIN, and the person is home, told so in a line', JSON.stringify({ pin: n.state.pinState }));
+       && owner.state.screen === 'flashcard' && !card(owner),
+       'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line (with a PIN, home)', owner.state.screen);
     await look();
     v = vals(owner);
     ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'ADD PIN,CHANGE LIMIT' && v.fcLimitLine === 'NO LIMIT',
@@ -1697,7 +1697,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       pad(owner).press('NO PIN');
       ok(!pad(owner) && card(owner) && card(owner).title === 'IF THE CARD IS LOST' && card(owner).has('RECOVERABLE'), 'with cards that can be taken back, NO PIN is followed by that question');
       card(owner).press('RECOVERABLE');
-      await until('the recoverable card to be set up with no PIN', () => owner.state.screen === 'home' && !!n2.state.owner);
+      await until('the recoverable card to be set up with no PIN', () => owner.state.screen === 'flashcard' && !!n2.state.owner && owner.toasts.indexOf('The card is set up.') >= 0);
       ok(n2.state.pinState === 0 && n2.state.record.refund !== '00'.repeat(33) && H2.W.cardsList().length === 1, 'and the card is set up with no PIN and its key of this phone’s on it');
       owner.FC_RECOVERABLE = false;
     }

@@ -106,7 +106,28 @@
     return h.replace(/^0+/, '').slice(0, 8);
   }
 
-  /* What this phone has kept: { hex, time, hash, bits, at } (`at`: when it was fetched, in ms), or null. It is read again
+  /* The last few blocks this phone has fetched, by hash: their heights and times, for a card whose clock is at a block
+   * this phone fetched before the one it keeps now ("Block #…" on its screen). Twenty are kept; nothing is decided by them. */
+  var CARD_HEIGHTS = 'foxy.flashcard.heights';
+  function headerRemember(hash, height, time) {
+    if (!(height > 0)) return;
+    var list = load(CARD_HEIGHTS, []);
+    if (!Array.isArray(list)) list = [];
+    list = list.filter(function (x) { return x && x.hash !== hash; });
+    list.unshift({ hash: hash, height: height, time: time });
+    save(CARD_HEIGHTS, list.slice(0, 20));
+  }
+  /* The height of a block this phone has fetched, by its hash: 0 for one it has not. */
+  function headerHeightOf(hash) {
+    var kept = headerKept();
+    if (kept && kept.hash === hash && kept.height > 0) return kept.height;
+    var list = load(CARD_HEIGHTS, []);
+    var found = Array.isArray(list) ? list.filter(function (x) { return x && x.hash === hash; })[0] : null;
+    return (found && found.height > 0) ? found.height : 0;
+  }
+
+  /* What this phone has kept: { hex, time, hash, bits, at, height } (`at`: when it was fetched, in ms; `height` as the source
+   * said it, 0 when none did), or null. It is read again
    * from its 80 bytes, and what is stored beside them is not believed. */
   function headerKept() {
     var rec = load(CARD_HEADER, null);
@@ -115,7 +136,7 @@
     try {
       var h = headerParse(rec.hex);
       if (!h.worked) return null;
-      return { hex: h.hex, time: h.time, hash: h.hash, bits: h.bits, at: at };
+      return { hex: h.hex, time: h.time, hash: h.hash, bits: h.bits, at: at, height: Number(rec.height) || 0 };
     } catch (e) { return null; }
   }
 
@@ -155,7 +176,12 @@
       return get('/api/block/' + tip + '/header').then(function (body) {
         var header = headerParse(headerText(body));
         if (header.hash !== tip) throw new Error('the header it gave is not the block it named');
-        return { source: source.name, tip: tip, header: header };
+        /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
+         * decided by it. A source that will not say it leaves it 0. */
+        return get('/api/blocks/tip/height').then(function (h) {
+          var height = parseInt(headerText(h), 10);
+          return { source: source.name, tip: tip, header: header, height: (height > 0 && height < 100000000) ? height : 0 };
+        }, function () { return { source: source.name, tip: tip, header: header, height: 0 }; });
       });
     });
   }
@@ -214,8 +240,10 @@
         say('the block ' + headerShort(chosen.hash) + ' is older than the one kept, ' + headerShort(before.hash) + '; the one kept stands');
         return { kept: before, fetched: false, why: 'older' };
       }
-      var rec = { hex: chosen.hex, time: chosen.time, hash: chosen.hash, at: Date.now() };
+      var height = usable.map(function (u) { return u.height; }).filter(function (n) { return n > 0; })[0] || 0;
+      var rec = { hex: chosen.hex, time: chosen.time, hash: chosen.hash, at: Date.now(), height: height };
       save(CARD_HEADER, rec);
+      headerRemember(chosen.hash, height, chosen.time);
       if (usable.length >= 2) say('block ' + headerShort(chosen.hash) + ' (time ' + chosen.time + ') is the tip of ' + usable.map(function (u) { return u.source; }).join(' and '));
       return { kept: headerKept(), fetched: true, why: usable.length >= 2 ? 'agree' : 'one' };
     });

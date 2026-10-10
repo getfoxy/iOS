@@ -135,11 +135,11 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   /* ---- 1: the card: three real headers at the real floor -------------------------------------------------------------- */
   {
     const c = mk();
-    ok((await read(c, SEL)).data === '0110', 'a card of the latest software says 1.16 when chosen');
+    ok((await read(c, SEL)).data === '0111', 'a card of the latest software says 1.17 when chosen');
     const c15 = mk({ software: 15 });
     ok((await read(c15, SEL)).data === '010f', 'and the card of 1.15 before it still says 1.15');
     const fresh = await infoOf(c);
-    ok(fresh.version === '1.16' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
+    ok(fresh.version === '1.17' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
     ok(blank.headerBits === '' && blank.headerHash === '' && blank.timeKey === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));
@@ -303,10 +303,11 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     ok(r.fetched && r.why === 'agree' && kept && kept.hex === h1 && kept.hash === hashOfHeader(h1) && kept.time === t1,
        'the explorers agree on the tip: it is kept, with its time and its hash', r.why + ' ' + (kept && kept.hash.slice(0, 12)));
     const asked = F.explored.map((x) => x.host.split('.')[0].slice(0, 8) + ' ' + x.path.replace(/[0-9a-f]{64}/, '<tip>'));
-    ok(F.explored.length === 4 && F.explored.every((x) => x.method === 'GET' && /^http:\/\/[a-z2-7]{56}\.onion\/api\//.test(x.url)),
-       'four requests, all GET, all to onion addresses over plain http (an onion is authenticated by its name)', asked.join(', '));
-    ok(F.explored.filter((x) => x.path === '/api/blocks/tip/hash').length === 2 && F.explored.filter((x) => /^\/api\/block\/[0-9a-f]{64}\/header$/.test(x.path)).length === 2,
-       'each asks for the tip’s hash and then for that block’s header');
+    ok(F.explored.length === 6 && F.explored.every((x) => x.method === 'GET' && /^http:\/\/[a-z2-7]{56}\.onion\/api\//.test(x.url)),
+       'six requests, all GET, all to onion addresses over plain http (an onion is authenticated by its name)', asked.join(', '));
+    ok(F.explored.filter((x) => x.path === '/api/blocks/tip/hash').length === 2 && F.explored.filter((x) => /^\/api\/block\/[0-9a-f]{64}\/header$/.test(x.path)).length === 2
+       && F.explored.filter((x) => x.path === '/api/blocks/tip/height').length === 2 && FW.headerKept().height > 0,
+       'each asks for the tip’s hash, then for that block’s header, then for its height, which is kept for the screen', String(FW.headerKept().height));
     const byHost = {};
     F.explored.forEach((x) => { (byHost[x.host] = byHost[x.host] || new Set()).add(x.circuit); });
     const circuits = Object.values(byHost);
@@ -324,7 +325,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     tipIs(F, h2);
     fresh();
     r = await FW.headerRefresh();
-    ok(r.fetched && FW.headerKept().hex === h2 && F.explored.length === 4, 'two minutes on it is asked for again, and a newer block replaces the one kept', r.why);
+    ok(r.fetched && FW.headerKept().hex === h2 && F.explored.length === 6, 'two minutes on it is asked for again, and a newer block replaces the one kept', r.why);
     // not an older block over a newer one
     skew = 22 * 60 * 1000;
     tipIs(F, h1);
@@ -460,8 +461,8 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       const exits = F.explored.filter((x) => /^https:\/\/(mempool\.space|blockstream\.info)\/api\//.test(x.url));
       ok(r.fetched && r.why === 'agree' && FW.headerKept().hex === viaExit && /is the tip of mempool\.space \(exit\) and blockstream\.info \(exit\)/.test(last()),
          'with neither onion answering, the two ordinary addresses are asked and agree: the header is kept, and the log says it came through the exits', last());
-      ok(onions.length === 2 && exits.length === 4 && F.explored.length === 6 && exits.every((x) => x.method === 'GET'),
-         'the onions first (one request each, unanswered), then the ordinary addresses over https: four GETs',
+      ok(onions.length === 2 && exits.length === 6 && F.explored.length === 8 && exits.every((x) => x.method === 'GET'),
+         'the onions first (one request each, unanswered), then the ordinary addresses over https: six GETs',
          F.explored.map((x) => x.host.slice(0, 10) + ' ' + x.path.replace(/[0-9a-f]{64}/, '<tip>')).join(', '));
       const byHost = {};
       F.explored.forEach((x) => { (byHost[x.host] = byHost[x.host] || new Set()).add(x.circuit); });
@@ -516,7 +517,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     {
       tipIs(F, mineHeader(now() - 2, CHEAP), { only: 'mempool' });
       r = await FW.headerRefresh();
-      ok(r.fetched && r.why === 'one' && F.explored.length === 3 && F.explored.every((x) => /\.onion$/.test(x.host)),
+      ok(r.fetched && r.why === 'one' && F.explored.length === 4 && F.explored.every((x) => /\.onion$/.test(x.host)),
          'one onion answering is enough: the ordinary addresses are not asked', F.explored.map((x) => x.host.slice(0, 12)).join(', '));
     }
 
@@ -532,7 +533,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       await new Promise((go) => setTimeout(go, 20));
       release();
       const [x, y] = await Promise.all([one, two]);
-      ok(x.fetched && y.fetched && F.explored.length - before === 4, 'asked twice while a fetch is in flight, it is made once: four requests, not eight', String(F.explored.length - before));
+      ok(x.fetched && y.fetched && F.explored.length - before === 6, 'asked twice while a fetch is in flight, it is made once: six requests, not twelve', String(F.explored.length - before));
     }
     // a source that quotes its answer, or ends it with a line break, is read all the same
     reset();
@@ -715,9 +716,9 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       tipIs(J, mineHeader(Math.floor(Date.now() / 1000) - 10, CHEAP));
       J.W._privacy({ tor: 'connecting', progress: 20, everUp: true, network: 'wifi' });
       J.W._privacy({ tor: 'up', progress: 100, everUp: true, network: 'wifi' });
-      await until('the header to be asked for when Tor comes up', () => J.explored.length >= 4);
+      await until('the header to be asked for when Tor comes up', () => J.explored.length >= 6);
       await settle();
-      ok(J.W.headerKept() !== null && J.explored.length === 4, 'Tor coming up fetches the header, once', String(J.explored.length - before));
+      ok(J.W.headerKept() !== null && J.explored.length === 6, 'Tor coming up fetches the header, once', String(J.explored.length - before));
       const quiet = page({});
       tipIs(quiet, mineHeader(Math.floor(Date.now() / 1000) - 10, CHEAP));
       quiet.W._privacy({ tor: 'connecting', progress: 20, everUp: true, network: 'wifi' });

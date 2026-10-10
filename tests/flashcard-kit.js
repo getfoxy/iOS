@@ -152,6 +152,8 @@ function mineHeader(time, bits, o) {
                   : BigInt('0x' + Buffer.from(sha256d(b)).reverse().toString('hex')) <= target) return b.toString('hex');
   }
 }
+/* A height for a fake header, from its time: the same for the same header, and ordered as the times are. */
+const heightOf = (hex) => 800000 + (Buffer.from(hex, 'hex').readUInt32LE(68) % 100000);
 /* A header's hash as Bitcoin shows it. */
 const hashOfHeader = (hex) => Buffer.from(sha256d(Buffer.from(hex, 'hex'))).reverse().toString('hex');
 /* The explorers of a page answering as the network's tip is this header: both of them, or `only` ('mempool' or 'blockstream': an operator,
@@ -169,6 +171,8 @@ function tipIs(ctx, hex, o) {
     if (opts.only && opts.only !== who) return null;
     const mine = opts.per && opts.per[who];
     if (/^\/api\/blocks\/tip\/hash$/.test(path)) return '200\n' + (mine ? hashOfHeader(mine) : tip);
+    // a height for the tip: made from its time, so that two sources with one tip say one height
+    if (/^\/api\/blocks\/tip\/height$/.test(path)) return '200\n' + heightOf(mine || hex);
     const m = /^\/api\/block\/([0-9a-f]{64})\/header$/.exec(path);
     if (m) return '200\n' + ((mine && hashOfHeader(mine) === m[1]) ? mine : (opts.lie && opts.lie[who]) || hex);
     return '404\nnot found';
@@ -195,5 +199,5 @@ const history = (c) => JSON.parse(c.storage.getItem('foxy.cashu.log') || '[]');
 /* What a call rejected with: its `card` kind, or its message. */
 const why = (p) => p.then(() => 'went through', (e) => (e && e.card) || (e && e.message) || String(e));
 
-module.exports = { page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS, PHONE_WORDS,
+module.exports = { heightOf, page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS, PHONE_WORDS,
                     EXPLORERS, CHEAP, mineHeader, hashOfHeader, tipIs, sha256d, targetOfBits };
