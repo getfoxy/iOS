@@ -253,7 +253,9 @@ function representative() {
   const KEY_B = '03' + 'b2'.repeat(30) + '9f0e';
   const KEY_C = '02' + 'c3'.repeat(30) + '77ab';
   const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
-    hasRecord: true, setUp: true, pinSet: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+    hasRecord: true, setUp: true, pinSet: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok',
+    // when the mint's word was had, far off and fixed, so the line under the title is the same every day
+    checkedAt: 4102358400000 }, over || {});
   // a card with a daily limit of 5,000 sats, 1,200 of it left, and its day turning at a fixed hour far off
   const DAY = { limited: true, limit: 5000, spent: 3800, left: 1200, turns: 4102444800, now: 4102358400, noTime: false };
   // the card's three amounts, on the keypad every amount is typed on
@@ -273,6 +275,7 @@ function representative() {
   add('fcMoveConfirm, asking what it costs', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE() }, { wallet: CARDS() }));
   add('fcMoveConfirm, with its cost', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE({ fee: 22, lands: 2026 }) }, { wallet: CARDS() }));
   add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
+  add('amount, money for a card from the send screen', at('amount', { flow: 'cardSend', amount: '5', unit: 'USD' }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
   // cards are cash for now (FC_RECOVERABLE), so the list of cards to take back is not drawn: the money waiting is
   add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({
@@ -305,6 +308,17 @@ function representative() {
   add('flashcard, a card of software 1.15 with both limits, the block its clock reads under them', at('flashcard', { fc: FC({ headers: true, clock: CLOCK, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card of software 1.15 that has been shown no block', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK }) }, { wallet: CARDS() }));
   add('flashcard, a card of software 1.15 with a daily limit and no block yet: a day with no start', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK, limit: 5000, day: DAY_ON_TRUST }) }, { wallet: CARDS() }));
+  /* Software 1.17: RESET CARD at the top left for the owner, the row under the card drawn as the receive screen's, and under the title
+   * the time the mint's word was had and the block the card's clock is at (its height where this phone has it, else its hash, else none). */
+  const R17 = { resetKnown: true, headers: true, clock: CLOCK };
+  add('flashcard, a card of software 1.17, with RESET CARD, its row and its block by height', at('flashcard', { fc: FC(R17) }, { wallet: CARDS({ headerHeightOf: () => 970809 }) }));
+  add('flashcard, a card of software 1.17, its block by its hash', at('flashcard', { fc: FC(R17) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.17 shown no block', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: NO_CLOCK }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.17 on another phone: no RESET CARD', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, ownedHere: false }) }, { wallet: CARDS() }));
+  add('flashcard, a locked card of software 1.17: RESET CARD is there', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, ownedHere: false, locked: true }) }, { wallet: CARDS() }));
+  add('flashcard, a card with no PIN, its limit line says so', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, pin: 'none', pinSet: false, noPinKnown: true,
+    limit: 5000, day: DAY, noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, { wallet: CARDS() }));
+  add('flashcard, a card of 1.17 that names its design FL1, not yet set up', at('flashcard', { fc: FC({ resetKnown: true, design: 'FL1', balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, setUp: false, pinSet: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   // the change this card made for itself (software 1.12) that no till has handed back, as its owner's read left it: a line for each state it is in
   const OWES = (parts) => ({ sats: parts.reduce((n, p) => n + p.sats, 0), parts });
   add('flashcard, change a till never handed over, fetched and put on', at('flashcard', { fc: FC({ owes: OWES([{ state: 'put', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
@@ -618,6 +632,17 @@ function cards() {
   add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
   // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
   add('card: how tap limit works, played out', (a) => { a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
+  add('card: how tap limit works, for a card before 1.17, played out', (a) => { a._fcCard = { info: { waitOver: 7 } }; a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
+  // RESET CARD (software 1.17): the warning, with and without money on the card, and the PIN of a locked one
+  add('card: reset, the warning', (a) => { a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 0 }; a.fcReset(); });
+  add('card: reset, the warning with money on the card', (a) => { a._fcCard = {}; a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 2048, mint: MINT }; a.fcReset(); },
+    { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
+  add('overlay: a locked card\u2019s PIN, to reset it', (a) => { a.state.fc = { resetKnown: true, owner: true, ownedHere: false, locked: true, pinSet: true, setUp: true, balance: 0 }; a.fcResetGo(); });
+  add('card: reset, the money came off and the reset did not', (a) => a.blockedCard('fc-reset-part', { tone: 'warn', title: 'EMPTY, BUT NOT RESET',
+    reason: '$1.31 (\u20bf2,048) came off the card into this phone. The card is not reset yet: tap it again to finish.', chip: 'Hold it still until the phone says to remove it.',
+    retry: 'TAP CARD', go: () => {}, shut: { label: 'LATER' } }));
+  // FLASHCARD on the send screen: the PIN of a card that has one, for the second tap
+  add('overlay: a card\u2019s PIN, to put money on it from the send screen', (a) => a.fcSendAsk(500));
   // the card's own log, opened from its line on the card's screen
   add('card: this card\u2019s own log', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
     last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });

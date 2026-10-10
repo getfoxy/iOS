@@ -7,9 +7,11 @@
    * payment within the limit is as quick as any tap, and every limit's worth
    * over it holds the card a few seconds longer. The example is a ten-dollar
    * limit, and the seconds beside each tier are what a card that makes its
-   * own change takes (the card's wait schedule: about five seconds over the
-   * limit, two more for every limit's worth beyond that, on top of a tap of
-   * two to five); they are the design's, not computed. A tap anywhere skips
+   * own change takes (the card's wait schedule: ten signatures for the first
+   * limit's worth over the limit, three for every limit's worth beyond that,
+   * on top of a tap of two to five; a card before software 1.17 asks for seven
+   * for the first), and they are said as "about", for that is what they are;
+   * they are the design's, not computed. A tap anywhere skips
    * the statement on the screen; once the list is whole, a tap on it plays
    * it again. A phone that asks for less motion is shown the whole list at
    * once, and so is a phone that has seen it play through once.
@@ -20,7 +22,7 @@
    * the card's screen has. `o.go` is CONTINUE, `o.cancel` CANCEL; neither
    * does anything until the list is whole. `this._fcExplainer` is the screen
    * for the suites: `finish()`, `play()`, `close()`, `done()`. */
-  FC_EXPLAINER = { limit: 10, secs: ['2–5', '8', '10', '12'], speed: 1.4 };
+  FC_EXPLAINER = { limit: 10, secs: ['2–5', '10', '12', '14'], secsBefore: ['2–5', '8', '10', '12'], speed: 1.4 };
   // set once the screen has played through on this phone; a tap on the list plays it again
   FC_EXPLAINED = 'foxy.flashcard.explained';
 
@@ -35,10 +37,11 @@
     const items = [
       item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),
       item('limit', { limit: '$' + E.limit }),
-    ].concat(E.secs.map((s, k) => item('tier', {
+    // a card of software 1.17 asks for ten signatures for the first limit's worth over its limit, one before it for seven
+    ].concat(((opts.over || 10) >= 10 ? E.secs : E.secsBefore).map((s, k, all) => item('tier', {
       range: money(k * E.limit + 0.01) + ' – ' + money((k + 1) * E.limit),
-      secs: s + ' SEC', long: 'Tap for ' + s + ' seconds',
-      bar: Math.round(parseInt(s.split('–').pop(), 10) / 12 * 100) + '%',
+      secs: 'ABOUT ' + s + ' SEC', long: 'Tap for about ' + s + ' seconds',
+      bar: Math.round(parseInt(s.split('–').pop(), 10) / parseInt(String(all[all.length - 1]).split('–').pop(), 10) * 100) + '%',
     }))).concat([item('more')]);
 
     const SORA = 'font-family:Sora,system-ui,sans-serif;';

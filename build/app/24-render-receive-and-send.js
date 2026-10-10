@@ -283,6 +283,11 @@
       // and offline the two that need a network are dimmed, not removed
       clTypeDim: off ? '0.38' : '1',
       clContactsDim: off ? '0.38' : '1',
+      /* FLASHCARD, last: money onto a card held to this phone (26f-flashcard.js, `fcSendCard`). The card is written to
+       * through the mint, so it is dimmed offline too, and says why when pressed. */
+      clCardOn: true,
+      clCardDim: off ? '0.38' : '1',
+      goSendCard: () => this.fcSendCard(),
       goMakeEcash: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]),
         flow: 'send', tokenMode: true, asset: 'BITCOIN',

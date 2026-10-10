@@ -478,8 +478,9 @@
     /* A card's amounts are typed on the same keypad (26f-flashcard.js), and
      * two of them have a ceiling it can say under the figure: adding to a
      * card is out of this phone's balance, and withdrawing is out of what the
-     * card holds. */
-    const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardWd';
+     * card holds. FLASHCARD on the send screen is out of this phone's balance
+     * as adding to a card is. */
+    const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
     const sendCapUsd = !capped ? 0
       : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
       : btcAvailUsd;

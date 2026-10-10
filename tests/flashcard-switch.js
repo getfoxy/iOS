@@ -181,7 +181,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     app.goFlashcard();
     await until('the card to be read', () => !!app.state.fc && app.state.fc.check !== 'asking');
     // the card's screen carries no SWITCH MINT button for now; the move is kept, and driven here by its own entry (fcSwitchMint)
-    ok(vals(app).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,CHANGE LIMIT', 'the card’s screen has CHANGE PIN and CHANGE LIMIT, and no SWITCH MINT button');
+    ok(vals(app).fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT', 'the card’s screen has HISTORY, CHANGE PIN and CHANGE LIMIT, and no SWITCH MINT button');
 
     app.fcSwitchMint();
     ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard', 'it opens the list of mints, asking which');

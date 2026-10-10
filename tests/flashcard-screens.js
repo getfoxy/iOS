@@ -32,6 +32,8 @@ const takeLimitSteps = (app, sats, which) => {
   if (sats > 0) keyIn(app, sats); else app.fcLimitConfirm(0);
   app.fcLimitSpec().go();
 };
+// "Verified At 11:42am", and the day after the time for any other than today
+const VERIFIED_AT = /^Verified At \d{1,2}:\d\d(am|pm)(, \d{1,2} [A-Z][a-z]{2})?$/;
 // the rule of software 1.13 in plain words, and the card before it (1.12)'s
 const TAP_WARNING = 'A per tap limit is the most this card pays in one tap straight away, change or no change: the sheet says when change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
   + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
@@ -56,7 +58,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- MENU > FLASHCARD, and a new card ------------------------------------ */
   holder.goFlashcard();
-  ok(H.sheet.length === 1 && /^begin: Hold the card/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
+  ok(H.sheet.length === 1 && /^begin: Tap behind the phone\.$/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
   await settle();
   ok(holder.state.screen === 'home' && !holder.state.fc && !card(holder) && !stage(H),
      'the sheet dismissed: the person is where they were, with nothing over it and no screen for no card');
@@ -68,7 +70,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   v = vals(holder);
   ok(v.fcHas && v.fcNew && !v.fcUsable && v.fcCheck === 'No PIN yet' && v.fcBalance === '₿ 0' && v.fcSub === '' && !stage(H),
      'a card out of its packet reads as new, with one thing to do', v.fcCheck);
-  ok(H.sheet.join(' / ').indexOf('begin: Hold the card to the top of the phone') >= 0 && H.sheet.indexOf('say: Reading the card') >= 0 && H.sheet.indexOf('end: Done. Remove the card.') >= 0,
+  ok(H.sheet.join(' / ').indexOf('begin: Tap behind the phone.') >= 0 && H.sheet.indexOf('say: Reading the card') >= 0 && H.sheet.indexOf('end: Done.') >= 0,
      'and the phone’s own sheet was told what was happening', H.sheet.slice(-3).join(' / '));
 
   holder.fcSetUp();
@@ -98,12 +100,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
-  ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,CHANGE LIMIT' && v.fcHistoryVis === 'visible' && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function',
-     'with ADD FUNDS and WITHDRAW, CHANGE PIN and CHANGE LIMIT under them, and its history at the top');
+  ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT' && v.fcRowShown === true && v.fcResetVis === 'hidden' && v.fcHistoryVis === undefined
+     && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcReset === 'function',
+     'with ADD FUNDS and WITHDRAW, and a row of HISTORY, CHANGE PIN and CHANGE LIMIT under them, and RESET CARD at the top, there for a card of 1.17 and not for this older one');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
      'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
-  ok(v.fcVerified === 'Verified Just Now' && v.fcVerifiedShown === true, 'and under its title, that it is verified: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
+  ok(VERIFIED_AT.test(v.fcVerified) && v.fcVerifiedShown === true, 'and under its title, that it is verified, and at what time: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
+  ok(v.fcBlockShown === false && v.fcBlockLine === '' && v.fcClockShown === undefined && v.fcClockLine === undefined,
+     'a card whose clock is not block headers has no block to say, and no card has a CLOCK line any more', v.fcBlockLine);
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
   c.tap();
@@ -123,11 +128,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(added && holder.seen[added.hash] === true && H.W.cardOwed().length === 0, 'its entry is one the app will not announce a second time, and nothing is left owed');
   card(holder).press('DONE');
   await until('the mint’s word on the card', () => holder.state.fc.check === 'ok');
-  ok(vals(holder).fcCheck === '' && vals(holder).fcVerified === 'Verified Just Now', 'the mint is asked about what the card says it holds, and the screen says so once, under its title');
+  ok(vals(holder).fcCheck === '' && VERIFIED_AT.test(vals(holder).fcVerified), 'the mint is asked about what the card says it holds, and the screen says so once, under its title');
 
   /* ---- under the title: how fresh the mint's word on the card is -------------- */
   {
-    ok(vals(holder).fcVerified === 'Verified Just Now' && H.W.cardCheckedAt(holder._fcCard) > 0, 'asked just now, the screen says so under its title', vals(holder).fcVerified);
+    ok(vals(holder).fcVerified === 'Verified At ' + holder.fcAt(H.W.cardCheckedAt(holder._fcCard)) && H.W.cardCheckedAt(holder._fcCard) > 0, 'asked just now, the screen says the time under its title', vals(holder).fcVerified);
+    const askedAt = H.W.cardCheckedAt(holder._fcCard);
     // two hours on, with no connection: the card is read, the mint cannot be asked, and the screen says how old its word is
     const realW = H.window.Date.now.bind(H.window.Date);
     const realN = Date.now;
@@ -141,7 +147,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     shift(2 * 3600000 + 60000);
     H.deaf = true;
     await reread();
-    ok(holder.state.fc.check === 'off' && vals(holder).fcVerified === 'Verified 2 Hours Ago', 'with no connection two hours later, it says when it was last verified', vals(holder).fcVerified);
+    ok(holder.state.fc.check === 'off' && vals(holder).fcVerified === 'Verified At ' + holder.fcAt(askedAt), 'with no connection two hours later, it says the time it was last verified', vals(holder).fcVerified);
     // a phone that never had the mint's word on these pieces cannot say it has
     const kept = H.storage.getItem('foxy.flashcard.checked');
     H.storage.setItem('foxy.flashcard.checked', '{}');
@@ -158,7 +164,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     H.window.Date.now = realW; Date.now = realN;
     await reread();
     await until('the mint to be asked again', () => holder.state.fc.check === 'ok');
-    ok(vals(holder).fcVerified === 'Verified Just Now', 'and with the connection back it is verified again', vals(holder).fcVerified);
+    ok(VERIFIED_AT.test(vals(holder).fcVerified) && vals(holder).fcVerified !== 'Verified At ' + holder.fcAt(askedAt - 1e9), 'and with the connection back it is verified again', vals(holder).fcVerified);
   }
 
   // the card taken away before the money is written: the pieces are made and wait, and the screen says so wherever it is opened
@@ -180,7 +186,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   c.send = send1;
   H.nfc = c;
   ok(card(holder).has('TAP CARD') && /The card was not read\. ₿500 is still waiting to go onto it\./.test(card(holder).reason) && c.balance() === 2000 && H.W.cardOwed().length === 1
-     && H.sheet.some((x) => /^again: Hold the card here again for the rest$/.test(x)),
+     && H.sheet.some((x) => /^again: Hold for the rest\.$/.test(x)),
      'a card taken away before it was written to: the same sheet asked for it again, and with no card the 500 is kept for it and said', card(holder).reason);
   v = vals(holder);
   ok(v.fcNotes.length === 1 && /₿500 is waiting to go onto this card/.test(v.fcNotes[0].text), 'the screen carries a line for it', v.fcNotes[0] && v.fcNotes[0].text);
@@ -258,15 +264,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await settle();
   const begins = R.sheet.filter((x) => /^begin:/.test(x));
   const ends = R.sheet.filter((x) => /^(end|error):/.test(x));
-  const removeAt = R.sheet.indexOf('say: Paid. Keep the card here for your change.');
-  ok(begins.length === 1 && ends.length === 1 && ends[0] === 'end: Done. \u20bf24 of change is back on the card.' && removeAt >= 0
-     && R.sheet.indexOf('again: Tap the card again for its change') > removeAt && R.sheet.indexOf('say: Keep the card there: asking the mint') < 0 && !pad(till),
-     'one sheet for the whole payment: as the card has signed it says paid and to keep the card there for the change (and nothing that reads as finished), asks for the card again, and ends saying the change is back',
-     R.sheet.filter((x) => /^(begin|again|end|error):|^say: Paid\./.test(x)).join(' / '));
+  const removeAt = R.sheet.indexOf('say: Hold for change.');
+  ok(begins.length === 1 && ends.length === 1 && ends[0] === 'end: Done.' && removeAt >= 0
+     && R.sheet.indexOf('again: Hold for change.') > removeAt && R.sheet.indexOf('say: Asking the mint') < 0 && !pad(till),
+     'one sheet for the whole payment: as the card has signed it says to hold for the change (and nothing that reads as finished), asks for the card again, and ends saying the change is back',
+     R.sheet.filter((x) => /^(begin|again|end|error):|^say: Hold for change\./.test(x)).join(' / '));
   ok(R.sheet.every((x) => !/Remove the card\. Verifying/.test(x)), 'the sheet no longer says “Remove the card” beside its own Cancel, which read as over and got it closed before the change');
   ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.head === 'Verifying card' && atMint.line === 'This may take a few seconds...' && atMint.button === 'hidden' && atMint.amount,
      'behind it, our own screen said VERIFYING CARD over the amount, with nothing to press', JSON.stringify(atMint));
-  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt <= R.sheet.indexOf('again: Tap the card again for its change'),
+  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt <= R.sheet.indexOf('again: Hold for change.'),
      'the payment’s three screens in turn: TAP TO VERIFY while the card signs, VERIFYING CARD while the mint is asked, and TAP TO CONFIRM from the moment the card is asked for again, before it is found',
      looks.join(' > '));
   till.fcLookStage = look0;
@@ -407,7 +413,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const got = (await RT.W.balanceSats()) - rb;
     const begins = RT.sheet.filter((x) => /^begin:/.test(x));
     const agains = RT.sheet.filter((x) => /^again:/.test(x));
-    ok(got === 1536 && c3.balance() === 0 && begins.length === 1 && agains.join() === 'again: Hold the card here again to finish paying' && !pad(till2),
+    ok(got === 1536 && c3.balance() === 0 && begins.length === 1 && agains.join() === 'again: Hold to finish paying' && !pad(till2),
        'a payment the card leaves part way through: the same sheet asks for the card again, with no PIN, and the next tap signs the rest and pays', RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + '; ' + got + ' received');
     ok(titles.length === 0 && RT.W.cardOwed().filter((r) => r.card === c3.key).length === 0, 'with no card to press, and nothing to put back on the card', titles.join(', '));
     till2.blockedCard = shown;
@@ -440,8 +446,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       const lines5 = RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x));
       ok(seen5.join(' > ') === 'tap > verify > confirm > confirmAgain' && seen5.words === 'Tap again / The last tap didn\u2019t finish...',
          'the card lost part way through taking its change: TAP AGAIN, on TAP TO CONFIRM’s ground, until the rest is on', seen5.join(' > ') + '; ' + seen5.words);
-      ok(lines5.filter((x) => /^begin:/.test(x)).length === 1 && lines5.indexOf('again: Hold the card here again for its change') > lines5.indexOf('again: Tap the card again for its change')
-         && lines5[lines5.length - 1] === 'end: Done. \u20bf824 of change is back on the card.' && taps === 3,
+      ok(lines5.filter((x) => /^begin:/.test(x)).length === 1 && lines5.filter((x) => x === 'again: Hold for change.').length === 2
+         && lines5[lines5.length - 1] === 'end: Done.' && taps === 3,
          'in the one sheet: asked for its change, asked again when it left, and ended with the change back', lines5.join(' / '));
       // the card allows one tap after a payment to load with no PIN, and the tap it left used that up: the rest needs its PIN
       const pins5 = c5.sent.slice(sentBefore).filter((a) => /^b040/.test(a)).length;
@@ -549,14 +555,30 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     holder._fcCard = was;
     ok(holder.fcShaped() === true, 'a card read as 1.13 (and one not read yet) has the newest words');
     // and the lines the sheet is given as the card works: the change a piece at a time, a second payment, a wait over the limit
-    ok(holder.fcProgressText({ step: 'change', i: 2, n: 4 }) === 'The card is making change \u00b7 piece 2 of 4. Keep holding.'
-       && holder.fcProgressText({ step: 'change', i: 1, n: 1 }) === 'The card is making change \u00b7 piece 1 of 1. Keep holding.'
+    ok(holder.fcProgressText({ step: 'change', i: 2, n: 4 }) === 'Making change 2 of 4.'
+       && holder.fcProgressText({ step: 'change', i: 1, n: 1 }) === 'Making change 1 of 1.'
        && holder.fcProgressText({ step: 'change', i: 0, n: 4 }) === '' && holder.fcProgressText({ step: 'change' }) === '',
-       'the card making its change is said a piece at a time: "The card is making change \u00b7 piece 2 of 4. Keep holding."');
-    ok(holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 2, second: true }) === 'A second payment in one tap. Keep holding (2 s)'
-       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4 }) === 'Over the card\u2019s per tap limit. Keep holding (4 s)'
-       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4, making: true }) === 'The card is making change. Keep holding (4 s)',
-       'a second payment in one tap is said as that; a wait over the limit as that; the card of 1.12 making change as that');
+       'the card making its change is said a piece at a time: "Making change 2 of 4."');
+    ok(holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 2, second: true }) === 'Keep holding.'
+       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4 }) === 'Over per tap limit'
+       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4, making: true }) === 'Keep holding.'
+       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4, want: 10, sum: 64 }) === 'Paying from a larger piece.'
+       && holder.fcProgressText({ step: 'fetching' }) === 'Asking for change owed.',
+       'a second payment in one tap and the card making change are "Keep holding."; a wait over the limit, a larger piece and the change owed are said as that');
+    // over the limit, by the level the askings have come to: ten for the first limit's worth (seven before software 1.17), three for each further one
+    {
+      const at = (over, polls) => holder.fcProgressText({ step: 'waiting', polls, seconds: 4, over });
+      const was10 = holder._fcCard;
+      ok(at(10, 1) === 'Over per tap limit' && at(10, 10) === 'Over per tap limit' && at(10, 11) === 'Over per tap limit x2' && at(10, 13) === 'Over per tap limit x2'
+         && at(10, 14) === 'Over per tap limit x3' && at(10, 16) === 'Over per tap limit x3' && at(10, 17) === 'Over per tap limit x4',
+         'a card of 1.17 says x2 when the eleventh asking begins and x3 three askings on');
+      ok(at(7, 7) === 'Over per tap limit' && at(7, 8) === 'Over per tap limit x2' && at(7, 11) === 'Over per tap limit x3',
+         'and a card before 1.17 changes level after seven');
+      holder._fcCard = { info: { waitOver: 7 } };
+      ok(holder.fcProgressText({ step: 'waiting', polls: 8, seconds: 4 }) === 'Over per tap limit x2' && holder.fcProgressText({ step: 'waiting', polls: 10, seconds: 4 }) === 'Over per tap limit x2',
+         'the card on show says which, where the event does not');
+      holder._fcCard = was10;
+    }
   }
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');
@@ -566,7 +588,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     x.finish();
     const y = explainer(holder);
     ok(y.done && y.all === ['How tap limit works', 'Any payment request over your limit requires you to tap and hold your card longer.', 'EXAMPLE LIMIT', '$10',
-                            '$0.01 \u2013 $10.00', '2\u20135 SEC', '$10.01 \u2013 $20.00', '8 SEC', '$20.01 \u2013 $30.00', '10 SEC', '$30.01 \u2013 $40.00', '12 SEC',
+                            '$0.01 \u2013 $10.00', 'ABOUT 2\u20135 SEC', '$10.01 \u2013 $20.00', 'ABOUT 8 SEC', '$20.01 \u2013 $30.00', 'ABOUT 10 SEC', '$30.01 \u2013 $40.00', 'ABOUT 12 SEC',
                             'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
        'played out, it is the rule as a list: the ten-dollar example, four tiers with their seconds, and so on, then CANCEL and CONTINUE', y.all);
     y.press('CANCEL');
@@ -860,7 +882,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the whole withdrawal to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
     await settle();
     const begins = H.sheet.filter((x) => /^begin:/.test(x));
-    ok(begins.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold the card here again for the rest' && !pad(holder) && titlesW.join() === 'IN YOUR WALLET',
+    ok(begins.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold for the rest.' && !pad(holder) && titlesW.join() === 'IN YOUR WALLET',
        'a withdrawal cut short keeps what came off, and the same sheet asks for the card again for the rest, with no PIN and no card to press', H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + titlesW.join(', '));
     ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.' && c.state.record.limit === 700 && H.W.cardOwed().length === 0,
        'and then all of it is in the phone, said as the whole withdrawal, and the card’s limit is back as it was', card(holder).reason + ' / ' + c.state.record.limit);
@@ -914,7 +936,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the load to be on the card', () => card(holder) && card(holder).title === 'ON THE CARD');
     await settle();
     const beginsL = H.sheet.filter((x) => /^begin:/.test(x));
-    ok(beginsL.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold the card here again for the rest' && c.balance() === onBefore + 1000 && H.W.cardOwed().length === 0,
+    ok(beginsL.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold for the rest.' && c.balance() === onBefore + 1000 && H.W.cardOwed().length === 0,
        'a load cut short after some pieces went on: the same sheet asks for the card again, and the rest goes on', H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + c.balance());
     card(holder).press('DONE');
     // and taken off again, so what comes after has the phone and the card as they were
@@ -990,7 +1012,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(350 * 86400000);
   v = vals(holder);
-  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcLinks.length === 2,
+  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcLinks.length === 3,
      'in its last month the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
@@ -1069,8 +1091,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const signedFor = f.state.spent;     // the fewest pieces that cover 300, signed whole
     /* The sheet was still up (kept for the change): the same sheet asks for the card again and puts what it signed back,
      * with no PIN, and ends saying so; the screen then says the payment failed and the money is back. Nothing to press. */
-    const putAt = R.sheet.indexOf('again: The payment did not go through. Tap the card to put it back');
-    ok(signedFor >= 300 && putAt >= 0 && R.sheet[R.sheet.length - 1] === 'end: The payment did not go through. ₿' + signedFor.toLocaleString('en-US') + ' is back on the card.'
+    const putAt = R.sheet.indexOf('again: Payment did not go through.');
+    ok(signedFor >= 300 && putAt >= 0 && R.sheet[R.sheet.length - 1] === 'end: Payment did not go through.'
        && !R.sheet.some((x) => /^error:/.test(x)) && R.sheet.filter((x) => /^begin:/.test(x)).length === 1,
        'a payment the mint refuses after the card signed: the same sheet asks for the card again, puts it back, and ends saying so, not in red',
        R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
@@ -1354,7 +1376,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const owedN = paid.change.sats, owedUsd = '$' + (owedN / 1000).toFixed(2);
     ok(owedN === 24 && v.fcOwesShown === true && lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · ' + owedUsd + ' (₿' + owedN + ') — FETCHED AND PUT ON' && owner.state.fc.balance === 1000,
        'a till that never handed its change over: the owner’s screen says the ' + owedN + ' owed to the card, in dollars first and the sats after, were fetched and put on', lines(owner).join('|'));
-    ok(OH.sheet[OH.sheet.length - 1] === 'end: Done. ₿' + owedN + ' of change is back on the card.' && OH.sheet.indexOf('say: Keep the card there: asking the mint') >= 0 && OH.sheet.indexOf('say: Asking the mint for the change this card is owed. Keep holding') >= 0,
+    ok(OH.sheet[OH.sheet.length - 1] === 'end: Done.' && OH.sheet.indexOf('say: Asking the mint') >= 0 && OH.sheet.indexOf('say: Asking for change owed.') >= 0,
        'and the phone’s sheet said the mint was being asked, and ends saying the change is back on the card', OH.sheet.filter((x) => /^(say|end):/.test(x)).slice(-4).join(' / '));
     ok(owedN > 0 && open() === 0 && oc.balance() === 1000, 'the card holds it', String(oc.balance()));
 
@@ -1483,7 +1505,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line (with a PIN, home)', owner.state.screen);
     await look();
     v = vals(owner);
-    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'ADD PIN,CHANGE LIMIT' && v.fcLimitLine === 'NO LIMIT',
+    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,ADD PIN,CHANGE LIMIT' && v.fcLimitLine === 'NO LIMIT | NO PIN',
        'its screen has ADD PIN in CHANGE PIN’s place, and CHANGE LIMIT', v.fcLinks.map((k) => k.label).join());
     owner.fcSetLimit();
     ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
@@ -1519,7 +1541,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(!pad(owner) && card(owner) && card(owner).title === 'NOT THIS PHONE’S CARD', 'on a phone that is not its owner, ADD PIN says so before asking for anything');
     card(owner).press('CLOSE');
     await look();
-    vals(owner).fcLinks[0].tap();
+    vals(owner).fcLinks[1].tap();
     ok(pad(owner).title === 'CHOOSE A PIN' && pad(owner).sub === 'A card with no PIN is cash to whoever holds it. Four to eight digits.' && !pad(owner).has('NO PIN'),
        'ADD PIN asks CHOOSE A PIN, and says in one line that a card with no PIN is cash to whoever holds it', pad(owner) && pad(owner).sub);
     pad(owner).type('4321');
@@ -1533,7 +1555,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.pinState === 1 && n.state.pin === Buffer.from('4321').toString('hex') && n.state.noPinLimit === 0 && owner.state.fc.pinSet === true && owner.state.screen === 'flashcard',
        'one tap gave the card the PIN, with no allowance, and said so in a line', owner.toasts.slice(-1)[0]);
     v = vals(owner);
-    ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,CHANGE LIMIT' && v.fcNoPinShown === false, 'and ADD PIN is CHANGE PIN again', v.fcLinks.map((k) => k.label).join());
+    ok(v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT' && v.fcNoPinShown === false, 'and ADD PIN is CHANGE PIN again', v.fcLinks.map((k) => k.label).join());
 
     /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
@@ -1739,6 +1761,269 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     c.tap();
     const wrote = await H.W.cardWrite(c, { owner: true });
     ok(wrote && c.balance() === before + 500, 'and the next tap puts them on', String(c.balance()));
+  }
+
+  /* ---- software 1.17: RESET CARD, the row under the card, the block, and FLASHCARD on the send screen --------------------------
+   * The card of 1.17 can be reset by its owner: a warning, then one tap (the money on it comes off to this phone first, and a
+   * locked card or one that holds money and has a PIN asks for the PIN on the pad), and the person is home with a line. The
+   * row of HISTORY, CHANGE PIN and CHANGE LIMIT is drawn as the receive screen's row; the card's clock is said as a block under
+   * the title; and money goes onto a card held to this phone from the send screen, with no card on show. */
+  {
+    const H2 = await funded({}, 30000);
+    const R2 = await funded({ sharedMint: H2.mint, words: OTHER_WORDS }, 0);
+    const owner = appOn(H2);
+    const other = appOn(R2);
+    await owner.refreshBalance();
+    await other.refreshBalance();
+    const n = newCard(H2, undefined, { format: 4 });
+    const look = async (app, ctx, cd) => {
+      ctx.nfc = cd;
+      app.setState({ screen: 'home', stack: [], fc: null });
+      app.goFlashcard();
+      await until('the card to be read', () => !!app.state.fc && app.state.fc.key === cd.key);
+      await settle();
+    };
+    const setUpWith = async (app, ctx, cd, pin) => {
+      await look(app, ctx, cd);
+      app.fcSetUp();
+      if (pin) { pad(app).type(pin); pad(app).type(pin); } else pad(app).press('NO PIN');
+      await until('the card to be set up', () => !!cd.state.owner && app.toasts.indexOf('The card is set up.') >= 0);
+      await settle();
+    };
+    let v;
+
+    /* the row, the block, the limit line, the design */
+    ok(owner.fcAt(Date.parse('2030-05-01T11:42:00')) === '11:42am' || /^\d{1,2}:\d\d(am|pm)?, \d{1,2} [A-Z][a-z]{2}$/.test(owner.fcAt(Date.parse('2030-05-01T11:42:00'))),
+       'a time is said as the phone says it, in lower case, with the day after it for any other than today', owner.fcAt(Date.parse('2030-05-01T11:42:00')));
+    await setUpWith(owner, H2, n, '1234');
+    await look(owner, H2, n);
+    v = vals(owner);
+    ok(owner.state.fc.resetKnown === true && v.fcResetVis === 'visible' && v.fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,CHANGE LIMIT',
+       'a card of 1.17 read by its owner: RESET CARD at the top, and the row of HISTORY, CHANGE PIN and CHANGE LIMIT', v.fcResetVis);
+    ok(v.fcLinks.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcLinks[0].path !== v.fcLinks[1].path, 'each a button with its own drawing');
+    ok(owner.state.fc.headers === true && v.fcBlockShown === true && v.fcBlockLine === 'No block yet' && VERIFIED_AT.test(v.fcVerified),
+       'a card shown no block says "No block yet" under the time it was verified', v.fcBlockLine);
+    const HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
+    owner.state.fc = Object.assign({}, owner.state.fc, { clock: { hash: HASH, short: '1fa7ca83', time: 4102358400 } });
+    ok(vals(owner).fcBlockLine === 'Block 1fa7ca83…', 'a block this phone has no height for is told by the first digits of its hash, as the line this replaces told it', vals(owner).fcBlockLine);
+    H2.storage.setItem('foxy.flashcard.heights', JSON.stringify([{ hash: HASH, height: 970809, time: 4102358400 }]));
+    ok(vals(owner).fcBlockLine === 'Block #970809', 'and one it has the height of by that: Block #970809', vals(owner).fcBlockLine);
+    H2.storage.removeItem('foxy.flashcard.heights');
+    ok(vals(owner).fcClockLine === undefined && vals(owner).fcClockShown === undefined, 'and there is no CLOCK line under the limits');
+    // the limit line: "| NO PIN" for a card without one
+    const lineOf = (over) => { const was = owner.state.fc; owner.state.fc = Object.assign({}, was, over); const l = vals(owner).fcLimitLine; owner.state.fc = was; return l; };
+    const DAY5 = { limited: true, limit: 500, spent: 0, left: 500, turns: 0, now: 0, noTime: false };
+    ok(lineOf({}) === 'NO LIMIT' && lineOf({ pinSet: false }) === 'NO LIMIT | NO PIN' && lineOf({ pinSet: false, day: DAY5 }) === 'DAILY LIMIT ₿500 | NO PIN'
+       && lineOf({ day: DAY5 }) === 'DAILY LIMIT ₿500'
+       && lineOf({ pinSet: false, tap: { known: true, limited: true, limit: 200, spent: 0, left: 200, turns: 0, noTime: false } }) === 'PER TAP LIMIT ₿200 | NO PIN',
+       'a card with no PIN says so beside its limit after a bar, and a card with one does not');
+    // the design the card names is the one drawn, in every state
+    {
+      const was = owner.state.fc;
+      const designs = ['new', 'not finished', 'set up'].map((st) => {
+        owner.state.fc = Object.assign({}, was, { design: 'FL1' }, st === 'new' ? { setUp: false, hasRecord: false, pin: 'none', pinSet: false }
+          : st === 'not finished' ? { setUp: false, hasRecord: false, pin: 'set', pinSet: true } : {});
+        return vals(owner).fcDesign;
+      });
+      owner.state.fc = Object.assign({}, was, { design: '' });
+      const none = vals(owner).fcDesign;
+      owner.state.fc = was;
+      ok(designs.join() === 'FL1,FL1,FL1' && none === 'FL1', 'the card screen draws the design a card names, new, not finished and set up', designs.join());
+    }
+    {
+      const fl = newCard(H2, undefined, { format: 4 });
+      fl.state.record.design = 'FL1';
+      await look(owner, H2, fl);
+      ok(vals(owner).fcDesign === 'FL1' && owner.state.fc.design === 'FL1', 'a card whose record names FL1 before it is set up is drawn FL1', vals(owner).fcDesign);
+      await setUpWith(owner, H2, fl, '');
+      await look(owner, H2, fl);
+      ok(fl.state.record.design === 'FL1' && owner.state.fc.design === 'FL1' && vals(owner).fcDesign === 'FL1', 'and after it is set up: this phone keeps the design the card names', vals(owner).fcDesign);
+      const fresh = newCard(H2, undefined, { format: 4 });
+      await setUpWith(owner, H2, fresh, '');
+      await look(owner, H2, fresh);
+      ok(vals(owner).fcDesign === 'FX1', 'a card that names none is given this phone’s own, FX1', vals(owner).fcDesign);
+    }
+    await look(owner, H2, n);
+
+    /* a phone that is not its owner, and a card of the software before */
+    await look(other, R2, n);
+    ok(other.state.fc.resetKnown === true && other.state.fc.ownedHere === false && vals(other).fcResetVis === 'hidden', 'on a phone that does not own the card, RESET CARD is not there');
+    other.fcReset();
+    ok(card(other) && card(other).title === 'NOT THIS PHONE’S CARD' && !pad(other), 'and pressed anyway it says so, before it asks for anything', card(other) && card(other).title);
+    card(other).press('CLOSE');
+    const old16 = newCard(H2, undefined, { format: 4, software: 16 });
+    await setUpWith(owner, H2, old16, '1234');
+    await look(owner, H2, old16);
+    ok(owner.state.fc.resetKnown === false && vals(owner).fcResetVis === 'hidden', 'a card of software 1.16 has no RESET CARD');
+    owner.fcReset();
+    ok(card(owner) && card(owner).title === 'NOT ON THIS CARD', 'and pressed anyway it says it cannot', card(owner) && card(owner).all);
+    card(owner).press('CLOSE');
+
+    /* an empty card: the warning, CONTINUE, one tap, and home */
+    await look(owner, H2, n);
+    const keyBefore = n.key;
+    owner.fcReset();
+    ok(card(owner) && card(owner).title === 'RESET CARD' && /anyone’s to set up/.test(card(owner).reason) && !/comes off to this phone first/.test(card(owner).reason)
+       && card(owner).has('CONTINUE') && card(owner).has('CANCEL'), 'RESET CARD opens one warning: what is wiped, and that it is then anyone’s to set up', card(owner) && card(owner).reason);
+    card(owner).press('CANCEL');
+    ok(!card(owner) && !pad(owner) && !!n.state.owner && owner.state.screen === 'flashcard', 'CANCEL leaves the card as it was');
+    owner.fcReset();
+    H2.sheet.length = 0;
+    card(owner).press('CONTINUE');
+    ok(!pad(owner), 'an empty card that is not locked asks for no PIN');
+    await until('the card to be reset', () => !n.state.owner);
+    await settle();
+    ok(owner.state.screen === 'home' && owner.state.stack.length === 0 && owner.state.fc === null && owner.toasts.slice(-1)[0] === 'The card is reset.' && !card(owner),
+       'one tap: the person is home, told so in a line, and the screen is no longer on that card', owner.state.screen + ' | ' + owner.toasts.slice(-1)[0]);
+    ok(n.key !== keyBefore && n.state.pinState === 0 && !n.state.record.set && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1 && H2.sheet[H2.sheet.length - 1] === 'end: Done.',
+       'the card is another card (a key of its own, no PIN, no record), in one sheet', H2.sheet.join(' / '));
+    await look(owner, H2, n);
+    ok(vals(owner).fcNew && owner.state.fc.owner === false && vals(owner).fcResetVis === 'hidden', 'and it reads as new, with nothing to reset');
+
+    /* a card with money and a PIN: the warning says the money comes off first; the PIN is asked on the pad */
+    await setUpWith(owner, H2, n, '1234');
+    await look(owner, H2, n);
+    owner.fcAdd();
+    keyIn(owner, 2000);
+    await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+    card(owner).press('DONE');
+    await look(owner, H2, n);
+    await owner.refreshBalance();
+    const haveBefore = await H2.W.balanceSats();
+    owner.fcReset();
+    ok(card(owner) && card(owner).title === 'RESET CARD' && /The ₿2,000 on it comes off to this phone first\./.test(card(owner).reason), 'with money on it the warning says it comes off to this phone first', card(owner) && card(owner).reason);
+    card(owner).press('CONTINUE');
+    ok(pad(owner) && pad(owner).title === 'CARD PIN' && pad(owner).cta === 'RESET CARD' && /off the card and reset it\.$/.test(pad(owner).sub), 'and the PIN is asked for on the pad', pad(owner) && pad(owner).sub);
+    pad(owner).type('1234');
+    await until('the card to be reset', () => !n.state.owner);
+    await settle();
+    ok(owner.state.screen === 'home' && owner.toasts.slice(-1)[0] === 'The card is reset.' && n.balance() === 0 && (await H2.W.balanceSats()) - haveBefore === 2000,
+       'one tap took the 2,000 off to this phone and reset the card', String((await H2.W.balanceSats()) - haveBefore));
+
+    /* a locked card asks for the PIN first, even with nothing on it */
+    await setUpWith(owner, H2, n, '1234');
+    n.state.locked = true;
+    await look(owner, H2, n);
+    ok(owner.state.fc.locked === true && vals(owner).fcResetVis === 'visible', 'a locked card still has RESET CARD for its owner');
+    owner.fcReset();
+    card(owner).press('CONTINUE');
+    ok(pad(owner) && pad(owner).sub === 'To reset the card. It is locked.', 'a locked card asks for its PIN first', pad(owner) && pad(owner).sub);
+    pad(owner).type('1234');
+    await until('the locked card to be reset', () => !n.state.owner);
+    await settle();
+    ok(owner.state.screen === 'home' && owner.toasts.slice(-1)[0] === 'The card is reset.' && n.state.locked === false, 'and with it the card is reset', String(n.state.locked));
+    // the wrong PIN is said, with the card as it was
+    await setUpWith(owner, H2, n, '1234');
+    n.state.locked = true;
+    await look(owner, H2, n);
+    owner.fcReset();
+    card(owner).press('CONTINUE');
+    pad(owner).type('9999');
+    await until('the wrong PIN to be said', () => card(owner) && card(owner).title === 'WRONG PIN');
+    ok(!!n.state.owner && /tries left/.test(card(owner).reason), 'a wrong PIN is said, and the card is as it was', card(owner) && card(owner).reason);
+    card(owner).press('CANCEL');
+    n.state.locked = false;
+
+    /* the wait of a card of 1.17: ten askings for the first limit's worth over, three for each further one, said as "about" */
+    await look(owner, H2, n);
+    ok(owner.fcWaitOver() === 10, 'the card on show says ten askings for the first limit’s worth over', String(owner.fcWaitOver()));
+    owner.fcSetLimit();
+    card(owner).press('PER TAP LIMIT');
+    {
+      explainer(owner).finish();
+      const y = explainer(owner);
+      ok(y.done && y.all === ['How tap limit works', 'Any payment request over your limit requires you to tap and hold your card longer.', 'EXAMPLE LIMIT', '$10',
+                              '$0.01 \u2013 $10.00', 'ABOUT 2\u20135 SEC', '$10.01 \u2013 $20.00', 'ABOUT 10 SEC', '$20.01 \u2013 $30.00', 'ABOUT 12 SEC', '$30.01 \u2013 $40.00', 'ABOUT 14 SEC',
+                              'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
+         'HOW TAP LIMIT WORKS for a card of 1.17: about 2\u20135 within the limit, then about 10, 12 and 14', y.all);
+      y.press('CONTINUE');
+      keyIn(owner, 2000);
+      ok(/held about 8 seconds, and 2 seconds more for every limit\u2019s worth beyond that\./.test(owner.fcLimitSpec().warn), 'and its confirmation says about 8 seconds over the limit', owner.fcLimitSpec().warn);
+      owner.fcLimitSpec().secondary.go();
+    }
+
+    /* the money came off and the reset did not: said, with the money in this phone */
+    {
+      await look(owner, H2, n);
+      const W = owner.fcW();
+      const real = W.cardEmptyAndReset;
+      W.cardEmptyAndReset = () => { const e = /** @type {any} */ (new Error('The card was taken away too soon.')); e.card = 'gone'; e.withdrew = 500; e.hash = ''; return Promise.reject(e); };
+      owner.state.fc = Object.assign({}, owner.state.fc, { balance: 500 });
+      owner.fcResetGo();
+      pad(owner).type('1234');
+      await until('the half-done reset to be said', () => card(owner) && card(owner).title === 'EMPTY, BUT NOT RESET');
+      ok(/came off the card into this phone/.test(card(owner).reason) && card(owner).has('TAP CARD') && owner.state.fc.balance === 0, 'a card left after its money came off says it is empty and not reset, with TAP CARD to finish', card(owner).reason);
+      card(owner).press('LATER');
+      W.cardEmptyAndReset = real;
+    }
+
+    /* FLASHCARD on the send screen: any card, the amount first, the sheet at once */
+    {
+      const free = newCard(H2, undefined, { format: 4 });
+      const keyed = newCard(H2, undefined, { format: 4 });
+      await setUpWith(other, R2, free, '');
+      await setUpWith(other, R2, keyed, '1234');
+      await owner.refreshBalance();
+      owner.setState({ screen: 'sendHow', stack: ['home'], fc: null });
+      H2.sheet.length = 0;
+      owner.fcSendCard();
+      ok(owner.state.screen === 'amount' && owner.state.flow === 'cardSend' && owner.state.stack.slice(-1)[0] === 'sendHow' && !card(owner) && !pad(owner),
+         'FLASHCARD on the send screen asks the amount first, on the keypad every amount is typed on; back from it is the send screen');
+      ok(!H2.sheet.some((x) => /^begin:/.test(x)), 'and no sheet has come up yet');
+      keyIn(owner, 999999);
+      ok(owner.state.screen === 'amount' && /^You have /.test(owner.toasts.slice(-1)[0]), 'more than the phone holds goes no further', owner.toasts.slice(-1)[0]);
+      // a card with no PIN takes the money in that tap
+      H2.nfc = free;
+      H2.sheet.length = 0;
+      const had = await H2.W.balanceSats();
+      keyIn(owner, 700);
+      ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'NEXT brings the sheet up at once', H2.sheet[0]);
+      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await settle();
+      ok(free.balance() === 700 && owner.state.screen === 'home' && owner.state.stack.length === 0 && /^₿700 went onto the card\.$/.test(card(owner).reason) && (await H2.W.balanceSats()) < had - 699,
+         'a card with no PIN took the money in that tap, and the person is home with the card saying so', card(owner).reason + ' | ' + free.balance());
+      ok(H2.W.cardOwed().length === 0 && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1, 'in one sheet, and nothing is left owed', H2.sheet.join(' / '));
+      card(owner).press('DONE');
+      // a card with a PIN ends the sheet asking for it, and the pad comes up
+      owner.setState({ screen: 'sendHow', stack: ['home'] });
+      owner.fcSendCard();
+      H2.nfc = keyed;
+      H2.sheet.length = 0;
+      keyIn(owner, 500);
+      await until('the PIN pad', () => !!pad(owner));
+      ok(H2.sheet.indexOf('end: Enter the card’s PIN') >= 0 && !H2.sheet.some((x) => /^error:/.test(x)) && keyed.balance() === 0 && H2.W.cardOwed().length === 0 && owner.state.screen === 'amount',
+         'a card with a PIN ends the sheet saying so, in no red, with nothing made or written', H2.sheet.join(' / '));
+      ok(pad(owner).title === 'CARD PIN' && pad(owner).cta === 'TAP AGAIN' && /^To put ₿500 on the card\./.test(pad(owner).sub), 'the pad says what the PIN is for, and TAP AGAIN writes it', pad(owner).sub);
+      // a wrong PIN: the pieces were made, owed to the card, and the way on is the pad again
+      H2.sheet.length = 0;
+      pad(owner).type('9999');
+      await until('the wrong PIN to be said', () => card(owner) && card(owner).title === 'WRONG PIN');
+      ok(keyed.balance() === 0 && H2.W.cardOwed().length === 1 && card(owner).has('TRY AGAIN'), 'a wrong PIN is said; what was made for the card is owed to it', card(owner).title + ' | ' + H2.W.cardOwed().length);
+      card(owner).press('TRY AGAIN');
+      await until('the PIN pad again', () => !!pad(owner));
+      ok(/ON CARD$/.test(pad(owner).cta), 'TRY AGAIN asks for the PIN to put it on', pad(owner).cta);
+      pad(owner).type('1234');
+      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await settle();
+      ok(keyed.balance() === 500 && H2.W.cardOwed().length === 0, 'and with the right one it is on', String(keyed.balance()));
+      card(owner).press('DONE');
+      // and with its PIN right the first time
+      owner.setState({ screen: 'sendHow', stack: ['home'] });
+      owner.fcSendCard();
+      keyIn(owner, 300);
+      await until('the PIN pad', () => !!pad(owner));
+      pad(owner).type('1234');
+      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await settle();
+      ok(keyed.balance() === 800 && owner.state.screen === 'home', 'the right PIN in the second tap writes it', String(keyed.balance()));
+      card(owner).press('DONE');
+      // offline, it says why
+      owner.offline = true;
+      owner.setState({ screen: 'sendHow', stack: ['home'] });
+      owner.fcSendCard();
+      ok(owner.state.screen === 'sendHow' && owner.toasts.slice(-1)[0] === 'Putting money on a card needs a connection.', 'offline it says so and goes no further', owner.toasts.slice(-1)[0]);
+      owner.offline = false;
+    }
   }
 
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));

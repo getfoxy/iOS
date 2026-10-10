@@ -98,7 +98,7 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
 ## Setting up a card
 
 1. MENU, then FLASHCARD. It goes straight to Apple's sheet, with no screen of
-   Foxy's first. Hold a new card to the top of the phone.
+   Foxy's first. Tap a new card behind the phone.
 2. The card's screen reads `This card is new. Set it up to put money on it.`
    Press **SET UP THIS CARD**.
 3. **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN**. The PIN pad
@@ -257,6 +257,36 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   each after; 1.13 to 1.16 ask seven and three. `info.waitOver` says which a card has, and `cardWaitSigns` and `cardWait`
   take it as their last argument (without it, seven).
 
+### The screens
+
+- **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
+  `Block #970809` (above). Under the balance the limit line says `NO LIMIT`, `DAILY LIMIT $5` and so on, and for a card
+  with no PIN adds a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`. The old CLOCK line is gone.
+  The row under ADD FUNDS and WITHDRAW is **HISTORY**, **CHANGE PIN** (**ADD PIN** on a card with none) and **CHANGE LIMIT**,
+  drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its label under it. HISTORY is for
+  any card with a record; the other two are the owner's. The card is drawn in the design it names (`FL1` stays `FL1`, before
+  and after set-up); a card that names none is drawn in, and given, this phone's own.
+- **RESET CARD.** The round button at the top left, where HISTORY was, for the owner of a card of 1.17 and on (a locked
+  card is offered it to any phone holding it: only the card can say whose it is; on another phone's unlocked card, and on
+  an older card, it is not drawn, and pressed it says `NOT THIS PHONE'S CARD` or `NOT ON THIS CARD`). It opens one warning:
+  what is wiped (the PIN, the owner, the limits, the log; a new key), that the card is then anyone's to set up, and, when
+  it holds money, that the money comes off to this phone first. **CONTINUE** goes to one tap (`cardEmptyAndReset`;
+  the sheet says `Keep holding.`); a locked card, or a card with money and a PIN, asks for the PIN on the pad first
+  (`CARD PIN`, button `RESET CARD`). Then Home, with `The card is reset.`, and the screen is no longer on that card.
+  If the money came off and the reset did not, `EMPTY, BUT NOT RESET` says so, with `TAP CARD` to finish. The wallet's
+  own refusals are the usual cards: `MONEY ON THE CARD`, `THE CARD IS OWED CHANGE`, `MONEY ON ITS WAY`, `WRONG PIN`,
+  `CARD BLOCKED`.
+- **FLASHCARD on the send screen.** The fifth button, under TYPE (the five are a little shorter, so the camera pane and
+  everything above it are as they were). It puts money onto a card held to this phone, any card: SET AMOUNT first (the keypad
+  every amount is typed on), NEXT, and the sheet at once. The card is read, and a card with no PIN has its pieces made and
+  written in that tap. A card with a PIN ends the sheet `Enter the card's PIN` with nothing made; the pad comes up (`CARD PIN`,
+  button `TAP AGAIN`), and the second tap makes the pieces for that card's key and writes them with the PIN
+  (`cardPrepare`, then `cardWrite` as a till writes change). A wrong PIN leaves them owed to the card, and TRY AGAIN asks for
+  the PIN to put them on. On success: Home, and the card `ON THE CARD`. Offline it says so and goes no further.
+- **HOW TAP LIMIT WORKS** says its seconds as "about": `ABOUT 2–5 SEC` within the limit, then about 10, 12 and 14 for a card of
+  1.17 (about 8, 10 and 12 for a card before it). The limit's confirmation says the card is held about 8 seconds over the limit
+  (about 5 before 1.17), and 2 more for every limit's worth beyond.
+
 ## Adding money
 
 **ADD FUNDS** on the card's screen.
@@ -391,7 +421,7 @@ exactly, are said in that first tap, with no pad.)
    pieces keeps the card against the phone for several seconds.
 5. **The card is let go the moment it has signed.** The signed pieces are
    written down first (`foxy.flashcard.taken`: they are now the only copy of the
-   right to spend them), and then the sheet ends with `Done. Remove the card.` The
+   right to spend them), and then the sheet ends with `Done.` The
    card's part is a few commands and the signatures: for a payment of one piece
    eight commands and one signing, which on the card tested through its contact
    reader (a command about 0.06 s, a signature 0.74 s) is about 1.2 seconds, not
@@ -433,16 +463,21 @@ amount and says the same. iOS ends a session after a minute.
 
 | Step | Foxy's screen | The sheet's line |
 |---|---|---|
-| waiting | HOLD THE CARD TO THE TOP OF THE PHONE (CANCEL is here only) | Hold the card to the top of the phone |
+| waiting | TAP BEHIND THE PHONE (CANCEL is here only) | Tap behind the phone. |
 | reading | READING THE CARD | Reading the card |
 | found | (the same) | Scanning. Hold still. |
 | signing | KEEP THE CARD THERE, and under it the piece | Signing piece 3 of 9 |
-| the card's change (1.12 and on) | (the same) | The card is making change · piece 2 of 4. Keep holding. |
-| a wait (1.13: only over the limit) | (the same) | Over the card's per tap limit. Keep holding (4 s) |
-| signed | VERIFYING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. Remove the card. (the sheet ends here) |
+| the card's change (1.12 and on) | (the same) | Making change 2 of 4. |
+| a wait (1.13: only over the limit) | (the same) | Over per tap limit (then `x2` as the second limit's worth begins, `x3` the third, and so on: ten askings for the first on 1.17, seven before it, three for each after) |
+| a wait for change, or a second payment in one tap | (the same) | Keep holding. |
+| the change is owed (the owner's read) | (the same) | Asking for change owed. |
+| signed | VERIFYING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. (the sheet ends here) |
 | the change | MAKING THE CHANGE, and under it that the payment is made | (no sheet) |
 | writing | WRITING TO THE CARD, and under it the piece | Writing 2 of 4 |
-| done | REMOVE THE CARD | Done. Remove the card. |
+| done | REMOVE THE CARD | Done. |
+| asking again | (the same) | Hold for change. / Hold for the rest. / Hold to finish paying / Tap to put back signatures. / Tap behind the phone. |
+| the card wants its PIN | (the same) | Enter the card's PIN (a note, not an error) |
+| the mint refused a payment | TAP TO PUT BACK | Payment did not go through. |
 
 A payment at a till has three screens of its own in place of these, drawn from
 the design: **TAP TO VERIFY** (a card's outline, with arrows flying into its
@@ -458,7 +493,7 @@ doing and an app cannot turn it off.
 
 A flow that goes on to speak to the card again (a renewal writes to it, a move
 reads it last) holds it instead, as it always did: the sheet stays open through the
-mint (`Keep the card there: asking the mint`) and its change is written back in
+mint (`Asking the mint`) and its change is written back in
 the same tap.
 
 Each result is one of the app's own cards, with a title, a line or two and one
@@ -472,7 +507,7 @@ or two buttons. The ones a payment can end in:
 | CARD BLOCKED | too many wrong PINs; the card pays again when its owner sets a new PIN on it |
 | NOT ENOUGH ON THE CARD | what it holds |
 | OVER THE CARD'S DAILY LIMIT | what is left of today, and when the day turns; said before the PIN is sent |
-| OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the screen says `Keep holding` and counts down. (An older card, whose limit was a window: the most it pays in one tap, or what the tap has left) |
+| OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the sheet says `Over per tap limit`, and the level (`x2`, `x3`) as it goes on. (An older card, whose limit was a window: the most it pays in one tap, or what the tap has left) |
 | A DIFFERENT MINT | the card's mint and this phone's. Adding funds to a card that holds money: "You need to withdraw all funds on the card before you can switch mints." and CLOSE. To an empty card, on its owner's phone: SWITCH TO <MINT>, which goes to the amount and moves the card in the tap that writes the funds; on any other phone, that only the phone that set the card up can switch it |
 | NO CHANGE WHILE OFFLINE | no connection, and the card has no pieces that make the price exactly; said before the PIN |
 | TAKEN ON TRUST | no connection: kept, not paid, swapped in when online |
@@ -698,8 +733,7 @@ one way of paying:
 
 1. **SEND.** The PIN, and the first tap, under TAP TO VERIFY. The card signs its
    one or two pieces and may be taken away.
-2. **VERIFY.** The phone's sheet stays up and says `Paid. Keep the card here
-   for your change.` while the swap runs and the change is made; Foxy's screen
+2. **VERIFY.** The phone's sheet stays up and says `Hold for change.` while the swap runs and the change is made; Foxy's screen
    behind it says VERIFYING CARD. "Paid" first, since the card's part is over
    the moment it has signed, and the words are what say so: iOS plays no
    haptic of an app's while its own sheet is up. (The sheet used to say `Remove
@@ -806,9 +840,9 @@ What it means for the holder:
   work.) That change is coming is the phone's to say and not the card's: see
   *Three buzzes*, below. **Software 1.12** waited four signatures for every limit's
   worth, three seconds, and for a payment within the limit that made change. While
-  it waits the till's sheet says `Over the card's per tap limit. Keep holding`,
-  and how long it has been; a card of 1.12 for its first limit's worth said `The
-  card is making change. Keep holding`. The day's limit is held at the card's
+  it waits the till's sheet says `Over per tap limit` (and `x2`, `x3` as each
+  further limit's worth begins), and nothing of how long; a card of 1.12 for its first limit's worth said `Keep
+  holding.` The day's limit is held at the card's
   first SIGN and not at the start of the payment, so a refusal comes after the
   outputs and the change were sent, and gives the payment up: the swap's row is
   dropped, nothing is burned.
@@ -863,7 +897,7 @@ What it means for the holder:
 - **The sheet says what the card is doing.** Between the pieces being named and
   the wait, the sheet used to say nothing: with seven pieces of change that was
   four seconds, and the holder pulled the card. Now each piece is said as the card
-  is asked for it, `The card is making change · piece 2 of 4. Keep holding.`, and
+  is asked for it, `Making change 2 of 4.`, and
   then the wait, if there is one.
 - **Three buzzes (1.13), asked for and not felt.** When the card has signed and
   change is coming back to it in this sheet, the page asks the phone being paid
@@ -871,7 +905,7 @@ What it means for the holder:
   app asks for three), in place of the single quiet tap it asks for when the
   card may be lifted. Neither is felt: iOS plays no haptic of an app's while
   its own sheet is up, and the sheet is up through both. So that change is
-  coming is said in words, `Paid. Keep the card here for your change.` on the
+  coming is said in words, `Hold for change.` on the
   sheet, and a payment within the limit waits for nothing either way. The
   buzzes stay in the code for the day iOS allows them, or for a sheet that is
   already down.
@@ -890,8 +924,7 @@ What it means for the holder:
   with it, and put on the card in the same tap with the owner's own grant and no
   PIN: the blinding taken off, the DLEQ checked where the mint gave one, three
   pieces to a command, and the card lets each opening go as its piece lands. The
-  sheet says `Keep the card there: asking the mint` and ends `Done. ₿280 of change
-  is back on the card.` Openings this phone owes itself (it was the till) are not
+  sheet says `Asking for change owed.` and ends `Done.` Openings this phone owes itself (it was the till) are not
   asked of the mint: it has the signatures, and the change tap finishes them as
   before. A phone that is not the card's owner reads none of this.
 
@@ -1023,8 +1056,8 @@ follows is the one a card has now.
   limit's worth after that, less what the change the card made counts for: two
   for every three pieces from 1.14, one for each piece in 1.13 (a piece is about
   two thirds of a signature's work; one for one let a terminal shorten the wait
-  with pieces of a sat). The till's screen says `Over the card's per tap limit.
-  Keep holding` and how long it has been; how long is left it cannot say, because
+  with pieces of a sat). The till's sheet says `Over per tap limit`, and `x2`, `x3` as
+  each further limit's worth begins; how long is left it cannot say, because
   the card does not tell it. The limit's worth is of what leaves the card (*A
   card that makes its own change*).
   Software 1.12 waited four signatures, three seconds, for every limit's worth,
@@ -1251,10 +1284,9 @@ nothing answers `6A92` (never told the time) any more.
   of the network's time, so the device clock stands alone. Tor itself will not
   use a consensus that is not current by its own clock, so a clock hours out
   tends not to get a route at all.
-- **What the owner's screen shows.** Under the limits, `CLOCK · block 1fa7ca83… ·
-  3:40 PM`: the eight digits after the zeros every block hash begins with (the
-  eight at the front are always the same) and the time in that block, or `CLOCK
-  · NO BLOCK YET`. A card with a day's limit and no block yet says `THE DAY
+- **What the owner's screen shows.** Under its title, two lines: `Verified At 11:42am` (the time the mint's word was last had, in the
+  phone's clock) and the block the card's clock is at, `Block #970809` (its height, where this phone has it: it keeps the last twenty
+  blocks' heights), else the eight digits after the zeros every block hash begins with (`Block 1fa7ca83…`), or `No block yet`. A card with a day's limit and no block yet says `THE DAY
   BEGINS WITH THE CARD'S FIRST BLOCK`. The log shows each tap at the time the
   phone told the card with the block's beside it. Nothing says a card has been
   told a false time, because it cannot be. A card more than three hours ahead of
@@ -1365,8 +1397,7 @@ it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused; for a card that makes its own change, what the mint signed for it); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
-said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+said a card's pieces were good, so a phone with no connection can say `Verified At 9:15am`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified At <time>` (with the day after it when not today), or
 `Not Verified`.
 
 **The card's face.** A card is drawn in a design named by a code of three

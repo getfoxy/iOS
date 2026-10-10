@@ -9691,7 +9691,7 @@
     }
     if (w === '6983') return cardError('blocked', 'This card is blocked: its PIN was typed wrong too many times.', { tries: 0 });
     if (w === '6984') return cardError('no-pin', 'This card has no PIN yet.');
-    if (w === '6982') return cardError('pin-needed', 'The card wants its PIN first.');
+    if (w === '6982') return cardError('pin-needed', 'Card needs PIN entered.');
     if (w === '6a8f') return cardError('limit', 'This payment is over what the card can spend in a day.');
     if (w === '6a95') return cardError('tap-limit', 'This payment is over what the card can spend in one tap.');
     if (w === '6a90') return cardError('no-owner', 'This card has no owner, so it cannot be loaded, and its PIN and its limit cannot be changed.');
@@ -9714,10 +9714,10 @@
     function ask(apdu) {
       return Promise.resolve().then(function () { return link.send(apdu); }).then(function (hex) {
         var h = String(hex || '').toLowerCase();
-        if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'The card was taken away too soon.');
+        if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
         return { data: h.slice(0, -4), sw: h.slice(-4) };
       }, function (e) {
-        throw (e && e.card) ? e : cardError('gone', 'The card was taken away too soon.');
+        throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
       });
     }
     return {
@@ -12856,7 +12856,7 @@
             /* 6A94: the card has a PIN, was shown none, and the no-PIN allowance does not cover this payment (or there is none).
              * It signed nothing and gave the payment up, as it does for a limit: this one's row goes with it (below), and the
              * person is asked for the PIN and taps again. */
-            if (r.sw === '6a94') throw cardError('pin-needed', 'The card wants its PIN for this payment.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
+            if (r.sw === '6a94') throw cardError('pin-needed', 'Card needs PIN entered.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
             if (r.sw !== '9000') throw cardRefused(r.sw, 'to sign for a payment');
             return r.data;
           }).then(function (d) {
@@ -12886,7 +12886,7 @@
              * which is what a payment within the limit waits for, and a payment over it too: the card does not say which, and it is said for
              * what it may be until it goes on past that. A card of 1.13 does not wait for change, only for the limit, and says so: the work of
              * making it is said as it is done (`progress`, `change`, above). */
-            try { if (typeof progress === 'function') progress({ step: 'waiting', polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
+            try { if (typeof progress === 'function') progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
                                                                 sum: plan.leaves, want: wantN, making: !cardIsShaped(card) && plan.cardChange > 0 && polls <= CARD_WAIT_SIGNS }); } catch (e) {}
             return again();
           });
@@ -12991,7 +12991,7 @@
       return t.ask(cardCommand(CARD_INS.again, 0, '', 64));
     }).then(function (r) {
       // asked with no PIN of a card that has one, and it wants it for this: the signature stays asked for, and the PIN is asked of the person
-      if (r.sw === '6982' && !pinHex) throw cardError('pin-needed', 'The card wants its PIN to give a signature it gave before it was taken away.', { sw: r.sw, again: true, sheetText: CARD_PIN_SHEET });
+      if (r.sw === '6982' && !pinHex) throw cardError('pin-needed', 'Card needs PIN entered.', { sw: r.sw, again: true, sheetText: CARD_PIN_SHEET });
       var sig = r.sw === '9000' ? r.data : '';
       var found = [];
       open.forEach(function (row) {
@@ -13648,7 +13648,7 @@
           throw cardError('tap-limit', 'This card would have to be held for ' + secs + ' seconds to pay this. Take it in parts of '
             + mostNow + ' sats or less.', { left: mostNow, need: sumProofs(picked), limit: tap.limit, wait: secs, paced: true });
         }
-        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
+        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
       }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
@@ -13671,7 +13671,7 @@
       if (!pin && card.info.pinSet && picked && picked.length) {
         var leastNet = o.all ? sumProofs(picked) : want + fee;
         if (cardNeedsPin(card, leastNet)) {
-          throw cardError('pin-needed', 'This card wants its PIN for a payment this size.',
+          throw cardError('pin-needed', 'Card needs PIN entered.',
                           { early: true, need: leastNet, set: !!(card.noPin && card.noPin.set), left: card.noPin ? card.noPin.left : 0, blocked: card.info.pin === 'blocked',
                             sheetText: CARD_PIN_SHEET });
         }
@@ -13881,7 +13881,7 @@
   }
 
   /* The card's part is over: it has signed, and nothing more is asked of it.
-   * Its sheet is ended ("Done. Remove the card.") and the mint, which takes
+   * Its sheet is ended ("Done.") and the mint, which takes
    * as long as it takes, is asked with the card gone. Not for a flow that
    * goes on to speak to the card again (`o.hold`: a renewal writes to it, a move
    * reads it last), and nothing is sent to a link that has no way to let go
@@ -13911,7 +13911,7 @@
        * asks for three buzzes at this moment too (26f-flashcard.js,
        * `fcChangeBuzz`), but iOS plays no haptic of an app's while its own
        * sheet is up, so these words are what says it. */
-      var line = 'Paid. Keep the card here for your change.';
+      var line = 'Hold for change.';
       return Promise.resolve().then(function () { return link.say(line); }).then(function () {}, function () {});
     }
     if (typeof link.release !== 'function') return Promise.resolve();
@@ -24443,7 +24443,7 @@
      *   2. the PIN, and the card signs for the pieces chosen. From here the
      *      card has marked them spent;
      *   3. the signed pieces are written down (TAKEN), and the card is let go
-     *      (its sheet ends, "Done. Remove the card."): its part is over. Foxy's
+     *      (its sheet ends, "Done."): its part is over. Foxy's
      *      own screen goes on saying it is checking with the mint;
      *   4. the pieces are swapped at the mint by the ordinary receive, with no
      *      question first (the swap refuses spent pieces itself), which is where
@@ -24699,7 +24699,7 @@
         release: function (line) {
           if (link.released) return Promise.resolve();
           link.released = true;
-          return bridgeAsk('cardEnd', { text: String(line || 'Done. Remove the card.') }, 5000).then(function () {}, function () {});
+          return bridgeAsk('cardEnd', { text: String(line || 'Done.') }, 5000).then(function () {}, function () {});
         },
         /* The card left part way through: the sheet stays up and looks for it
          * again (`cardAgain`). Resolves when a card is there. Rejects
@@ -24707,7 +24707,7 @@
          * `unsupported` from a phone whose native side has no such step. */
         again: function (line) {
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
-          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 63000).then(function () {
+          return bridgeAsk('cardAgain', { text: String(line || 'Tap behind the phone.') }, 63000).then(function () {
             // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
             // and it has signed nothing in it (`cardPaid`: a second payment in one time in the field waits)
             link.one.told = false; link.one.key = ''; link.one.paid = 0;
@@ -24730,7 +24730,7 @@
          * failed (a refused payment's pieces put back on the card), and the
          * sheet ends saying so, not in red. */
         if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
-        var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
+        var say = (e && e.card === 'gone') ? 'Card taken away too soon.' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
       };
       var tries = 0;
@@ -24743,7 +24743,7 @@
         return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
           if (link.released) return r;
           // `link.doneText`: what the sheet ends with, where `fn` has more to say than "done" (the change back on the card)
-          return bridgeAsk('cardEnd', { text: String(link.doneText || 'Done. Remove the card.') }, 5000).then(function () { return r; }, function () { return r; });
+          return bridgeAsk('cardEnd', { text: String(link.doneText || 'Done.') }, 5000).then(function () { return r; }, function () { return r; });
         }, function (e) {
           // the sheet was ended when the card was let go, and has nothing to say about what came after
           if (link.released) throw e;
@@ -24761,7 +24761,7 @@
           });
         });
       };
-      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 63000).then(run, function (e) {
+      return bridgeAsk('cardBegin', { text: String(text || 'Tap behind the phone.') }, 63000).then(run, function (e) {
         var why = String((e && e.message) || '');
         if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');

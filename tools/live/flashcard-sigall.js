@@ -513,10 +513,11 @@ async function at(mintKey, names, real) {
       const w2 = signatures() - 1, m2 = madePieces();
       delete card.one;
       // (the card of this software's rule for the change: 1.14 two waits off for every three pieces, 1.13 one for each)
-      const want2 = Math.max(0, 7 - changeCredit(m2, first.card.info));
-      ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits seven less what its change counts for (' + (first.card.info.costed ? 'two for every three pieces' : 'one for each piece') + '), and the wallet said so before the PIN',
+      const over2 = Number(first.card.info.waitOver) || 7;   // ten on 1.17, seven before
+      const want2 = Math.max(0, over2 - changeCredit(m2, first.card.info));
+      ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits its first tier (' + over2 + ') less what its change counts for (' + (first.card.info.costed ? 'two for every three pieces' : 'one for each piece') + '), and the wallet said so before the PIN',
          p1.sats === 100 && w1 === 0 && p2.sats === 100 && w2 === want2 && (w2 === 0 ? ahead.length === 0 : (ahead.length === 1 && ahead[0].left === w2 && ahead[0].second === true)),
-         'first ' + w1 + ' waits, second ' + w2 + ' (7 less ' + changeCredit(m2, first.card.info) + ' for ' + m2 + ' pieces of change made by the card), said ' + JSON.stringify(ahead.map((p) => [p.left, p.second])));
+         'first ' + w1 + ' waits, second ' + w2 + ' (' + over2 + ' less ' + changeCredit(m2, first.card.info) + ' for ' + m2 + ' pieces of change made by the card), said ' + JSON.stringify(ahead.map((p) => [p.left, p.second])));
       if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     }
     await card.tap();

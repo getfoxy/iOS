@@ -1,4 +1,4 @@
-<!-- screen flashcard -->
+<!-- flashcard, a card of 1.17 that names its design FL1, not yet set up -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -368,7 +368,7 @@
 </i>
 </i>
 </div>
-<div role="button" aria-label="Reset this card" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); visibility: hidden;" class="scp0">
+<div role="button" aria-label="Reset this card" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); visibility: visible;" class="scp0">
 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2">
 <path d="M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4">
 </path>
@@ -440,6 +440,9 @@
 <div style="font-size: 5.99cqw; font-weight: 800; line-height: 1; color: rgba(255, 255, 255, 0.5);">₿</div>
 <div style="font-family: Sora, sans-serif; font-size: 2.86cqw; font-weight: 600; letter-spacing: 0.24em; color: rgba(255, 255, 255, 0.42);">BEARER</div>
 </div>
+<div data-card-badge="" style="position: absolute; left: 9.92cqw; bottom: 6.25cqw; max-width: 53.65cqw; text-align: left; font-family: Sora, sans-serif; font-size: 2.6cqw; font-weight: 700; letter-spacing: 0.14em; line-height: 1.4; text-transform: uppercase; color: rgb(247, 147, 26); text-wrap: balance;">
+<span class="sc-interp">No PIN yet</span>
+</div>
 </div>
 </div>
 </div>
@@ -449,10 +452,12 @@
 <div style="position: relative; flex: 0 0 auto; font-family: Sora, sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; margin-bottom: 1px;">CARD BALANCE</div>
 <div style="height: 1px; background: var(--frost-rule); opacity: 0.5; margin: 8px 24px; flex: 0 0 auto;">
 </div>
-<div style="flex: 0 0 auto; padding: 3px 0px 6px; font-size: 18px; font-weight: 600; color: rgba(var(--ink-rgb),.55); text-align: center; text-wrap: pretty;">Tap a card to see what it holds, put money on it, or take money off it.</div>
+<div style="flex: 0 0 auto; padding: 3px 0px 6px; font-size: 18px; font-weight: 600; color: rgba(var(--ink-rgb),.55); text-align: center; text-wrap: pretty;">
+<span class="sc-interp">This card is new. Set it up to put money on it.</span>
+</div>
 </div>
 <div style="flex: 0 0 auto; padding: 10px 22px 26px; box-sizing: border-box; display: flex; flex-direction: column-reverse; align-items: center; gap: 18px;">
-<div class="fxShine fxShine1 scp7" style="align-self: stretch; flex: 0 0 auto; height: 60px; border-radius: 30px; background-color: var(--acc); background-image: radial-gradient(120% 84% at 26% 0%, rgba(255, 240, 220, 0.26), rgba(255, 240, 220, 0) 62%), linear-gradient(168deg, rgba(247, 154, 60, 0.62), rgba(232, 98, 42, 0.72) 48%, rgba(194, 74, 27, 0.78)), url(&quot;foxy-fur.webp&quot;); background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; position: relative; overflow: hidden; isolation: isolate; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; box-shadow: inset 0 2px 0 rgba(255,255,255,.4);">TAP CARD</div>
+<div class="fxShine fxShine1 scp7" style="align-self: stretch; flex: 0 0 auto; height: 60px; border-radius: 30px; background-color: var(--acc); background-image: radial-gradient(120% 84% at 26% 0%, rgba(255, 240, 220, 0.26), rgba(255, 240, 220, 0) 62%), linear-gradient(168deg, rgba(247, 154, 60, 0.62), rgba(232, 98, 42, 0.72) 48%, rgba(194, 74, 27, 0.78)), url(&quot;foxy-fur.webp&quot;); background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; position: relative; overflow: hidden; isolation: isolate; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; box-shadow: inset 0 2px 0 rgba(255,255,255,.4);">SET UP THIS CARD</div>
 </div>
 </div>
 </div>

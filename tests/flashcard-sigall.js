@@ -674,7 +674,7 @@ async function world(feePpk, sats, make) {
     await settle();
     ok((await bal(U.R)) === 1000 && U.card.balance() === 1000 && count(U.card, '24') === 1 && count(U.card, '25') === 1,
        'taken away as it signs: paid at the next tap, the card out 300 once, and asked only for the signature it had already given', (await bal(U.R)) + ', card ' + U.card.balance());
-    ok(U.R.sheet.filter((x) => /^begin:/.test(x)).length === 1 && U.R.sheet.indexOf('again: Hold the card here again to finish paying') >= 0 && titles.length === 0,
+    ok(U.R.sheet.filter((x) => /^begin:/.test(x)).length === 1 && U.R.sheet.indexOf('again: Hold to finish paying') >= 0 && titles.length === 0,
        'in the same sheet, which asks for the card again, with no card to press', U.R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' ' + titles.join());
     await settle();
   }
@@ -728,14 +728,14 @@ async function world(feePpk, sats, make) {
     pad(till).type('1234');
     await until('the waited payment to be made', () => V.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(V.R));
     await settle();
-    const waited = lines.filter((t) => /Keep holding/.test(t));
+    const waited = lines.filter((t) => /^Over per tap limit/.test(t));
     ok((await bal(V.R)) === 1500 && count(V.card, '24') === 1 + waitsOf(1500, 1000),
        'a charge of one and a half limits is paid after the card has waited for the first limit’s worth over it: seven', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
-    ok(waited.length >= 1 && /^Over the card’s per tap limit\. Keep holding \(\d+ s\)$/.test(waited[0]), 'and the till said to keep holding, with how long it had been and not how long was left', waited.join(' / '));
+    ok(waited.length >= 1 && /^Over per tap limit$/.test(waited[0]), 'and the till said it was over the per tap limit, and said nothing of how long it would be', waited.join(' / '));
     // a small payment paid from a piece worth much more is not over anybody's limit, and is not told it is
-    ok(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 2048, want: 613 }) === 'Paying from a larger piece. Keep holding (3 s)'
-       && /^Over the card’s per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 1500, want: 1500 }))
-       && /^Over the card’s per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3 })),
+    ok(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 2048, want: 613 }) === 'Paying from a larger piece.'
+       && /^Over per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 1500, want: 1500 }))
+       && /^Over per tap limit/.test(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3 })),
        'where the wait is for a piece worth twice the price or more, the till says it is paying from a larger piece, and not that the payment is over a limit');
     if (V.R.W.cardOwed().length) { V.card.tap(); await V.R.W.cardWrite(V.card, { pin: '1234' }); }
 
@@ -1465,7 +1465,7 @@ async function world(feePpk, sats, make) {
          label + ': within the limit but with change made by the card: one limit’s worth of waiting, three seconds, and the till says the card is making change', r.signs + ' SIGN, ' + r.said.length + ' told to hold');
     }
     const till = appOn(NC.R, { screen: 'confirm' });
-    if (!shaped) ok(/^The card is making change\. Keep holding \(\d+ s\)$/.test(till.fcProgressText(r.said[0])), 'in those words', till.fcProgressText(r.said[0]));
+    if (!shaped) ok(till.fcProgressText(r.said[0]) === 'Keep holding.', 'in those words', till.fcProgressText(r.said[0]));
     NC.card.tap(); await NC.R.W.cardWrite(NC.card, { change: true });
     r = await signN(900);
     if (shaped) {
@@ -1971,14 +1971,14 @@ async function world(feePpk, sats, make) {
     pad(till).type('1234');
     await until('the payment and its change to be finished', () => UB.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UB.R));
     await settle();
-    const piece = (k) => 'The card is making change · piece ' + k + ' of 4. Keep holding.';
+    const piece = (k) => 'Making change ' + k + ' of 4.';
     const asked = UB.card.sent.filter((a) => a.slice(0, 4) === 'b026').length;
     ok((await bal(UB.R)) === 1631 && asked === 4,
        'at a till: 1,631 paid from a card of one piece of 4,096, the card making four pieces of its change', (await bal(UB.R)) + ', ' + asked + ' change commands');
-    const making = lines.filter((t) => /making change/.test(t));
+    const making = lines.filter((t) => /^Making change/.test(t));
     ok(making.join(' / ') === [1, 2, 3, 4].map(piece).join(' / '),
        'the line under the heading moves from piece to piece, between the pieces being named and the signature: "' + piece(1) + '"', making.join(' / '));
-    const said = UB.R.sheet.filter((x) => /^say: The card is making change/.test(x));
+    const said = UB.R.sheet.filter((x) => /^say: Making change/.test(x));
     ok(said.length === 4 && said[0] === 'say: ' + piece(1) && said[3] === 'say: ' + piece(4), 'and the phone’s sheet is told the same, a piece at a time', said.join(' / '));
     const order = [lines.indexOf('Signing'), lines.indexOf(piece(1)), lines.indexOf(piece(4))];
     ok(order[0] >= 0 && order[1] > order[0] && order[2] > order[1], 'after "Signing", before anything else', JSON.stringify(order));
@@ -2005,7 +2005,7 @@ async function world(feePpk, sats, make) {
     await until('the exact payment to be finished', () => UC.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UC.R));
     await settle();
     const quiet = felt2.filter((f) => f.kind !== 'light');
-    ok((await bal(UC.R)) === 700 && !quiet.some((f) => f.kind === 'triple') && quiet.filter((f) => f.kind === 'tap').length === 1 && !UC.R.sheet.some((x) => /making change/.test(x)),
+    ok((await bal(UC.R)) === 700 && !quiet.some((f) => f.kind === 'triple') && quiet.filter((f) => f.kind === 'tap').length === 1 && !UC.R.sheet.some((x) => /[Mm]aking change/.test(x)),
        'a payment made exactly asks for no three buzzes and says nothing of making change', JSON.stringify(quiet.map((f) => f.kind)));
 
     // the other half of the phone: the page's call is a kind the phone knows (Foxy/Bridge/FoxyBridge.swift), and the web fallback has its pattern
@@ -2040,7 +2040,7 @@ async function world(feePpk, sats, make) {
     ok(two.sats === 350 && waitsTaken === 7 - Math.floor(2 * (two.change ? count(SP.card, '26') : 0) / 3) && ahead.length === 1 && ahead[0].second === true && ahead[0].left === waitsTaken && SP.card.one.paid === 2,
        'a second payment in it waits at the card, and the wallet had said so before the PIN was sent: how many signatures, and that it is a second payment',
        waitsTaken + ' waits, said ' + JSON.stringify(ahead));
-    ok(notes.filter((q) => !q.ahead).length === waitsTaken && /^A second payment in one tap\. Keep holding \(\d+ s\)$/.test(appOn(SP.R).fcProgressText(ahead[0])),
+    ok(notes.filter((q) => !q.ahead).length === waitsTaken && appOn(SP.R).fcProgressText(ahead[0]) === 'Keep holding.',
        'the screen told the person to keep holding for each, in words that say why', appOn(SP.R).fcProgressText(ahead[0]));
     // the card out of the field and back: a new time in the field, which the sheet knows (`link.again`) and a test does by hand
     SP.card.tap();
