@@ -9865,7 +9865,12 @@
     });
     return tell.then(function () {
       var kept = headerKept();
-      if (!kept || !(Number(kept.time) > info.now)) return card;
+      // the log says why nothing was shown: the owner's screen shows the card's clock, and a clock that does not move is a question
+      if (!kept) { console.log('[foxy] card: its clock is at ' + info.now + '; this phone has no block header to show it'); return card; }
+      if (!(Number(kept.time) > info.now)) {
+        console.log('[foxy] card: its clock is at ' + info.now + ', not behind this phone’s newest block ' + headerShort(kept.hash) + ' (time ' + kept.time + '): nothing to show it');
+        return card;
+      }
       var block = headerShort(kept.hash), blockTime = kept.time;
       card.clock.sent = true;
       return t.ask(cardCommand(CARD_INS.header, 0, kept.hex, 4)).then(function (r) {
@@ -14101,7 +14106,8 @@
       }
       var chosen = usable[0].header;
       if (usable.length === 1) {
-        say('only ' + usable[0].source + ' gave a header this phone could use (' + notes.join('; ') + '); taken on its word alone');
+        say('only ' + usable[0].source + ' gave a header this phone could use (' + notes.join('; ') + '); block ' + headerShort(chosen.hash)
+            + ' (time ' + chosen.time + ') taken on its word alone');
       }
       if (before && before.time > chosen.time) {
         say('the block ' + headerShort(chosen.hash) + ' is older than the one kept, ' + headerShort(before.hash) + '; the one kept stands');

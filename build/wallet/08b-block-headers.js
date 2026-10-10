@@ -207,7 +207,8 @@
       }
       var chosen = usable[0].header;
       if (usable.length === 1) {
-        say('only ' + usable[0].source + ' gave a header this phone could use (' + notes.join('; ') + '); taken on its word alone');
+        say('only ' + usable[0].source + ' gave a header this phone could use (' + notes.join('; ') + '); block ' + headerShort(chosen.hash)
+            + ' (time ' + chosen.time + ') taken on its word alone');
       }
       if (before && before.time > chosen.time) {
         say('the block ' + headerShort(chosen.hash) + ' is older than the one kept, ' + headerShort(before.hash) + '; the one kept stands');
