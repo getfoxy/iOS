@@ -214,6 +214,19 @@ async function world(pin, o) {
     await settle();
   }
 
+  /* ---- 4b: a record with no owner is not a set-up: a card given a design by hand reads as new ------------------- */
+  {
+    const H4 = await funded({}, 0);
+    const c4 = newCard(H4, undefined, { format: 4 });
+    await c4.send('00a404000af0464f5859434152440100');
+    const rec = 'b0320000' + '72' + '00' + '00'.repeat(33) + '00'.repeat(65) + '0e' + Buffer.from('https://m.test', 'latin1').toString('hex');
+    ok((await c4.send(rec)).slice(-4) === '9000', 'a blank card takes a record from anyone');
+    c4.tap();
+    const seen = await H4.W.cardLook(c4);
+    ok(seen.info.hasRecord === true && seen.info.owner === false && seen.info.setUp === false && seen.info.pinSet === false,
+       'a record and no owner is not a set-up on 1.16 and later: the card reads as new, to be set up, with its record kept', JSON.stringify({ setUp: seen.info.setUp, owner: seen.info.owner }));
+  }
+
   /* ---- 5: ADD PIN: the owner's grant, then the PIN sealed; every payment asks for it until an allowance is set ----------- */
   {
     const { H, R, card } = await world(null);

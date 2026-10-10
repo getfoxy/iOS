@@ -142,7 +142,10 @@
               * whether a PIN exists (a blocked one does). `setUp`: the card has its record and can be used: before 1.16 that
               * needed a PIN as well. */
              noPinKnown: noPinKnown, noPin: { limit: noPinKnown ? cardU32(h, 34) : 0, spent: noPinKnown ? cardU32(h, 38) : 0 },
-             pinSet: b(7) !== 0, setUp: b(11) === 1 && (b(7) !== 0 || noPinKnown),
+             pinSet: b(7) !== 0,
+             /* `setUp`: a record and, before 1.16, a PIN; from 1.16 a record and an OWNER, which set-up writes last: a card
+              * whose record was written by hand (a design put on it before it is set up) is not set up, and reads as new */
+             setUp: b(11) === 1 && (noPinKnown ? b(16) === 1 : b(7) !== 0),
              /* `resetKnown`: the card's software is 1.17 or later, whose owner can reset it (the version says so, as for `costed`):
               * no PIN, no owner, no record, no limits, no log and a new key, with its clock and its software kept. */
              resetKnown: resetKnown,
