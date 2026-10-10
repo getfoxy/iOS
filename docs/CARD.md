@@ -28,7 +28,11 @@ does not repeat the protocol. The limits are listed at the end and argued in
   not known. The list of what only a
   card and a hand can show is
   `DEVICE-TESTS.md` §23.
-- **The time the card is told is interim, and weak** (*The time*, below).
+- **A card's clock is the newest Bitcoin block header it has been shown**, from
+  software 1.15, which no terminal can set; before it, the clock was a time told
+  under a signature by a key built into the app, which a terminal could (*The
+  time*, below). Neither the fetch of the header nor a card that takes it has
+  run on a real card.
 - **A card is cash.** Lose it and the money on it is gone. Whoever has the card
   and its PIN has the money, up to the daily limit if there is one.
 - No independent review or audit has covered the card code. Do not put on a
@@ -53,7 +57,7 @@ nothing from this: the receiver always asks the mint first.
   money cannot be switched: ADD FUNDS says to withdraw all of it. On an empty
   card, the owner's phone is offered SWITCH TO <its mint> there, and the card's
   record is rewritten in the tap that writes the funds; the PIN, owner, limit
-  and time key stay as they were. Moving the money across by Lightning, with a
+  and clock stay as they were. Moving the money across by Lightning, with a
   card that still holds it, is built and tested at two local mints, but the app
   has no button for it.
 - **Cards are cash only.** A card set up so that the phone that loaded it can
@@ -103,8 +107,8 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    and limit. Whoever holds the card and this phone's seed phrase holds its
    money.` CONTINUE or CANCEL. It is the one place that says what making this
    phone the owner means.
-5. One tap writes the PIN, then the card's record (this phone's mint and the
-   time key), and last the owner key. The owner goes in last so that no step
+5. One tap writes the PIN, then the card's record (this phone's mint, and for
+   a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 6. **THE CARD IS READY**: that it is cash, that whoever has the card and its PIN
    has the money, and that if the card is lost the money on it is gone.
@@ -809,7 +813,11 @@ How it behaves:
   left of today cannot be spent today, whatever the payment.
 - **A day is 24 hours from when its window began.** Setting the limit begins a
   window. The first spend after a day has passed begins the next. A terminal
-  that straddles a boundary can take up to two days' limit in a short time.
+  that straddles a boundary can take up to two days' limit in a short time. The
+  hours are the card's own clock's: from 1.15 the newest block header it has
+  been shown, so a day turns when a block of a day later reaches the card, and
+  a limit set before the card has seen any block begins its day with the first
+  (*The time*).
 - **A payment the mint refuses still charges the day.** The card counted what it
   signed when it signed, and putting the pieces back (*A payment the mint
   refuses*) gives the day nothing back. Only the owner's phone can set the limit,
@@ -845,11 +853,11 @@ This is the card that signs once for a payment (software 1.5). An older card's
 second limit was a window of ten seconds of its clock, and refused; what
 follows is the one a card has now.
 
-- **It asks no clock, and refuses nothing.** The card's clock is only the last
-  time it was told (*The time*), and whoever can tell it a time can turn a
-  day, or a window of seconds. This limit counts nothing against time and
-  remembers nothing from one payment to the next, so there is nothing to
-  replay: a payment is judged by its own size, every time.
+- **It asks no clock, and refuses nothing.** The card's clock moves only when
+  it is told something (*The time*), and before 1.15 whoever could tell it a
+  time could turn a day, or a window of seconds. This limit counts nothing
+  against time and remembers nothing from one payment to the next, so there is
+  nothing to replay: a payment is judged by its own size, every time.
 - **The drawer is cut to it.** A top-up onto a card with this limit cuts
   nothing larger than the largest power of two under the limit (*Adding
   money*). A limit set lower than pieces the card already holds asks the PIN
@@ -921,8 +929,9 @@ record of a card's use that does not depend on any terminal being honest.
 
 - **Four counts**: taps, sats signed for, spends refused for being over a
   limit, and runs of such refusals (below).
-- **The last eight taps**, newest first: when (the time the card had been
-  told), sats signed for, how many pieces, how many refusals, and a mark.
+- **The last eight taps**, newest first: when (the card's clock; from 1.15 also
+  the time the terminal told the card at that tap), sats signed for, how many
+  pieces, how many refusals, and a mark.
 - **A tap is one time in a phone's field**, from the card being powered to its
   being taken away. A terminal that cuts the field to begin again shows as more
   taps, and the counts count them all, so pushing the eight round hides nothing.
@@ -932,22 +941,29 @@ record of a card's use that does not depend on any terminal being honest.
   what the card has left before it asks. So three or more refusals inside ten
   seconds of the card's clock are a terminal trying the limit again and again,
   and the card marks that tap. One refusal at each of three visits is not that.
-  It needs a limit to be set: a card with none refuses nothing.
+  It needs a limit to be set: a card with none refuses nothing. From 1.15 the
+  card's clock moves only as it is shown newer blocks, so the ten seconds are
+  the card's own, and three refusals before its clock next moves are one run;
+  the log says `before its clock moved on`. A card that has been shown no block
+  yet has no clock to tell visits apart by, so each of its refusals is a run of
+  its own and it marks nothing: a false mark is worse than none.
 
 The holder's phone reads it whenever it reads a card it owns (the owner's proof
 opens it, with no PIN; a till is not shown it). The card's screen says nothing
 of it unless the card has something to accuse: `TAMPER: a terminal tried 5
 times to take more than this card's limit. Press here.` for as long as a marked
-tap is among the eight, or `TAMPER: this card has been told a false time. Press
-here.` What else the card did is in this phone's history, which has it already.
+tap is among the eight, or, for a card before 1.15, `TAMPER: this card has been
+told a false time. Press here.` What else the card did is in this phone's
+history, which has it already.
 The line opens **TAMPER ON THIS CARD**: the taps, the totals, and `Since this
 phone last looked:` what has been added, which the phone works out from the
 counts it saw last time (`foxy.flashcard.logseen`).
 
 What it does not do: it says when and how much, never who; a terminal that
 overcharges within the limits leaves no mark, only the amount; and the times in
-it are the times the card was told, which a terminal built to cheat can choose
-(*The time*).
+it are, before 1.15, the times the card was told, which a terminal built to
+cheat can choose. From 1.15 each tap has two: the card's own, a block's, which
+nobody can choose, and the terminal's, a note, which it can (*The time*).
 
 ### What was put on, a false time, and receipts
 
@@ -956,14 +972,17 @@ them with the log.
 
 - **What was put on.** Each tap's line says what was put onto the card in it
   as well as what the card signed for: `$2.00 put on`.
-- **A false time.** The card cannot know the time, but it can see being told
-  it twice in one tap, more than two minutes apart, and marks that tap; and
-  this phone can see a card whose clock is more than five minutes ahead of its
-  own. Either way the card's screen says `TAMPER: this card has been told a
-  false time`, and the log says which it was. A till whose own clock is wrong
-  does the second by accident; a terminal walking the clock forward to turn
-  the card's day does both. The daily limit rests on that clock and cannot be
-  relied on while it is ahead.
+- **A false time** (a card before 1.15). The card cannot know the time, but it
+  can see being told it twice in one tap, more than two minutes apart, and
+  marks that tap; and this phone can see a card whose clock is more than five
+  minutes ahead of its own. Either way the card's screen says `TAMPER: this
+  card has been told a false time`, and the log says which it was. A till
+  whose own clock is wrong does the second by accident; a terminal walking the
+  clock forward to turn the card's day does both. The daily limit rests on
+  that clock and cannot be relied on while it is ahead. A card of 1.15 cannot
+  be told a false time: its clock is a block header, which no one can make for
+  a time that has not come. It writes no such mark, and neither screen speaks
+  of one.
 - **Receipts.** For every payment the card keeps when, what its pieces were
   worth, a hash of exactly what it signed, and the first output of the swap
   the money went into. It gives them to its owner's phone only, sixteen back;
@@ -973,6 +992,12 @@ them with the log.
   this one among them. So a receipt does not say who took a payment; it lets
   a wallet be shown to be the one that did, or not. COPY RECEIPTS on the log
   copies them as text, for whoever has to be shown.
+- **Two times, from 1.15.** A receipt is 73 bytes, and from 1.15 77: the card's
+  clock (the newest block's time) and, beside it, the time the terminal told
+  the card at that tap, a note the card trusts for nothing. The log's entries
+  are 16 bytes, and from 1.15 20, with the told time at the end. The log shows
+  each tap at the time the phone told the card with the block's beside it
+  (`3:41 PM (block 3:30 PM)`), and COPY RECEIPTS gives both, in two columns.
 
 ## Change PIN, withdraw, and a blocked card
 
@@ -1002,15 +1027,96 @@ twelve words stays blocked.
 
 ## The time
 
-A card has no running clock. It keeps the latest time it has been told, and it
-accepts a time only if it carries a signature by the card's **time key**, which
-is written to the card at set-up. The clock only moves forward. Every tap tells
-the card the time once, before anything that depends on the day is read.
+A card has no running clock. It keeps a number and moves it forward, and what
+moves it changed in software 1.15.
 
-**For now, the time is the receiving phone's own clock, signed by a key that is
-inside the app.** Its private half is a constant named `InterimCardTime` in
-`Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy of
-the app, and in the tests. That is on purpose and is documented where it is
+**From 1.15, the time is the newest Bitcoin block header the card has been
+shown.** The card believes a header for the work in it, and not for who brings
+it (`SET_HEADER`, 80 bytes, as the network carries them). It hashes them twice
+and the hash, read as a number, must be at or under the target the header's own
+difficulty (`bits`) names. That target must also be no easier than a floor built
+into the card, and no easier than four times the target of the hardest header
+the card has taken, which is a quarter of its work, so that headers made cheaply
+later cannot stand in for the network's. A header later than the card's clock
+moves the clock to the time written in it; an earlier one changes nothing and is
+no fault, so a terminal that brings the header it has is never in the wrong. No
+one can show the card a block from a time that has not come, because no one has
+the work for one: a terminal, a phone and a stranger's reader all carry its
+clock forward the same way, and none is trusted with it. There is no time key.
+No PIN, owner or record is needed for a header and the card is in any state, a
+blocked or locked card included, when it takes one. The floor is in the card's
+software and rises with the network in each version, so a card set up years from
+now starts from its own.
+
+The bar a header must clear only climbs, and a network that fell to under a
+quarter of its best would leave the card taking no real header again. The one
+way out is a new record (the owner's, or the PIN's on an open card): it lets the
+ratchet go. The hardest difficulty the card has taken is forgotten and the next
+header sets it afresh, and the clock, its day and the hash of the last block
+stay as they were.
+
+A day's limit counts against that clock: a window of 24 hours of block time from
+its start. A limit set before the card has seen any header has a window with no
+start, which the first header it takes begins; until then the card spends its
+first day on trust: it loads and spends up to the limit and no further, and
+nothing answers `6A92` (never told the time) any more.
+
+- **What a tap sends.** After the card has said what its clock reads, every
+  phone sends it two things. The newest header the phone has kept, if it is
+  later than the card's clock: once, and a card that is current is sent none.
+  And the phone's own time (`TELL_TIME`), once in each time in the field. That
+  one is a note, kept in the card's RAM and written into the receipts and the
+  log entries made in that time. The card trusts it for nothing, and nothing it
+  is told moves its clock or its day. A terminal that lies about it lies in its
+  own entries, and the owner's screen shows it beside the block's, so the lie
+  is seen. Neither command can fail a tap: a card that refuses a header keeps
+  the clock it had.
+- **Where the phone gets a header.** From two block explorers, mempool.space and
+  Blockstream, each at its onion address, each on a circuit of its own, over Tor
+  (`build/wallet/08b-block-headers.js`). It keeps a header only when it is 80
+  bytes of the block the source named as its tip, its hash is at or under its
+  own target, its time is within three hours of the phone's clock, and the two
+  sources name the same tip. With only one answering, or one failing those
+  checks, the other is taken on its word alone and the log says so. The newest
+  good header is kept (`foxy.flashcard.header`). It is fetched when Tor comes
+  up, when the app comes back to the front and when a card is tapped, if the
+  one kept is older than ten minutes and the phone has a route, and not more
+  than once a minute after a failure. A tap uses what is kept and never waits
+  for the fetch. Nothing here runs on a timer.
+- **What it takes from the phone's clock.** The phone's clock is the middle of
+  the three hours a header's time is held to, and the note the card is told. It
+  is not checked against the network's: the native side gives the page no view
+  of the network's time, so the device clock stands alone. Tor itself will not
+  use a consensus that is not current by its own clock, so a clock hours out
+  tends not to get a route at all.
+- **What the owner's screen shows.** Under the limits, `CLOCK · block 1fa7ca83… ·
+  3:40 PM`: the eight digits after the zeros every block hash begins with (the
+  eight at the front are always the same) and the time in that block, or `CLOCK
+  · NO BLOCK YET`. A card with a day's limit and no block yet says `THE DAY
+  BEGINS WITH THE CARD'S FIRST BLOCK`. The log shows each tap at the time the
+  phone told the card with the block's beside it. Nothing says a card has been
+  told a false time, because it cannot be. A card more than three hours ahead of
+  the newest header this phone has kept is a line in the log, and nothing else:
+  another phone or a till showed it a block this one has not fetched yet.
+- **What it does not do.** A card that is never shown a newer block keeps its
+  day where it was: a phone with no route keeps the header it fetched, which
+  grows old, and a card tapped only there is no further on than that. The
+  clock is the network's ten minutes at best, and a block's time is its miner's
+  (the network accepts one up to two hours ahead of the real time). The card
+  trusts the work in a header and no source for it, so who a header came from
+  is of no account, and neither is any key.
+
+**Before 1.15, the time was told under a signature, and was weak.** A card
+before 1.15 keeps the latest time it has been told, and accepts a time only if
+it carries a signature by the card's **time key**, which is written to the card
+at set-up. The clock only moves forward. Every tap tells the card the time once,
+before anything that depends on the day is read. Such a card is still told the
+time that way, and set up with that key, until the last of them is gone.
+
+**For those cards the time is the receiving phone's own clock, signed by a key
+that is inside the app.** Its private half is a constant named `InterimCardTime`
+in `Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy
+of the app, and in the tests. That is on purpose and is documented where it is
 used. It makes the daily limit **as weak as trusting the receiver's clock** (the
 limit on one tap asks no clock, and is not weakened by this):
 
@@ -1023,11 +1129,8 @@ limit on one tap asks no clock, and is not weakened by this):
   never takes an earlier one, so its day is frozen. The way out is for the owner
   to write the card a different time key while the card is empty.
 
-No screen says that the limit stops an attacker, because until the time is real
-it does not. A scheme with no signing key at all is meant to replace this: the
-card is told a Bitcoin block header, checks its proof of work against a floor
-written at set-up, and takes its timestamp if that is newer than its own. It
-needs a new version of the applet and is not built.
+No screen says that the limit stops an attacker, because on those cards it does
+not.
 
 ## Paying with no connection
 
@@ -1046,8 +1149,9 @@ receiver's.
   none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE).
   It is one tap, with no second, and a longer one than online: from a drawer of
   $50 a price of $1 to $10 is five to nine pieces;
-- the card's time is signed on the phone, which works with no connection, and the
-  daily limit is looked at as ever;
+- the card's clock needs no connection: the phone tells it the time (a note, or
+  before 1.15 a signed time) and shows it the newest header it has kept (1.15
+  and on), and the daily limit is looked at as ever, by the clock the card has;
 - the card's signatures are checked on the phone, and so is each piece's DLEQ
   proof where the card can supply one. The card holds none today, so a piece
   the mint never signed cannot be told from a real one, which is why this stays
@@ -1094,13 +1198,13 @@ wait, and the payment is made when the wallet next asks.
 
 ## What is kept on the phone
 
-Eight stores, named in `STORAGE.md`: ecash made for a card and not yet written to
+Nine stores, named in `STORAGE.md`: ecash made for a card and not yet written to
 it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused; for a card that makes its own change, what the mint signed for it); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
 said a card's pieces were good, so a phone with no connection can say `Verified 2
-Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); and the receipts read from this phone's own cards (`foxy.flashcard.receipts`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
+Hours Ago`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified Just Now`, that, or
 `Not Verified`.
 
 **The card's face.** A card is drawn in a design named by a code of three
@@ -1118,7 +1222,9 @@ other phone draws it as FL1. This phone sets up its cards as FX1.
 The card repository's `FOXY-CARD-SPEC.md` §10 has the full list. The ones that
 matter to a person:
 
-- **A terminal built to cheat**, while the time is interim (above).
+- **A terminal built to cheat**, on a card before 1.15, whose time is interim
+  (above). A card of 1.15 cannot be told a time it has to believe, but one that
+  is never shown a newer block keeps its day where it was.
 - **A receiver's phone that shows one amount and asks the card for more.** The
   limit does not check a payment, and nothing on the card can. Looking at the
   card's balance afterwards finds it out; it does not undo it.
@@ -1149,15 +1255,23 @@ matter to a person:
 - Screens: `build/app/26f-flashcard.js`, and the FLASHCARD block of
   `build/markup.html`.
 - The wallet's side: `build/wallet/08a-flashcard.js` (reading, signing, pieces,
-  the interim time key) and `build/wallet/21a-flashcard.js` (set-up, adding and
-  taking money, the owner's proofs).
+  the clock a tap gives a card, the interim time key of the cards before 1.15),
+  `build/wallet/08b-block-headers.js` (the block headers that clock is made of,
+  fetched over Tor and checked) and `build/wallet/21a-flashcard.js` (set-up,
+  adding and taking money, the owner's proofs).
 - Native: `Foxy/Flashcard/` (`CardLink.swift`, the NFC session; `CardGate.swift`,
-  which commands may pass; `CardTime.swift`, the interim time), and
+  which commands may pass; `CardTime.swift`, the interim time of the cards before 1.15), and
   `Foxy/Bridge/FoxyBridge+Flashcard.swift`. The bridge actions are in
   `THREAT-MODEL.md` §1, and the owner key's derivation is in `SEED-HANDLING.md`.
 - Tests: `tests/flashcard-*.js` run in `tools/check-all.sh` against a model of
   the card held to the applet's own conversation. `tests/flashcard-fewer.js` pins
-  the cash-drawer cut and the exact sets it makes; `tests/flashcard-release.js`
+  the cash-drawer cut and the exact sets it makes; `tests/flashcard-clock.js`
+  pins the card's clock: three real block headers at the card's real floor and
+  mined ones at a cheap floor for the rules a real one cannot reach, the fetch
+  from two explorers over a fake Tor and what it will not believe, a tap that
+  sends the header only when the card is behind and never waits for a fetch,
+  and what the log, the receipts and the CLOCK line make of it;
+  `tests/flashcard-release.js`
   pins the card being let go before the mint, a refusal and its put-back tap, a
   lost answer, and the circuit made ready as the sheet opens. `tests/flashcard-applet.js` is
   opt-in and drives the wallet against the applet itself over a local port.

@@ -129,6 +129,19 @@ final class RouteTests: XCTestCase {
         XCTAssertFalse(HostApprovals.approves("cashu.space", approved: HostApprovals.builtIn, carried: []))
     }
 
+    /// The two block explorers a card's clock is fetched from are approved without an alert, and no other onion is.
+    func testTheBlockExplorersAreApprovedAndNoOtherOnion() {
+        let known = HostApprovals.builtIn.union(HostApprovals.explorers)
+        XCTAssertEqual(HostApprovals.explorers.count, 2)
+        for host in HostApprovals.explorers {
+            XCTAssertTrue(host.hasSuffix(".onion"), host)
+            XCTAssertTrue(HostApprovals.approves(host, approved: known, carried: []), host)
+        }
+        for other in ["example.onion", "mempool.space", "evilmempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion"] {
+            XCTAssertFalse(HostApprovals.approves(other, approved: known, carried: []), other)
+        }
+    }
+
     /// I4(b): a carried host approves itself, never the names under it.
     func testACarriedHostIsApprovedExactly() {
         let carried = Set(HostApprovals.carriable(["co.uk", "getalby.com", "mint.coinos.io", "8333.space"]))

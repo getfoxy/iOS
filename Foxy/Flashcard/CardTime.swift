@@ -1,7 +1,10 @@
 import Foundation
 import CryptoKit
 
-/// The time a card is told, and the signature it checks it by.
+/// The time a card is told, and the signature it checks it by. For a card of
+/// software 1.14 and before: a card of 1.15 and on has no time key and takes no
+/// signed time, its clock being the newest Bitcoin block header it has been shown
+/// (build/wallet/08b-block-headers.js), so nothing here is asked of it.
 ///
 /// A Foxy card keeps no clock. Its day (the window its limit is counted in) is
 /// measured by the last time it was told, and it takes a time only with a

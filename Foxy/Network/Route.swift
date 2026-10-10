@@ -643,7 +643,8 @@ struct AnswerTooLarge: LocalizedError {
 /// and payment domains this person uses.
 ///
 /// Approved without asking: the mints Foxy lists by default and any host under
-/// one, a host the person allowed and any host under it (a lightning address's
+/// one, the two block explorers a card's clock comes from (`explorers`), a host
+/// the person allowed and any host under it (a lightning address's
 /// callback on its own subdomain), and exactly the mints and contact domains a
 /// wallet already had the first time this version ran.
 ///
@@ -660,6 +661,16 @@ enum HostApprovals {
     static let builtIn: Set<String> = [
         "mint.minibits.cash", "mint.westernbtc.com",
         "mint.macadamia.cash", "nofee.testnut.cashu.space", "testnut.cashu.space",
+    ]
+    /// The two block explorers, by their onion addresses, that a card's clock is fetched from
+    /// (build/wallet/08b-block-headers.js: mempool.space's and Blockstream's). The page asks them on its
+    /// own, as Tor comes up or a card is tapped, with nobody adding a mint, so an alert for a host
+    /// that nobody has heard of would be asked about for nothing, and a refusal would stop the clock.
+    /// They are published addresses, the same for everybody, and a request to either goes
+    /// to its operator and to no one the page chose.
+    static let explorers: Set<String> = [
+        "mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion",
+        "explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion",
     ]
     /// Hosts the person allowed in the alert. In earlier builds the carried
     /// hosts were added here too, and those still approve their subdomains:
@@ -703,7 +714,7 @@ enum HostApprovals {
     }
 
     static func isApproved(_ host: String) -> Bool {
-        approves(host, approved: builtIn.union(stored()), carried: carried())
+        approves(host, approved: builtIn.union(explorers).union(stored()), carried: carried())
     }
 
     /// The rule, apart from the keychain: a host in `approved` or under one, or

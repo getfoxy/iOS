@@ -9,6 +9,8 @@
  * had under jCardSim and compares every answer.
  *
  *     const card = makeCard({ window, key });  // window: the page's (its CashuTS signs); key: 64 hex
+ *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.15 (`software: 14` and before are the cards before it)
+ *     makeCard({ window, format: 4, floorBits: 0x207fffff })   // the least work a block header must show: the real floor unless a test mines its own headers
  *     const answer = await card.send('b001000000');
  *     card.tap();                                // the card leaves and comes back
  *     card.leaveAfter(2);                        // it leaves the field two commands from now
@@ -73,13 +75,31 @@ function makeCard(opts) {
    * the day's limit to the pieces whole as a payment begins, and works the wait out there. `software: 12` is the card that
    * makes its own change but waits four signatures to a limit's worth, and a payment within the limit that makes change waits
    * one; `software: 13` is the card whose wait is shaped (`SHAPED`, `waitsFor`) but takes one wait off for each piece of change
-   * it made; the card with no `software` is the latest, 1.14, whose change counts toward the wait for what it cost, two for
-   * every three pieces (`COSTED`). */
+   * it made; `software: 14` is the card whose change counts toward the wait for what it cost, two for every three pieces
+   * (`COSTED`), and whose clock is a time under a signature (SET_TIME, a time key in its record, 73-byte receipts and
+   * 16-byte log entries, `6a92` for a limit and no time); the card with no `software` is the latest, 1.15, whose clock is
+   * the time in the newest Bitcoin block header it has taken (`HEADERS`: SET_HEADER and TELL_TIME, no time key, 77-byte
+   * receipts and 20-byte entries, and a first day on trust). */
   const DESIGN = SEALED && o.software !== 9;
   const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
   const SHAPED = OWN_CHANGE && o.software !== 12;
   const COSTED = SHAPED && o.software !== 13;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? 14 : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const HEADERS = COSTED && o.software !== 14;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? 15 : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  /* The least work a block header must show (the applet's FLOOR_BITS, 0x1800FFFF: a target of 2^184), as `bits`. A test that
+   * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
+   * of a hash); the card of the tests is the real one unless it is asked. */
+  const FLOOR_BITS = o.floorBits === undefined ? 0x1800FFFF : (Number(o.floorBits) >>> 0);
+  const TOP = (1n << 256n) - 1n;
+  /* The target a header's `bits` name (the applet's `targetOf`): the three-byte mantissa placed `exponent` bytes up from the
+   * bottom. `bits` is the header's four bytes read as a little-endian number, so the exponent is the top byte. null for a
+   * difficulty no header could carry: a size of 0 or past 32, or a mantissa with its top bit set (the applet answers 6a80). */
+  const targetOf = (bits) => {
+    const exp = bits >>> 24, man = bits & 0xffffff;
+    if (exp < 1 || exp > 32 || (man & 0x800000)) return null;
+    return exp >= 3 ? BigInt(man) << BigInt(8 * (exp - 3)) : BigInt(man >> (8 * (3 - exp)));
+  };
+  const sha256x2 = (buf) => sha256(sha256(buf));
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   // software 1.13 and on: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
@@ -107,11 +127,15 @@ function makeCard(opts) {
     /* The card's own log (the applet's cardLog): counts that only go up, the run of over-limit refusals in hand, and a
      * ring of the last eight taps. A tap, here, is one time in the field: `tapOpen` is gone with the power (`tap()`). */
     log: { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
-           ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0 })) },
+           ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0, told: 0 })) },
     // the quicker card's receipts: a count of every payment it has signed, and the last sixteen (when, how much, the
     // hash of what was signed, the first output it went to)
-    receipts: { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) },
+    receipts: { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, told: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) },
     timeTold: false, timeMarked: false, timeFirst: 0,
+    /* The clock of a card of 1.15 (HEADERS): the `bits` of the hardest header it has taken (a number, as the header's four
+     * bytes read little-endian; 0 for none), the hash of the last header taken (64 hex, as Bitcoin shows a block hash), and
+     * the time the terminal last told it (the applet's tapTime: RAM, gone with the power, not with a SELECT; 0 until told). */
+    hardest: 0, headerHash: '00'.repeat(32), told: 0,
     tapOpen: false,
     /* That a payment has been signed in this time in the field (the applet's tapOpen[1]): gone with the power (`tap()`), and
      * not with a SELECT. From 1.13 the next payment signed in it waits as one over the limit does, unless the owner's grant
@@ -222,7 +246,7 @@ function makeCard(opts) {
   const logEntry = () => {
     if (!s.tapOpen) s.log.taps = stop(s.log.taps + 1);
     const at = (((s.log.taps & 0xff) - 1) & 7);
-    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: s.timeMarked ? 4 : 0, loads: 0, loaded: 0 }; s.tapOpen = true; }
+    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: s.timeMarked ? 4 : 0, loads: 0, loaded: 0, told: s.told }; s.tapOpen = true; }
     return s.log.ring[at];
   };
   /* A spend over a limit, written down and then refused: the third in a run inside one tap's ten seconds of the clock
@@ -231,7 +255,9 @@ function makeCard(opts) {
     const e = logEntry();
     s.log.refused = stop(s.log.refused + 1);
     if (e.refused < 255) e.refused += 1;
-    if (s.log.run === 0 || s.now < s.log.runAt || s.now >= s.log.runAt + TAP) { s.log.runAt = s.now; s.log.run = 1; }
+    /* A new run: the first there has been, a clock behind the run's start, ten seconds on from it, and (from 1.15) every refusal on a card that has
+     * seen no block header yet (now = 0): with no clock, three visits a week apart would read as one run of three, and a false mark is worse than none. */
+    if (s.log.run === 0 || (HEADERS && s.now === 0) || s.now < s.log.runAt || s.now >= s.log.runAt + TAP) { s.log.runAt = s.now; s.log.run = 1; }
     else if (s.log.run < 255) s.log.run += 1;
     if (s.log.run === 3) s.log.tampers = stop(s.log.tampers + 1);
     if (s.log.run >= 3) e.flags |= 1;
@@ -240,7 +266,7 @@ function makeCard(opts) {
   /* The limits, held to what a payment's pieces are worth together (format 4): '' when it is within them; '6a92' with a
    * limit and no time; over the day or the tap, written down and refused. */
   const overLimits = (total, carry) => {
-    if (s.record.limit !== 0 && s.now === 0) return '6a92';
+    if (!HEADERS && s.record.limit !== 0 && s.now === 0) return '6a92';
     if (s.record.limit !== 0) {
       const t = (s.now >= s.windowStart + DAY ? 0 : s.spent) + total;
       if (carry || t > s.record.limit || t > 4294967295) return refuse('6a8f');
@@ -289,7 +315,7 @@ function makeCard(opts) {
     const day = value.readUInt32BE(0);
     const tap = both ? value.readUInt32BE(4) : 0;
     // the limit on one payment asks no clock, and so needs no time; the day's does
-    if ((day !== 0 || (!PACED && both && tap !== 0)) && s.now === 0) return '6a92';
+    if (!HEADERS && (day !== 0 || (!PACED && both && tap !== 0)) && s.now === 0) return '6a92';
     if (!both || day !== s.record.limit) { s.record.limit = day; s.windowStart = s.now; s.spent = 0; }
     if (both && tap !== s.tapLimit) { s.tapLimit = tap; if (!PACED) { s.tapStart = s.now; s.tapSpent = 0; } }
     return '9000';
@@ -357,8 +383,10 @@ function makeCard(opts) {
       }
       case 0x16: {
         const mint = Buffer.from(s.record.mint, 'latin1');
+        // where the time key was (65 bytes): from 1.15 the hardest header's bits (4, as a header carries them: little-endian), the last header's hash (32) and zeros (29)
+        const clockBytes = HEADERS ? hex(Buffer.from(u32(s.hardest), 'hex').reverse()) + s.headerHash + '00'.repeat(29) : s.record.timeKey;
         return '0' + FORMAT + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
-          + s.record.refund + s.record.timeKey + ('0' + mint.length.toString(16)).slice(-2) + hex(mint)
+          + s.record.refund + clockBytes + ('0' + mint.length.toString(16)).slice(-2) + hex(mint)
           + (DESIGN ? (s.record.design ? hex(Buffer.from(s.record.design, 'latin1')) : '000000') : '') + '9000';
       }
       case 0x18: {
@@ -371,7 +399,7 @@ function makeCard(opts) {
           let said = u32(n);
           for (let k = p2; k < kept && k < p2 + 3; k++) {
             const r = s.receipts.ring[(last - k) & 15];
-            said += u32(r.time) + u32(r.sats) + r.hash + r.out;
+            said += u32(r.time) + (HEADERS ? u32(r.told || 0) : '') + u32(r.sats) + r.hash + r.out;
           }
           return said + '9000';
         }
@@ -384,7 +412,7 @@ function makeCard(opts) {
           const e = s.log.ring[(newest - k) & 7];
           // the quicker card's entry is sixteen bytes: what was put on in the tap after what was signed for
           out += u32(e.time) + u32(e.sats) + byte(e.pieces) + byte(e.refused) + byte(e.flags)
-            + (QUICK ? byte(Math.min(255, e.loads || 0)) + u32(e.loaded || 0) : '00');
+            + (QUICK ? byte(Math.min(255, e.loads || 0)) + u32(e.loaded || 0) : '00') + (HEADERS ? u32(e.told || 0) : '');
         }
         return out + '9000';
       }
@@ -571,7 +599,7 @@ function makeCard(opts) {
           if (pay.waited) e.flags |= 2; }
         // its receipt: when, how much leaves the card, the hash of what was signed, and where the first of it went
         if (QUICK) {
-          s.receipts.ring[s.receipts.count & 15] = { time: s.now, sats: net, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
+          s.receipts.ring[s.receipts.count & 15] = { time: s.now, told: s.told, sats: net, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
           s.receipts.count = stop(s.receipts.count + 1);
         }
         // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
@@ -625,7 +653,7 @@ function makeCard(opts) {
         if (!mayLoad()) return '6982';
         if (!s.owner) return '6a90';
         if (!s.record.set) return '6a8c';
-        if (s.now === 0) return '6a92';
+        if (!HEADERS && s.now === 0) return '6a92';
         if (s.slots.findIndex((x) => x.status === 0) < 0) return '6a84';
         // one piece, or (the quicker card) up to three end to end: each as one alone would be, in order
         if (data.length < 81 || data.length % 81 !== 0 || data.length > (QUICK ? 243 : 81)) return '6700';
@@ -691,10 +719,14 @@ function makeCard(opts) {
         const refund = rec.subarray(1, 34);
         if (refund[0] === 0) { if (refund.some((v) => v !== 0)) return '6a80'; }
         else if (refund[0] !== 2 && refund[0] !== 3) return '6a80';
+        // bytes 34 to 98 held a time signer's key until 1.15 and are not read by a card of it (a phone of an earlier software still sends one, a later one zeros)
         const timeKey = rec.subarray(34, 99);
-        if (timeKey[0] !== 4) return '6a80';
-        const newKey = hex(timeKey) !== s.record.timeKey;
-        s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: hex(timeKey), mint: rec.subarray(100, 100 + mintLen).toString('latin1'), design: design };
+        if (!HEADERS && timeKey[0] !== 4) return '6a80';
+        const newKey = !HEADERS && hex(timeKey) !== s.record.timeKey;
+        s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: HEADERS ? s.record.timeKey : hex(timeKey), mint: rec.subarray(100, 100 + mintLen).toString('latin1'), design: design };
+        /* From 1.15 a new record lets the ratchet go: the hardest difficulty the card has taken is set to nothing and the next header sets it afresh, the one
+         * way out for a card whose network has fallen under a quarter of its best. The clock itself, its window and the last header's hash stay. */
+        if (HEADERS) s.hardest = 0;
         // a different time key is the one thing that sends the card's clock, and the day it was counting, back to nothing
         if (newKey) { s.now = 0; s.windowStart = 0; s.spent = 0; s.tapStart = 0; s.tapSpent = 0; }
         return '9000';
@@ -716,6 +748,8 @@ function makeCard(opts) {
         return writeLimit(got.value);
       }
       case 0x35: {
+        // SET_TIME: a time under a signature. Gone in 1.15 (the key could be copied out of any phone), and unassigned since
+        if (HEADERS) return '6d00';
         if (data.length < 6) return '6700';
         const len = data[4];
         if (len < 1 || len > 72 || data.length !== 5 + len) return '6700';
@@ -736,6 +770,46 @@ function makeCard(opts) {
           if (s.tapOpen) logEntry().flags |= 4;
         }
         return u32(s.now) + '9000';
+      }
+      case 0x36: {
+        /* SET_HEADER (1.15): a Bitcoin block header, the 80 bytes as the network carries them. The card's clock is the time in the
+         * newest one it has taken. It hashes the 80 bytes twice and the hash, read as a number, must be at or under the target the
+         * header's own `bits` name (6a93); the target must be at or under the floor (6a93) and at or under four times the target of
+         * the hardest header taken, a quarter of its work (6a93); bits no header could carry are 6a80, any other length 6700. No PIN,
+         * no owner, no record, whatever state the card is in. A header later than the clock moves it, anchors the window of a day's
+         * limit set before any header, and is remembered (the hardest's bits where it is the hardest yet, and its hash); an older one
+         * changes nothing and is 9000. Answers the clock. */
+        if (!HEADERS) return '6d00';
+        if (data.length !== 80) return '6700';
+        const shown = Buffer.from(sha256x2(data)).reverse();            // as Bitcoin shows a block hash
+        const bits = data.readUInt32LE(72);
+        const own = targetOf(bits);
+        if (own === null) return '6a80';
+        if (BigInt('0x' + hex(shown)) > own) return '6a93';
+        if (own > targetOf(FLOOR_BITS)) return '6a93';
+        const seen = s.hardest !== 0;
+        if (seen) {
+          const quarter = targetOf(s.hardest) * 4n;
+          if (own > (quarter > TOP ? TOP : quarter)) return '6a93';
+        }
+        const time = data.readUInt32LE(68);
+        if (time > s.now) {
+          const harder = !seen || own < targetOf(s.hardest);
+          s.now = time;
+          // a day's limit set before the card had seen a header: its window begins at this one
+          if (s.record.limit !== 0 && s.windowStart === 0) s.windowStart = time;
+          if (harder) s.hardest = bits;
+          s.headerHash = hex(shown);
+        }
+        return u32(s.now) + '9000';
+      }
+      case 0x37: {
+        /* TELL_TIME (1.15): the terminal's own clock, four bytes big-endian, a note for this time in the field that is written into
+         * the receipts and the log entries made in it. Trusted for nothing: no PIN, no key, no state refuses it. Answers nothing. */
+        if (!HEADERS) return '6d00';
+        if (data.length !== 4) return '6700';
+        s.told = data.readUInt32BE(0);
+        return '9000';
       }
       case 0x40: {
         if (SEALED && p1 > 1) return '6a86';
@@ -864,15 +938,15 @@ function makeCard(opts) {
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.tapPaid = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.tapPaid = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; s.told = 0; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* It leaves as it answers the `nth` command of this instruction: the card has done what was asked, and nobody hears. */
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 13) ? VERSION : undefined, burnMost: BURN_MOST });
-      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 14) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS });
+      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, told: 0 });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */
@@ -888,6 +962,8 @@ function makeCard(opts) {
     },
     secretOf: (i) => secretOf(s.slots[i]),
     format: FORMAT,
+    // the software it is, as its minor version (15 for 1.15), for a test that has to read a layout the software changed
+    version: VERSION,
     balance: () => s.slots.reduce((a, x) => (x.status === 1 ? a + amountOf(x) : a), 0),
   };
 }

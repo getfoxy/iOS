@@ -12,15 +12,23 @@
    *                                      take back if they are lost.
    *
    * The daily limit is the most the card signs for in one day. The card keeps
-   * its own clock (told the time by every phone that taps it), counts the whole
-   * worth of every piece it signs against the day it falls in, and starts the
-   * count again by itself when the day is over. A card has none until its owner
-   * sets one; only the phone that holds the words the card was set up with, the
-   * owner, can set, change or remove it, change the card's PIN, or add funds
-   * without the PIN. While the time the card is told comes from the receiving
-   * phone's own clock (build/wallet/08a-flashcard.js, CARD_TIME_KEY), the limit
-   * bounds an honest receiver and the holder's own overspending, and nothing is
-   * said anywhere on these screens about stopping an attacker.
+   * its own clock, counts the whole worth of every piece it signs against the
+   * day it falls in, and starts the count again by itself when the day is over.
+   * A card has none until its owner sets one; only the phone that holds the
+   * words the card was set up with, the owner, can set, change or remove it,
+   * change the card's PIN, or add funds without the PIN.
+   *
+   * A card of software 1.15 and on takes its clock from the newest Bitcoin
+   * block header it has been shown (build/wallet/08b-block-headers.js): no one
+   * can show it a block from a time that has not come, so no terminal can walk
+   * its day forward, and a screen of ours says the block its clock reads
+   * (CLOCK, under its limits). The phone's own time is only a note the card
+   * writes in its log and receipts, and the log shows it beside the block's.
+   * An older card is told the time by the phone that taps it, under a signature
+   * whose key is built into the app (build/wallet/08a-flashcard.js,
+   * CARD_TIME_KEY): there the limit bounds an honest receiver and the holder's
+   * own overspending, and nothing is said anywhere on these screens about
+   * stopping an attacker.
    *
    * Three things here are not this app's to draw. The sheet that slides up
    * while the phone looks for a card is the phone's own, and one line of text
@@ -1342,7 +1350,11 @@
       log: card.log || null,
       // its receipts, as this phone has them: { count, list, fresh }; and how far its clock is ahead of this phone's, in seconds
       receipts: card.receipts || null,
-      clockAhead: Math.round(Number(card.clockAhead) || 0),
+      // (for a card before 1.15 only: a card of 1.15 and on is ahead of this phone's newest block header at most, which no screen says)
+      clockAhead: (card.info && card.info.headers) ? 0 : Math.round(Number(card.clockAhead) || 0),
+      // a card of software 1.15 and on keeps its time by Bitcoin block headers: the block its clock reads (the hash of the last it was shown, and the time in it)
+      headers: !!(card.info && card.info.headers),
+      clock: (card.info && card.info.headers) ? { hash: String(card.info.headerHash || ''), short: (W && card.info.headerHash) ? W.headerShort(card.info.headerHash) : '', time: Number(card.info.now) || 0 } : null,
       owner: !!(card.info && card.info.owner),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
@@ -1892,11 +1904,22 @@
     const fc = this.state.fc || {};
     const log = fc.log;
     if (!log || !log.last) return;
-    const refusals = log.last.some((x) => x.tamper);
-    const counted = !refusals && !!log.since && log.since.tampers > 0;
-    const clock = log.last.some((x) => x.clock) || fc.clockAhead > 0 || counted;
+    /* A card of software 1.15 and on cannot be told a false time: its clock is block headers, which no one can make for a time
+     * that has not come, so nothing here speaks of one (`fc.headers`). A mark the card counted that this phone cannot find in
+     * its eight taps is, for such a card, a run of refusals that has left the ring. */
+    const blocks = !!fc.headers;
+    const refusals = log.last.some((x) => x.tamper) || (blocks && !!log.since && log.since.tampers > 0);
+    const counted = !blocks && !log.last.some((x) => x.tamper) && !!log.since && log.since.tampers > 0;
+    const clock = !blocks && (log.last.some((x) => x.clock) || fc.clockAhead > 0 || counted);
     const marked = refusals || clock;
     const n = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+    /* When a tap was. A card of 1.15 and on writes the time its terminal told it beside the time in the newest block header it
+     * had: the phone's own, to the second, with the block's beside it. A card before it has the one time, its own clock. */
+    const when = (x) => {
+      if (!blocks) return this.fcWhen(x.time);
+      const block = x.time > 0 ? 'block ' + this.fcWhen(x.time) : 'no block yet';
+      return x.told > 0 ? this.fcWhen(x.told) + ' (' + block + ')' : block;
+    };
     // in dollars, at the price now: the card keeps sats and knows no price
     const line = (x) => {
       const said = [];
@@ -1906,7 +1929,7 @@
       if (put) said.push(this.fcPrice(x.loaded) + ' put on');
       if (x.waited) said.push('over the per tap limit');
       if (x.refused) said.push(x.refused + ' refused');
-      return this.fcWhen(x.time) + ': ' + said.join(', ')
+      return when(x) + ': ' + said.join(', ')
         + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '');
     };
     const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
@@ -1923,8 +1946,9 @@
     this.blockedCard('fc-log', Object.assign({
       long: true,
       tone: marked ? 'warn' : 'ask', title: marked ? 'TAMPER ON THIS CARD' : 'THIS CARD’S OWN LOG',
-      reason: (refusals ? 'A terminal asked this card for more than its limit allows, three times or more within ten seconds. The card refused each time and wrote it down.\n\n' : '')
-        + ((log.last.some((x) => x.clock) || counted) ? 'A terminal told this card the time twice in one tap, more than two minutes apart. No phone’s clock does that: it is how a daily limit is got round.\n\n' : '')
+      reason: (refusals ? 'A terminal asked this card for more than its limit allows, three times or more ' + (blocks ? 'before its clock moved on' : 'within ten seconds') + '. The card refused each time and wrote it down.\n\n' : '')
+        + ((!blocks && (log.last.some((x) => x.clock) || counted)) ? 'A terminal told this card the time twice in one tap, more than two minutes apart. No phone’s clock does that: it is how a daily limit is got round.\n\n' : '')
+        + (blocks ? 'This card keeps its time by Bitcoin blocks, which no terminal can set. Each tap is shown at the time the phone that tapped it told the card, with the block the card had beside it.\n\n' : '')
         + ahead
         + 'Kept by the card itself. No phone or terminal can change it.\n\n' + since
         + log.last.map(line).join('\n')
@@ -1952,8 +1976,17 @@
     const W = this.fcW();
     const list = (W && W.cardReceipts) ? W.cardReceipts(fc.key) : [];
     if (!list.length) { this.toast('No receipts to copy.', true); return; }
-    const text = ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, by the card’s clock), sats, sha256 of the message signed, first output (B_)']
-      .concat(list.map((r) => '#' + r.n + ', ' + new Date(r.time * 1000).toISOString().replace('.000Z', 'Z') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
+    const iso = (secs) => new Date(secs * 1000).toISOString().replace('.000Z', 'Z');
+    /* A card of software 1.15 and on writes two times in a receipt: the one its terminal told it (the phone's own clock, a note the
+     * card trusts for nothing) and the time in the newest block header the card had (its own clock). A card before it has the one, which
+     * was told it under a signature: it goes in the first column, and the second has none. */
+    const blocks = list.some((r) => r.told !== undefined);
+    const text = (blocks
+      ? ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, as the phone that tapped it told the card), block time (UTC, the card’s clock), sats, sha256 of the message signed, first output (B_)']
+        .concat(list.map((r) => '#' + r.n + ', ' + (r.told !== undefined ? (r.told > 0 ? iso(r.told) : '-') : iso(r.time)) + ', '
+          + (r.told !== undefined ? (r.time > 0 ? 'block ' + iso(r.time) : '-') : '-') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
+      : ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, by the card’s clock), sats, sha256 of the message signed, first output (B_)']
+        .concat(list.map((r) => '#' + r.n + ', ' + iso(r.time) + ', ' + r.sats + ', ' + r.hash + ', ' + r.out)))
       .join('\n');
     const copied = this.copySecret ? this.copySecret(text) : false;
     this.toast(copied ? 'Receipts copied.' : 'Could not copy the receipts.', !copied);
@@ -2421,12 +2454,16 @@
       const tried = marked.reduce((n, x) => n + (Number(x.refused) || 0), 0);
       // a false time: the card saw it (told twice in a tap, far apart), or this phone does (the card's clock is ahead of its own)
       // (a mark made in a tap that signed for nothing is in the card's count of marked things and in no entry: new since this phone last looked)
-      const falseTime = log.last.some((x) => x.clock) || fc.clockAhead > 0 || (!marked.length && !!log.since && log.since.tampers > 0);
-      if (marked.length || falseTime) {
+      // A card of software 1.15 and on cannot be told a false time (its clock is block headers): the same mark, with no tap to show it, is a run of refusals.
+      const blocks = !!fc.headers;
+      const lost = !marked.length && !!log.since && log.since.tampers > 0;
+      const falseTime = !blocks && (log.last.some((x) => x.clock) || fc.clockAhead > 0 || lost);
+      if (marked.length || falseTime || (blocks && lost)) {
         notes.push({
           text: marked.length
             ? 'TAMPER: a terminal tried ' + tried + ' times to take more than this card\u2019s limit. Press here.'
-            : 'TAMPER: this card has been told a false time. Press here.',
+            : falseTime ? 'TAMPER: this card has been told a false time. Press here.'
+            : 'TAMPER: a terminal tried to take more than this card\u2019s limit, again and again. Press here.',
           tap: () => this.fcLogCard(),
         });
       }
@@ -2541,7 +2578,15 @@
       // under the balance, where there is a limit: what the day has left, and when it turns
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
       fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
-      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase() : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
+      // a card of 1.15 and on with a limit and no block yet has a day with no start: it begins with the first block the card is shown
+      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
+        : day.onTrust ? 'THE DAY BEGINS WITH THE CARD\u2019S FIRST BLOCK' : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
+      /* Under the limits, for a card whose clock is Bitcoin block headers (software 1.15 and on): the block it reads its time from, as
+       * the hash of the last header it was shown (the eight digits after its zeros) and the time in it; or that it has been shown none. */
+      fcClockShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && !!fc.headers,
+      fcClockLine: !(fc && fc.headers) ? ''
+        : (fc.clock && fc.clock.short && fc.clock.time > 0) ? 'CLOCK \u00b7 block ' + fc.clock.short + '\u2026 \u00b7 ' + this.fcWhen(fc.clock.time).toUpperCase()
+        : 'CLOCK \u00b7 NO BLOCK YET',
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,
       fcAboveLine: (fc && fc.above > 0) ? this.fcPrice(fc.above).toUpperCase() + ' IN PIECES ABOVE THE LIMIT \u00b7 A TILL HOLDS LONGER FOR THOSE' : '',

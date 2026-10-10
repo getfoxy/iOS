@@ -14,8 +14,12 @@ import Foundation
  * foreground (the system ends an NFC session then).
  *
  * A fifth action, cardTime, needs no session and no seed: it gives the page the
- * time a card is to be told, signed (CardTime.swift). The card's owner key is the
- * seed actions' (NativeSeedBridge.swift), and never comes here. */
+ * time a card is to be told, signed (CardTime.swift). Only a card of software 1.14
+ * or before is told a time that way; a card of 1.15 and on takes its clock from
+ * Bitcoin block headers, which the page fetches over Tor (mintRequest) and sends
+ * through cardSend like any other command (CardGate lets 0x36 and 0x37 through).
+ * The card's owner key is the seed actions' (NativeSeedBridge.swift), and never
+ * comes here. */
 extension FoxyBridge {
     /// {text}: open the phone's card sheet with this line on it. Answers "ok"
     /// when a card is there to talk to, and otherwise why not: no NFC, the

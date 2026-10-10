@@ -4,9 +4,25 @@
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
-                 tap: cardTapOf, log: cardLogOf },
-    /* The key a card's time is checked against, which set-up writes (INTERIM: see 08a-flashcard.js). */
+                 tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
+    /* The key a card of software 1.14 and before checks its time against, which set-up writes to such a card (INTERIM: see
+     * 08a-flashcard.js). A card of 1.15 and on has none. */
     cardTimeKey: CARD_TIME_KEY,
+
+    /* The clock of a card of software 1.15 and on is the newest Bitcoin block header it has been shown, and this phone keeps
+     * the newest it can get, from two block explorers over Tor (08b-block-headers.js). A tap uses what is kept and never
+     * waits for the fetch. `headerKept` is { hex, time, hash, bits, at } or null; `headerRefresh` fetches if what is kept is
+     * older than ten minutes and there is a route (`opts.force`: regardless), and resolves { kept, fetched, why };
+     * `headerShort` is a block hash as a line of text says it. `_headersOff` is for the suites: the fetches that happen on
+     * their own (Tor up, the app back, a card tapped) are not made. */
+    headerKept: function () { return headerKept(); },
+    headerRefresh: function (opts) { return headerRefresh(opts); },
+    headerShort: function (hash) { return headerShort(hash); },
+    _headersOff: false,
+    // how long after Tor comes up, or the app comes back, the header is asked for, in ms (the suites set it short)
+    _headerAfterMs: 4000,
+    // how long one request to one explorer may take before that explorer is given up on, in ms (the suites set it short)
+    _headerAskMs: 25000,
     cardPick: function (w, have, want, cap, card, tapCap) { return cardPick(w, have, want, cap, card, tapCap); },
     cardReach: function (amounts) { return cardReach(amounts); },
     /* What a payment waits, in signatures of the card's work, by the rule of the card's software: 1.13 and on (`leaves`, the
@@ -105,7 +121,7 @@
       }).then(function (refund) {
         if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
-        var record = cardRecordHex(refund, mint, undefined, cardCanDesign(card) ? String(o.design || '') : '');
+        var record = cardRecordHex(refund, mint, undefined, cardCanDesign(card) ? String(o.design || '') : '', card.info.headers);
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         return cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
@@ -551,7 +567,7 @@
         if (canonicalMint(card.record.mint) === here) return null;
         if (card.pieces.length) throw cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.');
         if (!card.info.owner) throw cardRefused('6a90');
-        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '');
+        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '', card.info.headers);
         return cardOwned(t, card.key, 'set-card', record).then(function (data) {
           return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {
@@ -865,6 +881,8 @@
        * comes after takes the circuit made ready, and is not the one that waits
        * for a new one (`warmMint`). */
       if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
+      // and the newest block header, if the one kept is old: for the next tap, not this one (`cardClock`)
+      headerSoon();
       var ended = function (e) {
         /* `e.sheetText`: the flow put things right in the sheet before it
          * failed (a refused payment's pieces put back on the card), and the

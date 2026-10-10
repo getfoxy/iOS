@@ -50,6 +50,17 @@ const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
 async function replay(T, format, places, software) {
+  /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
+   * latest card (1.15) is replayed at the model's default, and each earlier recording at its own software (14, 13, 12, ...),
+   * since the model's default moves on with the card. The recording says what it is of: the card repository's
+   * spec/vectors/transcript.json at 1.15 replays here as tests/fixtures/flashcard-transcript.json, and the one it
+   * replaced is kept as flashcard-transcript-114.json.
+   */
+  if (software === undefined && format === 4 && places === undefined) {
+    const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
+    const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
+    if (minor > 0 && minor < 15) software = minor;
+  }
   const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
   // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
@@ -156,9 +167,12 @@ async function replay(T, format, places, software) {
       /* A page of receipts: the count, then for each when, what the pieces were worth, the hash of what was signed and
        * the first output. All of it is the recording's to the byte but the hash, which is over the card's own key. */
       ok(data.length === e.data.length && data.slice(0, 8) === e.data.slice(0, 8), e.name + ': the count of payments, and as many receipts', data.slice(0, 8) + ' / ' + e.data.slice(0, 8));
-      for (let at = 8; at + 146 <= data.length; at += 146) {
-        ok(data.substr(at, 16) === e.data.substr(at, 16) && data.substr(at + 80, 66) === e.data.substr(at + 80, 66), e.name + ': a receipt\u2019s clock, worth and first output');
-        ok(/^[0-9a-f]{64}$/.test(data.substr(at + 16, 64)) && data.substr(at + 16, 64) !== '0'.repeat(64), e.name + ': and a hash');
+      /* 73 bytes a receipt (the clock, the sats, the hash, the output), and from 1.15 77: the clock, the time the terminal told, the sats, the hash, the output.
+       * The hash is over the card's own key and is not compared; everything else is. */
+      const each = card.version >= 15 ? 154 : 146, told = card.version >= 15 ? 8 : 0;
+      for (let at = 8; at + each <= data.length; at += each) {
+        ok(data.substr(at, 16 + told) === e.data.substr(at, 16 + told) && data.substr(at + 80 + told, 66) === e.data.substr(at + 80 + told, 66), e.name + ': a receipt\u2019s clock, worth and first output');
+        ok(/^[0-9a-f]{64}$/.test(data.substr(at + 16 + told, 64)) && data.substr(at + 16 + told, 64) !== '0'.repeat(64), e.name + ': and a hash');
       }
       // the newest is of the payment the model last signed: the hash of that very message
       if (data.length > 8 && card.state.lastText) {
@@ -185,6 +199,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const costed = await replay(read('flashcard-transcript-114.json'), 4, undefined, 14);
   const oneEach = await replay(read('flashcard-transcript-113.json'), 4, undefined, 13);
   const fourSigns = await replay(read('flashcard-transcript-112.json'), 4, undefined, 12);
   const quicker = await replay(read('flashcard-transcript-111.json'), 4, undefined, 11);

@@ -53,6 +53,8 @@
       routeChanged();
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
+      // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
+      if (!wasUp && privacy.tor === 'up') headerLater();
       return FoxyWallet.privacy();
     },
 

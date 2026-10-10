@@ -308,7 +308,7 @@ or the seed.
   the owner public key; a signature for one of a fixed list of five labels
   (`change-pin`, `set-limit`, `set-owner`, `set-card`, `load`) over
   `"FoxyCard/" + label`, the card's 16-byte nonce and a value that must have the
-  shape that label's command takes; and, from `cardTime`, a signed time. Any other
+  shape that label's command takes; and, from `cardTime`, a signed time (for a card of software 1.14 or before; a card of 1.15 is shown Bitcoin block headers and takes none). Any other
   label, in particular `lock` and `time`, and any other shape, is "bad request"
   before the seed is read. It moves no counter and has no window. A page that had
   been got at can ask for a signature for any card whose key it knows, but a
@@ -317,7 +317,9 @@ or the seed.
   it, it can do what the card's owner can with no PIN, which includes setting the
   PIN, lifting the limit and so spending what is on the card.
 - **The card's time** (`cardTime`, `InterimCardTime` in
-  `Foxy/Flashcard/CardTime.swift`, not a seed action: no seed, no card). The
+  `Foxy/Flashcard/CardTime.swift`, not a seed action: no seed, no card), for a
+  card of software 1.14 or before; a card of 1.15 and on has no time key and is
+  not asked this. The
   phone's clock and a signature over `FoxyCard/time` and the time by the INTERIM
   time key. It is INTERIM: that key's private half is built into the app, so
   anyone can extract it, and this is as weak as trusting the receiving phone's own

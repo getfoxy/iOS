@@ -40,7 +40,10 @@
   var CARD_MINT_MAX = 77;   // 80 before the design (card software 1.10): the proof, the record, the mint and it in one APDU
   var CARD_DAY = 86400;
 
-  /* ---- INTERIM: the key a card checks the time against -------------------------
+  /* ---- INTERIM: the key a card of software 1.14 and before checks the time against ----
+   *
+   * (A card of 1.15 and on has no time key: its clock is Bitcoin block headers, 08b-block-headers.js.
+   * Everything below is for the cards before it, and goes when the last of them does.)
    *
    * A card keeps a clock of its own and a daily limit counted against it. The
    * clock is told the time under a signature, which the card checks against the
@@ -88,8 +91,9 @@
    * day, in sats, and 0 is no limit. `owner`: whether the card has an owner,
    * which changing its PIN, its limit and its record, and loading it with no
    * PIN, need the proof of. `now` is the card's own clock (0 until it has been
-   * told the time), `windowStart` when its current day began and `spentToday`
-   * what it has signed for since. */
+   * told the time: before software 1.15, a time under a signature; from it, the
+   * time in the newest block header it has been shown), `windowStart` when its
+   * current day began and `spentToday` what it has signed for since. */
   function cardInfoOf(hex) {
     var h = String(hex || '').toLowerCase();
     /* 42 bytes from a card that has the limit on one tap (1.3, asked with P1 = 1);
@@ -98,6 +102,7 @@
     if (!cardHexOk(h, 42) && !cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
     var tapKnown = h.length === 84;
     var b = function (i) { return parseInt(h.substr(i * 2, 2), 16); };
+    var headers = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 15));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -150,21 +155,38 @@
               * version says so, as for `shaped`): a piece is about two thirds of a
               * signature's work. Software 1.13 took one off for each piece, which was
               * more than a piece costs (`cardWaitSigns`). */
-             costed: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 14)) };
+             costed: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 14)),
+             /* `headers`: the card's clock is the time in the newest Bitcoin block header it has been shown (software 1.15
+              * and on; the version says so, as for `costed`). It has no time key and takes no signed time; it is shown a
+              * header (SET_HEADER) and told the phone's own time as a note (TELL_TIME); its receipts are 77 bytes and its
+              * log entries 20; and it spends its first day on trust, with a limit and no header yet (`cardClock`,
+              * `cardDayOf`). `headerTime` is its clock, the time in the last header that moved it. `headerBits` and
+              * `headerHash` are the hardest difficulty it has taken and the hash of the last header taken: the card's
+              * record says them (GET_CARD), and `cardLook` puts them here. */
+             headers: headers, headerTime: headers ? cardU32(h, 17) : 0, headerBits: '', headerHash: '' };
   }
 
   /* GET_CARD: format, set, unit, limit, refund key, time key, mint, and, from
    * card software 1.10, the card's design after the mint: a code of three
    * characters naming its face (docs/CARD-DESIGNS.md), or three zeros for none.
-   * A card before 1.10 answers nothing after the mint. */
-  function cardRecordOf(hex) {
+   * A card before 1.10 answers nothing after the mint. From 1.15 the 65 bytes
+   * where the time key was say something else: the hardest block header's `bits`
+   * (4 bytes, as the header carries them; zeros if it has taken none, or since a new
+   * record let that ratchet go), the hash of the
+   * last header it took (32 bytes, as Bitcoin shows a block hash) and 29 zeros. The
+   * bytes alone do not say which, so the card's software does: `info` is what
+   * `cardInfoOf` made of its GET_INFO (`info.headers`), and without it the old
+   * layout is read. */
+  function cardRecordOf(hex, info) {
     var h = String(hex || '').toLowerCase();
     if (!/^[0-9a-f]*$/.test(h) || h.length < 212) throw new Error('The card’s record could not be read.');
     var mintLen = parseInt(h.substr(210, 2), 16);
     var withDesign = h.length === (109 + mintLen) * 2;
     if (h.length !== (106 + mintLen) * 2 && !withDesign) throw new Error('The card’s record could not be read.');
     var refund = h.substr(14, 66);
-    var timeKey = h.substr(80, 130);
+    var clocked = !!(info && info.headers);
+    var timeKey = clocked ? '' : h.substr(80, 130);
+    var headerBits = clocked ? h.substr(80, 8) : '', headerHash = clocked ? h.substr(88, 64) : '';
     var mint = '';
     for (var i = 0; i < mintLen; i++) mint += String.fromCharCode(parseInt(h.substr(212 + i * 2, 2), 16));
     var design = '';
@@ -174,7 +196,9 @@
     }
     return { format: parseInt(h.substr(0, 2), 16), set: h.substr(2, 2) === '01', unit: parseInt(h.substr(4, 2), 16) === 0 ? 'sat' : 'other',
              limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, timeKey: /^0+$/.test(timeKey) ? '' : timeKey, mint: mint,
-             design: design, designKnown: withDesign };
+             design: design, designKnown: withDesign,
+             // from 1.15: the hardest difficulty taken and the last header's hash ('' for none)
+             headerBits: /^0*$/.test(headerBits) ? '' : headerBits, headerHash: /^0*$/.test(headerHash) ? '' : headerHash };
   }
 
   /* The design this phone chose for a card whose software cannot carry one
@@ -210,16 +234,24 @@
    * 0 where there is no day in hand (no limit, or the last one is over and the
    * next begins with the next signature it gives). The card's clock is what it was just
    * told: a card that has never been told the time (`noTime`) will not sign
-   * under a limit. */
+   * under a limit, until software 1.15, where there is no such card: one with a
+   * limit and no block header yet (`onTrust`) has a day with no start, which the
+   * first header it is shown gives, and spends what the limit allows in the
+   * meantime on trust. */
   function cardDayOf(info) {
     var limit = Number(info && info.limit) || 0;
+    var headers = !!(info && info.headers);
     if (!limit) return { limited: false, limit: 0, spent: 0, left: null, turns: 0, now: Number(info && info.now) || 0, noTime: false };
     var now = Number(info.now) || 0;
     var begun = Number(info.windowStart) || 0;
+    if (headers && now === 0 && begun === 0) {
+      var counted = Number(info.spentToday) || 0;
+      return { limited: true, limit: limit, spent: counted, left: Math.max(0, limit - counted), turns: 0, now: 0, noTime: false, onTrust: true };
+    }
     var over = now >= begun + CARD_DAY;
     var spent = over ? 0 : (Number(info.spentToday) || 0);
     return { limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY,
-             now: now, noTime: now === 0 };
+             now: now, noTime: !headers && now === 0 };
   }
 
   /* The same for the limit on one tap: what the card has left of the tap it is
@@ -390,10 +422,15 @@
   /* `wide`: the quicker card's entries, sixteen bytes: after what was signed
    * for, the pieces and the sats that were PUT ON in the tap. And one flag
    * more: the card was told the time twice in that tap, the second more than
-   * two minutes on, which no phone's clock does (`clock`). */
-  function cardLogOf(hex, wide) {
+   * two minutes on, which no phone's clock does (`clock`).
+   * `told`: the entries of software 1.15, twenty bytes: the sixteen, and then the time
+   * the terminal told the card at that tap (`told`, seconds; 0 if it told none), a note
+   * the card trusts for nothing. `time` is then the card's own clock, the time in the
+   * newest block header it had when the tap began, and there is no flag for a clock
+   * moved twice: the clock cannot be moved by a time that is told. */
+  function cardLogOf(hex, wide, told) {
     var h = String(hex || '').toLowerCase();
-    var each = wide ? 32 : 24;
+    var each = told ? 40 : wide ? 32 : 24;
     if (!/^[0-9a-f]*$/.test(h) || h.length < 32 || (h.length - 32) % each !== 0 || h.length > 32 + 8 * each) throw new Error('The card\u2019s log could not be read.');
     var taps = [];
     for (var at = 32; at < h.length; at += each) {
@@ -401,8 +438,9 @@
       taps.push({ time: cardU32(h, at / 2), sats: cardU32(h, at / 2 + 4), pieces: parseInt(h.substr(at + 16, 2), 16),
                   refused: parseInt(h.substr(at + 18, 2), 16), tamper: (flags & 1) === 1,
                   // a payment in that tap was over the card's limit on one payment, and was waited for
-                  waited: (flags & 2) === 2, clock: (flags & 4) === 4,
-                  loads: wide ? parseInt(h.substr(at + 22, 2), 16) : 0, loaded: wide ? cardU32(h, at / 2 + 12) : 0 });
+                  waited: (flags & 2) === 2, clock: !told && (flags & 4) === 4,
+                  loads: (wide || told) ? parseInt(h.substr(at + 22, 2), 16) : 0, loaded: (wide || told) ? cardU32(h, at / 2 + 12) : 0,
+                  told: told ? cardU32(h, at / 2 + 16) : 0 });
     }
     return { taps: cardU32(h, 0), sats: cardU32(h, 4), refused: cardU32(h, 8), tampers: cardU32(h, 12), last: taps };
   }
@@ -426,7 +464,7 @@
     return t.ask(cardCommand(CARD_INS.log, 0, '', 0)).then(function (r) {
       if (r.sw !== '9000') return card;
       var log;
-      try { log = /** @type {any} */ (cardLogOf(r.data, !!card.info.quick)); } catch (e) { return card; }
+      try { log = /** @type {any} */ (cardLogOf(r.data, !!card.info.quick, !!card.info.headers)); } catch (e) { return card; }
       var all = cardLogSeen();
       var was = all[card.key];
       // counts that are behind what was seen are another card's software (it was put on anew): no "since" from those
@@ -465,13 +503,19 @@
     return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
   }
 
-  /* GET_LOG, P1 = 1: the count (4), then receipts of 73 bytes, newest first. */
-  function cardReceiptsOf(hex) {
+  /* GET_LOG, P1 = 1: the count (4), then receipts, newest first. Of 73 bytes: the card's clock,
+   * the sats, the hash and the output. From software 1.15 (`told`), 77: the card's clock (the
+   * time in its newest block header), then the time the terminal told it at that tap (0 if it
+   * told none; a note the card trusts for nothing), then the rest as before. */
+  function cardReceiptsOf(hex, told) {
     var h = String(hex || '').toLowerCase();
-    if (!/^[0-9a-f]*$/.test(h) || h.length < 8 || (h.length - 8) % 146 !== 0 || h.length > 8 + 3 * 146) throw new Error('The card\u2019s receipts could not be read.');
+    var each = told ? 154 : 146, after = told ? 8 : 0;
+    if (!/^[0-9a-f]*$/.test(h) || h.length < 8 || (h.length - 8) % each !== 0 || h.length > 8 + 3 * each) throw new Error('The card\u2019s receipts could not be read.');
     var list = [];
-    for (var at = 8; at < h.length; at += 146) {
-      list.push({ time: cardU32(h, at / 2), sats: cardU32(h, at / 2 + 4), hash: h.substr(at + 16, 64), out: h.substr(at + 80, 66) });
+    for (var at = 8; at < h.length; at += each) {
+      // `told` is there only for a card that keeps one (1.15 and on), even if it is 0: a receipt of 73 bytes has no such field
+      list.push({ time: cardU32(h, at / 2), told: told ? cardU32(h, at / 2 + 4) : undefined, sats: cardU32(h, at / 2 + 4 + after / 2),
+                  hash: h.substr(at + 16 + after, 64), out: h.substr(at + 80 + after, 66) });
     }
     return { count: cardU32(h, 0), list: list };
   }
@@ -489,12 +533,12 @@
     var page = function (back, count) {
       return t.ask(cardCommand(CARD_INS.log, 1, '', 0, back)).then(function (r) {
         if (r.sw !== '9000') return null;
-        var got = cardReceiptsOf(r.data);
+        var got = cardReceiptsOf(r.data, !!card.info.headers);
         if (mine && got.count < Number(mine.count)) have = [];
         var known = (mine && got.count >= Number(mine.count)) ? Number(mine.count) : 0;
         got.list.forEach(function (x, k) {
           var n = got.count - back - k;
-          if (n > known) fresh.push({ n: n, time: x.time, sats: x.sats, hash: x.hash, out: x.out });
+          if (n > known) fresh.push({ n: n, time: x.time, told: x.told, sats: x.sats, hash: x.hash, out: x.out });
         });
         // more that are new and still on the card (it holds sixteen)
         var wanted = Math.min(16, got.count - known);
@@ -726,7 +770,10 @@
    * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
   var CARD_AID = 'f0464f58594341524401';
   var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17', log: '18', getChange: '19',
-                   spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', load: '30', clear: '31', setCard: '32', setLimit: '34', time: '35',
+                   spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', load: '30', clear: '31', setCard: '32', setLimit: '34',
+                   /* 35 is SET_TIME, a time under a signature, for a card of software 1.14 and before. From 1.15 the card's clock is
+                    * the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
+                   time: '35', header: '36', tell: '37',
                    verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45' };
 
   function cardByte(n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }
@@ -969,7 +1016,8 @@
    * (`cardTime`: INTERIM, see CARD_TIME_KEY). Resolves the card's clock as it
    * stands. A card that has no record yet has no time key to check against and
    * says so: it is read as it was, and the answer is 0. A card at another signer
-   * is not a card this Foxy can use. */
+   * is not a card this Foxy can use. For a card of software 1.14 and before: a card
+   * of 1.15 and on is not told a time under a signature, and takes none (`cardClock`). */
   function cardTold(t) {
     return nativeJson('cardTime', {}, 20000).then(function (j) {
       var time = Number(j && j.time);
@@ -987,6 +1035,54 @@
     }, function (e) {
       if (e && e.card) throw e;
       throw cardError('no-time-source', 'This phone could not sign the time for the card.');
+    });
+  }
+
+  /* A card whose clock is block headers (software 1.15 and on) is told two things at a tap, and neither is a signature.
+   *
+   * The phone's own time (TELL_TIME), once in each time in the field (`link.one.told`; a card that left and came
+   * back has forgotten it): a note the card keeps in its RAM and writes into the receipts and log entries made in
+   * that time, so that its owner's screen can say when a payment was to the second. The card trusts it for nothing, so
+   * nothing it is told can move its clock or its day.
+   *
+   * And, if the newest block header this phone has kept (08b-block-headers.js) is later than the clock the card
+   * reads out (GET_INFO's `now`, read already), that header (SET_HEADER). The card moves its clock to the time in it if
+   * the work in it is real and enough, and refuses it otherwise; an older header changes nothing and is no fault. When
+   * the clock moved, the card's day may have too (a limit set before any header begins its window with the first), so
+   * GET_INFO is read again. The log says the clock before and after.
+   *
+   * Neither fails the tap. A card that refuses the header keeps the clock it had, and the day it counts is the day it was
+   * counting; a refusal is a line in the log. Only a card that is gone throws. `card.clock` says what was done:
+   * { was, now, sent, told, refused }. A tap uses the header that is kept and never waits for one to be fetched. */
+  function cardClock(t, card, one, o) {
+    var info = card.info;
+    card.clock = { was: info.now, now: info.now, sent: false, told: false, refused: '' };
+    if (!info.headers || (o && o.noTime)) return Promise.resolve(card);
+    var tell = (one && one.told) ? Promise.resolve() : t.ask(cardCommand(CARD_INS.tell, 0, cardU32Hex(Math.floor(Date.now() / 1000)))).then(function (r) {
+      if (r.sw !== '9000') { console.warn('[foxy] card: it took no note of this phone\u2019s time (' + r.sw + ')'); return; }
+      card.clock.told = true;
+      if (one) one.told = true;
+    });
+    return tell.then(function () {
+      var kept = headerKept();
+      if (!kept || !(Number(kept.time) > info.now)) return card;
+      var block = headerShort(kept.hash), blockTime = kept.time;
+      card.clock.sent = true;
+      return t.ask(cardCommand(CARD_INS.header, 0, kept.hex, 4)).then(function (r) {
+        if (r.sw !== '9000' || r.data.length !== 8) {
+          card.clock.refused = r.sw;
+          console.warn('[foxy] card: it would not take block ' + block + ' (' + r.sw + '); its clock stays at ' + info.now);
+          return card;
+        }
+        var now = cardU32(r.data, 0);
+        card.clock.now = now;
+        console.log('[foxy] card: its clock was ' + info.now + ', block ' + block + ' (time ' + blockTime + ') moved it to ' + now);
+        if (now === info.now) return card;
+        return t.want(cardCommand(CARD_INS.info, 1, '', 0), 'to say what it is').then(function (d) {
+          card.info = cardInfoOf(d);
+          return card;
+        });
+      });
     });
   }
 
@@ -1118,8 +1214,11 @@
 
   /* Read everything a card says with no PIN: what it is, its key (and that it
    * holds that key), its record, and every piece on it. The card is told the
-   * time first (every tap does: `cardTold`), so what it says of its day is
-   * what it will act on.
+   * time first (every tap does), so what it says of its day is what it will act
+   * on: a card of software 1.14 and before in a time under a signature
+   * (`cardTold`), a card of 1.15 and on in the newest block header this phone
+   * has, if the card's clock is behind it, and in the phone's own time as a note
+   * (`cardClock`), after it has said what its clock reads.
    *
    * The key is proved, not taken on the card's word: the card signs this
    * phone's sixteen random bytes with sixteen of its own (AUTH). A reader's
@@ -1155,10 +1254,13 @@
      * nothing else does, and which a re-tap empties: a card that has left the
      * field has not been told this time it is powered up). */
     var one = (link && link.one) || null;
+    var clocked = false;
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
       mark('chosen');
-      if (o.noTime || (one && one.told)) return 0;
+      // its software, as it said on being chosen: from 1.15 its clock is block headers, and it is told after it has said what it reads (below)
+      clocked = parseInt(r.data.substr(0, 2), 16) > 1 || (parseInt(r.data.substr(0, 2), 16) === 1 && parseInt(r.data.substr(2, 2), 16) >= 15);
+      if (clocked || o.noTime || (one && one.told)) return 0;
       return cardTold(t).then(function (x) { if (one) one.told = true; return x; });
     }).then(function () {
       mark('time');
@@ -1168,6 +1270,10 @@
       card.info = cardInfoOf(d);
       if (card.info.format !== CARD_FORMAT && card.info.format !== CARD_FORMAT_ALL) throw cardError('not-a-card', 'That card is a kind this Foxy does not know.');
       mark('what it is');
+      // a card of 1.15 and on: the phone's time as a note, and the newest block header if the card's clock is behind it
+      return clocked ? cardClock(t, card, one, o) : null;
+    }).then(function (clock) {
+      if (clock) mark('clock');
       if (one && one.key) return one.key;
       return t.want(cardCommand(CARD_INS.key, 0, '', 0), 'to give its key');
     }).then(function (d) {
@@ -1203,7 +1309,9 @@
       if (!o.noAuth) mark('proof');
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
-      card.record = cardRecordOf(d);
+      card.record = cardRecordOf(d, card.info);
+      // a card of 1.15 and on says its clock's proof in its record: the hardest difficulty it has taken, and the hash of the last header
+      if (card.info.headers) { card.info.headerBits = card.record.headerBits; card.info.headerHash = card.record.headerHash; }
       // the design the card names for its face, where its software carries one; a phone's own file may say otherwise for an older card
       card.design = card.record.design || '';
       mark('record');
@@ -1231,13 +1339,24 @@
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
       card.day = cardDayOf(card.info);
       card.tap = cardTapOf(card.info);
-      /* A card's clock that is ahead of this phone's: somebody has told it a
-       * time that had not come. The card cannot know, and takes any later
-       * time it is told; this phone can, by its own. Five minutes is allowed
-       * for a phone whose clock is a little out. */
-      var here = Number(t.phoneTime) || Math.floor(Date.now() / 1000);
-      card.clockAhead = (card.info.now > here + 300) ? card.info.now - here : 0;
-      if (card.clockAhead) console.warn('[foxy] card: its clock is ' + card.clockAhead + ' seconds ahead of this phone\u2019s: it has been told a time that had not come');
+      if (card.info.headers) {
+        /* A card of 1.15 and on has been shown a block header, which no one can have made for a time that has not come, so
+         * its clock cannot be ahead of the network's. This phone's newest header can be behind the card's, though (another
+         * phone or a till showed the card a later block than this phone has fetched), and the card's clock is compared with
+         * it instead of with this phone's own: ahead of it by more than three hours is a header too old to be this phone's
+         * idea of the time. That is a line in the log and a number here, and nothing on any screen (`fcShow` leaves it out). */
+        var newest = headerKept();
+        card.clockAhead = (newest && card.info.now > Number(newest.time) + HEADER_SKEW) ? card.info.now - Number(newest.time) : 0;
+        if (card.clockAhead) console.warn('[foxy] card: its clock is ' + card.clockAhead + ' seconds ahead of the newest block header this phone has');
+      } else {
+        /* A card's clock that is ahead of this phone's: somebody has told it a
+         * time that had not come. The card cannot know, and takes any later
+         * time it is told; this phone can, by its own. Five minutes is allowed
+         * for a phone whose clock is a little out. */
+        var here = Number(t.phoneTime) || Math.floor(Date.now() / 1000);
+        card.clockAhead = (card.info.now > here + 300) ? card.info.now - here : 0;
+        if (card.clockAhead) console.warn('[foxy] card: its clock is ' + card.clockAhead + ' seconds ahead of this phone\u2019s: it has been told a time that had not come');
+      }
       if (!o.mine || !card.info.owner || card.info.locked) return said(card);
       /* Whether this phone is the owner, and a limit it lifted and did not put back */
       return cardGrant(t, card.key).then(function (yes) {
@@ -2606,12 +2725,13 @@
    * its pieces back or none, the key its time is signed by, and its mint's
    * address as text. Throws where the address is one a card cannot hold.
    * `timeKey` is the card's own where it has one (a card moved to another mint
-   * keeps its clock), and otherwise the interim key. */
-  function cardRecordHex(refundKey, mint, timeKey, design) {
+   * keeps its clock), and otherwise the interim key. A card of software 1.15 and on
+   * (`headers`) has no time key and reads none: the 65 bytes where it was are zeros. */
+  function cardRecordHex(refundKey, mint, timeKey, design, headers) {
     var at = String(mint || '');
     if (!at || at.length > CARD_MINT_MAX || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
-    var key = String(timeKey || CARD_TIME_KEY).toLowerCase();
-    if (!/^04[0-9a-f]{128}$/.test(key)) throw cardError('bad-key', 'That is not a key a card can check a time against.');
+    var key = headers ? new Array(131).join('0') : String(timeKey || CARD_TIME_KEY).toLowerCase();
+    if (!headers && !/^04[0-9a-f]{128}$/.test(key)) throw cardError('bad-key', 'That is not a key a card can check a time against.');
     var hex = '';
     for (var i = 0; i < at.length; i++) hex += cardByte(at.charCodeAt(i));
     // the design after the mint, only for a card whose software takes it (`cardCanDesign`): a code of three characters
@@ -2644,7 +2764,7 @@
       return Promise.reject(cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.'));
     }
     var record;
-    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : ''); } catch (e) { return Promise.reject(e); }
+    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '', card.info.headers); } catch (e) { return Promise.reject(e); }
     return cardOwned(t, card.key, 'set-card', record).then(function (data) {
       return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
     }).then(function () {

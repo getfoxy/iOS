@@ -377,9 +377,13 @@
         var parsed = null;
         try { parsed = raw ? parseBody(raw) : null; } catch (e) {}
         // any answer is a mint that is there; 502-504 is a proxy saying it is
-        // not. Counted in 98-mint-health.js.
-        noteMintAnswer(o.endpoint, classifyAnswer(code, null));
+        // not. Counted in 98-mint-health.js. (Not for what is not a mint: a record is kept for each address
+        // asked, and a block explorer's has the block's hash in it, so every block would add one.)
+        if (!o.foxyText) noteMintAnswer(o.endpoint, classifyAnswer(code, null));
         if (code >= 200 && code < 300) {
+          /* `foxyText`: the answer as it came, for the few things asked of this road that are not a mint's JSON (a block
+           * explorer's hex: build/wallet/08b-block-headers.js). Nothing of a mint's is read out of it. */
+          if (o.foxyText) return raw;
           // keys this phone will not use are refused before they are cached
           var badKey = mintKeysProblem(parsed);
           if (badKey) { console.warn('[foxy]', badKey); throw new Error(badKey); }
@@ -402,7 +406,7 @@
         var CT = window.CashuTS || {};
         var detail = parsed && typeof parsed.detail === 'string' ? parsed.detail : null;
         var message = detail || (parsed && typeof parsed.error === 'string' && parsed.error)
-          || ('The mint answered ' + code + '.');
+          || ((o.foxyText ? 'The server' : 'The mint') + ' answered ' + code + '.');
         // said as what it is: nothing was done, and a minute usually clears it
         if (code === 429) {
           message = hostOf(String(o.endpoint || '')).split('/')[0] + ' is turning requests away for now: too many have reached it this way. '
@@ -423,7 +427,7 @@
         throw err;
       }, function (e) {
         // no answer at all — or refused on this side, which classifyAnswer leaves out
-        noteMintAnswer(o.endpoint, classifyAnswer(0, e));
+        if (!o.foxyText) noteMintAnswer(o.endpoint, classifyAnswer(0, e));
         throw e;
       });
       if (keyUrl) noteKeyRequest(keyUrl, run);

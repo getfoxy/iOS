@@ -33,10 +33,10 @@ final class CardGateTests: XCTestCase {
     }
 
     func testOnlyTheInstructionsThePageUsesAreCarried() {
-        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these twenty-seven
+        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these twenty-nine
         let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "18", "19", "20", "22", "23", "24", "25", "26",
-                       "30", "31", "32", "34", "35", "40", "41", "42", "43", "44", "45"]
-        XCTAssertEqual(carried.count, 27)
+                       "30", "31", "32", "34", "35", "36", "37", "40", "41", "42", "43", "44", "45"]
+        XCTAssertEqual(carried.count, 29)
         XCTAssertEqual(CardGate.instructions, Set(carried.map { UInt8($0, radix: 16)! }), "exactly these, and the table says so")
         for ins in carried {
             XCTAssertNotNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins)")
@@ -54,7 +54,10 @@ final class CardGateTests: XCTestCase {
         XCTAssertEqual(CardGate.read(bytes("b019000000")), .applet(0x19), "the openings of that change, the first page")
         XCTAssertEqual(CardGate.read(bytes("b019020000")), .applet(0x19), "and the last")
         XCTAssertEqual(CardGate.read(bytes("b018000000")), .applet(0x18), "the card's own log")
-        XCTAssertEqual(CardGate.read(bytes("b035000006" + "01020304" + "00" + "00")), .applet(0x35), "the time, signed")
+        XCTAssertEqual(CardGate.read(bytes("b035000006" + "01020304" + "00" + "00")), .applet(0x35), "the time, signed (a card of 1.14 and before)")
+        // a card of software 1.15 and on: a block header (80 bytes, and the clock expected back), and the phone's own time as a note (4 bytes, nothing back)
+        XCTAssertEqual(CardGate.read(bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04")), .applet(0x36), "a block header")
+        XCTAssertEqual(CardGate.read(bytes("b0370000" + "04" + "6ac9dc75")), .applet(0x37), "the phone's own time, as a note")
         XCTAssertEqual(CardGate.read(bytes("b0450000" + "03" + "300100")), .applet(0x45), "the owner's grant to load")
         XCTAssertEqual(CardGate.read(bytes("b0430000" + "03" + "040102")), .applet(0x43), "an owner key")
         XCTAssertEqual(CardGate.read(bytes("b034000005" + "0102030405")), .applet(0x34), "the limit, with the owner's proof")
@@ -88,7 +91,8 @@ final class CardGateTests: XCTestCase {
         let verify = bytes("b04000000431323334")
         XCTAssertFalse(CardGate.allows(verify, selected: false), "a PIN is not sent to a card that has not been chosen")
         // the time and the owner's grant are the applet's too: carried only once it has answered that it was chosen
-        for command in [bytes("b035000006" + "01020304" + "0000"), bytes("b0450000" + "03" + "300100"), bytes("b044000010"), bytes("b0420000" + "02" + "0102")] {
+        for command in [bytes("b035000006" + "01020304" + "0000"), bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04"),
+                        bytes("b0370000" + "04" + "6ac9dc75"), bytes("b0450000" + "03" + "300100"), bytes("b044000010"), bytes("b0420000" + "02" + "0102")] {
             XCTAssertFalse(CardGate.allows(command, selected: false), "\(CardGate.hex(command)) before the applet is chosen")
             XCTAssertTrue(CardGate.allows(command, selected: true), "\(CardGate.hex(command)) after")
         }

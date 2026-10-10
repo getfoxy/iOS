@@ -347,12 +347,16 @@ final class NUT13Tests: XCTestCase {
     }
 
     /// SET_CARD's data: unit (1), refund key (33), time key (65), mint length (1), mint. `carried` is
-    /// how many bytes of mint follow, when that is not what the length byte says.
-    private func record(unit: UInt8 = 1, timeKeyFirst: UInt8 = 0x04, length: Int, carried: Int? = nil) -> [UInt8] {
+    /// how many bytes of mint follow, when that is not what the length byte says. `noTimeKey`: the
+    /// 65 bytes are zeros, as a card of software 1.15 and on is given (it has no time key);
+    /// `spoilTimeKey` then sets one of the 65 to 1.
+    private func record(unit: UInt8 = 1, timeKeyFirst: UInt8 = 0x04, noTimeKey: Bool = false, spoilTimeKey: Int? = nil,
+                        length: Int, carried: Int? = nil) -> [UInt8] {
         var out: [UInt8] = [unit, 0x02]
         out += [UInt8](repeating: 0x22, count: 32)
-        out.append(timeKeyFirst)
-        out += [UInt8](repeating: 0x33, count: 64)
+        var key: [UInt8] = noTimeKey ? [UInt8](repeating: 0x00, count: 65) : [timeKeyFirst] + [UInt8](repeating: 0x33, count: 64)
+        if let at = spoilTimeKey { key[at] = 0x01 }
+        out += key
         out.append(UInt8(truncatingIfNeeded: length))
         out += [UInt8](repeating: 0x6D, count: carried ?? length)
         return out
@@ -378,8 +382,10 @@ final class NUT13Tests: XCTestCase {
         XCTAssertFalse(CardOwner.Label.setOwner.accepts(Array(key.dropLast())))
         XCTAssertFalse(CardOwner.Label.setOwner.accepts(key + [0x55]))
         XCTAssertFalse(CardOwner.Label.setOwner.accepts([]))
-        // set-card: 100 + L bytes for a mint of L, 1 to 80, the time key (index 34 on) starting 04
+        // set-card: 100 + L bytes for a mint of L, 1 to 80, the time key (index 34 on) starting 04, or all zeros (a card of software 1.15 has none)
         for length in [1, 2, 24, 79, 80] { XCTAssertTrue(CardOwner.Label.setCard.accepts(record(length: length)), "mint of \(length)") }
+        for length in [1, 24, 80] { XCTAssertTrue(CardOwner.Label.setCard.accepts(record(noTimeKey: true, length: length)), "no time key, mint of \(length)") }
+        for at in [0, 1, 30, 63, 64] { XCTAssertFalse(CardOwner.Label.setCard.accepts(record(noTimeKey: true, spoilTimeKey: at, length: 5)), "zeros but for byte \(at) of the time key") }
         XCTAssertEqual(record(length: 80).count, CardOwner.mostValueBytes)
         XCTAssertFalse(CardOwner.Label.setCard.accepts(record(length: 0)), "no mint")
         XCTAssertFalse(CardOwner.Label.setCard.accepts(record(length: 81)), "a mint past 80 bytes")
@@ -388,7 +394,7 @@ final class NUT13Tests: XCTestCase {
         XCTAssertFalse(CardOwner.Label.setCard.accepts(record(length: 5, carried: 6)), "says 5 and carries 6")
         XCTAssertFalse(CardOwner.Label.setCard.accepts(record(length: 5, carried: 0)))
         XCTAssertFalse(CardOwner.Label.setCard.accepts(record(timeKeyFirst: 0x02, length: 5)), "a time key that is not uncompressed")
-        XCTAssertFalse(CardOwner.Label.setCard.accepts(record(timeKeyFirst: 0x00, length: 5)))
+        XCTAssertFalse(CardOwner.Label.setCard.accepts(record(timeKeyFirst: 0x00, length: 5)), "a first byte of zero and a key after it")
         XCTAssertFalse(CardOwner.Label.setCard.accepts(Array(record(length: 5).prefix(99))), "shorter than the fixed part")
         XCTAssertFalse(CardOwner.Label.setCard.accepts(Array(record(length: 5).prefix(100))), "the fixed part and a length with no mint")
         XCTAssertFalse(CardOwner.Label.setCard.accepts([]))

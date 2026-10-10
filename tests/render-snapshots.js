@@ -291,6 +291,16 @@ function representative() {
                        last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }].concat(LOG.last) };
   add('flashcard, a card with its own log', at('flashcard', { fc: FC({ tap: TAP, log: LOG }) }, { wallet: CARDS() }));
   add('flashcard, a card whose log has a tap marked as a tamper', at('flashcard', { fc: FC({ tap: TAP, log: LOG_MARKED }) }, { wallet: CARDS() }));
+  /* A card of software 1.15: its clock is Bitcoin block headers. One line under the limits says the block it reads its time from (the
+   * eight digits after its zeros, and the time in it), or that it has been shown none; with a daily limit and no block yet its day has
+   * no start, and the line under what is left says when it will. */
+  const CLOCK = { hash: '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a', short: '1fa7ca83', time: 4102358400 };
+  const NO_CLOCK = { hash: '', short: '', time: 0 };
+  const DAY_ON_TRUST = { limited: true, limit: 5000, spent: 800, left: 4200, turns: 0, now: 0, noTime: false, onTrust: true };
+  add('flashcard, a card of software 1.15, the block its clock reads', at('flashcard', { fc: FC({ headers: true, clock: CLOCK }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.15 with both limits, the block its clock reads under them', at('flashcard', { fc: FC({ headers: true, clock: CLOCK, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.15 that has been shown no block', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.15 with a daily limit and no block yet: a day with no start', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK, limit: 5000, day: DAY_ON_TRUST }) }, { wallet: CARDS() }));
   // the change this card made for itself (software 1.12) that no till has handed back, as its owner's read left it: a line for each state it is in
   const OWES = (parts) => ({ sats: parts.reduce((n, p) => n + p.sats, 0), parts });
   add('flashcard, change a till never handed over, fetched and put on', at('flashcard', { fc: FC({ owes: OWES([{ state: 'put', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
@@ -591,6 +601,12 @@ function cards() {
     last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
   add('card: tamper on this card', (a) => { a.state.fc = { log: { taps: 42, sats: 213400, refused: 5, tampers: 1, since: { taps: 1, sats: 0, refused: 5, tampers: 1 },
     last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }, { time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
+  // the log of a card of software 1.15: each tap at the time the phone that tapped it told the card, with the block the card had beside it
+  add('card: this card\u2019s own log, software 1.15', (a) => { a.state.fc = { headers: true, clockAhead: 0, log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
+    last: [{ time: 4102358400, told: 4102358437, sats: 12288, pieces: 2, refused: 0, tamper: false, clock: false }, { time: 4102358400, told: 0, sats: 3072, pieces: 2, refused: 0, tamper: false, clock: false },
+           { time: 0, told: 4102354800, sats: 0, pieces: 0, refused: 0, tamper: false, clock: false, loads: 3, loaded: 640 }] } }; a.fcLogCard(); });
+  add('card: tamper on this card, software 1.15: a run of refusals, and nothing about a clock', (a) => { a.state.fc = { headers: true, clockAhead: 0, log: { taps: 42, sats: 213400, refused: 5, tampers: 1, since: { taps: 1, sats: 0, refused: 5, tampers: 1 },
+    last: [{ time: 4102358400, told: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true, clock: false }] } }; a.fcLogCard(); });
   add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
   add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'x' }, {}));

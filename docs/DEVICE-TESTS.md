@@ -1714,7 +1714,8 @@ A card with the newer software, set up and loaded by this build. An older card
    payments`, and COPY RECEIPTS copies one line a payment. On the second
    phone the card has no log line at all.
 6. **What was put on.** The log's lines say `put on` for the loads.
-7. **A false time.** Set a second phone's clock a day ahead by hand, and read
+7. **A false time** (a card before software 1.15; 23c-9 is the card after it).
+   Set a second phone's clock a day ahead by hand, and read
    the card on it. Then read the card on the holder's phone. **Pass:** `TAMPER:
    this card has been told a false time`, and the log says the card's clock is
    about a day ahead of this phone's. (Put the second phone's clock back.)
@@ -1812,6 +1813,45 @@ second phone to be the till.
    the second payment of a tap today; if a build ever makes one, the sheet says
    `A second payment in one tap. Keep holding` and the card waits about five
    seconds.)
+
+#### 23c-9. Software 1.15: the clock is Bitcoin block headers
+
+Needs a card on software 1.15 (`01 0f` at SELECT), the holder's phone with Tor
+up, and a second phone to be the till. Foxy fetches the newest block header
+from two block explorers over Tor and shows it to a card whose clock is behind.
+
+1. **The line.** Read the card on the holder's phone, a few minutes after Tor
+   came up. **Pass:** under the limits a line `CLOCK · block xxxxxxxx… · 3:40
+   PM`, the time being that of a block from the last hour or so, and not the
+   phone's own clock. A card shown no block yet says `CLOCK · NO BLOCK YET`
+   until a tap has been made with a header kept.
+2. **A limit with no block.** Set a daily limit on a card that says `NO BLOCK
+   YET` (read it on a phone whose Tor is not up yet, or has never fetched a
+   header, so that the tap shows the card none). **Pass:** `THE DAY BEGINS WITH THE CARD'S FIRST BLOCK`, and the card
+   still loads and pays. After the next tap on a phone that has a header, the
+   line under the limit says when the day turns, a day on from that block.
+3. **A phone with a false clock cannot move the card.** Set the second phone's
+   clock a day ahead by hand, and charge the card on it. **Pass:** the payment is
+   made; the holder's phone reads the card with `CLOCK` still at the block's time
+   (the day did not move), and the log shows that tap at the second phone's time,
+   a day ahead, with `(block ...)` beside it. No `TAMPER` line, no false time.
+   (Put the second phone's clock back.) A phone whose own clock is a day out
+   keeps no header either: its log says `no block header could be used`, each
+   being more than three hours from its clock.
+4. **No connection.** Put the second phone in airplane mode for a while, then
+   charge the card on it. **Pass:** the payment is taken on trust as ever; the
+   card's clock does not move on that tap if the phone's kept header is no
+   newer than the card's. Come back online: the next tap shows the card the
+   newest header, and `CLOCK` moves.
+5. **One source down.** If one of the two explorers is unreachable, the log says
+   only the other was used, and the card's clock moves all the same.
+6. **The log.** Open the holder's log after a payment. **Pass:** each tap is
+   shown at the second phone's time with the block's beside it, and COPY RECEIPTS
+   has two time columns.
+7. **How long a tap takes.** The phone sends the time (a few bytes) and, if it
+   is newer, a block header (80 bytes). Note the time from card found to the
+   tick against a 1.14 card: it should be no longer by more than a few tens of
+   milliseconds, and a stale header must never hold the tap up.
 
 #### 23d. What a card cannot be made to do
 

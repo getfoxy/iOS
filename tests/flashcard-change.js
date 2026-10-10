@@ -12,10 +12,13 @@
  *
  * Software 1.13 shapes the wait: nothing within the limit, change or no change; seven signatures for the first limit's worth
  * over it and three for each after, less one for every piece of change the card made; and one payment a tap at full speed.
- * Software 1.14 (the model's default) takes less off for the change, what it cost: two waits for every three pieces, an output
- * being about two thirds of a signature's work (one for each let a terminal buy the wait down with outputs of a sat).
- * `software: 13` is the card before that, and `software: 12` the one before it, which waited four signatures to a limit's
- * worth and for the change within it; their tables are here too, run on those cards.
+ * Software 1.14 takes less off for the change, what it cost: two waits for every three pieces, an output being about two
+ * thirds of a signature's work (one for each let a terminal buy the wait down with outputs of a sat). Software 1.15 (the
+ * model's default) waits and makes change as 1.14 does, and takes its clock from Bitcoin block headers where 1.14 was told
+ * a time under a signature (tests/flashcard-clock.js); a card with a day's limit and no block yet spends its first day on
+ * trust, where 1.14 and before refused it, 6A92. `software: 14` is the card before that, `software: 13` the one before it,
+ * and `software: 12` the one before that, which waited four signatures to a limit's worth and for the change within it;
+ * their tables are here too, run on those cards.
  *
  * Each rule here is the applet's (its source and its own tests); tests/flashcard-model.js replays the applet's own
  * conversation against the model. The blinded message is checked with arithmetic of this file's own, NUT-00's hash to the
@@ -80,6 +83,8 @@ const blindedBy = (secret, rHex) => compressed(addPoints(hashToCurve(Buffer.from
 
 /* ---- a card to pay with, and a terminal to pay it ------------------------------------------------------------------ */
 const hx1 = (n) => ('0' + n.toString(16)).slice(-2);
+// the card's software as a table's label says it: no `software` is the latest, 1.15
+const versionOf = (software) => (software === 12 ? ' (1.12)' : software === 13 ? ' (1.13)' : software === 14 ? ' (1.14)' : ' (1.15)');
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const sha256hex = (text) => sha(Buffer.from(text, 'utf8'));
@@ -177,27 +182,27 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
 
   /* ---- 2: which card it is -------------------------------------------------------------------------------------- */
   {
-    const now = newCard(), thirteen = newCard({ software: 13 }), twelve = newCard({ software: 12 }), before = newCard({ software: 11 });
-    ok((await now.send(SELECT)) === '010e9000' && (await thirteen.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
-       'SELECT says 1.14, 1.13 for the card with software 13, 1.12 for the card with software 12, and 1.11 for the card before that');
-    await tap(now); await tap(thirteen); await tap(twelve); await tap(before);
-    ok((await now.send('b001000000')).slice(0, 4) === '010e' && (await thirteen.send('b001000000')).slice(0, 4) === '010d' && (await twelve.send('b001000000')).slice(0, 4) === '010c'
-       && (await before.send('b001000000')).slice(0, 4) === '010b',
+    const now = newCard(), fourteen = newCard({ software: 14 }), thirteen = newCard({ software: 13 }), twelve = newCard({ software: 12 }), before = newCard({ software: 11 });
+    ok((await now.send(SELECT)) === '010f9000' && (await fourteen.send(SELECT)) === '010e9000' && (await thirteen.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
+       'SELECT says 1.15, 1.14 for the card with software 14, 1.13 for the card with software 13, 1.12 for the card with software 12, and 1.11 for the card before that');
+    await tap(now); await tap(fourteen); await tap(thirteen); await tap(twelve); await tap(before);
+    ok((await now.send('b001000000')).slice(0, 4) === '010f' && (await fourteen.send('b001000000')).slice(0, 4) === '010e' && (await thirteen.send('b001000000')).slice(0, 4) === '010d'
+       && (await twelve.send('b001000000')).slice(0, 4) === '010c' && (await before.send('b001000000')).slice(0, 4) === '010b',
        'GET_INFO says the same in its version byte');
-    /* and the wallet reads from it what the card does with its change: `shaped` from 1.13, and from 1.14 `costed`, the change counted for what it cost */
+    /* and the wallet reads from it what the card does with its change: `shaped` from 1.13, from 1.14 `costed`, the change counted for what it cost, and from 1.15 `headers`, a clock that is block headers */
     const readInfo = async (c) => W.cardParse.info(dat(await c.send('b001000000')));
-    const reads = [await readInfo(now), await readInfo(thirteen), await readInfo(twelve), await readInfo(before)].map((i) => [i.version, i.shaped, i.costed].join(' '));
-    ok(reads.join() === '1.14 true true,1.13 true false,1.12 false false,1.11 false false',
-       'the wallet reads 1.14 as shaped and costed, 1.13 as shaped and not costed, and the cards before them as neither', reads.join());
-    ok(sw(await listing(now)) === '9000' && sw(await listing(thirteen)) === '9000' && sw(await listing(twelve)) === '9000' && sw(await listing(before)) === '6d00',
-       'GET_CHANGE is the 1.12, 1.13 and 1.14 cards’, and the card before them does not know it');
+    const reads = [await readInfo(now), await readInfo(fourteen), await readInfo(thirteen), await readInfo(twelve), await readInfo(before)].map((i) => [i.version, i.shaped, i.costed, i.headers].join(' '));
+    ok(reads.join() === '1.15 true true true,1.14 true true false,1.13 true false false,1.12 false false false,1.11 false false false',
+       'the wallet reads 1.15 as shaped, costed and keeping its time by block headers, 1.14 as shaped and costed, 1.13 as shaped and not costed, and the cards before them as none of these', reads.join());
+    ok(sw(await listing(now)) === '9000' && sw(await listing(fourteen)) === '9000' && sw(await listing(thirteen)) === '9000' && sw(await listing(twelve)) === '9000' && sw(await listing(before)) === '6d00',
+       'GET_CHANGE is the 1.12, 1.13, 1.14 and 1.15 cards’, and the card before them does not know it');
     fill(before, [100]);
     await begin(before, [0]);
     ok(sw(await change(before, 10)) === '6d00' && sw(await sign(before)) === '6985', 'nor SPEND_ALL_CHANGE, which like any command it does not know gives a begun payment up');
     const six = newCard({ places: 64 });
     await tap(six);
     ok(sw(await listing(six)) === '6d00', 'nor does the card of sixty-four places');
-    ok((await now.copy().send(SELECT)) === '010e9000' && (await thirteen.copy().send(SELECT)) === '010d9000' && (await twelve.copy().send(SELECT)) === '010c9000',
+    ok((await now.copy().send(SELECT)) === '010f9000' && (await fourteen.copy().send(SELECT)) === '010e9000' && (await thirteen.copy().send(SELECT)) === '010d9000' && (await twelve.copy().send(SELECT)) === '010c9000',
        'and a copy of a card is the card of its software');
   }
 
@@ -414,9 +419,11 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
   }
 
   /* ---- 7: the limits are held to what leaves the card -------------------------------------------------------- */
-  for (const software of [undefined, 13, 12]) {
-    // what the wait is: 1.13's and 1.14's is shaped, nothing within the limit; 1.12 waits a limit's worth for making change, four signatures to a limit's worth
-    const V = software === 12 ? ' (1.12)' : software === 13 ? ' (1.13)' : ' (1.14)';
+  for (const software of [undefined, 14, 13, 12]) {
+    // what the wait is: 1.13's, 1.14's and 1.15's is shaped, nothing within the limit; 1.12 waits a limit's worth for making change, four signatures to a limit's worth
+    const V = versionOf(software);
+    // (1.15 has no 6A92: a card with a day's limit and no block yet spends its first day on trust)
+    const trust = software === undefined;
     // (300 less 10 of change is three limits' worth, 10 waits, and one piece of change takes one off in 1.13 and nothing in 1.14: two for every three)
     const E = software === 12
       ? { change90: 4, flagged: 2, three: 12, noClock: 12, allChange: 4, most: 1020, why90: 'but it made change, so one limit’s worth of waiting' }
@@ -459,7 +466,12 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     n.state.now = 0;
     fill(n, [50]);
     await tap(n);
-    ok(sw(await begin(n, [0])) === '9000' && sw(await sign(n)) === '6a92' && sw(await sign(n)) === '6985', 'a day’s limit and no time: the payment begins, the first signing is refused 6a92, and the payment is given up' + V);
+    if (trust) {
+      ok(sw(await begin(n, [0])) === '9000' && !!(await signed(n)).signature && n.state.spent === 50,
+         'a day’s limit and no block yet: the payment begins and is signed for on trust, and counted against a day that has no start' + V);
+    } else {
+      ok(sw(await begin(n, [0])) === '9000' && sw(await sign(n)) === '6a92' && sw(await sign(n)) === '6985', 'a day’s limit and no time: the payment begins, the first signing is refused 6a92, and the payment is given up' + V);
+    }
     limits(n, 0, 100);
     n.state.now = 0;
     fill(n, [250]);
@@ -503,7 +515,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     ok(sw(await begin(w, [0, 1])) === '6a8f' && sw(await sign(w)) === '6985' && w.state.log.refused === 1, 'a day’s limit refuses such a sum at the beginning, 6a8f, whatever change it would make' + V);
     limits(w, 1000000000, 0);
     w.state.now = 0;
-    ok(sw(await begin(w, [0, 1])) === '6a92', 'and for want of a time it is 6a92' + V);
+    ok(sw(await begin(w, [0, 1])) === (trust ? '6a8f' : '6a92'), trust ? 'and with no block yet it is the same: a sum that wraps is past any day there is' + V : 'and for want of a time it is 6a92' + V);
     w.state.now = T0;
     limits(w, 0, 100);
     await tap(w);
@@ -536,8 +548,8 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
   }
 
   /* ---- 7b: change made among the waits ---------------------------------------------------------------------- */
-  for (const software of [undefined, 13, 12]) {
-    const V = software === 12 ? ' (1.12)' : software === 13 ? ' (1.13)' : ' (1.14)';
+  for (const software of [undefined, 14, 13, 12]) {
+    const V = versionOf(software);
     // the card works the wait out once, at the first SIGN, from what leaves it then. Change made after that is still change: it
     // is in the message, and what the day, the log and the receipt are charged is what leaves the card when it signs.
     const whole = software === 12 ? 8 : 7;
@@ -570,8 +582,8 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
    * piece costs (an output is about two thirds of a signature's work), and a terminal could buy a payment's wait down with outputs of a
    * sat. 1.14 takes two off for every three pieces, floor(2 * made / 3): a payment over the limit takes about as long in the hand with
    * change as without, and the most the eight pieces a card can make take off is five. */
-  for (const software of [undefined, 13]) {
-    const V = software === 13 ? ' (1.13)' : ' (1.14)';
+  for (const software of [undefined, 14, 13]) {
+    const V = versionOf(software);
     // what k pieces of change count for, and what the wallet is told of the card (`info.costed`) to say the same
     const credit = (k) => (software === 13 ? k : Math.floor(2 * k / 3));
     const costed = software !== 13;
@@ -713,8 +725,8 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
    * three on 1.14); a SELECT is not a new time in the field, the card leaving it is; the owner's grant in the tap lifts it
    * (and a SELECT takes the grant away); a payment begun and given up, or refused, or a load, is not a payment. The card of
    * 1.12 knows none of it. */
-  for (const software of [undefined, 13]) {
-    const V = software === 13 ? ' (1.13)' : ' (1.14)';
+  for (const software of [undefined, 14, 13]) {
+    const V = versionOf(software);
     const costed = software !== 13;
     const credit = (k) => (software === 13 ? k : Math.floor(2 * k / 3));
     const pay = async (c, place, outs) => {
@@ -829,7 +841,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     const twin = first.copy();
     await tap(twin);
     ok((await pay(twin, 1)).waits === 0 && (await pay(first, 1)).waits === 7, 'a copy of a card that has paid is not slowed for it, and the card itself is' + V);
-    ok((await twin.copy().send(SELECT)) === (costed ? '010e9000' : '010d9000'), 'and the copy is the card of its software' + V);
+    ok((await twin.copy().send(SELECT)) === (software === 13 ? '010d9000' : software === 14 ? '010e9000' : '010f9000'), 'and the copy is the card of its software' + V);
   }
   {
     // the card of 1.12 waits for none of it

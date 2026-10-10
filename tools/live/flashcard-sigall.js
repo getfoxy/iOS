@@ -42,6 +42,15 @@ const ok = (name, good, detail) => {
 const PORT = Number(process.argv[2]) || 47436;
 const PIN = '1234';
 
+/* A real block header, as the network carries it (80 bytes), and the time in it. A card of software 1.15 takes its clock from the newest
+ * it has been shown and believes a header for the work in it, so a header that is public and was made some time ago does as well as one
+ * from this minute, and needs no network: the applet's day logic runs on it. Shown to the card before the first payment. */
+const TIP = '00c02133b973a14eab498ae41fd2054685e7250b36c4bd758ca801000000000000000000ba4fd6d57bfebf73fcf0552a92d5430b78b735cf59c6c58243b2fc48d4669b5a75dcc96af01e021736a8ee8c';
+const TIP_TIME = 1791614069;
+const TIP_HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
+const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
+const SELECT = '00a4040009f0464f58594341524400';
+
 /* The applet over a socket, as the iOS Simulator reaches it; null when no card server is listening. */
 function applet(port) {
   return new Promise((resolve) => {
@@ -143,6 +152,29 @@ async function at(mintKey, names, real) {
   ok('a card that signs once for a payment, set up and loaded', first.card.info.format === 4 && first.card.balance >= 2000 && first.card.balance < 2040,
      'software ' + first.card.info.version + ', format ' + first.card.info.format + ', ' + first.card.balance + ' on it in ' + first.card.pieces.length + ' pieces');
   const loadCost = start - held(holder, MINT) - 2000;
+
+  /* The card's clock (software 1.15 and on), before the first payment: the time a terminal tells it, and the real block header above. A
+   * daily limit set on a card that has been shown no block has a day with no start (the card spends its first day on trust); the first
+   * block gives it one, and the day begins at the time written in the block. Then the limit is taken off again, so that what follows is
+   * as it always was. */
+  if (first.card.info.headers) {
+    await card.tap();
+    await holder.W.cardSetLimit(card, { sats: 1000000 });
+    await card.tap();
+    const before = (await holder.W.cardLook(card)).info;
+    await card.tap();
+    await card.send(SELECT);
+    const told = await card.send('b0370000' + '04' + u32(Math.floor(Date.now() / 1000)));
+    const took = await card.send('b0360000' + '50' + TIP + '04');
+    await card.tap();
+    const seen = await holder.W.cardLook(card);
+    ok('a daily limit on a card that has seen no block has a day with no start; a real block header, shown before the first payment, gives it one',
+       before.limit === 1000000 && before.now === 0 && before.windowStart === 0 && told === '9000' && took === u32(TIP_TIME) + '9000'
+       && seen.info.now === TIP_TIME && seen.info.windowStart === TIP_TIME && seen.record.headerHash === TIP_HASH && seen.day.turns === TIP_TIME + 86400,
+       'the clock was ' + before.now + ' and is ' + seen.info.now + ', the day begins at ' + seen.info.windowStart + ' and turns at ' + seen.day.turns);
+    await card.tap();
+    await holder.W.cardSetLimit(card, { sats: 0 });
+  }
 
   // payments: each one signature, the till with exactly what it asked
   let asked = 0, changeBack = 0, exact = 0;

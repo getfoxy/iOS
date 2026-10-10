@@ -140,6 +140,8 @@
        * coming back this does nothing, and Tor coming up asks again. */
       dropSpare();
       warmSpareSoon();
+      // and the newest block header for the cards, if the one kept has grown old while the app was away
+      headerLater();
       if (FoxyWallet._onResume) {
         FoxyWallet._onResume(Number(away) || 0);
         return;

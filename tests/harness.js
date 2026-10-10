@@ -60,6 +60,9 @@ function load(opts) {
   if (W.requireVpn) W.requireVpn(false);   // no gate in a test
   // no circuit is opened ahead of time unless a test asks: it is a request to the mint nobody made
   W._spareOff = !o.spare;
+  // nor is the newest Bitcoin block header fetched for the cards on its own (Tor up, the app back, a card tapped), unless a test asks (`headers`)
+  W._headersOff = !o.headers;
+  W._headerAfterMs = 0;
   if (phone) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
@@ -154,6 +157,9 @@ function loadReal(opts) {
   if (W.requireVpn) W.requireVpn(false);
   // no circuit is opened ahead of time unless a test asks: it is a request to the mint nobody made
   W._spareOff = !o.spare;
+  // nor is the newest Bitcoin block header fetched for the cards on its own (Tor up, the app back, a card tapped), unless a test asks (`headers`)
+  W._headersOff = !o.headers;
+  W._headerAfterMs = 0;
   if (o.bridge) W._privacy({ tor: 'up', progress: 100, everUp: true });
   // background checks unpaused, unless a test asks for a pause (sweepPause)
   W._sweepPause = o.sweepPause || [0, 0];
@@ -1171,7 +1177,9 @@ function nativePhone(opts) {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
         'set-limit': value.length === 4 || value.length === 8,
         'set-owner': value.length === 65 && value[0] === 4,
-        'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99] && value[34] === 4,
+        // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none (CardOwner.Label.setCard)
+        'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99]
+          && (value[34] === 4 || value.subarray(34, 99).every((b) => b === 0)),
         'load': value.length === 0,
       }[m.label];
       if (!shaped) return no(SAYS.bad);

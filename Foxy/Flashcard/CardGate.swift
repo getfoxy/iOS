@@ -20,7 +20,7 @@ enum CardGate {
     /// The applet's class byte.
     static let appletClass: UInt8 = 0xB0
 
-    /// The instructions the page uses, and no others the applet has: twenty-seven.
+    /// The instructions the page uses, and no others the applet has: twenty-nine.
     /// tests/flashcard-model.js holds this list to the page's own (`CARD_INS`,
     /// build/wallet/08a-flashcard.js), both ways: an instruction the page sends and
     /// the phone does not carry is a card that cannot be used.
@@ -39,7 +39,9 @@ enum CardGate {
         0x26,                                       // one output of a payment's change, which the card makes for itself (software 1.12)
         0x30, 0x31, 0x32,                           // write a piece, free used places, its record
         0x34,                                       // set the card's daily limit (the owner's proof, no PIN)
-        0x35,                                       // tell the card the time, signed (CardTime.swift)
+        0x35,                                       // tell a card of software 1.14 and before the time, signed (CardTime.swift)
+        0x36,                                       // show a card of software 1.15 and on a Bitcoin block header: its clock is the time in the newest it has taken
+        0x37,                                       // tell a card of 1.15 and on this phone's own time, a note it keeps for the tap and trusts for nothing
         0x40, 0x41, 0x42,                           // its PIN: check, set, change
         0x43,                                       // give it its owner key, or change it
         0x44,                                       // a nonce to answer with the owner's proof
