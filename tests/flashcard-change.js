@@ -10,6 +10,11 @@
  * the opening (GET_CHANGE) until the piece is written back (LOAD_PROOF). The day's limit and the wait are held to what
  * leaves the card for good, the pieces less that change, worked out at the first SPEND_ALL_SIGN.
  *
+ * Software 1.13 (the model's default) shapes the wait: nothing within the limit, change or no change; seven signatures for
+ * the first limit's worth over it and three for each after, less one for every piece of change the card made; and one
+ * payment a tap at full speed. `software: 12` is the card before it, which waited four signatures to a limit's worth and for
+ * the change within it; its tables are here too, run on that card.
+ *
  * Each rule here is the applet's (its source and its own tests); tests/flashcard-model.js replays the applet's own
  * conversation against the model. The blinded message is checked with arithmetic of this file's own, NUT-00's hash to the
  * curve and a point multiplication from BigInt alone, which is itself held to NUT-00's vectors, and the signature with the
@@ -170,17 +175,21 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
 
   /* ---- 2: which card it is -------------------------------------------------------------------------------------- */
   {
-    const now = newCard(), before = newCard({ software: 11 });
-    ok((await now.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000', 'SELECT says 1.12, and 1.11 for the card before it');
-    await tap(now); await tap(before);
-    ok((await now.send('b001000000')).slice(0, 4) === '010c' && (await before.send('b001000000')).slice(0, 4) === '010b', 'GET_INFO says the same in its version byte');
-    ok(sw(await listing(now)) === '9000' && sw(await listing(before)) === '6d00', 'GET_CHANGE is the 1.12 card’s, and the card before it does not know it');
+    const now = newCard(), twelve = newCard({ software: 12 }), before = newCard({ software: 11 });
+    ok((await now.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
+       'SELECT says 1.13, 1.12 for the card with software 12, and 1.11 for the card before that');
+    await tap(now); await tap(twelve); await tap(before);
+    ok((await now.send('b001000000')).slice(0, 4) === '010d' && (await twelve.send('b001000000')).slice(0, 4) === '010c' && (await before.send('b001000000')).slice(0, 4) === '010b',
+       'GET_INFO says the same in its version byte');
+    ok(sw(await listing(now)) === '9000' && sw(await listing(twelve)) === '9000' && sw(await listing(before)) === '6d00',
+       'GET_CHANGE is the 1.12 and 1.13 cards’, and the card before them does not know it');
     fill(before, [100]);
     await begin(before, [0]);
     ok(sw(await change(before, 10)) === '6d00' && sw(await sign(before)) === '6985', 'nor SPEND_ALL_CHANGE, which like any command it does not know gives a begun payment up');
     const six = newCard({ places: 64 });
     await tap(six);
     ok(sw(await listing(six)) === '6d00', 'nor does the card of sixty-four places');
+    ok((await now.copy().send(SELECT)) === '010d9000' && (await twelve.copy().send(SELECT)) === '010c9000', 'and a copy of a card is the card of its software');
   }
 
   /* ---- 3: a payment with change: one signature over the pieces, the terminal's output and the card's own ------- */
@@ -396,145 +405,363 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
   }
 
   /* ---- 7: the limits are held to what leaves the card -------------------------------------------------------- */
-  {
-    const c = newCard();
+  for (const software of [undefined, 12]) {
+    // what the wait is: 1.13's is shaped, nothing within the limit; 1.12 waits a limit's worth for making change, four signatures to a limit's worth
+    const V = software === 12 ? ' (1.12)' : ' (1.13)';
+    const E = software === 12
+      ? { change90: 4, flagged: 2, three: 12, noClock: 12, allChange: 4, most: 1020, why90: 'but it made change, so one limit’s worth of waiting' }
+      : { change90: 0, flagged: 0, three: 9, noClock: 10, allChange: 0, most: 766, why90: 'and within the limit, so no waiting, change or no change' };
+    const c = newCard({ software });
     limits(c, 100, 100);
     fill(c, [150, 50, 300]);
     await tap(c);
-    ok(sw(await begin(c, [0])) === '9000', 'a payment begins whatever it is worth: the day is not asked at the beginning');
-    ok(sw(await sign(c)) === '6a8f', 'it is asked at the signing, with the change known: 150 whole is over a day of 100');
-    ok(sw(await sign(c)) === '6985', 'and the refusal gave the payment up');
-    ok(c.state.log.refused === 1 && c.state.slots[0].status === 1 && c.state.spent === 0, 'written down once; nothing burned and nothing charged');
+    ok(sw(await begin(c, [0])) === '9000', 'a payment begins whatever it is worth: the day is not asked at the beginning' + V);
+    ok(sw(await sign(c)) === '6a8f', 'it is asked at the signing, with the change known: 150 whole is over a day of 100' + V);
+    ok(sw(await sign(c)) === '6985', 'and the refusal gave the payment up' + V);
+    ok(c.state.log.refused === 1 && c.state.slots[0].status === 1 && c.state.spent === 0, 'written down once; nothing burned and nothing charged' + V);
     await begin(c, [0]);
     await change(c, 60);
     const one = await signed(c);
-    ok(!!one.signature && one.waits === 4, '150 less 60 of change is 90, within the day, and within the limit on a payment: but it made change, so one limit’s worth of waiting', String(one.waits));
-    ok(c.state.spent === 90, 'the day is charged what left the card, 90', String(c.state.spent));
-    ok((c.state.log.ring[(c.state.log.taps - 1) & 7].flags & 2) === 2, 'and the card’s account of the tap marks it as waited for');
+    ok(!!one.signature && one.waits === E.change90, '150 less 60 of change is 90, within the day, and within the limit on a payment: ' + E.why90 + V, String(one.waits));
+    ok(c.state.spent === 90, 'the day is charged what left the card, 90' + V, String(c.state.spent));
+    ok((c.state.log.ring[(c.state.log.taps - 1) & 7].flags & 2) === E.flagged, 'and the card’s account of the tap ' + (E.flagged ? 'marks it as waited for' : 'does not mark it as waited for: it was not') + V);
     await begin(c, [1]);
     await change(c, 39);
-    ok(sw(await sign(c)) === '6a8f' && sw(await sign(c)) === '6985', '50 less 39 is 11, and 90 and 11 are over the day: refused, at the first command, with no waiting, and the payment is given up');
-    ok(c.state.log.refused === 2 && c.state.slots[1].status === 1 && c.state.spent === 90, 'written down, nothing burned, nothing charged');
+    ok(sw(await sign(c)) === '6a8f' && sw(await sign(c)) === '6985', '50 less 39 is 11, and 90 and 11 are over the day: refused, at the first command, with no waiting, and the payment is given up' + V);
+    ok(c.state.log.refused === 2 && c.state.slots[1].status === 1 && c.state.spent === 90, 'written down, nothing burned, nothing charged' + V);
     await begin(c, [1]);
     await change(c, 40);
     const exact = await signed(c);
-    ok(!!exact.signature && c.state.spent === 100, '50 less 40 is 10: the day exactly');
-    ok(pending(c).length === 2, 'the change of both payments is pending');
+    ok(!!exact.signature && c.state.spent === 100, '50 less 40 is 10: the day exactly' + V);
+    ok(pending(c).length === 2, 'the change of both payments is pending' + V);
     limits(c, 0, 100);
+    // (a second payment in the tap is slowed, 1.13: this one is made in a tap of its own)
+    await tap(c);
     await begin(c, [2]);
     await change(c, 10);
     const three = await signed(c);
-    ok(!!three.signature && three.waits === 12, '300 less 10 is 290, and the limit on a payment is 100: three limits’ worth', String(three.waits));
+    ok(!!three.signature && three.waits === E.three, '300 less 10 is 290, and the limit on a payment is 100: three limits’ worth' + (software === 12 ? '' : ', less the one piece of change it made') + V, String(three.waits));
 
     // a limit and no time
-    const n = newCard();
+    const n = newCard({ software });
     limits(n, 100, 0);
     n.state.now = 0;
     fill(n, [50]);
     await tap(n);
-    ok(sw(await begin(n, [0])) === '9000' && sw(await sign(n)) === '6a92' && sw(await sign(n)) === '6985', 'a day’s limit and no time: the payment begins, the first signing is refused 6a92, and the payment is given up');
+    ok(sw(await begin(n, [0])) === '9000' && sw(await sign(n)) === '6a92' && sw(await sign(n)) === '6985', 'a day’s limit and no time: the payment begins, the first signing is refused 6a92, and the payment is given up' + V);
     limits(n, 0, 100);
     n.state.now = 0;
     fill(n, [250]);
     await begin(n, [0]);
     const noClock = await signed(n);
-    ok(!!noClock.signature && noClock.waits === 12, 'the limit on a payment asks no clock: 250 under 100 waits three limits’ worth with no time told', String(noClock.waits));
+    ok(!!noClock.signature && noClock.waits === E.noClock, 'the limit on a payment asks no clock: 250 under 100 waits three limits’ worth with no time told' + V, String(noClock.waits));
 
     // the day is asked again at the signing, when the waits are done
-    const m = newCard();
+    const m = newCard({ software });
     limits(m, 100, 20);
     fill(m, [90]);
     await tap(m);
     await begin(m, [0]);
-    ok((await sign(m)) === '00019000', 'a payment of 90 under 20 is made to wait');
+    ok((await sign(m)) === '00019000', 'a payment of 90 under 20 is made to wait' + V);
     m.state.spent = 50;     // (only a test can move the day between two commands)
     let answer = await sign(m);
     while (answer === '00019000') answer = await sign(m);
-    ok(answer === '6a8f' && sw(await sign(m)) === '6985' && m.state.slots[0].status === 1, 'and again at the signing: the day as it stands then refuses it, with nothing burned');
+    ok(answer === '6a8f' && sw(await sign(m)) === '6985' && m.state.slots[0].status === 1, 'and again at the signing: the day as it stands then refuses it, with nothing burned' + V);
 
     // nothing leaves the card
-    const z = newCard();
+    const z = newCard({ software });
     limits(z, 100, 100);
     fill(z, [100]);
     await tap(z);
     await begin(z, [0]);
     await change(z, 100);
     const none = await signed(z);
-    ok(!!none.signature && none.waits === 4 && z.state.spent === 0 && z.state.log.sats === 0 && z.state.receipts.ring[0].sats === 0,
-       'change that is all of the pieces: nothing is charged to the day, the log or the receipt, and it still waits one limit’s worth for making change', none.waits + ' waits, ' + z.state.spent + ' charged');
+    ok(!!none.signature && none.waits === E.allChange && z.state.spent === 0 && z.state.log.sats === 0 && z.state.receipts.ring[0].sats === 0,
+       'change that is all of the pieces: nothing is charged to the day, the log or the receipt' + (software === 12 ? ', and it still waits one limit’s worth for making change' : ', and nothing is waited for') + V,
+       none.waits + ' waits, ' + z.state.spent + ' charged');
 
     // the sum of pieces wraps
-    const w = newCard();
+    const w = newCard({ software });
     fill(w, [4294967295, 2]);
     limits(w, 0, 0);
     await tap(w);
-    ok((await begin(w, [0, 1])) === 'ffffffff9000', 'two pieces that come to more than four bytes can say begin, and say the most there is');
-    ok(!!(await signed(w)).signature, 'and with no limit are signed for');
+    ok((await begin(w, [0, 1])) === 'ffffffff9000', 'two pieces that come to more than four bytes can say begin, and say the most there is' + V);
+    ok(!!(await signed(w)).signature, 'and with no limit are signed for' + V);
     fill(w, [4294967295, 2]);
     limits(w, 1000000000, 0);
-    ok(sw(await begin(w, [0, 1])) === '6a8f' && sw(await sign(w)) === '6985' && w.state.log.refused === 1, 'a day’s limit refuses such a sum at the beginning, 6a8f, whatever change it would make');
+    ok(sw(await begin(w, [0, 1])) === '6a8f' && sw(await sign(w)) === '6985' && w.state.log.refused === 1, 'a day’s limit refuses such a sum at the beginning, 6a8f, whatever change it would make' + V);
     limits(w, 1000000000, 0);
     w.state.now = 0;
-    ok(sw(await begin(w, [0, 1])) === '6a92', 'and for want of a time it is 6a92');
+    ok(sw(await begin(w, [0, 1])) === '6a92', 'and for want of a time it is 6a92' + V);
     w.state.now = T0;
     limits(w, 0, 100);
+    await tap(w);
     await begin(w, [0, 1]);
     const plain = await signed(w);
-    ok(!!plain.signature && plain.waits === 1020, 'under a limit on a payment it waits the most there is, 1020', String(plain.waits));
-    const v = newCard();
+    ok(!!plain.signature && plain.waits === E.most, 'under a limit on a payment it waits the most there is, ' + E.most + V, String(plain.waits));
+    const v = newCard({ software });
     fill(v, [4294967295, 2]);
     limits(v, 0, 100);
     await tap(v);
     await begin(v, [0, 1]);
     await change(v, 5);
     const wrapped = await signed(v);
-    ok(!!wrapped.signature && wrapped.waits === 1020 && v.state.log.sats === 4294967290, 'and so it does with change, which comes off the most there is', wrapped.waits + ' waits, ' + v.state.log.sats + ' in the log');
-    const u = newCard();
+    ok(!!wrapped.signature && wrapped.waits === E.most && v.state.log.sats === 4294967290, 'and so it does with change, which comes off the most there is' + V, wrapped.waits + ' waits, ' + v.state.log.sats + ' in the log');
+    const u = newCard({ software });
     fill(u, [4294967295, 2]);
     limits(u, 0, 100);
     await tap(u);
     await begin(u, [0, 1]);
     await change(u, 4294967290);
     const nearly = await signed(u);
-    ok(!!nearly.signature && nearly.waits === 1020 && u.state.log.sats === 5, 'and whatever its change: all but 5 of it as change still waits the most, for the sum wrapped', nearly.waits + ' waits, ' + u.state.log.sats + ' in the log');
-    const t = newCard();
+    ok(!!nearly.signature && nearly.waits === E.most && u.state.log.sats === 5, 'and whatever its change: all but 5 of it as change still waits the most, for the sum wrapped' + V, nearly.waits + ' waits, ' + u.state.log.sats + ' in the log');
+    const t = newCard({ software });
     fill(t, [4294967295, 4294967295, 5]);
     limits(t, 0, 4294967295);
     await tap(t);
     await begin(t, [0, 1, 2]);
     const most = await signed(t);
-    ok(!!most.signature && most.waits === 1020, 'a sum that wraps is past any limit, the largest included, and waits the most', String(most.waits));
+    ok(!!most.signature && most.waits === E.most, 'a sum that wraps is past any limit, the largest included, and waits the most' + V, String(most.waits));
   }
 
   /* ---- 7b: change made among the waits ---------------------------------------------------------------------- */
-  {
+  for (const software of [undefined, 12]) {
+    const V = software === 12 ? ' (1.12)' : ' (1.13)';
     // the card works the wait out once, at the first SIGN, from what leaves it then. Change made after that is still change: it
     // is in the message, and what the day, the log and the receipt are charged is what leaves the card when it signs.
-    const c = newCard();
+    const whole = software === 12 ? 8 : 7;
+    const c = newCard({ software });
     limits(c, 1000, 100);
     fill(c, [150]);
     await tap(c);
     await begin(c, [0]);
-    ok((await sign(c)) === '00019000' && (await sign(c)) === '00019000', 'a payment of 150 under 100 is made to wait: two limits’ worth, eight waits');
+    ok((await sign(c)) === '00019000' && (await sign(c)) === '00019000', 'a payment of 150 under 100 is made to wait: two limits’ worth, ' + whole + ' waits' + V);
     const late = await change(c, 60);
-    ok(sw(late) === '9000', 'and change may still be made among the waits');
+    ok(sw(late) === '9000', 'and change may still be made among the waits' + V);
     const paid = await signed(c);
-    ok(!!paid.signature && paid.waits === 6, 'the waits were counted once, from 150: eight in all, six after the two', String(paid.waits));
+    ok(!!paid.signature && paid.waits === whole - 2, 'the waits were counted once, from 150: ' + whole + ' in all, ' + (whole - 2) + ' after the two' + V, String(paid.waits));
     ok(verifies(c, paid.signature, message(c, [0], [[60, dat(late)]])) && c.state.spent === 90 && c.state.log.sats === 90 && c.state.receipts.ring[0].sats === 90,
-       'it is signed over the change, and the day, the log and the receipt have 90, what left the card when it signed');
+       'it is signed over the change, and the day, the log and the receipt have 90, what left the card when it signed' + V);
     // outputs among the waits are the terminal's, and are refused once the card has made change
-    const d = newCard();
+    const d = newCard({ software });
     limits(d, 0, 100);
     fill(d, [150]);
     await tap(d);
     await begin(d, [0]);
     await sign(d);
-    ok((await output(d, 90, POINT(4))) === '9000', 'the terminal’s outputs may come among the waits too');
+    ok((await output(d, 90, POINT(4))) === '9000', 'the terminal’s outputs may come among the waits too' + V);
     await change(d, 60);
-    ok(sw(await output(d, 1, POINT(5))) === '6985' && sw(await sign(d)) === '6985', 'but not after the card’s change');
+    ok(sw(await output(d, 1, POINT(5))) === '6985' && sw(await sign(d)) === '6985', 'but not after the card’s change' + V);
   }
 
-  /* ---- 8: the wait: nothing within the limit, ceil(net / limit) limits' worth over it ---------------------------- */
+  /* ---- 8: the wait, software 1.13: nothing within the limit, 7 for the first limit's worth over it, 3 for each after ------- */
+  {
+    // the applet's table: the limit, the waits, then the pieces; no change. A payment is within the limit up to a thirty-second over it.
+    const table = [
+      [100, 0, 100], [100, 0, 60, 40], [100, 0, 1], [100, 0, 101], [100, 0, 103], [100, 7, 104], [100, 0, 100, 1], [100, 7, 200], [100, 7, 100, 100],
+      [100, 7, 150, 50], [100, 7, 70, 70, 60], [100, 10, 201], [100, 10, 100, 100, 1], [100, 10, 300], [100, 13, 301], [100, 31, 1000], [100, 34, 1001],
+      [1, 0, 1], [1, 7, 2], [1, 10, 3], [1, 10, 1, 1, 1], [7, 0, 7], [7, 7, 8], [7, 7, 14], [7, 10, 15], [255, 0, 255], [255, 0, 256], [255, 0, 262], [255, 7, 263],
+      [256, 0, 256], [256, 0, 257], [65536, 0, 65536], [65536, 0, 65537], [16777216, 0, 16777217], [2147483647, 10, 2147483647, 2147483647, 1],
+      [4294967295, 0, 4294967295], [2147483648, 0, 2147483648], [2147483648, 0, 2147483649],
+      // the most: 255 limits' worth, however much more (7 + 3 * 253 = 766)
+      [1, 763, 254], [1, 766, 255], [1, 766, 256], [1, 766, 1000], [10, 766, 2550], [10, 766, 100000],
+    ];
+    const bad = [];
+    for (const [limit, want, ...pieces] of table) {
+      const c = newCard();
+      limits(c, 0, limit);
+      fill(c, pieces);
+      await tap(c);
+      await begin(c, pieces.map((_, i) => i));
+      const r = await signed(c);
+      if (!r.signature || r.waits !== want) bad.push('pieces ' + pieces + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      // and the wallet's estimate of it, which a till gives a person before the PIN is sent, is the card's
+      const said = W.cardWaitSigns(limit, pieces.reduce((a, b) => a + b, 0), 0, false);
+      if (said !== want) bad.push('the wallet says ' + said + ' for pieces ' + pieces + ' under ' + limit + ', not ' + want);
+    }
+    ok(bad.length === 0, 'a payment worth S under a limit L waits nothing within it (or a thirty-second over it), 7 for the first limit’s worth over and 3 for each after, 255 limits’ worth at most (the applet’s own table, and its most: ' + table.length + ' cases), and the wallet’s estimate is the same', bad.join('; '));
+
+    // with change: what leaves the card is the net, and each piece of change made is one signature done. Within the limit it waits nothing, change or no change.
+    const withChange = [
+      // the limit, the waits, the change (one piece), then the pieces
+      [100, 0, 60, 150], [100, 0, 100, 100], [100, 0, 10, 60], [100, 0, 50, 150], [100, 0, 49, 150], [100, 6, 40, 150], [100, 9, 10, 300], [100, 6, 100, 300], [100, 9, 99, 300],
+      [100, 0, 1, 102], [100, 0, 1, 100], [100, 0, 1, 1], [1, 0, 1, 1], [1, 0, 2, 3], [1, 6, 1, 3], [1, 765, 1, 1000], [7, 0, 7, 14], [7, 6, 6, 14],
+      // a thirty-second over, with change: still within
+      [100, 0, 50, 153], [100, 6, 49, 153],
+    ];
+    const worse = [];
+    for (const [limit, want, made, ...pieces] of withChange) {
+      const c = newCard();
+      limits(c, 0, limit);
+      fill(c, pieces);
+      await tap(c);
+      await begin(c, pieces.map((_, i) => i));
+      const point = await change(c, made);
+      const r = await signed(c);
+      if (sw(point) !== '9000' || !r.signature || r.waits !== want) worse.push('pieces ' + pieces + ' less ' + made + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSigns(limit, pieces.reduce((a, b) => a + b, 0) - made, 1, false);
+      if (said !== want) worse.push('the wallet says ' + said + ' for pieces ' + pieces + ' less ' + made + ' under ' + limit + ', not ' + want);
+    }
+    ok(worse.length === 0, 'a payment that makes change waits as its net says, one signature less for the piece of change it made, and nothing within the limit (' + withChange.length + ' of them), and the wallet’s estimate is the same', worse.join('; '));
+
+    // each piece of change made is a signature done: four pieces take four off, and the wait is never below nothing
+    const parts = [
+      // the limit, the waits, the pieces of change (amounts), then the pieces
+      [10, 31 - 4, [1, 1, 1, 1], 100], [10, 31 - 8, [1, 1, 1, 1, 1, 1, 1, 1], 100], [10, 0, [1, 1, 1, 1, 1, 1, 1, 1], 24], [10, 7 - 3, [1, 1, 1], 22],
+      [100, 7 - 2, [200, 100], 500], [100, 0, [1, 1, 1, 1, 1, 1, 1, 1], 120], [100, 7 - 4, [30, 10, 6, 2], 150 + 3],
+    ];
+    const taken = [];
+    for (const [limit, want, outs, ...pieces] of parts) {
+      const c = newCard();
+      limits(c, 0, limit);
+      fill(c, pieces);
+      await tap(c);
+      await begin(c, pieces.map((_, i) => i));
+      let all = true;
+      for (const a of outs) all = all && sw(await change(c, a)) === '9000';
+      const r = await signed(c);
+      if (!all || !r.signature || r.waits !== want) taken.push('pieces ' + pieces + ' less ' + outs.join('+') + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSigns(limit, pieces.reduce((a, b) => a + b, 0) - outs.reduce((a, b) => a + b, 0), outs.length, false);
+      if (said !== want) taken.push('the wallet says ' + said + ' for pieces ' + pieces + ' less ' + outs.join('+') + ' under ' + limit + ', not ' + want);
+    }
+    ok(taken.length === 0, 'and every piece of change counts toward it: four of them take four off the wait, eight take eight, and it is never below nothing', taken.join('; '));
+
+    // in seconds, as the screen tells a person, at 0.8 a signature; and sixteen limits' worth is as much as a till holds a card for (forty seconds)
+    ok(W.cardWait(100, 100, 0, false) === 0 && W.cardWait(100, 200, 0, false) === 6 && W.cardWait(100, 201, 0, false) === 8 && W.cardWait(100, 200, 4, false) === 3
+       && W.cardWait(100, 1600, 0, false) === 40 && W.cardWait(100, 1700, 0, false) === 42 && W.cardWait(0, 50, 0, true) === 6,
+       'the wallet says the wait in seconds: 6 for the first limit’s worth over, 8 for the next, 40 for sixteen limits’ worth (the most it holds a card for), 6 for a second payment with no limit',
+       [W.cardWait(100, 200, 0, false), W.cardWait(100, 201, 0, false), W.cardWait(100, 1600, 0, false), W.cardWait(100, 1700, 0, false)].join());
+
+    // a sweep of both against the rule in closed form
+    let seed = 20240607;
+    const roll = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const off = [];
+    for (let k = 0; k < 80; k++) {
+      const limit = 1 + roll(400), sum = 1 + roll(limit * (k % 5 === 0 ? 400 : 12)), made = roll(3) === 0 ? 0 : 1 + roll(sum);
+      const net = sum - made;
+      const units = net <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(net / limit));
+      const want = units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - (made > 0 ? 1 : 0));
+      const c = newCard();
+      limits(c, 0, limit);
+      fill(c, [sum]);
+      await tap(c);
+      await begin(c, [0]);
+      if (made) await change(c, made);
+      const r = await signed(c);
+      if (!r.signature || r.waits !== want) off.push(sum + ' less ' + made + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSigns(limit, net, made > 0 ? 1 : 0, false);
+      if (said !== want) off.push('the wallet says ' + said + ' for ' + sum + ' less ' + made + ' under ' + limit + ', not ' + want);
+    }
+    ok(off.length === 0, 'eighty payments, with change and without, wait as the rule says, and the wallet’s estimate says the same', off.join('; '));
+
+    // every wait is "not yet", 00 01, and says nothing of how many are left
+    const c = newCard();
+    limits(c, 0, 10);
+    fill(c, [95]);
+    await tap(c);
+    await begin(c, [0]);
+    const all = [];
+    for (let k = 0; k < 36; k++) all.push(await sign(c));
+    ok(all.slice(0, 31).every((a) => a === '00019000') && sw(all[31]) === '9000' && dat(all[31]).length === 128,
+       '95 under 10 is ten limits’ worth, 7 + 3 * 8 = 31 waits: each is the same two bytes, whatever is left, and the signature is the answer after the last');
+    ok(c.state.slots[0].status === 2 && all.slice(32).every((a) => a === '6985'), 'only then is the piece burned, and a command after it is not another signing');
+  }
+
+  /* ---- 8a: one payment a tap at full speed (1.13) ------------------------------------------------------------- *
+   * A second payment signed in the same time in the field waits as one over the limit does, 7, with a limit or without one,
+   * and its own count where that is more, less the change it made; a SELECT is not a new time in the field, the card leaving it
+   * is; the owner's grant in the tap lifts it (and a SELECT takes the grant away); a payment begun and given up, or refused, or
+   * a load, is not a payment. The card of 1.12 knows none of it. */
+  {
+    const pay = async (c, place, outs) => {
+      await begin(c, [place]);
+      for (const a of outs || []) await change(c, a);
+      return signed(c);
+    };
+    // no limit: the first payment of a tap goes at once, every one after it waits seven
+    let c = newCard();
+    fill(c, [10, 10, 10, 10, 10, 10]);
+    await tap(c);
+    const run = [];
+    for (let i = 0; i < 4; i++) run.push((await pay(c, i)).waits);
+    ok(run.join() === '0,7,7,7', 'with no limit, the first payment of a tap goes at once and each after it waits 7', run.join());
+    ok((c.state.log.ring[(c.state.log.taps - 1) & 7].flags & 2) === 2, 'and the card’s account of the tap marks it as waited for');
+    // a SELECT is the same time in the field
+    await c.send(SELECT);
+    await c.send('b04000000431323334');
+    ok((await pay(c, 4)).waits === 7, 'a new SELECT is the same time in the field: still slowed');
+    // the card leaving the field is a new one
+    await tap(c);
+    ok((await pay(c, 5)).waits === 0, 'the card out of the field and back is a new tap: the first payment of it goes at once');
+
+    // with a limit: within it the second waits seven; over it, its own count, which is at least that; change counts toward it
+    c = newCard();
+    limits(c, 0, 100);
+    fill(c, [50, 50, 250, 50, 50, 150]);
+    await tap(c);
+    const lim = [];
+    lim.push((await pay(c, 0)).waits);
+    lim.push((await pay(c, 1)).waits);
+    lim.push((await pay(c, 2)).waits);
+    lim.push((await pay(c, 3, [10])).waits);
+    lim.push((await pay(c, 4, [1, 1, 1, 1, 1, 1, 1, 1])).waits);
+    lim.push((await pay(c, 5, [10, 10, 10, 10])).waits);
+    ok(lim.join() === '0,7,10,6,0,3', 'with a limit of 100: 50 goes at once; the next 50, within the limit, waits 7; 250 waits its own 10; a second 50 with a piece of change 7 less 1; with eight pieces of change 0; 150 less 40 of change in four pieces 7 less 4', lim.join());
+    const est = [W.cardWaitSigns(100, 50, 0, false), W.cardWaitSigns(100, 50, 0, true), W.cardWaitSigns(100, 250, 0, true), W.cardWaitSigns(100, 40, 1, true),
+                 W.cardWaitSigns(100, 42, 8, true), W.cardWaitSigns(100, 110, 4, true)];
+    ok(est.join() === '0,7,10,6,0,3', 'and the wallet’s estimate for a second payment says the same, with the limit or without it: 7 with none', est.join() + ' / ' + W.cardWaitSigns(0, 50, 0, true) + ',' + W.cardWaitSigns(0, 50, 2, true) + ',' + W.cardWaitSigns(0, 50, 0, false));
+    ok(W.cardWaitSigns(0, 50, 0, true) === 7 && W.cardWaitSigns(0, 50, 2, true) === 5 && W.cardWaitSigns(0, 50, 9, true) === 0 && W.cardWaitSigns(0, 50, 0, false) === 0 && W.cardWaitSigns(0, 4294967295, 0, false) === 0,
+       'with no limit a second payment waits 7 less its change, never below nothing, and the first waits nothing');
+    ok(c.state.spent === 0, 'and the slowing takes nothing from a day that has no limit', String(c.state.spent));
+
+    // the grant lifts it, and a SELECT takes the grant away
+    c = newCard();
+    fill(c, [10, 10, 10, 10]);
+    await tap(c);
+    c.state.grant = true;                         // (ALLOW_LOAD with the owner's proof does this; the recording of the applet replays it)
+    const owner = [(await pay(c, 0)).waits, (await pay(c, 1)).waits, (await pay(c, 2)).waits];
+    ok(owner.join() === '0,0,0', 'the owner’s grant in the tap: no payment of it is slowed', owner.join());
+    await c.send(SELECT);
+    await c.send('b04000000431323334');
+    ok(c.state.grant === false && (await pay(c, 3)).waits === 7, 'a SELECT takes the grant away: the next payment is the second of the time in the field, and waits');
+
+    // a payment given up, or refused, or a load, is not a payment
+    c = newCard();
+    limits(c, 150, 0);
+    fill(c, [100, 100, 20, 20]);
+    await tap(c);
+    await begin(c, [0]);
+    await c.send('b001000000');
+    ok((await pay(c, 0)).waits === 0, 'a payment begun and given up is not a payment: the first one signed goes at once');
+    await tap(c);
+    await begin(c, [1]);
+    ok(sw(await sign(c)) === '6a8f', 'a payment the day refuses (100 and 100 of a day of 150)');
+    ok((await pay(c, 2)).waits === 0, 'is not a payment either: the next goes at once');
+    ok((await pay(c, 3)).waits === 7, 'and the one after the first that is signed is slowed');
+    c = newCard();
+    fill(c, [10, 10]);
+    await tap(c);
+    ok(sw(await load(c, pieceHex(5, 77, 0))) === '9000' && (await pay(c, 0)).waits === 0, 'a load is not a payment: the first payment after one goes at once');
+    ok(sw(await load(c, pieceHex(5, 78, 0))) === '9000' && (await pay(c, 1)).waits === 7, 'and a load between two payments does not start the tap afresh');
+
+    // a copy of the card is another card: its time in the field is its own
+    const first = newCard();
+    fill(first, [10, 10]);
+    await tap(first);
+    await pay(first, 0);
+    const twin = first.copy();
+    await tap(twin);
+    ok((await pay(twin, 1)).waits === 0 && (await pay(first, 1)).waits === 7, 'a copy of a card that has paid is not slowed for it, and the card itself is');
+
+    // the card of 1.12 waits for none of it
+    c = newCard({ software: 12 });
+    fill(c, [10, 10, 10]);
+    await tap(c);
+    const old12 = [(await pay(c, 0)).waits, (await pay(c, 1)).waits, (await pay(c, 2)).waits];
+    ok(old12.join() === '0,0,0', 'the card of 1.12 knows no such rule: every payment goes at once', old12.join());
+  }
+
+  /* ---- 8b: software 1.12's wait: nothing within the limit, ceil(net / limit) limits' worth over it, four signatures each -------- */
   {
     // the applet's table: the limit, the waits, then the pieces; no change
     const table = [
@@ -548,15 +775,17 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     ];
     const bad = [];
     for (const [limit, want, ...pieces] of table) {
-      const c = newCard();
+      const c = newCard({ software: 12 });
       limits(c, 0, limit);
       fill(c, pieces);
       await tap(c);
       await begin(c, pieces.map((_, i) => i));
       const r = await signed(c);
       if (!r.signature || r.waits !== want) bad.push('pieces ' + pieces + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSigns12(limit, pieces.reduce((a, b) => a + b, 0), false);
+      if (said !== want) bad.push('the wallet says ' + said + ' for pieces ' + pieces + ' under ' + limit + ', not ' + want);
     }
-    ok(bad.length === 0, 'a payment worth S under a limit L waits nothing within it and ceil(S / L) * 4 over it, 255 limits’ worth at most (the applet’s own table, and its most: ' + table.length + ' cases)', bad.join('; '));
+    ok(bad.length === 0, 'a card of 1.12: a payment worth S under a limit L waits nothing within it and ceil(S / L) * 4 over it, 255 limits’ worth at most (the applet’s own table at 1.12, and its most: ' + table.length + ' cases)', bad.join('; '));
 
     // with change: what leaves the card is the net; within the limit it waits one limit's worth, and over it as the net says
     const withChange = [
@@ -566,7 +795,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     ];
     const worse = [];
     for (const [limit, want, made, ...pieces] of withChange) {
-      const c = newCard();
+      const c = newCard({ software: 12 });
       limits(c, 0, limit);
       fill(c, pieces);
       await tap(c);
@@ -574,8 +803,10 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
       const point = await change(c, made);
       const r = await signed(c);
       if (sw(point) !== '9000' || !r.signature || r.waits !== want) worse.push('pieces ' + pieces + ' less ' + made + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSigns12(limit, pieces.reduce((a, b) => a + b, 0) - made, true);
+      if (said !== want) worse.push('the wallet says ' + said + ' for pieces ' + pieces + ' less ' + made + ' under ' + limit + ', not ' + want);
     }
-    ok(worse.length === 0, 'a payment that makes change waits one limit’s worth within the limit, and as its net says over it (' + withChange.length + ' of them)', worse.join('; '));
+    ok(worse.length === 0, 'a card of 1.12: a payment that makes change waits one limit’s worth within the limit, and as its net says over it (' + withChange.length + ' of them), and the wallet’s estimate says the same', worse.join('; '));
 
     // and a sweep of both against the rule in closed form
     let seed = 20240607;
@@ -585,7 +816,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
       const limit = 1 + roll(400), sum = 1 + roll(limit * (k % 5 === 0 ? 400 : 12)), made = roll(3) === 0 ? 0 : 1 + roll(sum);
       const net = sum - made;
       const units = net > limit ? Math.min(255, Math.ceil(net / limit)) : (made > 0 ? 1 : 0);
-      const c = newCard();
+      const c = newCard({ software: 12 });
       limits(c, 0, limit);
       fill(c, [sum]);
       await tap(c);
@@ -593,11 +824,13 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
       if (made) await change(c, made);
       const r = await signed(c);
       if (!r.signature || r.waits !== 4 * units) off.push(sum + ' less ' + made + ' under ' + limit + ': ' + r.waits + ', not ' + 4 * units);
+      const said = W.cardWaitSigns12(limit, net, made > 0);
+      if (said !== 4 * units) off.push('the wallet says ' + said + ' for ' + sum + ' less ' + made + ' under ' + limit + ', not ' + 4 * units);
     }
-    ok(off.length === 0, 'sixty payments, with change and without, wait as the rule says', off.join('; '));
+    ok(off.length === 0, 'a card of 1.12: sixty payments, with change and without, wait as the rule says, and the wallet’s estimate says the same', off.join('; '));
 
     // every wait is "not yet", 00 01, and says nothing of how many are left
-    const c = newCard();
+    const c = newCard({ software: 12 });
     limits(c, 0, 10);
     fill(c, [95]);
     await tap(c);
@@ -631,6 +864,8 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
       await begin(k, pieces.map((_, i) => i));
       const r = await signed(k);
       if (!r.signature || r.waits !== want) old.push('pieces ' + pieces + ' under ' + limit + ': ' + r.waits + ', not ' + want);
+      const said = W.cardWaitSignsBefore(limit, pieces.reduce((a, b) => a + b, 0));
+      if (said !== want) old.push('the wallet says ' + said + ' for pieces ' + pieces + ' under ' + limit + ', not ' + want);
     }
     ok(old.length === 0, 'and the wait is worked out there too, with the first limit’s worth free: (ceil(S / L) - 1) * 4', old.join('; '));
     // a sum that wraps

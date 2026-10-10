@@ -327,6 +327,17 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
                 let gen = UIImpactFeedbackGenerator(style: .heavy)
                 gen.prepare()
                 gen.impactOccurred()
+            case "triple":
+                /* Three hard knocks, 0.15 s apart, for a card payment whose change is coming: the card has
+                 * signed and may be lifted, and a second tap is on its way. The person is holding a card to
+                 * the top of the phone and can see no screen, so the phone says it in a way nothing else in
+                 * the app does: nothing else buzzes three times. The generator is kept alive until the last
+                 * knock, and made ready first so that the first is not late. */
+                let gen = UIImpactFeedbackGenerator(style: .heavy)
+                gen.prepare()
+                for knock in 0..<3 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15 * Double(knock)) { gen.impactOccurred() }
+                }
             default:
                 let gen = UIImpactFeedbackGenerator(style: .light)
                 gen.prepare()

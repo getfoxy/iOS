@@ -231,6 +231,68 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     ok(over === 0, 'and where none does, what is taken covers the price and the fee, and keeps to the day’s limit');
     ok(moreBad === 0 && moreHad > 50, 'and is the fewest pieces that cover it, each being most of a second of holding the card', moreHad + ' needed more than two, ' + moreBad + ' were not the fewest');
 
+    /* A card of 1.13 makes four pieces of change at most, cut plainly, and the till makes the rest after the swap: so where no set comes
+     * to the price exactly, the set taken among those that overpay least is one whose change is four powers of two or fewer, if one
+     * overpays a little more (an eighth of the price, 64 sats at the least; a change of those is asked about 48 at a time at the most).
+     * Held, over random drawers at mints that charge nothing and up to a sat a piece, to every subset of the pieces. */
+    {
+      const rand2 = rng(20261009);
+      const bits = (n) => n.toString(2).split('').filter((c) => c === '1').length;
+      const shapedCard = { info: { shaped: true, ownChange: true, wide: true, many: true, empty: 100, spent: 0, slots: 128 } };
+      let cases2 = 0, plainBad = 0, leastBad = 0, tidyHad = 0, tidyBad = 0, noneHad = 0, noneBad = 0, coverBad = 0;
+      for (let n = 0; n < 600; n++) {
+        const ppk = [0, 0, 100, 250, 1000][Math.floor(rand2() * 5)];
+        const fee = feeOf(ppk);
+        const stub2 = { getFeesForProofs: fee };
+        const size = 3 + Math.floor(rand2() * 8);
+        const pool = [];
+        for (let i = 0; i < size; i++) pool.push({ amount: 1 << Math.floor(rand2() * 12), secret: 'q' + i, id: 'k' });
+        const total = pool.reduce((s, p) => s + p.amount, 0);
+        const want = 1 + Math.floor(rand2() * total);
+        // every subset: whether one comes to the price and the fee exactly, the change each that covers it brings back, and the set that
+        // overpays least (the least the pieces come to, and of those the fewest, which pays the mint the least)
+        const overs = new Map();
+        let exact = false, leastSum = -1, leastCount = 0;
+        for (let m = 1; m < (1 << size); m++) {
+          const set = pool.filter((p, i) => m & (1 << i));
+          const sum = set.reduce((s, p) => s + p.amount, 0);
+          const over = sum - want - fee(set);
+          if (over < 0) continue;
+          if (over === 0) exact = true;
+          overs.set(over, true);
+          if (leastSum < 0 || sum < leastSum || (sum === leastSum && set.length < leastCount)) { leastSum = sum; leastCount = set.length; }
+        }
+        if (exact || !overs.size) continue;
+        cases2 += 1;
+        const got = H.W.cardPickAll(stub2, pool, want, null, shapedCard, null, false, true);
+        if (!got || !got.length) { coverBad += 1; continue; }
+        const gotOver = got.reduce((s, p) => s + p.amount, 0) - want - fee(got);
+        if (gotOver < 0) { coverBad += 1; continue; }
+        const least = leastSum - want - Math.ceil(leastCount * ppk / 1000);
+        const slack = Math.min(1024, Math.max(64, Math.floor(want / 8)));
+        // the changes a set that overpays more by up to `slack` could bring back, in the order they are asked about: those the card makes whole, the first 48
+        const asked = [];
+        for (let c = least + 1; c <= least + slack && asked.length < 48; c++) if (bits(c) <= 4) asked.push(c);
+        const first = asked.filter((c) => overs.has(c))[0];
+        if (bits(least) <= 4) {
+          // the least overpaying set is taken, whatever else there is
+          if (gotOver !== least) { leastBad += 1; if (leastBad < 4) console.log('  least missed', JSON.stringify({ ppk, want, pool: pool.map((p) => p.amount), least, got: got.map((p) => p.amount), gotOver })); }
+        } else if (first !== undefined) {
+          tidyHad += 1;
+          if (gotOver !== first) { tidyBad += 1; if (tidyBad < 4) console.log('  tidy missed', JSON.stringify({ ppk, want, pool: pool.map((p) => p.amount), least, first, got: got.map((p) => p.amount), gotOver })); }
+        } else {
+          noneHad += 1;
+          if (gotOver !== least) { noneBad += 1; if (noneBad < 4) console.log('  none missed', JSON.stringify({ ppk, want, pool: pool.map((p) => p.amount), least, got: got.map((p) => p.amount), gotOver })); }
+        }
+        // a set that is more than the card makes whole of change is taken only where nothing the card makes whole was within reach
+        if (bits(gotOver) > 4 && (bits(least) <= 4 || first !== undefined)) plainBad += 1;
+      }
+      ok(coverBad === 0 && cases2 > 200, 'a card of 1.13 is paid with a set that covers the price and the fee, over ' + cases2 + ' random drawers with no exact set', coverBad + ' did not');
+      ok(leastBad === 0, 'where the set that overpays least brings back change of four powers of two or fewer, that is the set taken', leastBad + ' missed');
+      ok(tidyHad > 30 && tidyBad === 0 && plainBad === 0, 'where it brings back more, and a set that overpays a little more (an eighth of the price, 64 sats at the least) brings back four or fewer, that one is taken: the least such', tidyHad + ' of them had one, ' + tidyBad + ' missed, ' + plainBad + ' were left with a longer change');
+      ok(noneHad > 30 && noneBad === 0, 'and where none does, the set that overpays least stands, and the tail of its change is the till’s to make after the swap', noneHad + ' of them had none, ' + noneBad + ' missed');
+    }
+
     // one price both ways: online a tap signs two pieces and takes change; offline, with no change to be had, it pays exactly
     const stub = { getFeesForProofs: () => 0 };
     const asPool = (list) => list.map((n, i) => ({ amount: n, secret: 'p' + i + '-' + n, id: 'k' }));

@@ -45,9 +45,12 @@ function makeCard(opts) {
   const FORMAT = o.format === 4 ? 4 : 3;
   /* The card of format 4 is also the one whose second limit is not a ten-second window that refuses (the card of format
    * 3 keeps that, as the applet it models did) but the limit on ONE PAYMENT, with no clock: a payment over it is not
-   * refused, it waits. A limit's worth costs WAIT_SIGNS signatures of the card's work, each asked for by a SPEND_ALL_SIGN
-   * that answers "not yet" (00 01) in place of the signature: before 1.12 every limit's worth past the first, and from 1.12
-   * every one of what leaves the card (`waitsFor`). Nothing is counted or remembered from one payment to the next. */
+   * refused, it waits, each wait a signature of the card's work asked for by a SPEND_ALL_SIGN that answers "not yet"
+   * (00 01) in place of the signature. How many (`waitsFor`) is the card's software's: before 1.12 four to every limit's
+   * worth past the first of what the pieces come to; from 1.12 four to every one of what leaves the card; from 1.13 seven
+   * for the first limit's worth over the limit and three for each after it, with nothing within it, and the change the card
+   * made counted toward them (and one payment a tap at full speed: a second one in the same time in the field is slowed
+   * unless the owner's grant is in the tap). Nothing else is remembered from one payment to the next. */
   /* And how many places it has. The card of format 4 has 128 (1.7), for a deep drawer of small pieces: a place's number
    * is seven bits of a listing's tag, and its short listing is P2 = 3, two bytes a piece. `places: 64` is the card before
    * it (1.6): sixty-four places, six-bit tags, and the brief listing (P2 = 1). */
@@ -66,12 +69,17 @@ function makeCard(opts) {
   /* `software: 9` is the card before the design was in its record: three bytes after the mint (1.10). `software: 10` is
    * that card before its signing was made quicker (1.11), which changed nothing on the wire but the version it says.
    * `software: 11` is that card before it made its own change (1.12): it knows neither SPEND_ALL_CHANGE nor GET_CHANGE, holds
-   * the day's limit to the pieces whole as a payment begins, and works the wait out there. */
+   * the day's limit to the pieces whole as a payment begins, and works the wait out there. `software: 12` is the card that
+   * makes its own change but waits four signatures to a limit's worth, and a payment within the limit that makes change waits
+   * one; the card with no `software` is the latest, 1.13, whose wait is shaped (`SHAPED`, `waitsFor`). */
   const DESIGN = SEALED && o.software !== 9;
   const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? 12 : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const SHAPED = OWN_CHANGE && o.software !== 12;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? 13 : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
+  // software 1.13: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
+  const WAIT_OVER = 7, WAIT_MORE = 3, UNITS_MOST = 255;
   // the change a payment makes for itself (1.12): eight openings are kept, and GET_CHANGE says three to a page
   const CHANGE_MOST = 8;
   const CHANGE_PAGE = 3;
@@ -101,6 +109,10 @@ function makeCard(opts) {
     receipts: { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) },
     timeTold: false, timeMarked: false, timeFirst: 0,
     tapOpen: false,
+    /* That a payment has been signed in this time in the field (the applet's tapOpen[1]): gone with the power (`tap()`), and
+     * not with a SELECT. From 1.13 the next payment signed in it waits as one over the limit does, unless the owner's grant
+     * (`grant`, which a SELECT takes away) is in the tap. */
+    tapPaid: false,
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
     /* The openings of the change the card has made for itself (1.12), kept from the moment it is made until the piece is
      * written back: { state, amount, keyset (16 hex), date, nonce (64 hex), r (64 hex) }. A state is 'empty', 'draft' (made
@@ -231,18 +243,37 @@ function makeCard(opts) {
     }
     return '';
   };
-  /* What a payment costs in time: the signatures of work before it is signed, WAIT_SIGNS to a unit and at most 255 units.
-   * `sum` is what its pieces come to, and `carry` is that they wrapped. Before 1.12 the first limit's worth was free:
-   * (ceil(sum / limit) - 1) units. From 1.12 `sum` is what leaves the card (the pieces less the change it made for itself)
-   * and `change` is that it made some: every whole limit's worth is a unit, and so is what is left over one, and so is a
-   * payment within the limit that makes change. A payment within the limit that makes none goes at once. */
-  const waitsFor = (sum, carry, change) => {
+  /* What a payment costs in time: the signatures of work before it is signed. `sum` is what its pieces come to, and `carry` is
+   * that they wrapped. Before 1.12 the first limit's worth was free: (ceil(sum / limit) - 1) units of WAIT_SIGNS, at most 255.
+   * From 1.12 `sum` is what leaves the card (the pieces less the change it made for itself) and `made` is how many pieces of
+   * change it made: every whole limit's worth is a unit, and so is what is left over one, and so is a payment within the limit
+   * that makes change; a payment within the limit that makes none goes at once. From 1.13 (`SHAPED`) a payment within the limit
+   * (or a thirty-second over it: a limit set in dollars at one moment and a price in dollars at another lands a few sats over)
+   * goes at once, change or no change; over it waits WAIT_OVER for the first limit's worth over and WAIT_MORE for each after
+   * it, ceil(sum / limit) limits' worth of them at most 255, less one for each piece of change made, never below 0; a `second`
+   * payment (one was signed in this time in the field, and the owner's grant is not in the tap) is at least one limit's worth
+   * over, WAIT_OVER, with a limit or none; and a sum that wrapped waits the most there is. */
+  const waitsFor = (sum, carry, made, second) => {
+    if (SHAPED) {
+      let waits;
+      if (s.tapLimit === 0) {
+        if (!second) return 0;
+        waits = WAIT_OVER;
+      } else {
+        if (carry) return WAIT_OVER + WAIT_MORE * (UNITS_MOST - 2);
+        let units = sum <= s.tapLimit + Math.floor(s.tapLimit / 32) ? 1 : Math.min(UNITS_MOST, Math.ceil(sum / s.tapLimit));
+        if (second && units <= 1) units = 2;
+        if (units <= 1) return 0;
+        waits = WAIT_OVER + WAIT_MORE * (units - 2);
+      }
+      return Math.max(0, waits - made);
+    }
     if (s.tapLimit === 0) return 0;
     if (carry) return 255 * WAIT_SIGNS;
     if (!OWN_CHANGE) return Math.min(255, Math.max(0, Math.ceil(sum / s.tapLimit) - 1)) * WAIT_SIGNS;
     let left = sum, units = 0;
     while (units < 255 && left > s.tapLimit) { left -= s.tapLimit; units += 1; }
-    if (units < 255 && (change || (units > 0 && left !== 0))) units += 1;
+    if (units < 255 && (made > 0 || (units > 0 && left !== 0))) units += 1;
     return units * WAIT_SIGNS;
   };
   /* SET_LIMIT's value, by either form: four bytes are the day's limit and leave the tap's; eight are both, the day's then
@@ -451,7 +482,7 @@ function makeCard(opts) {
         // change made for a payment that was never signed for is let go
         s.openings.forEach((x, k) => { if (x.state === 'draft') s.openings[k] = { state: 'empty' }; });
         // the pieces' half of the message is the card's own to build: each one's secret, and its C in hex
-        const waits = OWN_CHANGE ? null : waitsFor(total, carry, false);
+        const waits = OWN_CHANGE ? null : waitsFor(total, carry, 0, false);
         s.all = { list, total, carry, waits, waited: waits > 0, change: 0, changes: 0, text: list.map((i) => secretOf(s.slots[i]) + s.slots[i].data.substr(88, 66)).join('') };
         return u32(total) + '9000';
       }
@@ -506,7 +537,7 @@ function makeCard(opts) {
            * known. Refused (over the day, or for want of a time), the payment is given up. */
           const refused = overLimits(net, false);
           if (refused) { s.all = null; return refused; }
-          pay.waits = waitsFor(net, pay.carry, pay.changes > 0);
+          pay.waits = waitsFor(net, pay.carry, pay.changes, s.tapPaid && !s.grant);
           pay.waited = pay.waits > 0;
         }
         // the wait: one signature of work to a command, and how many are still to come in place of the signature
@@ -525,6 +556,8 @@ function makeCard(opts) {
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
         if (s.record.limit !== 0) { s.spent = (dayBegins ? 0 : s.spent) + net; if (dayBegins) s.windowStart = s.now; }
         pay.list.forEach((i) => { s.slots[i].status = 2; });
+        // a payment in this time in the field: the next one in it is slowed, unless the owner's grant is in its tap (1.13)
+        s.tapPaid = true;
         // the change the card made for itself is signed for now: its openings stay until the pieces are back
         s.openings.forEach((x) => { if (x.state === 'draft') x.state = 'pending'; });
         s.changeDue = true;
@@ -825,15 +858,15 @@ function makeCard(opts) {
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.tapPaid = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* It leaves as it answers the `nth` command of this instruction: the card has done what was asked, and nobody hears. */
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION === 10 || VERSION === 11) ? VERSION : undefined, burnMost: BURN_MOST });
-      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 12) ? VERSION : undefined, burnMost: BURN_MOST });
+      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */

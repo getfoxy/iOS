@@ -81,7 +81,8 @@
     }
     // Android WebViews and desktop Chrome do support the web API
     if (navigator.vibrate) {
-      navigator.vibrate(kind === 'success' ? [18, 60, 26] : kind === 'warning' ? [30, 80, 30] : 14);
+      // 'triple': three knocks 0.15 s apart, for a card payment whose change is coming (26f-flashcard.js, `fcChangeBuzz`)
+      navigator.vibrate(kind === 'success' ? [18, 60, 26] : kind === 'warning' ? [30, 80, 30] : kind === 'triple' ? [60, 150, 60, 150, 60] : 14);
     }
   }
 

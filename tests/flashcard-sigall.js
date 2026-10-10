@@ -25,6 +25,8 @@ const ok = (good, name, detail) => {
 };
 const bal = (c) => c.W.balanceSats();
 const card4 = (ctx) => makeCard({ window: ctx.window, format: 4 });
+// the card before the latest: it makes its own change in up to eight pieces cut to its drawer, and waits four signatures to a limit's worth (1.12)
+const card12 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 12 });
 const amounts = (card) => card.state.slots.filter((x) => x.status === 1).map((x) => parseInt(x.data.substr(16, 8), 16)).sort((a, b) => b - a);
 // how many pieces of each size are on a card
 const deep = (card) => amounts(card).reduce((o, a) => { o[a] = (o[a] || 0) + 1; return o; }, {});
@@ -40,9 +42,15 @@ function later(c, ms) {
   return () => { c.window.Date.now = real; };
 }
 const DAY = 24 * 3600 * 1000;
-// what a payment that leaves the card for this many sats waits under a limit on one payment, in SIGN commands before the signature, when it makes
-// no change: nothing within the limit, and four to every limit's worth over it, whole or in part (1.12). With change, a payment within the limit waits four.
-const waitsOf = (sats, limit) => (sats <= limit ? 0 : 4 * Math.ceil(sats / limit));
+// what a payment that leaves the card for this many sats waits under a limit on one payment, in SIGN commands before the signature (software 1.13):
+// nothing within the limit (or a thirty-second over it), 7 for the first limit's worth over it and 3 for each after, whole or in part, less one for
+// each piece of change the card made (`made`)
+const waitsOf = (sats, limit, made) => {
+  const units = sats <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(sats / limit));
+  return units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - (made || 0));
+};
+// and software 1.12's: nothing within the limit, and four to every limit's worth over it, whole or in part. With change, a payment within the limit waits four.
+const waitsOf12 = (sats, limit) => (sats <= limit ? 0 : 4 * Math.ceil(sats / limit));
 
 // the card as it was on the chip before 1.8: 128 places, and a transaction that held about a dozen pieces and no more
 const card7 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 7, burnMost: 11 });
@@ -61,7 +69,7 @@ async function world(feePpk, sats, make) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.12' && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
+  ok(seen.info.format === 4 && seen.info.version === '1.13' && seen.info.shaped === true && seen.info.ownChange === true && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
      'a card that signs once for a payment is read as what it is, with its 128 places', seen.info.version + ', format ' + seen.info.format + ', ' + seen.info.slots + ' places');
   card.tap();
   card.sent.length = 0;
@@ -198,6 +206,14 @@ async function world(feePpk, sats, make) {
     ok(nDates === 2 && off.sats === onCard && (await bal(T.H)) === hb + onCard && T.card.balance() === 0 && count(T.card, '24') === signatures,
        'a whole card taken off by its holder is a signature for each date’s pieces, in the one tap', JSON.stringify({ sats: off.sats, signatures: count(T.card, '24'), dates: nDates }));
     ok(T.H.W.cardTaken().length === 0 && swaps(T.H).length === 0, 'and nothing is left on file');
+    {
+      // a card of 1.13 slows a second payment signed in a time in the field unless the owner's grant is in the tap: the grant (ALLOW_LOAD)
+      // is sent first, and no SELECT comes between it and the last of the signatures, which would take it away
+      const seq = T.card.sent.map((a) => (a.slice(0, 4) === '00a4' ? 'select' : a.slice(2, 4)));
+      const grant = seq.indexOf('45'), firstSign = seq.indexOf('24'), lastSign = seq.lastIndexOf('24');
+      ok(nDates === 2 && grant >= 0 && grant < firstSign && seq.lastIndexOf('select') < grant && lastSign > firstSign && seq.slice(firstSign, lastSign).indexOf('select') < 0,
+         'the owner’s phone gives its grant before the first of the signatures, and no new SELECT takes it away before the last: the second is not slowed', seq.join(' '));
+    }
     await settle();
   }
 
@@ -235,10 +251,11 @@ async function world(feePpk, sats, make) {
   }
 
   /* ---- 8: the limit on one payment is waited for, and asks no clock ---------
-   * The card refuses nothing over it. For every limit's worth past the first
-   * it does four signatures of work before it signs, a SIGN command each, and
-   * nothing is burned until the last. Nothing is counted from one payment to
-   * the next, and no time is asked. */
+   * The card refuses nothing over it. Over the limit it does signatures of
+   * work before it signs, a SIGN command each (seven for the first limit's
+   * worth over it, three for each after: software 1.13), and nothing is burned
+   * until the last. Nothing is counted from one payment to the next, and no
+   * time is asked. */
   {
     const L = await world(0, 9000);
     L.card.tap();
@@ -257,7 +274,7 @@ async function world(feePpk, sats, make) {
     L.card.sent.length = 0;
     const at2 = await L.R.W.cardPay(L.card, { sats: 400, pin: '1234' });
     ok(at2.sats === 400 && count(L.card, '24') === 1, 'and so is the next, a moment later: nothing is counted from one payment to the next');
-    // over it: one limit more is four signatures of work, then the signature
+    // over it: a limit's worth more is seven signatures of work, then the signature
     L.card.tap();
     L.card.sent.length = 0;
     const said = [];
@@ -275,9 +292,9 @@ async function world(feePpk, sats, make) {
     L.card.send = (a) => send0(a).then((r) => { if (String(a).slice(0, 4) === 'b024' && r.length === 8) answers.push(r.slice(0, 4)); return r; });
     const over = await L.R.W.cardPay(L.card, { sats: 500, pin: '1234', on: (st) => steps.push(st), progress: (p) => { if (p.step === 'waiting') said.push(p.polls); } });
     L.card.send = send0;
-    ok(over.sats === 500 && (await bal(L.R)) === 1300 && count(L.card, '24') === 9,
-       'a payment of 500 is made, after the card has been asked eight times to wait: two limits’ worth, the first of them no longer free', count(L.card, '24') + ' SIGN commands');
-    ok(said.join(',') === '1,2,3,4,5,6,7,8' && answers.join(',') === '0001,0001,0001,0001,0001,0001,0001,0001',
+    ok(over.sats === 500 && (await bal(L.R)) === 1300 && count(L.card, '24') === 8,
+       'a payment of 500 is made, after the card has been asked seven times to wait: over the limit of 400, which is the first limit’s worth over it', count(L.card, '24') + ' SIGN commands');
+    ok(said.join(',') === '1,2,3,4,5,6,7' && answers.join(',') === '0001,0001,0001,0001,0001,0001,0001',
        'the card says only "not yet", never how many waits are left, and the screen counts what has been', said.join(',') + ' / ' + answers.join(','));
     ok(L.card.state.log.ring.some((e) => (e.flags & 2) === 2), 'and the card’s own log marks that tap as over its limit');
     // the card before 1.12 waits by what its pieces come to, so the pieces are chosen to overpay the least
@@ -301,10 +318,11 @@ async function world(feePpk, sats, make) {
       await settle();
     }
     /* From 1.12 the wait is by what leaves the card, and a larger piece costs none: the price is 250, within the limit of
-     * 300, so it is the change that is waited for (one limit's worth, four SIGN), whichever set pays. The set that fills the drawer
-     * is taken and nobody is sent round to a cheaper one, which would make change as well. */
-    {
-      const C = await world(0, 9000);
+     * 300, so whichever set pays, it is the change that a card of 1.12 waits for (one limit's worth, four SIGN), and a card of
+     * 1.13 waits for nothing: within the limit it goes at once, change or no change. The set that fills the drawer is taken
+     * and nobody is sent round to a cheaper one, which would make change as well. */
+    for (const [label, make, waits] of [['1.12', card12, 4], ['1.13', card4, 0]]) {
+      const C = await world(0, 9000, make);
       await binaryLoad(C.H, C.card, 2000);          // 1024 512 256 128 64 16
       C.card.tap();
       await C.H.W.cardSetLimit(C.card, { sats: 300, tap: true });
@@ -312,11 +330,11 @@ async function world(feePpk, sats, make) {
       C.card.sent.length = 0;
       const holding = [];
       const p = await C.R.W.cardPay(C.card, { sats: 250, pin: '1234', progress: (q) => { if (q.step === 'waiting') holding.push(q); } });
-      ok(p.sats === 250 && count(C.card, '22') === 1 && count(C.card, '24') === 1 + waitsOf(250, 300) + 4 && C.card.balance() === 2000 - 250 - p.change.sats && p.change.sats > 0,
-         'a card of 1.12 is paid with the one set, whatever it overpays, and waits a limit’s worth for its change: begun once, four "not yet" before the signature',
+      ok(p.sats === 250 && count(C.card, '22') === 1 && count(C.card, '24') === 1 + waits && C.card.balance() === 2000 - 250 - p.change.sats && p.change.sats > 0,
+         'a card of ' + label + ' is paid with the one set, whatever it overpays, and ' + (waits ? 'waits a limit’s worth for its change: begun once, four "not yet" before the signature' : 'waits for nothing, within the limit, with its change: begun once, signed at the first asking'),
          'card ' + C.card.balance() + ', ' + count(C.card, '24') + ' SIGN, ' + count(C.card, '22') + ' BEGIN');
-      ok(holding.length === 4 && holding.every((q) => q.making === true) && C.card.state.log.ring.some((e) => (e.flags & 2) === 2),
-         'the till was told it was making change, four times, and the card’s log marks that tap as one that waited', holding.length + ' told to hold');
+      ok(holding.length === waits && holding.every((q) => q.making === true) && C.card.state.log.ring.some((e) => (e.flags & 2) === 2) === (waits > 0),
+         waits ? 'the till was told it was making change, four times, and the card’s log marks that tap as one that waited' : 'the till was told nothing to hold for, and the card’s log does not mark the tap as one that waited', holding.length + ' told to hold');
       C.card.tap();
       await C.R.W.cardWrite(C.card, { change: true });
       await settle();
@@ -661,8 +679,9 @@ async function world(feePpk, sats, make) {
     const which = uiCard(holder);
     ok(which && which.title === 'CHANGE LIMIT' && /straight away/.test(which.reason), 'CHANGE LIMIT says what the per tap limit is now: the most it pays straight away', which && which.reason);
     which.press('PER TAP LIMIT');
-    ok(/holds the card 3 seconds/.test(uiCard(holder).reason) && /3 seconds for every limit’s worth/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason),
-       'and its warning says a payment that makes change, or is over the limit, waits, and that lifting the card stops it');
+    ok(/change or no change/.test(uiCard(holder).reason) && /three buzzes/.test(uiCard(holder).reason)
+       && /about 5 seconds, and 2 seconds more for every limit’s worth beyond that/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason),
+       'and its warning says a payment goes straight away, change or no change, that three buzzes say change is coming, that one over the limit waits about 5 seconds and 2 more for every limit’s worth beyond that, and that lifting the card stops it');
     uiCard(holder).press('CONTINUE');
     holder.state.amount = '0.50';
     holder.state.unit = 'USD';
@@ -695,8 +714,8 @@ async function world(feePpk, sats, make) {
     await until('the waited payment to be made', () => V.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(V.R));
     await settle();
     const waited = lines.filter((t) => /Keep holding/.test(t));
-    ok((await bal(V.R)) === 1500 && count(V.card, '24') === 9,
-       'a charge of one and a half limits is paid after the card has waited for two limits’ worth', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
+    ok((await bal(V.R)) === 1500 && count(V.card, '24') === 1 + waitsOf(1500, 1000),
+       'a charge of one and a half limits is paid after the card has waited for the first limit’s worth over it: seven', (await bal(V.R)) + ', ' + count(V.card, '24') + ' SIGN');
     ok(waited.length >= 1 && /^Over the card’s per tap limit\. Keep holding \(\d+ s\)$/.test(waited[0]), 'and the till said to keep holding, with how long it had been and not how long was left', waited.join(' / '));
     // a small payment paid from a piece worth much more is not over anybody's limit, and is not told it is
     ok(till.fcProgressText({ step: 'waiting', polls: 2, seconds: 3, sum: 2048, want: 613 }) === 'Paying from a larger piece. Keep holding (3 s)'
@@ -812,9 +831,12 @@ async function world(feePpk, sats, make) {
    * to 2,047 each. Then the drawer is short, and the payment that finds it so
    * brings change back that fills it again: in thirty-two pieces at the most
    * made here after the swap (the card before 1.12), or in the eight pieces
-   * the card makes of its own change. */
-  for (const own of [false, true]) {
-    const D = await world(0, 60000, own ? undefined : card11);
+   * the card makes of its own change (1.12). A card of 1.13 does not restock the
+   * drawer with its change: it is cut plainly, in four pieces at the most, and the
+   * least that is overpaid is the change, a few sats; that is a top-up's job. */
+  for (const [version, make] of [['1.11', card11], ['1.12', card12], ['1.13', card4]]) {
+    const own = version !== '1.11', shaped = version === '1.13';
+    const D = await world(0, 60000, make);
     D.card.tap();
     await D.H.W.cardAdd(D.card, { sats: 20000, pin: '1234' });
     const small = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
@@ -850,34 +872,47 @@ async function world(feePpk, sats, make) {
     const back = (short.change && short.change.sats) || 0;
     const made = count(D.card, '26');
     const usedUp = piecesBefore - amounts(D.card).length;
-    ok(short.sats === 613 && back >= 256 && back <= 1024 && count(D.card, '24') === 1 && onBefore - D.card.balance() === 613 + back && (own ? made >= 1 && made <= 8 : made === 0),
-       'the next odd price cannot be made exactly, and is paid with a set that brings back change worth going back for (256 sats or more, where the least there was to overpay was 1)'
-       + (own ? ', the card making the change itself in eight pieces at the most' : ''),
-       back + ' sats of change, ' + count(D.card, '24') + ' SIGN, ' + made + ' of the card’s own pieces');
+    if (shaped) {
+      ok(short.sats === 613 && back >= 1 && back < 64 && count(D.card, '24') === 1 && onBefore - D.card.balance() === 613 + back && made >= 1 && made <= 4,
+         version + ': the next odd price cannot be made exactly, and is paid with the set that overpays least, whose change the card makes itself in four pieces at the most (nothing is restocked by it)',
+         back + ' sats of change, ' + count(D.card, '24') + ' SIGN, ' + made + ' of the card’s own pieces');
+    } else {
+      ok(short.sats === 613 && back >= 256 && back <= 1024 && count(D.card, '24') === 1 && onBefore - D.card.balance() === 613 + back && (own ? made >= 1 && made <= 8 : made === 0),
+         version + ': the next odd price cannot be made exactly, and is paid with a set that brings back change worth going back for (256 sats or more, where the least there was to overpay was 1)'
+         + (own ? ', the card making the change itself in eight pieces at the most' : ''),
+         back + ' sats of change, ' + count(D.card, '24') + ' SIGN, ' + made + ' of the card’s own pieces');
+    }
     // the change goes back at the next tap, with no PIN, cut to fill what has been spent from
     D.card.tap();
     D.card.sent.length = 0;
     const wrote = await D.R.W.cardWrite(D.card, { change: true });
     const d1 = deep(D.card);
     ok(wrote.left === 0 && wrote.change === back && D.card.balance() === onBefore - 613 && D.R.W.cardOwed().length === 0, 'the change goes back onto the card at its next tap', String(D.card.balance()));
-    if (own) {
+    if (shaped) {
+      const onIt = amounts(D.card).length - (piecesBefore - usedUp);
+      ok(onIt >= 1 && onIt <= 4 && count(D.card, '30') === 1,
+         version + ': in four pieces at the most, since that is all the card makes of its own change at once: one command', count(D.card, '30') + ' LOAD commands; ' + onIt + ' pieces');
+    } else if (own) {
       const onIt = amounts(D.card).length - (piecesBefore - usedUp);
       ok(onIt <= 8 && count(D.card, '30') <= 3,
-         'in eight pieces at the most, since that is all the card makes of its own change at once: three to a command', count(D.card, '30') + ' LOAD commands; ' + onIt + ' pieces');
+         version + ': in eight pieces at the most, since that is all the card makes of its own change at once: three to a command', count(D.card, '30') + ' LOAD commands; ' + onIt + ' pieces');
     } else {
       ok(count(D.card, '30') <= 11 && d1[1] >= 4 && d1[2] >= 4 && d1[4] >= 4,
          'in thirty-two pieces at the most, smallest sizes first: the card has 1s, 2s and 4s again', count(D.card, '30') + ' LOAD commands; ' + JSON.stringify({ 1: d1[1], 2: d1[2], 4: d1[4], 8: d1[8] }));
     }
     ok(D.card.sent.filter((a) => /^b017..00/.test(a)).length === 0 && D.card.sent.filter((a) => /^b017..03/.test(a)).length === 2,
        'and the till read the card the short way before and after: it wants what the card comes to, not what is on it', D.card.sent.filter((a) => /^b017/.test(a)).length + ' listing commands');
-    let again = 0;
+    let again = 0, allPaid = true;
     for (const p of [613, 303, 1215, 81]) {
       D.card.tap();
+      D.card.sent.length = 0;
       const paid = await D.R.W.cardPay(D.card, { sats: p, pin: '1234' });
       if (paid.sats === p && paid.change === null) again += 1;
+      // (a card of 1.13 makes its change in four pieces at the most, whatever the payment)
+      allPaid = allPaid && paid.sats === p && (!shaped || count(D.card, '26') <= 4);
     }
-    // (eight pieces fill less of the drawer than thirty-two did, so a card that makes its own change is not made exact for as many)
-    ok(own ? again >= 1 : again === 4, 'and odd prices are paid exactly again' + (own ? ' where the pieces it was given allow' : ''), again + ' of 4');
+    // (eight pieces fill less of the drawer than thirty-two did, so a card that makes its own change is not made exact for as many; a card of 1.13 restocks nothing, and is paid with change until it is topped up)
+    ok(allPaid && (shaped ? again >= 0 : own ? again >= 1 : again === 4), version + ': ' + (shaped ? 'a drawer that is short of small pieces stays short until it is topped up: the prices after are all paid, with the change the pieces it has allow, never more than four pieces of it made by the card' : 'and odd prices are paid exactly again' + (own ? ' where the pieces it was given allow' : '')), again + ' of 4 exact');
 
     // a top-up fills what has been spent from, before anything else
     D.card.tap();
@@ -1276,9 +1311,11 @@ async function world(feePpk, sats, make) {
     await settle();
   }
 
-  /* ---- 25: the card makes its own change (software 1.12) ------------------------- */
-  {
-    const OC = await world(0, 9000);
+  /* ---- 25: the card makes its own change (software 1.12 and 1.13) ----------------------
+   * 1,000 from 1024 512 256 128 64 16: a card of 1.12 takes the 1024 and the 256 (a deep drawer's refill) and gets 280 back, in three pieces
+   * it makes itself; a card of 1.13 takes the 1024 alone and gets 24 back, in two (16 and 8). */
+  for (const [label, make, owedChange] of [['1.12', card12, 280], ['1.13', card4, 24]]) {
+    const OC = await world(0, 9000, make);
     const CT = OC.R.window.CashuTS;
     const own = (buf) => OC.R.window.Uint8Array.from(buf);
     await binaryLoad(OC.H, OC.card, 2000);            // 1024 512 256 128 64 16: no exact set for 1000
@@ -1303,7 +1340,7 @@ async function world(feePpk, sats, make) {
     ok(/^22( 23)+( 26)+ 24$/.test(order), 'in the order its outputs are hashed in: the pieces, the till’s outputs, the card’s change, and the signature', order);
     const asked = OC.card.sent.filter((a) => a.slice(0, 4) === 'b026').map((a) => parseInt(a.substr(10, 8), 16));
     const got = paid.change.sats;
-    ok(asked.reduce((a, b) => a + b, 0) === got && got === 1280 - 1000 && OC.card.sent.filter((a) => a.slice(0, 4) === 'b026').every((a) => a.substr(8, 2) === '04'),
+    ok(asked.reduce((a, b) => a + b, 0) === got && got === owedChange && OC.card.sent.filter((a) => a.slice(0, 4) === 'b026').every((a) => a.substr(8, 2) === '04'),
        'a command names an amount and nothing else, and the amounts are the pieces’ worth over the price', asked.join('+') + ' = ' + got);
     // the request the mint was sent: the till's outputs, then the card's, in the order the card hashed them
     const outs = request.outputs;
@@ -1362,35 +1399,58 @@ async function world(feePpk, sats, make) {
 
 
   /* ---- 25b: the wait is by what leaves the card ---------------------------------
-   * Within the limit with no change: nothing. Within it with change: one limit's
-   * worth (four waits). Over it: ceil(net / limit) limits' worth, with change or without. */
-  {
-    const WC = await world(0, 9000);
+   * Within the limit with no change: nothing. Over it: ceil(net / limit) limits' worth, with change or without.
+   * Software 1.12: within it with change, one limit's worth of waiting (four SIGN), and four to a limit's worth over it.
+   * Software 1.13: within it, nothing at all, change or no change; over it seven SIGN for the first limit's worth over it and
+   * three for each after, less one for every piece of change the card made. */
+  for (const [label, make] of [['1.12', card12], ['1.13', card4]]) {
+    const shaped = label === '1.13';
+    const WC = await world(0, 9000, make);
     await WC.H.W.cardAdd(WC.card, { sats: 3000, pin: '1234' });      // a deep drawer: most prices are exact
     WC.card.tap();
     await WC.H.W.cardSetLimit(WC.card, { sats: 400, tap: true });
     const sign = async (sats) => { WC.card.tap(); WC.card.sent.length = 0; const p = await WC.R.W.cardPay(WC.card, { sats, pin: '1234' }); return { p, signs: count(WC.card, '24'), changes: count(WC.card, '26') }; };
     let r = await sign(392);
-    ok(r.p.sats === 392 && r.changes === 0 && r.signs === 1, 'within the limit with no change (an exact set): signed at once', r.signs + ' SIGN, ' + r.changes + ' change');
+    ok(r.p.sats === 392 && r.changes === 0 && r.signs === 1, label + ': within the limit with no change (an exact set): signed at once', r.signs + ' SIGN, ' + r.changes + ' change');
     r = await sign(400);
-    ok(r.p.sats === 400 && r.changes === 0 && r.signs === 1, 'exactly the limit with no change: at once', r.signs + ' SIGN');
+    ok(r.p.sats === 400 && r.changes === 0 && r.signs === 1, label + ': exactly the limit with no change: at once', r.signs + ' SIGN');
     r = await sign(900);
-    ok(r.p.sats === 900 && r.changes === 0 && r.signs === 1 + waitsOf(900, 400), 'over it with no change: ceil(900 / 400) = 3 limits’ worth, 12 waits', r.signs + ' SIGN');
+    ok(r.p.sats === 900 && r.changes === 0 && r.signs === 1 + (shaped ? waitsOf(900, 400) : waitsOf12(900, 400)),
+       label + ': over it with no change: ceil(900 / 400) = 3 limits’ worth, ' + (shaped ? '7 + 3 = 10' : '12') + ' waits', r.signs + ' SIGN');
     // a card with no exact set for the price: change is unavoidable
-    const NC = await world(0, 9000);
+    const NC = await world(0, 9000, make);
     await binaryLoad(NC.H, NC.card, 4000);
     NC.card.tap();
     await NC.H.W.cardSetLimit(NC.card, { sats: 400, tap: true });
-    const signN = async (sats) => { NC.card.tap(); NC.card.sent.length = 0; const said = []; const p = await NC.R.W.cardPay(NC.card, { sats, pin: '1234', progress: (q) => { if (q.step === 'waiting') said.push(q); } }); return { p, signs: count(NC.card, '24'), changes: count(NC.card, '26'), said }; };
+    const signN = async (sats) => {
+      NC.card.tap(); NC.card.sent.length = 0; const said = [];
+      const p = await NC.R.W.cardPay(NC.card, { sats, pin: '1234', progress: (q) => { if (q.step === 'waiting') said.push(q); } });
+      const cardMade = NC.card.sent.filter((a) => a.slice(0, 4) === 'b026').reduce((n, a) => n + parseInt(a.substr(10, 8), 16), 0);
+      return { p, signs: count(NC.card, '24'), changes: count(NC.card, '26'), said, cardMade };
+    };
     r = await signN(250);
-    ok(r.p.sats === 250 && r.changes >= 1 && r.signs === 1 + 4 && r.said.length === 4 && r.said.every((q) => q.making === true),
-       'within the limit but with change made by the card: one limit’s worth of waiting, three seconds, and the till says the card is making change', r.signs + ' SIGN, ' + r.said.length + ' told to hold');
+    if (shaped) {
+      ok(r.p.sats === 250 && r.changes >= 1 && r.signs === 1 && r.said.length === 0,
+         label + ': within the limit but with change made by the card: nothing to wait for, signed at the first asking, and the till is told nothing to hold for', r.signs + ' SIGN, ' + r.said.length + ' told to hold, ' + r.changes + ' pieces of change');
+    } else {
+      ok(r.p.sats === 250 && r.changes >= 1 && r.signs === 1 + 4 && r.said.length === 4 && r.said.every((q) => q.making === true),
+         label + ': within the limit but with change made by the card: one limit’s worth of waiting, three seconds, and the till says the card is making change', r.signs + ' SIGN, ' + r.said.length + ' told to hold');
+    }
     const till = appOn(NC.R, { screen: 'confirm' });
-    ok(/^The card is making change\. Keep holding \(\d+ s\)$/.test(till.fcProgressText(r.said[0])), 'in those words', till.fcProgressText(r.said[0]));
+    if (!shaped) ok(/^The card is making change\. Keep holding \(\d+ s\)$/.test(till.fcProgressText(r.said[0])), 'in those words', till.fcProgressText(r.said[0]));
     NC.card.tap(); await NC.R.W.cardWrite(NC.card, { change: true });
     r = await signN(900);
-    ok(r.p.sats === 900 && r.changes >= 1 && r.signs === 1 + waitsOf(900, 400) && r.said.length === 12 && r.said.slice(0, 4).every((q) => q.making === true) && r.said.slice(4).every((q) => q.making === false),
-       'over the limit with change: the same limits’ worth as without it (overpaying costs no wait), said as making change for the first and as over the limit after', r.signs + ' SIGN');
+    if (shaped) {
+      // what leaves the card: the price, and the part of the change the card did not make (made here after the swap)
+      const leaves = 900 + (r.p.change.sats - r.cardMade);
+      const waits = waitsOf(leaves, 400, r.changes);
+      ok(r.p.sats === 900 && r.changes >= 1 && r.signs === 1 + waits && r.said.length === waits && r.said.every((q) => q.making === false),
+         label + ': over the limit with change: the wait is the limit’s, with one signature done for every piece of change the card made, and said as over the limit and never as making change',
+         r.signs + ' SIGN, ' + r.changes + ' pieces of change, ' + waits + ' waits for ' + leaves + ' that left the card');
+    } else {
+      ok(r.p.sats === 900 && r.changes >= 1 && r.signs === 1 + waitsOf12(900, 400) && r.said.length === 12 && r.said.slice(0, 4).every((q) => q.making === true) && r.said.slice(4).every((q) => q.making === false),
+         label + ': over the limit with change: the same limits’ worth as without it (overpaying costs no wait), said as making change for the first and as over the limit after', r.signs + ' SIGN');
+    }
     NC.card.tap(); await NC.R.W.cardWrite(NC.card, { change: true });
     await settle();
   }
@@ -1422,10 +1482,11 @@ async function world(feePpk, sats, make) {
   }
 
   /* ---- 25d: change of more pieces than the card makes at once --------------------
-   * The card keeps eight openings. A change that would be more pieces than that has the largest eight
-   * made by the card, and the rest made here after the swap, as change always was. */
-  {
-    const MP = await world(0, 9000);
+   * The card keeps eight openings, and a card of 1.12 is asked for up to eight of them, a card of 1.13 for four at the most (each
+   * is about half a second of the first tap, and change may add two seconds to it and no more). A change that would be more
+   * pieces than that has the largest made by the card, and the rest made here after the swap, as change always was. */
+  for (const [label, make, most, madeSum, tail, split] of [['1.12', card12, 8, 1020, 3, null], ['1.13', card4, 4, 960, 63, '512 + 256 + 128 + 64']]) {
+    const MP = await world(0, 9000, make);
     await binaryLoad(MP.H, MP.card, 2048);            // one piece of 2048
     MP.card.tap();
     MP.card.sent.length = 0;
@@ -1436,21 +1497,22 @@ async function world(feePpk, sats, make) {
     MP.R.window.console.log = log0;
     const rows = owedRows(MP.R);
     const blind = rows.filter((r) => r.blind), token = rows.filter((r) => r.token);
-    ok(paid.sats === 1025 && (await bal(MP.R)) === 1025 && count(MP.card, '26') === 8 && count(MP.card, '24') === 1,
-       '2048 paying 1025 is 1023 of change, which is ten powers of two: the card is asked for the eight largest', count(MP.card, '26') + ' change commands, till has ' + (await bal(MP.R)));
-    ok(blind.length === 1 && blind[0].sats === 1020 && blind[0].blind.length === 8 && token.length === 1 && token[0].sats === 3 && paid.change.sats === 1023 && paid.change.written === false,
-       'and the 3 sats left are made here after the swap and owed as a token, beside the card’s own', rows.map((r) => r.sats + (r.blind ? ' (the card’s)' : ' (a token)')).join(', '));
-    ok(logs.some((l) => /the card makes 1020 sats of the change itself, in 8 piece/.test(l) && /3 sats more are made here/.test(l)), 'the log line says so', logs.filter((l) => /card makes/.test(l)).join(' | '));
+    ok(paid.sats === 1025 && (await bal(MP.R)) === 1025 && count(MP.card, '26') === most && count(MP.card, '24') === 1,
+       label + ': 2048 paying 1025 is 1023 of change, which is ten powers of two: the card is asked for the ' + (most === 8 ? 'eight' : 'four') + ' largest', count(MP.card, '26') + ' change commands, till has ' + (await bal(MP.R)));
+    ok(blind.length === 1 && blind[0].sats === madeSum && blind[0].blind.length === most && token.length === 1 && token[0].sats === tail && paid.change.sats === 1023 && paid.change.written === false,
+       label + ': and the ' + tail + ' sats left are made here after the swap and owed as a token, beside the card’s own', rows.map((r) => r.sats + (r.blind ? ' (the card’s)' : ' (a token)')).join(', '));
+    ok(logs.some((l) => new RegExp('the card makes ' + madeSum + ' sats of the change itself, in ' + most + ' pieces \\(' + (split ? split.replace(/\+/g, '\\+') : '[0-9 +]+') + '\\); ' + tail + ' sats more are made here after the swap, at the change tap').test(l)),
+       label + ': the log line says how it was split: what the card makes, in how many pieces and which, and what is left for after the swap', logs.filter((l) => /card makes/.test(l)).join(' | '));
     const e = history(MP.R).filter((x) => x.hash === paid.hash)[0] || {};
     ok(e.sats === 1025 && e.grossSats === 2048 && e.changeSats === 1023 && e.feeSats === 0 && e.changeState === 'not handed',
-       'one entry for the payment, with the change as one amount', JSON.stringify({ sats: e.sats, gross: e.grossSats, change: e.changeSats, fee: e.feeSats, state: e.changeState }));
+       label + ': one entry for the payment, with the change as one amount', JSON.stringify({ sats: e.sats, gross: e.grossSats, change: e.changeSats, fee: e.feeSats, state: e.changeState }));
     MP.card.tap();
     MP.card.sent.length = 0;
     const wrote = await MP.R.W.cardWrite(MP.card, { change: true });
     ok(wrote.left === 0 && wrote.change === 1023 && MP.card.balance() === 1023 && MP.R.W.cardOwed().length === 0 && MP.card.state.openings.every((x) => x.state === 'empty'),
-       'one tap writes both', 'the card has ' + MP.card.balance());
+       label + ': one tap writes both', 'the card has ' + MP.card.balance());
     const e2 = history(MP.R).filter((x) => x.hash === paid.hash)[0] || {};
-    ok(e2.changeState === 'given back', 'and the entry says given back', e2.changeState);
+    ok(e2.changeState === 'given back', label + ': and the entry says given back', e2.changeState);
     await settle();
   }
 
@@ -1483,8 +1545,8 @@ async function world(feePpk, sats, make) {
   /* ---- 25f: the swap's answer is lost, and the card's change is had from the mint ----
    * This phone never held what the card's pieces are made of, but the mint remembers whom
    * it signed for: asked by the blinded messages (NUT-09), as a lost locked send's outputs are. */
-  {
-    const LA = await world(0, 9000);
+  for (const [label, make, change, pieces] of [['1.12', card12, 280, 3], ['1.13', card4, 24, 2]]) {
+    const LA = await world(0, 9000, make);
     await binaryLoad(LA.H, LA.card, 2000);
     LA.card.tap();
     const realHandle = LA.R.mint.handle.bind(LA.R.mint);
@@ -1497,7 +1559,7 @@ async function world(feePpk, sats, make) {
       return null;
     };
     const lost = await LA.R.W.cardPay(LA.card, { sats: 1000, pin: '1234' }).then((r) => r, (e) => e);
-    ok(dropped && lost && lost.card === 'waiting' && owedRows(LA.R).length === 0 && swaps(LA.R).length === 1 && swaps(LA.R)[0].change.outs.length === 3 && LA.R.W.cardTaken().length === 1,
+    ok(dropped && lost && lost.card === 'waiting' && owedRows(LA.R).length === 0 && swaps(LA.R).length === 1 && swaps(LA.R)[0].change.outs.length === pieces && LA.R.W.cardTaken().length === 1,
        'a swap whose answer never came: the card has signed, the mint has made it, and nothing is owed to the card yet; the row has its blinded messages', lost && (lost.card || lost.message));
     deaf = false;
     await settle();
@@ -1508,19 +1570,19 @@ async function world(feePpk, sats, make) {
     await settle();
     const mine = settled.filter((x) => x.state === 'paid')[0] || {};
     const rows = owedRows(LA.R);
-    ok(mine.sats === 1000 && mine.change === 280 && rows.length === 1 && rows[0].blind && rows[0].blind.length === 3 && rows[0].sats === 280 && swaps(LA.R).length === 0
+    ok(mine.sats === 1000 && mine.change === change && rows.length === 1 && rows[0].blind && rows[0].blind.length === pieces && rows[0].sats === change && swaps(LA.R).length === 0
        && LA.R.W.cardTaken().length === 0 && LA.R.W.cardDue().length === 0 && (await bal(LA.R)) === 1000,
        'found again, the payment is made and the card’s change is had from the mint by its blinded messages, and owed', JSON.stringify(mine) + ', ' + rows.length + ' owed');
     LA.R.fate = null;
     const eL = history(LA.R).filter((x) => x.hash === mine.id)[0] || {};
-    ok(eL.sats === 1000 && eL.feeSats === 0 && eL.grossSats === 1280 && eL.changeSats === 280 && eL.changeState === 'not handed',
+    ok(eL.sats === 1000 && eL.feeSats === 0 && eL.grossSats === 1000 + change && eL.changeSats === change && eL.changeState === 'not handed',
        'its entry, written by the wallet’s own recovery, does not count the card’s change as the mint’s fee', JSON.stringify({ sats: eL.sats, fee: eL.feeSats, gross: eL.grossSats, change: eL.changeSats, state: eL.changeState }));
     LA.card.tap();
     const wrote = await LA.R.W.cardWrite(LA.card, { change: true });
     ok(wrote.left === 0 && LA.card.balance() === 1000 && LA.R.W.cardOwed().length === 0, 'and written at the next tap, as any is', 'the card has ' + LA.card.balance());
 
     // the answer lost, and the payment recovered at once (the swap's own recovery); the mint will not say what it signed for the card
-    const LB = await world(0, 9000);
+    const LB = await world(0, 9000, make);
     await binaryLoad(LB.H, LB.card, 2000);
     LB.card.tap();
     const realB = LB.R.mint.handle.bind(LB.R.mint);
@@ -1533,50 +1595,56 @@ async function world(feePpk, sats, make) {
     };
     const pB = await LB.R.W.cardPay(LB.card, { sats: 1000, pin: '1234' });
     await settle();
-    ok(pB.sats === 1000 && pB.change && pB.change.unmade === true && pB.change.sats === 280 && owedRows(LB.R).length === 0 && LB.R.W.cardDue().length === 1 && LB.R.W.cardDue()[0].sats === 280
+    ok(pB.sats === 1000 && pB.change && pB.change.unmade === true && pB.change.sats === change && owedRows(LB.R).length === 0 && LB.R.W.cardDue().length === 1 && LB.R.W.cardDue()[0].sats === change
        && swaps(LB.R).length === 1 && (await bal(LB.R)) === 1000,
        'a mint that will not say what it signed for the card: the payment stands, its change is noted as due, said as change not made yet, and the swap’s row is kept', JSON.stringify(pB.change) + ' ' + JSON.stringify(LB.R.W.cardDue()));
     hushed = false;
     const again = await LB.R.W.cardDueRetry();
     await settle();
-    ok(again.length === 1 && again[0].state === 'made' && owedRows(LB.R).length === 1 && owedRows(LB.R)[0].sats === 280 && LB.R.W.cardDue().length === 0 && swaps(LB.R).length === 0,
+    ok(again.length === 1 && again[0].state === 'made' && owedRows(LB.R).length === 1 && owedRows(LB.R)[0].sats === change && LB.R.W.cardDue().length === 0 && swaps(LB.R).length === 0,
        'asked again when the phone connects, it is had and owed, and the note is gone', JSON.stringify(again));
     LB.R.fate = null;
     LB.card.tap();
     await LB.R.W.cardWrite(LB.card, { change: true });
     ok(LB.card.balance() === 1000, 'and written', String(LB.card.balance()));
     await settle();
+  
   }
 
   /* ---- 25g: a change write cut short ----------------------------------------------
    * The card lets an opening go when its piece is on it, so what a tap that left had written is not
-   * asked for again, and what it had not is. */
-  {
-    const CS = await world(0, 9000);
+   * asked for again, and what it had not is. A card of 1.12 makes this change in six pieces (two commands to
+   * write); a card of 1.13 makes four of them and the till one more, after the swap, all written at the change tap. */
+  for (const [label, make, kPieces, total, openLeft] of [['1.12', card12, 6, 343, 3], ['1.13', card4, 4, 87, null]]) {
+    const CS = await world(0, 9000, make);
     await binaryLoad(CS.H, CS.card, 4000);                 // 2048 1024 512 256 128 32
     CS.card.tap();
     const paid = await CS.R.W.cardPay(CS.card, { sats: 681, pin: '1234' });
-    const k = owedRows(CS.R)[0].blind.length;
+    const blindRow = owedRows(CS.R).filter((r) => r.blind)[0];
+    const k = blindRow.blind.length;
+    const tokens = owedRows(CS.R).filter((r) => r.token).length;
     const after = CS.card.balance();
-    ok(paid.sats === 681 && k === 6 && paid.change.sats === 343, 'a change of six pieces, two commands to write', k + ' pieces, ' + paid.change.sats);
+    ok(paid.sats === 681 && k === kPieces && paid.change.sats === total && tokens === (label === '1.13' ? 1 : 0),
+       label + ': a change of ' + (label === '1.12' ? 'six pieces, two commands to write' : 'four pieces made by the card, and the 1 sat left of 87 made by the till'), k + ' pieces, ' + paid.change.sats + ', ' + tokens + ' token row(s)');
     CS.card.tap();
     CS.card.leaveBefore('30', 2);
     const cut = await why(CS.R.W.cardWrite(CS.card, { change: true }));
     const nonces = () => CS.card.state.slots.filter((x) => x.status === 1).map((x) => x.data.substr(24, 64));
-    ok(cut === 'gone' && CS.card.balance() > after && CS.card.balance() < after + 343 && owedRows(CS.R).length === 1 && CS.card.state.openings.filter((x) => x.state === 'pending').length === 3,
-       'taken away after the first three pieces: they are on the card, three openings are left, and the row is still owed', cut + ', card ' + CS.card.balance());
+    const pendingNow = CS.card.state.openings.filter((x) => x.state === 'pending').length;
+    ok(cut === 'gone' && CS.card.balance() > after && CS.card.balance() < after + total && owedRows(CS.R).length >= 1 && (openLeft === null ? pendingNow >= 1 && pendingNow < kPieces : pendingNow === openLeft),
+       label + ': taken away after the first three pieces: they are on the card, the openings of the rest are left, and the rows are still owed', cut + ', card ' + CS.card.balance() + ', ' + pendingNow + ' openings left');
     CS.card.tap();
     CS.card.sent.length = 0;
     const fin = await CS.R.W.cardWrite(CS.card, { pin: '1234' });
-    ok(fin.left === 0 && CS.card.balance() === after + 343 && owedRows(CS.R).length === 0 && new Set(nonces()).size === nonces().length
-       && CS.card.state.openings.every((x) => x.state === 'empty') && count(CS.card, '30') === 1,
-       'the next tap writes the three that are left and no more, and nothing is on the card twice', 'card ' + CS.card.balance() + ', ' + count(CS.card, '30') + ' LOAD');
+    ok(fin.left === 0 && CS.card.balance() === after + total && owedRows(CS.R).length === 0 && new Set(nonces()).size === nonces().length
+       && CS.card.state.openings.every((x) => x.state === 'empty') && count(CS.card, '30') === (label === '1.12' ? 1 : 2),
+       label + ': the next tap writes the pieces that are left and no more, and nothing is on the card twice', 'card ' + CS.card.balance() + ', ' + count(CS.card, '30') + ' LOAD');
     await settle();
   }
 
   /* ---- 25h: what cannot be finished is kept and not promised ------------------------ */
-  {
-    const WP = await world(0, 9000);
+  for (const [label, make, pieces] of [['1.12', card12, 3], ['1.13', card4, 2]]) {
+    const WP = await world(0, 9000, make);
     await binaryLoad(WP.H, WP.card, 2000);
     WP.card.tap();
     const paid = await WP.R.W.cardPay(WP.card, { sats: 1000, pin: '1234' });
@@ -1586,7 +1654,7 @@ async function world(feePpk, sats, make) {
     WP.card.tap();
     const wrote = await WP.R.W.cardWrite(WP.card, { change: true });
     const stuck = WP.R.W.cardStuck();
-    ok(wrote.left === 0 && wrote.sats === 0 && WP.card.balance() === 0 && WP.R.W.cardOwed().length === 0 && stuck.length === 1 && stuck[0].sats === paid.change.sats && stuck[0].why === 'opening' && stuck[0].blind.length === 3,
+    ok(wrote.left === 0 && wrote.sats === 0 && WP.card.balance() === 0 && WP.R.W.cardOwed().length === 0 && stuck.length === 1 && stuck[0].sats === paid.change.sats && stuck[0].why === 'opening' && stuck[0].blind.length === pieces,
        'an output the card no longer lists and does not hold cannot be finished: the row is kept with why, and is no longer owed', JSON.stringify(stuck.map((x) => [x.sats, x.why])));
     const e = history(WP.R).filter((x) => x.hash === paid.hash)[0] || {};
     ok(e.changeState === 'not handed', 'its entry is not said to be given back', e.changeState);
@@ -1597,7 +1665,7 @@ async function world(feePpk, sats, make) {
     await settle();
 
     // a signature that does not check out is not written
-    const BD = await world(0, 9000);
+    const BD = await world(0, 9000, make);
     await binaryLoad(BD.H, BD.card, 2000);
     BD.card.tap();
     const p2 = await BD.R.W.cardPay(BD.card, { sats: 1000, pin: '1234' });
@@ -1611,11 +1679,11 @@ async function world(feePpk, sats, make) {
     const st2 = BD.R.W.cardStuck();
     ok(st2.length === 1 && st2[0].why === 'signature' && st2[0].sats === p2.change.sats - (p2.change.sats - st2[0].sats) && st2[0].blind.length === 1 && BD.R.W.cardOwed().length === 0,
        'the mint’s signature on one output fails its DLEQ: that piece is not written, and is kept apart; the others went on', JSON.stringify(st2.map((x) => [x.sats, x.why, x.blind.length])) + ', card ' + BD.card.balance());
-    ok(BD.card.balance() === 720 + (p2.change.sats - st2[0].sats), 'the card has the pieces that were good', String(BD.card.balance()));
+    ok(BD.card.balance() === 2000 - 1000 - p2.change.sats + (p2.change.sats - st2[0].sats), 'the card has the pieces that were good', String(BD.card.balance()));
     await settle();
 
     // a mint that sends no DLEQ is taken as every other is: its signatures cannot be checked, and are not refused for it
-    const ND = await world(0, 9000);
+    const ND = await world(0, 9000, make);
     await binaryLoad(ND.H, ND.card, 2000);
     ND.card.tap();
     const p3 = await ND.R.W.cardPay(ND.card, { sats: 1000, pin: '1234' });
@@ -1624,10 +1692,10 @@ async function world(feePpk, sats, make) {
     ND.R.storage.setItem('foxy.flashcard.owed', JSON.stringify(st3));
     ND.card.tap();
     const w3 = await ND.R.W.cardWrite(ND.card, { change: true });
-    ok(w3.left === 0 && ND.R.W.cardStuck().length === 0 && ND.card.balance() === 720 + p3.change.sats, 'a signature with no DLEQ is written all the same', String(ND.card.balance()));
+    ok(w3.left === 0 && ND.R.W.cardStuck().length === 0 && ND.card.balance() === 2000 - 1000 - p3.change.sats + p3.change.sats, 'a signature with no DLEQ is written all the same', String(ND.card.balance()));
     await settle();
+  
   }
-
 
   /* ---- 25i: a mint that charges for every piece ------------------------------------
    * What leaves the card is the price and the fee on the pieces; the rest is its change, and costs nothing to make. */
@@ -1653,26 +1721,48 @@ async function world(feePpk, sats, make) {
 
   /* ---- 25j: the day is charged what leaves the card, and its refusal comes at the signing ---- */
   {
-    const DL = await world(0, 9000);
-    await binaryLoad(DL.H, DL.card, 2048);            // one piece of 2048
-    DL.card.tap();
-    await DL.H.W.cardSetLimit(DL.card, { sats: 600 });
-    DL.card.tap();
-    const first = await DL.R.W.cardPay(DL.card, { sats: 300, pin: '1234' });
-    ok(first.sats === 300 && DL.card.state.spent === 300, 'a day of 600 and a piece of 2,048: a payment of 300 is made, and the day is charged 300 and not the piece', 'spent ' + DL.card.state.spent);
-    DL.card.tap();
-    await DL.R.W.cardWrite(DL.card, { change: true });
-    DL.card.tap();
-    const second = await DL.R.W.cardPay(DL.card, { sats: 300, pin: '1234' });
-    ok(second.sats === 300 && DL.card.state.spent === 600, 'and so is a second', 'spent ' + DL.card.state.spent);
-    DL.card.tap();
-    await DL.R.W.cardWrite(DL.card, { change: true });
-    DL.card.tap();
-    DL.card.sent.length = 0;
-    const third = await DL.R.W.cardPay(DL.card, { sats: 100, pin: '1234' }).then(() => null, (e) => e);
-    ok(third && third.card === 'limit' && third.need === 100 && third.left === 0 && count(DL.card, '40') === 0,
-       'one more is refused before the PIN is sent, and said as the price over what the day has left', third && (third.card + ': ' + third.message));
-    await settle();
+    // (a card of 1.13 makes four pieces of change at most: prices are chosen whose change is that few, so all of it is the card's)
+    for (const [label, make, prices] of [['1.12', card12, [300, 300, 100]], ['1.13', card4, [320, 280, 100]]]) {
+      const DL = await world(0, 9000, make);
+      await binaryLoad(DL.H, DL.card, 2048);            // one piece of 2048
+      DL.card.tap();
+      await DL.H.W.cardSetLimit(DL.card, { sats: 600 });
+      DL.card.tap();
+      const first = await DL.R.W.cardPay(DL.card, { sats: prices[0], pin: '1234' });
+      ok(first.sats === prices[0] && DL.card.state.spent === prices[0], label + ': a day of 600 and a piece of 2,048: a payment of ' + prices[0] + ' is made, and the day is charged ' + prices[0] + ' and not the piece', 'spent ' + DL.card.state.spent);
+      DL.card.tap();
+      await DL.R.W.cardWrite(DL.card, { change: true });
+      DL.card.tap();
+      const second = await DL.R.W.cardPay(DL.card, { sats: prices[1], pin: '1234' });
+      ok(second.sats === prices[1] && DL.card.state.spent === 600, label + ': and so is a second, of ' + prices[1], 'spent ' + DL.card.state.spent);
+      DL.card.tap();
+      await DL.R.W.cardWrite(DL.card, { change: true });
+      DL.card.tap();
+      DL.card.sent.length = 0;
+      const third = await DL.R.W.cardPay(DL.card, { sats: prices[2], pin: '1234' }).then(() => null, (e) => e);
+      ok(third && third.card === 'limit' && third.need === prices[2] && third.left === 0 && count(DL.card, '40') === 0,
+         label + ': one more is refused before the PIN is sent, and said as the price over what the day has left', third && (third.card + ': ' + third.message));
+      await settle();
+    }
+
+    /* A change of more pieces than the card makes has its tail made by the till after the swap, and that tail leaves the
+     * card with the price: it is what the day, and the wait, are charged. 300 from a piece of 2,048 is 1,748 of change, six
+     * powers of two; the card makes the four largest (1024 + 512 + 128 + 64) and the 20 left go with the 300. */
+    {
+      const DT = await world(0, 9000);
+      await binaryLoad(DT.H, DT.card, 2048);
+      DT.card.tap();
+      await DT.H.W.cardSetLimit(DT.card, { sats: 600 });
+      DT.card.tap();
+      DT.card.sent.length = 0;
+      const tailed = await DT.R.W.cardPay(DT.card, { sats: 300, pin: '1234' });
+      const madeBy = DT.card.sent.filter((a) => a.slice(0, 4) === 'b026').map((a) => parseInt(a.substr(10, 8), 16));
+      ok(tailed.sats === 300 && madeBy.join('+') === '1024+512+128+64' && DT.card.state.spent === 320 && tailed.change.sats === 1748,
+         '1.13: a change of six pieces, which the card makes four of, charges the day with the price and the tail the till makes (320), as it leaves the card with the price', 'made ' + madeBy.join('+') + ', spent ' + DT.card.state.spent);
+      DT.card.tap();
+      await DT.R.W.cardWrite(DT.card, { change: true });
+      await settle();
+    }
 
     // the day's refusal at the card's first SIGN, after the outputs and the change were sent: the payment is given up, and its row with it
     const DS = await world(0, 9000);
@@ -1697,14 +1787,14 @@ async function world(feePpk, sats, make) {
   /* ---- 25k: taken away as it signs, with change of its own in the swap --------------
    * The row of the swap has the card's blinded messages and the digest of everything the card signed,
    * so the signature the card gives again is held to it, and the payment is made with the card's change in it. */
-  {
-    const AB = await world(0, 9000);
+  for (const [label, make, change, pieces] of [['1.12', card12, 280, 3], ['1.13', card4, 24, 2]]) {
+    const AB = await world(0, 9000, make);
     await binaryLoad(AB.H, AB.card, 2000);
     AB.card.tap();
     AB.card.loseAnswerOf('24', 1);
     const lost = await AB.R.W.cardPay(AB.card, { sats: 1000, pin: '1234' }).then(() => null, (e) => e);
     const row = swaps(AB.R)[0];
-    ok(lost && lost.card === 'interrupted' && lost.resumable === true && AB.card.balance() === 720 && row && row.asked && row.change.outs.length === 3
+    ok(lost && lost.card === 'interrupted' && lost.resumable === true && AB.card.balance() === 2000 - 1000 - change && row && row.asked && row.change.outs.length === pieces
        && row.digest === crypto.createHash('sha256').update(AB.card.state.lastText, 'utf8').digest('hex'),
        'taken away as it signs: the pieces are burned, and the row holds the digest of everything the card signed, with its change', lost && lost.card);
     AB.card.tap();
@@ -1714,12 +1804,13 @@ async function world(feePpk, sats, make) {
        'the next tap asks for the signature it gave, and the payment is made with nothing more burned or asked for', (await bal(AB.R)) + ', ' + JSON.stringify(fin.change));
     const rows = owedRows(AB.R);
     const e = history(AB.R).filter((x) => x.hash === fin.hash)[0] || {};
-    ok(rows.length === 1 && rows[0].blind && rows[0].sats === 280 && fin.change && fin.change.sats === 280 && e.feeSats === 0 && e.changeSats === 280 && e.sats === 1000,
+    ok(rows.length === 1 && rows[0].blind && rows[0].sats === change && fin.change && fin.change.sats === change && e.feeSats === 0 && e.changeSats === change && e.sats === 1000,
        'with the card’s change owed as if it had been made in that tap', JSON.stringify({ owed: rows.map((r) => r.sats), fin: fin.change, fee: e.feeSats }));
     AB.card.tap();
     await AB.R.W.cardWrite(AB.card, { change: true });
     ok(AB.card.balance() === 1000, 'and written', String(AB.card.balance()));
     await settle();
+  
   }
 
   /* ---- 25m: taken away while the card is making its change ------------------------
@@ -1754,6 +1845,189 @@ async function world(feePpk, sats, make) {
     WD.card.sent.length = 0;
     const off = await WD.H.W.cardWithdraw(WD.card, { pin: '1234' });
     ok(off.sats === 1500 && count(WD.card, '26') === 0 && count(WD.card, '24') === 1 && (await bal(WD.H)) === hb + 1500 && WD.H.W.cardOwed().length === 0, 'taking everything off is one signature and no change of the card’s own', count(WD.card, '26') + ' change commands');
+    await settle();
+  }
+
+
+  /* ---- 26: among the sets that overpay least, one whose change the card makes whole ---------
+   * A card of 1.13 makes four pieces of change at the most, cut plainly: the four largest of the powers of two it is made of.
+   * What is more than that is made by the till after the swap, a second swap at the mint that leaves the card with the price. So when
+   * no set of pieces comes to the price exactly, the set whose change is four powers of two or fewer is taken among those that
+   * overpay least, if one overpays a little more (an eighth of the price, 64 sats at the least); and where none does, the least stands. */
+  {
+    const bitsOf = (n) => n.toString(2).split('').filter((c) => c === '1').length;
+    const named = (card) => card.sent.filter((a) => a.slice(0, 4) === 'b022').map((a) => parseInt(a.substr(8, 2), 16));
+    const madeOf = (card) => card.sent.filter((a) => a.slice(0, 4) === 'b026').map((a) => parseInt(a.substr(10, 8), 16));
+    const logsOf = (ctx) => {
+      const logs = [];
+      const log0 = ctx.window.console.log;
+      ctx.window.console.log = function () { logs.push(Array.prototype.join.call(arguments, ' ')); return log0.apply(this, arguments); };
+      return { logs, done: () => { ctx.window.console.log = log0; } };
+    };
+
+    // 4096 and the five smallest sizes: 1631 cannot be made exactly. The 4096 alone overpays least, by 2465, which is five powers of two
+    // (2048 + 256 + 128 + 32 + 1); with the 31 that are in the small pieces it overpays 31 more, by 2496, which is four (2048 + 256 + 128 + 64).
+    const TD = await world(0, 9000);
+    await binaryLoad(TD.H, TD.card, 4127);
+    ok(amounts(TD.card).join('+') === '4096+16+8+4+2+1' && bitsOf(4096 - 1631) === 5 && bitsOf(4127 - 1631) === 4,
+       'a drawer where the set that overpays least brings back a change of five powers of two, and a set that overpays 31 more one of four', amounts(TD.card).join('+'));
+    TD.card.tap();
+    TD.card.sent.length = 0;
+    const tl = logsOf(TD.R);
+    const tidy = await TD.R.W.cardPay(TD.card, { sats: 1631, pin: '1234' });
+    tl.done();
+    const rowsT = owedRows(TD.R);
+    ok(tidy.sats === 1631 && named(TD.card)[0] === 6 && madeOf(TD.card).join('+') === '2048+256+128+64' && tidy.change.sats === 2496 && rowsT.length === 1 && !!rowsT[0].blind && rowsT[0].sats === 2496,
+       'the four-bit one is chosen: six pieces named, not the 4096 alone, and the card makes all 2496 of the change in four pieces, with nothing left for the till to make after the swap',
+       'named ' + named(TD.card).join() + ', made ' + madeOf(TD.card).join('+') + ', change ' + tidy.change.sats + ', ' + rowsT.length + ' owed row(s)');
+    ok(tl.logs.some((l) => /the card makes 2496 sats of the change itself, in 4 pieces \(2048 \+ 256 \+ 128 \+ 64\)$/.test(l)),
+       'and the log line says it was split in four and that nothing is left to make after the swap', tl.logs.filter((l) => /card makes/.test(l)).join(' | '));
+    ok(TD.card.balance() === 0 && (await bal(TD.R)) === 1631, 'the pieces are all signed for', 'card ' + TD.card.balance());
+    TD.card.tap();
+    const wroteT = await TD.R.W.cardWrite(TD.card, { change: true });
+    ok(wroteT.left === 0 && TD.card.balance() === 2496 && TD.R.W.cardOwed().length === 0, 'and written back at the next tap', 'the card has ' + TD.card.balance());
+
+    // the card before it is not asked to prefer, and takes the 4096 alone, its change cut to its drawer in up to eight pieces
+    const TO = await world(0, 9000, card12);
+    await binaryLoad(TO.H, TO.card, 4127);
+    TO.card.tap();
+    TO.card.sent.length = 0;
+    const old = await TO.R.W.cardPay(TO.card, { sats: 1631, pin: '1234' });
+    ok(old.sats === 1631 && named(TO.card)[0] === 1 && old.change.sats === 2465, 'a card of 1.12 takes the 4096 alone, as the set that overpays least', 'named ' + named(TO.card).join() + ', change ' + old.change.sats);
+    TO.card.tap();
+    await TO.R.W.cardWrite(TO.card, { change: true });
+
+    // no such set: the 4096 alone. The card makes the four largest, 2048 + 256 + 128 + 32, and the 1 left is made after the swap
+    const TE = await world(0, 9000);
+    await binaryLoad(TE.H, TE.card, 4096);
+    TE.card.tap();
+    TE.card.sent.length = 0;
+    const el = logsOf(TE.R);
+    const tail = await TE.R.W.cardPay(TE.card, { sats: 1631, pin: '1234' });
+    el.done();
+    const rowsE = owedRows(TE.R);
+    ok(tail.sats === 1631 && named(TE.card)[0] === 1 && madeOf(TE.card).join('+') === '2048+256+128+32' && tail.change.sats === 2465
+       && rowsE.filter((r) => r.blind).length === 1 && rowsE.filter((r) => r.blind)[0].sats === 2464 && rowsE.filter((r) => r.token).length === 1 && rowsE.filter((r) => r.token)[0].sats === 1,
+       'where no set brings back change of four powers of two or fewer, the least stands: the card makes 2048 + 256 + 128 + 32 and the 1 sat left is made after the swap, a token row owed beside the card’s own',
+       'made ' + madeOf(TE.card).join('+') + ', ' + rowsE.map((r) => r.sats + (r.blind ? ' (the card’s)' : ' (a token)')).join(', '));
+    ok(el.logs.some((l) => /the card makes 2464 sats of the change itself, in 4 pieces \(2048 \+ 256 \+ 128 \+ 32\); 1 sat more is made here after the swap, at the change tap$/.test(l)),
+       'and the log line says how it was split: four pieces, then the 1 sat', el.logs.filter((l) => /card makes/.test(l)).join(' | '));
+    TE.card.tap();
+    const wroteE = await TE.R.W.cardWrite(TE.card, { change: true });
+    ok(wroteE.left === 0 && TE.card.balance() === 2465 && TE.R.W.cardOwed().length === 0, 'both are written at the change tap', 'the card has ' + TE.card.balance());
+
+    await settle();
+  }
+
+  /* ---- 27: at a till: the change a piece at a time, and three buzzes ---------------------------
+   * The card makes each piece of its change in about half a second over NFC, and the sheet said nothing between the pieces
+   * being named and the wait, which with seven pieces was four seconds of silence: now it says which piece, of how many.
+   * And when the card has signed with change coming back to it in this sheet, the phone buzzes three times so that whoever
+   * holds the card knows a second tap is coming; a payment with no change gets the single quiet tap it always got. */
+  {
+    const UB = await world(0, 9000);
+    await binaryLoad(UB.H, UB.card, 4096);
+    const till = appOn(UB.R, { screen: 'confirm' });
+    const lines = [];
+    const text0 = till.fcProgressText.bind(till);
+    till.fcProgressText = (p) => { const t = text0(p); if (t) lines.push(t); return t; };
+    const felt = [];
+    till.haptic = (kind, silent) => felt.push({ kind, silent: !!silent, ended: UB.R.sheet.some((x) => /^end:/.test(x)), signed: UB.card.sent.some((a) => a.slice(0, 4) === 'b024') });
+    till.wantedSats = () => 1631;
+    UB.R.nfc = UB.card;
+    UB.R.sheet.length = 0;
+    UB.card.sent.length = 0;
+    till.payByCard();
+    pad(till).type('1234');
+    await until('the payment and its change to be finished', () => UB.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UB.R));
+    await settle();
+    const piece = (k) => 'The card is making change · piece ' + k + ' of 4. Keep holding.';
+    const asked = UB.card.sent.filter((a) => a.slice(0, 4) === 'b026').length;
+    ok((await bal(UB.R)) === 1631 && asked === 4,
+       'at a till: 1,631 paid from a card of one piece of 4,096, the card making four pieces of its change', (await bal(UB.R)) + ', ' + asked + ' change commands');
+    const making = lines.filter((t) => /making change/.test(t));
+    ok(making.join(' / ') === [1, 2, 3, 4].map(piece).join(' / '),
+       'the line under the heading moves from piece to piece, between the pieces being named and the signature: "' + piece(1) + '"', making.join(' / '));
+    const said = UB.R.sheet.filter((x) => /^say: The card is making change/.test(x));
+    ok(said.length === 4 && said[0] === 'say: ' + piece(1) && said[3] === 'say: ' + piece(4), 'and the phone’s sheet is told the same, a piece at a time', said.join(' / '));
+    const order = [lines.indexOf('Signing'), lines.indexOf(piece(1)), lines.indexOf(piece(4))];
+    ok(order[0] >= 0 && order[1] > order[0] && order[2] > order[1], 'after "Signing", before anything else', JSON.stringify(order));
+    const buzz = felt.filter((f) => f.kind !== 'light');
+    const threes = buzz.filter((f) => f.kind === 'triple');
+    ok(threes.length === 1 && threes[0].silent === true && threes[0].signed === true && threes[0].ended === false && !buzz.some((f) => f.kind === 'tap') && buzz[buzz.length - 1].kind === 'success',
+       'the page asks for the three buzzes once, as the card has signed and its sheet is kept for the change, and for no single tap beside them; the payment’s own buzz comes when it is paid',
+       JSON.stringify(buzz.map((f) => f.kind + (f.silent ? ' (silent)' : '') + (f.ended ? ' [sheet ended]' : ''))));
+    ok(UB.card.balance() === 2465 && UB.R.W.cardOwed().length === 0, 'and the change is written back in the same sheet', 'the card has ' + UB.card.balance());
+
+    // a payment with no change: no three buzzes; the quiet tap it always had
+    const UC = await world(0, 9000);
+    await UC.H.W.cardAdd(UC.card, { sats: 2000, pin: '1234' });
+    const till2 = appOn(UC.R, { screen: 'confirm' });
+    const felt2 = [];
+    till2.haptic = (kind, silent) => felt2.push({ kind, silent: !!silent });
+    till2.wantedSats = () => 700;
+    UC.R.nfc = UC.card;
+    UC.R.sheet.length = 0;
+    till2.payByCard();
+    pad(till2).type('1234');
+    await until('the exact payment to be finished', () => UC.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UC.R));
+    await settle();
+    const quiet = felt2.filter((f) => f.kind !== 'light');
+    ok((await bal(UC.R)) === 700 && !quiet.some((f) => f.kind === 'triple') && quiet.filter((f) => f.kind === 'tap').length === 1 && !UC.R.sheet.some((x) => /making change/.test(x)),
+       'a payment made exactly asks for no three buzzes and says nothing of making change', JSON.stringify(quiet.map((f) => f.kind)));
+
+    // the other half of the phone: the page's call is a kind the phone knows (Foxy/Bridge/FoxyBridge.swift), and the web fallback has its pattern
+    const swift = require('fs').readFileSync(require('path').join(__dirname, '..', 'Foxy', 'Bridge', 'FoxyBridge.swift'), 'utf8');
+    const block = (/case "triple":([\s\S]*?)default:/.exec(swift) || [])[1] || '';
+    ok(/UIImpactFeedbackGenerator\(style: \.heavy\)/.test(block) && /0\.15 \* Double\(knock\)/.test(block) && /for knock in 0\.\.<3/.test(block),
+       'on the phone: three heavy impacts, 0.15 s apart', block.replace(/\s+/g, ' ').slice(0, 120));
+    const fallback = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'app', '05-device-shell.js'), 'utf8');
+    ok(/kind === 'triple' \? \[60, 150, 60, 150, 60\]/.test(fallback), 'where there is no phone, the web fallback vibrates the same three times');
+    await settle();
+  }
+
+  /* ---- 28: a second payment in one tap, and what the wallet says of it ----------------------
+   * A card of 1.13 makes a second payment signed in the same time in the field wait as one over the limit does, with a limit or
+   * without one, and the owner's grant in the tap lifts that. A till is not told the limit, but it knows what it has had the card sign
+   * in this sheet (`link.one.paid`, which a card back in the field empties): so its estimate, before the PIN is sent, says
+   * at least the 7 (less its change), and the screen says it is a second payment. */
+  {
+    const SP = await world(0, 9000);
+    await SP.H.W.cardAdd(SP.card, { sats: 3000, pin: '1234' });
+    SP.card.one = {};                                    // (what a sheet of the phone has: this card is the link, and its time in the field is one)
+    SP.card.tap();
+    const notes = [];
+    const nots0 = [];
+    const one = await SP.R.W.cardPay(SP.card, { sats: 300, pin: '1234', progress: (q) => { if (q.step === 'waiting') nots0.push(q); } });
+    ok(one.sats === 300 && SP.card.one.paid === 1 && nots0.length === 0, 'the first payment of a time in the field goes at once, and the sheet counts it', 'paid ' + SP.card.one.paid);
+    // the same time in the field: no tap between
+    SP.card.sent.length = 0;
+    const two = await SP.R.W.cardPay(SP.card, { sats: 350, pin: '1234', progress: (q) => { if (q.step === 'waiting') notes.push(q); } });
+    const waitsTaken = count(SP.card, '24') - 1;
+    const ahead = notes.filter((q) => q.ahead === true);
+    ok(two.sats === 350 && waitsTaken === 7 - (two.change ? count(SP.card, '26') : 0) && ahead.length === 1 && ahead[0].second === true && ahead[0].left === waitsTaken && SP.card.one.paid === 2,
+       'a second payment in it waits at the card, and the wallet had said so before the PIN was sent: how many signatures, and that it is a second payment',
+       waitsTaken + ' waits, said ' + JSON.stringify(ahead));
+    ok(notes.filter((q) => !q.ahead).length === waitsTaken && /^A second payment in one tap\. Keep holding \(\d+ s\)$/.test(appOn(SP.R).fcProgressText(ahead[0])),
+       'the screen told the person to keep holding for each, in words that say why', appOn(SP.R).fcProgressText(ahead[0]));
+    // the card out of the field and back: a new time in the field, which the sheet knows (`link.again`) and a test does by hand
+    SP.card.tap();
+    SP.card.one.paid = 0;
+    SP.card.sent.length = 0;
+    const three = await SP.R.W.cardPay(SP.card, { sats: 200, pin: '1234' });
+    ok(three.sats === 200 && count(SP.card, '24') === 1, 'a card back in the field starts afresh: the next goes at once', count(SP.card, '24') + ' SIGN');
+    // the holder's own phone takes the whole card off in the same time in the field: its grant is given before it signs anything, and it is not slowed
+    SP.card.tap();
+    SP.card.one.paid = 0;
+    await SP.R.W.cardPay(SP.card, { sats: 120, pin: '1234' });
+    await SP.R.W.cardPay(SP.card, { sats: 130, pin: '1234' });
+    ok(SP.card.state.tapPaid === true, 'two payments in one time in the field, and the card knows it');
+    SP.card.sent.length = 0;
+    const onIt = SP.card.balance();
+    const hb = await bal(SP.H);
+    const off = await SP.H.W.cardWithdraw(SP.card, { pin: '1234' });
+    ok(off.sats > 0 && (await bal(SP.H)) > hb && SP.card.balance() === 0 && count(SP.card, '24') === 1 && SP.card.state.tapPaid === true,
+       'the card’s owner, whose grant is in the tap, takes the rest off in one signature and no wait, though payments were signed in it before', count(SP.card, '24') + ' SIGN for ' + onIt + ' on the card');
     await settle();
   }
 

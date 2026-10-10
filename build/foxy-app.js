@@ -920,7 +920,8 @@ class Component extends DCLogic {
     }
     // Android WebViews and desktop Chrome do support the web API
     if (navigator.vibrate) {
-      navigator.vibrate(kind === 'success' ? [18, 60, 26] : kind === 'warning' ? [30, 80, 30] : 14);
+      // 'triple': three knocks 0.15 s apart, for a card payment whose change is coming (26f-flashcard.js, `fcChangeBuzz`)
+      navigator.vibrate(kind === 'success' ? [18, 60, 26] : kind === 'warning' ? [30, 80, 30] : kind === 'triple' ? [60, 150, 60, 150, 60] : 14);
     }
   }
 
@@ -18190,6 +18191,10 @@ class Component extends DCLogic {
          * (this screen is not the sheet, which iOS ends after a minute), and what
          * is said under the heading is what a person who has taken the card away
          * needs to hear. */
+        /* The card has signed and something is coming back to it in this sheet (`info.change`: its change, or a payment held
+         * for another amount): the phone buzzes three times, so that whoever holds the card knows that a second tap is coming
+         * and keeps the sheet. Nothing else in the app buzzes three times. */
+        if ((step === 'checking' || step === 'mint') && info && info.change) this.fcChangeBuzz();
         if (step === 'checking') {
           clearTimeout(this._stageT);
           this._stageT = setTimeout(() => this.hideStage('card'), 180000);
@@ -18235,12 +18240,14 @@ class Component extends DCLogic {
     if (p && p.step === 'waiting') {
       // how long it will be is the card's to know and it does not say (that would say what its limit is): how long it has been
       const s = Math.max(1, Math.round(Number(p.seconds) || 0));
-      // a card that makes its own change (software 1.12) waits a limit's worth for it, within the limit as well as over it
+      // a card of software 1.12 waits a limit's worth for the change it makes, within the limit as well as over it
       if (p.making) return 'The card is making change. Keep holding (' + s + ' s)';
       /* A card before 1.12 waits by what its pieces come to. A small payment made
        * with a piece worth much more than the price is not over anybody's
        * limit, and was being told it was: it is the piece that is. */
       if (p.want > 0 && p.sum >= 2 * p.want) return 'Paying from a larger piece. Keep holding (' + s + ' s)';
+      // a card of 1.13 slows a second payment signed in one time in the field, limit or no limit (08a-flashcard.js, `cardPaid`)
+      if (p.second) return 'A second payment in one tap. Keep holding (' + s + ' s)';
       return 'Over the card\u2019s per tap limit. Keep holding (' + s + ' s)';
     }
     // the card is owed change that no till has handed back, and the mint is being asked for it (08a-flashcard.js, `cardOwnerChange`)
@@ -18250,7 +18257,17 @@ class Component extends DCLogic {
     // a card that signs once for a payment has no pieces to count
     if (p.step === 'signing') return p.all ? 'Signing' : 'Signing piece ' + i + ' of ' + n;
     if (p.step === 'writing') return 'Writing ' + i + ' of ' + n;
+    /* The card makes its change a piece at a time, about half a second each over NFC, between the pieces being
+     * named and the signature: said before each, so that the sheet is never quiet for seconds and the card is not
+     * taken away (08a-flashcard.js, `cardSignGroup`). */
+    if (p.step === 'change') return 'The card is making change \u00b7 piece ' + i + ' of ' + n + '. Keep holding.';
     return '';
+  }
+
+  /* Three buzzes, 0.15 s apart (Foxy/Bridge/FoxyBridge.swift, "triple"), silent: change is coming back to the card, so
+   * there is a second tap to make. The page asks for them as the card is let go. */
+  fcChangeBuzz() {
+    this.haptic && this.haptic('triple', true);
   }
 
   /* The line under the heading on the card's screen: what the card is doing
@@ -18751,7 +18768,8 @@ class Component extends DCLogic {
                   * and silent: the payment's buzz and sound are for PAYMENT RECEIVED. */
                  let felt = false;
                  const onPay = (step, info) => {
-                   if (!felt && (step === 'checking' || step === 'mint')) { felt = true; this.haptic && this.haptic('tap', true); }
+                   // (with change coming it is three buzzes instead, which the tap's own step handler gives: `fcChangeBuzz`)
+                   if (!felt && (step === 'checking' || step === 'mint')) { felt = true; if (!(info && info.change)) this.haptic && this.haptic('tap', true); }
                    on(step, info);
                  };
                  return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
@@ -19717,6 +19735,14 @@ class Component extends DCLogic {
     fresh('');
   }
 
+  /* Whether the card on show waits by the rule of software 1.13 (`cardWaitSigns`), which the words on its limit screens
+   * say: a card read as the one before it (a card that signs once, of format 4, and is not 1.13 yet: the rule of 1.12 is
+   * its words) has the old rule's words. Anything else, and a card not read yet, has the newest. */
+  fcShaped() {
+    const c = this._fcCard;
+    return !(c && c.info && c.info.format === 4 && c.info.shaped === false);
+  }
+
   /* ---- the daily limit ---------------------------------------------------------
    *
    * The most the card signs for in one day. CHANGE LIMIT asks for it in three
@@ -19739,7 +19765,9 @@ class Component extends DCLogic {
     this._fcLimitTap = !!tap;
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
+      reason: (this.fcShaped()
+        ? 'A per tap limit is the most this card pays in one tap straight away, change or no change: three buzzes on the phone being paid say that change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
+        : 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
@@ -19781,7 +19809,9 @@ class Component extends DCLogic {
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
-        warn: 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. '
+        warn: (this.fcShaped()
+          ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. '
+          : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats)) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
@@ -19939,7 +19969,9 @@ class Component extends DCLogic {
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
     this.blockedCard('fc-limit-which', {
       tone: 'ask', title: 'CHANGE LIMIT',
-      reason: 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
+      reason: 'This card has two limits.\n\nPER TAP: ' + (this.fcShaped()
+        ? 'the most it will pay in one tap straight away, change or no change. Over that, it has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that.'
+        : 'the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.') + '\n\nDAILY: the most it will spend in one day.',
       retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
       shut: { label: 'DAILY LIMIT', tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
       also: { label: 'CANCEL' },

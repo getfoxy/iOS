@@ -1,5 +1,5 @@
 'use strict';
-/* flashcard-owed.js — change a till never handed over, finished by the card's owner (software 1.12).
+/* flashcard-owed.js — change a till never handed over, finished by the card's owner (software 1.12 and 1.13).
  *
  *     node tests/flashcard-owed.js
  *
@@ -35,7 +35,9 @@ const nonces = (card) => card.state.slots.filter((x) => x.status === 1).map((x) 
 const WORDS3 = 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above';
 const offline = (W) => W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
 const online = (W) => W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
-const card12 = (ctx) => makeCard({ window: ctx.window, format: 4 });
+// the card that makes its own change and waits four signatures to a limit's worth (1.12), and the card after it (1.13), whose change is cut plainly in four pieces at the most
+const card12 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 12 });
+const card13 = (ctx) => makeCard({ window: ctx.window, format: 4 });
 
 /* The owner (H, whose words made the card theirs), a till (R) at the same mint, and a card of software 1.12 set up by H. */
 async function world(make, opts) {
@@ -71,17 +73,18 @@ function holdRestores(ctx) {
 
 (async () => {
   /* ---- 1: a till that never handed the change over ------------------------------------------------------------------ */
-  {
-    const { H, R, card } = await world();
+  // (1,000 from 1024 512 256 128 64 16: the card of 1.12 takes the 1024 and the 256 and is given 280 back, in three pieces; the card of 1.13 takes the 1024 and is given 24, in two)
+  for (const [make, change, k] of [[card12, 280, 3], [card13, 24, 2]]) {
+    const { H, R, card } = await world(make);
     await binaryLoad(H, card, 2000);            // 1024 512 256 128 64 16: no exact set for 1000
     card.tap();
     const paid = await R.W.cardPay(card, { sats: 1000, pin: '1234' });
-    ok(paid.sats === 1000 && paid.change.sats === 280 && paid.change.written === false && pending(card).length === 3 && card.balance() === 720 && R.W.cardOwed().length === 1,
-       'a payment the card makes change for: the till is paid 1,000, the card has three openings and 720, and the till owes it 280', JSON.stringify(paid.change));
+    ok(paid.sats === 1000 && paid.change.sats === change && paid.change.written === false && pending(card).length === k && card.balance() === 1000 - change && R.W.cardOwed().length === 1,
+       'a payment the card makes change for: the till is paid 1,000, the card has its openings and the rest of its pieces, and the till owes it the change', JSON.stringify(paid.change));
     const hOwed = owedRows(H).length;
     const openings = pending(card).map((x) => ({ amount: x.amount, nonce: x.nonce, r: x.r, date: x.date }));
     dies(R);
-    ok(R.W.cardOwed().length === 0 && pending(card).length === 3, 'the till’s phone dies: it owes the card nothing any more, and the card still has its three openings');
+    ok(R.W.cardOwed().length === 0 && pending(card).length === k, 'the till’s phone dies: it owes the card nothing any more, and the card still has its openings');
     // a read that is not asked to look into the change does not
     const plain = await H.W.cardLook(card, { mine: true });
     ok(plain.owes === undefined && owedRows(H).length === hOwed && restores(H).length === 0, 'a read not asked to look into the change (no `change`) does not: the card as it was, nothing fetched');
@@ -92,20 +95,20 @@ function holdRestores(ctx) {
     const seen = await read(H, card, { on: (s) => steps.push(s), progress: (p) => lines.push(p) });
     H.fate = null;
     const cmds = card.sent.map((a) => a.slice(2, 4));
-    ok(says(seen) === parts([['put', 280, 3]]) && seen.owes.wrote === 280 && seen.owes.sats === 280 && seen.balance === 1000 && card.balance() === 1000,
-       'the owner’s read finds 280 owed to the card, fetches it, and puts it on in the same tap: the card holds 1,000 again', says(seen) + ', card ' + seen.balance);
-    ok(restores(H).length === 1 && asked.length === 1 && asked[0].outputs.length === 3, 'the mint was asked once, for the three outputs', parts(asked.map((a) => a.outputs.length)));
+    ok(says(seen) === parts([['put', change, k]]) && seen.owes.wrote === change && seen.owes.sats === change && seen.balance === 1000 && card.balance() === 1000,
+       'the owner’s read finds the change owed to the card, fetches it, and puts it on in the same tap: the card holds 1,000 again', says(seen) + ', card ' + seen.balance);
+    ok(restores(H).length === 1 && asked.length === 1 && asked[0].outputs.length === k, 'the mint was asked once, for the outputs', parts(asked.map((a) => a.outputs.length)));
     // each output asked for is an opening’s blinded message, made here from the opening: its secret in the card’s own form (the wallet’s text, held to the
     // applet’s vectors), hashed to the curve, plus r times G, by the library the mint’s own signing uses
     const CT = H.window.CashuTS;
     const blindedFor = (op) => CT.blindMessage(H.window.Uint8Array.from(Buffer.from(H.W.cardSecret(op.nonce, card.key, op.date, card.state.record.refund, 4), 'utf8')), BigInt('0x' + op.r)).B_.toHex(true);
     const want = openings.map((op) => op.amount + ':' + blindedFor(op)).sort();
     const got = asked[0].outputs.map((o) => Number(o.amount) + ':' + o.B_).sort();
-    ok(parts(got) === parts(want) && asked[0].outputs.every((o) => o.id === H.mint.id), 'and they are the three openings’ blinded messages, with their sizes and the mint’s keyset', got.map((x) => x.slice(0, 14)).join(' '));
-    ok(cmds.indexOf('19') > 0 && cmds.indexOf('19') < cmds.indexOf('30') && count(card, '19') === 2 && count(card, '30') === 1 && count(card, '40') === 0,
-       'the openings are read (a page of three, and the page after it, which is empty), then the pieces go on, three to a command, and no PIN is sent',
+    ok(parts(got) === parts(want) && asked[0].outputs.every((o) => o.id === H.mint.id), 'and they are the openings’ blinded messages, with their sizes and the mint’s keyset', got.map((x) => x.slice(0, 14)).join(' '));
+    ok(cmds.indexOf('19') > 0 && cmds.indexOf('19') < cmds.indexOf('30') && count(card, '19') === (k === 3 ? 2 : 1) && count(card, '30') === 1 && count(card, '40') === 0,
+       'the openings are read (a page of three, and the page after it where that page is full), then the pieces go on, three to a command, and no PIN is sent',
        count(card, '19') + ' GET_CHANGE, ' + count(card, '30') + ' LOAD, ' + count(card, '40') + ' PIN');
-    ok(steps.join(' ') === 'mint writing' && lines.filter((p) => p.step === 'fetching' && p.sats === 280).length === 1 && lines.filter((p) => p.step === 'writing' && p.n === 3).length === 1,
+    ok(steps.join(' ') === 'mint writing' && lines.filter((p) => p.step === 'fetching' && p.sats === change).length === 1 && lines.filter((p) => p.step === 'writing' && p.n === k).length === 1,
        'the screen is told the mint is being asked, for how much, and then that pieces are being written', steps.join(' ') + '; ' + lines.length + ' line(s)');
     ok(pending(card).length === 0 && (await card.send('b019000000')) === '009000', 'the card lists no openings after: it let each go as its piece was written');
     ok(owedRows(H).length === hOwed && H.W.cardOwed().length === 0 && new Set(nonces(card)).size === nonces(card).length, 'the owner owes it nothing, and nothing is on the card twice');
@@ -120,6 +123,7 @@ function holdRestores(ctx) {
        'the books: every sat the mint honours is in the till, the owner, or the card', String(H.mint.issuedSats() - H.mint.takenSats()));
     ok(entry(R, paid.hash).changeState === 'not handed', 'the dead till’s entry still says the change was not handed over: that phone was not asked');
     await settle();
+  
   }
 
   /* ---- 2: what the mint has not signed is not made yet ----------------------------------------------------------------

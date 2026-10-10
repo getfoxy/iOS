@@ -72,11 +72,20 @@ function applet(port) {
   });
 }
 
-/* The SIGN commands a payment waits before the signature under a limit on one payment: by what leaves the card for good, with change
- * made by the card itself (software 1.12) or not (before it, the pieces whole and the first limit's worth free). */
-const waitsFor = (leaves, limit, change, own) => {
-  if (!own) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
-  return leaves > limit ? 4 * Math.ceil(leaves / limit) : (change ? 4 : 0);
+/* The SIGN commands a payment waits before the signature under a limit on one payment, by the card's software: what leaves the card for
+ * good (the pieces less the change it made for itself) and how many pieces of that change it made (`made`).
+ *   1.13 (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven for the first limit's
+ *        worth over it and three for each after, a part counting as one (255 at most), less one for each piece of change made.
+ *   1.12 (info.ownChange): four for every limit's worth over the limit, a part counting as one, and four for a payment within it that
+ *        made change.
+ *   before: by the pieces whole, the first limit's worth free. */
+const waitsFor = (leaves, limit, made, info) => {
+  if (info.shaped) {
+    const units = leaves <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(leaves / limit));
+    return units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - made);
+  }
+  if (!info.ownChange) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
+  return leaves > limit ? 4 * Math.ceil(leaves / limit) : (made > 0 ? 4 : 0);
 };
 
 const held = (b, mint) => {
@@ -105,6 +114,9 @@ async function at(mintKey, names, real) {
     card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, m.send(a)); } };
   }
   const signatures = () => sent.filter((a) => a.slice(0, 4) === 'b024').length;
+  // the card's own change in the payment just made: how many pieces it was asked to make, and what they come to
+  const madePieces = () => sent.filter((a) => a.slice(0, 4) === 'b026').length;
+  const madeSats = () => sent.filter((a) => a.slice(0, 4) === 'b026').reduce((n, a) => n + parseInt(a.substr(10, 8), 16), 0);
   const pieces = () => sent.filter((a) => a.slice(0, 4) === 'b022').reduce((n, a) => n + parseInt(a.substr(8, 2), 16), 0);
   // what the pieces of the last payment came to, as the card answered SPEND_ALL_BEGIN
   let lastSum = 0;
@@ -159,11 +171,12 @@ async function at(mintKey, names, real) {
   /* The limit on one payment, which asks no clock and is waited for. From
    * software 1.12 the card counts what leaves it for good (the pieces less the
    * change it makes for itself, which is the price and the mint's fee on the
-   * pieces): within the limit and with no change it signs at once; otherwise
-   * it does four signatures of work for every limit's worth of that, whole or
-   * in part, a SIGN command each, and only then signs (a payment within the
-   * limit that makes change waits one). The mint sees nothing of that: the
-   * one signature it is sent is the same kind as any other. */
+   * pieces). From 1.13 it signs at once within the limit, change or no change,
+   * and over it does seven signatures of work for the first limit's worth over
+   * and three for each after, less one for each piece of change it made, a SIGN
+   * command each, and only then signs; 1.12 did four for every limit's worth, and
+   * for a payment within the limit that made change. The mint sees nothing of
+   * that: the one signature it is sent is the same kind as any other. */
   {
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 100, tap: true });
@@ -181,19 +194,19 @@ async function at(mintKey, names, real) {
     const change = (paid.change && paid.change.sats) || 0;
     const waits = signatures() - 1;
     // what left the card for good: the pieces less the change it made for itself (before 1.12, the pieces whole)
-    const leaves = (onIt - left) - (first.card.info.ownChange ? change : 0);
+    const leaves = (onIt - left) - (first.card.info.ownChange ? madeSats() : 0);
+    const made = madePieces();
     ok('a per tap limit of 100, and 250 asked: the card waits, then signs once, and the mint takes it',
-       paid.sats === 250 && waits === waitsFor(leaves, 100, change > 0, first.card.info.ownChange) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => i + 1).join(','),
-       waits + ' waits for ' + leaves + ' sats that left the card (' + (onIt - left) + ' of pieces), each answered "not yet" and no more; the till is up ' + (held(till, MINT) - tb));
+       paid.sats === 250 && waits === waitsFor(leaves, 100, made, first.card.info) && waits >= 4 && counted.join(',') === Array.from({ length: waits }, (_, i) => i + 1).join(','),
+       waits + ' waits for ' + leaves + ' sats that left the card (' + (onIt - left) + ' of pieces, ' + made + ' pieces of change made by the card), each answered "not yet" and no more; the till is up ' + (held(till, MINT) - tb));
     if (change) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     sent.length = 0;
     await card.tap();
     const small = await till.W.cardPay(card, { sats: 100, pin: PIN });
-    const smallChange = (small.change && small.change.sats) || 0;
-    // 100 and the mint's fee on the pieces is 101 or more: a limit's worth over, so two; with no fee it is nothing, or one for its change
-    const smallLeaves = pieceSum() - (first.card.info.ownChange ? smallChange : 0);
-    ok('  and 100, at the limit (or a sat over it for the mint\u2019s fee), waits what it should: nothing, one limit\u2019s worth for change within the limit, two for the fee',
-       small.sats === 100 && signatures() === 1 + waitsFor(smallLeaves, 100, smallChange > 0, first.card.info.ownChange) && signatures() <= 9,
+    // 100 and the mint's fee on the pieces is 101 or more: from 1.13 still within the limit (a thirty-second over counts as within), and nothing; in 1.12 a limit's worth over, so two, or one for its change
+    const smallLeaves = pieceSum() - (first.card.info.ownChange ? madeSats() : 0);
+    ok('  and 100, at the limit (or a sat over it for the mint\u2019s fee), waits what it should: ' + (first.card.info.shaped ? 'nothing, change or no change' : 'nothing, one limit\u2019s worth for change within the limit, two for the fee'),
+       small.sats === 100 && signatures() === 1 + waitsFor(smallLeaves, 100, madePieces(), first.card.info) && signatures() <= 9,
        signatures() + ' SIGN command(s) for ' + smallLeaves + ' sats that left the card');
     if (small.change && small.change.sats) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     await card.tap();
@@ -334,7 +347,7 @@ async function at(mintKey, names, real) {
     await card.tap();
     const lostAgain = await till.W.cardPay(card, { sats: 700, pin: PIN });
     ok('  and written at the next tap, and the pieces are good at the mint', lostBack.left === 0 && lostBack.change === lostChange && owedAfter === 0 && lostAgain.sats === 700 && signatures() === 1,
-       lostBack.card.balance + ' on the card');
+       lostBack.card.balance + ' on the card; ' + JSON.stringify({ left: lostBack.left, change: lostBack.change, lostChange, owedAfter, paid: lostAgain.sats, signatures: signatures() }));
     if (lostAgain.change && lostAgain.change.sats) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
     await card.tap();
     await holder.W.cardWithdraw(card, { pin: PIN });
@@ -394,7 +407,8 @@ async function at(mintKey, names, real) {
 
     /* A set chosen for its change, on a card that has a limit: before 1.12 the card waited by the pieces, so a larger set was given up
      * at the first "not yet" for the cheapest. From 1.12 it waits by what leaves it, which is the same for both sets, and both make change: a
-     * payment within the limit that makes change waits one limit's worth, for the one set, and the till is told the card is making change. */
+     * payment within the limit that makes change waits one limit's worth, for the one set, and the till is told the card is making change.
+     * From 1.13 it waits for nothing within the limit, change or no change: signed at the first asking, and nobody is told to hold. */
     await card.tap();
     const seen = await holder.W.cardLook(card);
     const sizes = [];
@@ -408,7 +422,11 @@ async function at(mintKey, names, real) {
     sent.length = 0;
     await card.tap();
     const cheap = await till.W.cardPay(card, { sats: 250, pin: PIN, progress: (p) => { if (p.step === 'waiting') told.push(p); } });
-    if (first.card.info.ownChange) {
+    if (first.card.info.shaped) {
+      ok('a payment within the limit that makes change waits for nothing, with the one set: signed at the first asking, and nobody is told to hold',
+         cheap.sats === 250 && signatures() === 1 && sent.filter((a) => a.slice(0, 4) === 'b022').length === 1 && told.length === 0,
+         signatures() + ' SIGN, ' + pieceSum() + ' sats of pieces signed for, ' + told.length + ' told to hold');
+    } else if (first.card.info.ownChange) {
       ok('a payment within the limit that makes change waits one limit\u2019s worth for it, with the one set: four "not yet", and the till is told the card is making change',
          cheap.sats === 250 && signatures() === 1 + 4 && sent.filter((a) => a.slice(0, 4) === 'b022').length === 1 && told.length === 4 && told.every((p) => p.making === true),
          signatures() + ' SIGN, ' + pieceSum() + ' sats of pieces signed for, ' + told.length + ' told to hold');
@@ -432,6 +450,25 @@ async function at(mintKey, names, real) {
       const wrote = await till.W.cardWrite(card, { change: true });
       ok('  which goes back on with no PIN, the card read the short way before and after', wrote.left === 0 && till.W.cardOwed().length === 0
          && sent.filter((a) => a.slice(0, 4) === 'b017' && a.substr(6, 2) === '00').length === 0, wrote.card.balance + ' on the card');
+    }
+    /* One payment a tap at full speed (software 1.13): the card makes a second payment signed in the same time in the field wait as one
+     * over the limit does, with a limit or none: seven signatures, less one for each piece of change it makes. A sheet of the phone
+     * remembers what it has had the card sign (`link.one.paid`; `card` here stands in for that link), and says so before the PIN is sent. */
+    if (first.card.info.shaped) {
+      card.one = {};
+      await card.tap();
+      sent.length = 0;
+      const p1 = await till.W.cardPay(card, { sats: 100, pin: PIN });
+      const w1 = signatures() - 1;
+      sent.length = 0;
+      const ahead = [];
+      const p2 = await till.W.cardPay(card, { sats: 100, pin: PIN, progress: (p) => { if (p.step === 'waiting' && p.ahead) ahead.push(p); } });
+      const w2 = signatures() - 1, m2 = madePieces();
+      delete card.one;
+      ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits seven less its change, and the wallet said so before the PIN',
+         p1.sats === 100 && w1 === 0 && p2.sats === 100 && w2 === Math.max(0, 7 - m2) && (w2 === 0 ? ahead.length === 0 : (ahead.length === 1 && ahead[0].left === w2 && ahead[0].second === true)),
+         'first ' + w1 + ' waits, second ' + w2 + ' (' + m2 + ' pieces of change made by the card), said ' + JSON.stringify(ahead.map((p) => [p.left, p.second])));
+      if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     }
     await card.tap();
     await holder.W.cardWithdraw(card, { pin: PIN });
@@ -495,7 +532,9 @@ async function run() {
   const names = await H.mintNames(['cdk', 'nutshell']);
   const real = await applet(PORT);
   if (CHIP && !real) { console.log('no card is listening on ' + PORT); process.exit(1); }
-  for (const mint of (CHIP ? [process.env.FOXY_CARD_MINT || 'cdk'] : ['cdk', 'nutshell'])) await at(mint, names, real);
+  // (FOXY_LIVE_ONLY=nutshell, say, runs one of the two)
+  const only = process.env.FOXY_LIVE_ONLY ? String(process.env.FOXY_LIVE_ONLY).split(',') : null;
+  for (const mint of (CHIP ? [process.env.FOXY_CARD_MINT || 'cdk'] : (only || ['cdk', 'nutshell']))) await at(mint, names, real);
   if (real) real.close();
   console.log('\n' + R.pass + ' passed, ' + R.fail + ' failed');
   process.exit(R.fail ? 1 : 0);

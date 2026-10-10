@@ -246,8 +246,8 @@
  },
  "fcLimitConfirm, a per tap limit, to be confirmed": {
   "file": "310-fclimitconfirm-a-per-tap-limit-to-be-confirmed.html",
-  "markup": "5908cd9ef09e381e0d656a6a3f8c2b5b87abe33a3c306ab364a5f9bf8f0add30",
-  "vals": "cee0759e5b7e1e441effeddbf5e2609205f0bcc0f8e6d4787bef0748a6bd82ba"
+  "markup": "8056a6e5fe5958d0944d8fb2b7c4018f8049e54cc685fc4a92ef36e9aafc5859",
+  "vals": "8f7eb1de6ab9e7e15a6bbfd26c486cbbcdc8f0bf76f630fd040a55af86957dfb"
  },
  "switchMint, asking which mint a card moves to": {
   "file": "255-switchmint-asking-which-mint-a-card-moves-to.html",
@@ -1206,12 +1206,12 @@
  },
  "card: change limit, which of the two": {
   "file": "313-card-change-limit-which-of-the-two.html",
-  "markup": "cfaece0094e16eb0f2512bccbe29fd7bd7685b08e1998b6ad8c9357eef4acd2a",
+  "markup": "37fdce0b1ccf61f98902699b4b6f9d523791c50f5298d7c374598502379394fd",
   "vals": "e56fbfbecb29b8233d4767fd63cac7956ba7918f28ccae34d125b6f5da0da84b"
  },
  "card: set per tap limit, the warning": {
   "file": "314-card-set-per-tap-limit-the-warning.html",
-  "markup": "d72db36fb08c0e9f701c26741cecd175c932e37d3b5a3cb704626e20487c96f3",
+  "markup": "a91af03dda2b99460eb3633c440813de7c78d65b760817c3a5b04ccd04063de4",
   "vals": "e56fbfbecb29b8233d4767fd63cac7956ba7918f28ccae34d125b6f5da0da84b"
  },
  "card: this card’s own log": {

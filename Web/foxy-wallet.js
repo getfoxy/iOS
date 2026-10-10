@@ -8936,7 +8936,15 @@
               * take the change; the limits and the wait are held to what leaves
               * the card for good; and the card keeps what the change is made of
               * until its pieces are written back (`cardOpenings`). */
-             ownChange: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 12)) };
+             ownChange: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 12)),
+             /* `shaped`: the card's wait is the one of software 1.13 and on (the
+              * version says so, as for `ownChange`): nothing within the limit,
+              * change or no change; about five seconds over it, and two more for
+              * every further limit's worth; the change it made counted toward
+              * that; and one payment a tap at full speed (`cardWaitSigns`). Its
+              * change is cut plainly, in the powers of two the amount is made of
+              * (`cardOwnChangeCut`). */
+             shaped: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 13)) };
   }
 
   /* GET_CARD: format, set, unit, limit, refund key, time key, mint, and, from
@@ -9033,19 +9041,27 @@
   /* ---- the limit on one payment, which is waited for ---------------------------
    *
    * A card that says it is `paced` keeps one number, the most it signs for in
-   * one payment at once. It refuses nothing over it. For every limit's worth,
-   * whole or in part, it does CARD_WAIT_SIGNS signatures of work before it
-   * signs, one for each SPEND_ALL_SIGN it is sent, and answers each with "not
-   * yet". It counts against no clock and remembers nothing from one payment to
-   * the next, so there is nothing a terminal can replay or reset: a payment is
-   * judged by its own size, every time.
+   * one payment at once. It refuses nothing over it. Over it, it does signatures
+   * of work before it signs, one for each SPEND_ALL_SIGN it is sent, and answers
+   * each with "not yet". It counts against no clock and remembers nothing from
+   * one payment to the next, so there is nothing a terminal can replay or reset:
+   * a payment is judged by its own size, every time.
    *
-   * What the wait is charged on depends on the card. From software 1.12 it is
-   * what leaves the card for good: the pieces less the change the card makes
-   * for itself (`cardWaitSigns`), which is the price and the mint's fee on the
-   * pieces, so overpaying costs no wait; and a payment within the limit that
-   * makes change waits one limit's worth, three seconds, which a payment that
-   * makes none does not. Before it, it was what the PIECES come to, the first
+   * How many depends on the card's software. From 1.13 (`info.shaped`), so that
+   * whoever holds it can feel that a payment was over the limit (`cardWaitSigns`):
+   * nothing within the limit, change or no change (that change is coming is this
+   * phone's to say, with three buzzes, and not the card's); seven signatures, about
+   * five seconds, for the first limit's worth over it; three, two seconds, for
+   * every limit's worth after that; each piece of change the card made (about half
+   * a second of its work) counted as one of them done; and one payment a tap at
+   * full speed, a second one in the same time in the field waiting as one over the
+   * limit does, limit or no limit, unless the owner's grant is in the tap. The
+   * charge is what leaves the card for good: the pieces less the change the card
+   * makes for itself.
+   *
+   * Software 1.12 charged four signatures for every limit's worth of that, a part
+   * counting as one, and four for a payment within the limit that made change
+   * (`cardWaitSigns12`). Before it, it was what the PIECES come to, the first
    * limit's worth free (`cardWaitSignsBefore`), which is why the pieces for
    * such a card were chosen to overpay the least.
    *
@@ -9054,6 +9070,10 @@
    * card's sats to match again when it reads the card and the price has moved
    * (`cardLook`, `price`). */
   var CARD_WAIT_SIGNS = 4;
+  // software 1.13: the signatures for the first limit's worth over the limit, and for each further one; at most 255 limits' worth count
+  var CARD_WAIT_OVER = 7;
+  var CARD_WAIT_MORE = 3;
+  var CARD_WAIT_UNITS = 255;
   // the longest a till asks anybody to hold a card for, in seconds: a payment that would wait longer is not begun
   var CARD_WAIT_MOST = 40;
   // and that many seconds as answers of "not yet", for a card that does not say how long it will be
@@ -9063,13 +9083,42 @@
   var CARD_PACE_DRIFT = 0.02;
 
   /* What a payment waits under a limit of `limit` sats on one payment, in
-   * signatures of work, by the rule of software 1.12: the card counts what
-   * leaves it for good (`net`: the price and the mint's fee on the pieces; the
-   * pieces less the change the card makes for itself), and a payment within the
-   * limit that makes no change goes at once. Otherwise every limit's worth,
-   * whole or in part, is a unit: ceil(net / limit) of them, and a payment within
-   * the limit that makes change (`change`) is one. */
-  function cardWaitSigns(limit, net, change) {
+   * signatures of work, by the rule of software 1.13. `leaves` is what leaves the
+   * card for good (the pieces less the change the card makes for itself: the price
+   * and the mint's fee on the pieces, and any part of the change not made by the
+   * card), `made` the pieces of change the card is asked to make, and `second`
+   * that a payment has been signed already in this time in the field with no
+   * owner's grant in the tap (`cardPaid`).
+   *
+   *     leaves <= limit + limit/32        0  (a limit set in dollars at one moment and a price in
+   *                                           dollars at another lands a few sats over)
+   *     otherwise              7 + 3 * (ceil(leaves / limit) - 2)
+   *
+   * less one for each piece of change made, never below 0. A second payment is at
+   * least one limit's worth over, 7, with a limit or without one. */
+  function cardWaitSigns(limit, leaves, made, second) {
+    var l = Math.round(Number(limit) || 0), n = Math.round(Number(leaves) || 0);
+    var done = Math.max(0, Math.round(Number(made) || 0));
+    if (!(l > 0)) return second ? Math.max(0, CARD_WAIT_OVER - done) : 0;
+    var units = n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
+    if (second && units <= 1) units = 2;
+    if (units <= 1) return 0;
+    return Math.max(0, CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 2) - done);
+  }
+  /* The most limits' worth a payment can be of and still be waited for in no more
+   * than CARD_WAIT_MOST seconds (software 1.13), to say what can be taken. */
+  function cardWaitUnitsMost() {
+    var units = 2;
+    while (units < CARD_WAIT_UNITS && cardWaitSeconds(CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 1)) <= CARD_WAIT_MOST) units += 1;
+    return units;
+  }
+  /* The same by the rule of software 1.12: the card counts what leaves it for
+   * good (`net`: the price and the mint's fee on the pieces; the pieces less the
+   * change the card makes for itself), and a payment within the limit that makes
+   * no change goes at once. Otherwise every limit's worth, whole or in part, is a
+   * unit: ceil(net / limit) of them, and a payment within the limit that makes
+   * change (`change`) is one. Four signatures to a unit. */
+  function cardWaitSigns12(limit, net, change) {
     var l = Math.round(Number(limit) || 0), n = Math.round(Number(net) || 0);
     if (!(l > 0)) return 0;
     var units = n > l ? Math.min(255, Math.ceil(n / l)) : (change ? 1 : 0);
@@ -9084,6 +9133,16 @@
     return Math.min(255, Math.ceil(n / l) - 1) * CARD_WAIT_SIGNS;
   }
   function cardWaitSeconds(signs) { return Math.ceil((Number(signs) || 0) * (CARD_SIGN_SECONDS + 0.06)); }
+
+  /* Whether a payment has been signed in this time in the field (`link.one.paid`,
+   * which a sheet of the phone has and nothing else does, and which a card that
+   * left and came back empties) with no owner's grant in the tap: the card then
+   * makes the next one wait as one over the limit (software 1.13). The holder's
+   * own phone, reading its card as the owner (`card.mine`), has given the grant
+   * before it signs anything and is not slowed. */
+  function cardPaid(link, card) {
+    return !!(link && link.one && Number(link.one.paid) > 0) && !(card && card.mine);
+  }
 
   function cardPaceAll() {
     var o = load(CARD_PACE, {});
@@ -10564,17 +10623,28 @@
    * At most eight outputs, as many as the card keeps openings for (those of
    * payments whose pieces are not back yet count). A change that would be more,
    * or a card with no opening free, is made the way it was before 1.12 (below,
-   * `cardOweBack`). */
+   * `cardOweBack`).
+   *
+   * From software 1.13 it is at most four, cut plainly. See CARD_CHANGE_PIECES. */
   var CARD_CHANGE_MOST = 8;
   var CARD_CHANGE_PAGE = 3;
-  /* And the pieces one payment asks the card to make. Each costs the card half a
-   * second to a second of its own work while it is held to the phone (the card's
-   * hardware notes: the hash to the curve), so eight is the longest tap this can
-   * make, and a change that is fewer pieces holds it for less. The card's
-   * capacity is the most there can be; this is how many are asked for. */
-  var CARD_CHANGE_PIECES = 8;
+  /* And the pieces one payment asks the card to make. Each costs the card about
+   * half a second of its own work over NFC (the hash to the curve) while it is
+   * held to the phone, in the first tap, and change may add no more than two
+   * seconds to that tap. So a card of software 1.13 is asked for FOUR at the most,
+   * the four largest of the powers of two the change is made of (`cardLadder`'s
+   * `plain`: 2,357 sats is 2048 + 256 + 32 + 16, and the 5 that are left are made
+   * here after the swap, `cardOweBack`, and written at the change tap as before
+   * 1.12). Restocking a drawer's small sizes is the owner's phone's job at a top-up
+   * (`cardAdd`), and not a till's, which is why the change is not cut to the
+   * drawer. The card's capacity (CARD_CHANGE_MOST) is the most there can be. */
+  var CARD_CHANGE_PIECES = 4;
+  // and the card of 1.12, which was asked for eight, cut to fill the gaps in its drawer
+  var CARD_CHANGE_PIECES_BEFORE = 8;
 
   function cardOwnChange(card) { return !!(card && card.info && card.info.ownChange); }
+  // a card of software 1.13 or later: its wait is shaped (`cardWaitSigns`) and its change is cut plainly (`cardOwnChangeCut`)
+  function cardIsShaped(card) { return !!(card && card.info && card.info.shaped); }
 
   /* GET_CHANGE, the pages of it: the openings of the change the card has made
    * for itself and not yet been handed. Three to a page, each an amount (4), a
@@ -12212,12 +12282,17 @@
        * quickest, whatever its size. From 1.12 by what leaves it (`cardWaitSigns`),
        * which the pieces do not change, and a payment with no change is the
        * quickest of all: an exact set was taken above, and where there is none the
-       * same sets are taken, for the change they bring back. */
+       * same sets are taken, for the change they bring back. A card of 1.13 makes
+       * that change in four pieces at the most, cut plainly, so among the sets that
+       * overpay least one whose change is that few is taken (`cardPlainPick`). */
       if (least) {
         var most = upper === null ? 281474976710655 : upper;
+        var tidy = cardIsShaped(card);
         for (i = 0; i < groups.length; i++) {
           var cheap = cardPickUnder(w, groups[i], want, most);
-          if (cheap && cheap.length && cheap.length <= many) return cardRefillPick(w, groups[i], want, most, card, cheap, many);
+          if (cheap && cheap.length && cheap.length <= many) {
+            return tidy ? cardPlainPick(w, groups[i], want, most, card, cheap, many) : cardRefillPick(w, groups[i], want, most, card, cheap, many);
+          }
         }
         /* The cheapest set is more pieces than one signature takes (a deep
          * drawer's small pieces, by the dozen): then the fewest pieces that
@@ -12227,7 +12302,9 @@
          * anybody holds a card. */
         for (i = 0; i < groups.length; i++) {
           var few = cardFewestCover(w, groups[i], want, upper, null);
-          if (few && few.length && few.length <= many) return cardRefillPick(w, groups[i], want, most, card, few, many);
+          if (few && few.length && few.length <= many) {
+            return tidy ? cardPlainPick(w, groups[i], want, most, card, few, many) : cardRefillPick(w, groups[i], want, most, card, few, many);
+          }
         }
       }
       for (i = 0; i < groups.length; i++) {
@@ -12247,6 +12324,57 @@
     var picked = pass(any ? CARD_ALL_EASY : CARD_ALL_MOST);
     if (!picked && any) picked = pass(CARD_ALL_WIDE);
     return picked;
+  }
+
+  /* The change a set of pieces brings back for `want`: what they come to, less the mint's fee on them and the price. */
+  function cardOverOf(w, set, want) {
+    var fee = swapFeeFor(w, set);
+    return sumProofs(set) - ((isFinite(fee) && fee > 0) ? fee : 0) - want;
+  }
+
+  /* The set of this `pool` that brings back the least change from `from` to `to`
+   * (sats) that the card makes whole in `room` pieces at the most, cut plainly
+   * (`cardPlainPieces`), or null where none does. Each change is asked of
+   * `cardExactPick` as a price that much higher, which finds the fewest pieces that
+   * come to it and the fee on them exactly. Not more than CARD_TIDY_TRIES changes
+   * are asked about. */
+  var CARD_TIDY_TRIES = 48;
+  // and how much more than the least a set may overpay for it to bring back change that few pieces make (an eighth of the price, and this much at the least)
+  var CARD_TIDY_MIN = 64;
+  function cardTidySet(w, pool, want, from, to, bound, many, room, top) {
+    var tried = 0;
+    for (var c = Math.max(1, Math.floor(from)); c <= to && tried < CARD_TIDY_TRIES; c++) {
+      if (cardPlainPieces(c, top) > room) continue;
+      tried += 1;
+      var set = /** @type {any} */ (cardExactPick(w, pool, want + c, bound));
+      if (set && set.length && set.length <= many) return set;
+    }
+    return null;
+  }
+
+  /* The set a card of software 1.13 is paid with when no set comes to the price
+   * exactly. Its change is made by the card, in four pieces at the most, cut
+   * plainly (`cardOwnChangeCut`); what is more than that is made here, after the
+   * swap, and written at the change tap: a second swap at the mint, and a part of
+   * the change that leaves the card with the price as far as its day and its wait
+   * are concerned. So among the sets that overpay least the one is taken whose
+   * change is that few pieces, and only where no set that overpays a little more
+   * is (an eighth of the price, at the least CARD_TIDY_MIN sats, and not past
+   * CARD_REFILL_MOST) does the least of all stand, and the tail of its change take
+   * the road after the swap.
+   *
+   * A deep drawer's refill (`cardRefillPick`) is not done for such a card: it
+   * overpaid by CARD_REFILL or more so that the change, cut to the gaps in the
+   * drawer, stocked its small sizes again. A plain cut stocks whatever sizes the
+   * change happens to be made of, so the refill only made every payment's change
+   * a few hundred sats; stocking the drawer is a top-up's job (`cardAdd`). */
+  function cardPlainPick(w, pool, want, most, card, cheap, many) {
+    var top = cardMaxPiece(w);
+    var room = cardChangeRoom(w, card, cheap);
+    var least = cardOverOf(w, cheap, want);
+    if (cardPlainPieces(least, top) <= room) return cheap;
+    var slack = Math.min(CARD_REFILL_MOST, Math.max(CARD_TIDY_MIN, Math.floor(want / 8)));
+    return cardTidySet(w, pool, want, least + 1, least + slack, most, many, room, top) || cheap;
   }
 
   /* Change worth going back for, on a card with a deep drawer.
@@ -12323,23 +12451,44 @@
 
   /* The sizes of the outputs the card is asked to make for itself (software
    * 1.12) of a payment's `back`, the pieces' worth over the price and the mint's
-   * fee: cut for the card as its change always was, to fill the gaps in the
-   * drawer it will then have (`cardChangeFor`), but in no more pieces than the card
-   * keeps openings for (CARD_CHANGE_MOST), the places it will have, and the
-   * outputs a request to the mint takes beside this phone's own. A change that
-   * is more pieces than that gives the largest of them; what is left is made
-   * here, after the swap, the way change was made before 1.12 (`cardOweBack`).
-   * None where the card's outputs would not be of a keyset the mint signs for:
-   * the card makes them in the keyset of its first piece, which has to be the
-   * one in use. Largest first. */
+   * fee, in no more pieces than the card keeps openings for (CARD_CHANGE_MOST),
+   * the places it will have, and the outputs a request to the mint takes beside
+   * this phone's own. A change that is more pieces than that gives the largest of
+   * them; what is left is made here, after the swap, the way change was made
+   * before 1.12 (`cardOweBack`). None where the card's outputs would not be of a
+   * keyset the mint signs for: the card makes them in the keyset of its first
+   * piece, which has to be the one in use. Largest first.
+   *
+   * A card of 1.12 is asked for up to eight, cut as its change always was, to fill
+   * the gaps in the drawer it will then have (`cardChangeFor`). A card of 1.13 is
+   * asked for FOUR at the most (CARD_CHANGE_PIECES), the four largest of the powers
+   * of two the amount is made of (`cardLadder`, `plain`): each piece is about half
+   * a second of the first tap, which change may add two seconds to and no more. */
   function cardOwnChangeCut(w, card, group, back) {
     var inUse = '';
     try { inUse = String(w.getOutputKeyset().id).toLowerCase(); } catch (e) { inUse = ''; }
     if (!inUse || !group.every(function (p) { return String(p.id).toLowerCase() === inUse; })) return [];
-    var except = group.map(function (p) { var parts = cardSecretParts(p.secret); return parts ? parts.nonce : ''; });
-    var room = Math.min(CARD_CHANGE_PIECES, CARD_CHANGE_MOST, cardRoomFor(card, except), Math.max(0, mintArrayCap(w) - CARD_OUTPUTS_MOST));
+    var room = cardChangeRoom(w, card, group);
     if (!(room >= 1)) return [];
+    var except = group.map(function (p) { var parts = cardSecretParts(p.secret); return parts ? parts.nonce : ''; });
+    if (cardIsShaped(card)) return cardLadder(back, 64, cardMaxPiece(w), null, true).denominations.slice(0, room);
     return cardChangeFor(back, room, cardMaxPiece(w), cardHeldAmounts(card, except), cardIsDeep(card)).slice(0, room);
+  }
+
+  /* How many pieces of change the card is asked to make for a payment of `signed`
+   * pieces: what it is asked for at most (CARD_CHANGE_PIECES, by its software), and
+   * the openings it keeps, the places it will have and the outputs a request to the
+   * mint takes beside this phone's own bound that. */
+  function cardChangeRoom(w, card, signed) {
+    var except = (signed || []).map(function (p) { var parts = cardSecretParts(p.secret); return parts ? parts.nonce : ''; });
+    return Math.min(cardIsShaped(card) ? CARD_CHANGE_PIECES : CARD_CHANGE_PIECES_BEFORE, CARD_CHANGE_MOST, cardRoomFor(card, except),
+                    Math.max(0, mintArrayCap(w) - CARD_OUTPUTS_MOST));
+  }
+
+  /* The pieces a change of `sats` is cut into plainly (`cardLadder`'s `plain`): one for each
+   * power of two it is made of, none above the mint's largest (`top`). */
+  function cardPlainPieces(sats, top) {
+    return cardLadder(sats, 64, top, null, true).denominations.length;
   }
 
   /* Have the card sign once for `group`. Resolves { plan, signed }: the pieces
@@ -12367,10 +12516,14 @@
       var slots = plan.inputs.map(function (p) { return slotOf[p.secret]; });
       var first0 = cardSecretParts(plan.inputs[0].secret);
       plan.changeInfo = { card: card.key, forHash: 'card-' + plan.id, date: first0 ? first0.date : 0, mint: canonicalMint(mintOf(w)) };
-      // said in the log: how the change is made, and what is left of it for the second swap
+      // said in the log: how the change is made and split, and what is left of it for the second swap
       if (note && note.own && !note.all && plan.net > wantN) {
-        console.log('[foxy] card: ' + (plan.change.length ? 'the card makes ' + plan.cardChange + ' sats of the change itself, in ' + plan.change.length + ' piece(s)' : 'no change is asked of the card')
-          + (plan.net - wantN - plan.cardChange > 0 ? '; ' + (plan.net - wantN - plan.cardChange) + ' sats more are made here after the swap' : ''));
+        var tail = plan.net - wantN - plan.cardChange;
+        console.log('[foxy] card: ' + (plan.change.length
+          ? 'the card makes ' + plan.cardChange + ' sats of the change itself, in ' + plan.change.length + ' piece' + (plan.change.length === 1 ? '' : 's')
+            + ' (' + plan.change.map(function (c) { return c.amount; }).join(' + ') + ')'
+          : 'no change is asked of the card')
+          + (tail > 0 ? '; ' + tail + ' sat' + (tail === 1 ? '' : 's') + ' more ' + (tail === 1 ? 'is' : 'are') + ' made here after the swap, at the change tap' : ''));
       }
       /* Written down before the card is asked. From SIGN on, what the card did
        * is not known until it answers, and this row is what its next tap is
@@ -12400,8 +12553,12 @@
          * and in the message it signs. A blinded message that is no point at
          * all would only be refused by the mint after the card had signed, so
          * it is looked at here. */
-        return plan.change.reduce(function (chain, c) {
+        return plan.change.reduce(function (chain, c, k) {
           return chain.then(function () {
+            /* Said before the card is asked, so the line is up for the whole of its work on this piece (about half a
+             * second of it over NFC): with several pieces that was seconds of a sheet that said nothing, and the holder
+             * took the card away. */
+            try { if (typeof progress === 'function') progress({ step: 'change', i: k + 1, n: plan.change.length }); } catch (e) {}
             return t.ask(cardCommand(CARD_INS.change, 0, cardU32Hex(c.amount), 33));
           }).then(function (r) {
             if (r.sw === '6a84') { var full = /** @type {any} */ (new Error('the card has no opening free for its change')); full.cardNoOpening = true; throw full; }
@@ -12458,9 +12615,10 @@
             /* `sum` and `want`: what leaves the card (the pieces, less the change it made for itself) and what is being paid, so the screen can
              * say which of the two the wait is for. `making`: the first limit's worth of waiting, of a payment in which the card made change,
              * which is what a payment within the limit waits for, and a payment over it too: the card does not say which, and it is said for
-             * what it may be until it goes on past that. */
+             * what it may be until it goes on past that. A card of 1.13 does not wait for change, only for the limit, and says so: the work of
+             * making it is said as it is done (`progress`, `change`, above). */
             try { if (typeof progress === 'function') progress({ step: 'waiting', polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
-                                                                sum: plan.leaves, want: wantN, making: plan.cardChange > 0 && polls <= CARD_WAIT_SIGNS }); } catch (e) {}
+                                                                sum: plan.leaves, want: wantN, making: !cardIsShaped(card) && plan.cardChange > 0 && polls <= CARD_WAIT_SIGNS }); } catch (e) {}
             return again();
           });
         };
@@ -12476,6 +12634,8 @@
         }
         // a signature good for its key is the card proving it holds that key: nothing in this session asks it to again
         cardProvedHere(t.link, card.key);
+        // and a payment signed in this time in the field: the card makes the next one wait (software 1.13, `cardPaid`)
+        if (t.link && t.link.one) t.link.one.paid = (Number(t.link.one.paid) || 0) + 1;
         mark(waited ? 'waits and signature' : 'signature');
         try { console.log('[foxy] card: signed in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (eL) {}
         return { plan: plan, signed: [first].concat(plan.inputs.slice(1)) };
@@ -12898,6 +13058,8 @@
     var all4 = false, groups = [], moreRows = [], cheaper = null;
     // a card that makes a payment's change itself (software 1.12): it is asked to, for a payment made online (`cardOwnChangeCut`)
     var ownChange = false;
+    // and one whose wait is shaped (1.13): nothing within the limit, and its change cut plainly in four pieces at the most
+    var shaped = false;
     // a payment of this card's held from a tap cut short (`cardHeld`), and one held for another amount, let go after this one
     var held = null, heldProofs = [], heldWorth = 0, letGoAfter = null, tornSats = 0;
     on('reading');
@@ -12919,6 +13081,7 @@
       if (no) throw no;
       all4 = cardIsAll(card);
       ownChange = all4 && cardOwnChange(card) && !o.all && !offline;
+      shaped = ownChange && cardIsShaped(card);
       /* A signature this phone asked this card for and never saw, had again
        * (`cardAskedBack`). A payment's is held as a payment the card left part
        * way through always was: this tap finishes it if it is for the same
@@ -13103,18 +13266,34 @@
       }
       /* What the card will make this payment wait, known before its PIN is
        * sent: said to the screen, and where it is longer than anybody holds a
-       * card, the payment is not begun and the most that can be taken is said. */
-      if (tap.paced && tap.limited && !lift) {
-        // from 1.12 what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole
-        var signs = ownChange ? cardWaitSigns(tap.limit, want + fee, worth - fee > want)
-          : groups.reduce(function (n, g) { return n + cardWaitSignsBefore(tap.limit, sumProofs(g)); }, 0);
-        var secs = cardWaitSeconds(signs);
+       * card, the payment is not begun and the most that can be taken is said.
+       * From 1.13 a payment is counted by what leaves the card, the pieces less the
+       * change it is asked to make (`cardOwnChangeCut`: the part of the change it
+       * does not make leaves it as the price does), with that change counted toward
+       * it, and a second payment in this time in the field waits whether or not the
+       * limit is known (`cardPaid`): a till is not told the limit, and says what it
+       * can. */
+      var second = shaped && !lift && cardPaid(link, card);
+      if ((tap.paced && tap.limited && !lift) || second) {
+        var signs, secs, unitsMost = 0;
+        if (shaped) {
+          var back = worth - fee - want;
+          var cut = back > 0 ? cardOwnChangeCut(w, card, groups[0] || [], back) : [];
+          var madeBy = cut.reduce(function (n, a) { return n + a; }, 0);
+          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second);
+          unitsMost = cardWaitUnitsMost();
+        } else {
+          // 1.12: what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole
+          signs = ownChange ? cardWaitSigns12(tap.limit, want + fee, worth - fee > want)
+            : groups.reduce(function (n, g) { return n + cardWaitSignsBefore(tap.limit, sumProofs(g)); }, 0);
+        }
+        secs = cardWaitSeconds(signs);
         if (secs > CARD_WAIT_MOST) {
-          var mostNow = (Math.floor(CARD_WAIT_MOST / cardWaitSeconds(CARD_WAIT_SIGNS)) + 1) * tap.limit;
+          var mostNow = unitsMost ? unitsMost * tap.limit : (Math.floor(CARD_WAIT_MOST / cardWaitSeconds(CARD_WAIT_SIGNS)) + 1) * tap.limit;
           throw cardError('tap-limit', 'This card would have to be held for ' + secs + ' seconds to pay this. Take it in parts of '
             + mostNow + ' sats or less.', { left: mostNow, need: sumProofs(picked), limit: tap.limit, wait: secs, paced: true });
         }
-        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', left: signs, seconds: secs, ahead: true }); } catch (eW) {} }
+        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
       }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
@@ -13191,7 +13370,9 @@
       return cardLetGo(link, o, changeComing).then(function () {
         released = !o.hold;
         if (!o.hold) console.log('[foxy] card: let go ' + (Date.now() - signedAt) + ' ms after it signed' + (changeComing ? ' (its sheet is kept for the change)' : ''));
-        on(released ? 'checking' : 'mint', { hash: row.id });
+        /* `change`: something is coming back to the card in this sheet, so its holder is told the second tap is on its way
+         * (26f-flashcard.js: three buzzes), as the sheet is kept open for it. */
+        on(released ? 'checking' : 'mint', { hash: row.id, change: changeComing });
         return cardSwapTaken(row, false);
       }).then(function (got) {
         // the other signatures of a whole card taken off, each its own swap
@@ -22856,7 +23037,15 @@
     cardTimeKey: CARD_TIME_KEY,
     cardPick: function (w, have, want, cap, card, tapCap) { return cardPick(w, have, want, cap, card, tapCap); },
     cardReach: function (amounts) { return cardReach(amounts); },
+    /* What a payment waits, in signatures of the card's work, by the rule of the card's software: 1.13 (`leaves`, the pieces
+     * less the change the card makes; `made`, the pieces of it; `second`, a payment signed in this time in the field already),
+     * 1.12, and before it (the pieces whole). */
+    cardWaitSigns: function (limit, leaves, made, second) { return cardWaitSigns(limit, leaves, made, second); },
+    cardWaitSigns12: function (limit, net, change) { return cardWaitSigns12(limit, net, change); },
+    cardWaitSignsBefore: function (limit, sats) { return cardWaitSignsBefore(limit, sats); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
+    /* The pieces a card that signs once for a payment is paid with (`least`: one that waits, which a till takes for every card of its kind). */
+    cardPickAll: function (w, have, want, cap, card, tapCap, exactOnly, least) { return cardPickAll(w, have, want, cap, card, tapCap, exactOnly, least); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
     cardDeepLadder: function (sats, most, biggest, have) { return cardDeepLadder(sats, most, biggest, have); },
@@ -23552,10 +23741,11 @@
     /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
     cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
     /* The limit on one payment, as its holder set it: the dollars, or 0 (`cardPaceNote`); and what a payment
-     * that leaves the card for `sats` waits on a card of software 1.12 with that limit, in seconds, whether it makes change (`change`)
-     * or not (a payment within the limit that does waits one limit's worth). */
+     * that leaves the card for `sats` waits on a card of software 1.13 with that limit, in seconds: `made`, how many pieces of
+     * change the card is asked to make (each counts as one signature done), and `second`, that a payment has been signed in the
+     * same time in the field already and the owner's grant is not in the tap (`cardWaitSigns`). */
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
-    cardWait: function (limit, sats, change) { return cardWaitSeconds(cardWaitSigns(limit, sats, change)); },
+    cardWait: function (limit, sats, made, second) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     cardHeldLetGo: function (key) {
@@ -23687,7 +23877,8 @@
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
           return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {
             // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
-            link.one.told = false; link.one.key = '';
+            // and it has signed nothing in it (`cardPaid`: a second payment in one time in the field waits)
+            link.one.told = false; link.one.key = ''; link.one.paid = 0;
           }, function (e) {
             var x = cardError('cancelled', 'The card was not tapped.');
             x.unsupported = /unknown action/i.test(String((e && e.message) || ''));

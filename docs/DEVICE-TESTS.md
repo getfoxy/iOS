@@ -1620,10 +1620,13 @@ under CHANGE LIMIT, and a charge over the limit is not refused).
    card's screen says PER TAP LIMIT and the amount (or both limits on one line).
 2. On the second phone, charge the card an amount at or under the limit.
    **Pass:** paid as fast as any payment. Charge it again straight away: the
-   same. Nothing is remembered from the first.
+   same. Nothing is remembered from the first. (Software 1.13: with a fresh tap
+   each; two payments in one tap are the 23c-8 case.)
 3. Charge it about twice the limit. **Pass:** the sheet and the screen say
    `Over the card's per tap limit. Keep holding:` with seconds that count
-   down, about three for each limit over; then PAYMENT RECEIVED. Time it.
+   up; then PAYMENT RECEIVED. Time it: about five seconds for the first limit's
+   worth over the limit and two more for each after it (software 1.13; 1.12
+   was about three for each limit).
 4. Charge it about three times the limit and lift the card while it counts.
    **Pass:** nothing is taken (read the card on the holder's phone: the same
    balance). Tap again: it counts the whole wait again, and pays.
@@ -1772,6 +1775,43 @@ that takes more than thirty-two pieces in a load is one).
 5. With a second phone that has an older build, if there is one: it cannot read
    this card at all (it does not know a card of 128 places). There is no way
    to make this build send a 1.9 card its PIN in the clear.
+
+#### 23c-8. Software 1.13: the wait only over the limit, change in four pieces, three buzzes
+
+Needs a card on software 1.13 (`01 0d` at SELECT), with a per tap limit, and a
+second phone to be the till.
+
+1. Charge the card an amount within its limit that it cannot make exactly (a
+   card with one large piece, say 4,096 sats, charged 1,631). **Pass:** no
+   `Keep holding` wait at all: the sheet says `Signing`, then `The card is making
+   change · piece 1 of 4. Keep holding.` through piece 4 (the line changes a
+   piece about every half second), then `Verifying the payment. Keep this open
+   for your change.`
+2. **Three buzzes.** In the same payment, as the card has signed and the sheet
+   changes to `Verifying the payment`, the till's phone buzzes three times, 0.15
+   seconds apart, hard enough to feel through the hand that holds the card.
+   **Pass:** three, and distinct from the single quiet tap of a payment with no
+   change and from the success buzz at PAYMENT RECEIVED. Charge an amount the
+   card makes exactly. **Pass:** the single quiet tap, no three. (Core Haptics is
+   not available while some sessions are open: if the three do not come with the
+   NFC sheet up, say so.) Note how long the first tap took against one with no
+   change: change may add about two seconds, four pieces at about half a second.
+3. **Four at most.** Charge 1,739 from a card of one piece of 4,096 (the change
+   is 2,357 sats, 2048 + 256 + 32 + 16 + 4 + 1). **Pass:** the card is asked for
+   four pieces; the 5 sats that are left are made by the till and written with them
+   at the second tap (the log says: `the card makes 2352 sats of the change itself,
+   in 4 pieces (2048 + 256 + 32 + 16); 5 sats more are made here after the swap`).
+   The second tap writes six pieces.
+4. Over the limit by a sat or more: charge about twice the limit. **Pass:** the
+   `Over the card's per tap limit` wait of about five seconds, counted up, after
+   the change pieces if any.
+5. **One payment a tap.** On the holder's own phone, WITHDRAW a card whose pieces
+   are of two dates. **Pass:** both signatures with no wait: its grant is given
+   first, and nothing takes it away between them. (A till makes one payment in a
+   sheet and the card leaves the field when the sheet ends, so a till is never
+   the second payment of a tap today; if a build ever makes one, the sheet says
+   `A second payment in one tap. Keep holding` and the card waits about five
+   seconds.)
 
 #### 23d. What a card cannot be made to do
 

@@ -296,6 +296,8 @@ amount and says the same. iOS ends a session after a minute.
 | reading | READING THE CARD | Reading the card |
 | found | (the same) | Scanning. Hold still. |
 | signing | KEEP THE CARD THERE, and under it the piece | Signing piece 3 of 9 |
+| the card's change (1.12 and on) | (the same) | The card is making change · piece 2 of 4. Keep holding. |
+| a wait (1.13: only over the limit) | (the same) | Over the card's per tap limit. Keep holding (4 s) |
 | signed | VERIFYING WITH THE MINT, and under it that the card can be removed (nothing to press) | Done. Remove the card. (the sheet ends here) |
 | the change | MAKING THE CHANGE, and under it that the payment is made | (no sheet) |
 | writing | WRITING TO THE CARD, and under it the piece | Writing 2 of 4 |
@@ -436,7 +438,10 @@ What that changes:
   one in two. The larger set may be over a per tap limit the till is not
   told: the card then answers "not yet" before it has signed anything, and
   the till pays with the cheapest set after all, at once. Nobody is told to
-  keep holding for the sake of change.
+  keep holding for the sake of change. (A card of 1.13 is paid otherwise:
+  *A card that makes its own change*, below. Its change is cut plainly and
+  restocks nothing in particular, so the till takes the set that overpays least,
+  and the drawer's small sizes are put back by a top-up.)
 - **How many pieces one signature is for.** A card burns the pieces of a
   payment as it signs. Before software 1.8 it did so inside one transaction,
   a status byte a piece, and the chip's transaction holds few: on the card
@@ -541,8 +546,10 @@ the gaps in what the card will then hold (*Adding money*), after the swap has
 landed. Change is never the receiver's: it is kept in a store of its own, outside
 the balance, until it is on the card. (A card of software 1.12 makes the change
 itself, in the swap, and this phone finishes the pieces at the second tap:
-*A card that makes its own change*, below. What follows is the change a till
-makes, which is every card's before 1.12, and a later part of a bigger change.)
+*A card that makes its own change*, below; from 1.13 the card makes the four
+largest powers of two the change is made of and this phone only the small tail.
+What follows is the change a till makes, which is every card's before 1.12, and a
+later part of a bigger change.)
 
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
@@ -634,18 +641,39 @@ What it means for the holder:
   A payment of $3 made with a $10 piece costs the day $3, and not $10. A till that
   writes change back by other means gives the day nothing back, and the card does
   not take its word.
-- **The wait on a per tap limit is by the same.** A payment within the limit that
-  makes no change goes at once; a payment within it that makes change takes three
-  seconds (a limit's worth); over it, three seconds for every limit's worth of
-  what leaves the card, whole or in part, with change or without. Overpaying costs
-  no wait, so the pieces are no longer chosen to overpay the least for the wait's
-  sake (the larger set that fills the drawer is taken, as it was, and a till is
-  not sent round to a cheaper one). While it waits
-  the till's sheet says `The card is making change. Keep holding` for the first
-  limit's worth (the card does not say which it is) and `Over the card's per tap
-  limit` after. The day's limit is held at the card's first SIGN and not at the
-  start of the payment, so a refusal comes after the outputs and the change were
-  sent, and gives the payment up: the swap's row is dropped, nothing is burned.
+- **The wait on a per tap limit is by the same.** It is counted on what leaves the
+  card, and overpaying costs no wait, so the pieces are not chosen to overpay the
+  least for the wait's sake. **From software 1.13** a payment within the limit
+  goes at once, with change or without (a thirty-second over the limit counts as
+  within it: a limit set in dollars at one moment and a price in dollars at
+  another lands a few sats over). Over it the card does seven signatures of work,
+  about five seconds, for the first limit's worth over the limit and three more,
+  about two seconds, for every limit's worth after that, whole or in part; each
+  piece of change the card made (about half a second of its work) counts as one
+  of them done, and none is below nothing; at most 255 limits' worth are counted.
+  That change is coming is the phone's to say and not the card's: see *Three
+  buzzes*, below. **Software 1.12** waited four signatures for every limit's
+  worth, three seconds, and for a payment within the limit that made change. While
+  it waits the till's sheet says `Over the card's per tap limit. Keep holding`,
+  and how long it has been; a card of 1.12 for its first limit's worth said `The
+  card is making change. Keep holding`. The day's limit is held at the card's
+  first SIGN and not at the start of the payment, so a refusal comes after the
+  outputs and the change were sent, and gives the payment up: the swap's row is
+  dropped, nothing is burned.
+- **One payment a tap at full speed (1.13).** A second payment signed in the
+  same time in the field waits as one over the limit does, seven signatures and
+  its own count where that is more, whether the card has a limit or not, unless
+  the owner's grant is in the tap. Without it a terminal that has the PIN could
+  take a limit's worth a second for as long as the card is held. A new SELECT
+  is the same time in the field; the card out of it and back is a new one. The
+  change tap, a refund and any load are not payments. A till is not told the
+  limit, but it knows what it has had the card sign in its sheet, so it says the
+  seven before the PIN is sent, with the change it will ask for taken off, and
+  the screen says `A second payment in one tap. Keep holding`. The owner's phone,
+  which gives the grant first and takes a whole card off in as many signatures as
+  its pieces have dates, is not slowed. Nothing a till does in one sheet makes a
+  second payment today: a payment begun and given up, a refusal and the change
+  tap are none.
 - **The change tap is as before**: the second tap, no PIN, TAP TO CONFIRM. The till
   reads the card's openings (`GET_CHANGE`, three a page, once in the tap), finds
   the one each output of its is (it makes the blinded message from the opening's
@@ -656,19 +684,41 @@ What it means for the holder:
   none when all is back. An output the card no longer lists and does not hold (it
   was wiped and set up again) cannot be finished: the row is kept, marked, and
   left out of what the screen says is owed.
-- **Eight pieces at most**, as many as the card keeps openings for, and the
-  openings of change not yet written back count. Each piece costs the card half a
-  second to a second of its own work (its hash to the curve) while it is held to
-  the phone, so a change of eight holds the card several seconds longer than a
-  change of one or two. The change is cut for the card as change always was
-  (the gaps in its drawer first) but in eight pieces: a deep drawer is refilled
-  less deeply than a thirty-two piece change refilled it. A
-  change that would be more than eight has its eight largest made by the card and
-  the rest made by the till after the swap, as before, and written at the same tap
-  (the log line says so). A card with no opening free refuses the first request for
+- **Four pieces at most, from 1.13** (eight, from 1.12 to 1.13), and the card
+  keeps openings for eight, of which the change not yet written back counts.
+  Each piece costs the card about half a second of its own work over NFC (its
+  hash to the curve) while it is held to the phone, in the first tap, and change
+  may add no more than two seconds to that tap. So the change is cut plainly, in
+  the powers of two the amount is made of, and the card makes the four largest:
+  2,357 sats is 2048 + 256 + 32 + 16 + 4 + 1, of which the card makes the first
+  four. The rest, the small tail, is made by the till after the swap and written
+  at the change tap, as before 1.12 (a `change` token row beside the card's own;
+  the log line says how it was split: `the card makes 2352 sats of the change
+  itself, in 4 pieces (2048 + 256 + 32 + 16); 5 sats more are made here after the
+  swap`). That tail leaves the card with the price as far as its day's limit and
+  its wait are concerned, since the card cannot check what the till makes. So,
+  when no set of pieces comes to the price exactly, a till takes among the sets that
+  overpay least one whose change is four powers of two or fewer, if one overpays a
+  little more (an eighth of the price, 64 sats at the least), and only where there
+  is none does the tail take the road after the swap. Stocking the drawer's small
+  sizes is a top-up's work (the owner's phone cuts the drawer, eight deep) and not
+  a till's; a card of 1.12 was asked for eight pieces cut to the gaps in its
+  drawer, and is still. A card with no opening free refuses the first request for
   change, and the payment is begun again with none asked of it. The card makes its
   pieces in the keyset of its first piece, which has to be the one in use at the mint;
   if it is not, the change is the till's.
+- **The sheet says what the card is doing.** Between the pieces being named and
+  the wait, the sheet used to say nothing: with seven pieces of change that was
+  four seconds, and the holder pulled the card. Now each piece is said as the card
+  is asked for it, `The card is making change · piece 2 of 4. Keep holding.`, and
+  then the wait, if there is one.
+- **Three buzzes (1.13).** When the card has signed and change is coming back
+  to it in this sheet, so that the sheet is kept and a second tap is on its way, the
+  phone being paid buzzes three times, 0.15 seconds apart (a `triple` haptic;
+  nothing else in the app buzzes three times), in place of the single quiet tap
+  that says the card may be lifted. A payment with no change gets that tap. That
+  change is coming is the phone's to say and not the card's, so a payment within
+  the limit waits for nothing and is told apart by feel.
 - **A lost answer comes back the same way**: the till asks the mint for the
   signatures by the blinded messages (NUT-09) when it finds the payment was made,
   and where the mint cannot say, notes it as due and asks again whenever it
@@ -769,9 +819,11 @@ How it behaves:
 A second limit: the most the card pays in **one tap straight away**. It is set
 the same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
 LIMIT: a warning, SET PER TAP LIMIT (`A per tap limit is the most this card
-pays in one tap straight away. For every limit more than that, the card has to
-be held 3 seconds longer before it pays. Lift the card and the payment stops,
-with nothing taken.`), the amount (`What is the most this card should pay in
+pays in one tap straight away, change or no change: three buzzes on the phone
+being paid say that change is coming. Over the limit, the card has to be held
+about 5 seconds, and 2 seconds more for every limit's worth beyond that. Lift
+the card and the payment stops, with nothing taken.`; a card of 1.12 is told its
+own rule), the amount (`What is the most this card should pay in
 one tap straight away?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE
 APPLYING A PER TAP LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and
 the amount, or `PER TAP $2.00 · DAILY $5.00` where it has both.
@@ -794,20 +846,23 @@ follows is the one a card has now.
   which at a mint that charges for inputs costs what a withdrawal and a top-up
   cost. Without the PIN the card is left as it is, and its screen says what it
   holds above the limit.
-- **A payment over it waits.** For every limit's worth, the card does about
-  three seconds of its own work before it signs, and nothing is taken until that
-  is done. The till's screen says `Over the card's per tap limit. Keep holding`
-  and how long it has been; how long is left it cannot say, because the card does
-  not tell it. From software 1.12 the limit's worth is of what leaves the card
-  (*A card that makes its own change*): within the limit and with no change a
-  payment goes at once, with change it waits one, and over the limit it waits
-  ceil(what leaves / limit). (Before 1.12 the card waited by what its pieces come
-  to, the first limit's worth free, so a small payment made with a piece worth
-  twice the price or more waited too: the screen then says `Paying from a larger
-  piece. Keep holding`, since it is the piece that is over the limit and not the
-  payment.) Lifted in the wait, the card has
-  paid nothing and the till holds nothing; tapped again, it waits the whole of
-  it again.
+- **A payment over it waits.** The card does signatures of its own work before
+  it signs, and nothing is taken until that is done. From software 1.13: nothing
+  within the limit (change or no change); about five seconds, seven signatures,
+  for the first limit's worth over it, and about two seconds, three, for every
+  limit's worth after that, less one for each piece of change the card made. The
+  till's screen says `Over the card's per tap limit. Keep holding` and how long it
+  has been; how long is left it cannot say, because the card does not tell it. The
+  limit's worth is of what leaves the card (*A card that makes its own change*).
+  Software 1.12 waited four signatures, three seconds, for every limit's worth,
+  ceil(what leaves / limit) of them, and for one when a payment within the limit
+  made change. Before 1.12 the card waited by what its pieces come to, the first
+  limit's worth free, so a small payment made with a piece worth twice the price or
+  more waited too: the screen then says `Paying from a larger piece. Keep
+  holding`, since it is the piece that is over the limit and not the payment.
+  Lifted in the wait, the card has paid nothing and the till holds nothing; tapped
+  again, it waits the whole of it again. A second payment in the same time in the
+  field waits as one over the limit does (*A card that makes its own change*).
 - **The limit is its owner's to know.** The card says it to the phone that
   holds its owner's key and to no other: a till reads none, and is told only
   "not yet" while the card waits, never how long. A till that knew the limit
@@ -823,10 +878,13 @@ follows is the one a card has now.
 - **It counts what leaves the card.** Before 1.12 that was the pieces signed, not
   the price, so the pieces for such a card were chosen to overpay the least where
   they could not come to the price exactly. From 1.12 it is the pieces less the
-  change the card makes for itself, and overpaying costs no wait.
+  change the card makes for itself, and overpaying costs no wait; but the part of
+  the change the card does not make (more than four pieces, from 1.13) is made by
+  the till, leaves with the price, and is counted.
 - **A wait longer than a tap lasts is given up**: after forty seconds of "not
   yet" the till stops asking, with nothing signed, and says to take the
-  payment in smaller parts.
+  payment in smaller parts (sixteen limits' worth is as much as a card of 1.13
+  waits that long for).
 - **It is kept in dollars.** The card holds sats and has no price. A limit typed
   in dollars is kept as dollars on the phone that set it
   (`foxy.flashcard.pace`), and when that phone reads its own card and the price

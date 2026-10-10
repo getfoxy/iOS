@@ -9,7 +9,15 @@
     cardTimeKey: CARD_TIME_KEY,
     cardPick: function (w, have, want, cap, card, tapCap) { return cardPick(w, have, want, cap, card, tapCap); },
     cardReach: function (amounts) { return cardReach(amounts); },
+    /* What a payment waits, in signatures of the card's work, by the rule of the card's software: 1.13 (`leaves`, the pieces
+     * less the change the card makes; `made`, the pieces of it; `second`, a payment signed in this time in the field already),
+     * 1.12, and before it (the pieces whole). */
+    cardWaitSigns: function (limit, leaves, made, second) { return cardWaitSigns(limit, leaves, made, second); },
+    cardWaitSigns12: function (limit, net, change) { return cardWaitSigns12(limit, net, change); },
+    cardWaitSignsBefore: function (limit, sats) { return cardWaitSignsBefore(limit, sats); },
     cardExactPick: function (w, have, want, cap) { return cardExactPick(w, have, want, cap); },
+    /* The pieces a card that signs once for a payment is paid with (`least`: one that waits, which a till takes for every card of its kind). */
+    cardPickAll: function (w, have, want, cap, card, tapCap, exactOnly, least) { return cardPickAll(w, have, want, cap, card, tapCap, exactOnly, least); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
     cardDeepLadder: function (sats, most, biggest, have) { return cardDeepLadder(sats, most, biggest, have); },
@@ -705,10 +713,11 @@
     /* Signatures this phone asked a card for and never saw: how many are still open (`cardAskedBack`). */
     cardAskedOpen: function () { return cardStore(CARD_SWAPS).filter(function (r) { return r && r.asked; }).length; },
     /* The limit on one payment, as its holder set it: the dollars, or 0 (`cardPaceNote`); and what a payment
-     * that leaves the card for `sats` waits on a card of software 1.12 with that limit, in seconds, whether it makes change (`change`)
-     * or not (a payment within the limit that does waits one limit's worth). */
+     * that leaves the card for `sats` waits on a card of software 1.13 with that limit, in seconds: `made`, how many pieces of
+     * change the card is asked to make (each counts as one signature done), and `second`, that a payment has been signed in the
+     * same time in the field already and the owner's grant is not in the tap (`cardWaitSigns`). */
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
-    cardWait: function (limit, sats, change) { return cardWaitSeconds(cardWaitSigns(limit, sats, change)); },
+    cardWait: function (limit, sats, made, second) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     cardHeldLetGo: function (key) {
@@ -840,7 +849,8 @@
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
           return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 70000).then(function () {
             // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
-            link.one.told = false; link.one.key = '';
+            // and it has signed nothing in it (`cardPaid`: a second payment in one time in the field waits)
+            link.one.told = false; link.one.key = ''; link.one.paid = 0;
           }, function (e) {
             var x = cardError('cancelled', 'The card was not tapped.');
             x.unsupported = /unknown action/i.test(String((e && e.message) || ''));

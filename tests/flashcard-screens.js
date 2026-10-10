@@ -31,7 +31,12 @@ const takeLimitSteps = (app, sats, which) => {
   if (sats > 0) keyIn(app, sats); else app.fcLimitConfirm(0);
   app.fcLimitSpec().go();
 };
-const TAP_WARNING = 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
+// the rule of software 1.13 in plain words, and the card before it (1.12)'s
+const TAP_WARNING = 'A per tap limit is the most this card pays in one tap straight away, change or no change: three buzzes on the phone being paid say that change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
+  + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
+  + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
+  + 'Do you wish to continue?';
+const TAP_WARNING_OLD = 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
   + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
   + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
   + 'Do you wish to continue?';
@@ -472,9 +477,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === c.balance() && holder.state.fc.ownedHere === true);
   ok(holder.state.fc.ownedHere === true && vals(holder).fcLimitLine === 'NO LIMIT', 'the card is read again, and this phone is found to be its owner');
   holder.fcSetLimit();
-  ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
+  ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, change or no change. Over that, it has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that.\n\nDAILY: the most it will spend in one day.',
                                            'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
-     'CHANGE LIMIT asks which of the card’s two limits: PER TAP LIMIT, DAILY LIMIT, or CANCEL', card(holder) && card(holder).all);
+     'CHANGE LIMIT asks which of the card’s two limits: PER TAP LIMIT, DAILY LIMIT, or CANCEL, and says the rule of software 1.13 in plain words', card(holder) && card(holder).all);
   card(holder).press('CANCEL');
   ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard', 'CANCEL there changes nothing');
   holder.fcSetLimit();
@@ -518,6 +523,32 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- the limit on one tap ----------------------------------------------------------
    * The other choice under CHANGE LIMIT, asked for by the same three steps in its own words. */
+  {
+    // a card read as the one before the latest (software 1.12) has that card's rule in its words: it does not wait by the newest
+    const was = holder._fcCard;
+    holder._fcCard = Object.assign({}, was, { info: Object.assign({}, was.info, { format: 4, shaped: false }) });
+    holder.fcSetLimit();
+    ok(card(holder) && card(holder).all === ['CHANGE LIMIT', 'This card has two limits.\n\nPER TAP: the most it will pay in one tap straight away, paying exactly. Change, or more than that, and it has to be held longer.\n\nDAILY: the most it will spend in one day.',
+                                             'PER TAP LIMIT', 'DAILY LIMIT', 'CANCEL'].join(' | '),
+       'a card of software 1.12 is told its own rule at CHANGE LIMIT: paying exactly, change or more than that held longer', card(holder) && card(holder).all);
+    card(holder).press('PER TAP LIMIT');
+    ok(card(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING_OLD, 'CONTINUE', 'CANCEL'].join(' | '), 'and in the warning: change holds the card 3 seconds, and 3 seconds for every limit’s worth over it', card(holder) && card(holder).all);
+    card(holder).press('CANCEL');
+    holder.state.fcLimit = { sats: 300, usd: 0 };
+    holder._fcLimitTap = true;
+    ok(/^This card will pay up to this straight away when it pays exactly\. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth\. /.test(holder.fcLimitSpec().warn), 'and at the confirmation');
+    holder._fcCard = was;
+    ok(holder.fcShaped() === true, 'a card read as 1.13 (and one not read yet) has the newest words');
+    // and the lines the sheet is given as the card works: the change a piece at a time, a second payment, a wait over the limit
+    ok(holder.fcProgressText({ step: 'change', i: 2, n: 4 }) === 'The card is making change \u00b7 piece 2 of 4. Keep holding.'
+       && holder.fcProgressText({ step: 'change', i: 1, n: 1 }) === 'The card is making change \u00b7 piece 1 of 1. Keep holding.'
+       && holder.fcProgressText({ step: 'change', i: 0, n: 4 }) === '' && holder.fcProgressText({ step: 'change' }) === '',
+       'the card making its change is said a piece at a time: "The card is making change \u00b7 piece 2 of 4. Keep holding."');
+    ok(holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 2, second: true }) === 'A second payment in one tap. Keep holding (2 s)'
+       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4 }) === 'Over the card\u2019s per tap limit. Keep holding (4 s)'
+       && holder.fcProgressText({ step: 'waiting', polls: 3, seconds: 4, making: true }) === 'The card is making change. Keep holding (4 s)',
+       'a second payment in one tap is said as that; a wait over the limit as that; the card of 1.12 making change as that');
+  }
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');
   ok(card(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
@@ -529,7 +560,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   {
     const cf = holder.fcLimitSpec();
     ok(cf.amountLabel === 'YOU ARE APPLYING A PER TAP LIMIT OF:' && cf.amount === '\u20bf 300' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
-       && cf.warn === 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+       && cf.warn === 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
        'the confirmation says the amount and what it means', JSON.stringify([cf.amountLabel, cf.amount]));
   }
   c.tap();
@@ -1289,11 +1320,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await readIt();
     await settle();
     let v = vals(owner);
-    ok(v.fcOwesShown === true && lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · $0.28 (₿280) — FETCHED AND PUT ON' && owner.state.fc.balance === 1000,
-       'a till that never handed its change over: the owner’s screen says the 280 owed to the card, in dollars first and the sats after, were fetched and put on', lines(owner).join('|'));
-    ok(OH.sheet[OH.sheet.length - 1] === 'end: Done. ₿280 of change is back on the card.' && OH.sheet.indexOf('say: Keep the card there: asking the mint') >= 0 && OH.sheet.indexOf('say: Asking the mint for the change this card is owed. Keep holding') >= 0,
+    // (the card makes the change of 1,000 from 1024 512 256 128 64 16 itself: 24 sats, a 16 and an 8, at a dollar of 1,000 sats)
+    const owedN = paid.change.sats, owedUsd = '$' + (owedN / 1000).toFixed(2);
+    ok(owedN === 24 && v.fcOwesShown === true && lines(owner).join('|') === 'CHANGE OWED TO THIS CARD · ' + owedUsd + ' (₿' + owedN + ') — FETCHED AND PUT ON' && owner.state.fc.balance === 1000,
+       'a till that never handed its change over: the owner’s screen says the ' + owedN + ' owed to the card, in dollars first and the sats after, were fetched and put on', lines(owner).join('|'));
+    ok(OH.sheet[OH.sheet.length - 1] === 'end: Done. ₿' + owedN + ' of change is back on the card.' && OH.sheet.indexOf('say: Keep the card there: asking the mint') >= 0 && OH.sheet.indexOf('say: Asking the mint for the change this card is owed. Keep holding') >= 0,
        'and the phone’s sheet said the mint was being asked, and ends saying the change is back on the card', OH.sheet.filter((x) => /^(say|end):/.test(x)).slice(-4).join(' / '));
-    ok(paid.change.sats === 280 && open() === 0 && oc.balance() === 1000, 'the card holds it', String(oc.balance()));
+    ok(owedN > 0 && open() === 0 && oc.balance() === 1000, 'the card holds it', String(oc.balance()));
 
     // the till has not made its swap: not yet made
     oc.tap();
