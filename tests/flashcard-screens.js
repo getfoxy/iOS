@@ -106,6 +106,36 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcVerified === 'Verified Just Now' && v.fcVerifiedShown === true, 'and under its title, that it is verified: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
+  {
+    /* One ADD FUNDS at a time, and CLOSE while the pieces are being made: a second start while the first was still
+     * preparing once put two sheets on one reader, and neither wrote. */
+    const W = holder.fcW();
+    const realPrepare = W.cardPrepare;
+    let release;
+    W.cardPrepare = (...a) => new Promise((go) => { release = go; }).then(() => realPrepare.apply(W, a));
+    c.tap();
+    holder.fcAdd();
+    keyIn(holder, 500);
+    ok(stage(H) === 'cardReady' && !!holder._fcAdding, 'ADD FUNDS shows GETTING IT READY while the pieces are made');
+    holder.fcAdd();
+    ok(holder.toasts.slice(-1)[0] === 'Still getting the last amount ready for the card.' && holder.state.screen === 'flashcard', 'a second ADD FUNDS meanwhile is refused in a line, and opens no keypad', holder.toasts.slice(-1)[0]);
+    H.window.document.querySelector('[data-stage-button]').click();
+    ok(stage(H) === '' && !!holder._fcAdding, 'CLOSE takes the screen down while the pieces are still being made');
+    H.sheet.length = 0;
+    release();
+    await until('the pieces to be made', () => !holder._fcAdding);
+    await settle();
+    ok(H.sheet.length === 0 && !card(holder) && /is ready for the card\. It goes on at the next tap\.$/.test(holder.toasts.slice(-1)[0]) && H.W.cardOwed().length > 0,
+       'made after CLOSE, they wait for the next tap, said in a line, and no sheet comes up by itself', holder.toasts.slice(-1)[0] + ' | sheets ' + H.sheet.length);
+    W.cardPrepare = realPrepare;
+    // the next tap writes them, as anything owed to a card is written
+    c.tap();
+    const wrote = await H.W.cardWrite(c, { owner: true });
+    ok(wrote && c.balance() === 500, 'and the next tap puts them on', String(c.balance()));
+    c.tap();
+    await H.W.cardWithdraw(c, { pin: '1234' });
+    holder.state.fc = Object.assign({}, holder.state.fc, { balance: 0 });
+  }
   c.tap();
   holder.fcAdd();
   ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'SATS' && holder.state.stack.slice(-1)[0] === 'flashcard',

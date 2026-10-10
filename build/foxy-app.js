@@ -19641,6 +19641,8 @@ class Component extends DCLogic {
    * no longer. A tap that fails leaves them owed to the card. */
   fcAdd() {
     if (!this.fcReady('Adding funds')) return;
+    // one at a time: the pieces of the last ADD FUNDS are still being made (a second sheet would take the reader from the first's)
+    if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
     this.fcAmount('cardAdd');
   }
 
@@ -19665,10 +19667,17 @@ class Component extends DCLogic {
   fcAddRun(sats, pin, owner) {
     const W = this.fcW();
     const card = this._fcCard;
+    if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
+    /* The run in hand. CLOSE on the screen while the pieces are being made lets the person go, and the pieces,
+     * once made, wait for the next tap as anything made for a card does (`cardOwed`): no sheet comes up by itself
+     * later, over whatever they are doing then. Two runs at once once put two sheets on one reader, and neither
+     * wrote. */
+    const run = { closed: false };
+    this._fcAdding = run;
     this.stageScreen('cardReady', {
       art: 'card', title: 'GETTING<br>IT READY', amount: this.stageMoney(sats),
       body: 'Keep the card nearby. You will be asked to tap it in a moment.',
-      dots: true, forMs: 90000, button: 'CLOSE',
+      dots: true, forMs: 90000, button: 'CLOSE', go: () => { run.closed = true; },
     });
     /* A card that holds nothing and is at another mint than this phone's is told
      * its new mint in the tap that writes the funds (the owner's proof; `fcOtherMint`
@@ -19677,12 +19686,19 @@ class Component extends DCLogic {
     const here = String(W.mintUrl || '').replace(/\/+$/, '');
     const moving = !!(there && here && there !== here && !((card.pieces || []).length));
     W.cardPrepare(card, sats, { moving }).then((made) => {
+      if (this._fcAdding === run) this._fcAdding = null;
       // said by this flow, so not announced as a payment sent (16-history-lists.js)
       if (made && made.hash) this.txIsNew(made.hash);
       this.hideStage('cardReady');
+      if (run.closed) {
+        this.toast(this.fcPrice(made.sats) + ' is ready for the card. It goes on at the next tap.');
+        return;
+      }
       this.fcWriteRun(pin, { sats: made.sats, owner: !!owner, asked: sats, rounded: Number(made.rounded) || 0 });
     }, (e) => {
+      if (this._fcAdding === run) this._fcAdding = null;
       this.hideStage('cardReady');
+      if (run.closed) return;
       this.fcFailed(e, {});
     });
   }
