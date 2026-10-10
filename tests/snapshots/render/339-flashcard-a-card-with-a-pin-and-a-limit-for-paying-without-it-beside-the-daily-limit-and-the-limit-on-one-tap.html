@@ -1,4 +1,4 @@
-<!-- flashcard, a new card -->
+<!-- flashcard, a card with a PIN and a limit for paying without it, beside the daily limit and the limit on one tap -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -368,7 +368,7 @@
 </i>
 </i>
 </div>
-<div role="button" aria-label="This card’s history" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); visibility: hidden;" class="scp0">
+<div role="button" aria-label="This card’s history" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); visibility: visible;" class="scp0">
 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2">
 <path d="M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z">
 </path>
@@ -382,6 +382,9 @@
 </div>
 <div style="position: absolute; left: 90px; right: 90px; top: 56px; height: 64px; z-index: 27; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; pointer-events: none;">
 <div style="font-size: 19px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; white-space: nowrap;">FLASHCARD</div>
+<div style="font-size: 15px; font-weight: 600; letter-spacing: 0px; color: rgba(var(--ink-rgb),.62); text-align: center; white-space: nowrap;">
+<span class="sc-interp">Verified Just Now</span>
+</div>
 </div>
 <div style="flex: 1 1 0%; min-height: 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 84px 24px 62px; margin-bottom: -48px; position: relative; z-index: 1; isolation: isolate; overflow: hidden; box-sizing: border-box;">
 <div style="position: absolute; left: 0px; right: 0px; bottom: -40px; height: 210px; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 128% 100% at 50% 100%,rgba(var(--acc-rgb),.52) 0%,rgba(var(--acc-rgb),.2) 46%,rgba(var(--acc-rgb),0) 82%); animation: landingGlow 10.4s ease-in-out infinite;">
@@ -440,9 +443,6 @@
 <div style="font-size: 5.99cqw; font-weight: 800; line-height: 1; color: rgba(255, 255, 255, 0.5);">₿</div>
 <div style="font-family: Sora, sans-serif; font-size: 2.86cqw; font-weight: 600; letter-spacing: 0.24em; color: rgba(255, 255, 255, 0.42);">BEARER</div>
 </div>
-<div data-card-badge="" style="position: absolute; left: 9.92cqw; bottom: 6.25cqw; max-width: 53.65cqw; text-align: left; font-family: Sora, sans-serif; font-size: 2.6cqw; font-weight: 700; letter-spacing: 0.14em; line-height: 1.4; text-transform: uppercase; color: rgb(247, 147, 26); text-wrap: balance;">
-<span class="sc-interp">No PIN yet</span>
-</div>
 </div>
 </div>
 </div>
@@ -452,12 +452,84 @@
 <div style="position: relative; flex: 0 0 auto; font-family: Sora, sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; margin-bottom: 1px;">CARD BALANCE</div>
 <div style="height: 1px; background: var(--frost-rule); opacity: 0.5; margin: 8px 24px; flex: 0 0 auto;">
 </div>
-<div style="flex: 0 0 auto; padding: 3px 0px 6px; font-size: 18px; font-weight: 600; color: rgba(var(--ink-rgb),.55); text-align: center; text-wrap: pretty;">
-<span class="sc-interp">This card is new. Set it up to put money on it.</span>
+<div style="--pill-ink: #F6FAFC; --pill-ink-rgb: 246,250,252; background: var(--frost-pill); border: 1px solid var(--frost-edge); margin: 0px -2px; border-radius: 16px; transition: box-shadow .45s ease; height: 120px; flex: 0 0 auto; position: relative; display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0px 26px; box-sizing: border-box; box-shadow: 0 0 30px 2px rgba(207,224,236,.22);">
+<div style="position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 62px; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+<div style="width: 62px; height: 62px; border-radius: 16px; background: rgb(244, 248, 251); display: flex; align-items: center; justify-content: center; box-sizing: border-box; font-family: Sora, system-ui, sans-serif; font-size: 38px; font-weight: 900; line-height: 1; letter-spacing: -0.02em; color: rgb(27, 34, 40);">
+<span class="sc-interp">M</span>
+</div>
+<div style="font-family: Figtree, system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0px; color: rgba(var(--pill-ink-rgb),.62); white-space: nowrap; max-width: 66px; overflow: hidden; text-overflow: ellipsis;">
+<span class="sc-interp">Minibits</span>
+</div>
+</div>
+<div style="position: absolute; left: 100px; top: 16px; bottom: 16px; width: 1.5px; background: rgba(var(--pill-ink-rgb),.5); border-radius: 1px;">
+</div>
+<div style="position: absolute; left: 122px; right: 22px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: flex-start; min-width: 0px;">
+<div style="font-family: SatSymbol, Sora, system-ui, sans-serif; font-size: 33px; font-weight: 800; letter-spacing: -0.02em; color: var(--pill-ink); line-height: 1.05;">
+<span class="sc-interp">$ 1.31</span>
+</div>
+<div style="font-family: Figtree, system-ui, sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; color: rgba(var(--pill-ink-rgb),.62); line-height: 1.15;">
+<span class="sc-interp">₿ 2,048</span>
+</div>
+<div style="font-family: Figtree, system-ui, sans-serif; font-size: 14px; font-weight: 600; letter-spacing: 0.02em; color: rgba(var(--pill-ink-rgb),.62); line-height: 1.3; margin-top: 3px; white-space: nowrap;">
+<span class="sc-interp">PER TAP $1.28 · DAILY $3.20</span>
+</div>
+</div>
+<div role="button" aria-label="This card’s history" style="position: absolute; left: 101px; right: 0px; top: 0px; bottom: 0px; border-radius: 0 16px 16px 0; cursor: pointer;" class="scph">
+</div>
+</div>
+<div style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 0px 4px; font-family: Figtree, system-ui, sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: rgba(var(--ink-rgb),.62); line-height: 1.35;">
+<div>
+<span class="sc-interp">LEFT TODAY $0.77</span>
+</div>
+<div>
+<span class="sc-interp">THE DAY TURNS AT 12:00 AM, 1 JAN 2100</span>
+</div>
+</div>
+<div style="flex: 0 0 auto; padding: 0px 4px; font-family: Figtree, system-ui, sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: rgba(var(--ink-rgb),.62); line-height: 1.35;">
+<span class="sc-interp">NO PIN UP TO $0.64 · LEFT TODAY $0.45</span>
 </div>
 </div>
 <div style="flex: 0 0 auto; padding: 10px 22px 26px; box-sizing: border-box; display: flex; flex-direction: column-reverse; align-items: center; gap: 18px;">
-<div class="fxShine fxShine1 scp7" style="align-self: stretch; flex: 0 0 auto; height: 60px; border-radius: 30px; background-color: var(--acc); background-image: radial-gradient(120% 84% at 26% 0%, rgba(255, 240, 220, 0.26), rgba(255, 240, 220, 0) 62%), linear-gradient(168deg, rgba(247, 154, 60, 0.62), rgba(232, 98, 42, 0.72) 48%, rgba(194, 74, 27, 0.78)), url(&quot;foxy-fur.webp&quot;); background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; position: relative; overflow: hidden; isolation: isolate; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; color: rgb(255, 255, 255); cursor: pointer; box-shadow: inset 0 2px 0 rgba(255,255,255,.4);">SET UP THIS CARD</div>
+<div style="position: relative; align-self: stretch; display: flex; gap: 10px;">
+<div role="button" aria-label="CHANGE PIN" style="position: relative; overflow: hidden; flex: 1 1 0%; min-width: 0px; height: 82px; border-radius: 16px; border: 1px solid var(--slate-edge); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; cursor: pointer; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp7">
+<div style="position: absolute; inset: 0px; opacity: 0.3; pointer-events: none; background-image: repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.14) 0 2px, rgba(0, 0, 0, 0.2) 2px 7px, rgba(255, 255, 255, 0.06) 7px 11px); transform: rotate(180deg);">
+</div>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: 0 0 auto; position: relative; z-index: 1;">
+<path d="M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z">
+</path>
+</svg>
+<div style="position: relative; z-index: 1; font-family: Sora, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0px; color: var(--ink); white-space: nowrap;">
+<span class="sc-interp">CHANGE PIN</span>
+</div>
+</div>
+<div role="button" aria-label="CHANGE LIMIT" style="position: relative; overflow: hidden; flex: 1 1 0%; min-width: 0px; height: 82px; border-radius: 16px; border: 1px solid var(--slate-edge); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; cursor: pointer; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp7">
+<div style="position: absolute; inset: 0px; opacity: 0.3; pointer-events: none; background-image: repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.14) 0 2px, rgba(0, 0, 0, 0.2) 2px 7px, rgba(255, 255, 255, 0.06) 7px 11px); transform: none;">
+</div>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: 0 0 auto; position: relative; z-index: 1;">
+<path d="M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z">
+</path>
+</svg>
+<div style="position: relative; z-index: 1; font-family: Sora, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0px; color: var(--ink); white-space: nowrap;">
+<span class="sc-interp">CHANGE LIMIT</span>
+</div>
+</div>
+</div>
+<div style="align-self: stretch; display: flex; gap: 12px;">
+<div style="flex: 1 1 0%; min-width: 0px; height: 96px; border-radius: 16px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; position: relative; overflow: hidden; background-color: rgb(220, 228, 235); background-size: auto, 170%, 170%, auto, auto; background-position: center center, 50% 40%, 50% 40%, center center, center center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat; background-blend-mode: normal,overlay,soft-light,normal,normal; border: 1px solid rgb(255, 255, 255); box-shadow: inset 0 2px 0 rgba(255,255,255,.7),inset 0 -4px 0 rgba(120,138,152,.34),0 10px 24px rgba(var(--frost-rgb),.22);" class="scp8">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#10161B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 3.5v11m0 0-4.2-4.2M12 14.5l4.2-4.2M4.5 19.5h15">
+</path>
+</svg>
+<div style="font-family: Sora, sans-serif; font-size: 21px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">ADD FUNDS</div>
+</div>
+<div style="flex: 1 1 0%; min-width: 0px; height: 96px; border-radius: 16px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; position: relative; overflow: hidden; background-color: rgb(220, 228, 235); background-size: auto, 170%, 170%, auto, auto; background-position: center center, 50% 40%, 50% 40%, center center, center center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat; background-blend-mode: normal,overlay,soft-light,normal,normal; border: 1px solid rgb(255, 255, 255); box-shadow: inset 0 2px 0 rgba(255,255,255,.7),inset 0 -4px 0 rgba(120,138,152,.34),0 10px 24px rgba(var(--frost-rgb),.22);" class="scp8">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#10161B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 20.5v-11m0 0-4.2 4.2M12 9.5l4.2 4.2M4.5 4.5h15">
+</path>
+</svg>
+<div style="font-family: Sora, sans-serif; font-size: 21px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">WITHDRAW</div>
+</div>
+</div>
 </div>
 </div>
 </div>

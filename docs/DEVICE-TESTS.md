@@ -1525,7 +1525,8 @@ and load it), a phone whose build carries the NFC entitlement
    up.` MENU, FLASHCARD, tap: the screen is home's shape: history and a cross
    at the top with FLASHCARD and "Verified Just Now" between them, the card,
    and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
-   over ADD FUNDS, WITHDRAW, CHANGE PIN and CHANGE LIMIT.
+   over ADD FUNDS, WITHDRAW, CHANGE PIN and CHANGE LIMIT. (On a card of
+   software 1.16, NO PIN is under the button of CHOOSE A PIN: 23c-10.)
 
 #### 23b. Money on, and off
 
@@ -1553,6 +1554,10 @@ and load it), a phone whose build carries the NFC entitlement
 #### 23c. Paying another phone
 
 1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
+   (A card of software 1.16 is tapped at once, with no PIN asked for first, and
+   the PIN is typed only if the card wants it: 23c-10. The card tested so far is
+   an earlier one, which ends that first tap asking for the PIN, and is tapped
+   again once it has been typed.)
    **Pass:** behind the sheet the screen is TAP TO VERIFY (light blue, a card's
    outline, arrows flying into its mark) over the amount; the sheet reads the
    card and counts the pieces it signs ("Signing piece 2 of 4"), and the moment
@@ -1860,6 +1865,38 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
    is newer, a block header (80 bytes). Note the time from card found to the
    tick against a 1.14 card: it should be no longer by more than a few tens of
    milliseconds, and a stale header must never hold the tap up.
+
+#### 23c-10. Software 1.16: the PIN is optional, and a limit for paying without it
+
+Needs a card on software 1.16 (`01 10` at SELECT), the holder's phone, and a second phone to be the till. Nothing here has run
+on a real card.
+
+1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** CHOOSE A PIN has a second button,
+   NO PIN, under its grey one. Press it. **Pass:** the pad goes, the sheet comes up at once, and one tap sets the card up: home,
+   `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was, and CHANGE LIMIT. A card of 1.15 or before is
+   offered no NO PIN.
+2. **It pays in one tap.** ADD FUNDS (no PIN asked), then on the till RECEIVE, an amount, CARD. **Pass:** no pad. The sheet
+   comes up and the card pays in that tap, as a card with a PIN does after its PIN; the sheet is up once. WITHDRAW on the
+   holder's phone asks for no PIN either. Time the tap against a card with a PIN: it should be no longer.
+3. **ADD PIN.** Press it. **Pass:** CHOOSE A PIN says `A card with no PIN is cash to whoever holds it.`; TYPE IT AGAIN; one
+   tap; the line `PIN added. Every payment asks for it until you set a no-PIN limit.` The button is CHANGE PIN. The money on
+   the card is as it was.
+4. **A card with a PIN, no limit.** On the till: RECEIVE, an amount, CARD. **Pass:** the sheet comes up at once and ends
+   after the read with `Enter the card's PIN` (not in red); the PIN pad comes up, `TAP AGAIN` on its button; type the PIN,
+   TAP AGAIN, tap: paid. Back from the pad leaves the invoice up. Count the taps: two.
+5. **NO PIN LIMIT.** CHANGE LIMIT. **Pass:** CHANGE CARD LIMITS has PER TAP LIMIT, DAILY LIMIT, NO PIN LIMIT, CANCEL (a card
+   with no PIN has no third). NO PIN LIMIT, CONTINUE, a few dollars, NEXT, CONFIRM, tap. **Pass:** no PIN asked;
+   `No PIN limit set.`; under the balance `NO PIN UP TO $5.00`, and a line `NO PIN UP TO $5.00 · LEFT TODAY $5.00`.
+6. **Within it, one tap.** On the till charge less than the limit. **Pass:** no pad; the card pays in the first tap. The
+   holder's line now says how much is left today, and the log says `no PIN` beside that tap.
+7. **Over what is left, the PIN for the whole payment.** Charge more than is left. **Pass:** the first tap ends asking for the
+   PIN, the pad comes up, and the second tap pays all of it with the PIN (nothing is split); the line under the balance
+   has not moved: only a payment with no PIN counts.
+8. **The day.** Leave it a day, with a block fetched in between. **Pass:** `LEFT TODAY` is the whole limit again.
+9. **No limit.** NO PIN LIMIT, CONTINUE, NO LIMIT under the keypad, CONFIRM. **Pass:** `No PIN limit removed.`; every
+   payment asks for the PIN again.
+10. **An older card at a till.** Charge a 1.15 card. **Pass:** it too is tapped first and ends that tap asking for the PIN;
+    the second tap pays. Note that this costs a tap more than it did.
 
 #### 23d. What a card cannot be made to do
 

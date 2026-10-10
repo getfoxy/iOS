@@ -253,7 +253,7 @@ function representative() {
   const KEY_B = '03' + 'b2'.repeat(30) + '9f0e';
   const KEY_C = '02' + 'c3'.repeat(30) + '77ab';
   const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
-    hasRecord: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
+    hasRecord: true, setUp: true, pinSet: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok' }, over || {});
   // a card with a daily limit of 5,000 sats, 1,200 of it left, and its day turning at a fixed hour far off
   const DAY = { limited: true, limit: 5000, spent: 3800, left: 1200, turns: 4102444800, now: 4102358400, noTime: false };
   // the card's three amounts, on the keypad every amount is typed on
@@ -263,6 +263,10 @@ function representative() {
   add('fcLimitConfirm, a daily limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, no limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 0 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, a per tap limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 2000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; } }));
+  add('amount, a card\u2019s limit for paying without its PIN, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '10', unit: 'USD', fc: FC({ noPinKnown: true }) }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
+  add('fcLimitConfirm, a limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
+  add('fcLimitConfirm, a limit for paying without the PIN, kept in dollars', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000, usd: 5 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
+  add('fcLimitConfirm, no limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
   add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
   const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, sats: 2048, plan: null, fee: null, lands: 0, err: '', busy: false }, over || {});
@@ -306,7 +310,15 @@ function representative() {
   add('flashcard, change a till never handed over, fetched and put on', at('flashcard', { fc: FC({ owes: OWES([{ state: 'put', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
   add('flashcard, change the till has not made yet', at('flashcard', { fc: FC({ owes: OWES([{ state: 'unmade', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
   add('flashcard, change owed in two states, under the limits', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP, owes: OWES([{ state: 'put', sats: 280, count: 3 }, { state: 'unmade', sats: 112, count: 2 }]) }) }, { wallet: CARDS() }));
-  add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
+  add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, setUp: false, pinSet: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
+  /* Software 1.16: a card with no PIN has ADD PIN where a card with one has CHANGE PIN; a card with a PIN may have a limit for paying without
+   * it, on the card's face as the one limit there is, and under it with what is left of it today, beside the other limits. */
+  const NOPIN = { known: true, set: true, limit: 1000, spent: 300, left: 700, turns: 4102444800, now: 4102358400 };
+  add('flashcard, a card with no PIN, with ADD PIN', at('flashcard', { fc: FC({ pin: 'none', pinSet: false, noPinKnown: true, noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a PIN and a limit for paying without it', at('flashcard', { fc: FC({ noPinKnown: true, noPin: NOPIN }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a PIN and a limit for paying without it, beside the daily limit and the limit on one tap',
+    at('flashcard', { fc: FC({ noPinKnown: true, noPin: NOPIN, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a PIN and no limit for paying without it', at('flashcard', { fc: FC({ noPinKnown: true, noPin: Object.assign({}, NOPIN, { set: false, limit: 0, spent: 0, left: 0, turns: 0 }) }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
   add('flashcard, a cash card the mint says is spent', at('flashcard', { fc: FC({ recoverable: false, mine: false, first: 0, last: 0, check: { spent: 1024 } }) }, { wallet: CARDS() }));
@@ -593,6 +605,14 @@ function cards() {
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
   // the daily limit's first step, what making this phone a card's owner says, and what a till says when a card cannot cover a payment
   add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
+  add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
+  // CHANGE LIMIT on a card of software 1.16 that has a PIN: the third limit, under the other two
+  add('card: change limit, which of the three', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true }, pinSet: true, noPinKnown: true, pin: 'set' }; a.fcSetLimit(); });
+  // the pad that asks for a new card's PIN has NO PIN under it, and the one that adds a PIN says what a card with none is
+  add('overlay: a new card\u2019s PIN, with NO PIN under it', (a) => { a.state.fc = { noPinKnown: true, pinSet: false, setUp: false }; a.fcSetUp(); });
+  add('overlay: ADD PIN, the first pad', (a) => { a.state.fc = { owner: true, ownedHere: true, setUp: true, pinSet: false, noPinKnown: true }; a.fcPinAdd(); });
+  // a till whose first tap, with no PIN, found the card wants one
+  add('overlay: a card\u2019s PIN, for the second tap', (a) => a.fcPayAsk(500));
   // CHANGE LIMIT asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
   add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
   add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
@@ -601,6 +621,8 @@ function cards() {
   // the card's own log, opened from its line on the card's screen
   add('card: this card\u2019s own log', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
     last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
+  add('card: this card\u2019s own log, a tap made without the PIN', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
+    last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false, noPin: true }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false, noPin: false }] } }; a.fcLogCard(); });
   add('card: tamper on this card', (a) => { a.state.fc = { log: { taps: 42, sats: 213400, refused: 5, tampers: 1, since: { taps: 1, sats: 0, refused: 5, tampers: 1 },
     last: [{ time: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true }, { time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }] } }; a.fcLogCard(); });
   // the log of a card of software 1.15: each tap at the time the phone that tapped it told the card, with the block the card had beside it
@@ -611,7 +633,7 @@ function cards() {
     last: [{ time: 4102358400, told: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true, clock: false }] } }; a.fcLogCard(); });
   add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
   add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
-  add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'x' }, {}));
+  add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'This card\u2019s software has no limit on one tap.' }, {}));
   add('card: a till, over the card\u2019s daily limit, with what is left today', (a) => a.fcFailed({ card: 'limit', left: 1200, need: 2000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a till, over what a card can spend in a day', (a) => a.fcFailed({ card: 'limit', left: 5000, need: 9000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: another phone\u2019s card', (a) => a.fcFailed({ card: 'not-owner', message: 'x' }, {}));

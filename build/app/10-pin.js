@@ -100,7 +100,7 @@
     });
   }
 
-  /* Three things a card's PIN pad asks of this one (26f-flashcard.js), none
+  /* Four things a card's PIN pad asks of this one (26f-flashcard.js), none
    * of which the lock uses:
    *   `o.warn`  a line already in red when the pad comes up: a wrong PIN, said
    *             on the pad that asks for it again;
@@ -108,7 +108,11 @@
    *             place of CANCEL at the bottom;
    *   `o.gate`  the button is grey and does nothing until four digits are in,
    *             because it says what the PIN will do ("PAY $0.43") and must
-   *             not look ready before it is. */
+   *             not look ready before it is;
+   *   `o.second` a second answer under the button, in the shape USE FACE ID
+   *             has: `{ label, go }`, for the question that has one that is not
+   *             a PIN (NO PIN, when a card is set up). It works at any time and
+   *             takes the pad down first. */
   pinOverlay(opts) {
     const o = opts || {};
     if (this._pinEl) this._pinEl.remove();
@@ -299,6 +303,17 @@
           && W.faceLock && W.faceLock()) {
         face.style.display = 'flex';
       }
+    }
+
+    if (o.second && o.second.label) {
+      const second = el('margin-top:10px;width:100%;max-width:300px;height:52px;box-sizing:border-box;'
+        + 'border-radius:26px;border:1.5px solid rgba(245,241,236,.2);'
+        + 'display:flex;align-items:center;justify-content:center;font-size:17px;'
+        + 'font-weight:800;letter-spacing:0.02em;color:var(--ink,#F5F1EC);'
+        + 'cursor:pointer', o.second.label);
+      second.setAttribute('data-pin-second', '1');
+      second.addEventListener('click', () => { root.remove(); this._pinEl = null; if (o.second.go) o.second.go(); });
+      root.appendChild(second);
     }
 
     if (o.onCancel) {

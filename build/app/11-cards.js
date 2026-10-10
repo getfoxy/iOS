@@ -146,6 +146,19 @@
     });
     stack.appendChild(shut);
 
+    /* More choices of the same weight as `shut.pill`, one button each, between
+     * it and the quiet one below (CHANGE CARD LIMITS' NO PIN LIMIT, the third
+     * limit): `spec.pills` is a list of `{ label, tap }`. */
+    (spec.pills || []).forEach((pill) => {
+      const b = el('height:60px;border-radius:30px;border:2px solid #2A2A2A;background:#101010;' +
+        'box-shadow:0 8px 18px rgba(0,0,0,.6);box-sizing:border-box;' +
+        'display:flex;align-items:center;justify-content:center;font-size:20px;' +
+        'font-weight:800;letter-spacing:0.02em;color:#F5F1EC;cursor:pointer');
+      b.textContent = pill.label;
+      b.addEventListener('click', () => { close(); if (pill.tap) pill.tap(); });
+      stack.appendChild(b);
+    });
+
     /* A quieter third choice, for a card that can be turned off for good
      * (A LOT AT ONE MINT's "don't show this again"). */
     if (spec.also && spec.also.label) {

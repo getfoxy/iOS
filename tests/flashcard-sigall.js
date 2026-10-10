@@ -636,6 +636,8 @@ async function world(feePpk, sats, make) {
     U.R.sheet.length = 0;
     U.card.sent.length = 0;
     till.payByCard();
+    await until('the PIN pad', () => !!pad(till));
+    U.R.sheet.length = 0;
     pad(till).type('1234');
     await until('the payment to be made', () => U.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(U.R));
     await settle();
@@ -663,6 +665,9 @@ async function world(feePpk, sats, make) {
     let armed = false;
     U.card.send = (a) => { if (!armed) { armed = true; U.card.loseAnswerOf('24', 1); } return send0(a); };
     till.payByCard();
+    await until('the PIN pad', () => !!pad(till));
+    U.R.sheet.length = 0;
+    armed = false;
     pad(till).type('1234');
     await until('the payment to be finished at the second tap', () => U.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(U.R));
     await settle();
@@ -717,6 +722,8 @@ async function world(feePpk, sats, make) {
     V.R.sheet.length = 0;
     V.card.sent.length = 0;
     till.payByCard();
+    await until('the PIN pad', () => !!pad(till));
+    V.R.sheet.length = 0;
     pad(till).type('1234');
     await until('the waited payment to be made', () => V.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(V.R));
     await settle();
@@ -1958,6 +1965,8 @@ async function world(feePpk, sats, make) {
     UB.R.sheet.length = 0;
     UB.card.sent.length = 0;
     till.payByCard();
+    await until('the PIN pad', () => !!pad(till));
+    UB.R.sheet.length = 0;
     pad(till).type('1234');
     await until('the payment and its change to be finished', () => UB.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UB.R));
     await settle();
@@ -1989,6 +1998,8 @@ async function world(feePpk, sats, make) {
     UC.R.nfc = UC.card;
     UC.R.sheet.length = 0;
     till2.payByCard();
+    await until('the PIN pad', () => !!pad(till2));
+    UC.R.sheet.length = 0;
     pad(till2).type('1234');
     await until('the exact payment to be finished', () => UC.R.sheet.some((x) => /^(end|error):/.test(x)) && !stage(UC.R));
     await settle();
