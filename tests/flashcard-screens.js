@@ -217,6 +217,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   // what is on the screen at the moment the mint is asked
   let atMint = null;
   R.sheet.length = 0;
+  R.trace.length = 0;
   R.fate = (m) => {
     if (!atMint && /\/v1\/swap$/.test(String(m.url || ''))) {
       const up = R.window.document.getElementById('foxy-stage');
@@ -245,28 +246,53 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const up = R.window.document.getElementById('foxy-stage');
     const now = (up && up.getAttribute('data-look')) || '';
     if (looks[looks.length - 1] !== now) looks.push(now);
-    if (now === 'confirm' && looks.confirmAt === undefined) looks.confirmAt = R.sheet.length;
+    if (now === 'confirm' && looks.confirmAt === undefined) { looks.confirmAt = R.sheet.length; looks.confirmTime = Date.now(); }
   };
+  // every buzz, with how much of the sheet had been said by then
+  const buzzes = [];
+  till.haptic = (kind, silent) => buzzes.push({ kind, silent: !!silent, at: R.sheet.length, ended: R.sheet.some((x) => /^end:/.test(x)) });
+  // when the card was asked for, once for each sheet that opened
+  const askedAt = [];
+  const tapC = c.tap;
+  c.tap = () => { tapC(); askedAt.push(Date.now()); };
   pad(till).type('1234');
-  /* Tap 1, SEND: the card signs the fewest pieces that cover it (two 512s for 1,000 here) and may go: the sheet stays up
-   * and says so while the mint is asked. Then the same sheet asks for the card again, and its change (the 24 over) goes
-   * on with no PIN. One sheet, nothing to press, and PAYMENT RECEIVED once the change is back. */
+  /* Tap 1, SEND: the card signs the fewest pieces that cover it (two 512s for 1,000 here) and may go: its sheet closes at
+   * once, with the phone's tick and no words, change or no change, and the phone buzzes three times as it does, since
+   * change is coming. The mint is asked with the card gone. Then TAP TO CONFIRM goes up and a second sheet comes up by
+   * itself, a moment later, to put the change (the 24 over) on with no PIN. Nothing to press, and PAYMENT RECEIVED once
+   * the change is back. */
   await until('the payment to be made and its change back on the card', () => till.state.screen === 'home' && R.W.cardOwed().length === 0 && released.length > 0 && !stage(R));
   R.fate = null;
   await settle();
+  c.tap = tapC;
   const begins = R.sheet.filter((x) => /^begin:/.test(x));
   const ends = R.sheet.filter((x) => /^(end|error):/.test(x));
-  const removeAt = R.sheet.indexOf('say: Verifying the payment. Keep this open for your change.');
-  ok(begins.length === 1 && ends.length === 1 && ends[0] === 'end: Done. \u20bf24 of change is back on the card.' && removeAt >= 0
-     && R.sheet.indexOf('again: Tap the card again for its change') > removeAt && R.sheet.indexOf('say: Keep the card there: asking the mint') < 0 && !pad(till),
-     'one sheet for the whole payment: while the mint is asked it says to keep it open for the change (and nothing that reads as finished), asks for the card again, and ends saying the change is back',
-     R.sheet.filter((x) => /^(begin|again|end|error):|Verifying the payment/.test(x)).join(' / '));
-  ok(R.sheet.every((x) => !/Remove the card\. Verifying/.test(x)), 'the sheet no longer says “Remove the card” beside its own Cancel, which read as over and got it closed before the change');
-  ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.head === 'Verifying card' && atMint.line === 'This may take a few seconds...' && atMint.button === 'hidden' && atMint.amount,
-     'behind it, our own screen said VERIFYING CARD over the amount, with nothing to press', JSON.stringify(atMint));
-  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt <= R.sheet.indexOf('again: Tap the card again for its change'),
-     'the payment’s three screens in turn: TAP TO VERIFY while the card signs, VERIFYING CARD while the mint is asked, and TAP TO CONFIRM from the moment the card is asked for again, before it is found',
-     looks.join(' > '));
+  const firstEnd = R.sheet.indexOf('end:  ');
+  const secondBegin = R.sheet.indexOf('begin: Hold the card here again for its change');
+  ok(begins.length === 2 && ends.length === 2 && ends[0] === 'end:  ' && ends[1] === 'end: Done. Remove the card.' && firstEnd > 0 && secondBegin > firstEnd
+     && !R.sheet.some((x) => /^again:/.test(x)) && !pad(till),
+     'two sheets for a payment with change: the first ends with the phone’s tick and no words the moment the card has signed, and the change goes back at a second that comes up by itself, with no PIN and nothing to press',
+     R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
+  ok(R.sheet.every((x) => !/Verifying|Keep this open|for your change\.|asking the mint/.test(x)),
+     'the first sheet is not kept up with anything to read (no “Verifying the payment. Keep this open for your change.”, nothing about the mint), so it is not taken for unfinished',
+     R.sheet.filter((x) => /^say:/.test(x)).join(' / '));
+  ok(R.trace.indexOf('end') >= 0 && R.trace.indexOf('end') < R.trace.indexOf('mint /v1/swap') && R.trace.lastIndexOf('begin') > R.trace.lastIndexOf('mint /v1/swap'),
+     'the first sheet had ended before the mint was asked, and the second began only after the mint had answered and the change was made', R.trace.filter((x) => x === 'begin' || x === 'end' || /swap/.test(x)).join(', '));
+  ok(atMint && atMint.kind === 'card' && atMint.look === 'verify' && atMint.head === 'Verifying card' && atMint.line === 'This may take a few seconds...' && atMint.button === 'hidden' && atMint.amount && atMint.ended === true,
+     'behind it, with the sheet already gone, our own screen said VERIFYING CARD over the amount, with nothing to press', JSON.stringify(atMint));
+  ok(looks.join(' > ') === 'tap > verify > confirm' && looks.confirmAt > firstEnd && looks.confirmAt <= secondBegin,
+     'the payment’s three screens in turn: TAP TO VERIFY while the card signs, VERIFYING CARD while the mint is asked, and TAP TO CONFIRM from the moment the change is made, before the second sheet is up',
+     looks.join(' > ') + '; confirm at line ' + looks.confirmAt + ', first sheet ended at ' + firstEnd + ', second began at ' + secondBegin);
+  ok(askedAt.length === 2 && askedAt[1] - looks.confirmTime >= 2000,
+     'TAP TO CONFIRM stays up through a pause, so that iOS has taken the first sheet down, and the second sheet then comes up by itself', (askedAt[1] - looks.confirmTime) + ' ms');
+  const buzz = buzzes.filter((f) => f.kind !== 'light');
+  ok(buzz.filter((f) => f.kind === 'triple').length === 1 && buzz[0].kind === 'triple' && buzz[0].silent === true && buzz[0].ended === true && buzz[0].at > firstEnd && buzz[0].at <= secondBegin
+     && !buzz.some((f) => f.kind === 'tap'),
+     'the phone buzzes three times as the first sheet closes, once the card has signed (it has ended, and the second has not begun), because change is coming; the single quiet tap is for a payment with none',
+     JSON.stringify(buzz.map((f) => f.kind + (f.silent ? ' (silent)' : '') + ' @' + f.at)));
+  ok(buzz.map((f) => f.kind).join() === 'triple,success,success', 'then success when the payment is made, and again when the change is back on the card', buzz.map((f) => f.kind).join());
+  ok(till.toasts.indexOf('₿24 of change is back on the card.') >= 0, 'and the change being back is said in passing, with no card to press', till.toasts.slice(-2).join(' | '));
+  till.haptic = () => {};
   till.fcLookStage = look0;
   ok((await R.W.balanceSats()) === 1000 && titles.length === 0, 'the right PIN: 1,000 sats paid, with no card to press at any point', titles.join(', '));
   ok(heldOnce && released.join() === 'the change is back on the card',
@@ -297,7 +323,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   till.asking = 200;
   R.nfc = c2;
   c2.tap();
-  // the card is taken away once it has signed and not brought back: the sheet asks for it again for the change and reads nothing
+  // the card is taken away once it has signed and not brought back: the second sheet comes up by itself for the change and reads nothing
   const send2 = c2.send;
   c2.send = (x) => send2(x).then((r) => { if (/^b020/.test(x)) R.nfc = null; return r; });
   /* Whether the till's own home screen could ever be seen between the payment and its change: from the payment being
@@ -405,8 +431,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(titles.length === 0 && RT.W.cardOwed().filter((r) => r.card === c3.key).length === 0, 'with no card to press, and nothing to put back on the card', titles.join(', '));
     till2.blockedCard = shown;
 
-    /* The card lost while its change was being written: what went on stays on, the same sheet asks again, and the
-     * screen says TAP AGAIN on TAP TO CONFIRM's ground until the rest is on. */
+    /* The card lost while its change was being written, in the second sheet: what went on stays on, that sheet asks for the
+     * card again, and the screen says TAP AGAIN on TAP TO CONFIRM's ground until the rest is on. The card allows one tap
+     * after a payment to load with no PIN, and the tap it left used that up: its next tap wants the PIN. Nothing is kept of
+     * the PIN from the payment's own sheet, so the second sheet ends and the PIN is asked for on the pad, and a third sheet
+     * writes the rest. (The owner's own tap, which is one sheet from end to end, does keep it: below.) */
     {
       const HC = await funded({ sharedMint: H.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 2000);
       const c5 = newCard(HC);
@@ -417,7 +446,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       RT.nfc = c5;
       let taps = 0;
       const tap5 = c5.tap;
-      // its second tap (the change) leaves before the second piece is written; the third stays
+      // its second tap (the change, in the second sheet) leaves before the second piece is written; the others stay
       c5.tap = () => { tap5(); taps += 1; if (taps === 2) c5.leaveBefore('30', 2); };
       const seen5 = [];
       till2.fcLookStage = watchLooks(seen5);
@@ -425,19 +454,25 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       RT.sheet.length = 0;
       till2.payByCard();
       pad(till2).type('1234');
-      await until('the change to be back on the card after two tries', () => till2.state.screen === 'home' && RT.W.cardOwed().filter((r) => r.card === c5.key).length === 0 && !stage(RT) && c5.balance() === 824);
+      let padSeen = false;
+      const padWatch = setInterval(() => { if (pad(till2)) padSeen = true; }, 10);
+      await until('the change to be back on the card after the card was lost part way', () => till2.state.screen === 'home' && RT.W.cardOwed().filter((r) => r.card === c5.key).length === 0 && !stage(RT) && c5.balance() === 824);
+      clearInterval(padWatch);
       await settle();
       c5.tap = tap5;
       const lines5 = RT.sheet.filter((x) => /^(begin|again|end|error):/.test(x));
-      ok(seen5.join(' > ') === 'tap > verify > confirm > confirmAgain' && seen5.words === 'Tap again / The last tap didn\u2019t finish...',
-         'the card lost part way through taking its change: TAP AGAIN, on TAP TO CONFIRM’s ground, until the rest is on', seen5.join(' > ') + '; ' + seen5.words);
-      ok(lines5.filter((x) => /^begin:/.test(x)).length === 1 && lines5.indexOf('again: Hold the card here again for its change') > lines5.indexOf('again: Tap the card again for its change')
-         && lines5[lines5.length - 1] === 'end: Done. \u20bf824 of change is back on the card.' && taps === 3,
-         'in the one sheet: asked for its change, asked again when it left, and ended with the change back', lines5.join(' / '));
-      // the card allows one tap after a payment to load with no PIN, and the tap it left used that up: the rest needs its PIN
+      ok(lines5.length === 7 && lines5[0] === 'begin: Hold the card to the top of the phone' && lines5[1] === 'end:  ' && lines5[2] === 'begin: Hold the card here again for its change'
+         && lines5[3] === 'again: Hold the card here again for the rest' && /^error: .*PIN/.test(lines5[4]) && lines5[5] === 'begin: Hold the card here again for the rest'
+         && lines5[6] === 'end: Done. Remove the card.' && taps === 4,
+         'the card lost part way through taking its change: the second sheet asks for it again, finds it wanting its PIN (the one tap without it was used up) and ends; a third sheet, which asks for the card itself, writes the rest and ends once',
+         lines5.join(' / '));
+      ok(seen5.join(' > ') === 'tap > verify > confirm > confirmAgain > confirm' && seen5.words === 'Tap again / The last tap didn\u2019t finish...',
+         'TAP AGAIN, on TAP TO CONFIRM\u2019s ground, from the card being lost until its sheet ended; TAP TO CONFIRM again for the third', seen5.join(' > ') + '; ' + seen5.words);
+      /* The card allows one tap after a payment to load with no PIN, and the tap it left used that up: the rest needs its PIN.
+       * It is given the payment's own, as every tap of the one payment is, so the PIN went to the card twice and was typed once. */
       const pins5 = c5.sent.slice(sentBefore).filter((a) => /^b040/.test(a)).length;
-      ok(!pad(till2) && pins5 === 2,
-         'the rest went on with the PIN typed for this payment, given to the card again (once to pay, once for the rest), and nobody was asked for it twice', String(pins5));
+      ok(!padSeen && !pad(till2) && pins5 === 2,
+         'the PIN went to the card twice (once to pay, once for the rest) and was typed once: no pad came up for the rest', JSON.stringify({ padSeen, pins5 }));
     }
     till2.fcLookStage = drawLook;
 
@@ -1030,25 +1065,41 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     R.nfc = f;
     f.tap();
     R.sheet.length = 0;
+    const feltF = [];
+    till.haptic = (kind, silent) => feltF.push(kind + (silent ? ' (silent)' : ''));
     till.payByCard();
     pad(till).type('1234');
     await until('the failed payment to be said', () => card(till) && card(till).title === 'PAYMENT FAILED');
     R.fate = null;
     await settle();
+    till.haptic = () => {};
     const signedFor = f.state.spent;     // the fewest pieces that cover 300, signed whole
-    /* The sheet was still up (kept for the change): the same sheet asks for the card again and puts what it signed back,
-     * with no PIN, and ends saying so; the screen then says the payment failed and the money is back. Nothing to press. */
-    const putAt = R.sheet.indexOf('again: The payment did not go through. Tap the card to put it back');
-    ok(signedFor >= 300 && putAt >= 0 && R.sheet[R.sheet.length - 1] === 'end: The payment did not go through. ₿' + signedFor.toLocaleString('en-US') + ' is back on the card.'
-       && !R.sheet.some((x) => /^error:/.test(x)) && R.sheet.filter((x) => /^begin:/.test(x)).length === 1,
-       'a payment the mint refuses after the card signed: the same sheet asks for the card again, puts it back, and ends saying so, not in red',
+    const said = signedFor.toLocaleString('en-US');
+    /* The card's sheet closed the moment the card had signed, as every payment's does, so there is no sheet still up to put
+     * what it signed back in: the screen says the payment failed and offers the card's next tap, which puts it back. */
+    ok(signedFor >= 300 && R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') === 'begin: Hold the card to the top of the phone / end:  ',
+       'a payment the mint refuses after the card signed: its sheet had closed as the card signed (one sheet, ended with no words and not in red), so the card is not asked for again by itself',
        R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
-    ok(card(till).reason === 'The mint refused it. ₿' + signedFor.toLocaleString('en-US') + ' is back on the card.' && !card(till).has('TAP CARD')
-       && /daily limit stays used/.test(card(till).all) && (await R.W.balanceSats()) === rb && till.state.screen === 'confirm' && !stage(R),
-       'and the screen says it failed and that the money is back, and that the day stays charged; nothing was paid, and the invoice is still up', card(till).all);
-    ok(f.balance() === 1000 && R.W.cardOwed().length === 0 && f.state.spent === signedFor && !pad(till),
-       'the card holds what it did, with no PIN asked, and its day is as charged', f.balance() + ' / ' + f.state.spent);
-    card(till).press('CLOSE');
+    ok(feltF.filter((k) => k !== 'light').join() === 'triple (silent),error',
+       'three buzzes as the sheet closed (change was coming when the card signed), then the failure’s own', feltF.join());
+    ok(card(till).title === 'PAYMENT FAILED' && card(till).reason === 'The mint refused it, and the card had already signed for it. Tap the card again to put ₿' + said + ' back on it.'
+       && card(till).has('TAP CARD') && card(till).has('LATER') && /daily limit stays used/.test(card(till).all)
+       && (await R.W.balanceSats()) === rb && till.state.screen === 'confirm' && !stage(R),
+       'the screen says it failed, offers TAP CARD to put the money back, and says the day stays charged; nothing was paid, and the invoice is still up', card(till).all);
+    ok(f.balance() === 1000 - signedFor && R.W.cardOwed().length === 1 && R.W.cardOwed()[0].kind === 'putback' && R.W.cardOwed()[0].sats === signedFor && f.state.spent === signedFor,
+       'what the card signed is owed back to it, the card holds the rest, and its day is as charged', f.balance() + ' / ' + f.state.spent + ' / ' + JSON.stringify(R.W.cardOwed().map((r) => [r.kind, r.sats])));
+    // TAP CARD: a second sheet comes up for the card, and puts it back with no PIN
+    const sentF = f.sent.length;
+    card(till).press('TAP CARD');
+    ok(!pad(till), 'TAP CARD asks for no PIN: the card has just paid, and the tap after a payment puts pieces back without one');
+    await until('what it signed to be put back', () => card(till) && card(till).title === 'PUT BACK ON THE CARD');
+    await settle();
+    ok(R.sheet.filter((x) => /^begin:/.test(x)).length === 2 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.' && !R.sheet.some((x) => /^(again|error):/.test(x)),
+       'in a second sheet of its own, which ended calmly', R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
+    ok(card(till).reason === '₿' + said + ' is back on the card. The payment was not made.' && f.balance() === 1000 && R.W.cardOwed().length === 0 && f.state.spent === signedFor
+       && !f.sent.slice(sentF).some((a) => /^b040/.test(a)) && (await R.W.balanceSats()) === rb && till.state.screen === 'confirm',
+       'and then the screen says the money is back on the card: it holds what it did, with no PIN asked, its day is as charged, and nothing was paid', card(till).all + ' / ' + f.balance() + ' / ' + f.state.spent);
+    card(till).press('DONE');
 
     // the screens for the same, said as the wallet says it (also for a withdrawal, and one found by the wallet’s own asking)
     till.fcFailed({ card: 'putback', owed: 88, limited: false }, { paying: true, taken: true });
@@ -1395,6 +1446,138 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await settle();
     ok(owner.toasts.some((t) => t === '₿' + slow + ' of change is back on the card.') && oc.balance() === heldBalance + slow && !oc.sent.some((a) => /^b040/.test(a)),
        'pressed, the tap writes it with no PIN, and says the change is back on the card', owner.toasts.slice(-2).join(' | '));
+  }
+
+  /* ---- the owner takes part of a card off: the rest goes back in the same sheet ----------------
+   * A till's payment is two sheets (above): the first closes the moment the card has signed, and a second comes up by itself
+   * for the change. The owner's own tap, taking part of a card off to this phone, is one sheet from end to end: it stays up
+   * through the mint's answer ("Verifying. Keep this open: the rest goes back on the card."), asks for the card again, and
+   * ends saying the rest is back. The 700 here is taken with a 1,024, and 324 goes back. */
+  {
+    const WH = await funded({}, 12000);       // four cards of 2,500 are loaded below
+    const wh = appOn(WH);
+    const feltW = [];
+    wh.haptic = (kind, silent) => feltW.push({ kind, silent: !!silent, ended: WH.sheet.some((x) => /^end:/.test(x)) });
+    const cardsW = [];
+    const shownW2 = wh.blockedCard.bind(wh);
+    wh.blockedCard = (k, sp) => { cardsW.push((sp && sp.title) || k); return shownW2(k, sp); };
+    // a new card holding 2,500, read by its owner's phone
+    const loaded = async () => {
+      const w = newCard(WH);
+      await WH.W.cardSetUp(w, { pin: '4321' });
+      w.tap();
+      await WH.W.cardAdd(w, { sats: 2500, owner: true });
+      WH.nfc = w;
+      w.tap();
+      wh.setState({ fc: null, screen: 'home', stack: [] });
+      wh.fcRead(true);
+      await until('the card to be read', () => !!wh.state.fc && wh.state.fc.balance === 2500 && wh.state.fc.check !== 'asking');
+      await wh.refreshBalance();
+      return w;
+    };
+    const takeOff = (sats) => { wh.fcWithdraw(); keyIn(wh, sats); };
+    const sheetOf = () => WH.sheet.filter((x) => /^(begin|again|end|error):|^say: Verifying/.test(x));
+    const buzzOf = () => feltW.filter((f) => f.kind !== 'light');
+
+    // the one sheet
+    {
+      const w = await loaded();
+      const had = await WH.W.balanceSats();
+      feltW.length = 0; cardsW.length = 0;
+      WH.sheet.length = 0;
+      takeOff(700);
+      ok(pad(wh) && pad(wh).title === 'ENTER PIN TO WITHDRAW', 'a part of the card is asked for with the PIN, on the same pad', pad(wh) && pad(wh).title);
+      pad(wh).type('4321');
+      await until('the money to be in the wallet', () => card(wh) && card(wh).title === 'IN YOUR WALLET');
+      await settle();
+      const verifyAt = WH.sheet.findIndex((x) => /^say: Verifying/.test(x));
+      const againAt = WH.sheet.findIndex((x) => /^again:/.test(x));
+      ok(WH.sheet.filter((x) => /^begin:/.test(x)).length === 1 && WH.sheet.filter((x) => /^end:/.test(x)).length === 1 && !WH.sheet.some((x) => /^error:/.test(x))
+         && WH.sheet[verifyAt] === 'say: Verifying. Keep this open: the rest goes back on the card.'
+         && WH.sheet[againAt] === 'again: Tap the card again for the rest' && againAt > verifyAt
+         && WH.sheet[WH.sheet.length - 1] === 'end: Done. ₿324 is back on the card.',
+         'one sheet for the whole tap: it says to keep it open while the mint is asked, asks for the card again, and ends saying how much is back on it', sheetOf().join(' / '));
+      ok(WH.sheet.every((x) => !/Remove the card|asking the mint|for your change/.test(x)),
+         'and nothing on it reads as finished before the rest is back (no “Remove the card”)', WH.sheet.filter((x) => /^(say|end):/.test(x)).join(' / '));
+      const threes = buzzOf().filter((f) => f.kind === 'triple');
+      ok(threes.length === 1 && threes[0].silent === true && threes[0].ended === false && buzzOf()[0].kind === 'triple',
+         'the three buzzes come while the sheet is still up: it is not closing, and its holder is told that the second tap is coming in it', JSON.stringify(buzzOf().map((f) => f.kind + (f.ended ? ' [sheet ended]' : ''))));
+      ok(w.balance() === 1800 && WH.W.cardOwed().length === 0 && (await WH.W.balanceSats()) === had + 700 && card(wh).reason === '₿700 from the card is in this phone now.'
+         && cardsW.join() === 'IN YOUR WALLET' && !pad(wh),
+         'the 700 is in the phone and the 324 is back on the card, with no card to press and no PIN asked a second time', card(wh).reason + ' / card ' + w.balance() + ' / ' + cardsW.join());
+      card(wh).press('DONE');
+    }
+
+    // all of it: nothing goes back, so there is no second tap to keep a sheet up for, and it closes at once as a payment's does
+    {
+      const w = await loaded();
+      const had = await WH.W.balanceSats();
+      feltW.length = 0; cardsW.length = 0;
+      WH.sheet.length = 0;
+      wh.fcWithdrawPin(0);
+      pad(wh).type('4321');
+      await until('the money to be in the wallet', () => card(wh) && card(wh).title === 'IN YOUR WALLET');
+      await settle();
+      ok(WH.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') === 'begin: Hold the card to the top of the phone / end:  ' && WH.sheet.every((x) => !/Verifying|Keep this open/.test(x)),
+         'taking all of it off: the sheet closes with the phone’s tick and no words the moment the card has signed, with nothing to keep it up for', sheetOf().join(' / '));
+      ok(!buzzOf().some((f) => f.kind === 'triple') && w.balance() === 0 && WH.W.cardOwed().length === 0 && (await WH.W.balanceSats()) === had + 2500,
+         'and the phone does not buzz three times, since nothing is coming back to the card', JSON.stringify(buzzOf().map((f) => f.kind)));
+      card(wh).press('DONE');
+    }
+
+    // the card lost part way through the rest: the same sheet asks for it again, and the PIN of the tap goes with it
+    {
+      const w = await loaded();
+      let taps = 0;
+      const tapW2 = w.tap;
+      // its second tap (the rest, in the same sheet) leaves before the second piece is written; the third stays
+      w.tap = () => { tapW2(); taps += 1; if (taps === 2) w.leaveBefore('30', 2); };
+      const sentW = w.sent.length;
+      feltW.length = 0; cardsW.length = 0;
+      WH.sheet.length = 0;
+      takeOff(700);
+      pad(wh).type('4321');
+      await until('the money to be in the wallet', () => card(wh) && card(wh).title === 'IN YOUR WALLET');
+      await settle();
+      w.tap = tapW2;
+      ok(WH.sheet.filter((x) => /^begin:/.test(x)).length === 1 && WH.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Tap the card again for the rest,again: Hold the card here again for the rest'
+         && WH.sheet[WH.sheet.length - 1] === 'end: Done. ₿324 is back on the card.' && taps === 3,
+         'the card lost part way through the rest: what went on stays on, the same sheet asks for it again, and it ends with the whole of the rest back', sheetOf().join(' / '));
+      ok(w.balance() === 1800 && WH.W.cardOwed().length === 0 && !pad(wh) && w.sent.slice(sentW).filter((a) => /^b040/.test(a)).length === 2,
+         'the card wanted its PIN for what was left (its one tap without it was used up), and was given the one typed for this tap: nobody was asked for it twice', 'card ' + w.balance());
+      card(wh).press('DONE');
+    }
+
+    // the card not brought back for the rest: the withdrawal stands, and the 324 waits at TAP TO RECEIVE, a sheet of its own
+    {
+      const w = await loaded();
+      const had = await WH.W.balanceSats();
+      const sendW2 = w.send;
+      // taken away once it has signed, and not brought back
+      w.send = (x) => sendW2(x).then((r) => { if (/^b020/.test(x)) WH.nfc = null; return r; });
+      cardsW.length = 0;
+      WH.sheet.length = 0;
+      takeOff(700);
+      pad(wh).type('4321');
+      await until('the money to be in the wallet', () => card(wh) && card(wh).title === 'IN YOUR WALLET');
+      await settle();
+      w.send = sendW2;
+      ok(WH.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Tap the card again for the rest' && WH.sheet.filter((x) => /^begin:/.test(x)).length === 1
+         && WH.W.cardOwed().length === 1 && WH.W.cardOwed()[0].kind === 'change' && WH.W.cardOwed()[0].sats === 324 && (await WH.W.balanceSats()) === had + 700,
+         'the sheet asked for the card and read none: the 700 is in the phone, and the 324 is made and owed to the card', sheetOf().join(' / ') + ' / owed ' + WH.W.cardOwed().map((r) => r.sats).join());
+      card(wh).press('DONE');
+      await until('TAP TO RECEIVE', () => card(wh) && card(wh).title === 'TAP TO RECEIVE');
+      ok(/^The money is off the card\. Tap the card again to receive its ₿324 of change\. No PIN is needed\.$/.test(card(wh).reason) && card(wh).has('TAP CARD') && card(wh).has('LATER'),
+         'then TAP TO RECEIVE says so, with TAP CARD', card(wh).reason);
+      WH.nfc = w;
+      card(wh).press('TAP CARD');
+      await until('the change to be back on the card', () => WH.W.cardOwed().length === 0 && !stage(WH));
+      await settle();
+      ok(WH.sheet.filter((x) => /^begin:/.test(x)).length === 2 && WH.sheet[WH.sheet.length - 1] === 'end: Done. Remove the card.' && !pad(wh)
+         && w.balance() === 1800 && wh.toasts.indexOf('₿324 of change is back on the card.') >= 0,
+         'and the tap puts it back in a second sheet of its own, with no PIN, and says so in passing', sheetOf().join(' / ') + ' / card ' + w.balance());
+    }
+    wh.blockedCard = shownW2;
   }
 
   failed += until.failed;

@@ -1547,6 +1547,16 @@ and load it), a phone whose build carries the NFC entitlement
    into the phone and how much is left; HISTORY has an entry, From card, for
    what came off; TAP CARD asks no PIN and takes the rest; IN YOUR WALLET says
    the whole amount.
+7. WITHDRAW part of it, an amount the card covers with a larger piece, so that
+   the rest has to go back on it, the PIN, tap. **Pass:** one sheet from start
+   to finish: it counts the piece it signs, says `Verifying. Keep this open: the
+   rest goes back on the card.` while the mint is asked, asks for the card again
+   (`Tap the card again for the rest`), and ends `Done. ₿… is back on the card.`;
+   the phone buzzed three times while the sheet was still up; IN YOUR WALLET
+   says the amount taken, and the card holds what it did less that. Do it again
+   and take the card away when the sheet asks for it again. **Pass:** IN YOUR
+   WALLET still says the amount, and TAP TO RECEIVE offers the tap for the rest,
+   in a sheet of its own.
 
 #### 23c. Paying another phone
 
@@ -1554,36 +1564,43 @@ and load it), a phone whose build carries the NFC entitlement
    **Pass:** behind the sheet the screen is TAP TO VERIFY (light blue, a card's
    outline, arrows flying into its mark) over the amount; the sheet reads the
    card and counts the pieces it signs ("Signing piece 2 of 4"), and the moment
-   the last is signed says "Verifying the payment. Keep this open for your
-   change." while the screen says VERIFYING CARD; then, where there is change,
-   the sheet asks for the card again and the screen is TAP TO CONFIRM (orange)
-   until the change is back; and after that the ordinary paid screen. Time two
-   things apart: from the sheet opening to "Verifying" (how long the card is
-   held; the model says about 1.2 seconds for one piece, with the phone finding
-   the card on top), and from there to the second tap being asked for (the
-   mint's part, over Tor). These are the numbers that decide whether the card is
-   usable at a till. Look at how much of the three screens the sheet's dimming
-   leaves readable.
+   the last is signed closes by itself, with the phone's tick and no words on it
+   (the same whether change is coming or not), while the screen says VERIFYING
+   CARD; then, where there is change, the phone buzzes three times as the sheet
+   closes, the screen is TAP TO CONFIRM (orange) from the moment the change is
+   made, and a second sheet comes up by itself about two and a half seconds
+   later and asks for the card, until the change is back; and after that the
+   ordinary paid screen. Time two things apart: from the first sheet opening to
+   its closing (how long the card is held; the model says about 1.2 seconds for
+   one piece, with the phone finding the card on top), and from there to the
+   second sheet being asked for (the mint's part, over Tor, and the pause).
+   These are the numbers that decide whether the card is usable at a till. Look
+   at how much of the three screens the sheet's dimming leaves readable.
 2. Load a card with 2,000 sats and pay it 600. **Pass:** two pieces are signed
-   (512 and 128), and the card's part is done in under three seconds; the same
-   sheet asks for it again and puts the 40 of change back with no PIN, and
-   PAYMENT RECEIVED goes up as the sheet ends, for 600. Time both taps. Pay it a
-   price no two pieces cover. **Pass:** the fewest pieces that do are signed, and
-   the same second tap puts the change back.
-2a. Close the sheet (its Cancel) while it says "Verifying the payment".
-   **Pass:** the payment still stands; TAP TO CONFIRM is on the screen at once
-   and stays (the home screen is not seen), a new sheet comes up by itself for
-   the change, and PAYMENT RECEIVED goes up when it is back, for the right
-   amount. Close that sheet too. **Pass:** TAP TO RECEIVE, with TAP CARD and
-   LATER; LATER raises PAYMENT RECEIVED. Then take a second payment straight
-   away. **Pass:** its PAYMENT RECEIVED is its own amount, and the first's does
-   not come up again.
-2c. Lift the card away part way through the first tap, and again part way
-   through the change. **Pass:** each time the screen turns to TAP AGAIN ("The
-   last tap didn't finish...") on the ground it was on (light blue for the
-   payment, orange for the change), the same sheet asks for the card, and the
-   next tap finishes: the payment is made, the change is all back, and no PIN
-   pad comes up for the rest of the change.
+   (512 and 128), and the card's part is done in under three seconds and its
+   sheet closes; a second sheet then comes up by itself, asks for the card and
+   puts the 40 of change back with no PIN, and PAYMENT RECEIVED goes up as that
+   sheet ends, for 600. Time both taps. Pay it a price no two pieces cover.
+   **Pass:** the fewest pieces that do are signed, and the second tap puts the
+   change back.
+2a. Close the second sheet (its Cancel) the moment it comes up for the change.
+   **Pass:** the payment still stands; TAP TO CONFIRM was on the screen from the
+   moment the change was made until now, and the home screen was not seen in
+   between; now it says TAP TO RECEIVE, with TAP CARD and LATER. TAP CARD brings
+   a sheet up for the card, and PAYMENT RECEIVED goes up when the change is back,
+   for the right amount. Pay again, close the second sheet the same way, and
+   press LATER. **Pass:** PAYMENT RECEIVED goes up for that payment. Then take a
+   second payment straight away. **Pass:** its PAYMENT RECEIVED is its own
+   amount, and the first's does not come up again.
+2c. Lift the card away part way through the first tap. **Pass:** the screen
+   turns to TAP AGAIN ("The last tap didn't finish...") on the light blue
+   ground, the same sheet asks for the card, and the next tap finishes the
+   payment. Pay again and lift the card away part way through the change, in the
+   second sheet. **Pass:** the screen turns to TAP AGAIN on the orange ground and
+   that sheet asks for the card again; the card has used up the one tap it allows
+   without its PIN, so the sheet ends and the PIN pad comes up (`To put ₿… on the
+   card`), and a third sheet, after the PIN, writes the rest: the change is all
+   back.
 2b. Pay from one card online several times (a few thousand sats each, from a
    card of forty thousand or so), then put the receiving phone in airplane mode
    and pay it three odd amounts. **Pass:** each offline payment is taken (HIGH
@@ -1598,14 +1615,15 @@ and load it), a phone whose build carries the NFC entitlement
    nothing paid yet: the sheet comes up again by itself ("Hold the card here
    again to finish paying"), and the next tap signs only the rest and pays.
    **Pass:** HISTORY has one payment for the whole amount, and the card is down
-   by exactly that (and its change). Pull it away again and let the second sheet
-   time out: NOT PAID YET, with TAP CARD and CANCEL; CANCEL puts what it signed
-   back on the card at a tap that comes up by itself.
-4. Put Foxy away the moment the sheet says "Done" and wait. **Pass:** on return
+   by exactly that (and its change). Pull it away again and let the sheet that
+   comes up again time out: NOT PAID YET, with TAP CARD and CANCEL; CANCEL puts
+   what it signed back on the card at a tap that comes up by itself.
+4. Put Foxy away the moment the first sheet closes and wait. **Pass:** on return
    the payment is paid, or CHECKING says it is still being asked; the wallet asks
    again by itself. A mint that refuses a payment after the card has signed cannot
-   be made on demand: PAYMENT FAILED with TAP CARD, and the next tap that says PUT
-   BACK ON THE CARD, are driven in the simulated runs only.
+   be made on demand: PAYMENT FAILED with TAP CARD (the card's sheet had closed
+   when it signed, so the put-back is a tap of its own), and the PUT BACK ON THE
+   CARD that follows it, are driven in the simulated runs only.
 5. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
    right PIN no longer opens it. On the holder's phone the card reads BLOCKED.
 
@@ -1785,17 +1803,19 @@ second phone to be the till.
    card with one large piece, say 4,096 sats, charged 1,631). **Pass:** no
    `Keep holding` wait at all: the sheet says `Signing`, then `The card is making
    change · piece 1 of 4. Keep holding.` through piece 4 (the line changes a
-   piece about every half second), then `Verifying the payment. Keep this open
-   for your change.`
+   piece about every half second), and then the sheet closes with the phone's
+   tick and no words on it.
 2. **Three buzzes.** In the same payment, as the card has signed and the sheet
-   changes to `Verifying the payment`, the till's phone buzzes three times, 0.15
-   seconds apart, hard enough to feel through the hand that holds the card.
-   **Pass:** three, and distinct from the single quiet tap of a payment with no
-   change and from the success buzz at PAYMENT RECEIVED. Charge an amount the
-   card makes exactly. **Pass:** the single quiet tap, no three. (Core Haptics is
-   not available while some sessions are open: if the three do not come with the
-   NFC sheet up, say so.) Note how long the first tap took against one with no
-   change: change may add about two seconds, four pieces at about half a second.
+   closes, the till's phone buzzes three times, 0.15 seconds apart, hard enough
+   to feel through the hand that holds the card, and a second sheet then comes up
+   by itself for the change. **Pass:** three, and distinct from the single quiet
+   tap of a payment with no change and from the success buzz at PAYMENT
+   RECEIVED. Charge an amount the card makes exactly. **Pass:** the single quiet
+   tap, no three, and the sheet closes the same way. (Core Haptics is not
+   available while some sessions are open: if the three do not come while the
+   NFC sheet is going down, say so.) Note how long the first tap took against one
+   with no change: change may add about two seconds, four pieces at about half a
+   second.
 3. **Four at most.** Charge 1,739 from a card of one piece of 4,096 (the change
    is 2,357 sats, 2048 + 256 + 32 + 16 + 4 + 1). **Pass:** the card is asked for
    four pieces; the 5 sats that are left are made by the till and written with them

@@ -10,6 +10,9 @@
  * are in, and the swap is asked with the card gone. This pins:
  *
  *   the order: the sheet ends, then the swap; nothing is sent to the card after;
+ *   the end is the same with change coming as with none: the phone's own tick
+ *     and a single space, so the first tap takes the same time either way (the
+ *     change goes back at a second sheet of its own, tests/flashcard-screens.js);
  *   a payment makes one swap request and asks the mint nothing first;
  *   the signed pieces are written down before the card is let go;
  *   a mint that refuses: the screen's error, what is owed back, and the next tap
@@ -82,8 +85,9 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const order = R.trace.filter((x) => x === 'begin' || x === 'end' || x === 'error' || x === 'mint /v1/swap');
     ok(order.join(' ') === 'begin end mint /v1/swap mint /v1/swap', 'the sheet ends, then the swap is asked, then the change is made: all with the card gone', R.trace.join(', '));
     ok(!!atSwap && atSwap.ended === true && atSwap.sheet.filter((x) => /^end:/.test(x)).length === 1, 'at the moment the mint is asked the sheet has ended', JSON.stringify(atSwap && atSwap.sheet));
-    ok(R.sheet.filter((x) => /^end:/.test(x)).length === 1 && R.sheet.filter((x) => /^error:/.test(x)).length === 0 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
-       'it ends once, as "Done. Remove the card.", and never again after the mint', R.sheet.join(' | '));
+    // (a payment with change coming ends its sheet as one with none does, with the phone's own tick and a single space: see 1b)
+    ok(R.sheet.filter((x) => /^end:/.test(x)).length === 1 && R.sheet.filter((x) => /^error:/.test(x)).length === 0 && R.sheet[R.sheet.length - 1] === 'end:  ',
+       'it ends once, with the phone’s own tick and no words (a single space), and never again after the mint', R.sheet.join(' | '));
     ok(R.refusedAfterEnd === 0, 'nothing is sent to the card after the sheet has ended', String(R.refusedAfterEnd));
     ok(atSwap && atSwap.taken === 1, 'the signed pieces were written down (in the card store) before the card was let go', JSON.stringify(atSwap && atSwap.taken));
     ok(steps.join(' ') === 'reading signing checking making done', 'the screen is told: the card is let go (checking), the change is made, and then it is done', steps.join(' '));
@@ -112,6 +116,7 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     await H.W.cardSetUp(one, { pin: '1234' });
     await binaryLoad(H, one, 1024);
     R.trace.length = 0;
+    R.sheet.length = 0;
     one.sent.length = 0;
     const got = await tap(R, one, (link) => R.W.cardPay(link, { sats: 1024, pin: '1234' }));
     const names = { '00a404': 'select', b03500: 'time', b00100: 'info', b01000: 'key', b01600: 'record', b01700: 'pieces', b04000: 'pin', b02000: 'sign' };
@@ -121,6 +126,9 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     ok(got.sats === 1024 && cmds.length === 8 && signs === 1 && !cmds.includes('auth'),
        'a payment of one piece holds the card for ' + cmds.length + ' commands and one signature', cmds.join(' '));
     console.log('      held: ' + cmds.length + ' commands, one signature: about ' + secs.toFixed(1) + ' s of the card’s work (0.06 s a command, 0.74 s a signature), and then the sheet ends');
+    // the same end as the payment above, which had change coming: the first tap takes the same time and reads the same either way
+    ok(R.sheet.filter((x) => /^(end|error):/.test(x)).join() === 'end:  ' && R.sheet.filter((x) => /^(begin|again):/.test(x)).length === 1,
+       'and it ends as the payment with change coming did: one sheet, the phone’s own tick and a single space, so the first tap is the same either way', R.sheet.join(' | '));
   }
 
   /* ---- 2: the mint refuses, and the next tap puts the money back --------------------- */
@@ -147,8 +155,8 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const signedFor = card.state.spent - spentBefore;
     ok(refused && refused.card === 'putback' && signedFor === 640 && refused.owed === 128 && refused.lost === 512 && refused.limited === true,
        'the card pays 600 with the same pieces, and the mint refuses it: 512 of the 640 it signed is spent, 128 is still good, and the error says so', refused && refused.message);
-    ok(R.trace.filter((x) => x === 'end' || x === 'error' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
-       'the sheet had ended before the swap, and says nothing more now', R.trace.join(', '));
+    ok(R.trace.filter((x) => x === 'end' || x === 'error' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && R.sheet[R.sheet.length - 1] === 'end:  ',
+       'the sheet had ended before the swap, with no words on it, and says nothing more now', R.trace.join(', '));
     ok(steps.join(' ') === 'reading signing checking', 'the screen was on checking with the mint', steps.join(' '));
     ok(asked(R, '/v1/swap') === 1 && asked(R, '/v1/checkstate') === 1, 'one swap, and then, with the card gone, the mint is asked which pieces are still good', R.circuits.map((x) => x.path.replace('/v1/', '')).join(', '));
     ok((await bal(R)) === rb && R.W.cardTaken().length === 0, 'nothing was paid, and nothing is left in the card store');
@@ -332,6 +340,35 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const out = await tap(Hh, c, (link) => Hh.W.cardWithdraw(link, { pin: '1234' }));
     ok(out.sats === 500 && out.card === undefined && Hh.trace.filter((x) => x === 'end' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && asked(Hh, '/v1/checkstate') === 0 && asked(Hh, '/v1/swap') === 1,
        'a withdrawal that does not hold lets the card go once it has signed, asks the mint nothing first, and does not read the card again', Hh.trace.join(', '));
+    ok(Hh.sheet[Hh.sheet.length - 1] === 'end:  ', 'and its sheet ends with the phone’s tick and no words, as a payment’s does', Hh.sheet.slice(-2).join(' | '));
+
+    /* `keepSheet`, the owner's own tap: taking part of a card off, the rest goes back onto it in the same sheet
+     * (26f-flashcard.js, `fcChangeInSheet`), so the sheet is kept up through the mint and says so; with nothing to go
+     * back (all of it) it goes at once, as above. */
+    c.tap();
+    await binaryLoad(Hh, c, 1024);            // one piece: taking 100 off makes change
+    Hh.trace.length = 0;
+    Hh.sheet.length = 0;
+    const told = [];
+    const part = await tap(Hh, c, (link) => Hh.W.cardWithdraw(link, { pin: '1234', sats: 100, keepSheet: true, on: (s, info) => told.push({ s, change: !!(info && info.change), released: link.released }) }));
+    const order5 = Hh.trace.filter((x) => x === 'begin' || x === 'end' || x === 'mint /v1/swap');
+    ok(part.sats === 100 && part.change && part.change.sats > 0 && part.change.written === false
+       && order5[0] === 'begin' && order5[order5.length - 1] === 'end' && order5.indexOf('mint /v1/swap') > 0 && order5.lastIndexOf('mint /v1/swap') < order5.indexOf('end'),
+       'with the rest to go back on the card, the sheet is kept up through the mint, and ends only when the tap does', order5.join(' ') + ' / ' + JSON.stringify(part.change));
+    ok(Hh.sheet.indexOf('say: Verifying. Keep this open: the rest goes back on the card.') >= 0 && Hh.sheet.every((x) => !/Verifying the payment|for your change/.test(x)),
+       'and says what to do with it: keep it open, the rest goes back on the card', Hh.sheet.filter((x) => /^say: Verifying/.test(x)).join(' | '));
+    const checking = told.filter((x) => x.s === 'checking')[0];
+    ok(!!checking && checking.change === true && checking.released === false,
+       'the screen is told change is coming (the three buzzes) while the sheet is still up', JSON.stringify(told));
+    // (the rest is put back by the screens, in that sheet; here it is written at a tap of its own so that the card is whole again)
+    c.tap();
+    await Hh.W.cardWrite(c, { change: true });
+    Hh.trace.length = 0;
+    Hh.sheet.length = 0;
+    const rest = c.balance();
+    const all = await tap(Hh, c, (link) => Hh.W.cardWithdraw(link, { pin: '1234', keepSheet: true }));
+    ok(all.sats === rest && Hh.trace.filter((x) => x === 'end' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && Hh.sheet[Hh.sheet.length - 1] === 'end:  ' && Hh.sheet.every((x) => !/Verifying/.test(x)),
+       'with nothing to go back, the owner’s sheet ends at once with no words, before the mint is asked', Hh.trace.join(', ') + ' / ' + all.sats + ' of ' + rest);
 
     // the card leaves part-way through signing: the sheet ends in an error, and what it signed is held for its next tap
     c.tap();
