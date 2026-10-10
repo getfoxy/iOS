@@ -394,7 +394,8 @@ enum CardOwner {
         /// what the card will read it as:
         ///  - change-pin: the new PIN, 4 to 8 bytes, each an ASCII digit;
         ///  - set-limit: the new limit, 4 bytes (the day's), or 8 (the day's and then
-        ///    the limit on one tap, for a card that has one);
+        ///    the limit on one tap, for a card that has one), or 12 (and then the
+        ///    no-PIN allowance, for a card of software 1.16 and on);
         ///  - set-owner: the new owner key, 65 bytes, the first of them 04;
         ///  - set-card: the card's record, unit (1), refund key (33), time key (65, the
         ///    first of them 04, or all zeros: a card of software 1.15 and on has no time
@@ -405,7 +406,7 @@ enum CardOwner {
             case .changePin:
                 return (4...8).contains(value.count) && value.allSatisfy { (0x30...0x39).contains($0) }
             case .setLimit:
-                return value.count == 4 || value.count == 8
+                return value.count == 4 || value.count == 8 || value.count == 12
             case .setOwner:
                 return value.count == 65 && value[0] == 0x04
             case .setCard:

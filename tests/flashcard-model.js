@@ -9,14 +9,15 @@
  * payment of any number of pieces, takes its PIN sealed, makes its own change
  * (1.12), waits only over its limit and one payment a tap at full speed (1.13),
  * and counts the change it made toward that wait for what it cost, two waits
- * for every three pieces (1.14).
- * The others are the same of the cards before it: -113 (which took one wait off
+ * for every three pieces (1.14), keeps its clock in Bitcoin block headers (1.15), and has an optional PIN and a no-PIN
+ * allowance (1.16).
+ * The others are the same of the cards before it: -115 (whose PIN was a must), -113 (which took one wait off
  * for each piece of change), -112 (which waited four signatures to a limit's
  * worth and for change within it), -111 (before it made its own change), -110
  * (before its signing was made quicker), -19 (before the design was in its
  * record), -18 (no sealed PIN), -17 (its pieces burned inside the payment's
  * transaction), -16 (sixty-four places), and -3, which signs for each piece
- * (format 3). The model is held to all ten. The model in
+ * (format 3). The model is held to all eleven. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
@@ -51,15 +52,15 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
 async function replay(T, format, places, software) {
   /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
-   * latest card (1.15) is replayed at the model's default, and each earlier recording at its own software (14, 13, 12, ...),
+   * latest card (1.16) is replayed at the model's default, and each earlier recording at its own software (15, 14, 13, ...),
    * since the model's default moves on with the card. The recording says what it is of: the card repository's
-   * spec/vectors/transcript.json at 1.15 replays here as tests/fixtures/flashcard-transcript.json, and the one it
-   * replaced is kept as flashcard-transcript-114.json.
+   * spec/vectors/transcript.json at 1.16 replays here as tests/fixtures/flashcard-transcript.json, and the one it
+   * replaced is kept as flashcard-transcript-115.json.
    */
   if (software === undefined && format === 4 && places === undefined) {
     const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
     const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
-    if (minor > 0 && minor < 15) software = minor;
+    if (minor > 0 && minor < 16) software = minor;
   }
   const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
@@ -199,6 +200,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const headers = await replay(read('flashcard-transcript-115.json'), 4, undefined, 15);
   const costed = await replay(read('flashcard-transcript-114.json'), 4, undefined, 14);
   const oneEach = await replay(read('flashcard-transcript-113.json'), 4, undefined, 13);
   const fourSigns = await replay(read('flashcard-transcript-112.json'), 4, undefined, 12);
@@ -210,7 +212,7 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  const all = [now, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

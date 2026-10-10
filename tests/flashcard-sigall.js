@@ -24,8 +24,9 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 const bal = (c) => c.W.balanceSats();
-// the latest card the model has: software 1.15, whose clock is Bitcoin block headers. Its wait and its change are those of 1.14, whose change counts
-// toward its wait for what it cost, two for every three pieces; what 1.15 changes is the clock (tests/flashcard-clock.js)
+// the latest card the model has: software 1.16, whose PIN is optional (tests/flashcard-nopin.js). Its wait and its change are those of 1.14, whose change
+// counts toward its wait for what it cost, two for every three pieces; 1.15 changed the clock (tests/flashcard-clock.js); a payment made WITH the PIN is the
+// same on all of them
 const card4 = (ctx) => makeCard({ window: ctx.window, format: 4 });
 // the card before it (1.14): the same wait and the same change, and a clock that is a time told under a signature, which a terminal can be made to lie about
 const card14 = (ctx) => makeCard({ window: ctx.window, format: 4, software: 14 });
@@ -76,7 +77,7 @@ async function world(feePpk, sats, make) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '1.15' && seen.info.headers === true && seen.info.shaped === true && seen.info.costed === true && seen.info.ownChange === true && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
+  ok(seen.info.format === 4 && seen.info.version === '1.16' && seen.info.headers === true && seen.info.shaped === true && seen.info.costed === true && seen.info.ownChange === true && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
      'a card that signs once for a payment is read as what it is, with its 128 places', seen.info.version + ', format ' + seen.info.format + ', ' + seen.info.slots + ' places');
   card.tap();
   card.sent.length = 0;
@@ -1140,7 +1141,13 @@ async function world(feePpk, sats, make) {
     const info = async () => P.R.W.cardParse.info((await P.card.send('b0010100' + '00')).slice(0, -4));
     ok(cold === '6985' && stale === '63c2' && (await info()).tries === 2,
        'the envelope heard at one tap opens nothing at another: with no fresh bytes asked for it is not even tried, and under new ones it does not open, and costs a try as a wrong PIN would', cold + ', ' + stale);
-    ok((await P.card.send('b0220000' + '01' + '00')).slice(-4) === '6982', 'and the card is not let into: a payment is still refused for want of the PIN');
+    // (1.16: a payment may begin with no PIN shown, and the card looks at the PIN where it signs, so the card is not let into at its signature)
+    P.card.tap();
+    const place = (await P.R.W.cardLook(P.card, { noAuth: true })).pieces[0].i;
+    P.card.tap();
+    await P.card.send('00a404000af0464f5859434152440100');
+    ok((await P.card.send('b0220000' + '01' + ('0' + place.toString(16)).slice(-2))).slice(-4) === '9000' && (await P.card.send('b024000040')).slice(-4) === '6a94',
+       'and the card is not let into: a payment is still refused for want of the PIN, at the signature');
 
     // the right PIN gives the tries back; a wrong one, sealed, costs one
     P.card.tap();

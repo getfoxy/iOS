@@ -114,7 +114,8 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    card is cash, so whoever has it and its PIN has what is on it, and a lost
    card's money is gone.
 
-No limit is asked for and none is suggested. A new card has none.
+No limit is asked for and none is suggested. A new card has none. From software 1.16 the PIN
+may be left out (*No PIN, and the no-PIN allowance*, below): the tap then writes the record and the owner only.
 
 A card with no owner is open while it is empty, because there is nothing on it
 to protect, and it cannot be loaded. A card with an owner is its owner's, empty
@@ -133,6 +134,58 @@ one more blocks the card.
 The PIN is typed on the receiver's phone and goes to the card in the clear over
 the few centimetres between them. Anyone running a till, or holding a phone
 altered to look like one, sees it.
+
+## No PIN, and the no-PIN allowance (software 1.16)
+
+From software 1.16 a card's PIN is optional. This is the phone's side of it; the card's is in the card
+repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
+
+- **A card may have no PIN.** `cardSetUp(link, { recoverable })`, with no `pin`, writes the record and then the owner
+  and nothing else: no PIN is set or shown, and the tap is one command shorter than before. Such a card pays with no PIN,
+  is loaded and emptied by its owner's grant as any card is, and has its per tap and daily limits set by the owner's
+  proof as any card does; those limits apply to every payment, PIN or not. It has no allowance, and nothing asks for one
+  (`cardSetLimit` with `noPin` says `no-pin`, and the card refuses it all the same, `6985`). A card of an earlier
+  software cannot be set up without a PIN (`old-card`), and neither can a card that has a PIN already (`has-pin`: a set-up
+  cut off after the PIN, whose PIN this phone does not know).
+- **ADD PIN.** `cardAddPin(link, { pin })`: the owner's grant in the tap, then the PIN sealed as at set-up. One tap. It
+  works on a card that holds money (the money stays), refuses a card that has a PIN (`has-pin`, which is CHANGE PIN's), a
+  phone that is not the owner (`not-owner`, at no cost) and a card of an earlier software (`old-card`). The card's
+  allowance is nothing when a PIN is added: every payment asks for the PIN until the owner sets one.
+- **The allowance.** A card with a PIN may carry a third limit, the most it signs for in a day WITHOUT the PIN. It shares
+  the day's window with the daily limit (the same clock, the same day), and only payments signed for with no PIN count
+  against it. `cardSetLimit(link, { sats, noPin: true, usd })` sets it (or `noPin: <sats>`; zero is none), as the owner, in
+  the twelve-byte form of the owner's limit command: the day's limit and the limit on one tap as the card has them, so
+  neither's window or count begins again, and then the allowance. An allowance whose number does not change keeps its
+  count; a new number counts from nothing in the window as it stands. Set in dollars (`usd`), it is kept in dollars on
+  the phone that set it, apart from the limit on one tap's, and followed with the price as that limit is: the owner's
+  phone sets the card's sats again when it reads the card and the price has moved by more than two in a hundred
+  (`card.repacedNoPin`; `cardNoPinUsd(key)` is the dollars).
+- **What the phone reads.** `info.noPin` is `{ limit, spent }`, from bytes 34 to 41 of the long answer to GET_INFO,
+  which the card gives to anybody (a till needs them to know whether to ask for the PIN; the limit on one tap, bytes 30
+  to 33, is still the owner's alone). `card.noPin` is `{ known, set, limit, spent, left, turns }` worked out over the
+  day's window as the daily limit's `card.day` is: `left` is the allowance less what is spent when the window is
+  current, and the whole of it when the window is over; with no block header yet the window has no start and does not
+  end, so the count runs from set-up (`onTrust`). `info.pinSet` is whether a PIN exists, and `info.setUp` whether the card
+  is set up at all (a record, and before 1.16 a PIN as well). `cardNeedsPin(card, net)` is whether the card will ask for
+  its PIN to sign a payment that takes `net` sats off it: no for a card with no PIN, no for an allowance with `net` or
+  more left, yes otherwise, and always yes for a card of an earlier software.
+- **At a till, the tap comes first.** `cardPay(link, { sats })` with no `pin` shows the card none. The card is read; if
+  it has a PIN and the allowance does not cover the payment (never less than the price and the mint's fee), the call
+  rejects at once with `pin-needed` and `early: true`, before the card is asked to begin anything, with `need` (what the
+  payment takes off the card, at least), `set` (whether there is an allowance) and `left` (what is left of it). Otherwise
+  the card is begun and asked to sign, and signs with no PIN. The card's own answer is the truth: if it is asked and
+  answers `6A94` at the signature, the call rejects with `pin-needed` and `sw: '6a94'`. The card has signed nothing and
+  given the payment up, as it does for a limit, and the phone's row for it goes with it: nothing asked for, nothing
+  taken, nothing owed. The error carries `sheetText`, `Enter the card's PIN`, so the sheet ends with that line as a note and not in red. The person is asked for the PIN, and the card is tapped again with `pin`. With the PIN the payment
+  is as it ever was, and counts nothing against the allowance. A card of an earlier software always rejects `pin-needed`
+  early when no PIN is given, since it would waste a tap. A signature the card gave under the allowance and whose answer
+  was lost is given again with no PIN; one it gave with the PIN is given again with it, and the call says `pin-needed`
+  with `again: true` and keeps the signature asked for.
+- **The log.** A tap in which a payment was signed for under the allowance (a PIN set, none shown, the allowance
+  covering it) is marked by the card, and `card.log.last[n].noPin` is true. A payment on a card that has no PIN is not
+  marked: it has no PIN to be without.
+- **Change.** The tap after such a payment writes the change back with no PIN, by the note the card makes that it has paid,
+  as it does after any payment. A card with no PIN is loaded by its owner's grant or in that tap, and by nobody else; the same goes for freeing its used places and for reading its log and receipts.
 
 ## Adding money
 
@@ -217,6 +270,11 @@ if it has no room for the load: take some money off it first.
 ## Paying at a till
 
 On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
+
+(For a card of software 1.16 the tap comes first and the PIN is asked only if the card wants it: step 1 below is skipped,
+the card is read, and a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap. Otherwise
+the sheet ends, saying the card's PIN is wanted, the PIN is typed, and a second tap pays with it. *No PIN, and the no-PIN
+allowance*, above. A card of an earlier software keeps the order below.)
 
 1. **CARD PIN**, titled with what is to be paid: `To pay $0.43 (₿500). The
    card's owner types its PIN here.` The button reads `PAY $0.43` and stays grey
@@ -784,6 +842,10 @@ come to (*The limit on one tap*).
 
 ## The daily limit and the owner's phone
 
+(From software 1.16 the day's window is also the no-PIN allowance's: it begins at the first payment when either is set,
+and when the day turns both counts go to nothing. A daily limit that is set or changed begins the window again, and with
+it the allowance's count; a limit on one tap that is set leaves both. *No PIN, and the no-PIN allowance*, above.)
+
 The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
@@ -951,6 +1013,9 @@ record of a card's use that does not depend on any terminal being honest.
   the log says `before its clock moved on`. A card that has been shown no block
   yet has no clock to tell visits apart by, so each of its refusals is a run of
   its own and it marks nothing: a false mark is worse than none.
+- **No PIN, from 1.16.** A tap in which a payment was signed for under the no-PIN allowance (a PIN set, none shown)
+  carries a mark for it, and the owner's log says so beside the tap; a card with no PIN marks nothing. A payment the card
+  refused for want of the PIN (`6A94`) is nothing in the log: it is not a refusal over a limit and no part of a run of them.
 
 The holder's phone reads it whenever it reads a card it owns (the owner's proof
 opens it, with no PIN; a till is not shown it). The card's screen says nothing
@@ -1090,7 +1155,7 @@ nothing answers `6A92` (never told the time) any more.
   checks, the other is taken on its word alone and the log says so. The newest
   good header is kept (`foxy.flashcard.header`). It is fetched when Tor comes
   up, when the app comes back to the front and when a card is tapped, if the
-  one kept is older than ten minutes and the phone has a route, and not more
+  one kept is older than two minutes and the phone has a route, and not more
   than once a minute after a failure. A tap uses what is kept and never waits
   for the fetch. Nothing here runs on a timer.
 - **What it takes from the phone's clock.** The phone's clock is the middle of
@@ -1281,6 +1346,9 @@ matter to a person:
   from two explorers over a fake Tor and what it will not believe, a tap that
   sends the header only when the card is behind and never waits for a fetch,
   and what the log, the receipts and the CLOCK line make of it;
+  `tests/flashcard-nopin.js` pins
+  software 1.16: a card with no PIN, ADD PIN, the allowance and its dollars, the early and the card's own `pin-needed`
+  with nothing left pending, the shared window, the log's mark, and a card of 1.15 that keeps asking for its PIN;
   `tests/flashcard-release.js`
   pins the card being let go before the mint, a refusal and its put-back tap, a
   lost answer, and the circuit made ready as the sheet opens. `tests/flashcard-applet.js` is

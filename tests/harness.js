@@ -1175,7 +1175,7 @@ function nativePhone(opts) {
       const value = Buffer.from(m.value, 'hex');
       const shaped = {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
-        'set-limit': value.length === 4 || value.length === 8,
+        'set-limit': value.length === 4 || value.length === 8 || value.length === 12,
         'set-owner': value.length === 65 && value[0] === 4,
         // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none (CardOwner.Label.setCard)
         'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99]

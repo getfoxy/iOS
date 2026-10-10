@@ -84,7 +84,7 @@ const blindedBy = (secret, rHex) => compressed(addPoints(hashToCurve(Buffer.from
 /* ---- a card to pay with, and a terminal to pay it ------------------------------------------------------------------ */
 const hx1 = (n) => ('0' + n.toString(16)).slice(-2);
 // the card's software as a table's label says it: no `software` is the latest, 1.15
-const versionOf = (software) => (software === 12 ? ' (1.12)' : software === 13 ? ' (1.13)' : software === 14 ? ' (1.14)' : ' (1.15)');
+const versionOf = (software) => (software === 12 ? ' (1.12)' : software === 13 ? ' (1.13)' : software === 14 ? ' (1.14)' : software === 15 ? ' (1.15)' : ' (1.16)');
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const sha256hex = (text) => sha(Buffer.from(text, 'utf8'));
@@ -182,27 +182,27 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
 
   /* ---- 2: which card it is -------------------------------------------------------------------------------------- */
   {
-    const now = newCard(), fourteen = newCard({ software: 14 }), thirteen = newCard({ software: 13 }), twelve = newCard({ software: 12 }), before = newCard({ software: 11 });
-    ok((await now.send(SELECT)) === '010f9000' && (await fourteen.send(SELECT)) === '010e9000' && (await thirteen.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
-       'SELECT says 1.15, 1.14 for the card with software 14, 1.13 for the card with software 13, 1.12 for the card with software 12, and 1.11 for the card before that');
-    await tap(now); await tap(fourteen); await tap(thirteen); await tap(twelve); await tap(before);
-    ok((await now.send('b001000000')).slice(0, 4) === '010f' && (await fourteen.send('b001000000')).slice(0, 4) === '010e' && (await thirteen.send('b001000000')).slice(0, 4) === '010d'
+    const now = newCard(), fifteen = newCard({ software: 15 }), fourteen = newCard({ software: 14 }), thirteen = newCard({ software: 13 }), twelve = newCard({ software: 12 }), before = newCard({ software: 11 });
+    ok((await now.send(SELECT)) === '01109000' && (await fifteen.send(SELECT)) === '010f9000' && (await fourteen.send(SELECT)) === '010e9000' && (await thirteen.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
+       'SELECT says 1.16, 1.15 for the card with software 15, 1.14 for the card with software 14, 1.13 for the card with software 13, 1.12 for the card with software 12, and 1.11 for the card before that');
+    await tap(now); await tap(fifteen); await tap(fourteen); await tap(thirteen); await tap(twelve); await tap(before);
+    ok((await now.send('b001000000')).slice(0, 4) === '0110' && (await fifteen.send('b001000000')).slice(0, 4) === '010f' && (await fourteen.send('b001000000')).slice(0, 4) === '010e' && (await thirteen.send('b001000000')).slice(0, 4) === '010d'
        && (await twelve.send('b001000000')).slice(0, 4) === '010c' && (await before.send('b001000000')).slice(0, 4) === '010b',
        'GET_INFO says the same in its version byte');
     /* and the wallet reads from it what the card does with its change: `shaped` from 1.13, from 1.14 `costed`, the change counted for what it cost, and from 1.15 `headers`, a clock that is block headers */
     const readInfo = async (c) => W.cardParse.info(dat(await c.send('b001000000')));
-    const reads = [await readInfo(now), await readInfo(fourteen), await readInfo(thirteen), await readInfo(twelve), await readInfo(before)].map((i) => [i.version, i.shaped, i.costed, i.headers].join(' '));
-    ok(reads.join() === '1.15 true true true,1.14 true true false,1.13 true false false,1.12 false false false,1.11 false false false',
-       'the wallet reads 1.15 as shaped, costed and keeping its time by block headers, 1.14 as shaped and costed, 1.13 as shaped and not costed, and the cards before them as none of these', reads.join());
-    ok(sw(await listing(now)) === '9000' && sw(await listing(fourteen)) === '9000' && sw(await listing(thirteen)) === '9000' && sw(await listing(twelve)) === '9000' && sw(await listing(before)) === '6d00',
-       'GET_CHANGE is the 1.12, 1.13, 1.14 and 1.15 cards’, and the card before them does not know it');
+    const reads = [await readInfo(now), await readInfo(fifteen), await readInfo(fourteen), await readInfo(thirteen), await readInfo(twelve), await readInfo(before)].map((i) => [i.version, i.shaped, i.costed, i.headers].join(' '));
+    ok(reads.join() === '1.16 true true true,1.15 true true true,1.14 true true false,1.13 true false false,1.12 false false false,1.11 false false false',
+       'the wallet reads 1.16 and 1.15 as shaped, costed and keeping their time by block headers, 1.14 as shaped and costed, 1.13 as shaped and not costed, and the cards before them as none of these', reads.join());
+    ok(sw(await listing(now)) === '9000' && sw(await listing(fifteen)) === '9000' && sw(await listing(fourteen)) === '9000' && sw(await listing(thirteen)) === '9000' && sw(await listing(twelve)) === '9000' && sw(await listing(before)) === '6d00',
+       'GET_CHANGE is the 1.12, 1.13, 1.14, 1.15 and 1.16 cards’, and the card before them does not know it');
     fill(before, [100]);
     await begin(before, [0]);
     ok(sw(await change(before, 10)) === '6d00' && sw(await sign(before)) === '6985', 'nor SPEND_ALL_CHANGE, which like any command it does not know gives a begun payment up');
     const six = newCard({ places: 64 });
     await tap(six);
     ok(sw(await listing(six)) === '6d00', 'nor does the card of sixty-four places');
-    ok((await now.copy().send(SELECT)) === '010f9000' && (await fourteen.copy().send(SELECT)) === '010e9000' && (await thirteen.copy().send(SELECT)) === '010d9000' && (await twelve.copy().send(SELECT)) === '010c9000',
+    ok((await now.copy().send(SELECT)) === '01109000' && (await fifteen.copy().send(SELECT)) === '010f9000' && (await fourteen.copy().send(SELECT)) === '010e9000' && (await thirteen.copy().send(SELECT)) === '010d9000' && (await twelve.copy().send(SELECT)) === '010c9000',
        'and a copy of a card is the card of its software');
   }
 
@@ -841,7 +841,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     const twin = first.copy();
     await tap(twin);
     ok((await pay(twin, 1)).waits === 0 && (await pay(first, 1)).waits === 7, 'a copy of a card that has paid is not slowed for it, and the card itself is' + V);
-    ok((await twin.copy().send(SELECT)) === (software === 13 ? '010d9000' : software === 14 ? '010e9000' : '010f9000'), 'and the copy is the card of its software' + V);
+    ok((await twin.copy().send(SELECT)) === (software === 13 ? '010d9000' : software === 14 ? '010e9000' : '01109000'), 'and the copy is the card of its software' + V);
   }
   {
     // the card of 1.12 waits for none of it

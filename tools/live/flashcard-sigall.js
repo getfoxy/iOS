@@ -122,9 +122,15 @@ async function at(mintKey, names, real) {
   const ever = [];
   let card;
   const seeing = (a, answer) => answer.then((r) => { if (String(a).toLowerCase().slice(0, 4) === 'b022' && /9000$/.test(r)) lastSum = parseInt(String(r).slice(0, 8), 16); return r; });
-  if (real && !process.env.FOXY_CARD_MODEL) { await real.fresh(); card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, real.send(a)); } }; }
-  else {
-    const m = makeCard({ window: holder.w, format: Number(process.env.FOXY_CARD_MODEL) === 3 ? 3 : 4 });
+  // a card made new again (a card with no PIN is set up on a new one): the simulator and the model can be, a chip cannot
+  let renew = null;
+  if (real && !process.env.FOXY_CARD_MODEL) {
+    await real.fresh();
+    if (!CHIP) renew = async () => { await real.fresh(); };
+    card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, real.send(a)); } };
+  } else {
+    let m = makeCard({ window: holder.w, format: Number(process.env.FOXY_CARD_MODEL) === 3 ? 3 : 4 });
+    if (Number(process.env.FOXY_CARD_MODEL) !== 3) renew = async () => { m = makeCard({ window: holder.w, format: 4 }); };
     card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, m.send(a)); } };
   }
   const signatures = () => sent.filter((a) => a.slice(0, 4) === 'b024').length;
@@ -539,9 +545,23 @@ async function at(mintKey, names, real) {
     const cold = await card.send(heard);
     await card.send('b044010071');
     const stale = await card.send(heard);
-    const still = await card.send('b0220000' + '01' + '00');
+    /* The card not let into: before 1.16 a payment is refused at its beginning, 6982. From it the beginning is taken with no PIN shown (the
+     * card looks at the PIN where it signs), and the signature is refused, 6A94, which signs nothing and gives the payment up. */
+    let still, signed = '';
+    if (first.card.info.noPinKnown) {
+      // (a place that holds a piece is begun with, and the card is chosen again in a new tap: nothing is verified in it)
+      await card.tap();
+      const lk = await till.W.cardLook(card, { noAuth: true });
+      await card.tap();
+      await card.send(SELECT);
+      still = await card.send('b0220000' + '01' + ('0' + lk.pieces[0].i.toString(16)).slice(-2));
+      signed = await card.send('b024000040');
+    } else {
+      still = await card.send('b0220000' + '01' + '00');
+    }
     ok('the envelope heard at one tap opens nothing at another: not tried at all with no fresh bytes, a wrong PIN under new ones, and the card not let into',
-       good.sats === 100 && /6985$/.test(cold) && /63c2$/i.test(stale) && /6982$/.test(still), cold + ', ' + stale + ', ' + still);
+       good.sats === 100 && /6985$/.test(cold) && /63c2$/i.test(stale) && (first.card.info.noPinKnown ? (/9000$/.test(still) && /6a94$/i.test(signed)) : /6982$/.test(still)),
+       cold + ', ' + stale + ', ' + still + (signed ? ', ' + signed : ''));
     // its owner changes the PIN: the new one sealed under the same sixteen bytes the proof is over
     await card.tap();
     await holder.W.cardChangePin(card, { newPin: '24680' });
@@ -555,6 +575,104 @@ async function at(mintKey, names, real) {
     if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     await card.tap();
     await holder.W.cardWithdraw(card, { pin: PIN });
+  }
+
+  /* The PIN is optional (software 1.16): a no-PIN allowance on a card with a PIN, and a card with none. The allowance is what a card signs for in
+   * the day's window with no PIN shown; a payment within it signs with none, one over it is refused at the signature (6A94: the PIN is wanted
+   * for the whole payment) and gives the payment up, and a payment made with the PIN counts nothing against it. A card with no PIN pays with
+   * none, and ADD PIN gives it one: every payment asks for it until an allowance is set. The card that is on a chip cannot be made new again,
+   * so a card with no PIN is made on the simulator and the model only. */
+  if (first.card.info.noPinKnown) {
+    await card.tap();
+    await holder.W.cardAdd(card, { sats: 1000, pin: PIN });
+    await card.tap();
+    await holder.W.cardSetLimit(card, { noPin: 300 });
+    await card.tap();
+    const set = await holder.W.cardLook(card);
+    ok('an allowance of 300 is set by the owner, in twelve bytes: the card says it to anybody, and nothing of it is spent',
+       set.noPin.set && set.noPin.limit === 300 && set.noPin.spent === 0 && set.noPin.left === 300, JSON.stringify(set.noPin));
+    sent.length = 0;
+    await card.tap();
+    const within = await till.W.cardPay(card, { sats: 200 });
+    ok('a payment of 200 within it is signed with no PIN: one signature, no PIN shown to the card', within.sats === 200 && signatures() === 1 && sent.filter((a) => a.slice(0, 4) === 'b040').length === 0,
+       'sent ' + sent.map((a) => a.slice(2, 4)).join(' '));
+    if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
+    await card.tap();
+    const counted = await till.W.cardLook(card, { noAuth: true });
+    ok('and the card counts it, for anybody who reads it: 200 of 300', counted.noPin.spent === 200 && counted.noPin.left === 100, JSON.stringify(counted.noPin));
+    // over what is left: the wallet knows from the read, and says so before the card is asked
+    sent.length = 0;
+    await card.tap();
+    const early = await till.W.cardPay(card, { sats: 150 }).then(() => null, (e) => e);
+    ok('150 is over the 100 that is left: the read says the PIN is wanted before the card is asked to begin', !!early && early.card === 'pin-needed' && early.early === true && signatures() === 0,
+       early && (early.card + ' ' + early.left));
+    // and the card's own word, asked all the same: begin one place and sign, which the card refuses, 6A94, and gives up
+    await card.tap();
+    const look = await till.W.cardLook(card, { noAuth: true });
+    const one = look.pieces.slice().sort((a, b) => b.amount - a.amount)[0];
+    await card.send(SELECT);
+    const begun = await card.send('b0220000' + '01' + ('0' + one.i.toString(16)).slice(-2));
+    const refused = await card.send('b024000040');
+    ok('asked all the same, the card begins and refuses to sign: 6A94, nothing signed, the payment given up', /9000$/.test(begun) && /6a94$/i.test(refused), begun.slice(-12) + ', ' + refused);
+    await card.tap();
+    const after = await till.W.cardLook(card, { noAuth: true });
+    ok('and it is nothing: the pieces are all there, and the count is as it was', after.balance === look.balance && after.noPin.spent === 200, after.balance + ' on it, ' + after.noPin.spent + ' counted');
+    // with the PIN, the whole payment
+    sent.length = 0;
+    await card.tap();
+    const withPin = await till.W.cardPay(card, { sats: 150, pin: PIN });
+    ok('the second tap, with the PIN, pays the whole 150', withPin.sats === 150 && sent.filter((a) => a.slice(0, 4) === 'b040').length === 1);
+    if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
+    await card.tap();
+    const kept = await till.W.cardLook(card, { noAuth: true });
+    ok('which counts nothing against the allowance', kept.noPin.spent === 200 && kept.noPin.left === 100, JSON.stringify(kept.noPin));
+    await card.tap();
+    const mine = await holder.W.cardLook(card, { mine: true });
+    ok('the owner’s log marks the taps made with no PIN', mine.log && mine.log.last.length >= 2 && mine.log.last[0].noPin === false && mine.log.last.some((x) => x.noPin === true),
+       JSON.stringify(mine.log && mine.log.last.slice(0, 3).map((x) => [x.sats, x.noPin])));
+    await card.tap();
+    await holder.W.cardSetLimit(card, { noPin: 0 });
+    await card.tap();
+    await holder.W.cardWithdraw(card, { pin: PIN });
+
+    // a card with no PIN
+    if (renew) {
+      await renew();
+      await card.tap();
+      const bare = await holder.W.cardSetUp(card, { recoverable: true });
+      ok('a card is set up with no PIN: its record and its owner, and no allowance to ask for', bare.info.pin === 'none' && bare.info.hasRecord && bare.info.owner && bare.noPin.set === false,
+         JSON.stringify([bare.info.pin, bare.info.hasRecord, bare.info.owner]));
+      await card.tap();
+      const loaded = await holder.W.cardAdd(card, { sats: 1000, owner: true });
+      ok('and loaded by its owner', loaded.card.balance >= 1000, String(loaded.card.balance));
+      sent.length = 0;
+      await card.tap();
+      const bareDay = await till.W.cardPay(card, { sats: 300 });
+      ok('it pays with no PIN', bareDay.sats === 300 && sent.filter((a) => /^b04[012]/.test(a)).length === 0, 'sent ' + sent.map((a) => a.slice(2, 4)).join(' '));
+      if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { change: true }); }
+      await card.tap();
+      await holder.W.cardSetLimit(card, { sats: 500 });
+      await card.tap();
+      const limit = await till.W.cardPay(card, { sats: 400 }).then(() => null, (e) => e);
+      ok('and its limits hold: a daily limit of 500 refuses 400 more after 300', !!limit && limit.card === 'limit', limit && limit.card);
+      await card.tap();
+      await holder.W.cardSetLimit(card, { sats: 0 });
+      await card.tap();
+      const pinned = await holder.W.cardAddPin(card, { pin: PIN });
+      ok('ADD PIN gives it one, with the owner’s grant, sealed; the money stays and the allowance is nothing', pinned.info.pin === 'set' && pinned.noPin.set === false && pinned.balance >= 600,
+         pinned.info.pin + ', ' + pinned.balance + ' on it');
+      await card.tap();
+      const asks = await till.W.cardPay(card, { sats: 100 }).then(() => null, (e) => e);
+      ok('and every payment asks for the PIN now', !!asks && asks.card === 'pin-needed', asks && asks.card);
+      await card.tap();
+      const typed = await till.W.cardPay(card, { sats: 100, pin: PIN });
+      ok('which is typed, and pays', typed.sats === 100);
+      if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
+      await card.tap();
+      await holder.W.cardWithdraw(card, { pin: PIN });
+    } else {
+      console.log('    (a card with no PIN is not made on a chip that cannot be made new: the simulator and the model do that)');
+    }
   }
 
   await card.tap();

@@ -8903,6 +8903,8 @@
     var tapKnown = h.length === 84;
     var b = function (i) { return parseInt(h.substr(i * 2, 2), 16); };
     var headers = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 15));
+    // software 1.16 and on: the PIN is optional, and bytes 34 to 41 of the long answer are the no-PIN allowance and what is spent of it
+    var noPinKnown = tapKnown && b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 16));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -8931,7 +8933,14 @@
               * (`cardSeal`), and this phone then sends it no other way. */
              sealed: (b(6) & 128) !== 0,
              tapKnown: tapKnown, tapLimit: tapKnown ? cardU32(h, 30) : 0,
-             tapStart: tapKnown ? cardU32(h, 34) : 0, tapSpent: tapKnown ? cardU32(h, 38) : 0,
+             tapStart: (tapKnown && !noPinKnown) ? cardU32(h, 34) : 0, tapSpent: (tapKnown && !noPinKnown) ? cardU32(h, 38) : 0,
+             /* `noPinKnown`: the card's software is 1.16 or later, whose PIN is optional: a card may have none and pay without
+              * it, and one with a PIN may let a day's worth be signed for without it (`noPin`, the allowance and what is spent
+              * of it in the day; said to anybody, since a till needs it to know whether to ask for the PIN). `pinSet` is
+              * whether a PIN exists (a blocked one does). `setUp`: the card has its record and can be used: before 1.16 that
+              * needed a PIN as well. */
+             noPinKnown: noPinKnown, noPin: { limit: noPinKnown ? cardU32(h, 34) : 0, spent: noPinKnown ? cardU32(h, 38) : 0 },
+             pinSet: b(7) !== 0, setUp: b(11) === 1 && (b(7) !== 0 || noPinKnown),
              /* This tap is the one after a payment: the card lets pieces be put
               * on with no PIN (the change). Said by the card for this tap only. */
              changeDue: h.length >= 60 && b(29) === 1,
@@ -9052,6 +9061,40 @@
     var spent = over ? 0 : (Number(info.spentToday) || 0);
     return { limited: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY,
              now: now, noTime: !headers && now === 0 };
+  }
+
+  /* The same for the NO-PIN ALLOWANCE (software 1.16 and on): how many sats a day the card signs for without its PIN. It
+   * shares the day's window with the daily limit, and only payments made without the PIN count against it. `set` is
+   * whether there is one (a card with no PIN has none, and nothing asks for one; a card with a PIN and no allowance asks
+   * for the PIN every time); `left` is what remains of it in this day, or all of it where the day is over (the card counts
+   * from nothing then) and where the card has no clock yet (no header: the window has no start and does not end, and the
+   * count runs from set-up, `onTrust`). `known` is whether the card's software has an allowance at all. */
+  function cardNoPinOf(info) {
+    var known = !!(info && info.noPinKnown);
+    var limit = known ? (Number(info.noPin && info.noPin.limit) || 0) : 0;
+    if (!limit) return { known: known, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: Number(info && info.now) || 0 };
+    var now = Number(info.now) || 0;
+    var begun = Number(info.windowStart) || 0;
+    var counted = Number(info.noPin && info.noPin.spent) || 0;
+    if (now === 0 && begun === 0) {
+      return { known: true, set: true, limit: limit, spent: counted, left: Math.max(0, limit - counted), turns: 0, now: 0, onTrust: true };
+    }
+    var over = now >= begun + CARD_DAY;
+    var spent = over ? 0 : counted;
+    return { known: true, set: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY, now: now };
+  }
+
+  /* Whether the card will ask for its PIN to sign for a payment that takes `net` sats off it (the pieces less the change the
+   * card makes for itself: for a till, at least the price and the mint's fee). A card with no PIN never does. A card with
+   * a PIN does unless an allowance covers the whole payment (it is never split), and a card of software before 1.16 always
+   * does. The card's own answer is the truth (`pin-needed`, 6A94); this is what the read can tell before asking it. */
+  function cardNeedsPin(card, net) {
+    var info = card && card.info;
+    if (!info || !info.pinSet) return false;
+    if (info.pin === 'blocked') return true;
+    var np = card.noPin || cardNoPinOf(info);
+    if (!np.known || !np.set) return true;
+    return Number(net) > np.left;
   }
 
   /* The same for the limit on one tap: what the card has left of the tap it is
@@ -9198,7 +9241,21 @@
   /* The dollars a card's limit was set in, or none (`usd` 0: set in sats, or no limit). */
   function cardPaceNote(cardKey, usd) {
     var all = cardPaceAll();
-    if (usd > 0) all[cardKey] = { usd: Math.round(Number(usd) * 100) / 100, at: Date.now() };
+    var row = all[cardKey] || {};
+    var noPin = row.noPinUsd > 0 ? { noPinUsd: row.noPinUsd, noPinAt: row.noPinAt } : null;
+    if (usd > 0) all[cardKey] = Object.assign({ usd: Math.round(Number(usd) * 100) / 100, at: Date.now() }, noPin || {});
+    else if (noPin) all[cardKey] = noPin;
+    else delete all[cardKey];
+    save(CARD_PACE, all);
+  }
+  /* The same for the no-PIN allowance (software 1.16): the dollars it was set in, kept in the same row beside the limit on one
+   * tap's, or none (`usd` 0). */
+  function cardPaceNoPinNote(cardKey, usd) {
+    var all = cardPaceAll();
+    var row = all[cardKey] || {};
+    var tap = row.usd > 0 ? { usd: row.usd, at: row.at } : null;
+    if (usd > 0) all[cardKey] = Object.assign({}, tap || {}, { noPinUsd: Math.round(Number(usd) * 100) / 100, noPinAt: Date.now() });
+    else if (tap) all[cardKey] = tap;
     else delete all[cardKey];
     save(CARD_PACE, all);
   }
@@ -9208,6 +9265,12 @@
     var p = Number(price) || 0;
     if (!row || !(row.usd > 0) || !(p > 0)) return 0;
     return Math.max(1, Math.round(row.usd / p * 100000000));
+  }
+  function cardPaceNoPinSats(cardKey, price) {
+    var row = cardPaceAll()[cardKey];
+    var p = Number(price) || 0;
+    if (!row || !(row.noPinUsd > 0) || !(p > 0)) return 0;
+    return Math.max(1, Math.round(row.noPinUsd / p * 100000000));
   }
 
   /* GET_LOG: the card's own account of its taps. Only the card writes it: a
@@ -9227,7 +9290,8 @@
    * the terminal told the card at that tap (`told`, seconds; 0 if it told none), a note
    * the card trusts for nothing. `time` is then the card's own clock, the time in the
    * newest block header it had when the tap began, and there is no flag for a clock
-   * moved twice: the clock cannot be moved by a time that is told. */
+   * moved twice: the clock cannot be moved by a time that is told. From software 1.16 a flag of 8 says a payment in
+   * that tap was signed for under the no-PIN allowance, a PIN set and none shown (`noPin`). */
   function cardLogOf(hex, wide, told) {
     var h = String(hex || '').toLowerCase();
     var each = told ? 40 : wide ? 32 : 24;
@@ -9239,6 +9303,8 @@
                   refused: parseInt(h.substr(at + 18, 2), 16), tamper: (flags & 1) === 1,
                   // a payment in that tap was over the card's limit on one payment, and was waited for
                   waited: (flags & 2) === 2, clock: !told && (flags & 4) === 4,
+                  // a payment in that tap was signed for under the no-PIN allowance (software 1.16 and on: a PIN set and none shown; a card with no PIN marks nothing)
+                  noPin: !!told && (flags & 8) === 8,
                   loads: (wide || told) ? parseInt(h.substr(at + 22, 2), 16) : 0, loaded: (wide || told) ? cardU32(h, at / 2 + 12) : 0,
                   told: told ? cardU32(h, at / 2 + 16) : 0 });
     }
@@ -9593,6 +9659,10 @@
     return e;
   }
 
+  /* What the sheet ends saying when the card wants its PIN for a payment (`pin-needed` with no PIN given): it is not an error, and the
+   * sheet is not red. The person is asked for the PIN and the card is tapped again. */
+  var CARD_PIN_SHEET = 'Enter the card\u2019s PIN';
+
   /* A status word that is not 9000, as the person should hear it. */
   function cardRefused(sw, doing) {
     var w = String(sw || '').toLowerCase();
@@ -9779,8 +9849,10 @@
   }
 
   /* The PIN shown to the card: sealed where the card takes it so, and as it
-   * is where the card knows no other way. */
+   * is where the card knows no other way. With no PIN (`pinHex` empty) nothing is shown. */
   function cardVerify(t, card, pinHex) {
+    // no PIN given: none is shown (a card with no PIN asks for none, and one with a PIN that has an allowance may sign without it; the card says if it will not)
+    if (!pinHex) return Promise.resolve();
     if (!(card && card.info && card.info.sealed)) return t.want(cardCommand(CARD_INS.verify, 0, pinHex), 'its PIN');
     return cardSealKey(t, card).then(function (key) {
       return t.want(cardCommand(CARD_INS.verify, 1, cardSeal(key, CARD_INS.verify, cardPinBlock(pinHex))), 'its PIN');
@@ -9900,8 +9972,12 @@
    * day's, then the tap's: eight bytes). There a limit whose number does not
    * change keeps its window and its count, so setting one of the two does not
    * begin the other again. Without it the command is the four bytes it always
-   * was, and the tap's limit is left as it is. */
-  function cardLimitTo(t, cardKey, sats, tapSats) {
+   * was, and the tap's limit is left as it is.
+   * `noPinSats`, where given (software 1.16 and on, and with `tapSats`), makes it twelve bytes: the day's, the tap's and the
+   * no-PIN allowance, which is set to it (zero is none). A limit whose number does not change keeps its window and count in
+   * all three forms, and the forms of four and eight bytes leave the allowance as it is. A card with no PIN refuses an
+   * allowance above zero (6985): there is no PIN for it to be an allowance against. */
+  function cardLimitTo(t, cardKey, sats, tapSats, noPinSats) {
     var n = Math.round(Number(sats));
     if (!(n >= 0 && n <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
     var value = cardU32Hex(n);
@@ -9909,6 +9985,11 @@
       var m = Math.round(Number(tapSats));
       if (!(m >= 0 && m <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
       value += cardU32Hex(m);
+      if (noPinSats !== undefined && noPinSats !== null) {
+        var q = Math.round(Number(noPinSats));
+        if (!(q >= 0 && q <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
+        value += cardU32Hex(q);
+      }
     }
     return cardOwned(t, cardKey, 'set-limit', value).then(function (data) {
       return t.want(cardCommand(CARD_INS.setLimit, 0, data), 'its limit');
@@ -10144,6 +10225,8 @@
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
       card.day = cardDayOf(card.info);
       card.tap = cardTapOf(card.info);
+      // software 1.16 and on: what the card signs for without its PIN, and what is left of it today
+      card.noPin = cardNoPinOf(card.info);
       if (card.info.headers) {
         /* A card of 1.15 and on has been shown a block header, which no one can have made for a time that has not come, so
          * its clock cannot be ahead of the network's. This phone's newest header can be behind the card's, though (another
@@ -10184,9 +10267,12 @@
           // as the card has it now: the limits back, and a day and a tap begun at its clock with nothing spent
           card.info.limit = note.limit; card.record.limit = note.limit;
           card.info.windowStart = card.info.now; card.info.spentToday = 0;
+          // the day's window began again, and the no-PIN allowance counts in the same window
+          if (card.info.noPinKnown) card.info.noPin = { limit: card.info.noPin.limit, spent: 0 };
           if (tapBack) { card.info.tapLimit = tapBack; card.info.tapStart = card.info.now; card.info.tapSpent = 0; }
           card.day = cardDayOf(card.info);
           card.tap = cardTapOf(card.info);
+          card.noPin = cardNoPinOf(card.info);
           card.restored = note.limit || tapBack || 0;
           console.log('[foxy] card: a limit lifted for a withdrawal and not put back is put back now');
           return card;
@@ -10204,6 +10290,20 @@
           c.tap = cardTapOf(c.info);
           c.repaced = want;
           mark('limit');
+          return c;
+        }, function () { return c; });
+      }).then(function (c) {
+        /* And the no-PIN allowance, set in dollars the same way (software 1.16): the card's sats are set to match when the
+         * price has moved, in the one command that carries the day's limit and the tap's as they stand. */
+        var wantNp = (c.mine && c.info.noPinKnown && c.info.pinSet) ? cardPaceNoPinSats(c.key, o.price) : 0;
+        var hasNp = Number(c.info.noPin && c.info.noPin.limit) || 0;
+        if (!(wantNp > 0) || !(hasNp > 0) || Math.abs(wantNp - hasNp) <= hasNp * CARD_PACE_DRIFT) return c;
+        return cardLimitTo(t, c.key, c.info.limit, Number(c.info.tapLimit) || 0, wantNp).then(function () {
+          console.log('[foxy] card: its no-PIN allowance is set to the sats its dollars are worth now');
+          c.info.noPin = { limit: wantNp, spent: 0 };
+          c.noPin = cardNoPinOf(c.info);
+          c.repacedNoPin = wantNp;
+          mark('no-PIN limit');
           return c;
         }, function () { return c; });
       }).then(function (c) {
@@ -11627,7 +11727,8 @@
   /* Why this card cannot be used here at all, as an error, or null. */
   function cardUnusable(card, w) {
     if (card.info.pin === 'blocked') return cardRefused('6983');
-    if (card.info.pin === 'none' || !card.info.hasRecord) return cardError('empty', 'There is no money on this card.');
+    // a card of software 1.16 may have no PIN and still be set up (`info.setUp`); before it, no PIN is a card with nothing on it
+    if (!card.info.setUp) return cardError('empty', 'There is no money on this card.');
     if (card.record.unit !== 'sat') return cardError('not-a-card', 'That card holds something other than sats.');
     var here = mintOf(w);
     if (canonicalMint(card.record.mint) !== here) {
@@ -12732,7 +12833,14 @@
         var polls = 0, since = Date.now();
         var again = function () {
           asked = true;
-          return t.want(cardCommand(CARD_INS.signAll, 0, '', 64), 'to sign for a payment').then(function (d) {
+          return t.ask(cardCommand(CARD_INS.signAll, 0, '', 64)).then(function (r) {
+            /* 6A94: the card has a PIN, was shown none, and the no-PIN allowance does not cover this payment (or there is none).
+             * It signed nothing and gave the payment up, as it does for a limit: this one's row goes with it (below), and the
+             * person is asked for the PIN and taps again. */
+            if (r.sw === '6a94') throw cardError('pin-needed', 'The card wants its PIN for this payment.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
+            if (r.sw !== '9000') throw cardRefused(r.sw, 'to sign for a payment');
+            return r.data;
+          }).then(function (d) {
             if (!cardHexOk(d, 2)) return d;
             /* Not yet, at the first asking, and there is a cheaper set that
              * pays (`other`: this one was chosen for the change it brings
@@ -12863,6 +12971,8 @@
     return cardVerify(t, card, pinHex).then(function () {
       return t.ask(cardCommand(CARD_INS.again, 0, '', 64));
     }).then(function (r) {
+      // asked with no PIN of a card that has one, and it wants it for this: the signature stays asked for, and the PIN is asked of the person
+      if (r.sw === '6982' && !pinHex) throw cardError('pin-needed', 'The card wants its PIN to give a signature it gave before it was taken away.', { sw: r.sw, again: true, sheetText: CARD_PIN_SHEET });
       var sig = r.sw === '9000' ? r.data : '';
       var found = [];
       open.forEach(function (row) {
@@ -13181,8 +13291,12 @@
   function cardTake(link, o, memo) {
     // `info`: what a step is about, where the screen needs it (the payment's entry, for a step after the card has signed)
     var on = function (step, info) { try { if (typeof o.on === 'function') o.on(step, info); } catch (e) {} };
+    /* The PIN is optional: a card of software 1.16 has none, or pays without it within its no-PIN allowance. A payment made with
+     * no PIN (`o.pin` absent) shows the card none; where the card will not sign without it, the read says so before anything is
+     * asked of the card, or the card says so at its signature (6A94), and both are `pin-needed` with nothing pending (see
+     * `cardNeedsPin`): the PIN is asked of the person, and the card is tapped again. */
     var pin;
-    try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+    try { pin = (o.pin === undefined || o.pin === null || o.pin === '') ? '' : cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
     var want = o.all ? 0 : Math.round(Number(o.sats));
     if (!o.all && !(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
     var w;
@@ -13454,6 +13568,18 @@
       if (tapCap !== null && sumProofs(picked) > tapCap) {
         throw cardError('tap-limit', 'This card can spend ' + tapCap + ' sats in this tap, and this payment needs more than that.',
                         { left: tapCap, need: sumProofs(picked), turns: tap.turns, limit: tap.limit });
+      }
+      /* A card that has a PIN and will not sign this payment without it (no allowance, or less left of it than the payment takes
+       * off the card, never less than the price and the mint's fee): said now, before the card is asked for anything, so the
+       * sheet can end and the PIN be asked of the person. The card's own word at its signature is the truth; this only spares
+       * a tap that would be refused. */
+      if (!pin && card.info.pinSet && picked && picked.length) {
+        var leastNet = o.all ? sumProofs(picked) : want + fee;
+        if (cardNeedsPin(card, leastNet)) {
+          throw cardError('pin-needed', 'This card wants its PIN for a payment this size.',
+                          { early: true, need: leastNet, set: !!(card.noPin && card.noPin.set), left: card.noPin ? card.noPin.left : 0, blocked: card.info.pin === 'blocked',
+                            sheetText: CARD_PIN_SHEET });
+        }
       }
       // chosen from the brief listing: the pieces themselves are asked for now, before the PIN
       return cardFill(t, card, picked, w);
@@ -13917,7 +14043,7 @@
    * back from mempool's onion to the clearnet; and it keeps the newest header that passes what is
    * checked below. A tap uses what is kept and never waits for
    * the fetch (`cardClock`, 08a-flashcard.js): the fetch happens when Tor comes up, when the app
-   * comes back to the front and when a card is tapped, if the one kept is older than ten minutes
+   * comes back to the front and when a card is tapped, if the one kept is older than two minutes
    * and the phone is online, and never more than once a minute after a failure. There is no timer
    * here: nothing runs that has to be stopped.
    *
@@ -13955,7 +14081,7 @@
     { name: 'blockstream.info (exit)', url: 'https://blockstream.info' },
   ];
   // a kept header is refreshed when it is older than this (when it was fetched, not when its block was made)
-  var HEADER_FRESH_MS = 10 * 60 * 1000;
+  var HEADER_FRESH_MS = 2 * 60 * 1000;   // a tap brings the card up to date within a couple of minutes of a block
   // and not asked for again sooner than this after a try that kept nothing
   var HEADER_RETRY_MS = 60 * 1000;
   // how far a header's time may be from this phone's clock, in seconds
@@ -14120,7 +14246,7 @@
     });
   }
 
-  /* The newest header, fetched when the one kept is older than ten minutes and the phone has a route; the one in
+  /* The newest header, fetched when the one kept is older than two minutes and the phone has a route; the one in
    * flight is shared. `opts.force` asks regardless of age and of the minute's rest. Resolves { kept, fetched, why }
    * and never rejects. */
   function headerRefresh(opts) {
@@ -23445,7 +23571,7 @@
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
-                 tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
+                 noPin: cardNoPinOf, tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
     /* The key a card of software 1.14 and before checks its time against, which set-up writes to such a card (INTERIM: see
      * 08a-flashcard.js). A card of 1.15 and on has none. */
     cardTimeKey: CARD_TIME_KEY,
@@ -23453,7 +23579,7 @@
     /* The clock of a card of software 1.15 and on is the newest Bitcoin block header it has been shown, and this phone keeps
      * the newest it can get, from two block explorers over Tor (08b-block-headers.js). A tap uses what is kept and never
      * waits for the fetch. `headerKept` is { hex, time, hash, bits, at } or null; `headerRefresh` fetches if what is kept is
-     * older than ten minutes and there is a route (`opts.force`: regardless), and resolves { kept, fetched, why };
+     * older than two minutes and there is a route (`opts.force`: regardless), and resolves { kept, fetched, why };
      * `headerShort` is a block hash as a line of text says it. `_headersOff` is for the suites: the fetches that happen on
      * their own (Tor up, the app back, a card tapped) are not made. */
     headerKept: function () { return headerKept(); },
@@ -23487,6 +23613,12 @@
     cardOffline: function (on) { return cardOffline(on); },
     cardOnline: function () { return routeOpen(); },
     cardOfflineAsk: function (sats) { return cardOfflineAsk(sats); },
+
+    /* Whether a card (as `cardLook` gave it) will ask for its PIN to sign for a payment that takes `net` sats off it (software
+     * 1.16 and on): false for a card with no PIN and for one whose no-PIN allowance (`card.noPin`) has `net` left; true for
+     * any other card with a PIN, and for every card before 1.16. The card's own answer at its signature (`pin-needed`) is
+     * the truth: this is what the read says. A till knows `net` to be at least the price and the mint's fee. */
+    cardNeedsPin: function (card, net) { return cardNeedsPin(card, net); },
 
     /* What a card says with no PIN (`cardLook`), after telling it the time.
      * `opts.mine`: also whether this phone is its owner (`card.mine`), for a
@@ -23538,8 +23670,11 @@
      * is told once: its record cannot change while it holds money. */
     cardSetUp: function (link, opts) {
       var o = opts || {};
-      var pin;
-      try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      /* `o.pin` empty or absent: a card with no PIN (software 1.16 and on). It pays without one, and its per tap and daily limits are
+       * set later by its owner as for any card; no allowance exists on it. A PIN can be added later (`cardAddPin`). */
+      var pin = '';
+      var noPin = (o.pin === undefined || o.pin === null || o.pin === '');
+      if (!noPin) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var w;
       try { w = need(); } catch (e2) { return Promise.reject(e2); }
       var mint = mintOf(w);
@@ -23555,6 +23690,10 @@
         /* A card with an owner is not open, set up or not: it is its owner's, and
          * only that owner's proof changes it. */
         if (card.info.owner) throw cardError('set-up', 'This card already belongs to a Foxy. Only that Foxy, or one restored from its seed phrase, can set it up again.');
+        // a card before 1.16 cannot be without a PIN: it would take no record and no owner
+        if (noPin && !card.info.noPinKnown) throw cardError('old-card', 'This card\u2019s software needs a PIN. It cannot be set up without one.');
+        // and a card that has a PIN already (a set-up cut off after it) cannot be set up without it: that PIN is not known here
+        if (noPin && card.info.pinSet) throw cardError('has-pin', 'This card already has a PIN. Set it up with that PIN.');
         return cardOwnerPub(card.key);
       }).then(function (pub) {
         ownerPub = pub;
@@ -23564,15 +23703,15 @@
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
         var record = cardRecordHex(refund, mint, undefined, cardCanDesign(card) ? String(o.design || '') : '', card.info.headers);
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
-        return cardFirstPin(t, card, pin).then(function () {
+        return (noPin ? Promise.resolve() : cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
-        }).then(function () {
+        })).then(function () {
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
         }).then(function () {
           return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
         });
       }).then(function () {
-        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with no limit');
+        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with ' + (noPin ? 'no PIN and ' : '') + 'no limit');
         /* The design this phone chose for it (`o.design`, a code of three
          * characters), written down here for a card whose software cannot
          * carry it (before 1.10): its own note, not the list of cards this
@@ -23603,6 +23742,31 @@
       }).then(function () { return true; });
     },
 
+    /* A PIN added to a card that has none (software 1.16 and on), by the card's owner: the owner's grant in this tap, then the PIN
+     * sealed to the card, exactly as at set-up. One tap. The card then asks for the PIN for every payment, as it has no no-PIN
+     * allowance (the allowance is 0 when a PIN is added) until its owner sets one (`cardSetLimit`, `noPin`). Resolves the card
+     * as its owner reads it after. Rejects: `no-owner`, `locked`, `old-card` (software before 1.16), `has-pin` (the card has a
+     * PIN already: that is `cardChangePin`), `not-owner` (this phone's words are not the ones the card was set up with: costs
+     * nothing and changes nothing), `bad-pin`. */
+    cardAddPin: function (link, opts) {
+      var o = opts || {};
+      var pin;
+      try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      var t = cardTalk(link);
+      // read as its owner (the grant is given in the read, and stands for this tap)
+      return cardLook(link, { short: true, mine: true }).then(function (card) {
+        if (!card.info.owner) throw cardRefused('6a90');
+        if (card.info.locked) throw cardRefused('6986');
+        if (!card.info.noPinKnown) throw cardError('old-card', 'This card\u2019s software cannot be without a PIN, so there is none to add.');
+        if (card.info.pinSet) throw cardError('has-pin', 'This card has a PIN already.');
+        if (!card.mine) throw cardRefused('6a91');
+        return cardFirstPin(t, card, pin);
+      }).then(function () {
+        console.log('[foxy] card: a PIN is added to a card that had none; every payment asks for it until a no-PIN limit is set');
+        return cardLook(link, { mine: true, short: true });
+      });
+    },
+
     /* The card's daily limit: the most it signs for in one day, in sats, set to
      * `sats` (zero removes it). The owner's proof and no PIN: only a phone that
      * holds the words the card was set up with can, and it does not need to know
@@ -23613,17 +23777,33 @@
      * Both go in the one command, the day's as the card has it, so the day's
      * window and count are not begun again. A card whose software has no such
      * limit says so (`old-card`). */
+    /* `opts.noPin` (software 1.16 and on): the NO-PIN ALLOWANCE is the one set, the most the card signs for in a day without its
+     * PIN (zero is none: every payment asks for it). `noPin: true` takes the figure from `opts.sats`, as `tap: true` does; a
+     * number is the figure itself. The command is the twelve-byte one, the day's limit and the limit on one tap as the card has
+     * them (so neither's window or count begins again) and then the allowance. A card with no PIN has no allowance to set
+     * (`no-pin`), and a card before 1.16 has none at all (`old-card`). `opts.usd` is the dollars it was set in, where it was,
+     * and the card's sats follow the price from then on, as the limit on one tap's do (`cardLook`, `cardPaceNoPinNote`). */
     cardSetLimit: function (link, opts) {
       var o = opts || {};
-      var sats = Math.round(Number(o.sats));
+      var npGiven = o.noPin !== undefined && o.noPin !== null && o.noPin !== false;
+      var sats = Math.round(Number(npGiven ? (o.noPin === true ? o.sats : o.noPin) : o.sats));
       if (!(sats >= 0 && sats <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
       var t = cardTalk(link);
       var key;
-      // read the short way: a limit is set, and what is on the card is not looked at
-      return cardLook(link, { short: true }).then(function (card) {
+      /* Read the short way: a limit is set, and what is on the card is not looked at. The allowance's twelve bytes carry the limit
+       * on one tap as the card has it, which only its owner is told, so that one is read as its owner. */
+      return cardLook(link, npGiven ? { short: true, mine: true } : { short: true }).then(function (card) {
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
         key = card.key;
+        if (npGiven) {
+          if (!card.info.noPinKnown) throw cardError('old-card', 'This card\u2019s software has no limit for payments without a PIN.');
+          if (sats > 0 && !card.info.pinSet) throw cardError('no-pin', 'A card with no PIN has no limit for payments without one. Add a PIN first.');
+          if (!card.mine) throw cardRefused('6a91');
+          return cardLimitTo(t, key, card.info.limit, card.info.tapLimit, sats).then(function () {
+            cardPaceNoPinNote(key, sats > 0 ? Number(o.usd) || 0 : 0);
+          });
+        }
         if (o.tap) {
           if (!card.info.tapKnown) throw cardError('old-card', 'This card\u2019s software has no limit on one tap.');
           return cardLimitTo(t, key, card.info.limit, sats).then(function () {
@@ -23649,7 +23829,8 @@
          * its money is in such pieces. A card of sixty-four places, or one
          * that signs for eight at a time, is not cut that way at all. */
         card.aboveLimit = cardAboveLimit(card);
-        if (!(o.tap && sats > 0 && o.pin && card.aboveLimit > 0 && cardIsDeep(card))) return card;
+        // (a card with no PIN needs none to be emptied and filled)
+        if (!(o.tap && !npGiven && sats > 0 && (o.pin || !card.info.pinSet) && card.aboveLimit > 0 && cardIsDeep(card))) return card;
         var on = function (step) { try { if (typeof o.on === 'function') o.on(step); } catch (e) {} };
         return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on, progress: o.progress, hold: true }).then(function (got) {
           return cardLook(link, { mine: true, short: true }).then(function (c) { return FoxyWallet.cardPrepare(c, got.sats); });
@@ -23810,7 +23991,7 @@
       try { w = need(); } catch (e) { return Promise.reject(e); }
       var no = cardUnusable(card, w);
       if (no && no.card !== 'empty' && !(moving && no.card === 'other-mint')) return Promise.reject(no);
-      if (card.info.pin !== 'set' || !card.info.hasRecord) return Promise.reject(cardError('no-record', 'Set this card up first.'));
+      if (!card.info.setUp) return Promise.reject(cardError('no-record', 'Set this card up first.'));
       if (card.info.locked) return Promise.reject(cardRefused('6986'));
       /* A card with no owner cannot be loaded: nobody could change its PIN or its
        * limit, and a terminal that had the PIN could never be bounded or
@@ -23884,11 +24065,13 @@
     cardWrite: function (link, opts) {
       var o = opts || {};
       var pin = '';
-      if (!o.owner && !o.change) {
-        try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
-      }
+      var pinGiven = !(o.pin === undefined || o.pin === null || o.pin === '');
+      /* No PIN given is a card with none (software 1.16): found out below, once the card is read, and written to by its owner's
+       * grant as `owner: true` does. A card that has a PIN is refused as before, for want of one. */
+      if (!o.owner && !o.change && pinGiven) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var t = cardTalk(link);
       var wrote;
+      var asOwner = !!o.owner;
       /* A till putting change back (or anything, under the PIN) reads a card
        * of 128 places the short way, before and after: it wants what the card
        * comes to and nothing else of what is on it. Its owner's phone reads
@@ -23899,13 +24082,17 @@
       var how = { short: true };
       return cardLook(link, how).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
-        if (o.owner && !card.info.owner) throw cardRefused('6a90');
+        if (!o.owner && !o.change && !pin) {
+          if (card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
+          asOwner = true;
+        }
+        if (asOwner && !card.info.owner) throw cardRefused('6a90');
         // not the tap after a payment after all (a read came between, say): the PIN is what writes
         if (o.change && !o.owner && !card.info.changeDue) throw cardRefused('6982');
         // what was found for this card is asked of the mint before any of it is written
         return cardOwedPrune(card).then(null, function () { return 0; }).then(function () {
           if (o.change && !o.owner) return null;
-          if (!o.owner) return cardVerify(t, card, pin);
+          if (!asOwner) return cardVerify(t, card, pin);
           return cardGrant(t, card.key).then(function (yes) {
             if (!yes) throw cardRefused('6a91');
           });
@@ -23915,7 +24102,7 @@
       }).then(function (r) {
         wrote = r;
         // after the write, what the card comes to: the short way for an owner as for a till
-        return cardLook(link, o.owner ? { mine: true, short: true } : { short: true });
+        return cardLook(link, asOwner ? { mine: true, short: true } : { short: true });
       }).then(function (card) {
         // a short read lists no nonces, and says nothing of which pieces have left the card
         if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
@@ -23928,9 +24115,11 @@
      * or `opts.pin`, as `cardWrite`). */
     cardAdd: function (link, opts) {
       var o = opts || {};
-      if (!o.owner) { try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
+      if (!o.owner && !(o.pin === undefined || o.pin === null || o.pin === '')) { try { cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       // the short way, as its owner: the cut needs the sizes of what is on the card, its room and its limit, not the pieces themselves
       return cardLook(link, { short: true, mine: true }).then(function (card) {
+        // a card that has a PIN is written with it, or by its owner's grant: said before any money is made for it
+        if (!o.owner && (o.pin === undefined || o.pin === null || o.pin === '') && card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
         return FoxyWallet.cardPrepare(card, o.sats);
       }).then(function () {
         return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin });
@@ -24004,7 +24193,7 @@
       // read the short way: whether it holds anything is all that is asked of what is on it
       return cardLook(link, { short: true }).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
-        if (card.info.pin !== 'set' || !card.info.hasRecord) throw cardError('no-record', 'Set this card up first.');
+        if (!card.info.setUp) throw cardError('no-record', 'Set this card up first.');
         if (canonicalMint(card.record.mint) === here) return null;
         if (card.pieces.length) throw cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.');
         if (!card.info.owner) throw cardRefused('6a90');
@@ -24066,6 +24255,11 @@
      * `opts.hold` keeps the card in the field instead (a renewal writes to it
      * next, a move reads it last): then the mint is asked with the card still
      * there, and change is written back in the same tap if it stays.
+     *
+     * `opts.pin` is optional (software 1.16): with none, the card is shown none, and signs if it has no PIN or its no-PIN
+     * allowance covers the payment. Otherwise it rejects with `pin-needed`, with nothing asked of the card or nothing left
+     * pending (`early: true` when the read said so before the card was asked, `sw: '6a94'` when the card did), and the
+     * sheet it ends reads `Enter the card's PIN`; the card is then tapped again with `opts.pin`.
      *
      * `opts.on(step)` is told 'reading', 'signing', 'checking' (the card has been
      * let go), 'making' (the change), 'done' for the screen; with `hold`, 'mint'
@@ -24176,6 +24370,8 @@
      * on a card that is `costed`, 1.14 and on: `info.costed`), and `second`, that a payment has been signed in the same time
      * in the field already and the owner's grant is not in the tap (`cardWaitSigns`). */
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
+    // and the no-PIN allowance's (software 1.16): the dollars it was set in, or 0
+    cardNoPinUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.noPinUsd > 0) ? r.noPinUsd : 0; },
     cardWait: function (limit, sats, made, second, costed) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second, costed)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },

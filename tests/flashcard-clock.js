@@ -135,9 +135,11 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   /* ---- 1: the card: three real headers at the real floor -------------------------------------------------------------- */
   {
     const c = mk();
-    ok((await read(c, SEL)).data === '010f', 'a card of the latest software says 1.15 when chosen');
+    ok((await read(c, SEL)).data === '0110', 'a card of the latest software says 1.16 when chosen');
+    const c15 = mk({ software: 15 });
+    ok((await read(c15, SEL)).data === '010f', 'and the card of 1.15 before it still says 1.15');
     const fresh = await infoOf(c);
-    ok(fresh.version === '1.15' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
+    ok(fresh.version === '1.16' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
     ok(blank.headerBits === '' && blank.headerHash === '' && blank.timeKey === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));
@@ -312,17 +314,17 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
        'each source on a circuit of its own, and both of its requests on that one', JSON.stringify(circuits.map((s) => [...s].map((x) => x.slice(0, 6)))));
     ok(/block \w{8} \(time \d+\) is the tip of mempool\.space and blockstream\.info/.test(last()), 'and the log says the two agreed', last());
     ok(JSON.parse(F.storage.getItem('foxy.flashcard.header')).hex === h1, 'it is kept in storage, where a restart finds it');
-    // the second fetch within ten minutes is not made
+    // the second fetch within two minutes is not made
     fresh();
     r = await FW.headerRefresh();
-    ok(!r.fetched && r.why === 'fresh' && F.explored.length === 0, 'one kept less than ten minutes ago is not fetched again: no request is made');
-    // ten minutes on it is
-    skew = 11 * 60 * 1000;
+    ok(!r.fetched && r.why === 'fresh' && F.explored.length === 0, 'one kept less than two minutes ago is not fetched again: no request is made');
+    // two minutes on it is
+    skew = 3 * 60 * 1000;
     const h2 = mineHeader(now() - 100, CHEAP);
     tipIs(F, h2);
     fresh();
     r = await FW.headerRefresh();
-    ok(r.fetched && FW.headerKept().hex === h2 && F.explored.length === 4, 'ten minutes on it is asked for again, and a newer block replaces the one kept', r.why);
+    ok(r.fetched && FW.headerKept().hex === h2 && F.explored.length === 4, 'two minutes on it is asked for again, and a newer block replaces the one kept', r.why);
     // not an older block over a newer one
     skew = 22 * 60 * 1000;
     tipIs(F, h1);

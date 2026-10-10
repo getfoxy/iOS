@@ -253,6 +253,106 @@ function wire(port) {
   H.window.Date.now = real;
   ok(back.sats === 256, 'and its money comes back to the phone that loaded it, a year on, with no card', String(back.sats));
 
+  /* ---- the PIN is optional (software 1.16): a card with none, ADD PIN, and the no-PIN allowance ----------------- */
+  if (made.info.noPinKnown) {
+    await w.ask('ctl new');
+    await tap();
+    const bare = await H.W.cardSetUp(link, { recoverable: true });
+    ok(bare.info.pin === 'none' && bare.info.hasRecord && bare.info.owner === true && bare.info.setUp === true && bare.noPin.set === false && bare.noPin.known === true,
+       'a card is set up with no PIN, by the applet: its record and its owner, and no allowance', JSON.stringify([bare.info.pin, bare.info.hasRecord, bare.info.owner]));
+    await tap();
+    const filled = await H.W.cardAdd(link, { sats: 1000, owner: true });
+    ok(filled.card.balance >= 1000, 'loaded by its owner with the grant, with no PIN on it', String(filled.card.balance));
+    await tap();
+    const rBefore = await bal(R);
+    await tap();
+    const free = await R.W.cardPay(link, { sats: 100 });
+    ok(free.sats === 100 && (await bal(R)) === rBefore + 100, 'it pays 100 with no PIN typed', String(free.sats));
+    await tap();
+    const bareLog = await H.W.cardLook(link, { mine: true });
+    ok(bareLog.log && bareLog.log.last.length > 0 && bareLog.log.last[0].noPin === false && bareLog.log.last[0].sats >= 100,
+       'and its log marks nothing for it: a card with no PIN has no PIN to be without (the mark is for the allowance)', JSON.stringify(bareLog.log && bareLog.log.last[0]));
+    await tap();
+    ok((await why(H.W.cardSetLimit(link, { noPin: 100 }))) === 'no-pin', 'no allowance can be set on a card with no PIN (the wallet says so before the applet is asked)');
+    // the applet itself, asked for twelve bytes with no PIN: 6985. The wallet is made to believe a PIN is set, so that it asks.
+    await tap();
+    const asked = { send: async (a) => { const r = await link.send(a); return (a.slice(0, 6) === 'b00101' && r.length === 88) ? r.slice(0, 14) + '01' + r.slice(16) : r; } };
+    const six = await H.W.cardSetLimit(asked, { noPin: 100 }).then(() => null, (e) => e);
+    ok(!!six && six.sw === '6985', 'asked for twelve bytes with an allowance on a card with no PIN, the applet answers 6985', six && six.sw);
+    await tap();
+    await H.W.cardSetLimit(link, { sats: 150 });
+    await tap();
+    await R.W.cardPay(link, { sats: 100 });
+    await tap();
+    ok((await why(R.W.cardPay(link, { sats: 100 }))) === 'limit', 'a daily limit set on it holds with no PIN: 100 more after 100 is over 150');
+    await tap();
+    await H.W.cardSetLimit(link, { sats: 0 });
+
+    // ADD PIN
+    await tap();
+    await link.send(SELECT);
+    const noGrant = await link.send('b0410000' + '04' + '31323334');
+    ok(/^6[0-9a-f]{3}$/i.test(noGrant), 'ADD PIN with no grant in the tap is refused by the applet', noGrant);
+    await tap();
+    const added = await H.W.cardAddPin(link, { pin: '2468' });
+    ok(added.info.pin === 'set' && added.info.noPin.limit === 0 && added.noPin.set === false && added.balance >= 800, 'ADD PIN: the owner’s grant and a PIN sealed; the money stays, the allowance is nothing', added.info.pin + ', ' + added.balance);
+    await tap();
+    ok((await why(H.W.cardAddPin(link, { pin: '1357' }))) === 'has-pin', 'and not again');
+    await tap();
+    ok((await why(R.W.cardPay(link, { sats: 50 }))) === 'pin-needed', 'every payment asks for the PIN now: the read says so before the applet is asked');
+    // the applet's own word: begin a payment with no PIN, and ask for the signature
+    await tap();
+    const seen = await R.W.cardLook(link);
+    await link.send(SELECT);
+    const place = ('0' + seen.pieces[0].i.toString(16)).slice(-2);
+    const begun = await link.send('b0220000' + '01' + place);
+    const refused = await link.send('b024000040');
+    ok(/9000$/.test(begun) && /6a94$/i.test(refused), 'the applet takes the beginning with no PIN and refuses the signature, 6A94', begun.slice(-12) + ', ' + refused);
+    await tap();
+    const kept = await R.W.cardLook(link);
+    ok(kept.balance === seen.balance && kept.info.spent === seen.info.spent, 'which signed nothing and burned nothing');
+    await tap();
+    const mid = await R.W.cardPay(link, { sats: 50, pin: '2468' });
+    ok(mid.sats === 50, 'with the PIN it pays');
+
+    // the allowance
+    await tap();
+    await H.W.cardSetLimit(link, { noPin: 200 });
+    await tap();
+    const set = await R.W.cardLook(link);
+    ok(set.noPin.set && set.noPin.limit === 200 && set.noPin.spent === 0, 'an allowance of 200 is set by the owner in twelve bytes, and said to anybody', JSON.stringify(set.noPin));
+    await tap();
+    const within = await R.W.cardPay(link, { sats: 120 });
+    await tap();
+    const counted = await R.W.cardLook(link);
+    ok(within.sats === 120 && counted.noPin.spent === 120 && counted.noPin.left === 80, 'a payment of 120 within it is signed with no PIN, and counted: 120 of 200', JSON.stringify(counted.noPin));
+    await tap();
+    const over = await R.W.cardPay(link, { sats: 100 }).then(() => null, (e) => e);
+    ok(!!over && over.card === 'pin-needed' && over.left === 80, '100 is over the 80 left: pin-needed, and the whole payment (never a part)', over && over.card);
+    await tap();
+    const pinned = await R.W.cardPay(link, { sats: 100, pin: '2468' });
+    await tap();
+    const same = await R.W.cardLook(link);
+    ok(pinned.sats === 100 && same.noPin.spent === 120, 'with the PIN it pays, and counts nothing against the allowance', JSON.stringify(same.noPin));
+    // the day: a header begins the window if none had (the allowance was set before one), and keeps the count
+    await tap();
+    await link.send(SELECT);
+    if (made.info.headers) {
+      const took = await link.send('b0360000' + '50' + TIP + '04');
+      await tap();
+      const anchored = await R.W.cardLook(link);
+      ok(took === u32(TIP_TIME) + '9000' && anchored.info.now === TIP_TIME && anchored.noPin.spent === 120,
+         'a block header shown to it gives the window a start (the allowance alone had set none) and keeps the count', JSON.stringify([anchored.info.now, anchored.info.windowStart, anchored.noPin.spent]));
+    }
+    // ADD PIN, then change the PIN (unblocking is the old flow): nothing else about the PIN changed
+    await tap();
+    ok((await H.W.cardChangePin(link, { newPin: '8642' })) === true, 'and CHANGE PIN is as it was');
+    await tap();
+    const hb = await bal(H);
+    const off = await H.W.cardWithdraw(link, { pin: '8642' });
+    ok(off.sats > 0 && (await bal(H)) === hb + off.sats, 'the card is emptied into its owner’s phone with the new PIN', String(off.sats));
+  }
+
   w.close();
   console.log('\n' + (failed ? failed + ' flashcard-applet check(s) failed' : 'all flashcard-applet checks pass'));
   process.exit(failed ? 1 : 0);

@@ -370,11 +370,12 @@ final class NUT13Tests: XCTestCase {
                     [0x61, 0x62, 0x63, 0x64], [0x31, 0x32, 0x33, 0xB1]] as [[UInt8]] {
             XCTAssertFalse(CardOwner.Label.changePin.accepts(bad), "\(bad)")
         }
-        // set-limit: exactly 4 bytes (the day's limit), or exactly 8 (the day's and the one tap's)
+        // set-limit: exactly 4 bytes (the day's limit), exactly 8 (the day's and the one tap's), or exactly 12 (and the no-PIN allowance)
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0xFF, 0xFF, 0xFF, 0xFF]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88]))
-        for n in [0, 1, 3, 5, 6, 7, 9, 12] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
+        XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88, 0, 0, 0x27, 0x10]))
+        for n in [0, 1, 3, 5, 6, 7, 9, 10, 11, 13, 16] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
         // set-owner: 65 bytes, 04 first
         let key = [0x04] + [UInt8](repeating: 0x55, count: 64)
         XCTAssertTrue(CardOwner.Label.setOwner.accepts(key))

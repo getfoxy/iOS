@@ -18,7 +18,7 @@
    * back from mempool's onion to the clearnet; and it keeps the newest header that passes what is
    * checked below. A tap uses what is kept and never waits for
    * the fetch (`cardClock`, 08a-flashcard.js): the fetch happens when Tor comes up, when the app
-   * comes back to the front and when a card is tapped, if the one kept is older than ten minutes
+   * comes back to the front and when a card is tapped, if the one kept is older than two minutes
    * and the phone is online, and never more than once a minute after a failure. There is no timer
    * here: nothing runs that has to be stopped.
    *
@@ -56,7 +56,7 @@
     { name: 'blockstream.info (exit)', url: 'https://blockstream.info' },
   ];
   // a kept header is refreshed when it is older than this (when it was fetched, not when its block was made)
-  var HEADER_FRESH_MS = 10 * 60 * 1000;
+  var HEADER_FRESH_MS = 2 * 60 * 1000;   // a tap brings the card up to date within a couple of minutes of a block
   // and not asked for again sooner than this after a try that kept nothing
   var HEADER_RETRY_MS = 60 * 1000;
   // how far a header's time may be from this phone's clock, in seconds
@@ -221,7 +221,7 @@
     });
   }
 
-  /* The newest header, fetched when the one kept is older than ten minutes and the phone has a route; the one in
+  /* The newest header, fetched when the one kept is older than two minutes and the phone has a route; the one in
    * flight is shared. `opts.force` asks regardless of age and of the minute's rest. Resolves { kept, fetched, why }
    * and never rejects. */
   function headerRefresh(opts) {
