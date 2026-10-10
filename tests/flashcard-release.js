@@ -82,8 +82,8 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const order = R.trace.filter((x) => x === 'begin' || x === 'end' || x === 'error' || x === 'mint /v1/swap');
     ok(order.join(' ') === 'begin end mint /v1/swap mint /v1/swap', 'the sheet ends, then the swap is asked, then the change is made: all with the card gone', R.trace.join(', '));
     ok(!!atSwap && atSwap.ended === true && atSwap.sheet.filter((x) => /^end:/.test(x)).length === 1, 'at the moment the mint is asked the sheet has ended', JSON.stringify(atSwap && atSwap.sheet));
-    ok(R.sheet.filter((x) => /^end:/.test(x)).length === 1 && R.sheet.filter((x) => /^error:/.test(x)).length === 0 && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
-       'it ends once, as "Done. Remove the card.", and never again after the mint', R.sheet.join(' | '));
+    ok(R.sheet.filter((x) => /^end:/.test(x)).length === 1 && R.sheet.filter((x) => /^error:/.test(x)).length === 0 && R.sheet[R.sheet.length - 1] === 'end: Done.',
+       'it ends once, as "Done.", and never again after the mint', R.sheet.join(' | '));
     ok(R.refusedAfterEnd === 0, 'nothing is sent to the card after the sheet has ended', String(R.refusedAfterEnd));
     ok(atSwap && atSwap.taken === 1, 'the signed pieces were written down (in the card store) before the card was let go', JSON.stringify(atSwap && atSwap.taken));
     ok(steps.join(' ') === 'reading signing checking making done', 'the screen is told: the card is let go (checking), the change is made, and then it is done', steps.join(' '));
@@ -147,7 +147,7 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const signedFor = card.state.spent - spentBefore;
     ok(refused && refused.card === 'putback' && signedFor === 640 && refused.owed === 128 && refused.lost === 512 && refused.limited === true,
        'the card pays 600 with the same pieces, and the mint refuses it: 512 of the 640 it signed is spent, 128 is still good, and the error says so', refused && refused.message);
-    ok(R.trace.filter((x) => x === 'end' || x === 'error' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && R.sheet[R.sheet.length - 1] === 'end: Done. Remove the card.',
+    ok(R.trace.filter((x) => x === 'end' || x === 'error' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && R.sheet[R.sheet.length - 1] === 'end: Done.',
        'the sheet had ended before the swap, and says nothing more now', R.trace.join(', '));
     ok(steps.join(' ') === 'reading signing checking', 'the screen was on checking with the mint', steps.join(' '));
     ok(asked(R, '/v1/swap') === 1 && asked(R, '/v1/checkstate') === 1, 'one swap, and then, with the card gone, the mint is asked which pieces are still good', R.circuits.map((x) => x.path.replace('/v1/', '')).join(', '));
@@ -302,7 +302,7 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     const got = await tap(Ro, c, (link) => Ro.W.cardPay(link, { sats: 592, pin: '1234', trusted: true, on: (s) => steps.push(s) }));
     ok(got.trusted === true && got.sats === 592 && Ro.W.trustedWaiting().length === 1 && Ro.W.cardTaken().length === 0,
        'with no route a card is taken on trust, kept as a pending row, as it was');
-    ok(Ro.trace.join(' ') === 'begin end' && Ro.sheet[Ro.sheet.length - 1] === 'end: Done. Remove the card.', 'the mint is never asked, and the sheet ends once, at the end', Ro.trace.join(', '));
+    ok(Ro.trace.join(' ') === 'begin end' && Ro.sheet[Ro.sheet.length - 1] === 'end: Done.', 'the mint is never asked, and the sheet ends once, at the end', Ro.trace.join(', '));
     ok(steps.join(' ') === 'reading signing done', 'the screen is told reading, signing, done: there is no mint to wait for', steps.join(' '));
     ok(Ro.circuits.length === 0 && Ro.refusedAfterEnd === 0, 'no request of any kind went out');
     online(Ro.W);

@@ -891,7 +891,7 @@
     }
     if (w === '6983') return cardError('blocked', 'This card is blocked: its PIN was typed wrong too many times.', { tries: 0 });
     if (w === '6984') return cardError('no-pin', 'This card has no PIN yet.');
-    if (w === '6982') return cardError('pin-needed', 'The card wants its PIN first.');
+    if (w === '6982') return cardError('pin-needed', 'Card needs PIN entered.');
     if (w === '6a8f') return cardError('limit', 'This payment is over what the card can spend in a day.');
     if (w === '6a95') return cardError('tap-limit', 'This payment is over what the card can spend in one tap.');
     if (w === '6a90') return cardError('no-owner', 'This card has no owner, so it cannot be loaded, and its PIN and its limit cannot be changed.');
@@ -914,10 +914,10 @@
     function ask(apdu) {
       return Promise.resolve().then(function () { return link.send(apdu); }).then(function (hex) {
         var h = String(hex || '').toLowerCase();
-        if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'The card was taken away too soon.');
+        if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
         return { data: h.slice(0, -4), sw: h.slice(-4) };
       }, function (e) {
-        throw (e && e.card) ? e : cardError('gone', 'The card was taken away too soon.');
+        throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
       });
     }
     return {
@@ -4056,7 +4056,7 @@
             /* 6A94: the card has a PIN, was shown none, and the no-PIN allowance does not cover this payment (or there is none).
              * It signed nothing and gave the payment up, as it does for a limit: this one's row goes with it (below), and the
              * person is asked for the PIN and taps again. */
-            if (r.sw === '6a94') throw cardError('pin-needed', 'The card wants its PIN for this payment.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
+            if (r.sw === '6a94') throw cardError('pin-needed', 'Card needs PIN entered.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
             if (r.sw !== '9000') throw cardRefused(r.sw, 'to sign for a payment');
             return r.data;
           }).then(function (d) {
@@ -4191,7 +4191,7 @@
       return t.ask(cardCommand(CARD_INS.again, 0, '', 64));
     }).then(function (r) {
       // asked with no PIN of a card that has one, and it wants it for this: the signature stays asked for, and the PIN is asked of the person
-      if (r.sw === '6982' && !pinHex) throw cardError('pin-needed', 'The card wants its PIN to give a signature it gave before it was taken away.', { sw: r.sw, again: true, sheetText: CARD_PIN_SHEET });
+      if (r.sw === '6982' && !pinHex) throw cardError('pin-needed', 'Card needs PIN entered.', { sw: r.sw, again: true, sheetText: CARD_PIN_SHEET });
       var sig = r.sw === '9000' ? r.data : '';
       var found = [];
       open.forEach(function (row) {
@@ -4871,7 +4871,7 @@
       if (!pin && card.info.pinSet && picked && picked.length) {
         var leastNet = o.all ? sumProofs(picked) : want + fee;
         if (cardNeedsPin(card, leastNet)) {
-          throw cardError('pin-needed', 'This card wants its PIN for a payment this size.',
+          throw cardError('pin-needed', 'Card needs PIN entered.',
                           { early: true, need: leastNet, set: !!(card.noPin && card.noPin.set), left: card.noPin ? card.noPin.left : 0, blocked: card.info.pin === 'blocked',
                             sheetText: CARD_PIN_SHEET });
         }
@@ -5081,7 +5081,7 @@
   }
 
   /* The card's part is over: it has signed, and nothing more is asked of it.
-   * Its sheet is ended ("Done. Remove the card.") and the mint, which takes
+   * Its sheet is ended ("Done.") and the mint, which takes
    * as long as it takes, is asked with the card gone. Not for a flow that
    * goes on to speak to the card again (`o.hold`: a renewal writes to it, a move
    * reads it last), and nothing is sent to a link that has no way to let go
@@ -5111,7 +5111,7 @@
        * asks for three buzzes at this moment too (26f-flashcard.js,
        * `fcChangeBuzz`), but iOS plays no haptic of an app's while its own
        * sheet is up, so these words are what says it. */
-      var line = 'Paid. Keep the card here for your change.';
+      var line = 'Hold for change.';
       return Promise.resolve().then(function () { return link.say(line); }).then(function () {}, function () {});
     }
     if (typeof link.release !== 'function') return Promise.resolve();

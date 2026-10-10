@@ -257,7 +257,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     P.nfc = tapped;
     P.sheet.length = 0;
     const got = await W.cardSession('Hold the card to the top of the phone', (link) => W.cardLook(link));
-    ok(got.key === tapped.key && P.sheet.join(' | ') === 'begin: Hold the card to the top of the phone | end: Done. Remove the card.',
+    ok(got.key === tapped.key && P.sheet.join(' | ') === 'begin: Hold the card to the top of the phone | end: Done.',
        'a tap opens the phone’s sheet, reads the card through it and closes it', P.sheet.join(' | '));
     P.sheet.length = 0;
     const refused = await W.cardSession('Hold the card', (link) => W.cardSetLimit(link, { sats: 1 })).then(() => null, (e) => e);
@@ -266,7 +266,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     P.sheet.length = 0;
     // set once the tap has begun: the card arriving is what clears what it was told before
     const left = await W.cardSession('Hold the card', (link) => { tapped.leaveAfter(3); return W.cardLook(link); }).then(() => null, (e) => e);
-    ok(left && left.card === 'gone' && /error: The card was taken away too soon/.test(P.sheet.join(' | ')), 'a card taken away mid-tap is said so', P.sheet.join(' | '));
+    ok(left && left.card === 'gone' && /error: Card taken away too soon\./.test(P.sheet.join(' | ')), 'a card taken away mid-tap is said so', P.sheet.join(' | '));
     P.nfc = null;
     ok((await why(W.cardSession('Hold the card', (link) => W.cardLook(link)))) === 'cancelled', 'a sheet dismissed with no card is a tap that was not made');
     P.nfc = 'off';

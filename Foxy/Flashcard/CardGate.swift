@@ -130,7 +130,7 @@ enum CardGate {
 
     /// What the phone's sheet says from the moment a card has connected until
     /// the page says something else.
-    static let scanning = "Scanning. Hold still."
+    static let scanning = "Reading the card"
 
     /// The stages the phone reports to the page as a session goes on.
     static let stages: Set<String> = ["connected", "say", "end", "lost"]

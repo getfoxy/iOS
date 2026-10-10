@@ -753,7 +753,7 @@
      *   2. the PIN, and the card signs for the pieces chosen. From here the
      *      card has marked them spent;
      *   3. the signed pieces are written down (TAKEN), and the card is let go
-     *      (its sheet ends, "Done. Remove the card."): its part is over. Foxy's
+     *      (its sheet ends, "Done."): its part is over. Foxy's
      *      own screen goes on saying it is checking with the mint;
      *   4. the pieces are swapped at the mint by the ordinary receive, with no
      *      question first (the swap refuses spent pieces itself), which is where
@@ -1009,7 +1009,7 @@
         release: function (line) {
           if (link.released) return Promise.resolve();
           link.released = true;
-          return bridgeAsk('cardEnd', { text: String(line || 'Done. Remove the card.') }, 5000).then(function () {}, function () {});
+          return bridgeAsk('cardEnd', { text: String(line || 'Done.') }, 5000).then(function () {}, function () {});
         },
         /* The card left part way through: the sheet stays up and looks for it
          * again (`cardAgain`). Resolves when a card is there. Rejects
@@ -1017,7 +1017,7 @@
          * `unsupported` from a phone whose native side has no such step. */
         again: function (line) {
           if (link.released) return Promise.reject(cardError('cancelled', 'The card was not tapped.'));
-          return bridgeAsk('cardAgain', { text: String(line || 'Hold the card here again') }, 63000).then(function () {
+          return bridgeAsk('cardAgain', { text: String(line || 'Tap behind the phone.') }, 63000).then(function () {
             // a card back in the field is powered up afresh: it has not been told the time this time (its key, if the same card, is proved still)
             // and it has signed nothing in it (`cardPaid`: a second payment in one time in the field waits)
             link.one.told = false; link.one.key = ''; link.one.paid = 0;
@@ -1040,7 +1040,7 @@
          * failed (a refused payment's pieces put back on the card), and the
          * sheet ends saying so, not in red. */
         if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
-        var say = (e && e.card === 'gone') ? 'The card was taken away too soon' : String((e && e.message) || 'That did not work').slice(0, 90);
+        var say = (e && e.card === 'gone') ? 'Card taken away too soon.' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
       };
       var tries = 0;
@@ -1053,7 +1053,7 @@
         return Promise.resolve().then(function () { return fn(link); }).then(function (r) {
           if (link.released) return r;
           // `link.doneText`: what the sheet ends with, where `fn` has more to say than "done" (the change back on the card)
-          return bridgeAsk('cardEnd', { text: String(link.doneText || 'Done. Remove the card.') }, 5000).then(function () { return r; }, function () { return r; });
+          return bridgeAsk('cardEnd', { text: String(link.doneText || 'Done.') }, 5000).then(function () { return r; }, function () { return r; });
         }, function (e) {
           // the sheet was ended when the card was let go, and has nothing to say about what came after
           if (link.released) throw e;
@@ -1071,7 +1071,7 @@
           });
         });
       };
-      return bridgeAsk('cardBegin', { text: String(text || 'Hold the card to the top of the phone') }, 63000).then(run, function (e) {
+      return bridgeAsk('cardBegin', { text: String(text || 'Tap behind the phone.') }, 63000).then(run, function (e) {
         var why = String((e && e.message) || '');
         if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');
