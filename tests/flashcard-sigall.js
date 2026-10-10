@@ -639,7 +639,7 @@ async function world(feePpk, sats, make) {
        'on the till’s screens: 700 sats paid with one signature and no card to press', (await bal(U.R)) + ', ' + titles.join());
     ok(U.R.sheet.filter((x) => /^begin:/.test(x)).length === 1 && U.R.sheet.filter((x) => /^again:/.test(x)).length === 0 && U.R.sheet.filter((x) => /^end:/.test(x)).length === 1,
        'one sheet and one tap: the card is not asked for again', U.R.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / '));
-    ok(U.R.sheet.indexOf('end:  ') >= 0 && U.R.sheet.every((x) => !/Verifying|Keep this open|Remove the card|for the rest|for your change/.test(x)),
+    ok(U.R.sheet.indexOf('end:  ') >= 0 && U.R.sheet.every((x) => !/Verifying the payment|Remove the card|for your change/.test(x)),
        'the sheet closes with no words on it: nothing about removing the card, and nothing of change, since none is coming', JSON.stringify(U.R.sheet.filter((x) => /^(end|say):/.test(x))));
     ok(U.R.trace.indexOf('end') >= 0 && U.R.trace.indexOf('end') < U.R.trace.lastIndexOf('mint /v1/swap'),
        'and it closes as soon as the card has signed, before the mint is asked: the wait for the mint is on Foxy’s own screen');
@@ -683,9 +683,9 @@ async function world(feePpk, sats, make) {
     const which = uiCard(holder);
     ok(which && which.title === 'CHANGE LIMIT' && /straight away/.test(which.reason), 'CHANGE LIMIT says what the per tap limit is now: the most it pays straight away', which && which.reason);
     which.press('PER TAP LIMIT');
-    ok(/change or no change/.test(uiCard(holder).reason) && /three buzzes/.test(uiCard(holder).reason)
+    ok(/change or no change/.test(uiCard(holder).reason) && /the sheet says when change is coming/.test(uiCard(holder).reason)
        && /about 5 seconds, and 2 seconds more for every limit’s worth beyond that/.test(uiCard(holder).reason) && /Lift the card and the payment stops/.test(uiCard(holder).reason),
-       'and its warning says a payment goes straight away, change or no change, that three buzzes say change is coming, that one over the limit waits about 5 seconds and 2 more for every limit’s worth beyond that, and that lifting the card stops it');
+       'and its warning says a payment goes straight away, change or no change, that the sheet says when change is coming, that one over the limit waits about 5 seconds and 2 more for every limit’s worth beyond that, and that lifting the card stops it');
     uiCard(holder).press('CONTINUE');
     holder.state.amount = '0.50';
     holder.state.unit = 'USD';
@@ -1334,8 +1334,8 @@ async function world(feePpk, sats, make) {
       atSend = { swap: swaps(OC.R)[0] || null, owed: owedRows(OC.R).length };
       return null;
     };
-    const steps = [], told = [];
-    const paid = await OC.R.W.cardPay(OC.card, { sats: 1000, pin: '1234', on: (s, info) => { steps.push(s); told.push(info); } });
+    const steps = [];
+    const paid = await OC.R.W.cardPay(OC.card, { sats: 1000, pin: '1234', on: (s) => steps.push(s) });
     OC.R.fate = null;
     const order = OC.card.sent.map((a) => a.slice(2, 4)).filter((i) => /^(22|23|26|24)$/.test(i)).join(' ');
     const k = count(OC.card, '26');
@@ -1378,9 +1378,7 @@ async function world(feePpk, sats, make) {
     const e = history(OC.R).filter((x) => x.hash === paid.hash)[0] || {};
     ok(e.sats === 1000 && e.feeSats === 0 && e.grossSats === 1000 + got && e.changeSats === got && e.changeState === 'not handed',
        'its entry says 1,000 kept, no fee, and the change owed back to the card, not as the mint’s fee', JSON.stringify({ sats: e.sats, fee: e.feeSats, gross: e.grossSats, change: e.changeSats, state: e.changeState }));
-    // (the card is let go as it signs, with change or none; the screen is told that change is coming, which is what the three buzzes are for)
-    ok(paid.change.written === false && steps.indexOf('checking') >= 0 && !!told[steps.indexOf('checking')] && told[steps.indexOf('checking')].change === true,
-       'the card is let go once it has signed and the screen is told that change is coming; the change waits for the second tap, as for change made here', JSON.stringify(paid.change));
+    ok(paid.change.written === false && steps.indexOf('checking') >= 0, 'the sheet is kept for the change tap, as for change made here', JSON.stringify(paid.change));
     ok((await bal(OC.R)) === 1000 && OC.H.mint.issuedSats() - OC.H.mint.takenSats() === (await bal(OC.R)) + (await bal(OC.H)) + OC.card.balance() + got + 0,
        'the books: every sat is in the till, the holder, the card, or signed for the card and waiting', String(OC.H.mint.issuedSats() - OC.H.mint.takenSats()));
 
@@ -1929,10 +1927,8 @@ async function world(feePpk, sats, make) {
   /* ---- 27: at a till: the change a piece at a time, and three buzzes ---------------------------
    * The card makes each piece of its change in about half a second over NFC, and the sheet said nothing between the pieces
    * being named and the wait, which with seven pieces was four seconds of silence: now it says which piece, of how many.
-   * The sheet closes the moment the card has signed, change or no change, so the first tap takes the same time either way.
-   * When change is coming back to the card the phone buzzes three times as the sheet closes, so that whoever holds the card
-   * knows a second tap is coming (a second sheet comes up by itself once the change is made); a payment with no change gets
-   * the single quiet tap it always got. */
+   * And when the card has signed with change coming back to it in this sheet, the phone buzzes three times so that whoever
+   * holds the card knows a second tap is coming; a payment with no change gets the single quiet tap it always got. */
   {
     const UB = await world(0, 9000);
     await binaryLoad(UB.H, UB.card, 4096);
@@ -1941,7 +1937,7 @@ async function world(feePpk, sats, make) {
     const text0 = till.fcProgressText.bind(till);
     till.fcProgressText = (p) => { const t = text0(p); if (t) lines.push(t); return t; };
     const felt = [];
-    till.haptic = (kind, silent) => felt.push({ kind, silent: !!silent, ended: UB.R.sheet.some((x) => /^end:/.test(x)), at: UB.R.sheet.length, signed: UB.card.sent.some((a) => a.slice(0, 4) === 'b024') });
+    till.haptic = (kind, silent) => felt.push({ kind, silent: !!silent, ended: UB.R.sheet.some((x) => /^end:/.test(x)), signed: UB.card.sent.some((a) => a.slice(0, 4) === 'b024') });
     till.wantedSats = () => 1631;
     UB.R.nfc = UB.card;
     UB.R.sheet.length = 0;
@@ -1963,21 +1959,10 @@ async function world(feePpk, sats, make) {
     ok(order[0] >= 0 && order[1] > order[0] && order[2] > order[1], 'after "Signing", before anything else', JSON.stringify(order));
     const buzz = felt.filter((f) => f.kind !== 'light');
     const threes = buzz.filter((f) => f.kind === 'triple');
-    // the first sheet is over once the card has signed; the second is the change tap's, which comes up by itself after the mint has answered
-    const firstEnd = UB.R.sheet.findIndex((x) => /^end:/.test(x));
-    const secondBegin = UB.R.sheet.findIndex((x, i) => i > firstEnd && /^begin:/.test(x));
-    ok(threes.length === 1 && threes[0].silent === true && threes[0].signed === true && threes[0].ended === true && threes[0].at > firstEnd && threes[0].at <= secondBegin
-       && !buzz.some((f) => f.kind === 'tap') && buzz[0].kind === 'triple',
-       'the page asks for the three buzzes once, as the sheet closes (the card has signed and the sheet has ended, and the second sheet has not begun), first of all, and for no single tap beside them',
-       JSON.stringify(buzz.map((f) => f.kind + (f.silent ? ' (silent)' : '') + (f.ended ? ' [sheet ended]' : '') + ' @' + f.at)) + ', first end ' + firstEnd + ', second begin ' + secondBegin);
-    ok(buzz.map((f) => f.kind).join() === 'triple,success,success',
-       'then the payment’s own buzz when it is paid, and once more when the change is back on the card', JSON.stringify(buzz.map((f) => f.kind)));
-    const two = UB.R.sheet.filter((x) => /^(begin|again|end|error):/.test(x));
-    ok(UB.card.balance() === 2465 && UB.R.W.cardOwed().length === 0 && secondBegin > firstEnd && two.filter((x) => /^begin:/.test(x)).length === 2
-       && two.filter((x) => /^again:/.test(x)).length === 0 && two.filter((x) => /^error:/.test(x)).length === 0
-       && UB.R.sheet[firstEnd] === 'end:  ' && UB.R.sheet[UB.R.sheet.length - 1] === 'end: Done. Remove the card.' && UB.R.sheet.filter((x) => /^end:/.test(x)).length === 2,
-       'and the change is written back in a second sheet of its own, which asks for the card itself: two sheets, each ended once, the first with no words',
-       'the card has ' + UB.card.balance() + '; ' + two.join(' / '));
+    ok(threes.length === 1 && threes[0].silent === true && threes[0].signed === true && threes[0].ended === false && !buzz.some((f) => f.kind === 'tap') && buzz[buzz.length - 1].kind === 'success',
+       'the page asks for the three buzzes once, as the card has signed and its sheet is kept for the change, and for no single tap beside them; the payment’s own buzz comes when it is paid',
+       JSON.stringify(buzz.map((f) => f.kind + (f.silent ? ' (silent)' : '') + (f.ended ? ' [sheet ended]' : ''))));
+    ok(UB.card.balance() === 2465 && UB.R.W.cardOwed().length === 0, 'and the change is written back in the same sheet', 'the card has ' + UB.card.balance());
 
     // a payment with no change: no three buzzes; the quiet tap it always had
     const UC = await world(0, 9000);

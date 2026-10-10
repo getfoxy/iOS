@@ -9056,7 +9056,7 @@
    * How many depends on the card's software. From 1.13 (`info.shaped`), so that
    * whoever holds it can feel that a payment was over the limit (`cardWaitSigns`):
    * nothing within the limit, change or no change (that change is coming is this
-   * phone's to say, with three buzzes, and not the card's); seven signatures, about
+   * phone's to say, in words on its sheet, and not the card's); seven signatures, about
    * five seconds, for the first limit's worth over it; three, two seconds, for
    * every limit's worth after that; the change the card made (about half a second
    * of its work a piece) counted toward them as work done, for what it cost: from
@@ -13386,13 +13386,13 @@
       /* The card has done its part, and the mint's work takes as long as Tor
        * does: it is let go now, and the person is told so, and the rest is
        * done with Foxy's own screen saying so (`cardLetGo`). */
-      // whether anything is coming back to the card: its change, or a payment held for another amount
+      // whether anything is coming back to the card in this sheet: its change, or a payment held for another amount
       var changeComing = row.over > 0 || row.cardChange > 0 || !!letGoAfter;
       return cardLetGo(link, o, changeComing).then(function () {
         released = !o.hold;
-        if (!o.hold) console.log('[foxy] card: let go ' + (Date.now() - signedAt) + ' ms after it signed' + (changeComing ? ' (change is coming: a second sheet asks for the card once it is made)' : ''));
-        /* `change`: something is coming back to the card, so its holder is told the second tap is on its way
-         * (26f-flashcard.js: three buzzes) as the sheet closes. */
+        if (!o.hold) console.log('[foxy] card: let go ' + (Date.now() - signedAt) + ' ms after it signed' + (changeComing ? ' (its sheet is kept for the change)' : ''));
+        /* `change`: something is coming back to the card in this sheet, so its holder is told the second tap is on its way
+         * (26f-flashcard.js: three buzzes), as the sheet is kept open for it. */
         on(released ? 'checking' : 'mint', { hash: row.id, change: changeComing });
         return cardSwapTaken(row, false);
       }).then(function (got) {
@@ -13535,37 +13535,41 @@
   }
 
   /* The card's part is over: it has signed, and nothing more is asked of it.
-   * Its sheet is ended at once, with the phone's own tick and nothing on it to
-   * read, and the mint, which takes as long as it takes, is asked with the
-   * card gone. Change or no change: the first tap takes the same time either
-   * way, a payment with change coming is told apart by feel (the phone being
-   * paid buzzes three times, 26f-flashcard.js `fcChangeBuzz`), and its second
-   * sheet comes up by itself once the mint has answered and the change is made
-   * (`fcReceiveNow`): two taps, each plainly its own. The sheet was once kept
-   * up through the mint's answer so that the change could go back in it, since
-   * a second sheet opened on the heels of the first was refused by iOS; the
-   * mint's answer now lies between the two, and the phone's side opens a
-   * refused sheet again a moment later (CardLink.swift). A line that said the
-   * card could be removed was one more thing to read on a sheet that had
-   * nothing left to do: a single space is the least a sheet can be told, and
-   * Foxy's own screen says the rest. Not for a flow that goes on to speak to
-   * the card again (`o.hold`: a renewal writes to it, a move reads it last),
-   * and nothing is sent to a link that has no way to let go (a test's bare
-   * model: it is simply not spoken to again). Resolves when the sheet has been
-   * told.
-   *
-   * `o.keepSheet` is the owner's own tap: taking part of a card off, the rest
-   * goes back onto it in the same sheet once the mint has answered
-   * (26f-flashcard.js `fcChangeInSheet`), so the sheet stays up and says so;
-   * with nothing coming back (`more` false) it goes at once as a payment's
-   * does. */
+   * Its sheet is ended ("Done. Remove the card.") and the mint, which takes
+   * as long as it takes, is asked with the card gone. Not for a flow that
+   * goes on to speak to the card again (`o.hold`: a renewal writes to it, a move
+   * reads it last), and nothing is sent to a link that has no way to let go
+   * (a test's bare model: it is simply not spoken to again). Resolves
+   * when the sheet has been told. */
   function cardLetGo(link, o, more) {
-    if (o.hold || !link || typeof link.release !== 'function') return Promise.resolve();
-    if (o.keepSheet && more !== false && typeof link.say === 'function') {
-      var line = 'Verifying. Keep this open: the rest goes back on the card.';
+    if (o.hold || !link) return Promise.resolve();
+    /* `o.keepSheet`: the card may go, and the sheet stays up, for the tap that
+     * takes its change back in the same sheet once the mint has answered
+     * (26f-flashcard.js, fcChangeInSheet). A second sheet opened for that tap
+     * was refused by iOS as often as not. What it says asks for the sheet to
+     * be left open: "Remove the card" beside the sheet's own Cancel read as
+     * finished, the sheet was closed, and the change had no sheet to go in. */
+    /* Paid in pieces that come to exactly the price (`more` false: which a
+     * card that signs once for a payment mostly is), there is no change to
+     * keep the sheet open for. The card's part is over, and its sheet goes at
+     * once, with nothing on it to read: a line that said the card could be
+     * removed was one more thing to read on a sheet that had nothing left to
+     * do. The phone's own tick is all it shows as it closes (a single space
+     * is the least a sheet can be told), and Foxy's own screen says the rest. */
+    if (o.keepSheet && more === false && typeof link.release === 'function') {
+      return Promise.resolve().then(function () { return link.release(' '); }).then(function () {}, function () {});
+    }
+    if (o.keepSheet && typeof link.say === 'function') {
+      /* "Paid" first: the card has signed, and the payment is made as far as
+       * the card is concerned; what follows is the change going on. The phone
+       * asks for three buzzes at this moment too (26f-flashcard.js,
+       * `fcChangeBuzz`), but iOS plays no haptic of an app's while its own
+       * sheet is up, so these words are what says it. */
+      var line = 'Paid. Keep the card here for your change.';
       return Promise.resolve().then(function () { return link.say(line); }).then(function () {}, function () {});
     }
-    return Promise.resolve().then(function () { return link.release(' '); }).then(function () {}, function () {});
+    if (typeof link.release !== 'function') return Promise.resolve();
+    return Promise.resolve().then(function () { return link.release(); }).then(function () {}, function () {});
   }
 
   /* Pieces a card signed for a payment that was not made, on their way back

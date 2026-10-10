@@ -25,11 +25,10 @@
    * Three things here are not this app's to draw. The sheet that slides up
    * while the phone looks for a card is the phone's own, and one line of text
    * on it is ours (`link.say`). The page behind it cannot be touched while it
-   * is up. And a card is let go as soon as it has signed: its sheet ends at
-   * once with the phone's own tick and nothing to read, and a screen of ours
-   * says that the mint is being asked for as long as that takes (the card's
-   * part is seconds; the mint's is as long as Tor). Change goes back at a
-   * second sheet that comes up by itself once it is made.
+   * is up. And a card is let go as soon as it has signed: its sheet ends with
+   * "Done. Remove the card.", and a screen of ours says that the mint is being
+   * asked for as long as that takes (the card's part is seconds; the mint's is
+   * as long as Tor).
    *
    * A card's PIN is not Foxy's PIN. It is typed on the same pad because that
    * is the pad a person already knows; it is held in a variable for the length
@@ -190,11 +189,11 @@
          * (this screen is not the sheet, which iOS ends after a minute), and what
          * is said under the heading is what a person who has taken the card away
          * needs to hear. */
-        /* The card has signed and something is coming back to it (`info.change`: its change, or a payment held for another
-         * amount): the phone buzzes three times, so that whoever holds the card knows that a second tap is coming. For a
-         * payment that is as the sheet closes, and the change's sheet comes up by itself once it is made (`fcReceiveNow`);
-         * for the owner's partial withdrawal the one sheet stays up for the rest (`fcChangeInSheet`). Nothing else in the
-         * app buzzes three times. */
+        /* The card has signed and something is coming back to it in this sheet (`info.change`: its change, or a payment held
+         * for another amount): the page asks for three buzzes, so that whoever holds the card would know a second tap is
+         * coming. iOS plays no haptic of an app's while its own sheet is up, so they are not felt today; the sheet's words
+         * ("Paid. Keep the card here for your change.", 08a-flashcard.js `cardLetGo`) are what says it. Nothing else in the
+         * app asks for three. */
         if ((step === 'checking' || step === 'mint') && info && info.change) this.fcChangeBuzz();
         if (step === 'checking') {
           clearTimeout(this._stageT);
@@ -266,7 +265,9 @@
   }
 
   /* Three buzzes, 0.15 s apart (Foxy/Bridge/FoxyBridge.swift, "triple"), silent: change is coming back to the card, so
-   * there is a second tap to make. The page asks for them as the card is let go. */
+   * there is a second tap to make. The page asks for them as the card is let go. Not felt while the phone's own NFC
+   * sheet is up, which it is at that moment: iOS keeps its haptics to itself under its sheet. Kept for the day it does
+   * not, and for a sheet that is already down. */
   fcChangeBuzz() {
     this.haptic && this.haptic('triple', true);
   }
@@ -773,11 +774,8 @@
                    if (!felt && (step === 'checking' || step === 'mint')) { felt = true; if (!(info && info.change)) this.haptic && this.haptic('tap', true); }
                    on(step, info);
                  };
-                 /* The sheet closes the moment the card has signed, change or no change, so the first tap takes the same
-                  * time either way; the change goes back at a second tap in a sheet of its own (`fcReceiveNow`, below).
-                  * It once stayed up for the change to go back in it, since a second sheet opened on the heels of the
-                  * first was refused by iOS; the mint's answer now lies between the two. */
-                 return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted });
+                 return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
+                   .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
         this.haptic && this.haptic('success');
@@ -786,21 +784,22 @@
         if (r && r.trusted) { this.fcTrusted(r); return; }
         const ch = r && r.change;
         const receiving = !!(ch && !ch.written && !ch.unmade && ch.sats > 0);
-        // no change to take (paid exactly, or too small, or not made): the confirmation is not held for it
-        if (!receiving) this.fcReleaseConfirm('no change to take');
+        // the change went back in the same sheet: the payment is whole, and its PAYMENT RECEIVED goes up now
+        if (ch && ch.written && ch.sats > 0) this.fcReleaseConfirm('the change is back on the card');
+        // no change to take after all (too small, or not made): the confirmation is not held for it
+        else if (!receiving) this.fcReleaseConfirm('no change to take');
         this.fcMoved(opt);
-        /* Made: the second tap's sheet comes up by itself, once iOS has taken
-         * the first down, with TAP TO CONFIRM up from now until it is over, so
-         * the till is never looking at its home screen between a payment and
-         * its change, and the holder, who felt the three buzzes, sees the sheet
-         * come back for the card. */
-        if (receiving) this.fcReceiveNow(ch.sats, sats, { pin });
+        /* Made, and not written back in that sheet (it was dismissed, or the
+         * phone's minute ran out): the second tap is asked for at once, with
+         * TAP TO CONFIRM up from now until it is over, so the till is never
+         * looking at its home screen between a payment and its change. */
+        if (receiving) this.fcReceiveNow(ch.sats, sats);
         // not made: this phone tries again when it connects, and says so
         if (ch && ch.unmade && ch.sats > 0) this.fcChangeLater(ch.sats, sats);
         /* A payment of this card's held for another amount was let go as this
          * one finished: its pieces go back on at the same second tap. */
         const back = r && r.letGo && r.letGo.made ? Math.round(Number(r.letGo.sats) || 0) : 0;
-        if (back > 0 && !(ch && !ch.written && !ch.unmade && ch.sats > 0)) this.fcReceiveNow(back, sats, { pin });
+        if (back > 0 && !(ch && !ch.written && !ch.unmade && ch.sats > 0)) this.fcReceiveNow(back, sats);
         // a piece the card signed as it was taken away, whose answer never came: said, quietly
         if (r && r.torn > 0) this.toast(this.fcSats(r.torn) + ' the card signed as it was taken away never reached this phone.', true);
       }, (e) => {
@@ -948,10 +947,7 @@
         this.fcReleaseConfirm('nothing is waiting for the card');
         return;
       }
-      /* `payPin`: the PIN typed for the payment this change belongs to. The card takes the one tap after a payment
-       * with no PIN; a card pulled away part way through that tap has used it up and wants its PIN for the rest, and
-       * it is given the payment's, as every tap of the one payment is, so nobody types it twice (`fcWriteRun`). */
-      this.fcWriteRun('', { change: true, receive: !putBack, paid: p, sats: n, payPin: (o && o.pin) || '',
+      this.fcWriteRun('', { change: true, receive: !putBack, paid: p, sats: n,
                             sheet: putBack ? 'Hold the card here to put back what it signed' : '' });
     }, 2500);
   }
@@ -1039,24 +1035,16 @@
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
     const looks = opt.receive ? this.fcReceiveLook(Math.round(Number(opt.paid) || 0), Math.round(Number(opt.sats) || 0)) : {};
-    // some of it went on in this sheet before the card left (`e.wrote`): the card that comes back wanting a PIN is the one the rest belongs to
-    let partWay = false;
     this.fcTap({ amount: looks.amount || (opt.sats ? this.stageMoney(opt.sats) : ''), look: looks.look || '', lost: !!opt.lost,
                  sheet: opt.sheet || (opt.receive ? 'Hold the card here again for its change' : ''),
                  // what went on stays on: the same sheet asks for the card again for the rest
-                 again: (e) => { if (e && e.card === 'gone' && e.wrote > 0) partWay = true; return (e && e.card === 'gone') ? 'Hold the card here again for the rest' : ''; } },
+                 again: (e) => (e && e.card === 'gone') ? 'Hold the card here again for the rest' : '' },
                (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap
              * after a payment after all: the PIN is what writes then. */
             (e) => ((opt.owner && e && e.card === 'not-owner') || (opt.change && e && e.card === 'pin-needed'))
-              /* The tap after a payment, used up by a card pulled away part way through it (`partWay`: some of the change
-               * went on in this sheet, so this is the card the change belongs to): the rest is written with the payment's
-               * own PIN (`payPin`, from `fcReceiveNow`) in a sheet of its own, and no pad comes up. A card that wants a PIN
-               * before anything went on may be another card altogether, and is not sent this payment's PIN to try. */
-              ? ((opt.change && opt.payPin && e && e.card === 'pin-needed' && partWay)
-                ? this.fcWriteRun(opt.payPin, Object.assign({}, opt, { owner: false, change: false, payPin: '', sheet: 'Hold the card here again for the rest' }))
-                : this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false })))
+              ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false }))
               : (e && e.card === 'cancelled')
                 ? this.fcStillWaiting(opt)
                 /* The card left after some pieces went on: the sheet again by
@@ -1071,18 +1059,16 @@
                   : (this.fcReleaseConfirm('the change tap failed'), this.fcFailed(e, { again: () => this.fcWriteAsk(opt) })));
   }
 
-  /* The owner's own tap, taking part of a card off: the rest goes back on in
-   * the same sheet.
+  /* RECEIVE in the same sheet as SEND.
    *
    * The card has signed and may be taken away; the sheet stayed up saying so
-   * (`keepSheet`, 08a-flashcard.js) while the mint answered and the rest was
-   * made into pieces for the card. Now the same sheet asks for the card again
-   * and puts them on, with no PIN, and ends saying so. (A till's payment is
-   * not done this way: its sheet closes the moment the card has signed, and
-   * the change goes back in a sheet of its own, `fcPayRun`, `fcReceiveNow`.)
-   * Never throws: whatever is not done here (the sheet dismissed, or timed out
-   * at iOS's minute, or a card that wants its PIN) is left on the result
-   * unwritten, and the screen takes it from there. */
+   * (`keepSheet`, 08a-flashcard.js) while the mint answered and the change was
+   * made. Now the same sheet asks for the card again and puts the change on,
+   * with no PIN, and ends saying the change is back. A second sheet opened for
+   * this was refused by iOS as often as not, and the person was left a card to
+   * press. Never throws: whatever is not done here (the sheet dismissed, or
+   * timed out at iOS's minute, or a card that wants its PIN) is left on the
+   * result unwritten, and the screen takes it from there. */
   fcChangeInSheet(link, on, progress, r, pin) {
     const W = this.fcW();
     const ch = r && r.change;
@@ -1094,26 +1080,58 @@
     const lost = () => { if (this._fcTapO) this._fcTapO.lost = true; };
     /* With no PIN, as the card allows the one tap after a payment. A card that
      * left part way through has used that tap up, and wants its PIN for the
-     * rest: it is given the one typed for this tap, and nobody is asked for it
-     * twice. */
+     * rest: it is given the one typed for this payment, as every tap of the
+     * one payment is (`fcResumeNow`), and nobody is asked for it twice. */
     const put = (withPin) => W.cardWrite(link, withPin ? { pin, progress } : { change: true, progress })
       .then(null, (e) => { if (!withPin && pin && e && e.card === 'pin-needed') return put(true); throw e; });
     const ask = (line) => link.again(line).then(() => {
       on('writing');
       return put(false).then((w) => {
-        if (w && w.left > 0 && w.sats > 0 && tries < 3) { tries += 1; lost(); return once('Hold the card here again for the rest'); }
-        // written when nothing made for this tap is still owed to a card
+        if (w && w.left > 0 && w.sats > 0 && tries < 3) { tries += 1; lost(); return once('Hold the card here again for the rest of its change'); }
+        // written when nothing made for this payment is still owed to a card
         const still = ((W.cardOwed && W.cardOwed()) || []).some((x) => x && r && x.forHash === r.hash);
         ch.written = !!(w && !(w.left > 0) && !still);
-        if (ch.written) link.doneText = 'Done. ' + this.fcSats(ch.sats) + ' is back on the card.';
+        if (ch.written) link.doneText = 'Done. ' + this.fcSats(ch.sats) + ' of change is back on the card.';
         return r;
       }, (e) => {
         // taken away while it was written: what went on stays on, and the same sheet asks again
-        if (e && e.card === 'gone' && tries < 3) { tries += 1; lost(); return once('Hold the card here again for the rest'); }
+        if (e && e.card === 'gone' && tries < 3) { tries += 1; lost(); return once('Hold the card here again for its change'); }
         return r;
       });
     }, () => r);
-    return once('Tap the card again for the rest');
+    return once('Tap the card again for its change');
+  }
+
+  /* The mint refused a payment after the card had signed, with the sheet still
+   * up (`keepSheet`): what is still good goes back on the card in the same
+   * sheet, and the payment's failure is said once it is back. Always rejects
+   * with the payment's own error; `putBackDone` says it went back, and
+   * `sheetText` ends the sheet calmly. */
+  fcPutBackInSheet(link, on, progress, e, pin) {
+    const W = this.fcW();
+    if (!W || !e || e.card !== 'putback' || !(e.owed > 0) || !link || link.released || typeof link.again !== 'function') return Promise.reject(e);
+    let tries = 0;
+    // the same ground as a payment's second tap, saying what this one is for
+    if (this._fcTapO) this._fcTapO.putBack = true;
+    const once = (line) => { this.fcStage('receive'); return ask(line); };
+    // with the payment's own PIN where the card has used up its tap without one (`fcChangeInSheet`)
+    const put = (withPin) => W.cardWrite(link, withPin ? { pin, progress } : { change: true, progress })
+      .then(null, (x) => { if (!withPin && pin && x && x.card === 'pin-needed') return put(true); throw x; });
+    const ask = (line) => link.again(line).then(() => {
+      on('writing');
+      return put(false).then((w) => {
+        if (w && w.left > 0 && w.sats > 0 && tries < 3) { tries += 1; return once('Hold the card here again for the rest'); }
+        if (w && w.back > 0 && !(w.left > 0)) {
+          e.putBackDone = w.back;
+          e.sheetText = 'The payment did not go through. ' + this.fcSats(w.back) + ' is back on the card.';
+        }
+        throw e;
+      }, (x) => {
+        if (x && x.card === 'gone' && tries < 3) { tries += 1; return once('Hold the card here again'); }
+        throw e;
+      });
+    }, () => { throw e; });
+    return once('The payment did not go through. Tap the card to put it back');
   }
 
   /* A card payment's PAYMENT RECEIVED (announcePayment, 12-receive.js) waits
@@ -1750,7 +1768,7 @@
     this.blockedCard('fc-limit-warn', tap ? {
       tone: 'warn', title: 'SET PER TAP LIMIT',
       reason: (this.fcShaped()
-        ? 'A per tap limit is the most this card pays in one tap straight away, change or no change: three buzzes on the phone being paid say that change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
+        ? 'A per tap limit is the most this card pays in one tap straight away, change or no change: the sheet says when change is coming. Over the limit, the card has to be held about 5 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Lift the card and the payment stops, with nothing taken.\n\n'
         : 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
