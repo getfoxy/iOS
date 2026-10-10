@@ -99,11 +99,14 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
 
 1. MENU, then FLASHCARD. It goes straight to Apple's sheet, with no screen of
    Foxy's first. Hold a new card to the top of the phone.
-2. The card's screen reads `This card is new. Give it a PIN to put money on it.`
+2. The card's screen reads `This card is new. Set it up to put money on it.`
    Press **SET UP THIS CARD**.
 3. **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN**. The PIN pad
-   is the lock screen's.
-4. One tap writes the PIN, then the card's record (this phone's mint, and for
+   is the lock screen's. On a card of software 1.16 and on, **NO PIN** is under
+   the button: it takes the pad down and goes straight to the tap, with nothing
+   more to answer. A card of an earlier software is offered no such button, since it
+   cannot be without a PIN.
+4. One tap writes the PIN (none, after NO PIN), then the card's record (this phone's mint, and for
    a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 5. Home, with a line: `The card is set up.` Nothing is read between the PIN
@@ -115,7 +118,8 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    card's money is gone.
 
 No limit is asked for and none is suggested. A new card has none. From software 1.16 the PIN
-may be left out (*No PIN, and the no-PIN allowance*, below): the tap then writes the record and the owner only.
+may be left out with NO PIN (*No PIN, and the no-PIN allowance*, below): the tap then writes the record and the owner only,
+and the card is cash to whoever holds it from that moment. Nothing at set-up says so; ADD PIN's first pad does (below).
 
 A card with no owner is open while it is empty, because there is nothing on it
 to protect, and it cannot be loaded. A card with an owner is its owner's, empty
@@ -185,7 +189,30 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
   covering it) is marked by the card, and `card.log.last[n].noPin` is true. A payment on a card that has no PIN is not
   marked: it has no PIN to be without.
 - **Change.** The tap after such a payment writes the change back with no PIN, by the note the card makes that it has paid,
-  as it does after any payment. A card with no PIN is loaded by its owner's grant or in that tap, and by nobody else; the same goes for freeing its used places and for reading its log and receipts.
+  as it does after any payment. A card with no PIN is loaded by whoever holds it, as it is spent by whoever holds it; the same goes for freeing its used places and for reading its log and receipts. What stays the owner's is the limits, ADD PIN, the mint and the lock.
+
+- **The screens.** All of them are the app's own, reused: the PIN pad (with a second button for NO PIN), `blockedCard`
+  dialogs (with `pills` for a third pill-shaped button), the SET AMOUNT keypad and the confirmation shell, and a toast for
+  a one-line outcome.
+  - *ADD PIN* stands where CHANGE PIN stands, on a card that is set up and has no PIN (`fc.setUp && !fc.pinSet`). Its first
+    pad is CHOOSE A PIN, with the line `A card with no PIN is cash to whoever holds it. Four to eight digits.`, then TYPE IT
+    AGAIN, then one tap, and the toast `PIN added. Every payment asks for it until you set a no-PIN limit.` A phone that is
+    not the owner is told NOT THIS PHONE'S CARD before a pad is raised.
+  - *NO PIN LIMIT* is the third button of CHANGE CARD LIMITS, shown only on a card that has a PIN. Its three steps are the
+    daily limit's: the warning SET NO PIN LIMIT (`A no PIN limit is the most this card will pay in one day without its PIN.
+    Over it, the PIN is asked for the whole payment. Only payments made without the PIN count against it. Anyone holding the
+    card can spend this much a day without the PIN.`, then who can change it, then CONTINUE or CANCEL); the amount, in dollars first,
+    `What is the most this card should pay in a day without its PIN?`, with NO LIMIT under NEXT, which is none, 0, and then
+    every payment asks for the PIN; and the confirmation, `YOU ARE APPLYING A NO PIN LIMIT OF:` or `YOU ARE REMOVING THIS
+    CARD'S NO PIN LIMIT.` with `Every payment will ask for the PIN.` One tap, no PIN, and the toast `No PIN limit set.` or
+    `No PIN limit removed.` Typed in dollars, it is kept at them (`cardNoPinUsd`). Nothing about it is shown on a card with no
+    PIN, which cannot have one.
+  - *The card's screen* says `NO PIN UP TO $10` in the line under the balance when it is the only limit, and in a line of its
+    own, `NO PIN UP TO $10 · LEFT TODAY $4`, beside the daily limit's and the limit on one tap's.
+  - *The log* says `no PIN` at the end of the line for a tap in which the card signed under the allowance.
+  - *Every flow that asked a card for its PIN* asks a card that has none nothing: WITHDRAW, renewing, moving to another mint,
+    adding funds from a phone that is not the owner's, and the recut that a per tap limit can need.
+  - *At a till*, *Paying at a till*, below.
 
 ## Adding money
 
@@ -271,14 +298,22 @@ if it has no room for the load: take some money off it first.
 
 On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
 
-(For a card of software 1.16 the tap comes first and the PIN is asked only if the card wants it: step 1 below is skipped,
-the card is read, and a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap. Otherwise
-the sheet ends, saying the card's PIN is wanted, the PIN is typed, and a second tap pays with it. *No PIN, and the no-PIN
-allowance*, above. A card of an earlier software keeps the order below.)
+**The tap comes first, and the PIN is asked only if the card wants it.** CARD brings up the sheet and the tap at once, with
+no pad before it. The card is read; a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap
+and the payment goes on from step 3 as below. Otherwise the sheet ends with `Enter the card's PIN` (a note, not red;
+nothing was signed or taken), and the pad comes up: **CARD PIN**, `To pay $0.43 (₿500). The card's owner types its PIN
+here.`, with the button **TAP AGAIN**, grey until four digits are in. Back from it is the invoice. TAP AGAIN begins the second
+tap, which pays with the PIN, as the rest of this section describes. The card's own answer decides: if the read said
+the allowance would cover it and the card says `6A94` at the signature, the sheet ends the same way and the same pad comes
+up. A wrong PIN comes back to the same pad, with TRY AGAIN, as it always did. *No PIN, and the no-PIN allowance*, above.
 
-1. **CARD PIN**, titled with what is to be paid: `To pay $0.43 (₿500). The
-   card's owner types its PIN here.` The button reads `PAY $0.43` and stays grey
-   until four digits are in.
+A card of an earlier software always wants its PIN, and the phone cannot tell it from one that does not before it is tapped, so
+it too is tapped first and ends that tap asking: one tap more than it used to take. (The refusals that need no PIN, a payment
+over a limit, more than the card holds, a mint that is not this one, no connection and the price a card cannot make
+exactly, are said in that first tap, with no pad.)
+
+1. **CARD PIN**, for a card that wants one: the pad above. In the order below, step 2 is the first tap
+   for a card that needs no PIN, and the second for one that does.
 2. Apple's sheet asks for the card. The card is read in a few commands: its
    state and key, its record, and its pieces three to a page (`GET_PIECES`; an
    older applet is read the old way). A till does not ask the card to prove its
@@ -389,6 +424,7 @@ or two buttons. The ones a payment can end in:
 | Result | Says |
 |---|---|
 | the paid confirmation | the usual one; the entry is marked as a card's |
+| (the sheet ends `Enter the card's PIN`) | the card wants its PIN for this payment; the pad comes up, and TAP AGAIN pays with it |
 | WRONG PIN | the tries left, and that nothing was taken; TRY AGAIN |
 | CARD BLOCKED | too many wrong PINs; the card pays again when its owner sets a new PIN on it |
 | NOT ENOUGH ON THE CARD | what it holds |
@@ -850,10 +886,12 @@ The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
 
-**CHANGE LIMIT** on the card's screen first asks which of the card's two limits,
+**CHANGE LIMIT** on the card's screen first asks which of the card's limits,
 under CHANGE CARD LIMITS: `Which limit would you like to add or change?`, with
-**PER TAP LIMIT** and **DAILY LIMIT**, each a button, and CANCEL (*The limit on
-one tap*, below; a card whose software has only the daily limit is not asked).
+**PER TAP LIMIT**, **DAILY LIMIT** and, on a card that has a PIN (software 1.16
+and on), **NO PIN LIMIT**, each a button, and CANCEL (*The limit on
+one tap*, below; a card whose software has only the daily limit is not asked;
+the third is *No PIN, and the no-PIN allowance*, above).
 Each has three steps and then a tap. The daily limit's:
 
 1. A full-screen warning, SET DAILY LIMIT: `A daily limit is the most this card
@@ -1070,11 +1108,15 @@ them with the log.
 
 ## Change PIN, withdraw, and a blocked card
 
+On a card that has no PIN (software 1.16 and on) the button reads **ADD PIN**: two pads, `CHOOSE A PIN`, with a line that a
+card with no PIN is cash to whoever holds it, and `TYPE IT AGAIN`, then a tap, and a toast. *No PIN, and the no-PIN
+allowance*, above. The rest of this section is for a card that has one.
+
 **CHANGE PIN** takes two pads, `NEW PIN` and `NEW PIN AGAIN`, and a tap. The old
 PIN is not asked, because the owner's phone does not know it; the card takes the
 owner's proof in its place. It ends at `PIN CHANGED`.
 
-**WITHDRAW** is an amount, or `ALL OF IT`, the PIN, and a tap. The card is let go
+**WITHDRAW** is an amount, or `ALL OF IT`, the PIN (not on a card that has none), and a tap. The card is let go
 the moment it has signed, as at a till, and is not read again afterwards: it ends
 at **IN YOUR WALLET**, and the card's screen goes away, so that the next tap shows
 the card as it is. (A move to another mint, and a renewal, hold the card.)

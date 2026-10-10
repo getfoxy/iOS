@@ -200,6 +200,11 @@ async function world(pin, o) {
     card.tap();
     const added = await H.W.cardAdd(card, { sats: 300, owner: true });
     ok(added.card.balance > 0, 'its owner tops it up with the grant', String(added.card.balance));
+    // and so does anyone: a card with no PIN is anyone's to fill, as it is anyone's to spend
+    card.tap();
+    const before = card.balance();
+    const topped = await R.W.cardAdd(card, { sats: 100 });
+    ok(topped.card.balance >= before + 100 && card.balance() >= before + 100, 'another phone tops it up with no PIN and no grant', String(card.balance()));
     card.tap();
     const hb = await bal(H);
     const off = await H.W.cardWithdraw(card, {});

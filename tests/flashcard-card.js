@@ -370,7 +370,7 @@ function makeCard(opts) {
     // 1.16: a card with no PIN is written (its record) by whoever holds it until it has an owner, as a PIN's own writes are; and it is loaded by its owner's grant, or the tap after a payment
     const strictWrite = () => s.pinState === 1 && s.verified;      // requirePinSetAndVerified (the pre-owner limit, the lock)
     const mayWrite = () => strictWrite() || (NOPIN && s.pinState === 0 && !s.owner);   // the record of a card with no owner: requirePinIfSet
-    const mayLoad = () => (s.pinState === 1 && (s.verified || s.grant || s.changeGrant)) || (NOPIN && s.pinState === 0 && (s.grant || s.changeGrant));   // requireLoadAuthority
+    const mayLoad = () => (s.pinState === 1 && (s.verified || s.grant || s.changeGrant)) || (NOPIN && s.pinState === 0);   // requireLoadAuthority: a card with no PIN is loaded by whoever holds it
     // 1.16: SPEND_ALL_BEGIN, _OUTPUTS and _CHANGE ask for no PIN of a card that has one, blocked or not: its signature is where the PIN or the allowance is looked at
     const gatedBegin = () => !NOPIN && s.pinState !== 0 && !s.verified;
 
@@ -416,7 +416,6 @@ function makeCard(opts) {
         if (QUICK && p1 === 1) {
           // the receipts: the count of every payment signed, then up to three, newest first, from P2 back. The owner's grant and nothing less
           if (s.pinState !== 0 && !s.grant) return '6982';
-          if (NOPIN && s.pinState === 0 && s.owner && !s.grant) return '6982';
           const n = s.receipts.count, kept = n < 16 ? n : 16, last = (((n & 0xff) - 1) & 15);
           let said = u32(n);
           for (let k = p2; k < kept && k < p2 + 3; k++) {
@@ -427,7 +426,6 @@ function makeCard(opts) {
         }
         if (QUICK && p1 !== 0) return '6a86';
         if (s.pinState !== 0 && !s.verified && !s.grant) return '6982';
-        if (NOPIN && s.pinState === 0 && s.owner && !s.grant) return '6982';
         const held = s.log.taps < 8 ? s.log.taps : 8;
         const newest = (((s.log.taps & 0xff) - 1) & 7);
         let out = u32(s.log.taps) + u32(s.log.sats) + u32(s.log.refused) + u32(s.log.tampers);
@@ -734,8 +732,7 @@ function makeCard(opts) {
       case 0x31: {
         if (s.locked) return '6986';
         if (s.pinState !== 0 && !s.verified && !s.grant && !s.changeGrant) return '6982';
-        // 1.16: a card with no PIN that has an owner is the owner's (or the tap after a payment) to free
-        if (NOPIN && s.pinState === 0 && s.owner && !s.grant && !s.changeGrant) return '6982';
+        // 1.16: a card with no PIN is freed by whoever holds it, as it is loaded
         let freed = 0;
         s.slots.forEach((x) => { if (x.status === 2) { x.status = 0; x.data = ''; freed += 1; } });
         return ('0' + freed.toString(16)).slice(-2) + '9000';

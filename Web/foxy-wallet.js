@@ -24066,8 +24066,8 @@
       var o = opts || {};
       var pin = '';
       var pinGiven = !(o.pin === undefined || o.pin === null || o.pin === '');
-      /* No PIN given is a card with none (software 1.16): found out below, once the card is read, and written to by its owner's
-       * grant as `owner: true` does. A card that has a PIN is refused as before, for want of one. */
+      /* No PIN given is a card with none (software 1.16): found out below, once the card is read, and written to by whoever
+       * holds it, as the card takes it: no PIN and no grant. A card that has a PIN is refused as before, for want of one. */
       if (!o.owner && !o.change && pinGiven) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var t = cardTalk(link);
       var wrote;
@@ -24082,16 +24082,15 @@
       var how = { short: true };
       return cardLook(link, how).then(function (card) {
         if (card.info.pin === 'blocked') throw cardRefused('6983');
-        if (!o.owner && !o.change && !pin) {
-          if (card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
-          asOwner = true;
-        }
+        if (!o.owner && !o.change && !pin && card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
         if (asOwner && !card.info.owner) throw cardRefused('6a90');
         // not the tap after a payment after all (a read came between, say): the PIN is what writes
         if (o.change && !o.owner && !card.info.changeDue) throw cardRefused('6982');
         // what was found for this card is asked of the mint before any of it is written
         return cardOwedPrune(card).then(null, function () { return 0; }).then(function () {
           if (o.change && !o.owner) return null;
+          // a card with no PIN (1.16) is written by whoever holds it: nothing to give
+          if (!asOwner && !pin) return null;
           if (!asOwner) return cardVerify(t, card, pin);
           return cardGrant(t, card.key).then(function (yes) {
             if (!yes) throw cardRefused('6a91');
