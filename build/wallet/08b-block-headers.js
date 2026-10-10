@@ -12,8 +12,11 @@
    *
    * This phone's part is to bring the card the newest header it can get. It asks two block
    * explorers, mempool.space and Blockstream, each at its onion address (no exit can turn an onion
-   * away, and neither learns where this phone is), each on a circuit of its own, and keeps the
-   * newest header that passes what is checked below. A tap uses what is kept and never waits for
+   * away, and neither learns where this phone is), each on a circuit of its own; when neither onion
+   * gave a header it could use (a fresh Tor can take longer to reach an onion service than the ask
+   * allows), it asks the same two by their ordinary names through a Tor exit, as the price falls
+   * back from mempool's onion to the clearnet; and it keeps the newest header that passes what is
+   * checked below. A tap uses what is kept and never waits for
    * the fetch (`cardClock`, 08a-flashcard.js): the fetch happens when Tor comes up, when the app
    * comes back to the front and when a card is tapped, if the one kept is older than ten minutes
    * and the phone is online, and never more than once a minute after a failure. There is no timer
@@ -42,6 +45,15 @@
   var HEADER_SOURCES = [
     { name: 'mempool.space', url: 'http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion' },
     { name: 'blockstream.info', url: 'http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion' },
+  ];
+  /* The same two by their ordinary addresses, asked through a Tor exit only when neither onion answered: a fresh
+   * Tor can take longer to reach an onion service than the ask allows, and the price feed's walk found the same
+   * (its onion first, then the clearnet). The header is public and the card checks its work itself, so where it
+   * came from changes nothing about trust; an exit learns that this phone asked for the newest block, as it does
+   * for the price. */
+  var HEADER_SOURCES_EXIT = [
+    { name: 'mempool.space (exit)', url: 'https://mempool.space' },
+    { name: 'blockstream.info (exit)', url: 'https://blockstream.info' },
   ];
   // a kept header is refreshed when it is older than this (when it was fetched, not when its block was made)
   var HEADER_FRESH_MS = 10 * 60 * 1000;
@@ -154,28 +166,43 @@
   /* Ask both sources and decide. Resolves { kept, fetched, why }: `kept` what this phone has now, `fetched` whether
    * it changed (a header newer than the one before, or the same one seen again), `why` in words. Never rejects. */
   function headerFetch() {
-    var labels = HEADER_SOURCES.map(function () { return newCircuitLabel(); });
     var began = Date.now();
-    return Promise.all(HEADER_SOURCES.map(function (src, i) {
-      return headerAsk(src, labels[i]).then(function (got) { return { name: src.name, got: got, why: '' }; },
-                                            function (e) { return { name: src.name, got: null, why: String((e && e.message) || e) }; });
-    })).then(function (results) {
-      var nowSec = Math.floor(Date.now() / 1000);
-      var usable = [], notes = [];
+    var nowSec = function () { return Math.floor(Date.now() / 1000); };
+    // one wave of sources, asked together, each on a circuit of its own: what each gave, or why not
+    var wave = function (sources) {
+      var labels = sources.map(function () { return newCircuitLabel(); });
+      return Promise.all(sources.map(function (src, i) {
+        return headerAsk(src, labels[i]).then(function (got) { return { name: src.name, got: got, why: '' }; },
+                                              function (e) { return { name: src.name, got: null, why: String((e && e.message) || e) }; });
+      }));
+    };
+    var notes = [];
+    var sift = function (results) {
+      var usable = [];
+      var at = nowSec();
       results.forEach(function (r) {
         if (!r.got) { notes.push(r.name + ': ' + r.why); return; }
-        var problem = headerProblem(r.got.header, nowSec);
+        var problem = headerProblem(r.got.header, at);
         if (problem) { notes.push(r.name + ': ' + problem); return; }
         usable.push(r.got);
       });
+      return usable;
+    };
+    return wave(HEADER_SOURCES).then(function (results) {
+      var usable = sift(results);
+      if (usable.length) return usable;
+      // neither onion answered with a header this phone could use: the same two by their ordinary addresses, through an exit
+      return wave(HEADER_SOURCES_EXIT).then(sift);
+    }).then(function (usable) {
       var before = headerKept();
       var say = function (words) { console.log('[foxy] card clock: ' + words + ' (' + (Date.now() - began) + ' ms)'); };
       if (!usable.length) {
         say('no block header could be used: ' + notes.join('; '));
         return { kept: before, fetched: false, why: 'none' };
       }
-      if (usable.length === 2 && usable[0].tip !== usable[1].tip) {
-        say('the two sources name different tips (' + headerShort(usable[0].tip) + ', ' + headerShort(usable[1].tip) + '); nothing is kept');
+      var tips = usable.map(function (u) { return u.tip; }).filter(function (t, i, a) { return a.indexOf(t) === i; });
+      if (tips.length > 1) {
+        say('the sources name different tips (' + tips.map(headerShort).join(', ') + '); nothing is kept');
         return { kept: before, fetched: false, why: 'disagree' };
       }
       var chosen = usable[0].header;
@@ -188,8 +215,8 @@
       }
       var rec = { hex: chosen.hex, time: chosen.time, hash: chosen.hash, at: Date.now() };
       save(CARD_HEADER, rec);
-      if (usable.length === 2) say('block ' + headerShort(chosen.hash) + ' (time ' + chosen.time + ') is the tip of both sources');
-      return { kept: headerKept(), fetched: true, why: usable.length === 2 ? 'agree' : 'one' };
+      if (usable.length >= 2) say('block ' + headerShort(chosen.hash) + ' (time ' + chosen.time + ') is the tip of ' + usable.map(function (u) { return u.source; }).join(' and '));
+      return { kept: headerKept(), fetched: true, why: usable.length >= 2 ? 'agree' : 'one' };
     });
   }
 

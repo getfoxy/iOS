@@ -10,7 +10,9 @@ const { makeCard } = require('./flashcard-card');
  * (`W.headerRefresh`). What they answer is `ctx.explorer(host, path)`: the answer's text with its status before it ('200\n...'),
  * a promise of one, or nothing at all for a source that does not answer. They are not the mint: their requests are in
  * `ctx.explored` and in neither `ctx.trace` nor `ctx.circuits`. */
-const EXPLORERS = { mempool: 'mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion', blockstream: 'explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion' };
+const EXPLORERS = { mempool: 'mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion', blockstream: 'explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion',
+  // the same two by their ordinary names, which the page asks through a Tor exit only when neither onion gave a header
+  mempoolExit: 'mempool.space', blockstreamExit: 'blockstream.info' };
 
 const MINT = 'https://m.test';
 // a second mint, for a card that is moved from one to another (`page({ second: true })`)
@@ -152,13 +154,18 @@ function mineHeader(time, bits, o) {
 }
 /* A header's hash as Bitcoin shows it. */
 const hashOfHeader = (hex) => Buffer.from(sha256d(Buffer.from(hex, 'hex'))).reverse().toString('hex');
-/* The explorers of a page answering as the network's tip is this header: both of them, or `only` ('mempool' or 'blockstream'). A
- * source that is left out does not answer. `lie` is a header a source gives for the tip it names instead of the real one. */
+/* The explorers of a page answering as the network's tip is this header: both of them, or `only` ('mempool' or 'blockstream': an operator,
+ * whose onion and ordinary name answer alike). A source that is left out does not answer. `lie` is a header a source gives for the tip it
+ * names instead of the real one. `onions: 'down'` is onions that do not answer, `onions: 'hang'` ones that never do; `exits: 'down'` is
+ * ordinary names that do not answer. */
 function tipIs(ctx, hex, o) {
   const opts = o || {};
   const tip = hashOfHeader(hex);
   ctx.explorer = (host, path) => {
-    const who = host === EXPLORERS.mempool ? 'mempool' : 'blockstream';
+    const exit = host === EXPLORERS.mempoolExit || host === EXPLORERS.blockstreamExit;
+    const who = (host === EXPLORERS.mempool || host === EXPLORERS.mempoolExit) ? 'mempool' : 'blockstream';
+    if (exit ? opts.exits === 'down' : opts.onions === 'down') return null;
+    if (!exit && opts.onions === 'hang') return new Promise(() => {});
     if (opts.only && opts.only !== who) return null;
     const mine = opts.per && opts.per[who];
     if (/^\/api\/blocks\/tip\/hash$/.test(path)) return '200\n' + (mine ? hashOfHeader(mine) : tip);

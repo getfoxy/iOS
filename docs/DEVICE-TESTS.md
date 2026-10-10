@@ -312,9 +312,11 @@ sudo tcpdump -r foxy-fresh.pcap -n -A 2>/dev/null | grep -o "[a-z0-9.-]*\.\(cash
 ```
 
 **Pass:** the only hostnames looked up are Apple's. No mint host, no price
-host, and in particular **no `mempool.space`** — the first price source is now
-a `.onion`, which is resolved inside Tor and can never appear in a DNS query or
-a TLS SNI. Everything else is TCP to a handful of relay addresses. The reader
+host, and in particular **no `mempool.space`** and **no `blockstream.info`** —
+the first price source is now a `.onion`, which is resolved inside Tor and can
+never appear in a DNS query or a TLS SNI, and the block explorers a card's clock
+comes from are asked at their onions first and by their ordinary names only
+through a Tor exit, where those names are resolved: never on this network. Everything else is TCP to a handful of relay addresses. The reader
 invents hostnames at volume (see test 4), so believe the two tcpdump lines over
 its verdict.
 
@@ -1844,7 +1846,10 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
    newer than the card's. Come back online: the next tap shows the card the
    newest header, and `CLOCK` moves.
 5. **One source down.** If one of the two explorers is unreachable, the log says
-   only the other was used, and the card's clock moves all the same.
+   only the other was used, and the card's clock moves all the same. With
+   neither onion answering (common in the first minute after Tor comes up), the
+   `card clock` line names `mempool.space (exit)` or `blockstream.info (exit)`:
+   the same two, asked by their ordinary names through an exit.
 6. **The log.** Open the holder's log after a payment. **Pass:** each tap is
    shown at the second phone's time with the block's beside it, and COPY RECEIPTS
    has two time columns.

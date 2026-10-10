@@ -316,10 +316,11 @@ What bounds the bridge:
   the page could send what the page holds (its proofs and, before the seed left
   the page, the seed) to an address of its own over Tor, silently. Approved
   without asking: the five mints Foxy lists by default (two of them test mints),
-  the onion addresses of the two block explorers a card's clock is fetched from
-  (`HostApprovals.explorers`; the page asks them on its own, with nobody adding a
-  mint, and each only learns that some Tor client asked for the newest block of
-  the Bitcoin network, which is public),
+  the two block explorers a card's clock is fetched from, at their onion
+  addresses and, when neither onion answered, by their ordinary names through a
+  Tor exit (`HostApprovals.explorers`; the page asks them on its own, with nobody
+  adding a mint, and each only learns that some Tor client asked for the newest
+  block of the Bitcoin network, which is public),
   any host under one of those or under a host the person allowed (a
   lightning address's callback on its own subdomain), and the mints and contact
   domains a wallet already had the first time a version with approvals ran,

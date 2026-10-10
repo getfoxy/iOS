@@ -1073,7 +1073,13 @@ nothing answers `6A92` (never told the time) any more.
   the clock it had.
 - **Where the phone gets a header.** From two block explorers, mempool.space and
   Blockstream, each at its onion address, each on a circuit of its own, over Tor
-  (`build/wallet/08b-block-headers.js`). It keeps a header only when it is 80
+  (`build/wallet/08b-block-headers.js`). When neither onion gave a header the
+  phone could use (a fresh Tor can take longer to reach an onion service than
+  the 25 seconds allowed), the same two are asked by their ordinary names
+  through a Tor exit, as the price falls back from mempool's onion to clearnet
+  sources. A header's trust is its work, so where it came from changes nothing;
+  the exit learns what it learns from the price, that a Tor client asked for
+  the newest block. It keeps a header only when it is 80
   bytes of the block the source named as its tip, its hash is at or under its
   own target, its time is within three hours of the phone's clock, and the two
   sources name the same tip. With only one answering, or one failing those

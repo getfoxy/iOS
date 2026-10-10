@@ -1398,8 +1398,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
                     case .success(let answer):
                         self.resolve(id: id, text: "\(answer.status)\n" + answer.body, error: nil)
                     case .failure(let why):
-                        print("[foxy] onion request to", name, "failed:", why.text)
-                        self.resolve(id: id, text: nil, error: "\(name) could not be asked over Tor: \(why.text)")
+                        print("[foxy] onion request to", name, "failed:", why.serviceText)
+                        self.resolve(id: id, text: nil, error: "\(name) could not be asked over Tor: \(why.serviceText)")
                     }
                 }
             }

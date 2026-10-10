@@ -93,6 +93,9 @@ tunnel. Requests still go only to Foxy's Tor.
   onion, which has no name to look up and no server name to read: it should
   never appear in a capture at all, whatever the outcome.
 - any lightning-address host being paid
+- the block explorers a card's clock comes from: their onions have no name to
+  look up, and `mempool.space` and `blockstream.info`, asked only when neither
+  onion answered, are resolved at a Tor exit, never here
 
 Check both DNS and TLS server names. `check.torproject.org` belonged to the old
 gate's probe, so it should not appear in a Release build at all; a Debug-only

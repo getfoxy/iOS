@@ -662,7 +662,8 @@ enum HostApprovals {
         "mint.minibits.cash", "mint.westernbtc.com",
         "mint.macadamia.cash", "nofee.testnut.cashu.space", "testnut.cashu.space",
     ]
-    /// The two block explorers, by their onion addresses, that a card's clock is fetched from
+    /// The two block explorers a card's clock is fetched from, by their onion addresses and, when
+    /// neither onion answered, by their ordinary names through a Tor exit
     /// (build/wallet/08b-block-headers.js: mempool.space's and Blockstream's). The page asks them on its
     /// own, as Tor comes up or a card is tapped, with nobody adding a mint, so an alert for a host
     /// that nobody has heard of would be asked about for nothing, and a refusal would stop the clock.
@@ -671,6 +672,9 @@ enum HostApprovals {
     static let explorers: Set<String> = [
         "mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion",
         "explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion",
+        // the same two by their ordinary names, asked through an exit when neither onion answers
+        "mempool.space",
+        "blockstream.info",
     ]
     /// Hosts the person allowed in the alert. In earlier builds the carried
     /// hosts were added here too, and those still approve their subdomains:

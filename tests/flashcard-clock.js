@@ -310,7 +310,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     const circuits = Object.values(byHost);
     ok(circuits.length === 2 && circuits.every((s) => s.size === 1 && [...s][0].length === 32) && [...circuits[0]][0] !== [...circuits[1]][0],
        'each source on a circuit of its own, and both of its requests on that one', JSON.stringify(circuits.map((s) => [...s].map((x) => x.slice(0, 6)))));
-    ok(/block \w{8} \(time \d+\) is the tip of both sources/.test(last()), 'and the log says the two agreed', last());
+    ok(/block \w{8} \(time \d+\) is the tip of mempool\.space and blockstream\.info/.test(last()), 'and the log says the two agreed', last());
     ok(JSON.parse(F.storage.getItem('foxy.flashcard.header')).hex === h1, 'it is kept in storage, where a restart finds it');
     // the second fetch within ten minutes is not made
     fresh();
@@ -448,6 +448,76 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       r = await FW.headerRefresh();
       ok(r.fetched, 'a minute on it does (the one kept is old by then)');
     }
+    /* --- neither onion answered: the same two by their ordinary names, through an exit ------------------------------------- */
+    reset();
+    {
+      const viaExit = mineHeader(now() - 8, CHEAP);
+      tipIs(F, viaExit, { onions: 'down' });
+      r = await FW.headerRefresh();
+      const onions = F.explored.filter((x) => /\.onion$/.test(x.host));
+      const exits = F.explored.filter((x) => /^https:\/\/(mempool\.space|blockstream\.info)\/api\//.test(x.url));
+      ok(r.fetched && r.why === 'agree' && FW.headerKept().hex === viaExit && /is the tip of mempool\.space \(exit\) and blockstream\.info \(exit\)/.test(last()),
+         'with neither onion answering, the two ordinary addresses are asked and agree: the header is kept, and the log says it came through the exits', last());
+      ok(onions.length === 2 && exits.length === 4 && F.explored.length === 6 && exits.every((x) => x.method === 'GET'),
+         'the onions first (one request each, unanswered), then the ordinary addresses over https: four GETs',
+         F.explored.map((x) => x.host.slice(0, 10) + ' ' + x.path.replace(/[0-9a-f]{64}/, '<tip>')).join(', '));
+      const byHost = {};
+      F.explored.forEach((x) => { (byHost[x.host] = byHost[x.host] || new Set()).add(x.circuit); });
+      const labels = Object.values(byHost).map((c) => [...c][0]);
+      ok(Object.values(byHost).every((c) => c.size === 1) && new Set(labels).size === 4,
+         'each of the four on a circuit of its own: the ordinary addresses do not ride the onions’ circuits', JSON.stringify(labels.map((c) => c.slice(0, 6))));
+    }
+    // the onions hang: the ordinary addresses are asked when the onions’ time is up, not before
+    reset();
+    {
+      const late = mineHeader(now() - 6, CHEAP);
+      tipIs(F, late, { onions: 'hang' });
+      FW._headerAskMs = 150;
+      const began = Date.now();
+      r = await FW.headerRefresh();
+      const took = Date.now() - began;
+      FW._headerAskMs = 25000;
+      ok(r.fetched && r.why === 'agree' && FW.headerKept().hex === late && took >= 140 && took < 2000,
+         'onions that never answer are given up on after their time, and the ordinary addresses answer', took + ' ms, ' + r.why);
+    }
+    // neither onion, and one ordinary address: taken on its word alone, and the log names the three that gave nothing
+    reset();
+    {
+      const lone = mineHeader(now() - 4, CHEAP);
+      tipIs(F, lone, { onions: 'down', only: 'blockstream' });
+      r = await FW.headerRefresh();
+      ok(r.fetched && r.why === 'one' && FW.headerKept().hex === lone && /only blockstream\.info \(exit\) gave a header/.test(last())
+         && /mempool\.space: /.test(last()) && /blockstream\.info: /.test(last()) && /mempool\.space \(exit\): /.test(last()),
+         'neither onion and one ordinary address: it is taken on its word alone, and the log names the three that gave nothing', last());
+    }
+    // neither onion, and the ordinary addresses disagree
+    reset();
+    {
+      const p = mineHeader(now() - 9, CHEAP), q = mineHeader(now() - 7, CHEAP);
+      const was = FW.headerKept().hex;
+      tipIs(F, p, { onions: 'down', per: { mempool: p, blockstream: q } });
+      r = await FW.headerRefresh();
+      ok(!r.fetched && r.why === 'disagree' && FW.headerKept().hex === was && /different tips/.test(last()),
+         'neither onion, and the two ordinary addresses name different tips: nothing is kept', last());
+    }
+    // all four down
+    reset();
+    {
+      const was = FW.headerKept().hex;
+      tipIs(F, mineHeader(now() - 3, CHEAP), { onions: 'down', exits: 'down' });
+      r = await FW.headerRefresh();
+      ok(!r.fetched && r.why === 'none' && FW.headerKept().hex === was && (last().match(/appears to be offline/g) || []).length === 4,
+         'onions and ordinary addresses all down: nothing changes, and the log names each of the four', last());
+    }
+    // one onion answering is enough: no ordinary address is asked
+    reset();
+    {
+      tipIs(F, mineHeader(now() - 2, CHEAP), { only: 'mempool' });
+      r = await FW.headerRefresh();
+      ok(r.fetched && r.why === 'one' && F.explored.length === 3 && F.explored.every((x) => /\.onion$/.test(x.host)),
+         'one onion answering is enough: the ordinary addresses are not asked', F.explored.map((x) => x.host.slice(0, 12)).join(', '));
+    }
+
     // a request made while one is in flight shares it
     reset();
     {

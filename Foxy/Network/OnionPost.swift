@@ -33,6 +33,17 @@ enum OnionPost {
             case .broken: return "The connection to their phone broke."
             }
         }
+        /// The same for an onion that is a service, not a phone (a block explorer's).
+        var serviceText: String {
+            switch self {
+            case .notOnion: return "That is not an onion address."
+            case .noTor: return Route.refusal
+            case .unreachable: return "It could not be reached over Tor."
+            case .refusedBySocks: return "Tor refused the connection."
+            case .timedOut: return "It did not answer in time."
+            case .broken: return "The connection broke."
+            }
+        }
     }
 
     /// POST `body` to `url`. `done` on the main queue with the HTTP status and body.
