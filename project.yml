@@ -59,7 +59,7 @@ targets:
         # Unset is fine for the simulator and the tests, which sign nothing.
         DEVELOPMENT_TEAM: ${FOXY_DEVELOPMENT_TEAM}
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSCameraUsageDescription: Scanning mint and invoice QR codes.
         # Face ID unlocks Foxy and reads the seed from the keychain. Without this string
