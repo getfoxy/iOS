@@ -106,36 +106,6 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcVerified === 'Verified Just Now' && v.fcVerifiedShown === true, 'and under its title, that it is verified: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
-  {
-    /* One ADD FUNDS at a time, and CLOSE while the pieces are being made: a second start while the first was still
-     * preparing once put two sheets on one reader, and neither wrote. */
-    const W = holder.fcW();
-    const realPrepare = W.cardPrepare;
-    let release;
-    W.cardPrepare = (...a) => new Promise((go) => { release = go; }).then(() => realPrepare.apply(W, a));
-    c.tap();
-    holder.fcAdd();
-    keyIn(holder, 500);
-    ok(stage(H) === 'cardReady' && !!holder._fcAdding, 'ADD FUNDS shows GETTING IT READY while the pieces are made');
-    holder.fcAdd();
-    ok(holder.toasts.slice(-1)[0] === 'Still getting the last amount ready for the card.' && holder.state.screen === 'flashcard', 'a second ADD FUNDS meanwhile is refused in a line, and opens no keypad', holder.toasts.slice(-1)[0]);
-    H.window.document.querySelector('[data-stage-button]').click();
-    ok(stage(H) === '' && !!holder._fcAdding, 'CLOSE takes the screen down while the pieces are still being made');
-    H.sheet.length = 0;
-    release();
-    await until('the pieces to be made', () => !holder._fcAdding);
-    await settle();
-    ok(H.sheet.length === 0 && !card(holder) && /is ready for the card\. It goes on at the next tap\.$/.test(holder.toasts.slice(-1)[0]) && H.W.cardOwed().length > 0,
-       'made after CLOSE, they wait for the next tap, said in a line, and no sheet comes up by itself', holder.toasts.slice(-1)[0] + ' | sheets ' + H.sheet.length);
-    W.cardPrepare = realPrepare;
-    // the next tap writes them, as anything owed to a card is written
-    c.tap();
-    const wrote = await H.W.cardWrite(c, { owner: true });
-    ok(wrote && c.balance() === 500, 'and the next tap puts them on', String(c.balance()));
-    c.tap();
-    await H.W.cardWithdraw(c, { pin: '1234' });
-    holder.state.fc = Object.assign({}, holder.state.fc, { balance: 0 });
-  }
   c.tap();
   holder.fcAdd();
   ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'SATS' && holder.state.stack.slice(-1)[0] === 'flashcard',
@@ -601,6 +571,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'played out, it is the rule as a list: the ten-dollar example, four tiers with their seconds, and so on, then CANCEL and CONTINUE', y.all);
     y.press('CANCEL');
     ok(!explainer(holder) && holder.state.screen === 'flashcard' && holder._fcLimitDone === null, 'CANCEL takes it down and changes nothing');
+    // played through once on this phone, it opens on the list from then on
+    holder.fcSetLimit();
+    card(holder).press('PER TAP LIMIT');
+    ok(explainer(holder) && explainer(holder).done && explainer(holder).has('CONTINUE') && H.storage.getItem('foxy.flashcard.explained') === '1',
+       'opened again, it does not play: the list and its buttons are there at once');
+    explainer(holder).press('CANCEL');
   }
   holder.fcSetLimit();
   card(holder).press('PER TAP LIMIT');
@@ -1728,6 +1704,43 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   }
 
   failed += until.failed;
+  /* ---- one ADD FUNDS at a time ------------------------------------------------- */
+  {
+    /* One ADD FUNDS at a time, and CLOSE while the pieces are being made: a second start while the first was still
+     * preparing once put two sheets on one reader, and neither wrote. */
+    const W = holder.fcW();
+    const realPrepare = W.cardPrepare;
+    let release;
+    W.cardPrepare = (...a) => new Promise((go) => { release = go; }).then(() => realPrepare.apply(W, a));
+    // the first card again, read afresh as its owner, from home
+    H.nfc = c;
+    holder.setState({ screen: 'home', stack: [] });
+    holder.goFlashcard();
+    await until('the first card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.key === c.key && holder.state.fc.ownedHere === true);
+    await settle();
+    const before = c.balance();
+    c.tap();
+    holder.fcAdd();
+    ok(holder.state.screen === 'amount' && holder.state.flow === 'cardAdd', 'ADD FUNDS opens the keypad');
+    keyIn(holder, 500);
+    ok(stage(H) === 'cardReady' && !!holder._fcAdding, 'ADD FUNDS shows GETTING IT READY while the pieces are made');
+    holder.fcAdd();
+    ok(holder.toasts.slice(-1)[0] === 'Still getting the last amount ready for the card.' && holder.state.screen === 'flashcard', 'a second ADD FUNDS meanwhile is refused in a line, and opens no keypad', holder.toasts.slice(-1)[0]);
+    H.window.document.querySelector('[data-stage-button]').click();
+    ok(stage(H) === '' && !!holder._fcAdding, 'CLOSE takes the screen down while the pieces are still being made');
+    H.sheet.length = 0;
+    release();
+    await until('the pieces to be made', () => !holder._fcAdding);
+    await settle();
+    ok(H.sheet.length === 0 && !card(holder) && /is ready for the card\. It goes on at the next tap\.$/.test(holder.toasts.slice(-1)[0]) && H.W.cardOwed().length > 0,
+       'made after CLOSE, they wait for the next tap, said in a line, and no sheet comes up by itself', holder.toasts.slice(-1)[0] + ' | sheets ' + H.sheet.length);
+    W.cardPrepare = realPrepare;
+    // the next tap writes them, as anything owed to a card is written
+    c.tap();
+    const wrote = await H.W.cardWrite(c, { owner: true });
+    ok(wrote && c.balance() === before + 500, 'and the next tap puts them on', String(c.balance()));
+  }
+
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

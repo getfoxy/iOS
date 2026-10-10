@@ -20805,7 +20805,7 @@ class Component extends DCLogic {
    * two to five); they are the design's, not computed. A tap anywhere skips
    * the statement on the screen; once the list is whole, a tap on it plays
    * it again. A phone that asks for less motion is shown the whole list at
-   * once.
+   * once, and so is a phone that has seen it play through once.
    *
    * Plain DOM over the page, as the stage (26e-loaders.js) and the cards
    * (11-cards.js) are, with the app's two buttons under it: CANCEL in the
@@ -20814,6 +20814,8 @@ class Component extends DCLogic {
    * does anything until the list is whole. `this._fcExplainer` is the screen
    * for the suites: `finish()`, `play()`, `close()`, `done()`. */
   FC_EXPLAINER = { limit: 10, secs: ['2–5', '8', '10', '12'], speed: 1.4 };
+  // set once the screen has played through on this phone; a tap on the list plays it again
+  FC_EXPLAINED = 'foxy.flashcard.explained';
 
   fcTapLimitExplainer(o) {
     this.fcExplainerClose();
@@ -20910,6 +20912,8 @@ class Component extends DCLogic {
     const setSpot = (t, op, tr) => { spot.style.transition = tr; spot.style.transform = t; spot.style.opacity = String(op); };
     const finish = () => {
       clear(); done = true; phase = 'end';
+      // played once on this phone: from then on the screen opens on the list, with its buttons ready
+      try { localStorage.setItem(this.FC_EXPLAINED, '1'); } catch (e) {}
       rows.forEach((r) => { r.style.opacity = '1'; });
       spot.innerHTML = ''; spot.style.opacity = '0';
       btns.style.opacity = '1'; btns.style.pointerEvents = 'auto'; tap.style.pointerEvents = 'none';
@@ -20964,8 +20968,10 @@ class Component extends DCLogic {
     this._fcExplainer = { root, finish, play, close, done: () => done, step: () => step };
     let still = false;
     try { still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { still = false; }
-    if (still) finish(); else later(play, 400);
-    console.log('[foxy] card: how tap limit works' + (still ? ', shown whole' : ''));
+    let seen = false;
+    try { seen = localStorage.getItem(this.FC_EXPLAINED) === '1'; } catch (e) { seen = false; }
+    if (still || seen) finish(); else later(play, 400);
+    console.log('[foxy] card: how tap limit works' + (seen ? ', seen before: shown whole' : still ? ', shown whole' : ''));
   }
 
   /* The screen taken down, timers and all: before another, and by whoever
