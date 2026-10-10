@@ -144,7 +144,13 @@
               * that; and one payment a tap at full speed (`cardWaitSigns`). Its
               * change is cut plainly, in the powers of two the amount is made of
               * (`cardOwnChangeCut`). */
-             shaped: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 13)) };
+             shaped: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 13)),
+             /* `costed`: the change the card made counts toward that wait for what it
+              * cost, two signatures for every three pieces (software 1.14 and on; the
+              * version says so, as for `shaped`): a piece is about two thirds of a
+              * signature's work. Software 1.13 took one off for each piece, which was
+              * more than a piece costs (`cardWaitSigns`). */
+             costed: b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 14)) };
   }
 
   /* GET_CARD: format, set, unit, limit, refund key, time key, mint, and, from
@@ -252,12 +258,15 @@
    * nothing within the limit, change or no change (that change is coming is this
    * phone's to say, with three buzzes, and not the card's); seven signatures, about
    * five seconds, for the first limit's worth over it; three, two seconds, for
-   * every limit's worth after that; each piece of change the card made (about half
-   * a second of its work) counted as one of them done; and one payment a tap at
-   * full speed, a second one in the same time in the field waiting as one over the
-   * limit does, limit or no limit, unless the owner's grant is in the tap. The
-   * charge is what leaves the card for good: the pieces less the change the card
-   * makes for itself.
+   * every limit's worth after that; the change the card made (about half a second
+   * of its work a piece) counted toward them as work done, for what it cost: from
+   * 1.14 (`info.costed`) two signatures for every three pieces, a piece being about
+   * two thirds of a signature's work, where 1.13 took one off for each piece, which
+   * was more than a piece costs and let a till buy the wait down with pieces of a
+   * sat; and one payment a tap at full speed, a second one in the same time in the
+   * field waiting as one over the limit does, limit or no limit, unless the owner's
+   * grant is in the tap. The charge is what leaves the card for good: the pieces
+   * less the change the card makes for itself.
    *
    * Software 1.12 charged four signatures for every limit's worth of that, a part
    * counting as one, and four for a payment within the limit that made change
@@ -283,22 +292,26 @@
   var CARD_PACE_DRIFT = 0.02;
 
   /* What a payment waits under a limit of `limit` sats on one payment, in
-   * signatures of work, by the rule of software 1.13. `leaves` is what leaves the
+   * signatures of work, by the rule of software 1.13 and on. `leaves` is what leaves the
    * card for good (the pieces less the change the card makes for itself: the price
    * and the mint's fee on the pieces, and any part of the change not made by the
-   * card), `made` the pieces of change the card is asked to make, and `second`
+   * card), `made` the pieces of change the card is asked to make, `second`
    * that a payment has been signed already in this time in the field with no
-   * owner's grant in the tap (`cardPaid`).
+   * owner's grant in the tap (`cardPaid`), and `costed` that the card is of
+   * software 1.14 or later (`info.costed`), whose change counts for what it cost.
    *
    *     leaves <= limit + limit/32        0  (a limit set in dollars at one moment and a price in
    *                                           dollars at another lands a few sats over)
    *     otherwise              7 + 3 * (ceil(leaves / limit) - 2)
    *
-   * less one for each piece of change made, never below 0. A second payment is at
-   * least one limit's worth over, 7, with a limit or without one. */
-  function cardWaitSigns(limit, leaves, made, second) {
+   * less what the change made counts for, never below 0: two for every three pieces
+   * (floor(2 * made / 3)) on a card that is `costed`, one for each piece on the card of
+   * 1.13. A second payment is at least one limit's worth over, 7, with a limit or
+   * without one, and takes the same off. */
+  function cardWaitSigns(limit, leaves, made, second, costed) {
     var l = Math.round(Number(limit) || 0), n = Math.round(Number(leaves) || 0);
-    var done = Math.max(0, Math.round(Number(made) || 0));
+    var pieces = Math.max(0, Math.round(Number(made) || 0));
+    var done = costed ? Math.floor(2 * pieces / 3) : pieces;
     if (!(l > 0)) return second ? Math.max(0, CARD_WAIT_OVER - done) : 0;
     var units = n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
     if (second && units <= 1) units = 2;
@@ -306,7 +319,9 @@
     return Math.max(0, CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 2) - done);
   }
   /* The most limits' worth a payment can be of and still be waited for in no more
-   * than CARD_WAIT_MOST seconds (software 1.13), to say what can be taken. */
+   * than CARD_WAIT_MOST seconds (software 1.13 and on), to say what can be taken. It
+   * takes nothing off for change, so it is the same whatever the card counts that
+   * for (`costed`) and a part of that size is waited for no longer than that. */
   function cardWaitUnitsMost() {
     var units = 2;
     while (units < CARD_WAIT_UNITS && cardWaitSeconds(CARD_WAIT_OVER + CARD_WAIT_MORE * (units - 1)) <= CARD_WAIT_MOST) units += 1;
@@ -1845,6 +1860,8 @@
   function cardOwnChange(card) { return !!(card && card.info && card.info.ownChange); }
   // a card of software 1.13 or later: its wait is shaped (`cardWaitSigns`) and its change is cut plainly (`cardOwnChangeCut`)
   function cardIsShaped(card) { return !!(card && card.info && card.info.shaped); }
+  // a card of software 1.14 or later: the change it made counts toward its wait for what it cost, two for every three pieces (`cardWaitSigns`)
+  function cardIsCosted(card) { return !!(card && card.info && card.info.costed); }
 
   /* GET_CHANGE, the pages of it: the openings of the change the card has made
    * for itself and not yet been handed. Three to a page, each an amount (4), a
@@ -4260,6 +4277,8 @@
     var ownChange = false;
     // and one whose wait is shaped (1.13): nothing within the limit, and its change cut plainly in four pieces at the most
     var shaped = false;
+    // and one that counts the change it made toward that wait for what it cost (1.14): two for every three pieces, and not one for each
+    var costed = false;
     // a payment of this card's held from a tap cut short (`cardHeld`), and one held for another amount, let go after this one
     var held = null, heldProofs = [], heldWorth = 0, letGoAfter = null, tornSats = 0;
     on('reading');
@@ -4282,6 +4301,7 @@
       all4 = cardIsAll(card);
       ownChange = all4 && cardOwnChange(card) && !o.all && !offline;
       shaped = ownChange && cardIsShaped(card);
+      costed = shaped && cardIsCosted(card);
       /* A signature this phone asked this card for and never saw, had again
        * (`cardAskedBack`). A payment's is held as a payment the card left part
        * way through always was: this tap finishes it if it is for the same
@@ -4470,7 +4490,8 @@
        * From 1.13 a payment is counted by what leaves the card, the pieces less the
        * change it is asked to make (`cardOwnChangeCut`: the part of the change it
        * does not make leaves it as the price does), with that change counted toward
-       * it, and a second payment in this time in the field waits whether or not the
+       * it (two for every three pieces from 1.14, one for each before: `costed`),
+       * and a second payment in this time in the field waits whether or not the
        * limit is known (`cardPaid`): a till is not told the limit, and says what it
        * can. */
       var second = shaped && !lift && cardPaid(link, card);
@@ -4480,7 +4501,7 @@
           var back = worth - fee - want;
           var cut = back > 0 ? cardOwnChangeCut(w, card, groups[0] || [], back) : [];
           var madeBy = cut.reduce(function (n, a) { return n + a; }, 0);
-          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second);
+          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second, costed);
           unitsMost = cardWaitUnitsMost();
         } else {
           // 1.12: what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole

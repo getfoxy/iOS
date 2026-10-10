@@ -674,11 +674,18 @@ What it means for the holder:
   within it: a limit set in dollars at one moment and a price in dollars at
   another lands a few sats over). Over it the card does seven signatures of work,
   about five seconds, for the first limit's worth over the limit and three more,
-  about two seconds, for every limit's worth after that, whole or in part; each
-  piece of change the card made (about half a second of its work) counts as one
-  of them done, and none is below nothing; at most 255 limits' worth are counted.
-  That change is coming is the phone's to say and not the card's: see *Three
-  buzzes*, below. **Software 1.12** waited four signatures for every limit's
+  about two seconds, for every limit's worth after that, whole or in part. The
+  change the card made counts toward them as work done, for what it cost: **from
+  software 1.14** two waits off for every three pieces (a piece is about two thirds
+  of a signature's work, so one for one took off more than a piece cost), and none
+  is below nothing; at most 255 limits' worth are counted. A payment over the limit
+  takes about the same time in the hand with change as without, and what is felt
+  says how far over the limit it was; and asking for more pieces buys a terminal
+  nothing, since each costs the holder's hand what it takes off. (**Software
+  1.13** took one off for each piece, and a terminal could buy the wait down with
+  pieces of a sat: eight of them took eight off for less than six signatures of
+  work.) That change is coming is the phone's to say and not the card's: see
+  *Three buzzes*, below. **Software 1.12** waited four signatures for every limit's
   worth, three seconds, and for a payment within the limit that made change. While
   it waits the till's sheet says `Over the card's per tap limit. Keep holding`,
   and how long it has been; a card of 1.12 for its first limit's worth said `The
@@ -694,7 +701,8 @@ What it means for the holder:
   is the same time in the field; the card out of it and back is a new one. The
   change tap, a refund and any load are not payments. A till is not told the
   limit, but it knows what it has had the card sign in its sheet, so it says the
-  seven before the PIN is sent, with the change it will ask for taken off, and
+  seven before the PIN is sent, with what the change it will ask for counts for
+  taken off (two for every three pieces from 1.14, one for each before), and
   the screen says `A second payment in one tap. Keep holding`. The owner's phone,
   which gives the grant first and takes a whole card off in as many signatures as
   its pieces have dates, is not slowed. Nothing a till does in one sheet makes a
@@ -879,10 +887,13 @@ follows is the one a card has now.
   it signs, and nothing is taken until that is done. From software 1.13: nothing
   within the limit (change or no change); about five seconds, seven signatures,
   for the first limit's worth over it, and about two seconds, three, for every
-  limit's worth after that, less one for each piece of change the card made. The
-  till's screen says `Over the card's per tap limit. Keep holding` and how long it
-  has been; how long is left it cannot say, because the card does not tell it. The
-  limit's worth is of what leaves the card (*A card that makes its own change*).
+  limit's worth after that, less what the change the card made counts for: two
+  for every three pieces from 1.14, one for each piece in 1.13 (a piece is about
+  two thirds of a signature's work; one for one let a terminal shorten the wait
+  with pieces of a sat). The till's screen says `Over the card's per tap limit.
+  Keep holding` and how long it has been; how long is left it cannot say, because
+  the card does not tell it. The limit's worth is of what leaves the card (*A
+  card that makes its own change*).
   Software 1.12 waited four signatures, three seconds, for every limit's worth,
   ceil(what leaves / limit) of them, and for one when a payment within the limit
   made change. Before 1.12 the card waited by what its pieces come to, the first
@@ -913,7 +924,7 @@ follows is the one a card has now.
 - **A wait longer than a tap lasts is given up**: after forty seconds of "not
   yet" the till stops asking, with nothing signed, and says to take the
   payment in smaller parts (sixteen limits' worth is as much as a card of 1.13
-  waits that long for).
+  or later waits that long for).
 - **It is kept in dollars.** The card holds sats and has no price. A limit typed
   in dollars is kept as dollars on the phone that set it
   (`foxy.flashcard.pace`), and when that phone reads its own card and the price

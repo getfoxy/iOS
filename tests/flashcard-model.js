@@ -7,13 +7,16 @@
  * under jCardSim: every command it was sent and what it answered. It is the
  * card that signs once for a payment (format 4), has 128 places, burns a
  * payment of any number of pieces, takes its PIN sealed, makes its own change
- * (1.12) and waits only over its limit, one payment a tap at full speed (1.13).
- * The others are the same of the cards before it: -112 (which waited four
- * signatures to a limit's worth and for change within it), -111 (before it made
- * its own change), -110 (before its signing was made quicker), -19 (before the
- * design was in its record), -18 (no sealed PIN), -17 (its pieces burned inside
- * the payment's transaction), -16 (sixty-four places), and -3, which signs for
- * each piece (format 3). The model is held to all nine. The model in
+ * (1.12), waits only over its limit and one payment a tap at full speed (1.13),
+ * and counts the change it made toward that wait for what it cost, two waits
+ * for every three pieces (1.14).
+ * The others are the same of the cards before it: -113 (which took one wait off
+ * for each piece of change), -112 (which waited four signatures to a limit's
+ * worth and for change within it), -111 (before it made its own change), -110
+ * (before its signing was made quicker), -19 (before the design was in its
+ * record), -18 (no sealed PIN), -17 (its pieces burned inside the payment's
+ * transaction), -16 (sixty-four places), and -3, which signs for each piece
+ * (format 3). The model is held to all ten. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
@@ -182,6 +185,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const oneEach = await replay(read('flashcard-transcript-113.json'), 4, undefined, 13);
   const fourSigns = await replay(read('flashcard-transcript-112.json'), 4, undefined, 12);
   const quicker = await replay(read('flashcard-transcript-111.json'), 4, undefined, 11);
   const designed = await replay(read('flashcard-transcript-110.json'), 4, undefined, 10);
@@ -191,7 +195,7 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  const all = [now, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

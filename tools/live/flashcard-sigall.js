@@ -72,17 +72,22 @@ function applet(port) {
   });
 }
 
+/* What the change a card made counts for against its wait, in SIGN commands, by the card's software: `made` pieces. From 1.14
+ * (info.costed) two for every three, since a piece is about two thirds of a signature's work; in 1.13 one for each piece. */
+const changeCredit = (made, info) => (info.costed ? Math.floor(2 * made / 3) : made);
+
 /* The SIGN commands a payment waits before the signature under a limit on one payment, by the card's software: what leaves the card for
  * good (the pieces less the change it made for itself) and how many pieces of that change it made (`made`).
- *   1.13 (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven for the first limit's
- *        worth over it and three for each after, a part counting as one (255 at most), less one for each piece of change made.
+ *   1.13 and on (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven for the first
+ *        limit's worth over it and three for each after, a part counting as one (255 at most), less what the change made counts for
+ *        (`changeCredit`: one for each piece in 1.13, two for every three from 1.14).
  *   1.12 (info.ownChange): four for every limit's worth over the limit, a part counting as one, and four for a payment within it that
  *        made change.
  *   before: by the pieces whole, the first limit's worth free. */
 const waitsFor = (leaves, limit, made, info) => {
   if (info.shaped) {
     const units = leaves <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(leaves / limit));
-    return units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - made);
+    return units <= 1 ? 0 : Math.max(0, 7 + 3 * (units - 2) - changeCredit(made, info));
   }
   if (!info.ownChange) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
   return leaves > limit ? 4 * Math.ceil(leaves / limit) : (made > 0 ? 4 : 0);
@@ -173,10 +178,11 @@ async function at(mintKey, names, real) {
    * change it makes for itself, which is the price and the mint's fee on the
    * pieces). From 1.13 it signs at once within the limit, change or no change,
    * and over it does seven signatures of work for the first limit's worth over
-   * and three for each after, less one for each piece of change it made, a SIGN
-   * command each, and only then signs; 1.12 did four for every limit's worth, and
-   * for a payment within the limit that made change. The mint sees nothing of
-   * that: the one signature it is sent is the same kind as any other. */
+   * and three for each after, less what the change it made counts for (one for
+   * each piece in 1.13, two for every three from 1.14), a SIGN command each, and
+   * only then signs; 1.12 did four for every limit's worth, and for a payment
+   * within the limit that made change. The mint sees nothing of that: the one
+   * signature it is sent is the same kind as any other. */
   {
     await card.tap();
     await holder.W.cardSetLimit(card, { sats: 100, tap: true });
@@ -452,8 +458,10 @@ async function at(mintKey, names, real) {
          && sent.filter((a) => a.slice(0, 4) === 'b017' && a.substr(6, 2) === '00').length === 0, wrote.card.balance + ' on the card');
     }
     /* One payment a tap at full speed (software 1.13): the card makes a second payment signed in the same time in the field wait as one
-     * over the limit does, with a limit or none: seven signatures, less one for each piece of change it makes. A sheet of the phone
-     * remembers what it has had the card sign (`link.one.paid`; `card` here stands in for that link), and says so before the PIN is sent. */
+     * over the limit does, with a limit or none: seven signatures, less what the change it makes counts for (`changeCredit`: one for each
+     * piece on a card of 1.13, two for every three from 1.14, so four pieces of change leave 3 on the one and 5 on the other). A sheet of
+     * the phone remembers what it has had the card sign (`link.one.paid`; `card` here stands in for that link), and says so before the
+     * PIN is sent. */
     if (first.card.info.shaped) {
       card.one = {};
       await card.tap();
@@ -465,9 +473,11 @@ async function at(mintKey, names, real) {
       const p2 = await till.W.cardPay(card, { sats: 100, pin: PIN, progress: (p) => { if (p.step === 'waiting' && p.ahead) ahead.push(p); } });
       const w2 = signatures() - 1, m2 = madePieces();
       delete card.one;
-      ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits seven less its change, and the wallet said so before the PIN',
-         p1.sats === 100 && w1 === 0 && p2.sats === 100 && w2 === Math.max(0, 7 - m2) && (w2 === 0 ? ahead.length === 0 : (ahead.length === 1 && ahead[0].left === w2 && ahead[0].second === true)),
-         'first ' + w1 + ' waits, second ' + w2 + ' (' + m2 + ' pieces of change made by the card), said ' + JSON.stringify(ahead.map((p) => [p.left, p.second])));
+      // (the card of this software's rule for the change: 1.14 two waits off for every three pieces, 1.13 one for each)
+      const want2 = Math.max(0, 7 - changeCredit(m2, first.card.info));
+      ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits seven less what its change counts for (' + (first.card.info.costed ? 'two for every three pieces' : 'one for each piece') + '), and the wallet said so before the PIN',
+         p1.sats === 100 && w1 === 0 && p2.sats === 100 && w2 === want2 && (w2 === 0 ? ahead.length === 0 : (ahead.length === 1 && ahead[0].left === w2 && ahead[0].second === true)),
+         'first ' + w1 + ' waits, second ' + w2 + ' (7 less ' + changeCredit(m2, first.card.info) + ' for ' + m2 + ' pieces of change made by the card), said ' + JSON.stringify(ahead.map((p) => [p.left, p.second])));
       if (till.W.cardOwed().length) { await card.tap(); await till.W.cardWrite(card, { pin: PIN }); }
     }
     await card.tap();

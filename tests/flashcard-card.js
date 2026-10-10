@@ -50,7 +50,8 @@ function makeCard(opts) {
    * worth past the first of what the pieces come to; from 1.12 four to every one of what leaves the card; from 1.13 seven
    * for the first limit's worth over the limit and three for each after it, with nothing within it, and the change the card
    * made counted toward them (and one payment a tap at full speed: a second one in the same time in the field is slowed
-   * unless the owner's grant is in the tap). Nothing else is remembered from one payment to the next. */
+   * unless the owner's grant is in the tap); from 1.14 that change counted for what it cost, two for every three pieces
+   * where 1.13 took one off for each. Nothing else is remembered from one payment to the next. */
   /* And how many places it has. The card of format 4 has 128 (1.7), for a deep drawer of small pieces: a place's number
    * is seven bits of a listing's tag, and its short listing is P2 = 3, two bytes a piece. `places: 64` is the card before
    * it (1.6): sixty-four places, six-bit tags, and the brief listing (P2 = 1). */
@@ -71,14 +72,17 @@ function makeCard(opts) {
    * `software: 11` is that card before it made its own change (1.12): it knows neither SPEND_ALL_CHANGE nor GET_CHANGE, holds
    * the day's limit to the pieces whole as a payment begins, and works the wait out there. `software: 12` is the card that
    * makes its own change but waits four signatures to a limit's worth, and a payment within the limit that makes change waits
-   * one; the card with no `software` is the latest, 1.13, whose wait is shaped (`SHAPED`, `waitsFor`). */
+   * one; `software: 13` is the card whose wait is shaped (`SHAPED`, `waitsFor`) but takes one wait off for each piece of change
+   * it made; the card with no `software` is the latest, 1.14, whose change counts toward the wait for what it cost, two for
+   * every three pieces (`COSTED`). */
   const DESIGN = SEALED && o.software !== 9;
   const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
   const SHAPED = OWN_CHANGE && o.software !== 12;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? 13 : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const COSTED = SHAPED && o.software !== 13;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? 14 : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
-  // software 1.13: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
+  // software 1.13 and on: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
   const WAIT_OVER = 7, WAIT_MORE = 3, UNITS_MOST = 255;
   // the change a payment makes for itself (1.12): eight openings are kept, and GET_CHANGE says three to a page
   const CHANGE_MOST = 8;
@@ -250,9 +254,11 @@ function makeCard(opts) {
    * that makes change; a payment within the limit that makes none goes at once. From 1.13 (`SHAPED`) a payment within the limit
    * (or a thirty-second over it: a limit set in dollars at one moment and a price in dollars at another lands a few sats over)
    * goes at once, change or no change; over it waits WAIT_OVER for the first limit's worth over and WAIT_MORE for each after
-   * it, ceil(sum / limit) limits' worth of them at most 255, less one for each piece of change made, never below 0; a `second`
-   * payment (one was signed in this time in the field, and the owner's grant is not in the tap) is at least one limit's worth
-   * over, WAIT_OVER, with a limit or none; and a sum that wrapped waits the most there is. */
+   * it, ceil(sum / limit) limits' worth of them at most 255, less what the change made counts for (one for each piece of
+   * change made in 1.13; from 1.14, `COSTED`, two for every three pieces: an output is about two thirds of a signature's
+   * work), never below 0; a `second` payment (one was signed in this time in the field, and the owner's grant is not in the
+   * tap) is at least one limit's worth over, WAIT_OVER, with a limit or none; and a sum that wrapped waits the most there is,
+   * with no change taken off it. */
   const waitsFor = (sum, carry, made, second) => {
     if (SHAPED) {
       let waits;
@@ -266,7 +272,7 @@ function makeCard(opts) {
         if (units <= 1) return 0;
         waits = WAIT_OVER + WAIT_MORE * (units - 2);
       }
-      return Math.max(0, waits - made);
+      return Math.max(0, waits - (COSTED ? Math.floor(2 * made / 3) : made));
     }
     if (s.tapLimit === 0) return 0;
     if (carry) return 255 * WAIT_SIGNS;
@@ -865,7 +871,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 12) ? VERSION : undefined, burnMost: BURN_MOST });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 13) ? VERSION : undefined, burnMost: BURN_MOST });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false });
       return twin;
     },
