@@ -20649,15 +20649,16 @@ class Component extends DCLogic {
     const E = this.FC_EXPLAINER;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // every statement in one shape, whatever its kind, so that a reader of the list needs no cases
+    const item = (kind, o) => Object.assign({ kind, text: '', limit: '', range: '', secs: '', long: '', bar: '' }, o || {});
     const items = [
-      { kind: 'text', text: 'Any payment request over your limit requires you to tap and hold your card longer.' },
-      { kind: 'limit', limit: '$' + E.limit },
-    ].concat(E.secs.map((s, k) => ({
-      kind: 'tier',
+      item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),
+      item('limit', { limit: '$' + E.limit }),
+    ].concat(E.secs.map((s, k) => item('tier', {
       range: money(k * E.limit + 0.01) + ' – ' + money((k + 1) * E.limit),
       secs: s + ' SEC', long: 'Tap for ' + s + ' seconds',
       bar: Math.round(parseInt(s.split('–').pop(), 10) / 12 * 100) + '%',
-    }))).concat([{ kind: 'more' }]);
+    }))).concat([item('more')]);
 
     const SORA = 'font-family:Sora,system-ui,sans-serif;';
     const FIG = 'font-family:Figtree,Sora,system-ui,sans-serif;';
