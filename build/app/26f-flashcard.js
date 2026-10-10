@@ -58,6 +58,8 @@
 
   /* A tap, step by step: the line on the phone's sheet. The wallet names the steps as it reaches them; the screen behind
    * the sheet is drawn from where the tap has got to (26h-tap-screen.js), not from these. */
+  // the screen's lead over the sheet, in ms: TAP BEHIND PHONE is seen before iOS's sheet comes up
+  FC_TAP_LEAD = 500;
   FC_STEPS = {
     hold: 'Tap behind the phone.',
     reading: 'Reading the card',
@@ -170,7 +172,12 @@
       if (W.onCard) W.onCard(null);
       if (pinNeeded) this.fcTapPin(); else this.hideStage('card');
     };
-    return W.cardSession((o && o.sheet) || this.FC_STEPS.hold, (link) => {
+    /* The screen first, the sheet half a second after it (FC_TAP_LEAD): the person sees TAP BEHIND PHONE and the
+     * card coming down before iOS puts its own sheet over the lower half, in every tap there is. */
+    const lead = Math.max(0, Number(this.FC_TAP_LEAD) || 0);
+    // with no lead (the suites) the sheet is asked for in this very turn, as it always was
+    const after = (start) => (lead > 0 ? new Promise((go) => setTimeout(go, lead)).then(start) : start());
+    return after(() => W.cardSession((o && o.sheet) || this.FC_STEPS.hold, (link) => {
       const on = (step, info) => {
         const line = this.FC_STEPS[step];
         if (line === undefined) return;
@@ -226,7 +233,7 @@
       if (line) this.fcTapLost();
       return line;
     } : null }).then((r) => { over(false); return r; },
-            (e) => { over(!!(e && e.card === 'pin-needed')); throw e; });
+            (e) => { over(!!(e && e.card === 'pin-needed')); throw e; }));
   }
 
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a

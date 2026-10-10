@@ -25,6 +25,8 @@ function appOn(ctx, start) {
   a.setState = (x) => { Object.assign(a.state, typeof x === 'function' ? x(a.state) : x); };
   a.forceUpdate = () => {};
   a.toasts = [];
+  // the sheet at once in the suites: the half-second the screen is shown before it on a phone is checked on its own
+  a.FC_TAP_LEAD = 0;
   a.seen = {};
   a.toast = (m) => a.toasts.push(m);
   a.group = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');

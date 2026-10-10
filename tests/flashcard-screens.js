@@ -2133,6 +2133,23 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
   }
 
+  /* ---- the screen before the sheet -------------------------------------------- */
+  {
+    // on a phone the sheet follows the screen by half a second (FC_TAP_LEAD 500); here sixty milliseconds, watched
+    ok(Object.getPrototypeOf(holder).constructor.prototype.FC_TAP_LEAD === undefined ? true : true, 'the lead is a field of the app');
+    const lead = new (Object.getPrototypeOf(holder).constructor)().FC_TAP_LEAD;
+    ok(lead === 500, 'the app shows TAP BEHIND PHONE for half a second before the sheet', String(lead));
+    holder.FC_TAP_LEAD = 60;
+    H.sheet.length = 0;
+    H.nfc = c;
+    c.tap();
+    const read = holder.fcTap({}, (link) => H.W.cardLook(link));
+    ok(stage(H) === 'card' && H.sheet.length === 0, 'the tap draws its screen at once, and the sheet is not asked for yet', stage(H) + ' | sheets ' + H.sheet.length);
+    await new Promise((go) => setTimeout(go, 90));
+    ok(H.sheet.length >= 1 && /^begin:/.test(H.sheet[0]), 'and the sheet comes after the lead', H.sheet.join(' | '));
+    await read;
+    holder.FC_TAP_LEAD = 0;
+  }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });
