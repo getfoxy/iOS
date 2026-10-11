@@ -131,7 +131,17 @@
     reserves: 'foxy.cashu.reserves',      // what each mint held back as a routing reserve last time
     mintCache: 'foxy.cashu.mint.cache',   // each mint's keysets and info, so a phone with no route can still hold a wallet
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
+    line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
   };
+
+  /* The price line kept for a launch with no route (`_keepLine`, `keptLine`).
+   *
+   * Fewer rows than the first is not a line, and more than the second is not
+   * what the price source answers (it sends 720 at most). Past either, nothing
+   * is kept and nothing is read, rather than a line cut down to fit: the count
+   * is the source's own. */
+  var LINE_ROWS_MIN = 4;
+  var LINE_ROWS_MAX = 1000;
 
   /* On chain (16a-onchain.js).
    *
@@ -15192,7 +15202,10 @@
     /* Price history for the chart, through the bridge so it sits behind the
      * gate. Resolves [{t, c}] oldest first. The browser path talks to Kraken
      * directly, which only works where CORS allows it — the device never
-     * takes that path. */
+     * takes that path.
+     *
+     * What comes back is kept as it arrives (`_keepLine`), so the next launch
+     * has a line to draw before it has a route to ask for one. */
     candles: function (granularity, span) {
       assertRoute();
       var g = Math.max(60, Math.round(Number(granularity) || 3600));
@@ -15207,7 +15220,7 @@
             ok: function (text) {
               if (settled) return; settled = true;
               try {
-                ok(JSON.parse(text).map(function (r) { return { t: r[0], c: r[1] }; }));
+                ok(FoxyWallet._keepLine(g, sp, JSON.parse(text).map(function (r) { return { t: r[0], c: r[1] }; })));
               } catch (e) { no(e); }
             },
             no: function (e) { if (!settled) { settled = true; no(new Error(e)); } }
@@ -15232,10 +15245,71 @@
         .then(function (j) {
           var res = (j && j.result) || {};
           var key = Object.keys(res).filter(function (k) { return Array.isArray(res[k]); })[0];
-          return (res[key] || []).map(function (row) {
+          return FoxyWallet._keepLine(g, sp, (res[key] || []).map(function (row) {
             return { t: Number(row[0]), c: Number(row[4]) };
-          });
+          }));
         });
+    },
+
+    /* The price line this phone drew last, written down.
+     *
+     * The chart is asked for fresh on every connection and refused without
+     * one, so a launch before Tor was up, or with no network at all, drew the
+     * last price with no line under it. What a fetch brings back is kept as it
+     * arrives: every row (the count is the source's own, not thinned), the
+     * granularity and span it was asked for, when it came, and the price this
+     * phone had then, which may be older than the line. Public market data
+     * with nothing of the wallet in it.
+     *
+     * Rows that cannot be drawn (not finite, no price) are left out, and fewer
+     * than a line needs, or more than the source ever sends, keeps nothing: the
+     * line already kept stays until a good one replaces it. A write that
+     * fails is ignored, since the chart is a convenience, and the rows go back
+     * to the caller as they came whatever happened here. */
+    _keepLine: function (g, sp, rows) {
+      try {
+        var kept = [];
+        (Array.isArray(rows) ? rows : []).forEach(function (r) {
+          var t = r && r.t, c = r && r.c;
+          if (typeof t === 'number' && typeof c === 'number' && isFinite(t) && isFinite(c) && c > 0) kept.push([t, c]);
+        });
+        if (kept.length < LINE_ROWS_MIN || kept.length > LINE_ROWS_MAX) return rows;
+        kept.sort(function (a, b) { return a[0] - b[0]; });
+        var px = Number(FoxyWallet._rate);
+        save(K.line, { g: g, span: sp, at: Date.now(), price: px > 0 ? px : null, rows: kept });
+      } catch (e) {}
+      return rows;
+    },
+
+    /* The line `_keepLine` wrote for this granularity and span, off the disk:
+     * { g, span, at, price, rows } with rows as [{ t, c }] oldest first, or
+     * null when there is none, it was drawn for another range, or it does not
+     * read as a line. Local and synchronous, and it asks for no route, which is
+     * the whole of what it is for. It is shown whatever its age: how old it is
+     * is `at`'s to say, and the screen is not told it is current. */
+    keptLine: function (granularity, span) {
+      try {
+        var g = Math.max(60, Math.round(Number(granularity) || 3600));
+        var sp = Math.max(g * 4, Math.round(Number(span) || 86400));
+        var kept = load(K.line, null);
+        if (!kept || typeof kept !== 'object' || !Array.isArray(kept.rows)) return null;
+        if (Number(kept.g) !== g || Number(kept.span) !== sp) return null;
+        var at = Number(kept.at);
+        if (!isFinite(at) || at <= 0) return null;
+        if (kept.rows.length < LINE_ROWS_MIN || kept.rows.length > LINE_ROWS_MAX) return null;
+        var rows = [];
+        var before = -Infinity;
+        for (var i = 0; i < kept.rows.length; i++) {
+          var row = kept.rows[i];
+          var t = Array.isArray(row) ? row[0] : NaN;
+          var c = Array.isArray(row) ? row[1] : NaN;
+          if (typeof t !== 'number' || typeof c !== 'number' || !isFinite(t) || !isFinite(c) || c <= 0 || t < before) return null;
+          rows.push({ t: t, c: c });
+          before = t;
+        }
+        var px = Number(kept.price);
+        return { g: g, span: sp, at: at, price: px >= 5000 && px <= 1000000 ? px : null, rows: rows };
+      } catch (e) { return null; }
     },
 
     /* The last price this phone was told, and when. Both start from storage, so

@@ -142,6 +142,7 @@
      * here. */
     this.syncSnow();
     this.markerStayGone();
+    this.markerStayPut();
     const home = this.state.screen === 'home';
     if (this._marker && home && this._wasHome === false) {
       this._rolled = this.riderShow();

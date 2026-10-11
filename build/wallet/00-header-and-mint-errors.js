@@ -130,7 +130,17 @@
     reserves: 'foxy.cashu.reserves',      // what each mint held back as a routing reserve last time
     mintCache: 'foxy.cashu.mint.cache',   // each mint's keysets and info, so a phone with no route can still hold a wallet
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
+    line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
   };
+
+  /* The price line kept for a launch with no route (`_keepLine`, `keptLine`).
+   *
+   * Fewer rows than the first is not a line, and more than the second is not
+   * what the price source answers (it sends 720 at most). Past either, nothing
+   * is kept and nothing is read, rather than a line cut down to fit: the count
+   * is the source's own. */
+  var LINE_ROWS_MIN = 4;
+  var LINE_ROWS_MAX = 1000;
 
   /* On chain (16a-onchain.js).
    *

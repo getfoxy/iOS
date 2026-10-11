@@ -479,6 +479,11 @@
   "markup": "b50307d25733ffccbc8d414d610a1687f03a8aff4b0d84f2b47e263056b00b35",
   "vals": "734cc25384c648d09b6e0923840556e80a5b09091b104a1477c6080de8208cc9"
  },
+ "home, working offline, a kept line and a stale price": {
+  "file": "376-home-working-offline-a-kept-line-and-a-stale-price.html",
+  "markup": "74c66c396eb6f49ee1e74d246ab0ceb2500ce21112718b4f3fb351f6db94cbee",
+  "vals": "f2e08d7ae08e1651224fb6b495f3f32abe50b7ab3fb000d2d8fea62f7d00bb36"
+ },
  "sendhow, working offline": {
   "file": "219-sendhow-working-offline.html",
   "markup": "9066a91bd390f23671fe7fbd7fc40a7ec3a389813580b6b20fdb946cc4f996ed",

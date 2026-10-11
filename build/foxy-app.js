@@ -1541,8 +1541,9 @@ class Component extends DCLogic {
     /* The price line is asked for once at launch and once when the wallet is
      * ready. Offline, both are refused, and nothing asked again — so a phone
      * that came online later showed the price with no line under it. Asked on every route change that has a route; `loadSeries`
-     * answers at once when the line is already there or on its way. */
-    if (secure && !offline && !((this.state.series || {})[this.state.range])) {
+     * answers at once when a fresh line is already there or on its way. One kept from before the app was opened does not count as
+     * there: it is what is drawn until the fresh one lands. */
+    if (secure && !offline && !this.seriesFresh(this.state.range)) {
       this.loadSeries(this.state.range);
     }
   }
@@ -9756,7 +9757,7 @@ class Component extends DCLogic {
      * screen, which is what used to say it, now stays down on every launch but
      * the first (home first), and waited for the unlock even when it did not. */
     // static frames (flow diagrams) skip the live feed, candle fetch and every loop
-    if (!this.props.startStatic) { this.openFeed(); this.loadSeries(this.state.range); }
+    if (!this.props.startStatic) { this.openFeed(); this.showKeptLine(); this.loadSeries(this.state.range); }
     this.applyShell();
     this._onResize = () => this.applyShell();
     window.addEventListener('resize', this._onResize);
@@ -9803,6 +9804,8 @@ class Component extends DCLogic {
     this.stopReceive();
     this.spStopWatch();
     cancelAnimationFrame(this._mraf);
+    // a line turning into the next one has nothing left to draw on
+    if (this._morph) { cancelAnimationFrame(this._morph.raf); this._morph = null; }
   }
 
   // candle configs, one per timeline the chip offers; the data comes from
@@ -9819,12 +9822,64 @@ class Component extends DCLogic {
     })[r];
   }
 
+  /* Is the line on screen for this range one fetched in this visit?
+   *
+   * One kept from before the app was opened (`showKeptLine`) is only what is
+   * drawn until the fresh one lands, so it does not stop the ask: every place
+   * that decides whether to ask reads this and not whether a line is there. */
+  seriesFresh(r) {
+    const have = (this.state.series || {})[r];
+    return !!have && !have.kept;
+  }
+
+  /* The rows a candles answer holds, as the chart is drawn from them: finite,
+   * priced, oldest first. The fetch and the kept line go through the same
+   * filter, so a line kept from before is held to what a fresh one is. */
+  chartRows(series) {
+    return (series || [])
+      .filter(x => isFinite(x.t) && isFinite(x.c) && x.c > 0)
+      .sort((p, q) => p.t - q.t);
+  }
+
+  /* The line this phone drew last time, up at once.
+   *
+   * The candles are asked for fresh on every connection and refused without
+   * one, so a launch before Tor was up (opening on the home screen, every
+   * launch is), or with no network at all, showed the last price with no line
+   * under it and no rider on it. The wallet keeps what a fetch brought back
+   * (`keptLine`); this draws it, whatever its age, so the line is as stale as
+   * the price beside it and no less there. It is marked `kept`, which is what
+   * lets the fresh one replace it (`loadSeries`, `showSeries`). Nothing kept
+   * for this range, or nothing that reads as a line: nothing is drawn, as
+   * before. */
+  showKeptLine() {
+    if (this.props.startStatic) return;
+    const r = this.state.range;
+    const cfg = this.rangeCfg(r);
+    const W = window.FoxyWallet;
+    if (!cfg || !W || !W.keptLine || (this.state.series || {})[r]) return;
+    let kept = null;
+    try { kept = W.keptLine(cfg.g, cfg.span); } catch (e) { kept = null; }
+    const rows = kept ? this.chartRows(kept.rows) : [];
+    if (rows.length < 4) return;
+    const built = this.buildChart(rows, cfg.label);
+    built.kept = true;
+    built.at = kept.at;
+    this.setState(p => {
+      const next = Object.assign({}, p.series);
+      next[r] = built;
+      return { series: next };
+    });
+    console.log('[foxy] price line for', r + ': the one kept from', this.agoWords(Date.now() - kept.at) + ',',
+      rows.length, 'points');
+  }
+
   loadSeries(r) {
     if (this.props.startStatic) return;
     const cfg = this.rangeCfg(r);
     if (!cfg) return;
     this._loading = this._loading || {};
-    if ((this.state.series || {})[r] || this._loading[r]) return;
+    if (this.seriesFresh(r) || this._loading[r]) return;
     this._loading[r] = true;
     // Through the wallet, so it asserts the gate like every other request.
     // It used to fetch Coinbase straight from here, which meant the one screen
@@ -9840,20 +9895,17 @@ class Component extends DCLogic {
      * every launch has no route yet. */
     Promise.resolve().then(() => W.candles(cfg.g, cfg.span))
       .then(series => {
-        const rows = (series || [])
-          .filter(x => isFinite(x.t) && isFinite(x.c) && x.c > 0)
-          .sort((p, q) => p.t - q.t);
+        const rows = this.chartRows(series);
         if (rows.length < 4) throw new Error('thin series');
-        const built = this.buildChart(rows, cfg.label);
-        this.setState(p => {
-          const next = Object.assign({}, p.series);
-          next[r] = built;
-          return { series: next };
-        });
+        this.showSeries(r, this.buildChart(rows, cfg.label));
       })
       .catch(e => {
         this._loading[r] = false;
-        console.warn('[foxy] price line for', r, 'not loaded \u2014', (e && e.message) || e);
+        /* Said when there is no line to show for it. A kept one is up, and a
+         * refusal while a route is on its way is the ordinary run of a launch,
+         * not something to report. */
+        const have = (this.state.series || {})[r];
+        if (!(have && have.kept)) console.warn('[foxy] price line for', r, 'not loaded \u2014', (e && e.message) || e);
         /* And asked again. One refusal at launch left the home screen with no
          * line under the price for the rest of the visit, online or not
          * ("bad URL", never retried).
@@ -9861,11 +9913,40 @@ class Component extends DCLogic {
         this._seriesTries = (this._seriesTries || 0) + 1;
         clearTimeout(this._seriesT);
         this._seriesT = setTimeout(() => {
-          if ((this.state.series || {})[this.state.range]) return;
+          if (this.seriesFresh(this.state.range)) return;
           if (this.offlineNow && this.offlineNow()) return;
           this.loadSeries(this.state.range);
         }, Math.min(60000, 4000 * this._seriesTries));
       });
+  }
+
+  /* A line has come in for this range.
+   *
+   * Nothing on screen yet: it is put up. One already there, the kept line or
+   * an older one: it turns into this one over half a second (`chartMorph`),
+   * and the state holds the new line from the moment that ends. The phone set
+   * to reduce motion, the home screen not up, or the launch screen still over
+   * it, has nothing to watch a change happen, so the new line replaces the old
+   * at once. */
+  showSeries(r, built) {
+    const shown = (this.state.series || {})[r];
+    const put = () => this.setState(p => {
+      const next = Object.assign({}, p.series);
+      next[r] = built;
+      return { series: next };
+    });
+    let turning = false;
+    // a change of line that could not begin is no reason to lose the new line
+    try { turning = !!shown && !this.reducedMotion() && !this.riderCovered() && this.chartMorph(r, shown, built, put); }
+    catch (e) { turning = false; }
+    if (turning) console.log('[foxy] price line for', r + ': the line on screen is turning into the new one');
+    else put();
+  }
+
+  /* Whether the phone is set to reduce motion. */
+  reducedMotion() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (e) { return false; }
   }
 
   buildChart(rows, label) {
@@ -9907,6 +9988,22 @@ class Component extends DCLogic {
       .concat(pts, [{ x: far.x + BLEED, y: far.y + lean(near, far) }]);
     const ENDS = 1;                      // how many drawn points at each end are bleed
 
+    const d = this.chartCurve(pts);
+    const diff = rows[rows.length - 1].c - rows[0].c;
+    const mag = Math.abs(diff);
+    const money = Math.round(mag).toLocaleString('en-US');
+    const real = pts.slice(ENDS, pts.length - ENDS);
+    /* `ctl` is every point the curve is drawn through, the bleed at both ends
+     * included, in the view box's own units: what one line is turned into
+     * another from (`chartBetween`), a height at a time. */
+    return { d: d, y: real[real.length - 1].y, t: (diff >= 0 ? '+' : '-') + '$ ' + money + ' ' + label,
+      pts: real.map(p => ({ x: p.x / 402 * 100, y: p.y / 92 * 100 })), ctl: pts };
+  }
+
+  /* The path through these points: each stretch a cubic whose handles are a
+   * sixth of the way along the line between the neighbours either side, so the
+   * curve passes through every point and bends smoothly at each. */
+  chartCurve(pts) {
     const f = n => n.toFixed(1);
     let d = 'M' + f(pts[0].x) + ' ' + f(pts[0].y);
     for (let i = 0; i < pts.length - 1; i++) {
@@ -9915,12 +10012,122 @@ class Component extends DCLogic {
          + ',' + f(p2.x - (p3.x - p1.x) / 6) + ' ' + f(p2.y - (p3.y - p1.y) / 6)
          + ',' + f(p2.x) + ' ' + f(p2.y);
     }
-    const diff = rows[rows.length - 1].c - rows[0].c;
-    const mag = Math.abs(diff);
-    const money = Math.round(mag).toLocaleString('en-US');
-    const real = pts.slice(ENDS, pts.length - ENDS);
-    return { d: d, y: real[real.length - 1].y, t: (diff >= 0 ? '+' : '-') + '$ ' + money + ' ' + label,
-      pts: real.map(p => ({ x: p.x / 402 * 100, y: p.y / 92 * 100 })) };
+    return d;
+  }
+
+  /* The wash under the line: its path closed down to the bottom of the box,
+   * past both edges as the line itself is. */
+  chartFillPath(d) {
+    return d + ' L462 92 L-60 92 Z';
+  }
+
+  /* One line part of the way to another: `u` is 0 at `a` and 1 at `b`.
+   *
+   * Heights are mixed by position, the first point of one with the first of
+   * the other and so on across the same width, and not by the time each stands
+   * for: a set that starts later than the last one still lines up end to end.
+   * Where the two do not have the same number of points (a short answer), the
+   * old height is read at the same fraction of its width. The points, the
+   * path through them and nothing else — the label and the rest belong to the
+   * line that ends up on screen. At 1 it is `b`'s own points, to the digit. */
+  chartBetween(a, b, u) {
+    const A = a.ctl, B = b.ctl;
+    const same = A.length === B.length;
+    const heightAt = (frac) => {
+      const x = frac * (A.length - 1);
+      const i = Math.max(0, Math.min(A.length - 2, Math.floor(x)));
+      return A[i].y + (A[i + 1].y - A[i].y) * (x - i);
+    };
+    const ctl = B.map((p, i) => {
+      if (u >= 1) return { x: p.x, y: p.y };
+      const was = same ? A[i].y : heightAt(i / ((B.length - 1) || 1));
+      return { x: p.x, y: was + (p.y - was) * u };
+    });
+    return { d: this.chartCurve(ctl), ctl: ctl };
+  }
+
+  /* The two paths the line is drawn with, as the page has them now: the wash
+   * (stroke none) and the line, in the panel the rider's marker stands in. Null
+   * when the home screen's chart is not on the page — another screen is up, or
+   * the price panel is closed — which is also how a change of line learns the
+   * screen it was drawing on has gone. */
+  chartPaths() {
+    const el = this._marker;
+    const panel = el && el.isConnected !== false ? el.parentElement : null;
+    const all = panel ? Array.prototype.slice.call(panel.querySelectorAll('svg path')) : [];
+    const fill = all.filter(p => p.getAttribute('stroke') === 'none')[0] || null;
+    const line = all.filter(p => p.getAttribute('stroke') !== 'none').pop();
+    return line ? { line: line, fill: fill } : null;
+  }
+
+  // a line written straight onto the page's two paths
+  chartDraw(paths, chart) {
+    paths.line.setAttribute('d', chart.d);
+    if (paths.fill) paths.fill.setAttribute('d', this.chartFillPath(chart.d));
+  }
+
+  CHART_MORPH_MS = 500;       // how long one line takes to become the next
+
+  /* One line becoming another, drawn onto the paths in the page frame by frame,
+   * and the new one put in the state when it is done.
+   *
+   * It is drawn straight onto the page and not through the state: a state
+   * change is the whole screen worked out again, thirty times over while the
+   * rider is on the same frames. The state holds the old line the whole time,
+   * so anything that draws the screen in between draws the old one, the same
+   * text it drew last, and the renderer writes nothing over the frames. When
+   * it is done the new line is in the state and the renderer writes that: the
+   * very text the last frame wrote.
+   *
+   * The rider is asked to take the line again on every frame (`riderRetrack`):
+   * he keeps his place along it and is carried by it. Answers whether it
+   * began: false when the chart is not on the page to draw on, and the caller
+   * then puts the new line up at once. */
+  chartMorph(r, from, to, done) {
+    if (this.state.screen !== 'home' || this.state.range !== r || !this.chartPaths()) return false;
+    if (!from.ctl || !to.ctl) return false;
+    // one already under way is finished first, and this one starts from where it was going
+    if (this._morph) { from = this._morph.to; this.chartMorphEnd(); }
+    const m = this._morph = { r: r, from: from, to: to, done: done, raf: 0, t0: performance.now(), drawn: -1 };
+    const frame = now => {
+      if (this._morph === m && this.chartMorphFrame(m, now)) m.raf = requestAnimationFrame(frame);
+    };
+    m.raf = requestAnimationFrame(frame);
+    return true;
+  }
+
+  /* One frame of it, at this moment: drawn, and the rider asked to take the line
+   * again. Answers whether there are more. A frame is drawn once however many ask
+   * for it, since the ride asks too, at the top of its own frame (`markerRoll`):
+   * whichever of the two comes first in a frame, he is put on the line that frame
+   * draws and not on the last one. */
+  chartMorphFrame(m, now) {
+    if (m.drawn === now) return true;
+    m.drawn = now;
+    try {
+      const paths = this.chartPaths();
+      // the screen was left: nothing to draw on, and nothing to wait for
+      if (!paths) { this.chartMorphEnd(); return false; }
+      const u = Math.min(1, Math.max(0, (now - m.t0) / this.CHART_MORPH_MS));
+      // eased at both ends, so it starts and stops softly
+      this.chartDraw(paths, u >= 1 ? m.to : this.chartBetween(m.from, m.to, u * u * (3 - 2 * u)));
+      this.riderRetrack();
+      if (u < 1) return true;
+    } catch (e) {
+      console.warn('[foxy] price line: the change of line stopped \u2014', (e && e.message) || e);
+    }
+    // done, or it could not go on: either way the new line is the state's
+    this.chartMorphEnd();
+    return false;
+  }
+
+  // the change of line over, or cut short: the new line goes into the state
+  chartMorphEnd() {
+    const m = this._morph;
+    if (!m) return;
+    this._morph = null;
+    cancelAnimationFrame(m.raf);
+    m.done();
   }
 
   // the price line, drawn from whatever the gated feed last reported
@@ -10073,6 +10280,19 @@ class Component extends DCLogic {
     if (el.style.visibility !== 'hidden') el.style.visibility = 'hidden';
   }
 
+  /* And keeping him where the ride has him, for the same reason from the other
+   * side. The template gives the marker a resting height from the line's last
+   * point, so a new line in the state is a new height for the renderer to
+   * write, over the place the ride put him on the line, until the ride's next
+   * frame. The update pass writes the ride's place back, in the same pass and
+   * so before anything is drawn. */
+  markerStayPut() {
+    const el = this._marker, at = this._rideAt;
+    if (!el || !this._riding || !at) return;
+    if (el.style.left !== at.left) el.style.left = at.left;
+    if (el.style.top !== at.top) el.style.top = at.top;
+  }
+
   markerGone() {
     const el = this._marker;
     if (!el) return false;
@@ -10178,12 +10398,17 @@ class Component extends DCLogic {
   /* The line in the marker's own pixel space, with an arc-length walk and the
    * gravity warp: travel time integrates 1/speed, so equal steps of phase are
    * short where the line is high and long where it dips. */
-  riderTrack(el) {
-    const path = el.parentElement && el.parentElement.querySelector('path');
+  riderTrack(el, known) {
+    /* The stroked line, not the wash: the wash is the same line closed along
+     * the panel's bottom, and a track sampled off it ran down and back along
+     * that edge. It was the first <path>, so it was the one taken. */
+    const path = el.parentElement && (el.parentElement.querySelector('path[stroke]:not([stroke="none"])')
+      || el.parentElement.querySelector('path'));
     if (!path || !path.getTotalLength) return null;
     let len = 0;
     try { len = path.getTotalLength(); } catch (e) { return null; }
-    const box = el.parentElement.getBoundingClientRect();
+    // the box a ride began in, when it takes the line again: the panel has not moved, and measuring it is a layout
+    const box = known || el.parentElement.getBoundingClientRect();
     if (!len || !box.width || !box.height) return null;
 
     /* Sampled across the drawn path, then cut back to the price's own ends: the
@@ -10226,6 +10451,39 @@ class Component extends DCLogic {
     const last = warp[warp.length - 1].t || 1;
     warp.forEach(o => { o.t /= last; });
     return { pts, total, yTop, range, whole, warp, box, yOf, speedAt };
+  }
+
+  /* The line under a rider on his way has changed shape (the price line is
+   * turning into the fresh one, `chartMorph`): his ride takes it again on its
+   * next frame, and carries him over to it. Nothing to do for a rider who is
+   * not out. */
+  riderRetrack() {
+    if (this._riding) this._rideNew = true;
+  }
+
+  /* Where on a new track the rider stands who is `along` the ride on the old.
+   *
+   * Along is the ride's own distance: in behind the line's first point, along
+   * the line, then out past its last. A rider still coming in is the same
+   * distance behind the first point of the new line, one on the line is the
+   * same fraction of the way along it, and one already leaving is the same
+   * distance past its last. The line is where he is carried, so what he keeps
+   * is his place on it and not the pixels he was at. */
+  riderCarried(was, now, along) {
+    const lead = this.RIDE_IN_PX;
+    if (along <= lead) return along;
+    if (along >= lead + was.total) return lead + now.total + (along - lead - was.total);
+    return lead + (along - lead) / (was.total || 1) * now.total;
+  }
+
+  /* The ride's clock, 0 to 1, at which the rider is `along` the ride on this
+   * track: the gravity warp read backwards. */
+  riderClock(track, along) {
+    const w = track.warp;
+    let i = 1;
+    while (i < w.length && w[i].s < along) i++;
+    const a = w[i - 1], b = w[i] || a;
+    return a.t + (b.t - a.t) * ((along - a.s) / ((b.s - a.s) || 1));
   }
 
   /* The pool the emphasis lines are drawn from: eighteen thin divs in a layer
@@ -10391,34 +10649,45 @@ class Component extends DCLogic {
     const body = el.querySelector('[data-rider="body"]');
     const armsWrap = el.querySelector('[data-rider="armswrap"]');
     const arms = el.querySelector('[data-rider="arms"]');
-    const track = this.riderTrack(el);
+    const track0 = this.riderTrack(el);
     /* The sled team has no separate arms — they are drawn into its sheet.
      * This used to refuse to ride at all without them. */
-    if (!track || !body) return false;
+    if (!track0 || !body) return false;
     this.sledLayout(body);
 
     cancelAnimationFrame(this._mraf);
     this._riding = true;
+    this._rideNew = false;
     el.style.visibility = 'visible';
     const lines = this.riderLines(el);
     this.riderLinesOff();
-    const pts = track.pts, N = pts.length - 1;
-    const first = pts[0], lastPt = pts[N];
-    const dx0 = pts[1].x - first.x, dy0 = pts[1].y - first.y;
-    const inLen = Math.hypot(dx0, dy0) || 1;
-    const inDir = { x: dx0 / inLen, y: dy0 / inLen };
-    const startAng = Math.atan2(dy0, dx0) * 180 / Math.PI;
-    const dxN = lastPt.x - pts[N - 1].x, dyN = lastPt.y - pts[N - 1].y;
-    const outLen = Math.hypot(dxN, dyN) || 1;
-    const outDir = { x: dxN / outLen, y: dyN / outLen };
-    const endAng = Math.atan2(dyN, dxN) * 180 / Math.PI;
+    /* The line he rides, and where it begins and ends: held in variables, since
+     * the line can change shape under him (`riderRetrack`) and he is put on the
+     * new one where he was on the old. */
+    let track, pts, N, first, lastPt, inDir, outDir, startAng, endAng;
+    const follow = next => {
+      track = next;
+      pts = next.pts; N = pts.length - 1;
+      first = pts[0]; lastPt = pts[N];
+      const dx0 = pts[1].x - first.x, dy0 = pts[1].y - first.y;
+      const inLen = Math.hypot(dx0, dy0) || 1;
+      inDir = { x: dx0 / inLen, y: dy0 / inLen };
+      startAng = Math.atan2(dy0, dx0) * 180 / Math.PI;
+      const dxN = lastPt.x - pts[N - 1].x, dyN = lastPt.y - pts[N - 1].y;
+      const outLen = Math.hypot(dxN, dyN) || 1;
+      outDir = { x: dxN / outLen, y: dyN / outLen };
+      endAng = Math.atan2(dyN, dxN) * 180 / Math.PI;
+    };
+    follow(track0);
 
     let squash = 0, squashV = 0, lean = 0, armA = 0, armV = 0;
     let lastAng = null, lastSquash = 0, lastFrame = -1;
     let prevCy = null, prevVy = 0;
     const bag = { spawn: 0 };
-    const t0 = performance.now();
+    let t0 = performance.now();
+    const began = t0;                  // the drawing's clock runs from here, whatever the ride's does
     let lastNow = t0;
+    let ridden = 0;                    // how far along the ride the last frame had him
 
     /* The line at a distance along the ride: before it, on it, or past its
      * end. Both halves ask this, each for its own point, which is what lets
@@ -10442,12 +10711,27 @@ class Component extends DCLogic {
     };
 
     const step = now => {
+      // the line may be turning into another: its frame for this moment is drawn first, and nothing it does stops the ride
+      if (this._morph) { try { this.chartMorphFrame(this._morph, now); } catch (e) {} }
+      /* A new line under him: sampled again, and he is put on it at the same
+       * place along it as he was on the last, with the ride's clock set to the
+       * moment that place is reached on the new line's own pace. */
+      if (this._rideNew) {
+        this._rideNew = false;
+        const next = this.riderTrack(el, track.box);
+        if (next) {
+          const there = this.riderCarried(track, next, ridden);
+          follow(next);
+          t0 = lastNow - this.riderClock(next, there) * this.RIDE_MS;
+        }
+      }
       const raw = Math.min(1, (now - t0) / this.RIDE_MS);
       // phase through the gravity warp: distance, not time, is what eases
       let i = 1;
       while (i < track.warp.length && track.warp[i].t < raw) i++;
       const a = track.warp[i - 1], b = track.warp[i] || a;
       const along = a.s + (b.s - a.s) * ((raw - a.t) / ((b.t - a.t) || 1));
+      ridden = along;
 
       let cx, cy, ang = startAng, target = 0, leanTo = 0, onLine = false;
       if (along < this.RIDE_IN_PX) {
@@ -10504,12 +10788,13 @@ class Component extends DCLogic {
 
       el.style.left = cx + 'px';
       el.style.top = cy + 'px';
+      this._rideAt = { left: el.style.left, top: el.style.top };
       el.style.transform = 'rotate(' + bodyAng.toFixed(2) + 'deg)';
       const shape = 'translate(-50%,-100%) scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ')';
       body.style.transform = shape;
 
       // the drawing on its own clock: forward through every frame, and round again
-      const fr = Math.floor(((now - t0) % this.SLED_CYCLE_MS) / this.SLED_CYCLE_MS * this.SLED_FRAMES) % this.SLED_FRAMES;
+      const fr = Math.floor(((now - began) % this.SLED_CYCLE_MS) / this.SLED_CYCLE_MS * this.SLED_FRAMES) % this.SLED_FRAMES;
       if (fr !== lastFrame) {
         lastFrame = fr;
         this.sledFrame(body, fr);
@@ -10684,6 +10969,7 @@ class Component extends DCLogic {
      * here. */
     this.syncSnow();
     this.markerStayGone();
+    this.markerStayPut();
     const home = this.state.screen === 'home';
     if (this._marker && home && this._wasHome === false) {
       this._rolled = this.riderShow();
@@ -12121,7 +12407,7 @@ class Component extends DCLogic {
       /* The same line, closed to the bottom of the box: a wash under the
        * price, which the snow-fox design uses to give it weight. It ends where the drawing does — past both edges — so the
        * wash bleeds off the screen with it. */
-      chartFill: chart ? chart.d + ' L462 92 L-60 92 Z' : '',
+      chartFill: chart ? this.chartFillPath(chart.d) : '',
       /* Sats held for a swap the mint has not answered are out of the
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */

@@ -42,7 +42,9 @@ mint is `mint.minibits.cash`.
 - **Foxy opens on the home screen, and the connection is a banner.** A wallet
   that has connected once is shown from what is on file (its mint's keysets
   and the last price) and works offline until Tor is really up, a few seconds
-  later. The banner at the foot of the home screen says which: SECURING YOUR
+  later. The price line is the last one fetched, drawn at once with the rider
+  on it, and it turns into the fresh line over half a second when one arrives.
+  The banner at the foot of the home screen says which: SECURING YOUR
   CONNECTION while Tor is at work, OFFLINE - NO CONNECTION with no network,
   CANNOT CONNECT when Tor has given up, and a tap on it brings the connection
   screen with its count and its choices. Only a first launch, with nothing on

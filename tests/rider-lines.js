@@ -12,6 +12,12 @@
  * So the methods are lifted out of build/foxy-app.js and run against a rail
  * this file shapes: a deep dip on the left, a crest on the right, in jsdom,
  * with the clock and the frames driven by hand.
+ *
+ * It also holds the arithmetic of the price line turning into the fresh one
+ * (the points mixed by position, the ends exact, the path text unchanged) and
+ * of the rider being carried by the line while it does (same place along it,
+ * no jump, the sled's own clock undisturbed). price-line.js has the same in the
+ * whole page, with the renderer.
  */
 const fs = require('fs');
 const path = require('path');
@@ -38,11 +44,13 @@ src.split('\n').forEach(line => {
   if (m) nums[m[1]] = Number(m[2]);
 });
 const methods = new Function('return {' + [
-  'riderTrack(el) {', 'riderLines(el) {', 'riderLine(stk, x, y, len, angle, op, life) {',
+  'riderTrack(el, known) {', 'riderLines(el) {', 'riderLine(stk, x, y, len, angle, op, life) {',
   'riderLinesOff() {', 'riderFade(lines, dt) {', 'riderAir(lines, bag, cx, cy, ang, speed, dt) {',
   'riderImpact(lines, cx, cy) {', 'markerGone() {', 'buildChart(rows, label) {',
   'riderCovered() {', 'riderWhenSeen() {', 'riderShow() {',
   'markerRoll() {', 'sledLayout(body) {', 'sledFrame(body, fr) {',
+  'chartCurve(pts) {', 'chartFillPath(d) {', 'chartBetween(a, b, u) {',
+  'riderRetrack() {', 'riderCarried(was, now, along) {', 'riderClock(track, along) {', 'markerStayPut() {',
 ].map(member).join(',\n') + '}')();
 
 const results = [];
@@ -368,6 +376,259 @@ let everything = 0;
   check('it reaches both ends of the drawing',
     order.includes(0) && order.includes(a.SLED_FRAMES - 1),
     'range ' + Math.min(...order) + '..' + Math.max(...order));
+}
+
+/* ---- the drawing of a line has not changed --------------------------------
+ *
+ * The path was built inside buildChart and is now `chartCurve`, so one line can
+ * be turned into another a frame at a time. These strings are what the
+ * original produced for the same rows: the text of a path the screen already
+ * draws must not move because the code that writes it did. */
+{
+  const a = app(null);
+  const small = [80000, 80100, 79900, 80300, 80250, 80400].map((c, i) => ({ t: 1700000000 + i * 300, c }));
+  const chart = a.buildChart(small, 'last 24 hours');
+  check('six rows are drawn through the path they always were',
+    chart.d === 'M-52.0 81.3 C-42.0 80.7,-14.1 79.2,8.0 78.0 C30.1 76.8,56.5 76.1,80.8 74.0 C105.1 71.9,129.3 69.7,153.6 65.5 '
+      + 'C177.9 61.3,202.1 54.8,226.4 49.0 C250.7 43.2,274.9 36.3,299.2 30.5 C323.5 24.7,349.9 19.0,372.0 14.0 '
+      + 'C394.1 9.0,422.0 2.7,432.0 0.4', chart.d);
+  check('and the rest of what is said of them, the label and the last point, is as it was',
+    chart.t === '+$ 400 last 24 hours' && chart.y === 14 && chart.pts.length === 6, chart.t + ' ' + chart.y);
+  const many = [];
+  for (let i = 0; i < 288; i++) many.push({ t: 1700000000 + i * 300, c: 80000 + 900 * Math.sin(i / 20) + i * 5 });
+  const big = a.buildChart(many, 'last 24 hours');
+  // the whole path of a day of rows, as the original wrote it, by its hash
+  const sha = require('crypto').createHash('sha256').update(big.d).digest('hex');
+  check('and a day of them is drawn through the one it was',
+    sha === '6c31ad1f1358fca7f541b8fb225bbb8c7825984f6b177e34274ac26bf80b3df2' && big.t === '+$ 2,315 last 24 hours',
+    big.d.length + ' characters, ' + big.t);
+}
+
+/* ---- one line turning into another ------------------------------------------
+ *
+ * The price line a launch with no route draws is the one kept from last time,
+ * and the fresh one replaces it when a connection is up (`chartMorph`). The
+ * arithmetic of that: heights mixed by position, and the ends exact. */
+{
+  const rowsOf = (n, f, from) => Array.from({ length: n }, (_, i) => ({ t: from + i * 300, c: f(i) }));
+  const a = app(null);
+  const old = a.buildChart(rowsOf(288, i => 80000 + 900 * Math.sin(i / 20) + i * 5, 1700000000), 'last 24 hours');
+  /* The same market three hours on: it starts later, has a row fewer and is
+   * another shape. Lined up first point to first point, across the same width. */
+  const fresh = a.buildChart(rowsOf(287, i => 80500 + 1400 * Math.cos(i / 31) - i * 3, 1700000000 + 36 * 300), 'last 24 hours');
+  check('a line keeps every point it is drawn through, the bleed at both ends included',
+    old.ctl.length === 30 && fresh.ctl.length === 30, old.ctl.length + ' and ' + fresh.ctl.length);
+  check('and turning into itself is the same line', a.chartBetween(old, old, 0.4).d === old.d, '');
+  check('at the start it is the old line, to the digit', a.chartBetween(old, fresh, 0).d === old.d, '');
+  const end = a.chartBetween(old, fresh, 1);
+  check('at the end it is the new line, to the digit', end.d === fresh.d, end.d.slice(0, 60));
+  check('and its points are the new line’s own',
+    end.ctl.every((p, i) => p.x === fresh.ctl[i].x && p.y === fresh.ctl[i].y), '');
+  const half = a.chartBetween(old, fresh, 0.5);
+  check('halfway, each height is halfway between the two at the same place along the width',
+    half.ctl.every((p, i) => Math.abs(p.y - (old.ctl[i].y + fresh.ctl[i].y) / 2) < 1e-9), '');
+  check('and the points stay where they were across the width',
+    half.ctl.every((p, i) => p.x === fresh.ctl[i].x), '');
+  let monotone = true;
+  for (let i = 0; i < old.ctl.length; i++) {
+    let last = old.ctl[i].y;
+    const dir = Math.sign(fresh.ctl[i].y - old.ctl[i].y);
+    for (let u = 0.1; u <= 1.0001; u += 0.1) {
+      const y = a.chartBetween(old, fresh, u).ctl[i].y;
+      if ((y - last) * dir < -1e-9) monotone = false;
+      last = y;
+    }
+  }
+  check('every point goes from where it was to where it is going, and never back', monotone, '');
+
+  // two short answers of different lengths: another number of points each
+  const few = a.buildChart(rowsOf(6, i => 80000 + 300 * i, 1700000000), 'last hour');
+  const more = a.buildChart(rowsOf(10, i => 80000 + 500 * Math.sin(i), 1700000000), 'last hour');
+  let clean = true;
+  for (let u = 0; u <= 1.0001; u += 0.125) {
+    const between = a.chartBetween(few, more, u);
+    if (/NaN|undefined|Infinity/.test(between.d) || between.ctl.length !== more.ctl.length) clean = false;
+  }
+  check('lines of different lengths turn into each other without a break in the path', clean, '');
+  check('and still end on the new one, to the digit', a.chartBetween(few, more, 1).d === more.d, '');
+  check('the wash under the line is closed the way the template closes it',
+    a.chartFillPath('M0 0 C1 1,2 2,3 3') === 'M0 0 C1 1,2 2,3 3 L462 92 L-60 92 Z', '');
+}
+
+/* ---- he is carried by the line: the same place along it ----------------------
+ *
+ * While the fresh line takes the kept one's place, the rider is on whichever he
+ * was on. He keeps his place along it — the same fraction of the way, not the
+ * same pixels — and the line carries him; the ride goes on from there. */
+const railB = x => 45 + 0.03 * x + 28 * Math.sin(x / 21);
+// where a point stands along a track: the nearest place on its polyline, as a distance from its start
+function standing(track, p) {
+  let best = Infinity, at = 0;
+  for (let i = 1; i < track.pts.length; i++) {
+    const a = track.pts[i - 1], b = track.pts[i];
+    const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy || 1;
+    const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    const d = Math.hypot(p.x - (a.x + dx * u), p.y - (a.y + dy * u));
+    if (d < best) { best = d; at = a.s + (b.s - a.s) * u; }
+  }
+  return { at, off: best };
+}
+const placeOf = marker => ({ x: parseFloat(marker.style.left), y: parseFloat(marker.style.top) });
+{
+  const { marker, doc } = page();
+  const pathEl = doc.querySelector('path');
+  let rail = railY;
+  pathEl.getPointAtLength = (at) => ({ x: at, y: rail(at) });
+  const a = app(marker);
+  frames = [];
+  clock.now = 0;
+  a.markerRoll();
+  const t = pump(a, 0, 3200);
+  const was = a.riderTrack(marker);
+  const before = placeOf(marker);
+  const stood = standing(was, before);
+  check('at a good way along, he is on the line', stood.off < 0.5 && stood.at > 60 && stood.at < was.total - 60,
+    'off by ' + stood.off.toFixed(2) + ', ' + stood.at.toFixed(0) + ' of ' + was.total.toFixed(0));
+
+  rail = railB;
+  a.riderRetrack();
+  check('a ride that is out is asked to take the line again on its next frame', a._rideNew === true, String(a._rideNew));
+  // the next frame, at the very moment of the last: nothing has moved on, so he is only carried
+  const next = frames.pop();
+  frames = [];
+  clock.now = t;
+  next(t);
+  const now = a.riderTrack(marker);
+  const after = placeOf(marker);
+  const stands = standing(now, after);
+  check('and it has: the request is answered', a._rideNew === false, String(a._rideNew));
+  check('the new line is not the old one', Math.abs(now.total - was.total) > 5,
+    now.total.toFixed(1) + ' against ' + was.total.toFixed(1));
+  check('he is on the new line, not where the old one was',
+    stands.off < 0.5, 'off the new line by ' + stands.off.toFixed(2) + 'px');
+  check('at the same place along it: the same fraction of the way',
+    Math.abs(stands.at / now.total - stood.at / was.total) < 0.002,
+    (stands.at / now.total).toFixed(4) + ' against ' + (stood.at / was.total).toFixed(4));
+  check('so he has moved, to stay where he was on the line',
+    Math.hypot(after.x - before.x, after.y - before.y) > 3, 'moved ' + Math.hypot(after.x - before.x, after.y - before.y).toFixed(1) + 'px');
+
+  // and the ride goes on from there, to the end it always had
+  let ended = false;
+  pump(a, t, a.RIDE_MS + 500, () => { if (!a._riding) ended = true; });
+  check('and the ride goes on and ends as any ride does',
+    ended && marker.style.visibility === 'hidden', marker.style.visibility);
+}
+{
+  /* The line changing a little on every frame, thirty frames running, as the
+   * change of one line into another asks for it: he never jumps, and ends where
+   * the whole ride would have had him. */
+  const { marker, doc } = page();
+  const pathEl = doc.querySelector('path');
+  let mix = 0;
+  pathEl.getPointAtLength = (at) => ({ x: at, y: railY(at) * (1 - mix) + railB(at) * mix });
+  const a = app(marker);
+  frames = [];
+  clock.now = 0;
+  a.markerRoll();
+  let t = pump(a, 0, 2400);
+  let far = 0, last = placeOf(marker), fractions = [];
+  for (let n = 1; n <= 30; n++) {
+    const u = n / 30;
+    mix = u * u * (3 - 2 * u);
+    a.riderRetrack();
+    t = pump(a, t, 16);
+    const p = placeOf(marker);
+    far = Math.max(far, Math.hypot(p.x - last.x, p.y - last.y));
+    last = p;
+    const track = a.riderTrack(marker);
+    fractions.push(standing(track, p).at / track.total);
+  }
+  check('a line that changes on every frame does not throw him about: no frame moves him far',
+    far < 14, 'the biggest step was ' + far.toFixed(1) + 'px');
+  const rose = fractions.every((f, i) => i === 0 || f >= fractions[i - 1] - 0.002);
+  check('and all the way through he is going forward along it', rose,
+    fractions.map(f => f.toFixed(3)).join(' '));
+  let ended = false;
+  pump(a, t, a.RIDE_MS + 500, () => { if (!a._riding) ended = true; });
+  check('and the ride then finishes', ended, 'still riding');
+}
+{
+  // a ride that is not out has nothing to carry
+  const { marker } = page();
+  const a = app(marker);
+  a.riderRetrack();
+  check('a rider who is put away is not asked for anything', !a._rideNew, String(a._rideNew));
+}
+
+/* The place on a new track, for each of the three stretches of a ride. */
+{
+  const a = app(null);
+  const was = { total: 400 }, now = { total: 500 };
+  const lead = a.RIDE_IN_PX;
+  check('still coming in, he is the same way behind the first point',
+    a.riderCarried(was, now, 20) === 20 && a.riderCarried(was, now, 0) === 0, '');
+  check('on the line, he is the same fraction of the way along it',
+    Math.abs(a.riderCarried(was, now, lead + 100) - (lead + 125)) < 1e-9, String(a.riderCarried(was, now, lead + 100)));
+  check('and leaving, the same way past the last point',
+    Math.abs(a.riderCarried(was, now, lead + 400 + 30) - (lead + 500 + 30)) < 1e-9, String(a.riderCarried(was, now, lead + 430)));
+  check('with no jump where one stretch becomes the next',
+    a.riderCarried(was, now, lead) === lead && Math.abs(a.riderCarried(was, now, lead + 400) - (lead + 500)) < 1e-9, '');
+
+  // the ride's clock is the gravity warp read backwards
+  const { marker } = page();
+  const b = app(marker);
+  const track = b.riderTrack(marker);
+  let exact = true;
+  for (let raw = 0; raw <= 1.0001; raw += 0.05) {
+    let i = 1;
+    while (i < track.warp.length && track.warp[i].t < raw) i++;
+    const lo = track.warp[i - 1], hi = track.warp[i] || lo;
+    const along = lo.s + (hi.s - lo.s) * ((raw - lo.t) / ((hi.t - lo.t) || 1));
+    if (Math.abs(b.riderClock(track, along) - Math.min(raw, 1)) > 1e-9) exact = false;
+  }
+  check('the clock at a place is the place’s own time through the warp, and back', exact, '');
+}
+
+/* ---- and nothing else about the ride is disturbed ---------------------------- */
+{
+  /* The drawing runs on a clock of its own. The ride's was moved to put him
+   * on the new line, and the drawing's frame at a given moment must not move
+   * with it, or the sled would stutter every time the price line changed. */
+  const frameAt = (retrack) => {
+    const { marker, body, doc } = page();
+    const pathEl = doc.querySelector('path');
+    let rail = railY;
+    pathEl.getPointAtLength = (at) => ({ x: at, y: rail(at) });
+    const a = app(marker);
+    frames = [];
+    clock.now = 0;
+    a.markerRoll();
+    const t = pump(a, 0, 3000);
+    if (retrack) { rail = railB; a.riderRetrack(); }
+    pump(a, t, 16);
+    return body.style.backgroundPosition;
+  };
+  check('the sled’s frame at a moment is the same whether the line changed under him or not',
+    frameAt(false) === frameAt(true), frameAt(false) + ' against ' + frameAt(true));
+}
+{
+  /* The renderer writes the marker's resting place when the line's last point
+   * changes. While he is out that would be a frame with him in the wrong place. */
+  const { marker } = page();
+  const a = app(marker);
+  frames = [];
+  clock.now = 0;
+  a.markerRoll();
+  pump(a, 0, 1500);
+  const placed = marker.style.top;
+  marker.style.top = '41.3%';
+  a.markerStayPut();
+  check('the place the ride gave him is put back over the renderer’s', marker.style.top === placed,
+    marker.style.top + ' against ' + placed);
+  a.markerGone();
+  marker.style.top = '41.3%';
+  a.markerStayPut();
+  check('and a rider who is put away is left alone', marker.style.top === '41.3%', marker.style.top);
 }
 
 results.forEach(r => console.log(r));

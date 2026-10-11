@@ -199,7 +199,7 @@ const SERIES = { '1D': { pts: [[0, 60], [50, 40], [100, 20]], d: 'M0 60L50 40L10
 // a representative state of a screen, against the stand-in wallet
 const at = (screen, state, extra) => Object.assign({ wallet: true, state: Object.assign({ screen, stack: [] }, LIVE, state || {}) }, extra || {});
 
-function representative() {
+function representative(logic) {
   const v = [];
   const add = (label, view) => v.push([label, view]);
   // home
@@ -346,6 +346,13 @@ function representative() {
   add('flashcard, somebody else\u2019s card, past its date, no connection', at('flashcard', { fc: FC({ mine: false, first: 1700000000, last: 1700000000, check: 'off', locked: true }) }, { wallet: CARDS() }));
   add('home, working offline', at('home', { series: SERIES, range: '1D' }, { wallet: OFFLINE }));
   add('home, a secure connection', at('home', { series: SERIES, range: '1D' }, { wallet: ONLINE }));
+  /* A phone that opens with no route, and draws the line it kept the last time it had one: a day of rows through the real chart
+   * code, marked as kept, with the rider's panel, the offline banner and a price that says how old it is. The stand-in wallet is
+   * given the price three hours old, which is what puts that age under the figure. */
+  const KEPT_ROWS = Array.from({ length: 288 }, (_, i) => ({ t: 1700000000 + i * 300, c: Math.round(80000 + 900 * Math.sin(i / 20) + i * 5) }));
+  const KEPT_LINE = Object.assign(logic.buildChart(KEPT_ROWS, 'last 24 hours'), { kept: true, at: 1700086400000 });
+  add('home, working offline, a kept line and a stale price', at('home', { series: { '1D': KEPT_LINE }, range: '1D' },
+    { wallet: Object.assign({}, OFFLINE, { _rate: 64000, _rateAt: Date.now() - 3 * 3600 * 1000 }) }));
   add('sendhow, working offline', at('sendHow', { flow: 'send' }, { wallet: OFFLINE }));
   add('sendhow, with a connection', at('sendHow', { flow: 'send' }, { wallet: ONLINE }));
   /* The mint list with no route: only the mints whose keysets this phone already
@@ -743,7 +750,7 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   const views = [['home (first render)', {}]]
     .concat(screens.map((s) => ['screen ' + s, { state: { screen: s, stack: [] } }]))
     .concat(popups.map((p) => ['popup ' + p, { state: { screen: 'home', stack: [], [p]: true } }]))
-    .concat(representative(), cards());
+    .concat(representative(logic), cards());
 
   const recorded = fs.existsSync(path.join(DIR, 'index.json'))
     ? JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8')) : {};

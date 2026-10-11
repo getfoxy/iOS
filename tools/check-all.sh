@@ -137,6 +137,7 @@ check "array cap"       1 node tests/array-cap.js
 check "mint health"    1 node tests/mint-health.js
 check "rider lines"    1 node tests/rider-lines.js
 check "rider tap"      1 node tests/rider-tap.js
+check "price line"     1 node tests/price-line.js
 check "tap offer"      1 node tests/tap-offer.js
 check "tap shake"      1 node tests/tap-shake.js
 check "tap nearby"     1 node tests/tap-nearby.js

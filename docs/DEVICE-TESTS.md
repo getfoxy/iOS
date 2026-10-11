@@ -2058,6 +2058,17 @@ a fresh install.*
     which it scans; then send the very same token over the tap from a payer
     that still holds it (a second phone restored from the same words will
     do). **Pass:** PAYMENT RECEIVED once; the balance counts it once.
+11. **The price line before Tor.** Open Foxy once with a connection, so a price
+    line has been fetched, and close it fully. Open it again with airplane
+    mode on, and once more with the radios on, watching from the first frame.
+    **Pass:** the line is under the price at once, with the rider riding it,
+    beside the last price and its age in red, and the diary says `price line
+    for 1D: the one kept from` and never `not loaded`. With the radios on, when
+    Tor is through the line changes to the fresh one over about half a second,
+    and a rider still on it is carried along without a jump. With Reduce Motion
+    on (Settings, Accessibility, Motion) the fresh line replaces it at once.
+    The first launch after installing has no line until one fetch has
+    succeeded.
 
 ## Getting a log off somebody else's phone
 

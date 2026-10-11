@@ -38,7 +38,7 @@
       /* The same line, closed to the bottom of the box: a wash under the
        * price, which the snow-fox design uses to give it weight. It ends where the drawing does — past both edges — so the
        * wash bleeds off the screen with it. */
-      chartFill: chart ? chart.d + ' L462 92 L-60 92 Z' : '',
+      chartFill: chart ? this.chartFillPath(chart.d) : '',
       /* Sats held for a swap the mint has not answered are out of the
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */

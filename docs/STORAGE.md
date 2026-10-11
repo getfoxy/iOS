@@ -91,6 +91,7 @@ answers, and so do its counters (below, "Migration").
 | `foxy.cashu.topupfees` | per mint, the input fees (sats) that change-pool top-up swaps cost when no history row could carry them, so the books still add up | no | which mints you use |
 | `foxy.cashu.mint.cache` | per mint (5 at most), its info and keysets as last fetched, with the time, so a phone with no route can rebuild a wallet without a request | no | which mints you use |
 | `foxy.price.last` | `{rate, at}`: the last bitcoin price the phone was told and when, so a relaunch with no route still has one; always shown with its age and never treated as current | no | no |
+| `foxy.price.line` | `{g, span, at, price, rows}`: the last price line the chart was fetched for (`candles`, `_keepLine`), so a launch or a return with no route has one to draw. The granularity and span it was asked for, when it came (`at`), the price the phone had then (`price`, or `null`; it may be older than the line), and every row as `[time, close]`, oldest first: 288 for the day the home screen draws, the count the source sent and never thinned (1,000 at the most; more is not kept). Drawn whatever its age, with the rider on it, and written over by the next fetch that succeeds; a fetch that fails, or is refused, leaves it as it was. Public market data, and nothing of the wallet is in it | no | no |
 | `foxy.req.unclaimed` | **ecash that has arrived and is not swapped in yet**, per payment request: the token, its amount, and when it landed. A payment locked to this phone is written here before anything is attempted with it, and cleared only once it is really in the wallet. Everything after that write can fail and the money is still findable; before it, nothing could — a payment went missing that way once, while a delayed redeem sat in a `setTimeout`. The redeem now runs the moment the payment lands, so what is usually here is a swap that failed and is waiting for the next connect. `balanceSats` counts what is here, because it is money: locked to a key only this phone holds | no — these are bearer proofs, and the lock key below is what opens them | **bearer money** |
 | `foxy.req.lockkeys` | per payment request, `{i, pub}`: the index the phone derived its P2PK lock key at (NUT-13's path, `SEED-HANDLING.md`) and the public key that went into the request. **No private key** — that comes from the phone (`p2pkKey`) when there is ecash to open, and the public key is compared with the row's before it is used. Rows from an earlier version are `{key, at}`, a random private key, and go on working for ever: a random key has no index to convert it to, so there is no migration step and there cannot be one. The lock is found by the lock itself as well as by request id, and when no row names it the phone walks the path — which is how a payment that arrived can be claimed on another device from the twelve words alone | no | the index and public half only; the money is opened by the seed |
 | `foxy.req.lockpool` | lock keys the phone derived ahead of time, `[{i, pub}]`, because `paymentRequest` is synchronous and cannot wait for it. A request takes one off the front; an empty pool means the request goes out **unlocked**, never with a random key | no | no |
@@ -343,10 +344,10 @@ deletes the seed, sets `foxy-counters.json` aside, drops any typed words held
 natively and makes a new seed on the phone. Only then does the page delete every
 `foxy.*` key in localStorage: proofs at every mint, the stale counters, quotes,
 held melts, quarantine, the out-token, history, audit trail, notes, contacts,
-the mint list, the PIN and its count, the backed-up flag, any older install's
-words and the migration stamps. A No in the alert erases nothing. The app then
-connects to the default mint. There is no undo. If the old words
-were not written down, the money is gone.
+the mint list, the last price and the price line, the PIN and its count, the
+backed-up flag, any older install's words and the migration stamps. A No in the
+alert erases nothing. The app then connects to the default mint. There is no
+undo. If the old words were not written down, the money is gone.
 
 A wipe leaves `foxy.orbot.token` in the keychain, the install marker and Tor's
 state.

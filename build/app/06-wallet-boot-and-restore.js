@@ -424,8 +424,9 @@
     /* The price line is asked for once at launch and once when the wallet is
      * ready. Offline, both are refused, and nothing asked again — so a phone
      * that came online later showed the price with no line under it. Asked on every route change that has a route; `loadSeries`
-     * answers at once when the line is already there or on its way. */
-    if (secure && !offline && !((this.state.series || {})[this.state.range])) {
+     * answers at once when a fresh line is already there or on its way. One kept from before the app was opened does not count as
+     * there: it is what is drawn until the fresh one lands. */
+    if (secure && !offline && !this.seriesFresh(this.state.range)) {
       this.loadSeries(this.state.range);
     }
   }
