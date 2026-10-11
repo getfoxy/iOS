@@ -528,6 +528,6 @@ final class NUT13Tests: XCTestCase {
                 checked += 1
             }
         }
-        XCTAssertEqual(checked, 15)
+        XCTAssertEqual(checked, 18, "three seeds, each signing every label: six since the card could be reset")
     }
 }
