@@ -175,8 +175,10 @@ was gone from both sides.
 
 The offer is the same JSON as before, at **version 2** and padded to a flat
 2048 bytes so its size says nothing: `{"v":2,"inv":"ln…","req":"creqA…"}`.
-Either field may be missing and at least one is there; on the CASHU rail the
-request goes alone. The payment is padded up to the next multiple of 4096 bytes,
+Either field may be missing and at least one is there: the request goes alone
+while the mint is still making the invoice, and on either rail the invoice goes
+beside the request once there is one, so a payer at another mint can pay it by
+Lightning instead of moving its sats across first. The payment is padded up to the next multiple of 4096 bytes,
 as far as 48 KB; a larger one goes in parts (*Large payments*).
 
 **The code.** The two phones agree an X25519 key. Both then compute
@@ -354,8 +356,8 @@ where the shortening had to come from.
 
 ## Limits
 
-- The Lightning and CASHU rails both work: Lightning offers the invoice and
-  the payment request together, CASHU the request alone. On-chain does not and
+- The Lightning and CASHU rails both work, and both offer the invoice and the
+  payment request together (the rail is which code the screen shows). On-chain does not and
   cannot — an address is not a thing one Foxy hands another over a link. Nor is
   a bank wire, nor a receive reopened from history as a plain address.
 - Both apps must be open on screen. iOS strips a background advertisement down

@@ -393,8 +393,17 @@ function run(a) {
   let body = null;
   try { body = JSON.parse(said[0].slice('receive '.length)); } catch (e) {}
   check('the CASHU rail goes on the air', said.length === 1, JSON.stringify(said));
-  check('offering the request alone, with no invoice beside it',
-    !!body && body.req === a.creq && body.inv === undefined, JSON.stringify(body));
+  check('offering the request with the invoice beside it, so a payer at another mint pays it by Lightning rather than moving its sats here first',
+    !!body && body.req === a.creq && body.inv === INVOICE, JSON.stringify(body));
+
+  // a split share on the CASHU rail offers both halves too
+  const sp = app({ state: { screen: 'spPayer', spIdx: 0, spInvoices: [INVOICE], spRail: 'CASHU' } });
+  sp.creq = 'creqA' + 'd'.repeat(30);
+  const spSaid = run(sp);
+  let spBody = null;
+  try { spBody = JSON.parse(spSaid[0].slice('receive '.length)); } catch (e) {}
+  check('a share on the CASHU rail offers its invoice and its request',
+    !!spBody && spBody.inv === INVOICE && !!spBody.req, JSON.stringify(spBody));
 
   // and on chain still cannot be tapped: an address is not a thing to hand over
   const oc = app({ state: { screen: 'confirm', flow: 'receive', recvRail: 'ON-CHAIN', invoice: INVOICE } });

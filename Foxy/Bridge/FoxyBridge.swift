@@ -1613,7 +1613,7 @@ private final class PriceWalk {
                     print("[foxy] price source failed:", url.host ?? "onion", "answered \(answer.status)")
                     self.answered(i, nil, nil)
                 case .failure(let why):
-                    print("[foxy] price source failed:", url.host ?? "onion", why.text)
+                    print("[foxy] price source failed:", url.host ?? "onion", why.serviceText)
                     self.answered(i, nil, nil)
                 }
             }

@@ -14605,9 +14605,18 @@ class Component extends DCLogic {
       if (cashu(s.recvRail)) {
         /* The rail's own request, not one made beside it: the QR on screen and
          * the offer on the air have to be the same request, or a share paid by
-         * tap settles a row the screen is not watching. */
+         * tap settles a row the screen is not watching.
+         *
+         * The invoice goes beside it whenever the mint has made one, on this
+         * rail as on the other. The rail is which code the screen shows, not
+         * which money this phone takes: a payer at the same mint pays the
+         * request by ecash either way, and a payer at another mint can pay the
+         * invoice by Lightning in seconds, where an offer with no invoice sent
+         * it the long way round, moving its sats to this mint first. */
         const req = this.cashuRequest();
-        return req ? { inv: '', req: req, waiting: false } : { inv: '', req: '', waiting: true };
+        const inv = W.classify(String(s.invoice || '')) === 'invoice' ? String(s.invoice) : '';
+        if (!req && !inv) return { inv: '', req: '', waiting: true };
+        return { inv: inv, req: req || '', waiting: false };
       }
       /* No invoice yet is *waiting*, not *no*.
        *
@@ -14658,7 +14667,10 @@ class Component extends DCLogic {
       if (!inv) return quick ? { inv: '', req: quick, waiting: false } : { inv: '', req: '', waiting: true };
       const req = this.railRequest(want, 'split:' + idx) || quick;
       if (cashu(s.spRail)) {
-        return req ? { inv: '', req: req, waiting: false }
+        // the share's invoice goes beside its request on this rail too (see the receive screen above)
+        const li = W.classify(inv) === 'invoice' ? inv : '';
+        if (req) return { inv: li, req: req, waiting: false };
+        return li ? { inv: li, req: '', waiting: false }
           : { inv: '', req: '', waiting: this.railRequestPending(want, 'split:' + idx) };
       }
       if (W.classify(inv) !== 'invoice') return { inv: '', req: '', waiting: true };
