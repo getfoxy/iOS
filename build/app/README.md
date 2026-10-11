@@ -8,7 +8,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 |---|---|---|
 | `00-header-and-state.js` | 1 | — |
 | `01-ui-basics.js` | 361 | `offlineNow`, `offlineNo`, `toast`, `goSwitchMint`, `back`, `cfRow`, `sendToText`, `confirmSpec`, `sendAmountText`, `noteShown` |
-| `03-send.js` | 442 | `openTx`, `receiptCheck`, `txFiat`, `money`, `usd`, `quoteSendFee`, `startSend`, `showPayPending`, `checkSendPrice`, `startSendNow` |
+| `03-send.js` | 461 | `openTx`, `receiptCheck`, `txFiat`, `money`, `usd`, `quoteSendFee`, `toConfirm`, `startSend`, `showPayPending`, `checkSendPrice`, `startSendNow` |
 | `04-receive-dismissals.js` | 38 | `closeReceive`, `dismissPending`, `dismissOnchain` |
 | `05-device-shell.js` | 274 | `isRealDevice`, `applyShell`, `audioCtx`, `tone`, `sound`, `haptic`, `syncHaptics`, `pushToNative`, `applyDeepLink` |
 | `06-wallet-boot-and-restore.js` | 808 | `bootWallet`, `bootWalletNow`, `setUpAfterReturn`, `settleLaunch`, `mintName`, `mintNameOf`, `mintHost`, `sayBackOnline`, `claimWhenRouteReturns`, `connectForRealOnceOnline`, `retryConnect`, `allMints`, `knownMints`, `runSeedScan`, `restoreFromMenu`, `scanCandidate`, `scanSeedRows`, `seedScanEnded`, `forgetRestoreCandidates`, `pickRestoreMint`, `adoptRestoreMint` |

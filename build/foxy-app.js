@@ -487,6 +487,25 @@ class Component extends DCLogic {
     });
   }
 
+  /* Back to the send confirmation from the sending screen.
+   *
+   * startSend pushes the confirmation onto the screen stack as it moves to
+   * the sending screen. Coming back by setting the screen alone left that
+   * entry behind: the stack ended with the confirmation while the
+   * confirmation was showing, so the first press of its back arrow popped the
+   * entry and changed nothing on screen, and only the second press left.
+   * Every return from a send that did not happen comes through here, which
+   * drops the entry the sending screen pushed, so one press leaves as it did
+   * before SEND. Every trailing entry goes, so a send tried twice does not
+   * leave two. */
+  toConfirm() {
+    this.setState(p => {
+      const stack = p.stack.slice();
+      while (stack.length && stack[stack.length - 1] === 'sendConfirm') stack.pop();
+      return { screen: 'sendConfirm', stack: stack, sendPhase: null, sendSlow: false };
+    });
+  }
+
   startSend() {
     const onchain = this.state.recipientKind === 'address';
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: onchain ? 'onchain' : 'in', etaLeft: 600 }));
@@ -516,7 +535,7 @@ class Component extends DCLogic {
          * back while a send is in flight. The only way out was relaunching. */
         onClose: () => {
           if (this.state.screen === 'sendDone' || this.state.sendPhase) {
-            this.setState({ screen: 'sendConfirm', sendPhase: null });
+            this.toConfirm();
           }
         },
       });
@@ -543,7 +562,7 @@ class Component extends DCLogic {
               reason: 'Foxy lost its Tor connection and is getting it back. Nothing was sent.',
               onClose: () => {
                 if (this.state.screen === 'sendDone' || this.state.sendPhase) {
-                  this.setState({ screen: 'sendConfirm', sendPhase: null });
+                  this.toConfirm();
                 }
               },
               retry: 'TRY AGAIN', back: '',
@@ -733,7 +752,7 @@ class Component extends DCLogic {
       // before the classification below, which would call "invalid" a refusal and offer TRY AGAIN
       if (this.isBadSignatures(e)) {
         this.badSignatureCard(null, 'pay', () => {
-          if (this.state.screen === 'sendDone' || this.state.sendPhase) this.setState({ screen: 'sendConfirm', sendPhase: null });
+          if (this.state.screen === 'sendDone' || this.state.sendPhase) this.toConfirm();
         });
         return;
       }
@@ -773,7 +792,7 @@ class Component extends DCLogic {
        * `sendPhase` stayed 'in', which also stops this phone listening for a
        * tap. */
       if (this.state.screen === 'sendDone' || this.state.sendPhase) {
-        this.setState({ screen: 'sendConfirm', sendPhase: null, sendSlow: false });
+        this.toConfirm();
       }
 
       // not enough money needs a different amount, not another attempt
@@ -797,7 +816,7 @@ class Component extends DCLogic {
            * 'confirm' is the receive invoice screen. Sending someone there
            * after a failed payment is worse than the dead end it replaced. */
           if (this.state.screen === 'sendDone' || this.state.sendPhase) {
-            this.setState({ screen: 'sendConfirm', sendPhase: null });
+            this.toConfirm();
           }
         },
       });
