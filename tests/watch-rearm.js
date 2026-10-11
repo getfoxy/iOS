@@ -51,7 +51,7 @@ const methods = new Function('return {' + [
   'nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {',
   'walletReady(w) {',
   'spSyncPaid() {', 'spPaidArr() {', 'spOthers() {', 'spWaysN() {',
-  'spPaidOnScreen(idx) {', 'spAdvanceAfterPaid(idx, how) {',
+  'spPaidOnScreen(idx, how) {', 'spAdvanceAfterPaid(idx, how) {', 'spStopOne(i, hash) {',
   'spMakeInvoices() {',
   // the change tidy, and the move it must stay out of (07-history-tokens-mints.js)
   'tidyChangeLater(more) {', 'movingMints() {',
@@ -219,6 +219,83 @@ async function run() {
     d.state = { screen: 'spPayer', spIdx: 1, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
     d.spSyncPaid();
     check('and a screen showing a different share stays on it', d.state.screen === 'spPayer' && d.state.spIdx === 1 && d.state.spPaid[0] === true, JSON.stringify(d.state));
+  }
+  {
+    /* Paid by a card while its own code was on screen (26f-flashcard.js, `fcShareMoved`): the screen moves as it does for a
+     * share paid over the tap or by its invoice, and the log says it was by a card. Every tap is its own, so the next
+     * payer's screen starts with no code and no payer on the link from the last. */
+    const lines = [];
+    const log0 = console.log;
+    console.log = (...x) => { lines.push(x.join(' ')); };
+    const a = app();
+    a.state = { screen: 'spPayer', spIdx: 0, spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'], tapShownCode: '4821', tapRecvStage: 'connected' };
+    a.spPaidOnScreen(0, 'by card');
+    const b = app();
+    b.state = { screen: 'spPayer', spIdx: 1, spWays: 3, spPaid: [true, true], spInvoices: ['lnbc1', 'lnbc2'] };
+    b.spPaidOnScreen(1, 'by card');
+    const c = app();
+    c.state = { screen: 'spPayer', spIdx: 0, spFromWaiting: true, spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    c.spPaidOnScreen(0, 'by card');
+    const d = app();
+    d.state = { screen: 'spPayer', spIdx: 1, spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    d.spPaidOnScreen(0, 'by card');
+    const e = app();
+    e.state = { screen: 'spPayer', spIdx: 0, spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    e.spPaidOnScreen(0);
+    console.log = log0;
+    check('a share paid by a card moves its screen on to the next payer, with no code carried over, and the log says how it was paid',
+      a.state.screen === 'spPayer' && a.state.spIdx === 1 && a.state.tapShownCode === '' && a.state.tapRecvStage === ''
+        && lines.some(l => /share 1 paid by card; on to payer 2/.test(l)), JSON.stringify({ state: a.state, lines }));
+    check('the last share paid by a card is EVERYONE HAS PAID', b.state.screen === 'spAllPaid' && lines.some(l => /share 2 paid by card; everyone has paid/.test(l)), JSON.stringify(b.state));
+    check('paid by a card, a share opened from the list goes back to the list', c.state.screen === 'spWaiting' && c.state.spFromWaiting === false, JSON.stringify(c.state));
+    check('paid by a card, a screen showing a different share stays on it', d.state.screen === 'spPayer' && d.state.spIdx === 1, JSON.stringify(d.state));
+    check('a share paid by its invoice is still logged as that', lines.some(l => /share 1 paid by its invoice/.test(l)) && e.state.spIdx === 1, JSON.stringify(lines));
+  }
+  {
+    /* A share paid by a card whose answer came late is ticked by what the ledger says: its row names the card payment's entry
+     * (`splitNoteCard`), the reconcile ticks the row when that entry settles, and the screen follows, as it does for a share its invoice
+     * paid, said to be by a card. Its invoice, which nobody will pay, is no longer asked about. */
+    const lines = [];
+    const log0 = console.log;
+    console.log = (...x) => { lines.push(x.join(' ')); };
+    const ledger = (rows) => ({ splitRecord() { return { done: rows.every(r => r.paid), ways: 3, total: 3000, rows }; } });
+    const row = (n, more) => Object.assign({ hash: 'h' + n, bolt11: 'lnbc' + n, sats: 1000, paid: false }, more || {});
+
+    const a = app();
+    const stopped = [];
+    a.state = { screen: 'spPayer', spIdx: 0, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    a._spWatching = 'h1,h2';
+    a._spStops = [() => stopped.push('h1'), () => stopped.push('h2')];
+    global.window = { FoxyWallet: splitWallet(ledger([row(1, { paid: true, card: 'card-x' }), row(2)])) };
+    a.spSyncPaid();
+    check('a share the ledger says a card paid is ticked on the screen, which moves on, said to be by a card',
+      a.state.spPaid[0] === true && a.state.spPaid[1] === false && a.state.screen === 'spPayer' && a.state.spIdx === 1
+        && lines.some(l => /share 1 paid by card; on to payer 2/.test(l)), JSON.stringify({ state: a.state, lines }));
+    check('and its invoice is no longer asked about, and the other share’s still is', stopped.join() === 'h1', stopped.join());
+
+    const b = app();
+    const stoppedB = [];
+    b.state = { screen: 'spPayer', spIdx: 0, spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    b._spWatching = 'h1,h2';
+    b._spStops = [() => stoppedB.push('h1'), () => stoppedB.push('h2')];
+    global.window = { FoxyWallet: splitWallet(ledger([row(1, { paid: true }), row(2)])) };
+    b.spSyncPaid();
+    check('a share its invoice paid is said to be that, and its watcher is left to the watcher',
+      b.state.spIdx === 1 && lines.some(l => /share 1 paid by its invoice/.test(l)) && stoppedB.length === 0, JSON.stringify({ spIdx: b.state.spIdx, stopped: stoppedB }));
+
+    const c = app();
+    c.state = { screen: 'spWaiting', spWays: 3, spPaid: [true, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    global.window = { FoxyWallet: splitWallet(ledger([row(1, { paid: true }), row(2, { paid: true, card: 'card-y' })])) };
+    c.spSyncPaid();
+    check('the last share landing by a card ends the collecting screen on EVERYONE HAS PAID', c.state.screen === 'spAllPaid' && c.state.spPaid.every(Boolean), JSON.stringify(c.state));
+
+    const d = app();
+    d.state = { screen: 'spWaiting', spWays: 3, spPaid: [false, false], spInvoices: ['lnbc1', 'lnbc2'] };
+    global.window = { FoxyWallet: splitWallet(ledger([row(1, { card: 'card-z' }), row(2)])) };
+    d.spSyncPaid();
+    console.log = log0;
+    check('a row that names a card payment which has not settled is not ticked: only a row the ledger says is paid is',
+      d.state.spPaid.every(x => !x) && d.state.screen === 'spWaiting', JSON.stringify(d.state));
   }
   {
     // a tally that has not moved must not redraw the screen under the person

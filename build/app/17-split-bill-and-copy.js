@@ -111,7 +111,11 @@
    * radio re-armed for the same share — the next person had to be stepped to
    * by hand. Only from the payer screen showing that very
    * share; a share opened from the waiting list goes back there instead
-   * (requestPaidHere). With every share paid it is EVERYONE HAS PAID. */
+   * (requestPaidHere). With every share paid it is EVERYONE HAS PAID.
+   *
+   * A share paid by a card moves on the same way (26f-flashcard.js,
+   * `fcShareMoved`; `how` says so in the log). The next payer's screen has a
+   * CARD of its own, and its payment is a tap of its own. */
   spAdvanceAfterPaid(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
@@ -143,7 +147,13 @@
    * So the screen no longer depends on which path settled a share. Nothing is
    * set here that the ledger does not already say, and a tally that has not
    * moved sets no state at all rather than drawing the screen again on every
-   * history load. */
+   * history load.
+   *
+   * A share paid by a card lands this way when the mint's answer came late, or
+   * a payment taken on trust has been swapped: its row names the card payment's
+   * entry (`splitNoteCard`), the reconcile marks the row when that entry settles,
+   * and the screen follows. Its invoice, which nobody will pay, is no longer
+   * asked about, as it is when the screen sees the share paid (`spMarkPaid`). */
   spSyncPaid() {
     const W = window.FoxyWallet;
     /* The record whether or not it is finished (`splitRecord`). It was
@@ -169,7 +179,22 @@
       screen: done && p.screen === 'spWaiting' ? 'spAllPaid' : p.screen,
     }));
     if (done && this.haptic) this.haptic('success');
-    landed.forEach(i => this.spPaidOnScreen(i));
+    landed.forEach(i => {
+      const row = led.rows[i];
+      if (row.card) this.spStopOne(i, row.hash);
+      this.spPaidOnScreen(i, row.card ? 'by card' : undefined);
+    });
+  }
+
+  /* The entries of the card payments that pay the shares of the bill being collected, by name (`splitNoteCard`). The bill's own screens
+   * report those payments, as they report a share paid over the tap, so a history pass does not announce one as well, however
+   * late it settles. A bill that has been stopped names none, and a payment that lands after it is an ordinary one. */
+  splitCardEntries() {
+    const W = window.FoxyWallet;
+    const bill = W && W.splitRecord && W.splitRecord();
+    const named = {};
+    ((bill && bill.rows) || []).forEach(r => { if (r && r.card) named[r.card] = true; });
+    return named;
   }
 
   /* A share paid by its invoice while its own screen was up: the screen says
@@ -179,12 +204,12 @@
    * was, so the person holding the phone saw no sign of the payment until
    * they went to the list. Back to the list when the share was opened from
    * it, otherwise on to the next payer; with every share paid it is EVERYONE
-   * HAS PAID. */
-  spPaidOnScreen(idx) {
+   * HAS PAID. `how`, for the log: a share paid by a card says 'by card'. */
+  spPaidOnScreen(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
     if (s.spFromWaiting) { this.setState({ screen: 'spWaiting', spFromWaiting: false }); return; }
-    this.spAdvanceAfterPaid(idx, 'by its invoice');
+    this.spAdvanceAfterPaid(idx, how || 'by its invoice');
   }
 
   /* Pick up a bill left half-collected.

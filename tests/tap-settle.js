@@ -14,7 +14,9 @@
  * nobody had taken.
  *
  * Two halves: what `payRequest` makes of each answer, and what
- * `requestDelivered` forgets on the strength of it.
+ * `requestDelivered` forgets on the strength of it. And, after them, a share of
+ * a split bill reports itself once, whether it was paid over the tap
+ * (`requestPaidHere`) or by a card (`fcShareMoved`).
  */
 const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
 const fs = require('fs');
@@ -90,6 +92,10 @@ const lifted = new Function('return {'
   + method('requestPaidHere(ev) {') + ',\n'
   + method('forgetRequests(paid) {') + ',\n'
   + method('syncInbox() {') + ',\n'
+  + method('fcW() {') + ',\n'
+  + method('fcShareMoved(share, hash) {') + ',\n'
+  + method('fcShareNote(share, hash) {') + ',\n'
+  + method('splitCardEntries() {') + ',\n'
   + method('txIsNew(hash) {') + '}')();
 
 function delivered(req, r) {
@@ -206,6 +212,105 @@ async function run() {
     }, lifted);
     app2.requestPaidHere({ stage: 'paid', purpose: 'receive', id: 'xyz', sats: 24 });
     ok(seenPlain[0] === 'announced', 'and an ordinary payment still does');
+  }
+
+  // ---- a share of a split paid by a card reports itself once, too ----------
+  {
+    /* The same for a card (26f-flashcard.js, `fcShareMoved`): the bill's own screens say the share is paid, so the card
+     * payment's entry is not announced as well, whichever stage it has reached. A history pass may have queued it
+     * already, the change being made for it may be holding it, or neither may have happened yet. */
+    const base = (record, over) => {
+      const said = { marked: [], moved: [], state: { screen: 'spPayer', spIdx: 0, tapArmed: true } };
+      const app = Object.assign({
+        said, state: said.state, _seenSeeded: true,
+        setState(o) { Object.assign(said.state, typeof o === 'function' ? o(said.state) : o); },
+        spMarkPaid(i, hash) { said.marked.push([i, hash]); },
+        spPaidOnScreen(i, how) { said.moved.push([i, how]); },
+        _paidQueue: [{ hash: 'card-a' }, { hash: 'card-b' }],
+        _heldConfirm: { hash: 'card-a', dir: 'in', sats: 100 },
+      }, lifted, over || {});
+      global.window = { FoxyWallet: { cardSession() {}, splitRecord: () => record } };
+      return app;
+    };
+    const owed = { rows: [{ hash: 'h0', paid: false }, { hash: 'h1', paid: false }] };
+
+    const a = base(owed);
+    a.fcShareMoved({ idx: 0, hash: 'h0' }, 'card-a');
+    ok(a.said.marked.length === 1 && a.said.marked[0][0] === 0 && a.said.marked[0][1] === 'h0' && a.said.moved.length === 1 && a.said.moved[0][1] === 'by card',
+      'the share is ticked by its own row and its screen moves on, said to be by a card');
+    ok(a.txIsNew('card-a') === false, 'its entry is marked announced, so a history pass that comes later queues nothing for it');
+    ok(a._paidQueue.map((q) => q.hash).join() === 'card-b', 'one a pass had queued already is let go, and the others stay');
+    ok(a._heldConfirm === null, 'and so is one held behind its change');
+    ok(a.said.state.tapArmed === false, 'a radio armed for this share is not left armed for the next');
+
+    const b = base(owed);
+    b._heldConfirm = { hash: 'card-other', dir: 'in', sats: 5 };
+    b.fcShareMoved({ idx: 1, hash: 'h1' }, 'card-a');
+    ok(b._heldConfirm && b._heldConfirm.hash === 'card-other', 'another payment\u2019s held confirmation is left as it was');
+
+    const c = base({ rows: [{ hash: 'h0', paid: true }, { hash: 'h1', paid: false }] });
+    c.fcShareMoved({ idx: 0, hash: 'h0' }, 'card-a');
+    ok(c.said.marked.length === 0 && c.said.moved.length === 1, 'a share already ticked (its invoice was paid meanwhile) is not ticked again, and the screen still moves');
+
+    const d = base(null);
+    d.fcShareMoved({ idx: 0, hash: 'h0' }, 'card-a');
+    ok(d.said.marked.length === 0 && d.said.moved.length === 0 && d.txIsNew('card-a') === true && d._paidQueue.length === 2 && d._heldConfirm !== null && d.said.state.tapArmed === true,
+      'a bill that is no longer collected has no share to tick: the payment is an ordinary one, with its own confirmation');
+
+    const e = base({ rows: [{ hash: 'other', paid: false }] });
+    e.fcShareMoved({ idx: 0, hash: 'h0' }, 'card-a');
+    ok(e.said.marked.length === 0 && e.txIsNew('card-a') === true, 'nor does a share of another bill: it is found by its row, and not by its place');
+
+    const f = base(owed);
+    f.fcShareMoved({ idx: 0, hash: 'h0' }, '');
+    ok(f.said.marked.length === 1 && f._paidQueue.length === 2, 'a payment with no entry yet still ticks its share, and lets go of nothing');
+
+    // the rest of a payment's handling (its change, its confirmation) is not cut short by a share that cannot be ticked
+    const g = base(owed, { spMarkPaid() { throw new Error('the store is full'); } });
+    const warn0 = console.warn;
+    console.warn = () => {};
+    let escaped = null;
+    try { g.fcShareMoved({ idx: 0, hash: 'h0' }, 'card-a'); } catch (x) { escaped = x; }
+    console.warn = warn0;
+    ok(escaped === null, 'a share that cannot be ticked does not take the rest of the payment’s handling with it');
+  }
+
+  // ---- and a card's payment that lands late is not announced either ---------
+  {
+    /* The payment's entry is named on the share's row as soon as the card has signed (`fcShareNote`), before the mint has answered, and a
+     * history pass leaves alone an entry a row names (`splitCardEntries`), whenever it settles: the bill's own screens tick the share. */
+    const noted = [];
+    const wallet = (record) => ({
+      cardSession() {}, splitRecord: () => record,
+      splitNoteCard(hash, entry) { noted.push([hash, entry]); },
+    });
+    const app = Object.assign({}, lifted);
+    global.window = { FoxyWallet: wallet({ rows: [{ hash: 'h0', paid: false, card: 'card-late' }, { hash: 'h1', paid: false }, { hash: 'h2', paid: true, card: 'req-card-trusted' }] }) };
+    const named = app.splitCardEntries();
+    ok(named['card-late'] === true && named['req-card-trusted'] === true && Object.keys(named).length === 2,
+      'the entries the bill’s rows name are found, a payment taken on trust among them', JSON.stringify(named));
+    global.window = { FoxyWallet: wallet(null) };
+    ok(Object.keys(app.splitCardEntries()).length === 0, 'a bill that has been stopped names none, and a payment that lands after it is an ordinary one');
+    global.window = { FoxyWallet: {} };
+    ok(Object.keys(app.splitCardEntries()).length === 0, 'nor does a wallet that keeps no bill');
+
+    global.window = { FoxyWallet: wallet({ rows: [] }) };
+    app.fcShareNote({ idx: 1, hash: 'h1' }, 'card-new');
+    ok(noted.length === 1 && noted[0][0] === 'h1' && noted[0][1] === 'card-new', 'a share is noted by its row, with the name of the payment');
+    global.window = { FoxyWallet: Object.assign(wallet(null), { splitNoteCard() { throw new Error('the store is full'); } }) };
+    const warn0 = console.warn;
+    console.warn = () => {};
+    let escaped = null;
+    try { app.fcShareNote({ idx: 1, hash: 'h1' }, 'card-new'); } catch (x) { escaped = x; }
+    console.warn = warn0;
+    ok(escaped === null, 'and a note that cannot be written does not stop the payment');
+
+    /* The history pass itself is too large to run here; what is pinned is that it asks for those entries before it decides what to announce,
+     * and that an entry a row names is marked announced and not queued, as an entry tagged as change is. */
+    const pass = method('loadHistory() {');
+    const at = pass.indexOf('shareCards[t.hash]');
+    ok(/const shareCards = this\.splitCardEntries\(\);/.test(pass) && at > 0 && /if \(shareCards\[t\.hash\]\) \{ this\.txIsNew\(t\.hash\); return; \}/.test(pass) && at < pass.indexOf('fresh.push(t)'),
+      'the history pass marks such an entry announced and queues nothing for it, before it decides what to announce');
   }
 
   // ---- a crossing's own entries are not payments to announce ---------------

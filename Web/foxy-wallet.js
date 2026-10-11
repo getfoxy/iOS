@@ -19216,13 +19216,28 @@
         if (t && t.dir === 'in' && t.settled && t.hash) paid[t.hash] = true;
       });
       var n = 0;
+      // the rows this walk marked, by the names of their invoices (see `finish`)
+      var marked = {};
+      function mark(r) { r.paid = true; if (r.hash) marked[r.hash] = true; n++; }
       s.rows.forEach(function (r) {
-        if (!r.paid && r.hash && paid[r.hash]) { r.paid = true; n++; }
+        /* Paid by its invoice's own entry, or by a card's payment, which is an entry of its own and is noted on the
+         * row as soon as it has a name (`splitNoteCard`). Only an entry that has settled counts, so a payment taken
+         * on trust ticks nothing until it has been swapped. */
+        if (!r.paid && ((r.hash && paid[r.hash]) || (r.card && paid[r.card]))) mark(r);
       });
 
       function finish() {
         if (!n) return n;
-        if (s.rows.every(function (r) { return r.paid; })) {
+        /* Onto the record as it is now, and not over it.
+         *
+         * A walk asks the mint a row at a time and can take a while, and the record can change under it: a share
+         * ticked by hand, a card's payment noted on a row, another bill begun. Writing back what was read when the
+         * walk began would undo all of those. What the walk found is put onto the record as it stands when the walk
+         * ends, and nowhere if the bill has gone. */
+        var now = load(K.split, null);
+        if (!now || !now.rows) return n;
+        now.rows.forEach(function (r) { if (r.hash && marked[r.hash]) r.paid = true; });
+        if (now.rows.every(function (r) { return r.paid; })) {
           /* Marked, not deleted.
            *
            * The collecting screen reads this object on every render. Deleting
@@ -19231,11 +19246,11 @@
            * stayed pending forever, while the payment sat in history.
            *
            * splitClear() removes it when the all-paid screen is dismissed. */
-          s.done = true;
-          save(K.split, s);
+          now.done = true;
+          save(K.split, now);
           console.log('[foxy] split settled in full');
         } else {
-          save(K.split, s);
+          save(K.split, now);
         }
         console.log('[foxy] split: marked', n, 'row(s) paid');
         return n;
@@ -19264,11 +19279,11 @@
           // each row's invoice on its own circuit
           return onCircuit(w, 'quote:' + r.hash).checkMintQuoteBolt11(r.hash).then(function (q) {
             var state = q && q.state;
-            if (state === 'ISSUED') { r.paid = true; n++; return; }
+            if (state === 'ISSUED') { mark(r); return; }
             if (state === 'PAID') {
               // paid and never claimed: the money is at the mint waiting
               return FoxyWallet.claim(r.hash).then(function () {
-                r.paid = true; n++;
+                mark(r);
               }).catch(function (e) {
                 console.warn('[foxy] split: claim of', r.hash, 'failed —', FoxyWallet.reason(e));
               });
@@ -19297,6 +19312,24 @@
         console.log('[foxy] split settled in full');
         return s;
       }
+      save(K.split, s);
+      return s;
+    },
+
+    /* A share paid by a card: the entry of the card's payment, noted on the share's row before that entry exists.
+     *
+     * A card's payment is an entry of its own and not the share's invoice's, so nothing else would know which share it
+     * pays: the reconcile marks a row by its invoice's entry. The app notes the card's as soon as the card has signed,
+     * when its name is known and the mint has not yet answered, or when a payment taken with no route is kept. Then
+     * however late that entry settles (the wallet's own settling when it connects, or the swap of a payment taken on
+     * trust), the reconcile marks the row. A refused payment never settles, and one taken on trust is pending until it
+     * has been swapped, so neither ticks a share. Answers the record, or nothing where no unpaid row has this name. */
+    splitNoteCard: function (hash, entry) {
+      var s = load(K.split, null);
+      if (!s || !s.rows || !hash || !entry) return null;
+      var hit = false;
+      s.rows.forEach(function (r) { if (r.hash === hash && !r.paid) { r.card = String(entry); hit = true; } });
+      if (!hit) return null;
       save(K.split, s);
       return s;
     },

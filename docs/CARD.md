@@ -388,7 +388,11 @@ if it has no room for the load: take some money off it first.
 
 ## Paying at a till
 
-On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP.
+On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP. A split bill has the same **CARD** on each payer's own
+screen, in the row beside SHARE, COPY, SCAN and TAP, for that payer's share: one share to a tap, ticked (and the screen moved on
+to the next payer) when the mint has given this phone its pieces, as *Paid* below says, and not before. The share's row in the
+bill's ledger names the payment's entry from the moment the card has signed, so a payment the mint answers late (CHECKING closed
+first), or one taken on trust and swapped later, ticks its share when it lands, as a share paid by its invoice late does.
 
 **The tap comes first, and the PIN is asked only if the card wants it.** CARD brings up the sheet and the tap at once, with
 no pad before it. The card is read; a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap

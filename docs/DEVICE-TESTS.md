@@ -1634,6 +1634,18 @@ and load it), a phone whose build carries the NFC entitlement
    BACK ON THE CARD, are driven in the simulated runs only.
 5. Three wrong PINs at the till. **Pass:** CARD BLOCKED on the third, and the
    right PIN no longer opens it. On the holder's phone the card reads BLOCKED.
+6. A split bill: MENU, SPLIT A BILL, a few dollars three ways, on to the first payer's
+   screen. **Pass:** the row under the code is SHARE, COPY, SCAN, TAP and CARD, evenly spaced,
+   none touching the next. CARD, a tap, the PIN if the card wants it. **Pass:** the sheet is
+   the one of step 1 for the share's amount; when it ends the screen is the next payer's, with
+   a CARD of its own and no sheet coming up for it, and no PAYMENT RECEIVED. Step back to the
+   paid share: it has no CARD. Pay the next share with the same card. **Pass:** it is its own
+   press and its own tap; the last share ends on EVERYONE HAS PAID, COLLECTING ticked each
+   one, and HISTORY has a card payment for each and none announced. A wrong PIN, a card taken
+   away too soon and airplane mode (HIGH RISK, TAKEN ON TRUST) are as at the receive screen,
+   except that the share is ticked, with no PAYMENT RECEIVED, when the payment lands: after a
+   CHECKING that was closed before the mint answered, or once a payment taken on trust has been
+   swapped (online again). Not before: until then the share stays owed.
 
 #### 23c-2. The limit on one tap
 

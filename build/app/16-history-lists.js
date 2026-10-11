@@ -449,6 +449,8 @@
       }
 
       const fresh = [];
+      // the card payments that pay a share of the bill being collected, which its own screens report (`splitCardEntries`)
+      const shareCards = this.splitCardEntries();
       list.forEach(t => {
         /* Money written down and not yet swapped in, which the person has
          * already been shown.
@@ -487,6 +489,12 @@
          * taken from a card is not this: it is tagged apart and announced like
          * any other. */
         if (tags.to === 'card') { this.txIsNew(t.hash); return; }
+        /* A card's payment of a share of a split bill, which the bill's row
+         * names: the bill's own screens report it, as they report a share paid
+         * over the tap, so it is not announced as well, however late it
+         * settles. A bill that has been stopped names none, and then it is
+         * announced like any other payment. */
+        if (shareCards[t.hash]) { this.txIsNew(t.hash); return; }
         /* Still on its way to somebody. The entry exists because the token
          * does; the payment has not happened yet, and announcing it is how the
          * payer came to see a confirmation of withdrawal while the receiver was

@@ -9172,6 +9172,8 @@ class Component extends DCLogic {
       }
 
       const fresh = [];
+      // the card payments that pay a share of the bill being collected, which its own screens report (`splitCardEntries`)
+      const shareCards = this.splitCardEntries();
       list.forEach(t => {
         /* Money written down and not yet swapped in, which the person has
          * already been shown.
@@ -9210,6 +9212,12 @@ class Component extends DCLogic {
          * taken from a card is not this: it is tagged apart and announced like
          * any other. */
         if (tags.to === 'card') { this.txIsNew(t.hash); return; }
+        /* A card's payment of a share of a split bill, which the bill's row
+         * names: the bill's own screens report it, as they report a share paid
+         * over the tap, so it is not announced as well, however late it
+         * settles. A bill that has been stopped names none, and then it is
+         * announced like any other payment. */
+        if (shareCards[t.hash]) { this.txIsNew(t.hash); return; }
         /* Still on its way to somebody. The entry exists because the token
          * does; the payment has not happened yet, and announcing it is how the
          * payer came to see a confirmation of withdrawal while the receiver was
@@ -9356,7 +9364,11 @@ class Component extends DCLogic {
    * radio re-armed for the same share — the next person had to be stepped to
    * by hand. Only from the payer screen showing that very
    * share; a share opened from the waiting list goes back there instead
-   * (requestPaidHere). With every share paid it is EVERYONE HAS PAID. */
+   * (requestPaidHere). With every share paid it is EVERYONE HAS PAID.
+   *
+   * A share paid by a card moves on the same way (26f-flashcard.js,
+   * `fcShareMoved`; `how` says so in the log). The next payer's screen has a
+   * CARD of its own, and its payment is a tap of its own. */
   spAdvanceAfterPaid(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
@@ -9388,7 +9400,13 @@ class Component extends DCLogic {
    * So the screen no longer depends on which path settled a share. Nothing is
    * set here that the ledger does not already say, and a tally that has not
    * moved sets no state at all rather than drawing the screen again on every
-   * history load. */
+   * history load.
+   *
+   * A share paid by a card lands this way when the mint's answer came late, or
+   * a payment taken on trust has been swapped: its row names the card payment's
+   * entry (`splitNoteCard`), the reconcile marks the row when that entry settles,
+   * and the screen follows. Its invoice, which nobody will pay, is no longer
+   * asked about, as it is when the screen sees the share paid (`spMarkPaid`). */
   spSyncPaid() {
     const W = window.FoxyWallet;
     /* The record whether or not it is finished (`splitRecord`). It was
@@ -9414,7 +9432,22 @@ class Component extends DCLogic {
       screen: done && p.screen === 'spWaiting' ? 'spAllPaid' : p.screen,
     }));
     if (done && this.haptic) this.haptic('success');
-    landed.forEach(i => this.spPaidOnScreen(i));
+    landed.forEach(i => {
+      const row = led.rows[i];
+      if (row.card) this.spStopOne(i, row.hash);
+      this.spPaidOnScreen(i, row.card ? 'by card' : undefined);
+    });
+  }
+
+  /* The entries of the card payments that pay the shares of the bill being collected, by name (`splitNoteCard`). The bill's own screens
+   * report those payments, as they report a share paid over the tap, so a history pass does not announce one as well, however
+   * late it settles. A bill that has been stopped names none, and a payment that lands after it is an ordinary one. */
+  splitCardEntries() {
+    const W = window.FoxyWallet;
+    const bill = W && W.splitRecord && W.splitRecord();
+    const named = {};
+    ((bill && bill.rows) || []).forEach(r => { if (r && r.card) named[r.card] = true; });
+    return named;
   }
 
   /* A share paid by its invoice while its own screen was up: the screen says
@@ -9424,12 +9457,12 @@ class Component extends DCLogic {
    * was, so the person holding the phone saw no sign of the payment until
    * they went to the list. Back to the list when the share was opened from
    * it, otherwise on to the next payer; with every share paid it is EVERYONE
-   * HAS PAID. */
-  spPaidOnScreen(idx) {
+   * HAS PAID. `how`, for the log: a share paid by a card says 'by card'. */
+  spPaidOnScreen(idx, how) {
     const s = this.state;
     if (s.screen !== 'spPayer' || Number(s.spIdx || 0) !== Number(idx)) return;
     if (s.spFromWaiting) { this.setState({ screen: 'spWaiting', spFromWaiting: false }); return; }
-    this.spAdvanceAfterPaid(idx, 'by its invoice');
+    this.spAdvanceAfterPaid(idx, how || 'by its invoice');
   }
 
   /* Pick up a bill left half-collected.
@@ -11374,6 +11407,12 @@ class Component extends DCLogic {
     v.spTapArmBg = s.tapArmed ? 'var(--acc)' : 'var(--ink)';
     v.spTapArmInk = s.tapArmed ? '#fff' : 'var(--bg)';
     v.spTapArmLabel = 'TAP';
+    /* CARD, on a share: paid by a card that holds ecash, as on the receive screen, one share to a tap
+     * (26f-flashcard.js, `payShareByCard`). A share that is paid has none: there is nothing left to pay. */
+    v.spCardPay = () => this.payShareByCard(idx);
+    v.spCardShown = !paid[idx];
+    // five round buttons take more room than the four of a paid share's row, which keeps the width it had
+    v.spButtonsW = v.spCardShown ? '340px' : '300px';
     v.spEditPayerAmt = () => this.setState({ spEditIdx: idx + 1, spEditBuf: '0' });
     v.spAssignBtnLabel = isQrSlot ? 'ASSIGN TO A CONTACT' : 'CHANGE CONTACT';
     v.spOpenAssign = () => this.setState({ screen: 'spAssign' });
@@ -18036,11 +18075,16 @@ class Component extends DCLogic {
   /* ---- FLASHCARD: a card that holds ecash ----------------------------------
    *
    * The screens over the wallet's card functions (build/wallet/08a-flashcard.js
-   * and 21a-flashcard.js). Two places use them:
+   * and 21a-flashcard.js). These places use them:
    *
    *   the receive screen's CARD button   somebody pays this phone with their
    *                                      card: its PIN on this phone's pad,
    *                                      a tap, paid or not;
+   *   a split bill's share screen        the same CARD, for one payer's share
+   *                                      of the bill (`payShareByCard`): one
+   *                                      share to a tap, and a share the mint
+   *                                      has vouched for is ticked and the
+   *                                      screen moves on to the next payer;
    *   MENU > FLASHCARD                   a holder's own card: what it holds,
    *                                      money on and off it, its PIN and its
    *                                      limit, and the cards this phone can
@@ -18621,6 +18665,7 @@ class Component extends DCLogic {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
       if (how === 'paid') {
+        if (opt.share) this.fcShareMoved(opt.share, id);
         this.fcMoved(opt);
         // the mint's answer came late, and the change it made waits for the card's second tap (RECEIVE)
         if (opt.paying && row && row.change > 0 && !row.refund) this.fcReceiveNow(row.change, row.sats);
@@ -18669,6 +18714,54 @@ class Component extends DCLogic {
     if (!opt.paying && opt.done) opt.done(opt.after);
   }
 
+  /* The entry that will pay a share of a split bill, noted on the share's row in the bill's ledger (`splitNoteCard`) as soon as it has a
+   * name: when the card has signed, before the mint has answered, or when a payment is taken on trust. However late that entry settles
+   * (the mint's answer after CHECKING was closed, found by the wallet's own settling, or a payment taken on trust once it is swapped),
+   * the ledger ticks the share then, and the screens follow it as they follow a share paid by its invoice (`spSyncPaid`). A failure to
+   * note it does not stop the payment: the share is then ticked only if the mint answers while the screen is waiting (`fcShareMoved`). */
+  fcShareNote(share, hash) {
+    const W = this.fcW();
+    try {
+      if (W && W.splitNoteCard) W.splitNoteCard(share.hash, hash);
+    } catch (e) {
+      console.warn('[foxy] a share’s card payment could not be noted on its row:', (e && e.message) || e);
+    }
+  }
+
+  /* A share of a split bill, paid by a card: the mint has given this phone its pieces (`hash`: the payment's entry).
+   *
+   * The bill's own screens say a share is paid: its row turns green on COLLECTING, and EVERYONE HAS PAID sums them
+   * up. So the payment is not announced as well, as a share paid over the tap is not (12-receive.js,
+   * `requestPaidHere`): its entry is marked as announced before a history pass can queue it, and one already queued,
+   * or held for the change, is let go. Its entry stays in HISTORY as a payment from a card, as the receive screen's
+   * does. Then the share is ticked, which also ends the asking about its invoice, and the screen moves on to the next
+   * payer (17-split-bill-and-copy.js).
+   *
+   * A bill that is no longer being collected (stopped by hand while the mint was asked) has no share to tick: the
+   * payment is an ordinary one, with its own PAYMENT RECEIVED. */
+  fcShareMoved(share, hash) {
+    const W = this.fcW();
+    try {
+      const bill = W && (W.splitRecord ? W.splitRecord() : (W.splitPending && W.splitPending()));
+      const row = bill && bill.rows ? bill.rows.filter((r) => r && r.hash === share.hash)[0] : null;
+      if (!row) return;
+      const entry = String(hash || '');
+      if (entry) {
+        this.txIsNew(entry);
+        this._paidQueue = (this._paidQueue || []).filter((q) => !(q && q.hash === entry));
+        if (this._heldConfirm && this._heldConfirm.hash === entry) this._heldConfirm = null;
+      }
+      // the next share is a new tap, not this one's radio (a fresh screen arms afresh)
+      if (this.state.tapArmed) this.setState({ tapArmed: false });
+      if (!row.paid) this.spMarkPaid(share.idx, share.hash);
+      this.spPaidOnScreen(share.idx, 'by card');
+    } catch (e) {
+      /* The payment is made whatever this comes to, and what is left of its handling (the change, the confirmation) goes
+       * on after it. The ledger is the bill's truth, and the next history pass puts the screen right by it (`spSyncPaid`). */
+      console.warn('[foxy] a share paid by a card could not be ticked on screen:', (e && e.message) || e);
+    }
+  }
+
   /* ---- being paid by a card (the receive screen's CARD button) -------------- */
 
   payByCard() {
@@ -18677,17 +18770,44 @@ class Component extends DCLogic {
     const s = this.state;
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
+    this.fcPayBegin(sats);
+  }
+
+  /* CARD on a payer's own screen of a split bill: that payer's share, taken as the receive screen's CARD takes an
+   * invoice, in every way but one. It is the bill's own share that is paid, and the screen is told so (`fcShareMoved`).
+   *
+   * The share is the row of the bill's ledger that the code on this screen was made for, and its amount the row's, so
+   * the card pays what the code says. Until the code is made there is no row to settle, and a share that is paid
+   * has nothing left to pay. */
+  payShareByCard(idx) {
+    const W = this.fcW();
+    if (!W) return;
+    const code = (this.state.spInvoices || [])[idx] || '';
+    const bill = W.splitPending && W.splitPending();
+    const row = code && bill && bill.rows ? bill.rows[idx] : null;
+    const sats = row ? Math.round(Number(row.sats) || 0) : 0;
+    if (!row || row.bolt11 !== code || !(sats > 0)) { this.toast('That share\u2019s invoice is still being made.', true); return; }
+    if (row.paid) { this.toast('That share is already paid.', true); return; }
+    this.fcPayBegin(sats, { idx: Number(idx), hash: row.hash });
+  }
+
+  /* Where a card payment begins, for the receive screen's invoice and for a share of a bill alike. `share`: the share
+   * of a split bill this payment is for (its place in the bill, and its row's hash), and none for an invoice. It is
+   * carried through every step the payment can be taken up by again (the PIN's pad, a wrong PIN's TRY AGAIN, a card
+   * that left part way), so that it is the same share that is ticked when the mint says paid. */
+  fcPayBegin(sats, share) {
+    const W = this.fcW();
     /* No route to the mint: the mint cannot say paid. The card may still be taken,
      * as plain ecash is on trust, if the person says so, in front of the amount,
      * before the PIN is asked for (the HIGH RISK card: until this phone is online,
      * whoever gave it can still spend it). Only an exact set of the card's pieces
      * is taken then, which the tap finds out before the PIN is sent. */
     if (W.cardOnline && !W.cardOnline() && W.cardOffline && W.cardOffline()) {
-      W.cardOfflineAsk(sats).then((yes) => { if (yes) this.fcPayStart(sats, true); });
+      W.cardOfflineAsk(sats).then((yes) => { if (yes) this.fcPayStart(sats, true, share); });
       return;
     }
     if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
-    this.fcPayStart(sats);
+    this.fcPayStart(sats, false, share);
   }
 
   /* The CARD button: the sheet comes up and the card is tapped at once, with no PIN asked for first. A card
@@ -18695,18 +18815,18 @@ class Component extends DCLogic {
    * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
    * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
    * it with no route. */
-  fcPayStart(sats, trusted) {
-    this.fcPayRun(sats, '', trusted);
+  fcPayStart(sats, trusted, share) {
+    this.fcPayRun(sats, '', trusted, false, share);
   }
 
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. */
-  fcPayAsk(sats, trusted, resuming) {
+  fcPayAsk(sats, trusted, resuming, share) {
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
       cta: 'TAP AGAIN',
-    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming));
+    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share));
   }
 
   /* A card payment is two taps, and is said as two every time, so a person
@@ -18716,11 +18836,13 @@ class Component extends DCLogic {
    * nothing to receive, and the payment is complete at once. Taken on trust
    * with no route, it is one tap: only an exact set is taken then. */
   /* `resuming`: the same payment, taken up again after the card left part way
-   * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). */
-  fcPayRun(sats, pin, trusted, resuming) {
+   * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). `share`: the share of a split bill
+   * this payment is for (`payShareByCard`), or none. */
+  fcPayRun(sats, pin, trusted, resuming, share) {
     const W = this.fcW();
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
-    const opt = { paying: true, taken: true, again: () => (pin ? this.fcPayAsk(sats, trusted) : this.fcPayStart(sats, trusted)) };
+    const opt = { paying: true, taken: true, share: share || null,
+                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share) : this.fcPayStart(sats, trusted, share)) };
     /* A new payment: a confirmation still held for the one before (its change
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
@@ -18739,6 +18861,9 @@ class Component extends DCLogic {
                  const onPay = (step, info) => {
                    // (with change coming it is three buzzes instead, which the tap's own step handler gives: `fcChangeBuzz`)
                    if (!felt && (step === 'checking' || step === 'mint')) { felt = true; if (!(info && info.change)) this.haptic && this.haptic('tap', true); }
+                   /* The payment's entry has a name from here, before the mint is asked: a share of a bill has it noted on its
+                    * row, so that the share is ticked whenever the payment lands, however late (`fcShareNote`). */
+                   if (share && info && info.hash && (step === 'checking' || step === 'mint')) this.fcShareNote(share, info.hash);
                    on(step, info);
                  };
                  return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
@@ -18747,8 +18872,12 @@ class Component extends DCLogic {
       .then((r) => {
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
-         * nothing here says paid; it settles when this phone is online. */
-        if (r && r.trusted) { this.fcTrusted(r); return; }
+         * nothing here says paid; it settles when this phone is online. A share of a bill has the entry noted on its
+         * row, and is ticked when that entry has been swapped and not before. */
+        if (r && r.trusted) { if (opt.share) this.fcShareNote(opt.share, r.hash); this.fcTrusted(r); return; }
+        /* The mint has given this phone its own pieces: a share of a bill is paid, and the bill's screens say so
+         * before anything else is done with the payment, which is not announced on top of them. */
+        if (opt.share) this.fcShareMoved(opt.share, r && r.hash);
         const ch = r && r.change;
         const receiving = !!(ch && !ch.written && !ch.unmade && ch.sats > 0);
         // the change went back in the same sheet: the payment is whole, and its PAYMENT RECEIVED goes up now
@@ -18774,19 +18903,19 @@ class Component extends DCLogic {
         this.fcDropConfirm();
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming); return; }
+        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share); return; }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
          * sheet comes up by itself instead, once iOS has taken the last down. */
         if (e && e.card === 'interrupted' && e.resumable) {
-          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted); else this.fcResumeNow(sats, pin, trusted);
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share); else this.fcResumeNow(sats, pin, trusted, share);
           return;
         }
         // taken up, and the card could not make the rest: what it signed goes back, and why is said
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
-        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted); return; }
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share); return; }
         this.fcFailed(e, opt);
       });
   }
@@ -18796,9 +18925,9 @@ class Component extends DCLogic {
    * payment is used again, as it is for every tap of the one payment. And a
    * settling once the hold could be stale, so one nobody came back for goes
    * back to the card even with Foxy left open. */
-  fcResumeNow(sats, pin, trusted) {
+  fcResumeNow(sats, pin, trusted, share) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true), 2500);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
     this._fcTapO = { amount: this.fcPrice(sats), paying: true, lost: true };
     this.fcStage('reading');
@@ -18829,13 +18958,13 @@ class Component extends DCLogic {
 
   /* Held, and the tap to finish read no card: said, with the tap again, and
    * CANCEL, which gives back what the card signed (`fcLetGo`). */
-  fcHeldCard(sats, pin, trusted) {
+  fcHeldCard(sats, pin, trusted, share) {
     this.fcHeldClock();
     this.blockedCard('fc-held', {
       tone: 'warn', title: 'NOT PAID YET',
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
-      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true),
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share),
       shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
     });
   }

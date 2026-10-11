@@ -722,8 +722,15 @@ Several invoices, one per person, **written** to `foxy.split.pending` as a
 unit, stamped with the mint. Each is claimed as in §1 when paid;
 `splitReconcile()` settles rows the watcher missed, first from local history,
 then by asking the mint and claiming any it reports paid. A fully paid split is
-marked done, not deleted. Does not survive a seed restore — the invoices are
-the mint's, but the record of which belong to this bill is local only.
+marked done, not deleted. A share can also be paid by a card (CARD.md, *Paying
+at a till*): that payment is an entry of its own, which the app notes on the
+share's row (`splitNoteCard`) as soon as the card has signed, and the reconcile
+marks the row when that entry has settled, however late; a payment taken on
+trust is pending until it has been swapped, so it ticks nothing before. A walk
+of the reconcile puts what it found onto the record as it stands when the walk
+ends, and not over it, so a share ticked by hand or a payment noted meanwhile
+is kept. Does not survive a seed restore — the invoices are the mint's, but the
+record of which belong to this bill is local only.
 
 ---
 

@@ -11,6 +11,9 @@
  * NFC stand-in finds it. What is checked is what a person would see, and that
  * the money is where the screen says it is.
  *
+ * A payer's share of a split bill is paid by the same CARD (the split's own parts, build/app/17-split-bill-and-copy.js and
+ * 20-split-values.js, are added with `appOn(ctx, start, { split: true })`).
+ *
  * The render snapshots pin how these look. This pins what they do. */
 const { funded, newCard, binaryLoad, history, OTHER_WORDS } = require('./flashcard-kit');
 
@@ -2381,6 +2384,263 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(H.sheet.length >= 1 && /^begin:/.test(H.sheet[0]), 'and the sheet comes after the lead', H.sheet.join(' | '));
     await read;
     holder.FC_TAP_LEAD = 0;
+  }
+
+  /* ---- a share of a split bill, paid by a card ------------------------------------------------------------------------
+   * CARD on a payer's own screen takes that payer's share through the till's flow (`payShareByCard`), and the share is ticked
+   * when the mint has vouched for the money and not before: its row in the bill's ledger, the collecting screen's own list, and
+   * the screen is on to the next payer. One share to a tap. The bill is the app's own (the real ledger, its invoices made at the
+   * test mint, `splitVals` for what the screen draws), and so are the screens the card flow reaches. */
+  {
+    const HB = await funded({}, 6000);
+    const RB = await funded({ sharedMint: HB.mint, words: OTHER_WORDS }, 0);
+    const bill = appOn(RB, { screen: 'spShares', stack: ['home'], spAmt: '300', spWays: 3, spIdx: 0, spPaid: [], spInvoices: [], spAssigns: [] }, { split: true });
+    bill.price = 1000000;                     // a dollar is 100 sats, so each of the two other payers owes 100
+    // what the screen draws for a share is `splitVals`' (its code and its animations are not what is looked at here)
+    bill.boltField = () => []; bill.qrLoadingSrc = () => ''; bill.railRequest = () => ''; bill.chooseRail = () => {}; bill.tapArm = () => {}; bill.go = () => {};
+    RB.W.qr = () => 'qr';
+    // the test mint takes no description on an invoice (a bill’s shares are named “Split 2 of 3”), as some real ones do not
+    const invoice0 = RB.W.invoice.bind(RB.W);
+    RB.W.invoice = (sats, label, expiry) => invoice0(sats, '', expiry);
+    const shares = (screen) => bill.splitVals(Object.assign({}, bill.state, screen ? { screen } : {}), screen || bill.state.screen);
+    const rows = () => RB.W.splitRecord().rows;
+    const begins = () => RB.sheet.filter((x) => /^begin:/.test(x)).length;
+    // the watchers of the invoices: which of them are still asking the mint
+    const watched = [];
+    RB.W.watch = (hash, fn) => { const w = { hash, fn, stopped: false }; watched.push(w); return () => { w.stopped = true; }; };
+    /* the history pass's own tail (16-history-lists.js): the reconcile ticks what has landed, and the screen follows (`spSyncPaid`). The test mint
+     * calls every quote it makes paid, and the bill's invoices are not: the shares are paid some other way. And its swaps can be left unanswered. */
+    bill.loadHistory = () => RB.W.splitReconcile().then(() => bill.spSyncPaid());
+    let holdSwaps = false;
+    RB.fate = (m) => {
+      const url = String(m.url || '');
+      if (/\/v1\/mint\/quote\/bolt11\/[0-9a-f]{32}$/.test(url)) return String(HB.mint.handle(m)).replace('"state":"PAID"', '"state":"UNPAID"');
+      return holdSwaps && /\/v1\/swap$/.test(url) ? '0\n' : null;
+    };
+    // the history pass and PAYMENT RECEIVED (not in these parts): what is raised, and what a pass or a hold would have left for it
+    const raised = [];
+    bill.announcePayment = (ev) => raised.push(ev);
+    const hold0 = bill.fcHoldConfirm.bind(bill);
+    bill.fcHoldConfirm = (hash) => { hold0(hash); bill._heldConfirm = { hash, dir: 'in', sats: 100 }; bill._paidQueue = [{ hash }, { hash: 'card-someone-else' }]; };
+    const startBill = async () => {
+      RB.W.splitClear();
+      watched.length = 0;
+      bill.setState({ screen: 'spShares', stack: ['home'], spAmt: '300', spWays: 3, spIdx: 0, spPaid: [], spInvoices: [], spAssigns: [], spFromWaiting: false });
+      bill.spMakeInvoices();
+      await until('the bill’s two invoices to be made', () => (bill.state.spInvoices || []).length === 2);
+      bill.setState({ screen: 'spPayer', spIdx: 0 });
+    };
+    const holding = async (sats, o) => {
+      const k = newCard(HB);
+      await HB.W.cardSetUp(k, { pin: '1234' });
+      await binaryLoad(HB, k, sats, o);
+      return k;
+    };
+
+    /* a share with no code yet has nothing to be paid, and a code that is not the ledger's own is not paid either */
+    RB.W.splitSave({ ways: 3, total: 300, at: Date.now(), rows: [{ hash: 'old-1', bolt11: 'lnbc-old-1', sats: 100, paid: false }, { hash: 'old-2', bolt11: 'lnbc-old-2', sats: 100, paid: false }] });
+    bill.setState({ screen: 'spPayer', spIdx: 0, spInvoices: [] });
+    shares().spCardPay();
+    ok(bill.toasts.slice(-1)[0] === 'That share’s invoice is still being made.' && begins() === 0 && !pad(bill),
+       'CARD on a share whose code is still being made says so, and asks nothing of a card (an earlier bill’s ledger is not this share’s)', bill.toasts.slice(-1)[0]);
+    bill.setState({ spInvoices: ['lnbc-another-bill'] });
+    shares().spCardPay();
+    ok(bill.toasts.slice(-1)[0] === 'That share’s invoice is still being made.' && begins() === 0 && !pad(bill) && rows().every((r) => !r.paid),
+       'nor is a code that is not the one the ledger holds for that share', bill.toasts.slice(-1)[0]);
+
+    await startBill();
+    const cb = await holding(2000, { owner: true });
+    ok(rows().length === 2 && rows().every((r) => r.sats === 100 && !r.paid) && watched.length === 2 && watched.every((w) => !w.stopped),
+       'a bill of $3.00 three ways, at a dollar of 100 sats: two shares owed, 100 sats each, each invoice watched', JSON.stringify(rows().map((r) => r.sats)));
+    let v = shares();
+    ok(v.spPayerIsQr === true && v.spCardShown === true && typeof v.spCardPay === 'function' && v.spButtonsW === '340px' && v.spTapArmLabel === 'TAP' && v.spShareLabel === 'SHARE',
+       'the first share’s screen has CARD in the row beside SHARE, COPY, SCAN and TAP, which makes the row wider', String(v.spButtonsW));
+
+    // CARD: the sheet at once, then the PIN for the card that wants it, and the share’s own amount is asked
+    RB.nfc = cb;
+    cb.tap();
+    RB.sheet.length = 0;
+    v.spCardPay();
+    ok(!pad(bill) && begins() === 1 && /^begin: /.test(RB.sheet[0]), 'CARD brings up the sheet at once, with no PIN asked for first, as on the receive screen', RB.sheet[0]);
+    await until('the card to say it wants its PIN', () => !!pad(bill));
+    ok(pad(bill).title === 'CARD PIN' && /To pay \$1\.00 \(₿100\)/.test(pad(bill).sub) && pad(bill).cta === 'TAP AGAIN'
+       && bill.spPaidArr()[0] === false && rows()[0].paid === false && bill.state.spIdx === 0,
+       'the card asks for its PIN, for the share’s 100 sats, and nothing is ticked yet', pad(bill).sub);
+    pad(bill).type('1234');
+    await until('the first share to be paid', () => bill.spPaidArr()[0] === true && !stage(RB));
+    await settle();
+    const first = history(RB).filter((e) => e.memo === 'card')[0];
+    ok(rows()[0].paid === true && rows()[1].paid === false && bill.state.spPaid[0] === true && !bill.state.spPaid[1],
+       'the mint has vouched for it, and the share is ticked in the bill’s ledger and in the list the collecting screen draws', JSON.stringify(rows().map((r) => !!r.paid)));
+    ok(watched[0].stopped === true && watched[1].stopped === false, 'its invoice is no longer asked about, and the other share’s still is');
+    ok(bill.state.screen === 'spPayer' && bill.state.spIdx === 1 && v.spPayerTitle === 'PAYER 2' && shares().spPayerTitle === 'PAYER 3',
+       'the screen is on to the next payer, as it is after a tap', bill.state.screen + ' ' + bill.state.spIdx);
+    ok((await RB.W.balanceSats()) === 100 && first && first.sats === 100 && RB.W.tagsFor(first.hash).to === 'card payment' && !RB.W.cardOwed().length,
+       'the till holds the share’s 100 sats, and its entry reads as a card payment’s does at the receive screen, with the card’s change back on it', String(first && first.sats));
+    ok(bill.seen[first.hash] === true && raised.length === 0 && !bill._heldConfirm && bill._paidQueue.map((q) => q.hash).join() === 'card-someone-else',
+       'and it is attached to the bill: its entry is marked announced, it is let go from the queue and from the hold for the change, and no PAYMENT RECEIVED is raised for it',
+       JSON.stringify({ seen: bill.seen[first.hash], raised: raised.length, held: !!bill._heldConfirm, queue: (bill._paidQueue || []).map((q) => q.hash) }));
+    ok(shares('spWaiting').spWaitRows.map((r) => r.status).join() === 'RECEIVED,PENDING' && shares('spWaiting').spWaitFrac === '1/2',
+       'the collecting screen ticks it from the same list it ticks the others from', shares('spWaiting').spWaitRows.map((r) => r.status).join());
+
+    // one share to a tap: nothing came up for the next payer by itself, and the paid one has no CARD
+    ok(begins() === 2, 'it took the tap and the tap again for the PIN, and no sheet came up for the next share', String(begins()));
+    bill.setState({ spIdx: 0 });
+    v = shares();
+    ok(v.spCardShown === false && v.spButtonsW === '300px' && v.spPayerIsQr === true, 'a share that is paid has no CARD, and its row is as wide as it was');
+    const before = begins();
+    v.spCardPay();
+    ok(bill.toasts.slice(-1)[0] === 'That share is already paid.' && begins() === before && !pad(bill), 'and pressed all the same, it says so and asks nothing of a card', bill.toasts.slice(-1)[0]);
+    bill.setState({ spIdx: 1 });
+
+    // the next share is its own press and its own tap, with the same card; a wrong PIN is said, nothing is ticked, and TRY AGAIN keeps the share
+    v = shares();
+    ok(v.spCardShown === true, 'the next share has its own CARD');
+    cb.tap();
+    v.spCardPay();
+    await until('the PIN pad', () => !!pad(bill));
+    pad(bill).type('0000');
+    await until('the card to say the PIN was wrong', () => card(bill) && card(bill).title === 'WRONG PIN');
+    ok(card(bill).reason === '2 tries left. Nothing was taken.' && bill.spPaidArr()[1] === false && rows()[1].paid === false && bill.state.spIdx === 1 && bill.state.screen === 'spPayer',
+       'a wrong PIN: said, nothing taken, nothing ticked, and the share is still on screen', card(bill).reason);
+    cb.tap();
+    card(bill).press('TRY AGAIN');
+    pad(bill).type('1234');
+    await until('the last share to be paid', () => bill.state.screen === 'spAllPaid');
+    await settle();
+    ok(rows().every((r) => r.paid) && RB.W.splitRecord().done === true && bill.spPaidArr().every(Boolean) && watched.every((w) => w.stopped),
+       'TRY AGAIN paid the same share, and with every share paid the screen is EVERYONE HAS PAID', bill.state.screen);
+    ok(begins() === 5 && (await RB.W.balanceSats()) === 200 && raised.length === 0 && cb.balance() === 1800,
+       'each share was its own tap (the second took the first tap, the wrong PIN, and the right one): 200 paid, the card’s change back, and nothing announced',
+       JSON.stringify({ sheets: begins(), till: await RB.W.balanceSats(), card: cb.balance(), raised: raised.length }));
+
+    /* a card that holds too little: refused as at the receive screen, before the PIN, and nothing is ticked */
+    await startBill();
+    const poor = await holding(50);
+    RB.nfc = poor;
+    poor.tap();
+    shares().spCardPay();
+    await until('too little to be said', () => card(bill) && card(bill).title === 'NOT ENOUGH ON THE CARD');
+    ok(card(bill).reason === 'It holds ₿50. Nothing was taken.' && bill.spPaidArr()[0] === false && rows()[0].paid === false && bill.state.spIdx === 0,
+       'more than the card holds: refused before it signs anything, and the share is not ticked', card(bill).reason);
+    card(bill).press('CLOSE');
+
+    /* the mint has not said paid when the card has signed: CHECKING, and the share is ticked only when it does */
+    const cc = await holding(2000, { owner: true });
+    RB.nfc = cc;
+    cc.tap();
+    holdSwaps = true;                          // the swap never reaches the mint
+    shares().spCardPay();
+    await until('the PIN pad', () => !!pad(bill));
+    cc.tap();
+    pad(bill).type('1234');
+    await until('the CHECKING screen', () => stage(RB) === 'cardChecking');
+    ok(bill.spPaidArr()[0] === false && rows()[0].paid === false && bill.state.spIdx === 0 && bill.state.screen === 'spPayer',
+       'the card has signed and the mint has not answered: the share is not ticked', String(bill.spPaidArr()[0]));
+    holdSwaps = false;
+    await until('the mint to say paid', () => bill.spPaidArr()[0] === true && !stage(RB));
+    await settle();
+    ok(rows()[0].paid === true && rows()[1].paid === false && bill.state.spIdx === 1 && watched[0].stopped === true && raised.length === 0,
+       'and when it says paid, while CHECKING is up, the share is ticked and the screen is on to the next payer, with no PAYMENT RECEIVED of its own', JSON.stringify(rows().map((r) => !!r.paid)));
+
+    /* the same, and CHECKING is closed before the mint answers: the payment is only in HISTORY, and the share is ticked when it lands, whoever
+     * notices (the reconcile, and the screen from it), and the collecting screen goes on to EVERYONE HAS PAID with it */
+    const late = await holding(1000, { owner: true });
+    RB.nfc = late;
+    late.tap();
+    holdSwaps = true;
+    shares().spCardPay();
+    await until('the PIN pad', () => !!pad(bill));
+    late.tap();
+    pad(bill).type('1234');
+    await until('the CHECKING screen', () => stage(RB) === 'cardChecking');
+    RB.window.document.querySelector('#foxy-stage [data-stage-button]').dispatchEvent(new RB.window.Event('click', { bubbles: true }));
+    ok(!stage(RB) && bill.spPaidArr()[1] === false && rows()[1].paid === false && /^card-/.test(rows()[1].card || '') && !card(bill),
+       'CHECKING closed with the mint not heard from: the share is not ticked, and its row names the entry that is to pay it', String(rows()[1].card));
+    bill.setState({ screen: 'spWaiting' });                 // and the person is looking at the collecting screen
+    holdSwaps = false;
+    await RB.W.cardSettle();                                // the wallet’s own settling, when it has a connection: the payment lands
+    await settle();
+    bill.loadHistory();                                     // and the next history pass
+    await until('the late share to be ticked', () => bill.spPaidArr()[1] === true);
+    await settle();
+    ok(rows()[1].paid === true && RB.W.splitRecord().done === true && bill.state.screen === 'spAllPaid' && watched[1].stopped === true && raised.length === 0
+       && shares('spWaiting').spWaitRows.map((r) => r.status).join() === 'RECEIVED,RECEIVED',
+       'when the payment lands, late, the share is ticked from the ledger, its invoice is no longer asked about, and the collecting screen goes on to EVERYONE HAS PAID',
+       JSON.stringify({ rows: rows().map((r) => !!r.paid), screen: bill.state.screen }));
+
+    /* with no route: the HIGH RISK card, and a card taken on trust is not paid, so its share is not ticked until the payment has been swapped
+     * and the mint has vouched for it, and it is ticked then, late, as a payment the mint answered late is */
+    await startBill();
+    const exact = await holding(100);          // 64 32 4: exactly a share, which is all a till with no route takes
+    RB.nfc = exact;
+    RB.W.onOfflineOffer((info) => bill.offlineRiskCard(info));
+    const offline = () => RB.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
+    const online = () => RB.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
+    offline();
+    const sheets = begins();
+    shares().spCardPay();
+    ok(card(bill) && card(bill).title === 'HIGH RISK \u2014 YOU ARE OFFLINE' && !pad(bill) && begins() === sheets,
+       'a share paid by a card with no route puts the HIGH RISK card first, before the PIN and before the card is touched', card(bill) && card(bill).title);
+    card(bill).press('REJECT');
+    await settle();
+    ok(!pad(bill) && !card(bill) && begins() === sheets && bill.spPaidArr()[0] === false && !rows()[0].card, 'REJECT: nothing asked of the card, nothing noted, and nothing ticked');
+    shares().spCardPay();
+    card(bill).press('CONTINUE');
+    await until('the PIN pad', () => !!pad(bill));
+    exact.tap();
+    pad(bill).type('1234');
+    await until('the card to be taken on trust', () => card(bill) && card(bill).title === 'TAKEN ON TRUST');
+    ok(rows()[0].paid === false && bill.spPaidArr()[0] === false && bill.state.spIdx === 0 && bill.state.screen === 'spPayer' && RB.W.trustedWaiting().length === 1 && /^req-card-/.test(rows()[0].card || ''),
+       'taken on trust: said, kept as a pending payment, named on the share’s row, and the share is not ticked, since the mint has not been asked', card(bill).reason);
+    card(bill).press('OK');
+    bill.loadHistory();                                     // a history pass while it is still on trust
+    await settle();
+    ok(bill.state.screen === 'spPayer' && bill.state.spIdx === 0 && bill.spPaidArr()[0] === false && rows()[0].paid === false, 'OK leaves the share where it was, and a history pass ticks nothing while the payment is pending');
+    online();
+    await RB.W.claimUnclaimed();                            // the swap, once there is a route: the mint vouches for it
+    await settle();
+    bill.loadHistory();                                     // and the next history pass
+    await until('the share to be ticked once the swap has landed', () => bill.spPaidArr()[0] === true);
+    await settle();
+    ok(rows()[0].paid === true && rows()[1].paid === false && bill.state.spIdx === 1 && bill.state.screen === 'spPayer' && RB.W.trustedWaiting().length === 0 && watched[0].stopped === true && raised.length === 0,
+       'swapped and vouched for, the share is ticked, late, and the screen is on to the next payer', JSON.stringify(rows().map((r) => !!r.paid)));
+
+    /* a card that leaves before it has signed for all of a share, and is not brought back when the sheet looks for it: NOT PAID YET, and
+     * TAP CARD finishes the same share, which is ticked then and not before */
+    await startBill();
+    const left = await holding(100);          // 64 32 4: three signatures, one at a time
+    RB.nfc = left;
+    const tapLeft = left.tap, sendLeft = left.send;
+    const rb = await RB.W.balanceSats();
+    shares().spCardPay();
+    await until('the PIN pad', () => !!pad(bill));
+    left.tap = () => { tapLeft(); left.leaveBefore('20', 2); left.tap = tapLeft; };
+    left.send = (x) => sendLeft(x).then((r) => r, (err) => { RB.nfc = null; throw err; });
+    pad(bill).type('1234');
+    await until('NOT PAID YET to be said', () => card(bill) && card(bill).title === 'NOT PAID YET');
+    left.send = sendLeft;
+    ok(bill.spPaidArr()[0] === false && rows()[0].paid === false && bill.state.spIdx === 0 && (await RB.W.balanceSats()) === rb && card(bill).has('TAP CARD'),
+       'a card taken away before it had signed for all of a share: NOT PAID YET, the share is not ticked, and nothing is paid', card(bill).all);
+    RB.nfc = left;
+    left.tap();
+    card(bill).press('TAP CARD');
+    await until('the tap that finishes it', () => bill.spPaidArr()[0] === true && !stage(RB));
+    await settle();
+    ok(rows()[0].paid === true && rows()[1].paid === false && bill.state.spIdx === 1 && (await RB.W.balanceSats()) - rb === 100 && left.balance() === 0 && !pad(bill) && raised.length === 0,
+       'TAP CARD signs the rest, with no PIN asked for again, and it is that same share which is ticked, with the screen on to the next payer', JSON.stringify(rows().map((r) => !!r.paid)));
+    // and where the phone cannot ask for the card again in the same sheet, a new sheet is begun for the same payment, a moment later
+    const runs = [];
+    const run0 = bill.fcPayRun.bind(bill);
+    bill.fcPayRun = (...a) => { runs.push(a); };
+    bill.fcResumeNow(100, '1234', false, { idx: 1, hash: rows()[1].hash });
+    await new Promise((go) => setTimeout(go, 2700));
+    bill.fcPayRun = run0;
+    bill.hideStage('card');
+    clearTimeout(bill._fcHeldT);
+    ok(runs.length === 1 && runs[0][3] === true && runs[0][4] && runs[0][4].idx === 1 && runs[0][4].hash === rows()[1].hash,
+       'and the payment begun again after a pause is taken up for the same share', JSON.stringify(runs.map((a) => a.slice(0, 5))));
+    clearTimeout(bill._spResumeT);
   }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);

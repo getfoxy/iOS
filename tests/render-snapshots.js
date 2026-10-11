@@ -528,6 +528,8 @@ function representative() {
    * the split's missing one was invisible here. */
   add('spPayer, a payer tapped, the code up', at('spPayer', { spAmt: '4500', spWays: 3, spIdx: 0, spInvoices: ['lnbc1500n1stub'], tapShownCode: '4821' }));
   add('spPayer, on the air, tap here', at('spPayer', { spAmt: '4500', spWays: 3, spIdx: 0, spInvoices: ['lnbc1500n1stub'], tapArmed: true }));
+  /* CARD is the fifth button of a share's row, and the row is wider for it (spButtonsW); a share that is paid has none, and the row is as it was. */
+  add('spPayer, a paid share has no CARD', at('spPayer', { spAmt: '4500', spWays: 3, spIdx: 0, spInvoices: ['lnbc1500n1stub'], spPaid: [true, false] }));
   add('spAssign, contacts, one taken', at('spAssign', { spAmt: '4500', spWays: 3, spIdx: 0, contacts: CONTACTS, spAssigns: [{ type: 'qr' }, { type: 'contact', name: 'Zed', handle: 'zed@example.com', ini: 'Z' }] }));
   add('spWaiting, one of two paid', at('spWaiting', { spAmt: '4500', spWays: 3, spPaid: [true, false], spAssigns: [{ type: 'contact', name: 'Bob', handle: 'bob@walletofsatoshi.com', ini: 'B' }] }));
   add('spWaiting, one left of one', at('spWaiting', { spAmt: '4500', spWays: 2, spPaid: [false] }));

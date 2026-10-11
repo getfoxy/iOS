@@ -7,19 +7,26 @@
  * are made into a class here and run against the real wallet, a test mint and
  * the model of the card (flashcard-kit.js), with the rest of the app class
  * stood in for. Keys are pressed on the pad and buttons on the cards; a card
- * is "tapped" by putting it where the phone's NFC stand-in finds it. */
+ * is "tapped" by putting it where the phone's NFC stand-in finds it.
+ *
+ * `appOn(ctx, start, { split: true })` adds the split bill's own parts (17-split-bill-and-copy.js, 20-split-values.js), for
+ * the suites that press CARD on a payer's share: the bill's invoices, its ledger, and the screens that tick a share are then
+ * the app's own, and what the screen draws for a share is `splitVals`'. */
 const fs = require('fs');
 const path = require('path');
 
-const PARTS = ['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js']
-  .map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
+const read = (files) => files.map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
+const PARTS = read(['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js']);
+const SPLIT_PARTS = read(['17-split-bill-and-copy.js', '20-split-values.js']);
 
-/* The four parts as a class over this page's window, and an app of it with
+/* The parts as a class over this page's window, and an app of it with
  * the rest of the app class stood in for: state, navigation, and the few
  * helpers the parts call. */
-function appOn(ctx, start) {
-  const Parts = new Function('window', 'document', 'localStorage', 'return class {\n' + PARTS + '\n};')(
-    ctx.window, ctx.window.document, ctx.window.localStorage);
+function appOn(ctx, start, o) {
+  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '');
+  // (the split values keep a React ref in a field of the class: nothing here draws with it)
+  const Parts = new Function('window', 'document', 'localStorage', 'React', 'return class {\n' + body + '\n};')(
+    ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) });
   const a = new Parts();
   a.state = Object.assign({ screen: 'home', stack: [], fc: null, invoice: '', invoiceIsAddress: false }, start || {});
   a.setState = (x) => { Object.assign(a.state, typeof x === 'function' ? x(a.state) : x); };
