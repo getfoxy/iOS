@@ -2453,8 +2453,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(rows().length === 2 && rows().every((r) => r.sats === 100 && !r.paid) && watched.length === 2 && watched.every((w) => !w.stopped),
        'a bill of $3.00 three ways, at a dollar of 100 sats: two shares owed, 100 sats each, each invoice watched', JSON.stringify(rows().map((r) => r.sats)));
     let v = shares();
-    ok(v.spPayerIsQr === true && v.spCardShown === true && typeof v.spCardPay === 'function' && v.spButtonsW === '340px' && v.spTapArmLabel === 'TAP' && v.spShareLabel === 'SHARE',
-       'the first share’s screen has CARD in the row beside SHARE, COPY, SCAN and TAP, which makes the row wider', String(v.spButtonsW));
+    ok(v.spPayerIsQr === true && v.spCardShown === true && typeof v.spCardPay === 'function' && v.spButtonsW === '300px' && v.spShareLabel === 'SHARE',
+       'the first share’s screen has CARD in the row beside SHARE, COPY and SCAN, four as the receive invoice screen has; the Bluetooth tap is in the QR', String(v.spButtonsW));
 
     // CARD: the sheet at once, then the PIN for the card that wants it, and the share’s own amount is asked
     RB.nfc = cb;

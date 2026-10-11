@@ -389,7 +389,7 @@ if it has no room for the load: take some money off it first.
 ## Paying at a till
 
 On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP. A split bill has the same **CARD** on each payer's own
-screen, in the row beside SHARE, COPY, SCAN and TAP, for that payer's share: one share to a tap, ticked (and the screen moved on
+screen, in the row beside SHARE, COPY and SCAN (four, as the receive invoice screen's row; the Bluetooth tap sits in the QR), for that payer's share: one share to a tap, ticked (and the screen moved on
 to the next payer) when the mint has given this phone its pieces, as *Paid* below says, and not before. The share's row in the
 bill's ledger names the payment's entry from the moment the card has signed, so a payment the mint answers late (CHECKING closed
 first), or one taken on trust and swapped later, ticks its share when it lands, as a share paid by its invoice late does.

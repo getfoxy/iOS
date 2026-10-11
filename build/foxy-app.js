@@ -11406,13 +11406,12 @@ class Component extends DCLogic {
     // the label never changes; the accent is what says it is on the air
     v.spTapArmBg = s.tapArmed ? 'var(--acc)' : 'var(--ink)';
     v.spTapArmInk = s.tapArmed ? '#fff' : 'var(--bg)';
-    v.spTapArmLabel = 'TAP';
     /* CARD, on a share: paid by a card that holds ecash, as on the receive screen, one share to a tap
      * (26f-flashcard.js, `payShareByCard`). A share that is paid has none: there is nothing left to pay. */
     v.spCardPay = () => this.payShareByCard(idx);
     v.spCardShown = !paid[idx];
     // five round buttons take more room than the four of a paid share's row, which keeps the width it had
-    v.spButtonsW = v.spCardShown ? '340px' : '300px';
+    v.spButtonsW = '300px';   // four buttons, as the receive invoice screen's row: the Bluetooth tap sits in the QR
     v.spEditPayerAmt = () => this.setState({ spEditIdx: idx + 1, spEditBuf: '0' });
     v.spAssignBtnLabel = isQrSlot ? 'ASSIGN TO A CONTACT' : 'CHANGE CONTACT';
     v.spOpenAssign = () => this.setState({ screen: 'spAssign' });

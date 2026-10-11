@@ -26,7 +26,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `17-split-bill-and-copy.js` | 464 | `spStart`, `spMakeInvoices`, `spShareSats`, `spMarkPaid`, `spAdvanceAfterPaid`, `spSyncPaid`, `splitCardEntries`, `spPaidOnScreen`, `spDiscard`, `spDiscardNow`, `resumeSplit`, `splitWatchLater`, `resumeSplitNow`, `openPendingSplit`, `spScanToken`, `spStopOne`, `spStopWatch`, `copySecret`, `copyText` |
 | `18-lifecycle-and-chart.js` | 821 | `componentDidMount`, `componentWillUnmount`, `rangeCfg`, `loadSeries`, `buildChart`, `openFeed`, `closeFeed`, `syncSnowCap`, `syncSnow`, `markerStayGone`, `markerGone`, `riderTrack`, `riderLines`, `riderLine`, `riderFade`, `riderAir`, `riderImpact`, `riderLinesOff`, `riderCovered`, `riderWhenSeen`, `riderShow`, `sledLayout`, `sledFrame`, `markerRoll` |
 | `19-update-keypad-balance.js` | 581 | `noteScreen`, `endReceiveAtHome`, `componentDidUpdate`, `press`, `toggleUnit`, `group`, `balNow`, `settleAnimate`, `openNote`, `autoFocus`, `runBalanceAnim`, `display`, `boltField`, `satCoinEl`, `step`, `fitStack`, `satsStack`, `syncAccent`, `syncStatusBar` |
-| `20-split-values.js` | 394 | `spEven`, `spSharesArr`, `spSlots`, `spPaidArr`, `spNextUnpaid`, `spInitials`, `splitVals`, `goSendScanFromSplit` |
+| `20-split-values.js` | 393 | `spEven`, `spSharesArr`, `spSlots`, `spPaidArr`, `spNextUnpaid`, `spInitials`, `splitVals`, `goSendScanFromSplit` |
 | `21-render-values.js` | 512 | `renderVals`, `renderValsBase`, `renderFieldLog`, `renderContext` |
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
 | `23-render-home-and-amount.js` | 459 | `renderHome`, `torBannerVals`, `renderAmount` |
