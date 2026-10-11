@@ -1490,12 +1490,17 @@ const eq = (got, want, what) =>
     return eq(broken.seen.invoices, 1, 'askings after a failure that came at once');
   });
 
-  await test('with both askings hung, an invoice is still one the caller can give up on; with both failed, it fails', async () => {
-    const dead = await slowCtx({ fail: 0, hang: 2 });
+  await test('with every asking hung, an invoice is still one the caller can give up on; with two hung, the third answers; with both failed, it fails', async () => {
+    const dead = await slowCtx({ fail: 0, hang: 9 });
     let settled = false;
     dead.ctx.W.invoice(8).then(() => { settled = true; }, () => { settled = true; });
     await new Promise(r => setTimeout(r, 120));
-    if (settled || dead.seen.invoices !== 2) return 'two hung askings: settled ' + settled + ', asked ' + dead.seen.invoices;
+    // asked again every tick while nothing answers, up to five askings in all
+    if (settled || dead.seen.invoices < 2 || dead.seen.invoices > 5) return 'hung askings: settled ' + settled + ', asked ' + dead.seen.invoices;
+    // two circuits that never carry it, and a third that does: the invoice is the third's
+    const third = await slowCtx({ fail: 0, hang: 2 });
+    const inv3 = await third.ctx.W.invoice(8);
+    if (!inv3 || third.seen.invoices !== 3) return 'two hung askings were not followed by a third (asked ' + third.seen.invoices + ')';
     // the first hangs and the second is refused: the refusal is not an answer while the first may still come
     const mixed = slowStub({});
     let n = 0;
@@ -1518,6 +1523,36 @@ const eq = (got, want, what) =>
     const fee = await ctx.W.quoteFee('lnbc80n1test');
     if (!fee || fee.amount !== 8) return 'the quote: ' + JSON.stringify(fee);
     return eq(seen.quotes, 2, 'askings');
+  });
+
+  await test('a fee quote that two circuits never carry is asked a third time, and that answer is the quote', async () => {
+    const { ctx, seen } = await slowCtx({ hang: 2 });
+    const fee = await ctx.W.quoteFee('lnbc80n1test');
+    if (!fee || fee.amount !== 8) return 'the quote: ' + JSON.stringify(fee);
+    if (!fee.quote || !fee.w || fee.bolt11 !== 'lnbc80n1test' || !(fee.at > 0)) return 'the quote is not returned whole, with its circuit: ' + Object.keys(fee).join();
+    return eq(seen.quotes, 3, 'askings');
+  });
+
+  await test('a payment pays with the quote the confirmation showed while it is fresh, and asks anew once it is stale or for another invoice', async () => {
+    const { ctx, seen } = await slowCtx({}, {
+      'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]),
+    });
+    const fee = await ctx.W.quoteFee('lnbc80n1test');
+    if (!fee || seen.quotes !== 1) return 'the confirmation quote: ' + JSON.stringify(fee) + ', asked ' + seen.quotes;
+    await ctx.W.pay('lnbc80n1test', undefined, { quote: fee });
+    if (seen.quotes !== 1) return 'the payment asked the mint again (' + seen.quotes + ') with a fresh quote in hand';
+    // stale: older than the window
+    const again = await slowCtx({}, { 'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]) });
+    const old = await again.ctx.W.quoteFee('lnbc80n1test');
+    old.at = Date.now() - 120000;
+    await again.ctx.W.pay('lnbc80n1test', undefined, { quote: old });
+    if (again.seen.quotes !== 2) return 'a stale quote was paid with (asked ' + again.seen.quotes + ')';
+    // another invoice: never
+    const other = await slowCtx({}, { 'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]) });
+    const mine = await other.ctx.W.quoteFee('lnbc80n1test');
+    mine.bolt11 = 'lnbc80n1other';
+    await other.ctx.W.pay('lnbc80n1test', undefined, { quote: mine });
+    return eq(other.seen.quotes, 2, 'askings when the quote in hand is for another invoice');
   });
 
   await test('a payment whose fee quote hung goes on with the quote that answered, and pays once', async () => {

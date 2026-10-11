@@ -59,9 +59,11 @@ token".
 **N1a. A question asked twice — a small, chosen cost.** A circuit sometimes
 goes nowhere, and a request on it sits until its clock runs out: a minute for
 an invoice, on a phone standing beside one the same mint answered in two
-seconds. An invoice and a fee quote are asked again on a second circuit after
-five seconds of nothing, and the first answer is used (`askedTwice`); a proof
-check has done the same after six. What the mint can join by it: the two fee
+seconds. An invoice and a fee quote are asked again on a fresh circuit every
+five seconds of nothing, up to five askings, and the first answer is used
+(`askedAgain`); a proof check is asked again once, after six. A payment also
+takes the fee quote its confirmation screen fetched moments before, while it
+is fresh, rather than asking again (`pay`, `opts.quote`). What the mint can join by it: the two fee
 quotes name the same Lightning invoice, so they are plainly one payment's, as
 that payment's quote, swap and melt already were. The two invoice requests
 share nothing but their amount and their second: each carries a one-time

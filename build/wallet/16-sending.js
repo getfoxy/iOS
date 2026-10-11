@@ -61,12 +61,27 @@
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      /* And asked again on another circuit after five seconds of nothing
-       * (`askedTwice`): a quote commits to nothing, so two cost nothing. The
-       * payment then goes by the circuit that answered. The split and the
+      /* And asked again on another circuit every five seconds of nothing
+       * (`askedAgain`): a quote commits to nothing, so several cost nothing.
+       * The payment then goes by the circuit that answered. The split and the
        * melt are never asked twice, and a road that would not carry a quote
-       * is no road to send them down. */
-      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote')
+       * is no road to send them down.
+       *
+       * Or not asked at all: the confirmation screen asked the same question
+       * seconds ago (`quoteFee`), and its answer is handed in as `opts.quote`.
+       * While it is fresh (a minute, and the mint's own expiry at least half a
+       * minute off) and for this very invoice, that quote and the circuit it
+       * came by are used, which takes one round trip over Tor off the front
+       * of the payment. An invoice with no amount is always quoted anew: the
+       * confirmation quotes without one. */
+      var kept = opts && opts.quote;
+      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv
+        && (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000)
+        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + 30000));
+      if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      var quoted = reuse ? Promise.resolve({ got: kept.quote, w: kept.w })
+        : withTimeout(askedAgain(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
+      return quoted
         .then(function (won) {
         var quote = won.got;
         w = won.w;

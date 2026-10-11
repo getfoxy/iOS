@@ -26,15 +26,19 @@
       if (!wallet || !bolt11) return Promise.resolve(null);
       // on the circuit kept ready, when there is one
       var w = viewNow(wallet);
-      // asked again on another circuit after five seconds of nothing (`askedTwice`)
-      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', function (via) {
+      // asked again on another circuit every five seconds of nothing (`askedAgain`)
+      return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
         return via.createMeltQuoteBolt11(String(bolt11));
       }), 20000, 'the mint\u2019s fee quote')
         .then(function (won) {
           var q = won.got;
+          /* The whole quote, the circuit it answered on and when, beside the
+           * two figures the screen shows: `pay` takes it (`opts.quote`) while
+           * it is fresh, rather than asking the mint the same thing again. */
           return {
             amount: satsOf(q.amount) || 0,
             feeReserve: satsOf(q.fee_reserve) || 0,
+            quote: q, w: won.w, bolt11: String(bolt11), at: Date.now(),
           };
         })
         .catch(function (e) {

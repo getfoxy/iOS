@@ -472,7 +472,10 @@ class Component extends DCLogic {
      * cross-mint one that actually cost 29, still displayed 0. A stale number
      * stated confidently is worse than UNKNOWN. */
     this.setState({ quotingFee: true, quotedFee: null, sendFee: null });
+    this._feeQuote = null;
     W.quoteFee(inv).then(q => {
+      // kept whole for SEND: a fresh quote for this invoice is not asked for twice (`pay`, opts.quote)
+      this._feeQuote = q && q.quote ? q : null;
       this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null });
     }).catch(() => {
       /* Let the next render try again. This was set before the request and
@@ -642,7 +645,8 @@ class Component extends DCLogic {
     const typed = this.state.unit === 'SATS' ? this.wantedSats() : (this.state.sendSats || 0);
     const run = W.classify(to) === 'lnurl'
       ? W.payLnurl(to, typed, '', onStage)
-      : W.pay(to, onStage, W.amountOf(to) ? undefined : { sats: typed });
+      : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
+                                         (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);

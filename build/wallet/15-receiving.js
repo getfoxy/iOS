@@ -16,11 +16,11 @@
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
       /* Asked again on another circuit after five seconds of nothing
-       * (`askedTwice`), each asking with a one-time key of its own, so the two
+       * (`askedAgain`), each asking with a one-time key of its own, so the two
        * quotes share nothing the mint could join them by. The first to answer
        * is the invoice, and it is its key that is kept. The other, if it
        * comes, is a quote nobody was shown. */
-      return askedTwice(w, 'the mint\u2019s invoice', function (via) {
+      return askedAgain(w, 'the mint\u2019s invoice', function (via) {
         var key = quoteLock(via);
         if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
         return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });

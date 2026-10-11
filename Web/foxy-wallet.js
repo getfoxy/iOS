@@ -712,44 +712,51 @@
     };
   }
 
-  /* A question asked again, on a circuit of its own, when the first has said
-   * nothing for five seconds. Resolves { got, w }: the answer, and the wallet
-   * view that got it, so whatever follows can go by the road that worked.
+  /* Asked on `w`, and asked again on a fresh circuit every five seconds it
+   * has not answered (`FoxyWallet._askAgainMs`), up to `_askAgainMost` more
+   * circuits: five askings within the thirty seconds a caller allows. It
+   * used to ask again once, which was enough for a circuit that was merely
+   * slow; two new circuits that never delivered, in one bad minute, failed a
+   * payment that a third would have carried in two seconds.
    *
-   * Every job leaves on a Tor circuit of its own, and now and then one of
-   * them goes nowhere: the request sits until its clock runs out, a minute
-   * for an invoice, while the same mint answers the phone beside it in two
-   * seconds. Only for questions that cost nothing asked twice. A second
-   * invoice is a quote nobody is shown and nobody pays, and a second fee
-   * quote is a figure; each lapses at the mint by itself. Never a swap or a
-   * melt, which move money.
-   *
-   * An answer from either is the answer. A failure ends it at once while
-   * only one has been asked, as it always did; once two have, it takes both
-   * failing, and the error is the later one's. */
-  function askedTwice(w, what, ask) {
+   * An answer from any of them is the answer, and says which circuit gave it
+   * (`w`), so what follows goes by the road that answered. A failure ends it
+   * at once while only one has been asked, as it always did; once more have,
+   * it takes every one asked so far failing, and the error is the last one's.
+   * What is asked commits to nothing, so several cost nothing but a circuit. */
+  function askedAgain(w, what, ask) {
     return new Promise(function (ok, no) {
-      var settled = false, second = false, failed = 0;
+      var settled = false, asked = 0, failed = 0, again = null;
+      var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 5000;
+      var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
       var yes = function (via) {
         return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
       };
       var bad = function (e) {
         failed += 1;
-        if (settled || (second && failed < 2)) return;
+        if (settled || failed < asked) return;
         settled = true; clearTimeout(again); no(e);
       };
-      var again = setTimeout(function () {
-        if (settled) return;
-        var other;
-        try { other = onCircuit(w); } catch (e) { other = null; }
-        if (!other) return;
-        second = true;
-        console.log('[foxy] ' + what + ' has not answered in 5s; asking again on another circuit');
-        Promise.resolve().then(function () { return ask(other); }).then(yes(other), bad);
-      }, FoxyWallet._askAgainMs || 5000);
-      Promise.resolve().then(function () { return ask(w); }).then(yes(w), bad);
+      var send = function (via) {
+        asked += 1;
+        Promise.resolve().then(function () { return ask(via); }).then(yes(via), bad);
+      };
+      var later = function () {
+        again = setTimeout(function () {
+          if (settled || asked > most) return;
+          var other;
+          try { other = onCircuit(w); } catch (e) { other = null; }
+          if (!other) return;
+          console.log('[foxy] ' + what + ' has not answered in ' + Math.round(asked * ms / 1000) + 's; asking again on another circuit');
+          send(other);
+          later();
+        }, ms);
+      };
+      send(w);
+      later();
     });
   }
+
 
   /* Each proof's state at the mint, as 'UNSPENT' / 'PENDING' / 'SPENT'. */
   function statesOf(w, list) {
@@ -16501,11 +16508,11 @@
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
       /* Asked again on another circuit after five seconds of nothing
-       * (`askedTwice`), each asking with a one-time key of its own, so the two
+       * (`askedAgain`), each asking with a one-time key of its own, so the two
        * quotes share nothing the mint could join them by. The first to answer
        * is the invoice, and it is its key that is kept. The other, if it
        * comes, is a quote nobody was shown. */
-      return askedTwice(w, 'the mint\u2019s invoice', function (via) {
+      return askedAgain(w, 'the mint\u2019s invoice', function (via) {
         var key = quoteLock(via);
         if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
         return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });
@@ -17694,12 +17701,27 @@
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      /* And asked again on another circuit after five seconds of nothing
-       * (`askedTwice`): a quote commits to nothing, so two cost nothing. The
-       * payment then goes by the circuit that answered. The split and the
+      /* And asked again on another circuit every five seconds of nothing
+       * (`askedAgain`): a quote commits to nothing, so several cost nothing.
+       * The payment then goes by the circuit that answered. The split and the
        * melt are never asked twice, and a road that would not carry a quote
-       * is no road to send them down. */
-      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote')
+       * is no road to send them down.
+       *
+       * Or not asked at all: the confirmation screen asked the same question
+       * seconds ago (`quoteFee`), and its answer is handed in as `opts.quote`.
+       * While it is fresh (a minute, and the mint's own expiry at least half a
+       * minute off) and for this very invoice, that quote and the circuit it
+       * came by are used, which takes one round trip over Tor off the front
+       * of the payment. An invoice with no amount is always quoted anew: the
+       * confirmation quotes without one. */
+      var kept = opts && opts.quote;
+      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv
+        && (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000)
+        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + 30000));
+      if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      var quoted = reuse ? Promise.resolve({ got: kept.quote, w: kept.w })
+        : withTimeout(askedAgain(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
+      return quoted
         .then(function (won) {
         var quote = won.got;
         w = won.w;
@@ -24880,15 +24902,19 @@
       if (!wallet || !bolt11) return Promise.resolve(null);
       // on the circuit kept ready, when there is one
       var w = viewNow(wallet);
-      // asked again on another circuit after five seconds of nothing (`askedTwice`)
-      return withTimeout(askedTwice(w, 'the mint\u2019s fee quote', function (via) {
+      // asked again on another circuit every five seconds of nothing (`askedAgain`)
+      return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
         return via.createMeltQuoteBolt11(String(bolt11));
       }), 20000, 'the mint\u2019s fee quote')
         .then(function (won) {
           var q = won.got;
+          /* The whole quote, the circuit it answered on and when, beside the
+           * two figures the screen shows: `pay` takes it (`opts.quote`) while
+           * it is fresh, rather than asking the mint the same thing again. */
           return {
             amount: satsOf(q.amount) || 0,
             feeReserve: satsOf(q.fee_reserve) || 0,
+            quote: q, w: won.w, bolt11: String(bolt11), at: Date.now(),
           };
         })
         .catch(function (e) {
