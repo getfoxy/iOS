@@ -446,5 +446,74 @@ densityDrives();
     'a swap or a melt holding the proof lock');
 }
 
+/* ---- a connection on its way is not a connection that is not coming ------------
+ *
+ * Foxy opens, and comes back from the background, working offline for the few
+ * seconds Tor takes to connect. The banner says SECURING YOUR CONNECTION then,
+ * and what is scanned in those seconds is not turned away: an invoice goes to
+ * the confirmation, whose button reads CHECKING (tests/home-first.js runs it;
+ * tests/send-fee-check.js draws it). Here is the wiring, which a run of the
+ * screens would not notice losing: that the question is the wallet's, the
+ * banner's own; that a scan still turns away what it always turned away; and
+ * that every update keeps the confirmation up with the route.
+ */
+{
+  check('"coming" is asked of the wallet, from the record the banner is drawn from',
+    /connecting\(\) \{[\s\S]{0,260}W\.routeComing\(\)/.test(app)
+    && /routeComing: function \(\) \{ return routeComing\(\); \}/.test(wallet)
+    && /making = offline && !noNet && \(p\.tor === 'connecting' \|\| p\.tor === 'stuck'\)/.test(app),
+    'the banner\'s `making` and the wallet\'s `routeComing` are one reading');
+  check('and not a signal of the page\'s own: no clock, no memory of it',
+    !/connecting\(\) \{[\s\S]{0,300}(Date\.now|setTimeout|this\._)/.test(body(app, 'connecting() {', 'connecting')),
+    'read live, as offlineNow is');
+  const accept = body(app, 'acceptTarget(text) {', 'acceptTarget');
+  check('an invoice is turned away offline only when no connection is coming',
+    /if \(off && !this\.connecting\(\)\) \{[\s\S]{0,260}this\.offlineInvoiceCard\(\);\s*return true;/.test(accept),
+    'the card is the same one, from the same function');
+  check('the mint\'s own invoice is paid with a token first, as it was, coming or not',
+    accept.search(/if \(off && W\.invoiceFromThisMint && W\.invoiceFromThisMint\(t\)\) \{[\s\S]{0,200}payThisMintWithToken/) >= 0
+    && accept.search(/off && W\.invoiceFromThisMint/) < accept.search(/off && !this\.connecting\(\)/),
+    'a token needs no connection to make');
+  check('one that is coming goes to the confirmation, without asking the mint what it cannot yet be asked',
+    /if \(off\) \{[^}]{0,200}overLightning\(\);\s*return true;\s*\}/.test(accept)
+    && accept.search(/if \(off\) \{[^}]{0,200}overLightning/) < accept.search(/learnThisMintNode/),
+    'learnThisMintNode needs the route');
+  check('a lightning address and a request never had an offline refusal at the scan, and have none now',
+    !/kind === 'lnurl'[\s\S]{0,600}offlineInvoiceCard/.test(accept) && !/kind === 'request'[\s\S]{0,200}offline/.test(accept),
+    'they reach their screens; the confirmation is what waits');
+  check('the card for no connection is one function, which the scan and the confirmation both call',
+    /offlineInvoiceCard\(\) \{[\s\S]{0,300}blockedCard\('offlineInvoice'/.test(app)
+    && /notOnlineCard\(\) \{[\s\S]{0,200}this\.offlineInvoiceCard\(\)/.test(app),
+    'the same words, wherever it comes up');
+  const update = body(app, 'componentDidUpdate(prevProps, prevState) {', 'componentDidUpdate');
+  check('every update keeps the send confirmation up with the route',
+    /this\.syncSend\(\);/.test(update) && !/quoteSendFee\(\)/.test(update.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'the route coming up is an update (onPrivacy → routeAt), and asks what the screen needs by itself');
+  check('and a route change is an update',
+    /W\.onPrivacy\(\(\) => \{\s*this\.setState\(\{ routeAt: Date\.now\(\) \}\);/.test(app),
+    '06-wallet-boot-and-restore.js');
+  const sync = body(app, 'syncSend() {', 'syncSend');
+  check('it remembers that the confirmation waited, to tell a connection that does not come',
+    /this\._sendWaited = key/.test(sync) && /this\.notOnlineCard\(\)/.test(sync) && /this\.offlineNow\(\)/.test(sync),
+    'and says nothing of one that did');
+  const quote = body(app, 'quoteSendFee() {', 'quoteSendFee');
+  check('nothing is asked while there is no route, and what is asked is asked again by nothing but the route',
+    /if \(this\.offlineNow\(\)\) \{[\s\S]{0,260}return;\s*\}\s*this\._quotedFor = target;/.test(quote),
+    'the early return is above the marking, so the next update asks');
+  check('an answer to an older question is nothing to this one',
+    /const stale = \(\) => run !== this\._askRun;/.test(quote) && (quote.match(/if \(stale\(\)\)/g) || []).length === 3,
+    'three places an answer lands');
+  const hold = body(app, 'confirmSpec() {', 'confirmSpec');
+  check('the button and the FEE row read one state',
+    /const held = asks && \(this\.connecting\(\) \|\| !!s\.quotingFee \|\| this\.sendToAsk\(\)\);/.test(hold)
+    && /: held \? 'CHECKING…' : 'UNKNOWN'/.test(hold)
+    && /cta: held \? 'CHECKING…' : 'SEND '/.test(hold) && /ctaBusy: held,/.test(hold) && /go: held \? \(\) => \{\} : \(\) => this\.startSend\(\)/.test(hold),
+    'one `held`');
+  check('and the request\'s the same, where its route is part of how it is paid',
+    /const held = !!\(sats > 0 && this\.connecting\(\) && this\.requestNeedsRoute\(req\)\);/.test(app)
+    && /go: held \? \(\) => \{\} : \(\) => this\.makeTokenForRequest\(\)/.test(app),
+    'requestSpec');
+}
+
 console.log('\n' + (R.fail ? 'FAILED ' + R.fail : 'PASSED ' + R.pass) + ' of ' + (R.pass + R.fail));
 process.exit(R.fail ? 1 : 0);

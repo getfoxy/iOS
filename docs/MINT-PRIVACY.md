@@ -72,6 +72,23 @@ on by it, so it is still one circuit for the money. A swap or a melt is never
 asked twice. Tests: "an invoice the mint is slow to give is asked for again,
 and the first to answer is the invoice" and the four after it.
 
+A lightning address's lookup is asked again the same way, though it is not a
+mint's question: its two requests (the well-known request, and the callback
+that has the address's server write an invoice) go to the server of whoever
+is being paid, each on a fresh circuit every five seconds it goes unanswered,
+up to five askings, the first answer used, and the deadline the lookup always
+had caps all of them (`lookupLnurl`). That server can see up to five requests
+from five exits for one payment, and the callback can make it write up to five
+invoices, of which one is looked at; the rest lapse at its end. And the lookup
+is made when the confirmation screen opens, not when SEND is pressed, so that
+the screen can show the fee on the invoice and hold SEND if the balance would
+not cover it: the server learns that this address and amount were looked up
+even if the person then backs out, which it learned only on SEND before. SEND
+pays the invoice the screen looked up and the quote it asked, while they are
+a minute old at most, and looks the address up anew otherwise. Tests: "a
+lightning address that two circuits never carry is asked a third time…" and
+the seven after it.
+
 **N1b. A circuit kept ready — a small, chosen cost.** A circuit takes a second
 or three to build after Foxy comes to the front, and one that goes nowhere
 costs a minute. One is opened ahead of time, by asking the mint for its

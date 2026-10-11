@@ -118,8 +118,12 @@
       if (typed) this.checkSendPrice();
       else if (this.state.sendSats || this.state.sendPriceCheck) this.setState({ sendSats: null, sendPriceCheck: null });
     }
-    // the send confirmation needs a fee before the person decides, not after
-    if (this.state.screen === 'sendConfirm') this.quoteSendFee();
+    /* The send confirmation needs a fee before the person decides, not after,
+     * and a connection that comes or goes while it is open is an update of
+     * its own (`routeAt`): it holds its button for one on its way, asks what
+     * it needs the moment the route is up, and tells of one that does not
+     * come (`syncSend`). */
+    this.syncSend();
     this.syncUnit();
     this.syncQueue();
     this.syncSlide();

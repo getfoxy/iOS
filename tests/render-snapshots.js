@@ -442,7 +442,39 @@ function representative(logic) {
   // confirmation shells
   add('sendConfirm, lightning address, a quoted fee, a note', at('sendConfirm', { flow: 'send', amount: '20', unit: 'USD', recipient: 'alice@example.com', recipientKind: 'email', payFrom: 'BITCOIN', quotedFee: 12, note: 'rent' }));
   add('sendConfirm, an invoice, quoting', at('sendConfirm', { flow: 'send', amount: '', unit: 'SATS', recipient: 'lnbc2100n1stub', recipientKind: 'invoice', quotingFee: true }));
+  /* The confirmation held (CHECKING, with the FEE row saying the same) for a
+   * connection that is on its way: working offline while Tor is at work, which
+   * is where Foxy opens and where it comes back from the background. The wallet
+   * stand-in says so the way the real one does, in `routeComing` and in the
+   * privacy record the home banner is drawn from. */
+  const COMING = Object.assign({}, OFFLINE, { routeComing: () => true, lookupLnurl: () => new Promise(() => {}),
+    privacy: () => ({ tor: 'connecting', progress: 40, everUp: true, unprotected: false, offline: true, network: 'wifi',
+                      orbot: 'none', vpn: false, orbotKey: false }) });
+  add('sendConfirm, an invoice, the connection on its way', at('sendConfirm',
+    { flow: 'send', amount: '2100', unit: 'SATS', recipient: 'lnbc2100n1stub', recipientKind: 'invoice', payFrom: 'BITCOIN' }, { wallet: COMING }));
+  add('sendConfirm, a lightning address, the connection on its way', at('sendConfirm',
+    { flow: 'send', amount: '2100', unit: 'SATS', recipient: 'alice@example.com', recipientKind: 'email', payFrom: 'BITCOIN' }, { wallet: COMING }));
+  add('reqOffer, a payment request, the connection on its way', at('reqOffer',
+    { req: { sats: 500, mints: ['https://mint.example.com'], transports: ['nostr', 'post'], delivery: { kind: 'nostr', target: 'npub1stub' } } }, { wallet: COMING }));
+  add('sendConfirm, a lightning address, quoted, SEND with its fee', at('sendConfirm',
+    { flow: 'send', amount: '2100', unit: 'SATS', recipient: 'alice@example.com', recipientKind: 'email', payFrom: 'BITCOIN',
+      balSats: 250000, quotedFee: 12, quotedAmt: 2100 },
+    { wallet: { lookupLnurl: () => new Promise(() => {}), payNeed: () => ({ ok: true, need: 2112, have: 250000, fee: 12, why: '' }) },
+      before: (a) => { a._quotedFor = 'alice@example.com|2100'; } }));
   add('depConfirm, by card', at('depConfirm', { flow: 'deposit', amount: '10', unit: 'USD', depositVia: 'DEBIT / CREDIT CARD' }));
+  /* The quote in, the balance not covering the payment and its fee: the
+   * button reads NOT ENOUGH and does nothing, with the wallet's sentence under
+   * the rows. The invoice fits the balance; its fee reserve and the mint's own
+   * fee do not. After the others, and before a screen of another kind: the
+   * button is the orange of a refusal, and a confirmation after it in the same
+   * run would be drawn on the button this one leaves behind (a style set again
+   * as a shorthand clears the shine set beside it), not as it is drawn fresh. */
+  add('sendConfirm, a quote the balance cannot cover', at('sendConfirm',
+    { flow: 'send', amount: '2100', unit: 'SATS', recipient: 'lnbc2100n1stub', recipientKind: 'invoice', payFrom: 'BITCOIN',
+      balSats: 2105, quotedFee: 12, quotedAmt: 2100 },
+    { wallet: { payNeed: () => ({ ok: false, need: 2113, have: 2105, fee: 13,
+        why: 'Your balance isn\'t enough to cover the payment and its fee: this needs 2113 sats and you hold 2105.' }) },
+      before: (a) => { a._quotedFor = 'lnbc2100n1stub'; } }));
   for (const kind of ['sendFail', 'mintRefused', 'netLost', 'lnNoRoute', 'badAddress']) {
     add('blocked screen ' + kind, at(kind, { flow: 'send', amount: '20', unit: 'USD' }));
   }
@@ -730,7 +762,9 @@ function cards() {
 
 // what a view leaves behind on the instance, cleared before the next
 const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
-  '_meltEl', '_fcTapO', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt'];
+  '_meltEl', '_fcTapO', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
+  // what the send confirmation has asked, and whether it waited (03-send.js `quoteSendFee`, `syncSend`)
+  '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited'];
 
 (async () => {
   const { w, errors } = mount();

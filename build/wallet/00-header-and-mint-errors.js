@@ -732,12 +732,20 @@
    * (`w`), so what follows goes by the road that answered. A failure ends it
    * at once while only one has been asked, as it always did; once more have,
    * it takes every one asked so far failing, and the error is the last one's.
-   * What is asked commits to nothing, so several cost nothing but a circuit. */
-  function askedAgain(w, what, ask) {
+   * What is asked commits to nothing, so several cost nothing but a circuit.
+   *
+   * `w` is whatever `ask` is given the first time, and every later asking is
+   * given what `another()` makes: `onCircuit(w)` unless a caller says
+   * otherwise, a wallet view on a circuit of its own. A question that is not
+   * a mint's, a Lightning address's lookup (`lookupLnurl`), has no wallet
+   * view to put on a circuit and passes a maker of fresh circuit labels
+   * (`newCircuitLabel`) for the request to carry. */
+  function askedAgain(w, what, ask, another) {
     return new Promise(function (ok, no) {
       var settled = false, asked = 0, failed = 0, again = null;
       var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 5000;
       var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
+      var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
       var yes = function (via) {
         return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
       };
@@ -754,7 +762,7 @@
         again = setTimeout(function () {
           if (settled || asked > most) return;
           var other;
-          try { other = onCircuit(w); } catch (e) { other = null; }
+          try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round(asked * ms / 1000) + 's; asking again on another circuit');
           send(other);

@@ -756,13 +756,38 @@
  },
  "sendConfirm, an invoice, quoting": {
   "file": "096-sendconfirm-an-invoice-quoting.html",
-  "markup": "54458ceca0b44f82f31b647ddd7c3634512eedd736314a5d1396d1e9b2267034",
-  "vals": "5948bcd86f94ca471b58536d45930a06a6e01d695f4e29bb28046639802f4bbf"
+  "markup": "0d6b53369760f5d223cd27a3fb53b7c56355f01c47d89170fb8eb99006a41de9",
+  "vals": "d3ab6d220651f2c75ebcccff96e89bb80c8ec11a4345a229f0f195c017a25e68"
+ },
+ "sendConfirm, an invoice, the connection on its way": {
+  "file": "377-sendconfirm-an-invoice-the-connection-on-its-way.html",
+  "markup": "0d6b53369760f5d223cd27a3fb53b7c56355f01c47d89170fb8eb99006a41de9",
+  "vals": "0d0dcc299d189c240c0c3875535de488fb09ee4ea21eeb955c82f3d96a2939e4"
+ },
+ "sendConfirm, a lightning address, the connection on its way": {
+  "file": "378-sendconfirm-a-lightning-address-the-connection-on-its-way.html",
+  "markup": "506dca5909bd6cde54eb999f3a10224509f91a8d1847a794fcb002b61bff2a4d",
+  "vals": "6ac83d769acf0a82f35bc93c166d88c1c47fed62349f4c2a44587436a138b612"
+ },
+ "reqOffer, a payment request, the connection on its way": {
+  "file": "379-reqoffer-a-payment-request-the-connection-on-its-way.html",
+  "markup": "46c799e8d46df43a315a34361398e41ba184e0223a9ea2926665f6562170caef",
+  "vals": "16760f70a184222e7cd1afd48e16e4a83158994c48cd6a887f4f07dc46a03574"
+ },
+ "sendConfirm, a lightning address, quoted, SEND with its fee": {
+  "file": "380-sendconfirm-a-lightning-address-quoted-send-with-its-fee.html",
+  "markup": "8eb8e02f97cfc8bf35fc5d7f61e39ffd4cda27876fd0a17ca5a114d2803f8231",
+  "vals": "2b738dcc8aadb48ae53acf2e7d0823d7b5fe5b9094d5434af519bd3cd9939668"
  },
  "depConfirm, by card": {
   "file": "098-depconfirm-by-card.html",
   "markup": "b67197eb3b3a3300b017eaf2c58d2f3658f1ce5ee26dec4a691e2f0123bc8794",
   "vals": "4e4bd0ed7498f27b27c66132ba4bbaa05afc496d613e2c471dc72c967a7df8f9"
+ },
+ "sendConfirm, a quote the balance cannot cover": {
+  "file": "381-sendconfirm-a-quote-the-balance-cannot-cover.html",
+  "markup": "a7f41d0681a8133e072f28d3762af8306a172435eb4fb9ae89b6a25ad5afe4fa",
+  "vals": "b1b052f84613a127c0f1c20944e82a1ec2cac8b3bd7a21a1049727632b6f2b01"
  },
  "blocked screen sendFail": {
   "file": "099-blocked-screen-sendfail.html",

@@ -67,7 +67,7 @@ ok(/txTokenTitle/.test(markup) && /txTokenNoteShown/.test(markup), 'the title an
 
 const send = read('build/app/03-send.js');
 const sent = read('build/app/24-render-receive-and-send.js');
-ok(/if \(this\.state\.screen === 'sendDone' \|\| this\.state\.sendPhase\) \{\s*this\.setState\(\{ screen: 'sendConfirm', sendPhase: null, sendSlow: false \}\);\s*\}\s*\/\/ not enough money/.test(send),
+ok(/if \(this\.state\.screen === 'sendDone' \|\| this\.state\.sendPhase\) \{\s*this\.toConfirm\(\);\s*\}\s*\/\/ not enough money/.test(send),
    'a failed send leaves SENDING at once, before any card');
 ok(/insufficient\|balance\|not enough/.test(send), '"Not enough ecash" is a balance problem, not a lost connection');
 ok(/sendStopWaiting: \(\) => \{[\s\S]{0,1600}?sendSlow: false, sendPhase: null/.test(sent),

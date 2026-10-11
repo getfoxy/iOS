@@ -101,6 +101,24 @@ rather than the invoice refused, that a mint which cannot pay one is named
 before anything moves, and that an amount offered beside an invoice which
 already carries its own is refused — the invoice is what the payee signed.
 
+**`send-fee-check.js`** and the last part of **`home-first.js`** are what hold
+the send confirmation's states. The first draws `confirmSpec` and `requestSpec`
+for each: CHECKING (the FEE row saying the same word) while a connection is on
+its way or a question is out, NOT ENOUGH when the wallet's own sum
+(`payNeed`, `pay`'s `meltNeed`) says the balance does not cover the payment and
+its fee, and the card with no TRY AGAIN when the send is refused all the same.
+It also lifts the app's own ways back from a send that did not happen, and
+pins that each leaves the screen stack as it was before SEND (the
+confirmation, or the amount screen for a balance, with no entry of the
+confirmation left behind; the card for a connection that never came pushes
+nothing), so one press of the back arrow leaves.
+The second lifts the app's methods onto a real wallet at a fake mint and a fake
+address server and moves the route as the native side does: a scan while Tor is
+connecting reaches its confirmation held, the route coming up looks the address
+up and quotes the fee by itself, Tor giving up says the card, no network
+at all is as it was; and then it mounts the real page and reads the button off
+the DOM, because only the page makes the route coming up an update.
+
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:
 `bridgeAsk(` and `nativeJson(`, which is how the seed, counter and lock-key

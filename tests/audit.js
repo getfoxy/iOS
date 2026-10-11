@@ -149,8 +149,8 @@ const out = (sats, o) => Object.assign({ dir: 'out', sats, hash: 'out-' + Math.r
   ok(a.heldBlocks(1000) === '', 'and with nothing held it is the ordinary block');
   ok(/priceWarn: sendHeld \? sendHeld/.test(src) && /sendOverLabel: sendHeld \? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE'/.test(src),
      'on the amount screen it takes the place of MORE THAN YOUR BALANCE, with the amount red and NEXT off');
-  ok((src.match(/warn: this\.heldBlocks\(/g) || []).length === 3,
-     'and on the three confirmations that already close on a payment over the balance', String((src.match(/warn: this\.heldBlocks\(/g) || []).length));
+  ok((src.match(/warn: this\.heldBlocks\(/g) || []).length === 4,
+     'and on the four confirmations that close on a payment over the balance: an invoice before its fee, a quote the balance cannot cover, a request, and an on-chain payment', String((src.match(/warn: this\.heldBlocks\(/g) || []).length));
 }
 
 console.log('\n' + (failed ? failed + ' audit check(s) failed' : 'all audit checks pass'));

@@ -846,6 +846,32 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fai
     t.G.holdVerify(false);
   }
 
+  /* ---- what the gate shows and what the wallet calls "on its way" are one reading ----
+   *
+   * The send confirmation holds its button, CHECKING, for a connection that is
+   * on its way, and asks the wallet whether there is one (`routeComing`, behind
+   * the app's `connecting()`). The person sees this file's screens for the same
+   * states, so the two must say the same: the states the gate calls SECURING
+   * YOUR CONNECTION are waited for, and a Tor that has given up, or a phone with
+   * no network, are not (the confirmation tells those at once). */
+  { const cases = [
+      ['Tor connecting over wifi', { tor: 'connecting', everUp: false, progress: 20, network: 'wifi' }, /SECURING YOUR CONNECTION/, true],
+      ['Tor connecting over cellular', { tor: 'connecting', everUp: false, progress: 20, network: 'cellular' }, /SECURING YOUR CONNECTION/, true],
+      ['Tor having given up', { tor: 'failed', everUp: false, progress: 0, network: 'wifi' }, /CANNOT CONNECT TO TOR/, false],
+      ['no network at all', { tor: 'connecting', everUp: false, progress: 0, network: 'none' }, /NO CONNECTION/, false],
+    ];
+    for (const [what, patch, screen, coming] of cases) {
+      const t = boot();
+      t.G.check(() => {});
+      await t.set(patch);
+      await sleep(700);
+      ok(screen.test(t.title()) && t.W.routeComing() === coming,
+         'the gate and the wallet agree on ' + what + ': ' + t.title().slice(0, 30) + ' / on its way ' + t.W.routeComing());
+    }
+    const up = boot();
+    await up.set({ tor: 'up', everUp: true, progress: 100, network: 'wifi' });
+    ok(up.W.routeComing() === false, 'and Tor up is a connection, not one on its way'); }
+
   console.log(failures ? '\n' + failures + ' FAILED' : '\nall scenarios pass');
   process.exit(failures ? 1 : 0);
 })();

@@ -730,6 +730,27 @@
       note: '', noteDraft: '' }));
   }
 
+  /* Does paying this request need a connection?
+   *
+   * What `makeTokenForRequest` does with a route that it cannot do without
+   * one. A request that names somewhere to be paid (an onion address, a Nostr
+   * inbox) is delivered there only over the route, and without it becomes a
+   * token to show; one that asks for a lock has the lock made by a swap, and
+   * without a route is paid unlocked; one for another mint connects to that
+   * mint first, and without a route cannot be paid at all.
+   *
+   * Not one that came over the Bluetooth link in hand, which is paid over the
+   * link, nor one that names none of these: a token to show them, from the
+   * mint this phone is on, made from the pieces it holds. Those are not waited
+   * on (`requestSpec`), because there is nothing for a connection to add. */
+  requestNeedsRoute(req) {
+    if (!req || req.viaTap) return false;
+    const W = window.FoxyWallet;
+    const want = String((req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const here = !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+    return !!(req.delivery || req.lockTo || (want && !here));
+  }
+
   /* Will an over-payment's change come back by itself?
    *
    * Only from a phone with a route, because making change is a swap. It says

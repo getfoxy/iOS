@@ -47,6 +47,26 @@
         });
     },
 
+    /* Can this phone cover a Lightning payment, the mint's fees included,
+     * before anything is made? `sats` is the amount the quote is for and
+     * `reserve` the fee reserve it names: the confirmation asks once the
+     * quote is in, and does not offer SEND to a payment that is short.
+     *
+     * The very sum `pay` refuses on (`meltNeed`: the amount, the reserve, this
+     * mint's own fee for the split and its fee again on the pieces the melt
+     * spends), against the same pile and in the same words (`notEnoughWords`),
+     * so the screen and the payment cannot disagree. Answers
+     * { ok, need, have, fee, why } with `why` empty when it fits, and null
+     * when there is no wallet or nothing to pay. Local, and at once. */
+    payNeed: function (sats, reserve) {
+      var w;
+      try { w = needLocal(); } catch (e) { return null; }
+      var owed = Math.round(Number(sats) || 0) + Math.round(Number(reserve) || 0);
+      if (!(owed > 0)) return null;
+      var mn = meltNeed(w, proofs(mintOf(w)), owed);
+      return { ok: !!mn.ok, need: mn.need, have: mn.have, fee: mn.fee, why: mn.ok ? '' : notEnoughWords(mn) };
+    },
+
     /* Resolves once the phone has said it has a seed, and an older install
      * has been moved onto it (nativeReady). Boot calls this after the lock and
      * before any mint work.

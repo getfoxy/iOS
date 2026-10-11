@@ -108,13 +108,29 @@ class Component extends DCLogic {
     return !!(p && p.offline);
   }
 
+  /* Is a connection on its way? The home banner's SECURING YOUR CONNECTION:
+   * the phone has a network, Tor is at work on a circuit (connecting, or
+   * stuck for a while), and nobody has chosen to go without Tor. The wallet
+   * answers from the very record the banner is drawn from (`routeComing`), so
+   * the two cannot differ; this is only the ask.
+   *
+   * It is the other half of `offlineNow`, not the opposite. No network, or
+   * a Tor that has stopped or given up, is offline and not coming: the
+   * banner says OFFLINE - NO CONNECTION or CANNOT CONNECT, and what needs a
+   * connection is refused at once. Coming is a state to wait out, for a few
+   * seconds, by the step that needs it (the send confirmation holds its
+   * button, `confirmSpec`) and not to refuse in. */
+  connecting() {
+    const W = window.FoxyWallet;
+    return !!(W && W.routeComing && W.routeComing());
+  }
+
   /* What a greyed-out control says when it is tapped anyway. A control that
    * looks dead and does nothing at all reads as a bug; one that says why reads
    * as a state. */
   offlineNo(what) {
-    const W = window.FoxyWallet;
     // there is no OFFLINE to tap while a connection is on its way: the banner says SECURING YOUR CONNECTION
-    const coming = !!(W && W.routeComing && W.routeComing());
+    const coming = this.connecting();
     this.toast((what || 'That') + (coming ? ' needs a connection. One is on its way.'
                                            : ' needs a connection. Tap the banner to retry.'), true);
   }
@@ -221,6 +237,23 @@ class Component extends DCLogic {
     // a card's limit, before it is set (26f-flashcard.js)
     if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
     // sendConfirm
+    const W = window.FoxyWallet;
+    /* Waiting on the connection, or on what it is for.
+     *
+     * A Lightning payment cannot be made, and its fee cannot be known, until
+     * the route is up and the mint has answered (for an address, the address
+     * first: `quoteSendFee`). Until then the button says CHECKING and does
+     * nothing, and the FEE row says the same word: they are one state, and
+     * both read it from here. A connection that is on its way comes first
+     * (`connecting`: Foxy comes back from the background, or opens, working
+     * offline for the few seconds Tor takes), then the question itself, out
+     * (`quotingFee`) or about to go (`sendToAsk`).
+     *
+     * With no connection and none coming nothing is waited for: the fee
+     * reads UNKNOWN, and SEND is there to be pressed, as it always was, to be
+     * told so. */
+    const asks = s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email');
+    const held = asks && (this.connecting() || !!s.quotingFee || this.sendToAsk());
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
       this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
@@ -241,7 +274,7 @@ class Component extends DCLogic {
        * on a screen shown before the payment — a quote or nothing. */
       this.cfRow('FEE', s.quotedFee != null
         ? 'UP TO ' + this.money(s.quotedFee).main
-        : s.quotingFee ? 'CHECKING…' : 'UNKNOWN',
+        : held ? 'CHECKING…' : 'UNKNOWN',
         { half: true, sub: s.quotedFee != null ? this.money(s.quotedFee).sub : '' }),
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
@@ -249,21 +282,14 @@ class Component extends DCLogic {
      * in the accent — the same place and shape as on the receiver's screen, so
      * the two can be held side by side and compared at a glance rather than
      * read. See cfCode in the render values. */
-    const feeDue = s.quotedFee != null ? Math.max(0, Math.round(Number(s.quotedFee) || 0)) : 0;
+    /* An invoice for more than the balance, before any fee: nothing to wait
+     * for, and nothing the fee could change. The invoice alone fitting is not
+     * the payment fitting, which is asked once the quote is in, below. */
     const shortOf = (() => {
-      const W = window.FoxyWallet;
       if (s.recipientKind !== 'invoice' || !s.recipient || !W || !W.amountOf) return 0;
       const need = W.amountOf(s.recipient) || 0;
       const have = s.balSats || 0;
-      /* With the fee the mint will hold back for it, once that is known. The
-       * invoice alone fitting is not the payment fitting: a mint takes the
-       * amount and a reserve for routing, and gives back what it does not
-       * use. Two invoices a few hundred sats under the balance were offered
-       * a SEND button here and refused a second later on the sending screen
-       * with "needs N including the fee reserve, and you hold M". The quote
-       * is on this screen already. */
-      const owed = need + feeDue;
-      return (need && owed > have) ? owed - have : 0;
+      return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
       return {
@@ -271,8 +297,7 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main
-          + (feeDue > 0 ? ' with the fee' : ''),
+        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
       };
     }
@@ -288,6 +313,32 @@ class Component extends DCLogic {
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE\u2026', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
+      };
+    }
+    /* Once the fee is quoted: can the balance cover the payment and its fee?
+     *
+     * The wallet answers with the very sum `pay` refuses on (the amount, the
+     * mint's fee reserve, this mint's own fee for the split and its fee again
+     * on the pieces the melt spends) against what is held at the mint it pays
+     * from, in the words it refuses in (`payNeed`). The invoice alone fitting
+     * is not the payment fitting: two invoices a few hundred sats under the
+     * balance were offered a SEND button and refused a second later, on the
+     * sending screen. So the button is held here and says why, and the way
+     * out is back, to the amount screen. A render must not fail on the wallet
+     * failing to say, and then SEND is there as it was: `pay` refuses. */
+    let covers = null;
+    try {
+      covers = (s.quotedFee != null && asks && W && W.payNeed)
+        ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+    } catch (e) { covers = null; }
+    if (covers && !covers.ok) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'SENDING',
+        amount: this.sendAmountText(),
+        amountInk: '#FF5C5C',
+        rows: rows,
+        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
     return {
@@ -313,12 +364,13 @@ class Component extends DCLogic {
       /* Not until the fee is known. The balance check above needs it, and
        * the screen offered SEND for the second or two the mint took to say
        * what it would hold back — long enough to press it and find out on
-       * the sending screen that the payment did not fit. While it is being
-       * asked, the button says so and does nothing. */
-      cta: (s.recipientKind === 'invoice' && s.quotingFee) ? 'CHECKING FEE\u2026' : 'SEND ' + this.sendAmountText(),
-      ctaBusy: s.recipientKind === 'invoice' && !!s.quotingFee,
+       * the sending screen that the payment did not fit. While that is being
+       * asked, or the connection it is asked over is on its way, the button
+       * says CHECKING and does nothing, and the FEE row says the same. */
+      cta: held ? 'CHECKING…' : 'SEND ' + this.sendAmountText(),
+      ctaBusy: held,
       ctaTone: 'go',
-      go: (s.recipientKind === 'invoice' && s.quotingFee) ? () => {} : () => this.startSend(),
+      go: held ? () => {} : () => this.startSend(),
     };
   }
 

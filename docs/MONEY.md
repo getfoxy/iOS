@@ -287,6 +287,20 @@ asked, to the millisat (`msatOf`), and one with no amount is refused. It was
 once compared in rounded sats, so an address server could return up to half a
 sat more than asked and be paid.
 
+The resolving is its own function (`lookupLnurl`), because the confirmation
+screen does it when it opens, not when SEND is pressed: it looks the address
+up, quotes the fee on the invoice that comes back, and holds the button
+(CHECKING) until both have answered. Then `payNeed` asks the wallet the very
+sum `pay` refuses on (`meltNeed`: the amount, the fee reserve, and this
+mint's own fee for the split and for the pieces the melt spends) against what
+is held at the mint, and a payment the balance cannot cover holds the button
+at NOT ENOUGH, in the wallet's sentence. SEND pays that invoice, with that
+quote, while both are a minute old at most (`payLnurl`, `opts.found` and
+`opts.quote`); older, or for another address or amount, and the address is
+looked up anew. A refusal at the send itself, because the reserve moved
+between the quote and the send, is the same sentence on a card that goes to
+the amount screen.
+
 `sweepMelts()` runs on connect and on resume. For each held melt belonging to
 the connected mint it asks the mint: `PAID` files it as a payment (change
 added without duplicates; change that comes back as blind signatures is
@@ -1351,7 +1365,14 @@ offline for the first seconds of every session, so `pay`, `sendToken`,
 `receiveToken`, `reclaimToken`, `onchainPay`, `payRequest` and a payment
 arriving (`_requestPaid`) wait up to six seconds while Tor is at work over a
 network (`routeSoon`), and not at all with no network or a Tor that has given
-up. `tests/home-first.js`.
+up. The send confirmation is not a step with a six second wait: it holds its
+button, CHECKING, for as long as the banner says SECURING YOUR CONNECTION,
+and asks what it needs (the address's invoice, the fee quote) by itself the
+moment the route is up; Tor giving up while it waits puts the card for no
+connection over it. A scanned request that is delivered over the route, or
+asks for a lock, or is for another mint, is held the same way; if the
+connection does not come it gets no card, because the way without a route (a
+token to show) is still there. `tests/home-first.js`.
 
 **One payment, one entry, whichever door it came by.** A token this phone
 already holds, or has already swapped in, is turned away at a scan and over

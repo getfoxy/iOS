@@ -2069,6 +2069,17 @@ a fresh install.*
     on (Settings, Accessibility, Motion) the fresh line replaces it at once.
     The first launch after installing has no line until one fetch has
     succeeded.
+12. **A payment scanned in the first seconds.** Open Foxy (or bring it back
+    after a minute away) and at once scan a Lightning invoice that names its
+    amount; another time, a Lightning address, and type an amount.
+    **Pass:** no card for no connection. The confirmation is there, its button
+    reads CHECKING with a spinner and so does its FEE row, and pressing the
+    button does nothing. When the banner turns to Tor the button turns to SEND
+    by itself, with the fee in the FEE row (NOT ENOUGH, with the sentence under
+    the rows, when the balance would not cover the payment and its fee). In
+    airplane mode the same invoice gets YOU'RE OFFLINE at once, as before; and
+    with the radios turned off while CHECKING shows, the card comes up over
+    the confirmation then.
 
 ## Getting a log off somebody else's phone
 

@@ -79,48 +79,180 @@
   // a pasted invoice is 200-odd characters; five each end fits on one line
   shortId(v) { return v.length > 14 ? v.slice(0, 5) + '…' + v.slice(-5) : v; }
 
-  /* Ask the mint what this invoice would cost. Commits to nothing. */
+  /* The sats being sent, as the keypad and the price check settle them: what
+   * was typed in sats, or what two price sources agreed a typed dollar amount
+   * comes to (`checkSendPrice`). Nought until that is known. */
+  typedSats() {
+    return this.state.unit === 'SATS' ? this.wantedSats() : (this.state.sendSats || 0);
+  }
+
+  /* And the sats this payment sends: an invoice's own amount, which the payee
+   * signed, else what was typed. */
+  sendSatsNow() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const own = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(String(s.recipient)) : 0;
+    return own || this.typedSats();
+  }
+
+  /* What the send confirmation asks of the network before it offers SEND, or
+   * null when it asks nothing.
+   *
+   *   an invoice ............ { key, inv }         the mint's fee quote on it
+   *   a lightning address ... { key, addr, sats }  an invoice from the address
+   *                           for these sats, then the fee quote on that
+   *
+   * `key` names the question, so another invoice, another address or another
+   * amount is a new one. An invoice that names no amount cannot be quoted
+   * without one (`pay` quotes it with the amount typed, at SEND), so it asks
+   * nothing; an address waits for its amount, which typed in dollars is not
+   * known until two price sources have agreed on it (`checkSendPrice`). */
+  sendAsk() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const raw = String(s.recipient || '');
+    if (!W || !raw) return null;
+    if (s.recipientKind === 'invoice') return (W.amountOf && W.amountOf(raw)) ? { key: raw, inv: raw } : null;
+    const addr = raw.trim().replace(/^lightning:/i, '');
+    if (s.recipientKind === 'email' && W.lookupLnurl && W.classify && W.classify(addr) === 'lnurl') {
+      const sats = this.typedSats();
+      return sats > 0 ? { key: addr + '|' + sats, addr: addr, sats: sats } : null;
+    }
+    return null;
+  }
+
+  /* Is there a question this confirmation has yet to ask? Yes from the moment
+   * a route is there until `quoteSendFee` has started it, so the button never
+   * reads SEND in between. Not without a route: that is no question, and the
+   * fee reads UNKNOWN. */
+  sendToAsk() {
+    const W = window.FoxyWallet;
+    const ask = this.sendAsk();
+    return !!(ask && W && W.quoteFee && !this.offlineNow() && this._quotedFor !== ask.key);
+  }
+
+  /* Ask what this payment would cost. Commits to nothing.
+   *
+   * For an invoice that is the mint's quote on it. A lightning address has no
+   * invoice yet, so the address is asked for one first (`lookupLnurl`) and the
+   * quote is asked on what it gave: SEND pays that very invoice, with that
+   * quote (`startSendNow`). While this is out the button says CHECKING, and
+   * once the quote is in the sum the wallet will refuse on is compared with
+   * the balance before the button is live (`confirmSpec`).
+   *
+   * Over a route only. A connection that is on its way is waited for, and
+   * this is called on every update (`syncSend`), the route coming being one
+   * of them, so it starts by itself the moment the route is up and the person
+   * presses nothing. With none coming there is nothing to ask, and the fee
+   * reads UNKNOWN as it always did when no quote was possible.
+   *
+   * An answer that does not come, or comes empty, ends the question: the fee
+   * reads UNKNOWN and SEND does the whole of it as it did before the screen
+   * asked anything, the address looked up again at that point. */
   quoteSendFee() {
     const W = window.FoxyWallet;
     const s = this.state;
     if (!W || !W.quoteFee) return;
-    const inv = s.recipientKind === 'invoice' ? s.recipient : null;
-    const target = inv || s.recipient || '';
+    const ask = this.sendAsk();
+    const target = ask ? ask.key : String(s.recipient || '');
     if (!target || this._quotedFor === target) return;
-    this._quotedFor = target;
 
     /* Clear first, quote second.
      *
      * An earlier version only cleared when there was an invoice to quote. A
-     * lightning address has none until LNURL resolves it during the send, so
-     * that path kept the previous payment's fee on screen — a 200-sat payment
-     * that cost 1, then a 9,862-sat payment still showing 1 when it cost 15.
+     * lightning address has none until LNURL resolves it, so that path kept
+     * the previous payment's fee on screen — a 200-sat payment that cost 1,
+     * then a 9,862-sat payment still showing 1 when it cost 15.
      *
-     * Where no quote is possible the row says UNKNOWN, which is true. */
-    if (!inv) {
-      this.setState({ quotingFee: false, quotedFee: null, sendFee: null });
-      return;
-    }
-    /* Clear the last payment's fee.
+     * Where no quote is possible the row says UNKNOWN, which is true.
      *
      * sendFee is written when a payment succeeds and was never cleared, and
      * the FEE row reads it before the quote. So a second payment showed the
      * first one's fee — a same-mint payment costing 0, followed by a
      * cross-mint one that actually cost 29, still displayed 0. A stale number
      * stated confidently is worse than UNKNOWN. */
-    this.setState({ quotingFee: true, quotedFee: null, sendFee: null });
-    this._feeQuote = null;
-    W.quoteFee(inv).then(q => {
+    const clear = (more) => {
+      this._feeQuote = null;
+      this._found = null;
+      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, more));
+    };
+    if (!ask) {
+      this._quotedFor = target;
+      clear({ quotingFee: false });
+      return;
+    }
+    if (this.offlineNow()) {
+      // not asked yet, so not marked: cleared the once, and asked when the route is up
+      if (this._feeClearedFor !== target) { this._feeClearedFor = target; clear({ quotingFee: false }); }
+      return;
+    }
+    this._quotedFor = target;
+    this._feeClearedFor = null;
+    // an answer to an older question is nothing to this one
+    const run = this._askRun = (this._askRun || 0) + 1;
+    const stale = () => run !== this._askRun;
+    clear({ quotingFee: true });
+    // not called on this turn: a wallet that refuses at once (no route after all) must not throw out of an update
+    Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv })).then(found => {
+      if (stale()) return null;
+      // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
+      if (ask.addr) this._found = found;
+      return W.quoteFee(found.pr);
+    }).then(q => {
+      if (stale()) return;
       // kept whole for SEND: a fresh quote for this invoice is not asked for twice (`pay`, opts.quote)
       this._feeQuote = q && q.quote ? q : null;
-      this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null });
-    }).catch(() => {
-      /* Let the next render try again. This was set before the request and
-       * never cleared, and componentDidUpdate's guard then returned on every
-       * pass — so one failed quote, which over Tor is ordinary, left the
-       * confirmation reading UNKNOWN for that invoice for the whole session. */
-      this._quotedFor = null;
+      this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null, quotedAmt: q ? q.amount : null });
+    }).catch(e => {
+      if (stale()) return;
+      console.warn('[foxy] the send confirmation could not ask what the payment costs:', W.reason ? W.reason(e) : e);
       this.setState({ quotingFee: false });
+    });
+  }
+
+  /* The send confirmation, kept up with the route. Called on every update
+   * (componentDidUpdate), and the route coming or going is an update of its
+   * own (`onPrivacy` → `routeAt`).
+   *
+   * While a connection is on its way the confirmation holds its button
+   * (CHECKING, `confirmSpec`); what it is waiting for is asked by itself once
+   * the route is up (`quoteSendFee`). It remembers that it waited, so that a
+   * connection which then does not come, Tor having given up or the network
+   * gone, is told at once, in the card a payment gets with no connection
+   * (`notOnlineCard`), with the confirmation left under it as it is after any
+   * send that is refused. A route that did come says nothing.
+   *
+   * The dollar price check (`checkSendPrice`) is not among the things waited
+   * for: working offline puts the keypad in sats (`syncUnit`), so a payment
+   * reaches this screen in dollars only with a route. */
+  syncSend() {
+    const s = this.state;
+    if (s.screen !== 'sendConfirm') {
+      this._sendWaited = null;
+      return;
+    }
+    const key = String(s.recipient || '');
+    // a Lightning payment, an invoice or an address: the others (on chain) need a connection their own way
+    const lightning = s.recipientKind === 'invoice' || s.recipientKind === 'email';
+    if (lightning && this.connecting()) {
+      this._sendWaited = key;
+    } else if (this._sendWaited === key) {
+      this._sendWaited = null;
+      if (lightning && this.offlineNow()) this.notOnlineCard();
+    }
+    this.quoteSendFee();
+  }
+
+  /* A payment that needs a connection, when there is none and none is coming:
+   * told in the card a scanned invoice gets (`acceptTarget`), in the same
+   * words for an invoice, and for a lightning address in words that fit it. */
+  notOnlineCard() {
+    if (this.state.recipientKind === 'invoice') { this.offlineInvoiceCard(); return; }
+    this.blockedCard('offlineAddress', {
+      tone: 'warn',
+      title: 'YOU\u2019RE OFFLINE',
+      reason: 'A Lightning address can only be paid with a connection. '
+        + 'Ask them for a Cashu request, or reconnect.',
     });
   }
 
@@ -140,6 +272,20 @@
       const stack = p.stack.slice();
       while (stack.length && stack[stack.length - 1] === 'sendConfirm') stack.pop();
       return { screen: 'sendConfirm', stack: stack, sendPhase: null, sendSlow: false };
+    });
+  }
+
+  /* Back to the amount screen from the send confirmation, or from the sending
+   * screen over it, with the stack discipline of `toConfirm`: the entry the
+   * sending screen pushed goes, every trailing one of it, so nothing of the
+   * confirmation is left behind to be gone back to as if it were another
+   * screen. A payment that came with its own amount has no amount screen, and
+   * this is the screen it came from. */
+  toAmount() {
+    this.setState(p => {
+      const stack = (p.stack || []).slice();
+      while (stack.length && stack[stack.length - 1] === 'sendConfirm') stack.pop();
+      return { screen: stack.length ? stack.pop() : 'home', stack: stack, sendPhase: null, sendSlow: false };
     });
   }
 
@@ -298,9 +444,22 @@
      * figure two price sources agreed on (checkSendPrice). `pay` refuses the
      * pair if the invoice does carry an amount, so this is never a way to send
      * something other than what the payee asked for. */
-    const typed = this.state.unit === 'SATS' ? this.wantedSats() : (this.state.sendSats || 0);
+    const typed = this.typedSats();
+    /* And what the confirmation has asked already. For an address that is the
+     * invoice it gave and the fee quote on it, paid as they stand while they
+     * are fresh (`payLnurl`); an address the screen could not look up, or one
+     * it was not asked about, is looked up here, as it was before. */
+    const asked = this.sendAsk();
+    const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
+      ? this._found : null;
+    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    /* An address's invoice is for one attempt. A payment that goes must not be
+     * paid with the same invoice again the next time this address and amount
+     * are chosen, and one that fails is asked about afresh when the person is
+     * back on the confirmation. */
+    if (found) { this._found = null; this._quotedFor = null; }
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage)
+      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
                                          (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
     this._sendRun = run;
@@ -440,14 +599,24 @@
        * blockedCard leaves you where you were, which is right when a failure
        * arrives over the home screen. Here the progress overlay has gone, the
        * payment did not happen, and that screen has nothing on it — closing
-       * left no way out. Back to the confirmation, where the buttons are. */
+       * left no way out. Back to the confirmation, where the buttons are.
+       *
+       * Except for a balance that does not cover the payment and its fee: the
+       * confirmation would only say the same again (it holds its button for
+       * exactly this, NOT ENOUGH), so the card, whichever way it is closed,
+       * goes to the amount screen. It has no TRY AGAIN; its one button names
+       * where it goes, and the closing does it (`toAmount`). */
       this.blockedCard(kind, {
         title: kind === 'mintRefused' ? 'THE MINT SAID NO' : undefined,
         reason: W.reason(e),
         retry: again ? 'TRY AGAIN' : 'CHANGE AMOUNT',
         back: again ? '' : 'amount',
-        go: again,
+        go: again || (() => {}),
         onClose: () => {
+          if (kind === 'sendFail') {
+            if (this.state.screen === 'sendDone' || this.state.screen === 'sendConfirm' || this.state.sendPhase) this.toAmount();
+            return;
+          }
           /* Back to the send confirmation — 'sendConfirm', not 'confirm'.
            *
            * 'confirm' is the receive invoice screen. Sending someone there

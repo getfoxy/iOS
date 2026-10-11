@@ -1410,6 +1410,25 @@ const eq = (got, want, what) =>
     return minted && minted[2] === 'q0' && !minted[3] ? null : 'the claim was not a plain one: ' + JSON.stringify(minted);
   });
 
+  // an invoice-shaped string with an h field, for the description hash: timestamp,
+  // then h (type 23, 52 words), then a blank 520-bit signature and a blank checksum
+  // (a lightning address's invoice is checked against it; used by the lookup tests below and by the one after the sent-token ones)
+  const invoiceFor = (prefix, text) => {
+    const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+    const hash = require('crypto').createHash('sha256').update(text, 'utf8').digest();
+    const words = [];
+    let acc = 0, bits = 0;
+    for (const b of hash) {
+      acc = (acc << 8) | b; bits += 8;
+      while (bits >= 5) { bits -= 5; words.push((acc >> bits) & 31); }
+      acc &= (1 << bits) - 1;
+    }
+    if (bits) words.push((acc << (5 - bits)) & 31);
+    const data = [0, 0, 0, 0, 0, 0, 0, 23, 1, 20].concat(words, new Array(104).fill(0));
+    return { pr: prefix + data.map(v => CHARSET[v]).join('') + 'qqqqqq', hex: hash.toString('hex') };
+  };
+  const META = '[["text/plain","Pay alice"]]';
+
   // ---- a question asked twice: an invoice, a fee quote -----------------------
 
   /* A mint whose answers to an invoice or a fee quote can hang. `hang` is how
@@ -1565,6 +1584,189 @@ const eq = (got, want, what) =>
     if (seen.quotes !== 2) return 'the fee was asked for ' + seen.quotes + ' time(s)';
     // the melt is never asked twice, and it is for the quote that came back
     return JSON.stringify(seen.melts) === '["melt2"]' ? null : 'melts: ' + JSON.stringify(seen.melts);
+  });
+
+  // ---- a lightning address's lookup: asked again on a fresh circuit, like a fee quote ------
+
+  /* A lightning address's server behind the phone's bridge. `answer(url, n, m)`
+   * is what the n-th asking of that url gets, as the text the bridge hands
+   * back ('200\n<json>'), or 'hang' for one that is never answered. Every
+   * asking is written down with the circuit it asked to leave on: '' is the
+   * phone's own choice, a label is a circuit of the wallet's making. */
+  const reply200 = (j) => '200\n' + JSON.stringify(j);
+  const addressCtx = (answer, route) => {
+    const asked = [];
+    const ctx = load({ bridge: (w, m) => {
+      if (m.action !== 'mintRequest') return;
+      asked.push({ url: m.url, circuit: m.circuit });
+      const n = asked.filter((a) => a.url === m.url).length;
+      const got = answer(m.url, n, m);
+      if (got === 'hang') return;
+      setTimeout(() => w.FoxyWallet._scanResult(m.id, got, null), 0);
+    } });
+    if (route) ctx.W._privacy(route);
+    return { ctx, asked, of: (re) => asked.filter((a) => re.test(a.url)) };
+  };
+  const GOOD = () => invoiceFor('lnbc100n1', META).pr;
+  const WELL = () => reply200({ tag: 'payRequest', callback: 'https://addr.test/cb', minSendable: 1000, maxSendable: 100000000, metadata: META });
+  const isWell = (url) => /\/\.well-known\/lnurlp\//.test(url);
+
+  await test('a lightning address that two circuits never carry is asked a third time, each on a circuit of its own, and that answer is the invoice', async () => {
+    const t = addressCtx((url, n) => (isWell(url) ? (n <= 2 ? 'hang' : WELL()) : reply200({ pr: GOOD() })));
+    t.ctx.W._askAgainMs = 30;
+    const found = await t.ctx.W.lookupLnurl('alice@addr.test', 10);
+    if (!found || found.pr !== GOOD() || found.addr !== 'alice@addr.test' || found.sats !== 10 || !(found.at > 0)) return 'the lookup: ' + JSON.stringify(found);
+    const asks = t.of(/\/\.well-known\//).map((a) => a.circuit);
+    if (asks.length !== 3) return 'the address was asked ' + asks.length + ' time(s)';
+    if (asks[0] !== '' || !asks[1] || !asks[2] || asks[1] === asks[2]) return 'the askings were not on circuits of their own: ' + JSON.stringify(asks);
+    return eq(t.of(/\/cb\?/).length, 1, 'askings of the callback, which answered at once');
+  });
+
+  await test('the callback of a lightning address is asked again the same way, and the first invoice to come is the one paid', async () => {
+    const t = addressCtx((url, n) => (isWell(url) ? WELL() : (n === 1 ? 'hang' : reply200({ pr: GOOD() }))));
+    t.ctx.W._askAgainMs = 30;
+    const found = await t.ctx.W.lookupLnurl('alice@addr.test', 10);
+    if (!found || found.pr !== GOOD()) return 'the lookup: ' + JSON.stringify(found);
+    const asks = t.of(/\/cb\?/);
+    if (asks.length !== 2 || !asks[1].circuit) return 'the callback was asked ' + asks.length + ' time(s)';
+    return eq(t.of(/\/\.well-known\//).length, 1, 'askings of the well-known request, which answered at once');
+  });
+
+  await test('an address that answers at once is asked once each, and one that is refused at once is refused at once', async () => {
+    const quick = addressCtx((url) => (isWell(url) ? WELL() : reply200({ pr: GOOD() })));
+    quick.ctx.W._askAgainMs = 30;
+    await quick.ctx.W.lookupLnurl('alice@addr.test', 10);
+    await new Promise((r) => setTimeout(r, 120));
+    if (quick.asked.length !== 2) return 'a quick address was asked ' + quick.asked.length + ' times';
+    const refused = addressCtx(() => '404\n{}');
+    refused.ctx.W._askAgainMs = 30;
+    let error = null;
+    try { await refused.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { error = e; }
+    await new Promise((r) => setTimeout(r, 120));
+    if (!error) return 'a refusal was papered over';
+    return eq(refused.asked.length, 1, 'askings after a refusal that came at once');
+  });
+
+  await test('an address that never answers is asked five times and fails at the deadline in the words it always did', async () => {
+    const t = addressCtx((url) => 'hang');
+    t.ctx.W._askAgainMs = 30;
+    t.ctx.W._reachMs = 1500;
+    const began = Date.now();
+    let error = null;
+    try { await t.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { error = e; }
+    const took = Date.now() - began;
+    if (!error) return 'it did not fail';
+    if (!/^that address did not answer within \d+s\.$/.test(error.message)) return 'the words: ' + error.message;
+    if (took < 1400 || took > 3000) return 'it failed after ' + took + ' ms, not at the deadline';
+    return eq(t.asked.length, 5, 'askings: first, and four more at the pace of _askAgainMs');
+  });
+
+  await test('the lookup stays inside the deadline when the second request is the one that stalls', async () => {
+    const t = addressCtx((url) => (isWell(url) ? WELL() : 'hang'));
+    t.ctx.W._askAgainMs = 30;
+    t.ctx.W._reachMs = 600;
+    let error = null;
+    try { await t.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { error = e; }
+    if (!error || !/^that address did not answer within \d+s\.$/.test(error.message)) return 'the words: ' + (error && error.message);
+    return eq(t.of(/\/cb\?/).length, 5, 'askings of the callback');
+  });
+
+  await test('what the lookup checks on the invoice is checked as it was: amount, and what the address described', async () => {
+    const wrongAmount = addressCtx((url) => (isWell(url) ? WELL() : reply200({ pr: invoiceFor('lnbc104000p1', META).pr })));
+    let msg = '';
+    try { await wrongAmount.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { msg = e.message; }
+    if (!/Not paying it/.test(msg)) return 'an invoice for 10.4 sats against 10 asked was not refused: ' + msg;
+    const other = addressCtx((url) => (isWell(url) ? WELL() : reply200({ pr: invoiceFor('lnbc100n1', '[["text/plain","Pay mallory"]]').pr })));
+    msg = '';
+    try { await other.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { msg = e.message; }
+    return /something other than what it described/.test(msg) ? null : 'an invoice for other metadata was not refused: ' + msg;
+  });
+
+  await test('payLnurl pays the invoice the confirmation looked up while it is fresh, with the quote it asked, and looks up anew once it is stale or for something else', async () => {
+    const t = addressCtx((url) => (isWell(url) ? WELL() : reply200({ pr: GOOD() })));
+    const W = t.ctx.W;
+    const paid = [];
+    W.pay = (inv, stage, opts) => { paid.push({ inv, opts }); return Promise.resolve({ hash: 'h', feeSats: 0 }); };
+    const found = await W.lookupLnurl('alice@addr.test', 10);
+    const asked = t.asked.length;
+    const quote = { quote: {}, w: {}, bolt11: found.pr, at: Date.now() };
+    await W.payLnurl('alice@addr.test', 10, '', null, { found, quote });
+    if (t.asked.length !== asked) return 'the address was asked again (' + (t.asked.length - asked) + ' requests) with its invoice in hand';
+    if (paid.length !== 1 || paid[0].inv !== found.pr || paid[0].opts.payee !== 'alice@addr.test' || paid[0].opts.quote !== quote) {
+      return 'what was paid: ' + JSON.stringify(paid.map((p) => [p.inv, p.opts && p.opts.payee]));
+    }
+    // older than a minute: asked anew, and the quote is still handed on for pay to judge
+    await W.payLnurl('alice@addr.test', 10, '', null, { found: Object.assign({}, found, { at: Date.now() - 120000 }), quote });
+    if (t.asked.length !== asked + 2) return 'a stale invoice was paid as it stood (' + (t.asked.length - asked) + ' requests)';
+    // another address, and another amount
+    await W.payLnurl('alice@addr.test', 10, '', null, { found: Object.assign({}, found, { addr: 'bob@addr.test' }) });
+    if (t.asked.length !== asked + 4) return 'an invoice from another address was paid (' + (t.asked.length - asked) + ' requests)';
+    let msg = '';
+    try { await W.payLnurl('alice@addr.test', 11, '', null, { found }); } catch (e) { msg = e.message; }
+    if (t.asked.length !== asked + 6) return 'an invoice for another amount was paid (' + (t.asked.length - asked) + ' requests)';
+    // and with nothing handed in, it is what it was
+    const before = t.asked.length;
+    await W.payLnurl('alice@addr.test', 10);
+    return eq(t.asked.length - before, 2, 'requests of a lookup made at the send, as before');
+  });
+
+  await test('a lookup asks nothing while there is no route, whether a connection is on its way or not', async () => {
+    const coming = addressCtx(() => reply200({}), { tor: 'connecting', progress: 20, everUp: true, unprotected: false, transport: 'direct', network: 'wifi' });
+    // working offline until the connection is up, which is where Foxy opens
+    coming.ctx.W.setOffline(true);
+    let msg = '';
+    try { await coming.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { msg = e.message; }
+    if (!/securing its connection/i.test(msg) || coming.asked.length) return 'a connection on its way: ' + msg + ' / ' + coming.asked.length + ' request(s)';
+    const dark = addressCtx(() => reply200({}), { tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct', network: 'none' });
+    dark.ctx.W.setOffline(true);
+    msg = '';
+    try { await dark.ctx.W.lookupLnurl('alice@addr.test', 10); } catch (e) { msg = e.message; }
+    return (/working offline/i.test(msg) && !dark.asked.length) ? null : 'no network: ' + msg + ' / ' + dark.asked.length + ' request(s)';
+  });
+
+  // ---- what a payment needs, said before it is made, and refused in the same words ----------------
+
+  const needsWords = (need, have) => 'Your balance isn\'t enough to cover the payment and its fee: this needs ' + need + ' sats and you hold ' + have + '.';
+  const payNeedCtx = async (reserve, fee) => {
+    const { cashu, seen } = slowStub({});
+    cashu.Wallet.prototype.createMeltQuoteBolt11 = function () {
+      seen.quotes += 1;
+      return Promise.resolve({ quote: 'melt' + seen.quotes, amount: 8, fee_reserve: reserve });
+    };
+    if (fee) cashu.Wallet.prototype.getFeesForProofs = function (ps) { return fee * (ps || []).length; };
+    const ctx = load({ cashu, storage: { 'foxy.cashu.proofs.https://m.test': JSON.stringify([proof(8)]) } });
+    ctx.W._nodeProbeDelay = [86400000, 86400000];
+    await ctx.W.connect('https://m.test', { remember: true });
+    return { ctx, seen };
+  };
+
+  await test('the wallet says what a payment needs before it is made, at the sum it refuses on and in the words it refuses in', async () => {
+    const { ctx } = await payNeedCtx(5);
+    const fits = ctx.W.payNeed(8, 0);
+    if (!fits || fits.ok !== true || fits.need !== 8 || fits.have !== 8 || fits.why !== '') return 'a payment that fits: ' + JSON.stringify(fits);
+    const short = ctx.W.payNeed(8, 5);
+    if (!short || short.ok !== false || short.need !== 13 || short.have !== 8) return 'one that does not: ' + JSON.stringify(short);
+    if (short.why !== needsWords(13, 8)) return 'the words: ' + short.why;
+    let refusal = null;
+    try { await ctx.W.pay('lnbc80n1test'); } catch (e) { refusal = e; }
+    if (!refusal) return 'the payment was not refused';
+    return refusal.message === short.why ? null : 'the payment says "' + refusal.message + '", the screen "' + short.why + '"';
+  });
+
+  await test('and the mint\'s own fee is in that sum, as it is in the payment\'s', async () => {
+    const { ctx } = await payNeedCtx(0, 2);
+    const a = ctx.W.payNeed(8, 0);
+    if (!a || a.ok !== false || a.need !== 10) return 'the sum with a fee of 2 on the one piece held: ' + JSON.stringify(a);
+    let refusal = null;
+    try { await ctx.W.pay('lnbc80n1test'); } catch (e) { refusal = e; }
+    return (refusal && refusal.message === a.why) ? null : 'the payment says "' + (refusal && refusal.message) + '", the screen "' + a.why + '"';
+  });
+
+  await test('a wallet with no mint, or nothing to pay, has no answer to give', async () => {
+    const bare = load({});
+    if (bare.W.payNeed(8, 5) !== null) return 'with no mint connected';
+    const { ctx } = await payNeedCtx(5);
+    return ctx.W.payNeed(0, 0) === null ? null : 'for nothing';
   });
 
   await test('an interrupted mint switch finishes with its quote\'s key', async () => {
@@ -2643,24 +2845,6 @@ const eq = (got, want, what) =>
     await src.setNext(K1, 30);
     return eq(readCounters(ctx)[K1], 30, 'counter after setNext upwards');
   });
-
-  // an invoice-shaped string with an h field, for the description hash: timestamp,
-  // then h (type 23, 52 words), then a blank 520-bit signature and a blank checksum
-  const invoiceFor = (prefix, text) => {
-    const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-    const hash = require('crypto').createHash('sha256').update(text, 'utf8').digest();
-    const words = [];
-    let acc = 0, bits = 0;
-    for (const b of hash) {
-      acc = (acc << 8) | b; bits += 8;
-      while (bits >= 5) { bits -= 5; words.push((acc >> bits) & 31); }
-      acc &= (1 << bits) - 1;
-    }
-    if (bits) words.push((acc << (5 - bits)) & 31);
-    const data = [0, 0, 0, 0, 0, 0, 0, 23, 1, 20].concat(words, new Array(104).fill(0));
-    return { pr: prefix + data.map(v => CHARSET[v]).join('') + 'qqqqqq', hex: hash.toString('hex') };
-  };
-  const META = '[["text/plain","Pay alice"]]';
 
   await test('an invoice\'s description hash is read from its h field', async () => {
     const { W } = load({});

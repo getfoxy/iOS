@@ -136,6 +136,20 @@ async function run() {
   ok(cold.tried.length === mark, 'and nothing went out in the seconds after, either',
      cold.tried.slice(mark).join(','));
 
+  /* What the send confirmation asks over a route (a lightning address's lookup,
+   * the mint's fee quote) is refused before it is sent when there is none, in
+   * the words the rest of Foxy refuses in. The confirmation does not ask without
+   * one (it holds its button for a connection on its way, and for none says
+   * UNKNOWN), and if it did, nothing would leave the page. */
+  const lookedUp = await threw(() => cold.W.lookupLnurl('alice@addr.test', 10));
+  ok(!!lookedUp && /working offline/i.test(lookedUp), 'a lightning address cannot be looked up with no route, and says why', String(lookedUp));
+  const quoted = await threw(() => cold.W.quoteFee('lnbc100n1' + 'q'.repeat(40)));
+  ok(!!quoted && /working offline/i.test(quoted), 'nor a fee quoted', String(quoted));
+  ok(cold.tried.length === mark, 'and not one request left the page to find out', cold.tried.slice(mark).join(','));
+  const fits = cold.W.payNeed(16, 0), short = cold.W.payNeed(16, 5000);
+  ok(!!fits && fits.ok === true && !!short && short.ok === false && /this needs \d+ sats and you hold \d+\.$/.test(short.why),
+     'what a payment needs, though, is a sum over what the phone holds and needs no route', JSON.stringify([fits, short]));
+
   // ---- the point of it: locked ecash is taken while offline ---------------
   const payer = page({});
   await payer.W.connect(MINT, null, null, { remember: true });

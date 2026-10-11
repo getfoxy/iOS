@@ -735,6 +735,18 @@
   // and it has to run inside the tap that triggered it.
   /* ---- sending ---- */
 
+  /* What an invoice is told when there is no connection and none coming and
+   * it is not the mint's own: said at the scan, and again by the send
+   * confirmation when the connection it was waiting for does not come. */
+  offlineInvoiceCard() {
+    this.blockedCard('offlineInvoice', {
+      tone: 'warn',
+      title: 'YOU\u2019RE OFFLINE',
+      reason: 'A Lightning invoice can only be paid offline when it comes from your own mint. '
+        + 'Ask them for a Cashu request, or reconnect.',
+    });
+  }
+
   // anything payable: a bolt11 invoice, a lightning address, or an lnurl code
   acceptTarget(text) {
     const W = window.FoxyWallet;
@@ -821,20 +833,24 @@
      * invoice this phone's own mint made names somebody who takes this mint's
      * ecash, and a token needs no connection to make: they scan it off this
      * screen. Anybody else's invoice is said no to now,
-     * rather than after a confirmation screen and a wait. */
-    if (this.offlineNow && this.offlineNow()) {
-      if (W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
-        console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
-        this.payThisMintWithToken(sats);
-      } else {
-        console.log('[foxy] offline, and the invoice is not known to be from this mint: refused');
-        this.blockedCard('offlineInvoice', {
-          tone: 'warn',
-          title: 'YOU\u2019RE OFFLINE',
-          reason: 'A Lightning invoice can only be paid offline when it comes from your own mint. '
-            + 'Ask them for a Cashu request, or reconnect.',
-        });
-      }
+     * rather than after a confirmation screen and a wait.
+     *
+     * Unless a connection is on its way (`connecting`): Foxy comes back from
+     * the background, or opens, working offline for the few seconds Tor takes
+     * to connect, and an invoice scanned in them is not one to turn away. It
+     * goes to the confirmation like any other, whose button reads CHECKING
+     * until the route is up and the mint has quoted the fee (`confirmSpec`),
+     * and then SEND. A connection that does not come says the card then
+     * (`syncSend`). */
+    const off = !!(this.offlineNow && this.offlineNow());
+    if (off && W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
+      console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
+      this.payThisMintWithToken(sats);
+      return true;
+    }
+    if (off && !this.connecting()) {
+      console.log('[foxy] offline, and the invoice is not known to be from this mint: refused');
+      this.offlineInvoiceCard();
       return true;
     }
     const overLightning = () => this.setState(p => ({
@@ -849,6 +865,10 @@
       amount: String(sats),
       payFrom: 'BITCOIN',
     }));
+    /* A connection on its way: straight to the confirmation. Whether the
+     * invoice is the mint's own is answered from what is on file above; asking
+     * the mint for what is not (below) needs the connection that is not up. */
+    if (off) { console.log('[foxy] a connection is on its way; the invoice goes to the confirmation, which holds SEND for it'); overLightning(); return true; }
 
     /* The mint this wallet pays from made this invoice: paying it by Lightning
      * shows that mint both sides. Offer a token instead (payThisMintWithToken).

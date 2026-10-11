@@ -110,13 +110,29 @@ class Component extends DCLogic {
     return !!(p && p.offline);
   }
 
+  /* Is a connection on its way? The home banner's SECURING YOUR CONNECTION:
+   * the phone has a network, Tor is at work on a circuit (connecting, or
+   * stuck for a while), and nobody has chosen to go without Tor. The wallet
+   * answers from the very record the banner is drawn from (`routeComing`), so
+   * the two cannot differ; this is only the ask.
+   *
+   * It is the other half of `offlineNow`, not the opposite. No network, or
+   * a Tor that has stopped or given up, is offline and not coming: the
+   * banner says OFFLINE - NO CONNECTION or CANNOT CONNECT, and what needs a
+   * connection is refused at once. Coming is a state to wait out, for a few
+   * seconds, by the step that needs it (the send confirmation holds its
+   * button, `confirmSpec`) and not to refuse in. */
+  connecting() {
+    const W = window.FoxyWallet;
+    return !!(W && W.routeComing && W.routeComing());
+  }
+
   /* What a greyed-out control says when it is tapped anyway. A control that
    * looks dead and does nothing at all reads as a bug; one that says why reads
    * as a state. */
   offlineNo(what) {
-    const W = window.FoxyWallet;
     // there is no OFFLINE to tap while a connection is on its way: the banner says SECURING YOUR CONNECTION
-    const coming = !!(W && W.routeComing && W.routeComing());
+    const coming = this.connecting();
     this.toast((what || 'That') + (coming ? ' needs a connection. One is on its way.'
                                            : ' needs a connection. Tap the banner to retry.'), true);
   }
@@ -223,6 +239,23 @@ class Component extends DCLogic {
     // a card's limit, before it is set (26f-flashcard.js)
     if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
     // sendConfirm
+    const W = window.FoxyWallet;
+    /* Waiting on the connection, or on what it is for.
+     *
+     * A Lightning payment cannot be made, and its fee cannot be known, until
+     * the route is up and the mint has answered (for an address, the address
+     * first: `quoteSendFee`). Until then the button says CHECKING and does
+     * nothing, and the FEE row says the same word: they are one state, and
+     * both read it from here. A connection that is on its way comes first
+     * (`connecting`: Foxy comes back from the background, or opens, working
+     * offline for the few seconds Tor takes), then the question itself, out
+     * (`quotingFee`) or about to go (`sendToAsk`).
+     *
+     * With no connection and none coming nothing is waited for: the fee
+     * reads UNKNOWN, and SEND is there to be pressed, as it always was, to be
+     * told so. */
+    const asks = s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email');
+    const held = asks && (this.connecting() || !!s.quotingFee || this.sendToAsk());
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
       this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
@@ -243,7 +276,7 @@ class Component extends DCLogic {
        * on a screen shown before the payment — a quote or nothing. */
       this.cfRow('FEE', s.quotedFee != null
         ? 'UP TO ' + this.money(s.quotedFee).main
-        : s.quotingFee ? 'CHECKING…' : 'UNKNOWN',
+        : held ? 'CHECKING…' : 'UNKNOWN',
         { half: true, sub: s.quotedFee != null ? this.money(s.quotedFee).sub : '' }),
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
@@ -251,21 +284,14 @@ class Component extends DCLogic {
      * in the accent — the same place and shape as on the receiver's screen, so
      * the two can be held side by side and compared at a glance rather than
      * read. See cfCode in the render values. */
-    const feeDue = s.quotedFee != null ? Math.max(0, Math.round(Number(s.quotedFee) || 0)) : 0;
+    /* An invoice for more than the balance, before any fee: nothing to wait
+     * for, and nothing the fee could change. The invoice alone fitting is not
+     * the payment fitting, which is asked once the quote is in, below. */
     const shortOf = (() => {
-      const W = window.FoxyWallet;
       if (s.recipientKind !== 'invoice' || !s.recipient || !W || !W.amountOf) return 0;
       const need = W.amountOf(s.recipient) || 0;
       const have = s.balSats || 0;
-      /* With the fee the mint will hold back for it, once that is known. The
-       * invoice alone fitting is not the payment fitting: a mint takes the
-       * amount and a reserve for routing, and gives back what it does not
-       * use. Two invoices a few hundred sats under the balance were offered
-       * a SEND button here and refused a second later on the sending screen
-       * with "needs N including the fee reserve, and you hold M". The quote
-       * is on this screen already. */
-      const owed = need + feeDue;
-      return (need && owed > have) ? owed - have : 0;
+      return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
       return {
@@ -273,8 +299,7 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main
-          + (feeDue > 0 ? ' with the fee' : ''),
+        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
       };
     }
@@ -290,6 +315,32 @@ class Component extends DCLogic {
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE\u2026', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
+      };
+    }
+    /* Once the fee is quoted: can the balance cover the payment and its fee?
+     *
+     * The wallet answers with the very sum `pay` refuses on (the amount, the
+     * mint's fee reserve, this mint's own fee for the split and its fee again
+     * on the pieces the melt spends) against what is held at the mint it pays
+     * from, in the words it refuses in (`payNeed`). The invoice alone fitting
+     * is not the payment fitting: two invoices a few hundred sats under the
+     * balance were offered a SEND button and refused a second later, on the
+     * sending screen. So the button is held here and says why, and the way
+     * out is back, to the amount screen. A render must not fail on the wallet
+     * failing to say, and then SEND is there as it was: `pay` refuses. */
+    let covers = null;
+    try {
+      covers = (s.quotedFee != null && asks && W && W.payNeed)
+        ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+    } catch (e) { covers = null; }
+    if (covers && !covers.ok) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'SENDING',
+        amount: this.sendAmountText(),
+        amountInk: '#FF5C5C',
+        rows: rows,
+        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
     return {
@@ -315,12 +366,13 @@ class Component extends DCLogic {
       /* Not until the fee is known. The balance check above needs it, and
        * the screen offered SEND for the second or two the mint took to say
        * what it would hold back — long enough to press it and find out on
-       * the sending screen that the payment did not fit. While it is being
-       * asked, the button says so and does nothing. */
-      cta: (s.recipientKind === 'invoice' && s.quotingFee) ? 'CHECKING FEE\u2026' : 'SEND ' + this.sendAmountText(),
-      ctaBusy: s.recipientKind === 'invoice' && !!s.quotingFee,
+       * the sending screen that the payment did not fit. While that is being
+       * asked, or the connection it is asked over is on its way, the button
+       * says CHECKING and does nothing, and the FEE row says the same. */
+      cta: held ? 'CHECKING…' : 'SEND ' + this.sendAmountText(),
+      ctaBusy: held,
       ctaTone: 'go',
-      go: (s.recipientKind === 'invoice' && s.quotingFee) ? () => {} : () => this.startSend(),
+      go: held ? () => {} : () => this.startSend(),
     };
   }
 
@@ -442,48 +494,180 @@ class Component extends DCLogic {
   // a pasted invoice is 200-odd characters; five each end fits on one line
   shortId(v) { return v.length > 14 ? v.slice(0, 5) + '…' + v.slice(-5) : v; }
 
-  /* Ask the mint what this invoice would cost. Commits to nothing. */
+  /* The sats being sent, as the keypad and the price check settle them: what
+   * was typed in sats, or what two price sources agreed a typed dollar amount
+   * comes to (`checkSendPrice`). Nought until that is known. */
+  typedSats() {
+    return this.state.unit === 'SATS' ? this.wantedSats() : (this.state.sendSats || 0);
+  }
+
+  /* And the sats this payment sends: an invoice's own amount, which the payee
+   * signed, else what was typed. */
+  sendSatsNow() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const own = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(String(s.recipient)) : 0;
+    return own || this.typedSats();
+  }
+
+  /* What the send confirmation asks of the network before it offers SEND, or
+   * null when it asks nothing.
+   *
+   *   an invoice ............ { key, inv }         the mint's fee quote on it
+   *   a lightning address ... { key, addr, sats }  an invoice from the address
+   *                           for these sats, then the fee quote on that
+   *
+   * `key` names the question, so another invoice, another address or another
+   * amount is a new one. An invoice that names no amount cannot be quoted
+   * without one (`pay` quotes it with the amount typed, at SEND), so it asks
+   * nothing; an address waits for its amount, which typed in dollars is not
+   * known until two price sources have agreed on it (`checkSendPrice`). */
+  sendAsk() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const raw = String(s.recipient || '');
+    if (!W || !raw) return null;
+    if (s.recipientKind === 'invoice') return (W.amountOf && W.amountOf(raw)) ? { key: raw, inv: raw } : null;
+    const addr = raw.trim().replace(/^lightning:/i, '');
+    if (s.recipientKind === 'email' && W.lookupLnurl && W.classify && W.classify(addr) === 'lnurl') {
+      const sats = this.typedSats();
+      return sats > 0 ? { key: addr + '|' + sats, addr: addr, sats: sats } : null;
+    }
+    return null;
+  }
+
+  /* Is there a question this confirmation has yet to ask? Yes from the moment
+   * a route is there until `quoteSendFee` has started it, so the button never
+   * reads SEND in between. Not without a route: that is no question, and the
+   * fee reads UNKNOWN. */
+  sendToAsk() {
+    const W = window.FoxyWallet;
+    const ask = this.sendAsk();
+    return !!(ask && W && W.quoteFee && !this.offlineNow() && this._quotedFor !== ask.key);
+  }
+
+  /* Ask what this payment would cost. Commits to nothing.
+   *
+   * For an invoice that is the mint's quote on it. A lightning address has no
+   * invoice yet, so the address is asked for one first (`lookupLnurl`) and the
+   * quote is asked on what it gave: SEND pays that very invoice, with that
+   * quote (`startSendNow`). While this is out the button says CHECKING, and
+   * once the quote is in the sum the wallet will refuse on is compared with
+   * the balance before the button is live (`confirmSpec`).
+   *
+   * Over a route only. A connection that is on its way is waited for, and
+   * this is called on every update (`syncSend`), the route coming being one
+   * of them, so it starts by itself the moment the route is up and the person
+   * presses nothing. With none coming there is nothing to ask, and the fee
+   * reads UNKNOWN as it always did when no quote was possible.
+   *
+   * An answer that does not come, or comes empty, ends the question: the fee
+   * reads UNKNOWN and SEND does the whole of it as it did before the screen
+   * asked anything, the address looked up again at that point. */
   quoteSendFee() {
     const W = window.FoxyWallet;
     const s = this.state;
     if (!W || !W.quoteFee) return;
-    const inv = s.recipientKind === 'invoice' ? s.recipient : null;
-    const target = inv || s.recipient || '';
+    const ask = this.sendAsk();
+    const target = ask ? ask.key : String(s.recipient || '');
     if (!target || this._quotedFor === target) return;
-    this._quotedFor = target;
 
     /* Clear first, quote second.
      *
      * An earlier version only cleared when there was an invoice to quote. A
-     * lightning address has none until LNURL resolves it during the send, so
-     * that path kept the previous payment's fee on screen — a 200-sat payment
-     * that cost 1, then a 9,862-sat payment still showing 1 when it cost 15.
+     * lightning address has none until LNURL resolves it, so that path kept
+     * the previous payment's fee on screen — a 200-sat payment that cost 1,
+     * then a 9,862-sat payment still showing 1 when it cost 15.
      *
-     * Where no quote is possible the row says UNKNOWN, which is true. */
-    if (!inv) {
-      this.setState({ quotingFee: false, quotedFee: null, sendFee: null });
-      return;
-    }
-    /* Clear the last payment's fee.
+     * Where no quote is possible the row says UNKNOWN, which is true.
      *
      * sendFee is written when a payment succeeds and was never cleared, and
      * the FEE row reads it before the quote. So a second payment showed the
      * first one's fee — a same-mint payment costing 0, followed by a
      * cross-mint one that actually cost 29, still displayed 0. A stale number
      * stated confidently is worse than UNKNOWN. */
-    this.setState({ quotingFee: true, quotedFee: null, sendFee: null });
-    this._feeQuote = null;
-    W.quoteFee(inv).then(q => {
+    const clear = (more) => {
+      this._feeQuote = null;
+      this._found = null;
+      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, more));
+    };
+    if (!ask) {
+      this._quotedFor = target;
+      clear({ quotingFee: false });
+      return;
+    }
+    if (this.offlineNow()) {
+      // not asked yet, so not marked: cleared the once, and asked when the route is up
+      if (this._feeClearedFor !== target) { this._feeClearedFor = target; clear({ quotingFee: false }); }
+      return;
+    }
+    this._quotedFor = target;
+    this._feeClearedFor = null;
+    // an answer to an older question is nothing to this one
+    const run = this._askRun = (this._askRun || 0) + 1;
+    const stale = () => run !== this._askRun;
+    clear({ quotingFee: true });
+    // not called on this turn: a wallet that refuses at once (no route after all) must not throw out of an update
+    Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv })).then(found => {
+      if (stale()) return null;
+      // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
+      if (ask.addr) this._found = found;
+      return W.quoteFee(found.pr);
+    }).then(q => {
+      if (stale()) return;
       // kept whole for SEND: a fresh quote for this invoice is not asked for twice (`pay`, opts.quote)
       this._feeQuote = q && q.quote ? q : null;
-      this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null });
-    }).catch(() => {
-      /* Let the next render try again. This was set before the request and
-       * never cleared, and componentDidUpdate's guard then returned on every
-       * pass — so one failed quote, which over Tor is ordinary, left the
-       * confirmation reading UNKNOWN for that invoice for the whole session. */
-      this._quotedFor = null;
+      this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null, quotedAmt: q ? q.amount : null });
+    }).catch(e => {
+      if (stale()) return;
+      console.warn('[foxy] the send confirmation could not ask what the payment costs:', W.reason ? W.reason(e) : e);
       this.setState({ quotingFee: false });
+    });
+  }
+
+  /* The send confirmation, kept up with the route. Called on every update
+   * (componentDidUpdate), and the route coming or going is an update of its
+   * own (`onPrivacy` → `routeAt`).
+   *
+   * While a connection is on its way the confirmation holds its button
+   * (CHECKING, `confirmSpec`); what it is waiting for is asked by itself once
+   * the route is up (`quoteSendFee`). It remembers that it waited, so that a
+   * connection which then does not come, Tor having given up or the network
+   * gone, is told at once, in the card a payment gets with no connection
+   * (`notOnlineCard`), with the confirmation left under it as it is after any
+   * send that is refused. A route that did come says nothing.
+   *
+   * The dollar price check (`checkSendPrice`) is not among the things waited
+   * for: working offline puts the keypad in sats (`syncUnit`), so a payment
+   * reaches this screen in dollars only with a route. */
+  syncSend() {
+    const s = this.state;
+    if (s.screen !== 'sendConfirm') {
+      this._sendWaited = null;
+      return;
+    }
+    const key = String(s.recipient || '');
+    // a Lightning payment, an invoice or an address: the others (on chain) need a connection their own way
+    const lightning = s.recipientKind === 'invoice' || s.recipientKind === 'email';
+    if (lightning && this.connecting()) {
+      this._sendWaited = key;
+    } else if (this._sendWaited === key) {
+      this._sendWaited = null;
+      if (lightning && this.offlineNow()) this.notOnlineCard();
+    }
+    this.quoteSendFee();
+  }
+
+  /* A payment that needs a connection, when there is none and none is coming:
+   * told in the card a scanned invoice gets (`acceptTarget`), in the same
+   * words for an invoice, and for a lightning address in words that fit it. */
+  notOnlineCard() {
+    if (this.state.recipientKind === 'invoice') { this.offlineInvoiceCard(); return; }
+    this.blockedCard('offlineAddress', {
+      tone: 'warn',
+      title: 'YOU\u2019RE OFFLINE',
+      reason: 'A Lightning address can only be paid with a connection. '
+        + 'Ask them for a Cashu request, or reconnect.',
     });
   }
 
@@ -503,6 +687,20 @@ class Component extends DCLogic {
       const stack = p.stack.slice();
       while (stack.length && stack[stack.length - 1] === 'sendConfirm') stack.pop();
       return { screen: 'sendConfirm', stack: stack, sendPhase: null, sendSlow: false };
+    });
+  }
+
+  /* Back to the amount screen from the send confirmation, or from the sending
+   * screen over it, with the stack discipline of `toConfirm`: the entry the
+   * sending screen pushed goes, every trailing one of it, so nothing of the
+   * confirmation is left behind to be gone back to as if it were another
+   * screen. A payment that came with its own amount has no amount screen, and
+   * this is the screen it came from. */
+  toAmount() {
+    this.setState(p => {
+      const stack = (p.stack || []).slice();
+      while (stack.length && stack[stack.length - 1] === 'sendConfirm') stack.pop();
+      return { screen: stack.length ? stack.pop() : 'home', stack: stack, sendPhase: null, sendSlow: false };
     });
   }
 
@@ -661,9 +859,22 @@ class Component extends DCLogic {
      * figure two price sources agreed on (checkSendPrice). `pay` refuses the
      * pair if the invoice does carry an amount, so this is never a way to send
      * something other than what the payee asked for. */
-    const typed = this.state.unit === 'SATS' ? this.wantedSats() : (this.state.sendSats || 0);
+    const typed = this.typedSats();
+    /* And what the confirmation has asked already. For an address that is the
+     * invoice it gave and the fee quote on it, paid as they stand while they
+     * are fresh (`payLnurl`); an address the screen could not look up, or one
+     * it was not asked about, is looked up here, as it was before. */
+    const asked = this.sendAsk();
+    const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
+      ? this._found : null;
+    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    /* An address's invoice is for one attempt. A payment that goes must not be
+     * paid with the same invoice again the next time this address and amount
+     * are chosen, and one that fails is asked about afresh when the person is
+     * back on the confirmation. */
+    if (found) { this._found = null; this._quotedFor = null; }
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage)
+      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
                                          (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
     this._sendRun = run;
@@ -803,14 +1014,24 @@ class Component extends DCLogic {
        * blockedCard leaves you where you were, which is right when a failure
        * arrives over the home screen. Here the progress overlay has gone, the
        * payment did not happen, and that screen has nothing on it — closing
-       * left no way out. Back to the confirmation, where the buttons are. */
+       * left no way out. Back to the confirmation, where the buttons are.
+       *
+       * Except for a balance that does not cover the payment and its fee: the
+       * confirmation would only say the same again (it holds its button for
+       * exactly this, NOT ENOUGH), so the card, whichever way it is closed,
+       * goes to the amount screen. It has no TRY AGAIN; its one button names
+       * where it goes, and the closing does it (`toAmount`). */
       this.blockedCard(kind, {
         title: kind === 'mintRefused' ? 'THE MINT SAID NO' : undefined,
         reason: W.reason(e),
         retry: again ? 'TRY AGAIN' : 'CHANGE AMOUNT',
         back: again ? '' : 'amount',
-        go: again,
+        go: again || (() => {}),
         onClose: () => {
+          if (kind === 'sendFail') {
+            if (this.state.screen === 'sendDone' || this.state.screen === 'sendConfirm' || this.state.sendPhase) this.toAmount();
+            return;
+          }
           /* Back to the send confirmation — 'sendConfirm', not 'confirm'.
            *
            * 'confirm' is the receive invoice screen. Sending someone there
@@ -2672,6 +2893,27 @@ class Component extends DCLogic {
     this.setState(p => ({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
       note: '', noteDraft: '' }));
+  }
+
+  /* Does paying this request need a connection?
+   *
+   * What `makeTokenForRequest` does with a route that it cannot do without
+   * one. A request that names somewhere to be paid (an onion address, a Nostr
+   * inbox) is delivered there only over the route, and without it becomes a
+   * token to show; one that asks for a lock has the lock made by a swap, and
+   * without a route is paid unlocked; one for another mint connects to that
+   * mint first, and without a route cannot be paid at all.
+   *
+   * Not one that came over the Bluetooth link in hand, which is paid over the
+   * link, nor one that names none of these: a token to show them, from the
+   * mint this phone is on, made from the pieces it holds. Those are not waited
+   * on (`requestSpec`), because there is nothing for a connection to add. */
+  requestNeedsRoute(req) {
+    if (!req || req.viaTap) return false;
+    const W = window.FoxyWallet;
+    const want = String((req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const here = !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+    return !!(req.delivery || req.lockTo || (want && !here));
   }
 
   /* Will an over-payment's change come back by itself?
@@ -7352,6 +7594,18 @@ class Component extends DCLogic {
   // and it has to run inside the tap that triggered it.
   /* ---- sending ---- */
 
+  /* What an invoice is told when there is no connection and none coming and
+   * it is not the mint's own: said at the scan, and again by the send
+   * confirmation when the connection it was waiting for does not come. */
+  offlineInvoiceCard() {
+    this.blockedCard('offlineInvoice', {
+      tone: 'warn',
+      title: 'YOU\u2019RE OFFLINE',
+      reason: 'A Lightning invoice can only be paid offline when it comes from your own mint. '
+        + 'Ask them for a Cashu request, or reconnect.',
+    });
+  }
+
   // anything payable: a bolt11 invoice, a lightning address, or an lnurl code
   acceptTarget(text) {
     const W = window.FoxyWallet;
@@ -7438,20 +7692,24 @@ class Component extends DCLogic {
      * invoice this phone's own mint made names somebody who takes this mint's
      * ecash, and a token needs no connection to make: they scan it off this
      * screen. Anybody else's invoice is said no to now,
-     * rather than after a confirmation screen and a wait. */
-    if (this.offlineNow && this.offlineNow()) {
-      if (W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
-        console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
-        this.payThisMintWithToken(sats);
-      } else {
-        console.log('[foxy] offline, and the invoice is not known to be from this mint: refused');
-        this.blockedCard('offlineInvoice', {
-          tone: 'warn',
-          title: 'YOU\u2019RE OFFLINE',
-          reason: 'A Lightning invoice can only be paid offline when it comes from your own mint. '
-            + 'Ask them for a Cashu request, or reconnect.',
-        });
-      }
+     * rather than after a confirmation screen and a wait.
+     *
+     * Unless a connection is on its way (`connecting`): Foxy comes back from
+     * the background, or opens, working offline for the few seconds Tor takes
+     * to connect, and an invoice scanned in them is not one to turn away. It
+     * goes to the confirmation like any other, whose button reads CHECKING
+     * until the route is up and the mint has quoted the fee (`confirmSpec`),
+     * and then SEND. A connection that does not come says the card then
+     * (`syncSend`). */
+    const off = !!(this.offlineNow && this.offlineNow());
+    if (off && W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
+      console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
+      this.payThisMintWithToken(sats);
+      return true;
+    }
+    if (off && !this.connecting()) {
+      console.log('[foxy] offline, and the invoice is not known to be from this mint: refused');
+      this.offlineInvoiceCard();
       return true;
     }
     const overLightning = () => this.setState(p => ({
@@ -7466,6 +7724,10 @@ class Component extends DCLogic {
       amount: String(sats),
       payFrom: 'BITCOIN',
     }));
+    /* A connection on its way: straight to the confirmation. Whether the
+     * invoice is the mint's own is answered from what is on file above; asking
+     * the mint for what is not (below) needs the connection that is not up. */
+    if (off) { console.log('[foxy] a connection is on its way; the invoice goes to the confirmation, which holds SEND for it'); overLightning(); return true; }
 
     /* The mint this wallet pays from made this invoice: paying it by Lightning
      * shows that mint both sides. Offer a token instead (payThisMintWithToken).
@@ -10968,8 +11230,12 @@ class Component extends DCLogic {
       if (typed) this.checkSendPrice();
       else if (this.state.sendSats || this.state.sendPriceCheck) this.setState({ sendSats: null, sendPriceCheck: null });
     }
-    // the send confirmation needs a fee before the person decides, not after
-    if (this.state.screen === 'sendConfirm') this.quoteSendFee();
+    /* The send confirmation needs a fee before the person decides, not after,
+     * and a connection that comes or goes while it is open is an update of
+     * its own (`routeAt`): it holds its button for one on its way, asks what
+     * it needs the moment the route is up, and tells of one that does not
+     * come (`syncSend`). */
+    this.syncSend();
     this.syncUnit();
     this.syncQueue();
     this.syncSlide();
@@ -13527,6 +13793,18 @@ class Component extends DCLogic {
     // locked exactly when the send will be (makeTokenForRequest): a key named, and a route
     const lack = (sats > 0 && W && W.sendShortfall)
       ? W.sendShortfall(sats, { locked: !!(req && req.lockTo && !(this.offlineNow && this.offlineNow())) }) : null;
+    /* Waiting on a connection that is on its way.
+     *
+     * A request that names somewhere to be paid, or a lock to be made, or
+     * another mint, is paid over the route, and the way without one (a token
+     * to show them) is a worse way for a route a few seconds off. So the
+     * button says CHECKING and does nothing until Tor is up, and then reads
+     * what it reads (`requestNeedsRoute`); the FEE row says the same, since
+     * the lock's swap is part of it. One that needs no route, a token to show
+     * or a payment over the link in hand, is not waited on. If the
+     * connection does not come the button is simply what it is with none:
+     * the token. */
+    const held = !!(sats > 0 && this.connecting() && this.requestNeedsRoute(req));
     const to = byTap ? s.tapCode
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
              : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND' : 'THEIR NOSTR INBOX, OVER TOR')
@@ -13538,7 +13816,7 @@ class Component extends DCLogic {
       // two orange things is one too many to look at
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
-      this.cfRow('FEE', lack && lack.fee > 0 ? this.money(lack.fee).main : this.px() ? '$ 0.00' : '\u20bf 0', { half: true }),
+      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? this.money(lack.fee).main : this.px() ? '$ 0.00' : '\u20bf 0', { half: true }),
     ]).concat(this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
@@ -13581,12 +13859,12 @@ class Component extends DCLogic {
        * phones are touching and the thing being done is handing it over. What
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
-      cta: s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
+      cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
         : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + this.money(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
-      ctaBusy: !!s.reqBusy,
-      go: () => this.makeTokenForRequest(),
+      ctaBusy: held || !!s.reqBusy,
+      go: held ? () => {} : () => this.makeTokenForRequest(),
     };
   }
 

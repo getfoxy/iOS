@@ -51,7 +51,13 @@ mint is `mint.minibits.cash`.
   file, waits behind that screen. Nothing about what is sent changes: the
   phone refuses every request without Tor, as before. A step that moves
   money waits a few seconds for a connection that is on its way rather than
-  take the offline way.
+  take the offline way. A Lightning address, invoice or payment request
+  scanned or pasted in those seconds goes through its usual screens, and the
+  confirmation's button reads CHECKING, and does nothing, until Tor is up and
+  the address has been looked up and the fee quoted; then it reads SEND, or
+  NOT ENOUGH if the balance would not cover the payment and its fee. With no
+  network at all, or a Tor that has given up, the card for no connection
+  comes as it always did.
 - **Coming back from the background is the same.** Once what is with a mint
   has come back (a payment is waited for up to twenty seconds, anything else
   up to three), nothing new is sent, and Tor goes off the network about

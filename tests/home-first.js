@@ -14,7 +14,15 @@
  * Web/foxy-tor-gate.js and Web/foxy-wallet.js in jsdom with a fake native side
  * (tests/gate-kit.js), the app's own return set-up and banner from
  * build/foxy-app.js, and then the wallet's wait for a route that is on its way
- * against a fake mint (tests/harness.js). */
+ * against a fake mint (tests/harness.js).
+ *
+ * And what is scanned in those seconds: a Lightning address, an invoice or a
+ * payment request goes through its usual screens to a confirmation whose button
+ * reads CHECKING, and does nothing, until the route is up and the address has
+ * been looked up and the fee quoted; then SEND, by itself. With no network, or
+ * a Tor that has given up, the card for no connection is what it always was, and
+ * comes up over a confirmation that was waiting. The last part mounts the real
+ * page, since only the page makes a route coming up an update. */
 const fs = require('fs');
 const path = require('path');
 const { boot, sleep, ROOT } = require('./gate-kit');
@@ -325,10 +333,21 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     const phone = nativePhone({ words: opts.words || PHONE_WORDS });
     let mint = null;
     const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
+    // every request that left the page, with the circuit it asked for; and an address's server, when a scenario has one
+    const requests = [];
     const ctx = loadReal({
       routeWaitMs: opts.routeWaitMs,
       bridge: (w, m) => {
-        if (m.action === 'mintRequest') return reply(w, m.id, mint.handle(m));
+        if (m.action === 'mintRequest') {
+          requests.push({ url: m.url, circuit: m.circuit });
+          if (opts.address && !/^https:\/\/m\.test\//.test(String(m.url))) {
+            const got = opts.address(m, requests.filter((r) => r.url === m.url).length);
+            // 'hang' is never answered; a promise is answered when the scenario says
+            if (got && typeof got.then === 'function') return got.then((text) => reply(w, m.id, text));
+            return got === 'hang' ? undefined : reply(w, m.id, got);
+          }
+          return reply(w, m.id, mint.handle(m));
+        }
         if (m.action === 'inboxAnswer') return reply(w, m.id, 'ok');
         const got = phone.answer(w, m);
         if (!got) return reply(w, m.id, null, 'not in this test');
@@ -337,6 +356,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
       before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true }); },
     });
     ctx.mint = mint;
+    ctx.requests = requests;
     ctx.W._nodeProbeDelay = [86400000, 86400000];
     return ctx;
   };
@@ -403,6 +423,450 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
        && !said.some((l) => /the lock the request asked for is dropped/.test(l)),
        'a payer whose connection is 120 ms off waits for it and keeps the lock the request asked for',
        said.filter((l) => /lock|connection is on its way/.test(l)).join(' | ').slice(0, 160));
+  }
+
+  /* ---- a payment scanned while the connection is on its way ------------------
+   *
+   * Foxy comes back from the background working offline for the few seconds Tor
+   * takes to connect. What was scanned in them was turned away with the card for
+   * no connection (an invoice), or sent on to fail after SEND (an address), or
+   * paid the worse way (a request). Now it goes through the screens it always
+   * goes through, and the confirmation's button reads CHECKING, and does
+   * nothing, until the route is up and what it needs the route for has answered:
+   * an address is looked up and the fee on its invoice is quoted, an invoice is
+   * quoted, and a request is paid over the route it names. Then it reads SEND.
+   *
+   * The app's own methods, lifted from the build onto the page of a real wallet
+   * at a fake mint, a fake address server behind the wallet's bridge, and the
+   * route set the way the native side sets it (`coming`, `up`, `dark`, Tor
+   * giving up). The wallet's lookup, quote and payment are the real ones; the
+   * screen's repaint after any change is a call to `syncSend`, which is what
+   * its componentDidUpdate makes. */
+  const LIFTED = ['connecting() {', 'offlineNow() {', 'acceptTarget(text) {', 'offlineInvoiceCard() {', 'openRequest(text, opts) {',
+    'requestNeedsRoute(req) {', 'wantedSats() {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {',
+    'syncSend() {', 'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'confirmSpec() {', 'requestSpec() {', 'cfRow(label, value, opt) {',
+    'sendToText() {', 'shortId(v) {', 'sendAmountText() {', 'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {', 'satUsd() {',
+    'px() {', 'peerRate() {', 'peerRateLabel() {', 'peerRateRow() {', 'heldBlocks(shortBy) {', 'heldNote() {',
+    'unitLabel(unit) {', 'startSend() {', 'startSendNow(to) {', 'torBannerVals() {'];
+  const AMOUNTLESS = 'lnbc1p4ttszqpp5c6utwdk6cmla7kmz4nf89avnlyrzqrkhz0jx06hsltwmw9afwheqdqqcqzzs'
+    + 'xqrrs0fppq9eka5xeg7p7sezkmmkc02cpffc2ekcdssp5hcpux550uxjsc3nj3qhvqa7rmz7hsp7yel3eveh3'
+    + 'vg8awmve4fds9qxpqysgqtsd5g8er8mhnst3eres2455nxxm4kd44c4uwa3fvu8ueqsgf4vd5ft94jk8u54ahh'
+    + 'vx9nmlz4r4z2w7yvcpd7nrk7d8yy489lfg5djspkrewuj';
+  const PRICED = 'lnbc170n1pcheque' + 'q'.repeat(40);      // 17 sats, from nobody this mint knows
+  const META = '[["text/plain","Pay alice"]]';
+  // an invoice-shaped string with the description hash of `text` in its h field (tests/run.js `invoiceFor`)
+  const invoiceFor = (prefix, text) => {
+    const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+    const hash = require('crypto').createHash('sha256').update(text, 'utf8').digest();
+    const words = [];
+    let acc = 0, bits = 0;
+    for (const b of hash) {
+      acc = (acc << 8) | b; bits += 8;
+      while (bits >= 5) { bits -= 5; words.push((acc >> bits) & 31); }
+      acc &= (1 << bits) - 1;
+    }
+    if (bits) words.push((acc << (5 - bits)) & 31);
+    return prefix + [0, 0, 0, 0, 0, 0, 0, 23, 1, 20].concat(words, new Array(104).fill(0)).map((v) => CHARSET[v]).join('') + 'qqqqqq';
+  };
+  // asked for an amount, it writes an invoice for it (n is nano-bitcoin: a hundred millisats each)
+  const addressServer = (m) => '200\n' + JSON.stringify(/\/\.well-known\//.test(m.url)
+    ? { tag: 'payRequest', callback: 'https://addr.test/cb', minSendable: 1000, maxSendable: 100000000, metadata: META }
+    : { pr: invoiceFor('lnbc' + Math.round(Number(/amount=(\d+)/.exec(m.url)[1]) / 100) + 'n1', META) });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (fn, ms) => { for (let at = 0; at < (ms || 4000); at += 20) { if (fn()) return true; await wait(20); } return false; };
+  const gaveUp = (W) => W._privacy({ tor: 'failed', progress: 0, everUp: true, unprotected: false, transport: 'direct', network: 'wifi' });
+  const feeOf = (spec) => (spec.rows.find((r) => r.label === 'FEE') || {}).value;
+  // a phone holding 2000 sats at the fake mint, working offline while Tor is at work: where every session begins
+  const phoneAt = async (route, o) => {
+    const ctx = page(Object.assign({ address: addressServer }, o || {}));
+    await ctx.W.connect(MINT, null, null, { remember: true });
+    await ctx.W.claim((await ctx.W.invoice(2000, '')).hash);
+    route(ctx.W);
+    ctx.W.setOffline(true);
+    const app = ctx.window.eval('(function () { return {' + LIFTED.map(method).join(',') + '}; })()');
+    const log = { cards: [], tokens: [], toasts: [] };
+    Object.assign(app, {
+      log, ctx,
+      state: { screen: 'home', stack: [], flow: 'send', unit: 'SATS', amount: '', balSats: 2000 },
+      setState(u) {
+        Object.assign(app.state, typeof u === 'function' ? u(app.state) : u);
+        Promise.resolve().then(() => app.syncSend());     // componentDidUpdate
+      },
+      toast(m) { log.toasts.push(m); },
+      blockedCard(kind, over) { log.cards.push(Object.assign({ kind }, over)); },
+      payThisMintWithToken(sats) { log.tokens.push(sats); },
+      makeTokenForRequest() { log.made = (log.made || 0) + 1; },
+      showMelt() {}, hideMelt() {}, mintName: () => 'MINT', stageMoney: (n) => '₿ ' + n, balNow: () => 0, refreshBalance() {}, loadHistory() {},
+      tidyChangeNow() {}, showPayPending() { log.pending = true; }, isBadSignatures: () => false, back() {}, editSendNote() {},
+      payOnchain() {}, takeTokenFromPaste() {},
+    });
+    // the app's own listener for every route change (06-wallet-boot-and-restore.js): a repaint
+    ctx.W.onPrivacy(() => app.setState({ routeAt: Date.now() }));
+    app.addressAsks = () => ctx.requests.filter((r) => /addr\.test/.test(r.url)).length;
+    app.meltQuotes = () => ctx.requests.filter((r) => /\/v1\/melt\/quote\/bolt11$/.test(r.url)).length;
+    // the keypad's NEXT, as renderAmount makes it
+    app.next = () => app.setState((p) => ({ payFrom: 'BITCOIN', screen: 'sendConfirm', stack: p.stack.concat([p.screen]) }));
+    return app;
+  };
+
+  // an address: to the keypad, to the confirmation held at CHECKING, and SEND by itself when the route is up
+  {
+    const app = await phoneAt(coming);
+    const W = app.ctx.W;
+    ok(app.connecting() === true && app.offlineNow() === true, 'working offline while Tor is at work is a connection on its way, as the wallet and the banner say');
+    const asked = app.ctx.requests.length;
+    app.acceptTarget('alice@addr.test');
+    ok(app.state.screen === 'amount' && app.state.recipientKind === 'email' && app.state.recipient === 'alice@addr.test' && !app.log.cards.length,
+       'a lightning address scanned while the connection is on its way goes to the keypad, and no card', app.state.screen + ' / ' + app.log.cards.map((c) => c.kind));
+    app.setState({ amount: '10', unit: 'SATS' });
+    app.next();
+    await wait(60);
+    let spec = app.confirmSpec();
+    ok(spec.cta === 'CHECKING…' && spec.ctaBusy === true && feeOf(spec) === 'CHECKING…',
+       'and to the confirmation, whose button reads CHECKING, and so does its FEE row', spec.cta + ' / ' + feeOf(spec));
+    ok(app.ctx.requests.length === asked, 'nothing has been asked of the address or the mint: nothing is, until the route is up', String(app.ctx.requests.length - asked));
+    spec.go();
+    ok(app.state.screen === 'sendConfirm', 'pressing it does nothing', app.state.screen);
+    up(W);
+    ok(await until(() => app.state.quotedFee != null), 'the route coming up looks the address up and quotes its invoice by itself, with nothing pressed');
+    spec = app.confirmSpec();
+    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10',
+       'and the button turns to SEND, with the fee in the FEE row', spec.cta + ' / ' + feeOf(spec));
+    ok(app.addressAsks() === 2 && app.meltQuotes() === 1, 'one lookup of the address (its two requests) and one quote at the mint', app.addressAsks() + ' / ' + app.meltQuotes());
+    ok(!app.log.cards.length, 'the connection that came says nothing: no card');
+    spec.go();
+    ok(await until(() => app.state.sendPhase === 'settled'), 'SEND pays', JSON.stringify(app.log.cards.map((c) => c.reason)));
+    ok(app.addressAsks() === 2 && app.meltQuotes() === 1,
+       'with the invoice the screen looked up and the quote it asked: neither the address nor the mint was asked again', app.addressAsks() + ' / ' + app.meltQuotes());
+    ok((await W.balanceSats()) < 2000, 'and the sats left', String(await W.balanceSats()));
+  }
+
+  // the amount changed while the address was still being looked up: the answer to the older question lands nothing
+  {
+    let release = null;
+    const slow = new Promise((yes) => { release = yes; });
+    const app = await phoneAt(up, { address: (m, n) => ((/\/\.well-known\//.test(m.url) && n === 1) ? slow.then(() => addressServer(m)) : addressServer(m)) });
+    app.acceptTarget('alice@addr.test');
+    app.setState({ amount: '10', unit: 'SATS' });
+    app.next();
+    await wait(80);
+    ok(app.state.quotingFee === true && app.confirmSpec().cta === 'CHECKING…', 'with the route up an address is looked up at once, and the button held');
+    app.setState({ amount: '20' });
+    ok(await until(() => app.state.quotedAmt === 20), 'a new amount is a new question, asked at once beside the old one', String(app.state.quotedAmt));
+    release();
+    await wait(300);
+    ok(app.state.quotedAmt === 20 && app.state.quotingFee === false && app._found && app._found.sats === 20 && app.meltQuotes() === 1,
+       'and the older answer, when it comes, changes nothing: the quote is the new amount\'s, and the mint was asked once',
+       JSON.stringify({ amt: app.state.quotedAmt, found: app._found && app._found.sats, quotes: app.meltQuotes() }));
+    ok(/^SEND /.test(app.confirmSpec().cta) && feeOf(app.confirmSpec()) === 'UP TO ₿ 10', 'SEND, with the fee', app.confirmSpec().cta + ' / ' + feeOf(app.confirmSpec()));
+  }
+
+  // an amount the balance covers and its fee does not: held at NOT ENOUGH, in the wallet's words, and the send says the same
+  {
+    const app = await phoneAt(coming);
+    const W = app.ctx.W;
+    app.acceptTarget('alice@addr.test');
+    app.setState({ amount: '1995', unit: 'SATS' });
+    app.next();
+    up(W);
+    ok(await until(() => app.state.quotedFee != null), 'an address for nearly all the balance is looked up and quoted as any other is');
+    const spec = app.confirmSpec();
+    const sentence = 'Your balance isn\'t enough to cover the payment and its fee: this needs 2005 sats and you hold 2000.';
+    ok(spec.cta === 'NOT ENOUGH' && spec.ctaTone === 'warn' && spec.warn === sentence,
+       'the button reads NOT ENOUGH, with the wallet\'s sentence under the rows', spec.cta + ' / ' + spec.warn);
+    spec.go();
+    ok(app.state.screen === 'sendConfirm' && JSON.stringify(app.state.stack) === '["home","amount"]' && !app.log.cards.length,
+       'and does nothing when it is pressed', app.state.screen + ' ' + JSON.stringify(app.state.stack));
+    // the screen is stale, or the reserve moved: the send is made all the same, and the wallet refuses in the same words
+    app.ctx.window.console.error = () => {};
+    app.startSend();
+    ok(await until(() => app.log.cards.length === 1), 'a send that is made all the same is refused by the payment');
+    const refused = app.log.cards[0] || {};
+    ok(refused.kind === 'sendFail' && refused.reason === sentence && refused.retry === 'CHANGE AMOUNT',
+       'in the same words, on a card with no TRY AGAIN', refused.kind + ' / ' + refused.reason + ' / ' + refused.retry);
+    ok(app.state.screen === 'sendConfirm' && JSON.stringify(app.state.stack) === '["home","amount"]',
+       'the confirmation under it, on the stack as it was before SEND', app.state.screen + ' ' + JSON.stringify(app.state.stack));
+    refused.onClose();
+    ok(app.state.screen === 'amount' && JSON.stringify(app.state.stack) === '["home"]',
+       'closing it goes to the amount screen, not back to the confirmation, with no entry of the confirmation left behind', app.state.screen + ' ' + JSON.stringify(app.state.stack));
+    ok((await W.balanceSats()) === 2000, 'and no sat moved', String(await W.balanceSats()));
+  }
+
+  // an invoice that carries its amount: straight to the confirmation, held, and quoted when the route is up
+  {
+    const app = await phoneAt(coming);
+    app.acceptTarget(PRICED);
+    ok(app.state.screen === 'sendConfirm' && app.state.recipientKind === 'invoice' && !app.log.cards.length && !app.log.tokens.length,
+       'an invoice with its amount, scanned while the connection is on its way, lands on the confirmation: no card', app.state.screen + ' / ' + app.log.cards.map((c) => c.kind));
+    await wait(60);
+    let spec = app.confirmSpec();
+    ok(spec.cta === 'CHECKING…' && spec.ctaBusy && feeOf(spec) === 'CHECKING…', 'reading CHECKING, with the FEE row the same', spec.cta + ' / ' + feeOf(spec));
+    ok(app.meltQuotes() === 0, 'and no quote has been asked of the mint');
+    up(app.ctx.W);
+    ok(await until(() => app.state.quotedFee != null), 'the route coming up asks the mint for the fee by itself');
+    spec = app.confirmSpec();
+    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10', 'and then it reads SEND, with the fee', spec.cta + ' / ' + feeOf(spec));
+    ok(app.meltQuotes() === 1, 'asked once', String(app.meltQuotes()));
+  }
+  {
+    // the mint's own invoice needs no connection to be paid with a token, as it did not
+    const app = await phoneAt(coming);
+    app.ctx.W.invoiceFromThisMint = () => true;
+    app.acceptTarget(PRICED);
+    ok(app.log.tokens.length === 1 && app.state.screen === 'home', 'an invoice from the mint this phone is on is still paid with a token at once', JSON.stringify(app.log.tokens) + ' / ' + app.state.screen);
+  }
+  {
+    // an invoice with no amount: the keypad, as ever; the confirmation is held for the route, and has no quote to wait for
+    const app = await phoneAt(coming);
+    app.acceptTarget(AMOUNTLESS);
+    ok(app.state.screen === 'amount' && app.state.recipientKind === 'invoice' && !app.log.cards.length, 'an invoice with no amount goes to the keypad', app.state.screen);
+    app.setState({ amount: '5', unit: 'SATS' });
+    app.next();
+    await wait(60);
+    ok(app.confirmSpec().cta === 'CHECKING…', 'and its confirmation is held while the connection is on its way');
+    up(app.ctx.W);
+    ok(await until(() => /^SEND /.test(app.confirmSpec().cta)), 'and SEND once it is up', app.confirmSpec().cta);
+    await wait(60);
+    ok(feeOf(app.confirmSpec()) === 'UNKNOWN' && app.meltQuotes() === 0,
+       'with the fee UNKNOWN: a mint cannot quote an invoice that names no amount, and is not asked to', feeOf(app.confirmSpec()) + ' / ' + app.meltQuotes() + ' quote(s)');
+  }
+
+  // a connection that does not come: told in the card there always was, the confirmation left under it
+  {
+    const app = await phoneAt(coming);
+    app.acceptTarget(PRICED);
+    await wait(60);
+    ok(app.confirmSpec().cta === 'CHECKING…' && !app.log.cards.length, 'an invoice held for the connection');
+    gaveUp(app.ctx.W);
+    ok(await until(() => app.log.cards.length === 1), 'Tor giving up tells it in the card for no connection, then and there');
+    const card = app.log.cards[0] || {};
+    ok(card.kind === 'offlineInvoice' && card.title === 'YOU’RE OFFLINE' && /Lightning invoice can only be paid offline/.test(card.reason),
+       'the very card an invoice gets scanned with no connection', card.kind + ' / ' + card.title);
+    ok(app.state.screen === 'sendConfirm', 'with the confirmation under it, as after a send that is refused', app.state.screen);
+    ok(JSON.stringify(app.state.stack) === '["home"]', 'on the stack as it was: the card pushed nothing, so there is nothing of it to drop', JSON.stringify(app.state.stack));
+    const spec = app.confirmSpec();
+    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'its button no longer held: SEND, the fee UNKNOWN', spec.cta + ' / ' + feeOf(spec));
+    gaveUp(app.ctx.W); app.ctx.W.setOffline(true); await wait(60);
+    ok(app.log.cards.length === 1, 'and said once, not again with every word from Tor');
+    ok(app.meltQuotes() === 0 && app.addressAsks() === 0, 'nothing was asked of anyone');
+  }
+  {
+    const app = await phoneAt(coming);
+    app.acceptTarget('alice@addr.test');
+    app.setState({ amount: '10', unit: 'SATS' });
+    app.next();
+    await wait(60);
+    dark(app.ctx.W);
+    ok(await until(() => app.log.cards.length === 1), 'the network going while an address is held tells it too');
+    const card = app.log.cards[0] || {};
+    ok(card.kind === 'offlineAddress' && card.title === 'YOU’RE OFFLINE' && /Lightning address can only be paid with a connection/.test(card.reason),
+       'in a card that fits it', card.kind + ' / ' + card.reason);
+    ok(app.state.screen === 'sendConfirm' && /^SEND /.test(app.confirmSpec().cta), 'confirmation under it, its button SEND to be told the same by the payment', app.state.screen + ' / ' + app.confirmSpec().cta);
+    ok(JSON.stringify(app.state.stack) === '["home","amount"]', 'on the stack as it was, so one press of the back arrow leaves it', JSON.stringify(app.state.stack));
+  }
+
+  // no connection at all: as it was
+  {
+    const app = await phoneAt(dark);
+    ok(app.connecting() === false && app.offlineNow() === true, 'no network is not a connection on its way');
+    app.acceptTarget(PRICED);
+    ok(app.log.cards.length === 1 && app.log.cards[0].kind === 'offlineInvoice' && app.state.screen === 'home',
+       'an invoice scanned with no network at all gets the card for no connection, and no confirmation', app.log.cards.map((c) => c.kind) + ' / ' + app.state.screen);
+    app.acceptTarget('alice@addr.test');
+    app.setState({ amount: '10', unit: 'SATS' });
+    app.next();
+    await wait(60);
+    const spec = app.confirmSpec();
+    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'an address goes to a confirmation that is not held: nothing is coming to wait for', spec.cta + ' / ' + feeOf(spec));
+    ok(app.ctx.requests.filter((r) => /addr\.test/.test(r.url)).length === 0 && app.log.cards.length === 1, 'nothing asked, and no card by itself');
+    app.ctx.window.console.error = () => {};
+    spec.go();
+    ok(await until(() => app.log.cards.length === 2), 'SEND is refused by the payment, as it was');
+    const refused = app.log.cards[1] || {};
+    ok(refused.kind === 'netLost' && refused.retry === 'TRY AGAIN' && /working offline/.test(refused.reason), 'in the card it always was', refused.kind + ' / ' + refused.reason);
+    ok(app.state.screen === 'sendConfirm' && JSON.stringify(app.state.stack) === '["home","amount"]',
+       'with the confirmation back on the stack it had before SEND', app.state.screen + ' ' + JSON.stringify(app.state.stack));
+  }
+  {
+    const app = await phoneAt(gaveUp);
+    ok(app.connecting() === false, 'nor is Tor having given up');
+    app.acceptTarget(PRICED);
+    ok(app.log.cards.length === 1 && app.log.cards[0].kind === 'offlineInvoice', 'an invoice scanned then gets the card for no connection', app.log.cards.map((c) => c.kind));
+  }
+
+  // a payment request: held where a connection would change how it is paid
+  {
+    const NOSTR = { id: 'r1', sats: 21, unit: 'sat', mints: [MINT], transports: ['nostr'], delivery: { kind: 'nostr', target: 'npub1stub' }, lockTo: '', viaTap: false, usd: 0, theirRate: 0 };
+    const app = await phoneAt(coming);
+    app.ctx.W.decodeRequest = (t) => Object.assign({}, NOSTR, app.reqOverride || {});
+    app.acceptTarget('creqA' + 'x'.repeat(30));
+    ok(app.state.screen === 'reqOffer' && !app.log.cards.length, 'a payment request scanned while the connection is on its way opens its confirmation', app.state.screen);
+    let spec = app.confirmSpec();
+    ok(spec.cta === 'CHECKING…' && spec.ctaBusy && feeOf(spec) === 'CHECKING…', 'held at CHECKING, its FEE row the same', spec.cta + ' / ' + feeOf(spec));
+    spec.go();
+    ok(!app.log.made, 'and pressing it makes nothing');
+    up(app.ctx.W);
+    await wait(60);
+    spec = app.confirmSpec();
+    ok(/^PAY /.test(spec.cta) && !spec.ctaBusy, 'the route coming up turns it to what it reads, by itself', spec.cta);
+    spec.go();
+    ok(app.log.made === 1, 'and PAY pays');
+    // the same request with the connection given up on: its button is what it is with none, and there is no card to tell
+    const gone = await phoneAt(coming);
+    gone.ctx.W.decodeRequest = () => NOSTR;
+    gone.acceptTarget('creqA' + 'x'.repeat(30));
+    gaveUp(gone.ctx.W);
+    await wait(80);
+    ok(/^PAY /.test(gone.confirmSpec().cta) && !gone.confirmSpec().ctaBusy && !gone.log.cards.length,
+       'a request needs no card for a connection that does not come: its token to show is the way without one', gone.confirmSpec().cta + ' / ' + gone.log.cards.length);
+    // one that names nothing the route is for is not waited on
+    const plain = await phoneAt(coming);
+    plain.ctx.W.decodeRequest = () => Object.assign({}, NOSTR, { transports: [], delivery: null });
+    plain.acceptTarget('creqA' + 'x'.repeat(30));
+    ok(plain.confirmSpec().cta === 'GENERATE ECASH TOKEN', 'a request for a token to show them is not held', plain.confirmSpec().cta);
+  }
+
+  // the signal is the banner's: the confirmation holds exactly when the banner says SECURING YOUR CONNECTION
+  {
+    const states = [
+      ['connecting over wifi', { tor: 'connecting', network: 'wifi' }, true],
+      ['stuck over wifi', { tor: 'stuck', network: 'wifi' }, true],
+      ['connecting over cellular', { tor: 'connecting', network: 'cellular' }, true],
+      ['failed over wifi', { tor: 'failed', network: 'wifi' }, false],
+      ['stopped over wifi', { tor: 'stopped', network: 'wifi' }, false],
+      ['connecting with no network', { tor: 'connecting', network: 'none' }, false],
+      ['up with no network', { tor: 'up', network: 'none' }, false],
+      ['up over wifi', { tor: 'up', network: 'wifi' }, false],
+      ['continuing without Tor', { tor: 'connecting', network: 'wifi', unprotected: true }, false],
+    ];
+    const app = await phoneAt(up);
+    const W = app.ctx.W;
+    for (const [what, p, want] of states) {
+      W._privacy(Object.assign({ progress: 10, everUp: true, unprotected: false, transport: 'direct' }, p));
+      // working offline is where the gate puts the wallet whenever Tor is not up; going without Tor is the person's own answer to an iOS alert, and is not that
+      if (!p.unprotected) W.setOffline(true);
+      const text = app.torBannerVals().torBannerText;
+      ok(app.connecting() === want && (text === 'SECURING YOUR CONNECTION') === want,
+         'the confirmation and the banner agree on ' + what, 'connecting ' + app.connecting() + ', banner ' + text);
+    }
+  }
+
+  /* ---- the same through the page: React, the template, componentDidUpdate ---------
+   *
+   * The scenarios above call the app's methods by hand, and a repaint is
+   * stood in for by `syncSend`. What they cannot say is that the page does it:
+   * that the route coming up is an update, that the update reaches the send
+   * confirmation, and that what is read off the screen is what `confirmSpec`
+   * said. So the real class is mounted (as tests/render-snapshots.js mounts it)
+   * on a wallet whose route and answers this moves, and the confirmation's
+   * button and FEE row are read from the DOM. */
+  {
+    const { JSDOM, VirtualConsole } = require('jsdom');
+    const shell = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'shell', 'page.json'), 'utf8'));
+    const assets = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'shell', 'manifest.json'), 'utf8'));
+    const unpack = (uuid) => fs.readFileSync(path.join(ROOT, assets.find((a) => a.uuid === uuid).file), 'utf8');
+    const open = shell.open.replace(/data-props="([^"]*)"/, (m, v) => {
+      const props = JSON.parse(v.replace(/&quot;/g, '"'));
+      props.startStatic = { default: true };
+      return 'data-props="' + JSON.stringify(props).replace(/"/g, '&quot;') + '"';
+    });
+    const html = fs.readFileSync(path.join(ROOT, 'build', 'markup.html'), 'utf8')
+      .replace(/<script src="64b433ba-[^"]*"><\/script>/, '')
+      .replace(shell.marker, () => open + appSrc + '</script>');
+    const errors = [];
+    const vc = new VirtualConsole();
+    vc.on('jsdomError', (e) => errors.push(String(e && e.message).slice(0, 200)));
+    const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://foxy.test/index.html', virtualConsole: vc });
+    const w = dom.window;
+    w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
+    w.ResizeObserver = w.ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
+    w.IntersectionObserver = w.IntersectionObserver || class { observe() {} unobserve() {} disconnect() {} };
+    w.HTMLCanvasElement.prototype.getContext = () => null;
+    w.scrollTo = () => {};
+    const run = (text) => { const s = w.document.createElement('script'); s.textContent = text; w.document.head.appendChild(s); };
+    run(unpack('8d4aa6b2-16cb-4c42-a6f2-d85feb8c0047'));
+    run(unpack('93c76fbd-259d-463c-a60d-5ed97ad7e690'));
+    const dc = w.document.querySelector('script[type="text/x-dc"]');
+    run('window.__foxyComponentFactory = function (DCLogic, StreamableLogic, React) {\n' + dc.textContent
+      + '\n;return (typeof Component!=="undefined"&&Component)||undefined;\n};');
+    run('(function(){var f=window.__foxyComponentFactory;window.__foxyComponentFactory=function(a,b,R){'
+      + 'var C=f(a,b,R);return class extends C{constructor(p){super(p);window.__logic=this;}};};})();');
+    run(fs.readFileSync(path.join(ROOT, 'build', 'foxy-render.js'), 'utf8'));
+    await until(() => !!w.__logic, 8000);
+    await wait(300);
+    const logic = w.__logic;
+    ok(!!logic, 'the page mounts');
+
+    const route = { coming: true, offline: true };
+    const asked = { lookup: 0, quote: 0 };
+    let answerLookup = null, answerQuote = null;
+    w.FoxyWallet = {
+      connected: true, mintUrl: MINT, mintHost: () => 'm.test', mints: () => [MINT],
+      classify: (t) => (/^lnbc/.test(t) ? 'invoice' : /@/.test(t) ? 'lnurl' : 'unknown'),
+      amountOf: (inv) => (/^lnbc/.test(String(inv)) ? 2100 : null),
+      privacy: () => ({ tor: route.coming ? 'connecting' : (route.gone ? 'failed' : 'up'), progress: 40, everUp: true, unprotected: false,
+                        offline: route.offline, network: 'wifi', orbot: 'none', vpn: false, orbotKey: false }),
+      routeComing: () => route.coming,
+      lookupLnurl: (addr, sats) => { asked.lookup += 1; return new Promise((yes) => { answerLookup = () => yes({ pr: 'lnbc2100n1looked', addr, sats, at: Date.now() }); }); },
+      quoteFee: (pr) => { asked.quote += 1; return new Promise((yes) => { answerQuote = () => yes({ amount: 2100, feeReserve: 12, quote: { q: 1 }, w: {}, bolt11: pr, at: Date.now() }); }); },
+      payNeed: (sats, reserve) => ({ ok: true, need: sats + reserve, have: 250000, fee: reserve, why: '' }),
+      reason: (e) => String((e && e.message) || e), heldSats: () => 0,
+      balances: () => [], quarantinedSats: () => 0, quarantinedUnknown: () => 0, tokensNotClaimed: () => Promise.resolve([]),
+      lastToken: () => ({ token: '', sats: 0, hash: '' }), clearLastToken() {}, tagsFor: () => ({}), tag() {}, backedUp: () => false,
+      pinIsSet: () => false, pinClear() {}, auditTrail: () => [], qr: () => 'data:,', paymentRequest: () => 'creqAstub',
+      unitName: (u) => String(u).toUpperCase(), formatAmount: (a, u) => a + ' ' + u, mintDown: () => null, share: () => true,
+      clearHistory() {}, clearContacts() {}, splitClear() {}, showSeedNative: () => new Promise(() => {}), enterSeedNative: () => new Promise(() => {}),
+      forgetSeedCandidate: () => Promise.resolve(true), agreedRate: () => new Promise(() => {}),
+    };
+    // a change of route is an update of the page, as 06-wallet-boot-and-restore.js makes it
+    const moved = async () => { logic.setState({ routeAt: Date.now() }); await wait(250); };
+    const onScreen = () => {
+      const spans = Array.from(w.document.querySelectorAll('#dc-root .sc-interp')).map((e) => e.textContent);
+      const at = spans.indexOf('FEE');
+      return { cta: spans.filter((t) => /^(CHECKING…|SEND |NOT ENOUGH)/.test(t)).pop() || '', fee: at >= 0 ? spans[at + 1] : '' };
+    };
+    const cards = () => Array.from(w.document.body.children).filter((e) => e.localName === 'div' && e.id !== 'dc-root' && /YOU.RE OFFLINE/.test(e.textContent)).length;
+
+    logic.setState({ screen: 'sendConfirm', stack: ['home', 'amount'], flow: 'send', amount: '2100', unit: 'SATS', recipient: 'alice@example.com',
+      recipientKind: 'email', payFrom: 'BITCOIN', walletLive: true, balSats: 250000, livePrice: 64000 });
+    await wait(300);
+    let seen = onScreen();
+    ok(seen.cta === 'CHECKING…' && seen.fee === 'CHECKING…' && asked.lookup === 0,
+       'on the page: an address\'s confirmation reads CHECKING, its FEE row too, and nothing is asked while the connection is on its way', JSON.stringify(seen) + ' ' + asked.lookup);
+    route.coming = false; route.offline = false;
+    await moved();
+    ok(asked.lookup === 1 && onScreen().cta === 'CHECKING…', 'the route coming up is an update of the page, and the address is looked up by itself', JSON.stringify(asked));
+    answerLookup(); await wait(250);
+    ok(asked.quote === 1 && onScreen().cta === 'CHECKING…', 'its invoice is quoted as soon as it is in, the button still held', JSON.stringify(asked));
+    answerQuote(); await wait(250);
+    seen = onScreen();
+    ok(/^SEND /.test(seen.cta) && /^UP TO/.test(seen.fee), 'and the button turns to SEND, with the fee in the FEE row', JSON.stringify(seen));
+    ok(!errors.length, 'with nothing thrown by the page', errors.join(' | '));
+
+    // the connection going again with the quote in hand: held, and not asked for again when it returns
+    route.coming = true; route.offline = true;
+    await moved();
+    seen = onScreen();
+    ok(seen.cta === 'CHECKING…' && /^UP TO/.test(seen.fee), 'the connection going again holds the button, with the quote still in its row', JSON.stringify(seen));
+    route.coming = false; route.offline = false;
+    await moved();
+    ok(/^SEND /.test(onScreen().cta) && asked.lookup === 1 && asked.quote === 1, 'and it is SEND when it returns, with nothing asked twice', JSON.stringify(asked));
+
+    // an invoice, held, and Tor gives up
+    asked.lookup = 0; asked.quote = 0;
+    route.coming = true; route.offline = true;
+    logic.setState({ screen: 'home', stack: [] });
+    await wait(100);
+    logic.setState({ screen: 'sendConfirm', stack: ['home'], recipient: 'lnbc2100n1stub', recipientKind: 'invoice',
+      quotedFee: null, quotedAmt: null, quotingFee: false, amount: '2100' });
+    await wait(300);
+    ok(onScreen().cta === 'CHECKING…' && cards() === 0, 'an invoice is held at CHECKING too', JSON.stringify(onScreen()));
+    route.coming = false; route.offline = true; route.gone = true;
+    await moved();
+    seen = onScreen();
+    ok(cards() === 1 && /^SEND /.test(seen.cta) && seen.fee === 'UNKNOWN' && logic.state.screen === 'sendConfirm',
+       'Tor giving up puts the card for no connection over it and lets the button go', JSON.stringify(seen) + ' cards ' + cards());
+    ok(!errors.length, 'with nothing thrown by the page', errors.join(' | '));
   }
 
   console.log(failures ? '\n' + failures + ' FAILED' : '\nall home-first checks pass');

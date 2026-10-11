@@ -676,6 +676,18 @@
     // locked exactly when the send will be (makeTokenForRequest): a key named, and a route
     const lack = (sats > 0 && W && W.sendShortfall)
       ? W.sendShortfall(sats, { locked: !!(req && req.lockTo && !(this.offlineNow && this.offlineNow())) }) : null;
+    /* Waiting on a connection that is on its way.
+     *
+     * A request that names somewhere to be paid, or a lock to be made, or
+     * another mint, is paid over the route, and the way without one (a token
+     * to show them) is a worse way for a route a few seconds off. So the
+     * button says CHECKING and does nothing until Tor is up, and then reads
+     * what it reads (`requestNeedsRoute`); the FEE row says the same, since
+     * the lock's swap is part of it. One that needs no route, a token to show
+     * or a payment over the link in hand, is not waited on. If the
+     * connection does not come the button is simply what it is with none:
+     * the token. */
+    const held = !!(sats > 0 && this.connecting() && this.requestNeedsRoute(req));
     const to = byTap ? s.tapCode
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
              : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND' : 'THEIR NOSTR INBOX, OVER TOR')
@@ -687,7 +699,7 @@
       // two orange things is one too many to look at
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
-      this.cfRow('FEE', lack && lack.fee > 0 ? this.money(lack.fee).main : this.px() ? '$ 0.00' : '\u20bf 0', { half: true }),
+      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? this.money(lack.fee).main : this.px() ? '$ 0.00' : '\u20bf 0', { half: true }),
     ]).concat(this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
@@ -730,11 +742,11 @@
        * phones are touching and the thing being done is handing it over. What
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
-      cta: s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
+      cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
         : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + this.money(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
-      ctaBusy: !!s.reqBusy,
-      go: () => this.makeTokenForRequest(),
+      ctaBusy: held || !!s.reqBusy,
+      go: held ? () => {} : () => this.makeTokenForRequest(),
     };
   }

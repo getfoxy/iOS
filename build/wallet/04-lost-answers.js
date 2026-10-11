@@ -669,6 +669,15 @@
     return { ok: can, need: need, have: held, fee: need - n };
   }
 
+  /* What is said of a payment the pile cannot cover. One sentence in one
+   * place, for the confirmation that says it before SEND (`payNeed`) and for
+   * the payment that refuses it (`pay`), so the two are never in different
+   * words or at different figures. */
+  function notEnoughWords(mn) {
+    return 'Your balance isn\'t enough to cover the payment and its fee: this needs '
+      + mn.need + ' sats and you hold ' + mn.have + '.';
+  }
+
   function dropQuoteRecord(found) {
     if (found.key === K.move) { dropMoveNote(found.entry.quote); return; }
     var gone = function (p) { return !(p && p.quote === found.entry.quote); };

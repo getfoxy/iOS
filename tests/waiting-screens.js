@@ -117,5 +117,34 @@ ok(/end: function \(\) \{\s*clearTimeout\(slowT\);/.test(prog), 'and its clock s
 ok(/__foxyStopWaiting = \(\) => \{[\s\S]{0,300}?this\._takingToken = false;[\s\S]{0,120}?screen: 'home'/.test(src),
    'stopping lets the next scan through and goes home');
 
+// ---- CHECKING is a waiting screen too, and has a way off --------------------------
+/* The send confirmation holds its button while a connection is on its way and
+ * while the address is looked up and the fee quoted. That is a screen with
+ * nothing to press, so it follows the rule above: it is never the last screen.
+ * The back arrow is the shell's own and is not behind any flag; the note can
+ * still be added; and each thing it waits for ends — the connection by coming
+ * or by giving up (tests/home-first.js), the questions by an answer, a refusal
+ * or the deadline their requests have. */
+{
+  const shellAt = markup.indexOf('<sc-if value="{{ isConfirmShell }}">');
+  const backAt = markup.indexOf('sc-camel-on-click="{{ back }}"', shellAt);
+  ok(shellAt >= 0 && backAt > shellAt && backAt - shellAt < 700 && markup.slice(shellAt + 10, backAt).indexOf('<sc-if') < 0,
+     'the confirmation\'s back arrow is the shell\'s own, behind no flag', String(backAt - shellAt));
+  const quote = method('quoteSendFee() {');
+  ok(/\.then\(q => \{[\s\S]{0,400}quotingFee: false/.test(quote) && /\.catch\(e => \{[\s\S]{0,300}quotingFee: false/.test(quote),
+     'the question being asked ends in an answer or a refusal, and either way the button is let go', 'quoteSendFee');
+  const wallet = fs.readFileSync(path.join(__dirname, '..', 'Web', 'foxy-wallet.js'), 'utf8');
+  ok(/withTimeout\(askedAgain\(w, 'the mint\\u2019s fee quote', function \(via\) \{\s*return via\.createMeltQuoteBolt11\(String\(bolt11\)\);\s*\}\), 20000/.test(wallet),
+     'the fee quote has its twenty seconds', 'quoteFee');
+  ok(/var asked = askedAgain\('', label, function \(circuit\) \{[\s\S]{0,260}return withTimeout\(asked, REACH_MS, label\)/.test(wallet),
+     'and the address\'s lookup the deadline it always had, over all its askings', 'lookupLnurl');
+  const confirm = method('confirmSpec() {');
+  ok(/rows: rows,\s*\/\/ the DOM sheet[\s\S]{0,400}secondary: \{ label: \(s\.note/.test(confirm),
+     'the note can still be added while it waits', 'confirmSpec');
+  const sync = method('syncSend() {');
+  ok(/else if \(this\._sendWaited === key\) \{[\s\S]{0,200}this\.notOnlineCard\(\)/.test(sync),
+     'a connection that is given up on releases the button and says so (it does not wait for ever)', 'syncSend');
+}
+
 console.log('\n' + (failed ? failed + ' waiting-screens check(s) failed' : 'all waiting-screens checks pass'));
 process.exit(failed ? 1 : 0);

@@ -733,12 +733,20 @@
    * (`w`), so what follows goes by the road that answered. A failure ends it
    * at once while only one has been asked, as it always did; once more have,
    * it takes every one asked so far failing, and the error is the last one's.
-   * What is asked commits to nothing, so several cost nothing but a circuit. */
-  function askedAgain(w, what, ask) {
+   * What is asked commits to nothing, so several cost nothing but a circuit.
+   *
+   * `w` is whatever `ask` is given the first time, and every later asking is
+   * given what `another()` makes: `onCircuit(w)` unless a caller says
+   * otherwise, a wallet view on a circuit of its own. A question that is not
+   * a mint's, a Lightning address's lookup (`lookupLnurl`), has no wallet
+   * view to put on a circuit and passes a maker of fresh circuit labels
+   * (`newCircuitLabel`) for the request to carry. */
+  function askedAgain(w, what, ask, another) {
     return new Promise(function (ok, no) {
       var settled = false, asked = 0, failed = 0, again = null;
       var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 5000;
       var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
+      var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
       var yes = function (via) {
         return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
       };
@@ -755,7 +763,7 @@
         again = setTimeout(function () {
           if (settled || asked > most) return;
           var other;
-          try { other = onCircuit(w); } catch (e) { other = null; }
+          try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round(asked * ms / 1000) + 's; asking again on another circuit');
           send(other);
@@ -4776,6 +4784,15 @@
     if (!asked) return { ok: held >= n + whole, need: n + whole, have: held, fee: whole };
     var need = can ? out + spend : Math.max(out + spend, held + 1);
     return { ok: can, need: need, have: held, fee: need - n };
+  }
+
+  /* What is said of a payment the pile cannot cover. One sentence in one
+   * place, for the confirmation that says it before SEND (`payNeed`) and for
+   * the payment that refuses it (`pay`), so the two are never in different
+   * words or at different figures. */
+  function notEnoughWords(mn) {
+    return 'Your balance isn\'t enough to cover the payment and its fee: this needs '
+      + mn.need + ' sats and you hold ' + mn.have + '.';
   }
 
   function dropQuoteRecord(found) {
@@ -17809,13 +17826,13 @@
          * sats … and you hold 1024" (tools/live/tap-scenarios.js 6). */
         /* The one sum (`meltNeed`): the invoice, the reserve, this mint's
          * fee for the split, and its fee again on the pieces the melt
-         * spends. */
+         * spends. The confirmation asks the same sum before it offers SEND
+         * (`payNeed`) and says it in the same words (`notEnoughWords`), so
+         * what it refuses a payment on and what this refuses it on cannot
+         * differ; the reserve can still move between that quote and this
+         * one, which is when this is the one that says it. */
         var mn = meltNeed(w, have, owed);
-        if (!mn.ok) {
-          throw new Error('Not enough ecash. That payment needs ' + mn.need +
-            ' sats including the fee reserve' + (mn.need > owed ? ' and this mint\u2019s fee' : '')
-            + ', and you hold ' + mn.have + '.');
-        }
+        if (!mn.ok) throw new Error(notEnoughWords(mn));
 
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
@@ -18071,9 +18088,16 @@
       });
     },
 
-    /* A lightning address or LNURL: resolve it to an invoice, then melt.
-     * The well-known request goes to the recipient's server, not the mint. */
-    payLnurl: function (addr, sats, comment, onStage) {
+    /* A lightning address or LNURL, asked for an invoice of `sats`, and every
+     * check on what comes back. Nothing is paid and no mint is asked: the
+     * well-known request and the callback both go to the recipient's server.
+     * Resolves { pr, addr, sats, at }, the invoice and what it was asked for.
+     *
+     * Its own function, with `payLnurl` after it, because the confirmation
+     * screen looks the address up while the person reads it (the button says
+     * CHECKING until it has, and the fee on this invoice is quoted), and SEND
+     * then pays this very invoice instead of asking the address again. */
+    lookupLnurl: function (addr, sats, comment, onStage) {
       var a = String(addr || '').trim().replace(/^lightning:/i, '');
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Enter an amount first.'));
@@ -18130,10 +18154,25 @@
        *
        * Still well under the bridge's own ceiling, so the screen still ends by
        * itself rather than sitting there for a minute. */
-      var REACH_MS = 45000;
+      var REACH_MS = Number(FoxyWallet._reachMs) > 0 ? Number(FoxyWallet._reachMs) : 45000;
+      /* And asked again on a fresh circuit every five seconds it goes
+       * unanswered, up to five askings, the first answer being the answer
+       * (`askedAgain`), the way a fee quote is.
+       *
+       * Each of these goes out on one Tor circuit, and now and then a circuit
+       * goes nowhere: the request sat there until the deadline above while the
+       * same server answers the next circuit in a second or two. Both are plain
+       * GETs. The well-known request changes nothing at the address; the
+       * callback makes the address's server write an invoice, and only the
+       * first one to come back is looked at, paid or not: the others lapse at
+       * the server by themselves. The deadline stays the cap on all of them,
+       * and says the same words when none of them answers. */
       var get = function (u, label) {
         if (bridged()) {
-          return withTimeout(FoxyWallet.nativeRequest({ endpoint: u, method: 'GET' }), REACH_MS, label);
+          var asked = askedAgain('', label, function (circuit) {
+            return FoxyWallet.nativeRequest({ endpoint: u, method: 'GET', foxyCircuit: circuit });
+          }, newCircuitLabel).then(function (won) { return won.got; });
+          return withTimeout(asked, REACH_MS, label);
         }
         return withTimeout(fetch(u), REACH_MS, label).then(function (r) {
           if (!r.ok) throw new Error('That address did not answer (' + r.status + ').');
@@ -18211,7 +18250,36 @@
             : 'That address returned an invoice that does not say what it is for, so Foxy cannot check it '
               + 'against what the address described. Not paying it.');
         }
-        return FoxyWallet.pay(res.pr, onStage, { payee: a });
+        return { pr: res.pr, addr: a, sats: amount, at: Date.now() };
+      });
+    },
+
+    /* A lightning address or LNURL: resolve it to an invoice, then melt.
+     * The well-known request goes to the recipient's server, not the mint.
+     *
+     * `opts.found` is the invoice the confirmation screen already looked up
+     * for this address and amount (`lookupLnurl`), and `opts.quote` the fee
+     * quote it asked on that invoice (`quoteFee`). While the invoice is a
+     * minute old at most, and for this very address and amount, it is paid as
+     * it stands: the address is not asked again, and `pay` takes the quote on
+     * the same terms as for any invoice. Older, or for something else, and it
+     * is looked up anew, which is all this did before the screen looked. */
+    payLnurl: function (addr, sats, comment, onStage, opts) {
+      var a = String(addr || '').trim().replace(/^lightning:/i, '');
+      var amount = Math.round(Number(sats));
+      var kept = opts && opts.found;
+      var fresh = !!(kept && kept.pr && amount > 0 && kept.addr === a && kept.sats === amount
+        && (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._lookReuseMs) > 0 ? Number(FoxyWallet._lookReuseMs) : 60000));
+      var looked;
+      if (fresh) {
+        console.log('[foxy] the address was looked up a moment ago; paying the invoice it gave');
+        if (typeof onStage === 'function') onStage('resolving');
+        looked = Promise.resolve(kept);
+      } else {
+        looked = FoxyWallet.lookupLnurl(addr, sats, comment, onStage);
+      }
+      return looked.then(function (found) {
+        return FoxyWallet.pay(found.pr, onStage, { payee: a, quote: opts && opts.quote });
       });
     },
 
@@ -24995,6 +25063,26 @@
           console.warn('[foxy] could not quote the fee:', FoxyWallet.reason(e));
           return null;
         });
+    },
+
+    /* Can this phone cover a Lightning payment, the mint's fees included,
+     * before anything is made? `sats` is the amount the quote is for and
+     * `reserve` the fee reserve it names: the confirmation asks once the
+     * quote is in, and does not offer SEND to a payment that is short.
+     *
+     * The very sum `pay` refuses on (`meltNeed`: the amount, the reserve, this
+     * mint's own fee for the split and its fee again on the pieces the melt
+     * spends), against the same pile and in the same words (`notEnoughWords`),
+     * so the screen and the payment cannot disagree. Answers
+     * { ok, need, have, fee, why } with `why` empty when it fits, and null
+     * when there is no wallet or nothing to pay. Local, and at once. */
+    payNeed: function (sats, reserve) {
+      var w;
+      try { w = needLocal(); } catch (e) { return null; }
+      var owed = Math.round(Number(sats) || 0) + Math.round(Number(reserve) || 0);
+      if (!(owed > 0)) return null;
+      var mn = meltNeed(w, proofs(mintOf(w)), owed);
+      return { ok: !!mn.ok, need: mn.need, have: mn.have, fee: mn.fee, why: mn.ok ? '' : notEnoughWords(mn) };
     },
 
     /* Resolves once the phone has said it has a seed, and an older install

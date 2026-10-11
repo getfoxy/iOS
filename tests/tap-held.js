@@ -160,9 +160,12 @@ const TALKING = { _tapTalking: true };
    * the three above hold them. `syncSnow` draws the home screen's snow once and
    * leaves it alone; `syncAccent`, `syncHaptics`, `syncQueue`, `syncSlide`,
    * `syncUnit`, `syncPreview`, `syncTokenQr`, `syncReqQr`, `syncClaim`, `syncShake` and `syncFlip` tear
-   * nothing down that a payer is waiting on. */
+   * nothing down that a payer is waiting on. `syncSend` keeps the send
+   * confirmation up with the route (it asks the fee, holds the button, tells
+   * of a connection that does not come); it reads `screen` only to forget a
+   * wait once the confirmation has gone, and touches no link. */
   const known = ['syncAccent', 'syncAwake', 'syncShake', 'syncFlip', 'syncClaim', 'syncHaptics', 'syncInbox',
-                 'syncPreview', 'syncQueue', 'syncReqQr', 'syncSlide', 'syncSnow',
+                 'syncPreview', 'syncQueue', 'syncReqQr', 'syncSend', 'syncSlide', 'syncSnow',
                  'syncTap', 'syncTokenQr', 'syncUnit'].sort();
   ok('the passes that run on every update are the ones this file knows about',
     JSON.stringify(passes) === JSON.stringify(known),
