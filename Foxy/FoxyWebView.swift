@@ -822,11 +822,21 @@ final class WebHostController: UIViewController {
     ///
     /// THE RULE, WHICH tools/page-hash.py FOLLOWS TOO
     ///
-    /// One line per file, `"<sha256 of its bytes>␠␠<name>\n"`, sorted by name
-    /// as bytes, files whose name begins with a dot left out; the manifest hash
-    /// is the SHA-256 of those lines joined. `tools/page-hash.py` is where that
-    /// rule is written down in prose — the two implementations have to agree on
-    /// exactly which files count and in which order or the numbers mean nothing.
+    /// Every regular file under the staged folder, at any depth, named by its
+    /// path from that folder with a slash between the parts (`index.html`,
+    /// `img/card-fx1.png`). One line per file, `"<sha256 of its bytes>␠␠<path>\n"`,
+    /// sorted by path as bytes; a file whose name begins with a dot is left
+    /// out, and so is everything inside a folder whose name does. The manifest
+    /// hash is the SHA-256 of those lines joined. `tools/page-hash.py` is where
+    /// that rule is written down in prose — the two implementations have to
+    /// agree on exactly which files count and in which order or the numbers
+    /// mean nothing.
+    ///
+    /// It goes into the folders because stageWebFiles copies them, and the web
+    /// view loads what is in them: a rule that stopped at the top would leave
+    /// those files under no number. It once did stop there, and read every name
+    /// as a file, so the first folder in Web/ left the phone with no number at
+    /// all.
     ///
     /// The name is hashed alongside the content, so a file added, removed or
     /// renamed changes the number even when no file's content changed — a
@@ -836,12 +846,25 @@ final class WebHostController: UIViewController {
     ///
     /// Returns an empty string if the staged folder cannot be read, rather than
     /// a hash of nothing: a number that looks real but covers no files would be
-    /// worse than none.
+    /// worse than none. The same for anything in it that is neither a regular
+    /// file nor a folder — the web view would follow a link, and the number
+    /// would not cover where it led.
     static func manifestHash(of dir: URL) -> String {
         let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return "" }
+        // every path under the folder, folders included; links are listed and
+        // not followed
+        guard let paths = try? fm.subpathsOfDirectory(atPath: dir.path) else { return "" }
+        var names: [String] = []
+        for path in paths where !path.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
+            // attributesOfItem describes a link itself, not what it points at
+            guard let kind = (try? fm.attributesOfItem(atPath: dir.appendingPathComponent(path).path))?[.type]
+                    as? FileAttributeType else { return "" }
+            if kind == .typeDirectory { continue }
+            guard kind == .typeRegular else { return "" }
+            names.append(path)
+        }
         var lines = ""
-        for name in names.filter({ !$0.hasPrefix(".") }).sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
+        for name in names.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
             guard let bytes = try? Data(contentsOf: dir.appendingPathComponent(name)) else { return "" }
             let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
             lines += "\(digest)  \(name)\n"

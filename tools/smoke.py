@@ -56,7 +56,9 @@ WHAT IT CHECKS
  40. the onion inbox listens on 127.0.0.1 behind a random path, holds its size
      caps, and closes its address with its listener
  41. the app hashes the page it staged, by the same rule tools/page-hash.py
-     follows, and hands it to the drawer to show
+     follows, and hands it to the drawer to show; the tool is run over a small
+     folder with subfolders and must print the number FoxyTests/PageHashTests
+     expects of the Swift, and the same number however a commit is spelled
 
 It cannot render the page. A screen that mounts but draws nothing still needs
 a phone, and tools/foxy-walk.js in the Safari console is the tool for that.
@@ -2788,13 +2790,17 @@ needs = [
      'stageWebFiles no longer hashes the folder it staged, so the number would not cover what the web view loads'),
     (re.search(r'Self\.pageHash\s*=', stage41) and 'page hash' in stage41,
      'the page hash is no longer kept or logged at staging'),
-    # the rule, on the Swift side: dot files out, sorted by name as bytes, the
-    # line shasum prints. tools/page-hash.py follows the same rule in prose;
-    # if either side drifts the two numbers stop meaning the same thing.
+    # the rule, on the Swift side: every file under the folder, dot files out,
+    # sorted by path as bytes, the line shasum prints. tools/page-hash.py
+    # follows the same rule in prose; if either side drifts the two numbers
+    # stop meaning the same thing.
     (re.search(r'hasPrefix\("\."\)', hash41) and re.search(r'lexicographicallyPrecedes', hash41)
-     and re.search(r'\\\(digest\)  \\\(name\)', hash41),
-     'the manifest rule changed in Swift (dot files left out, sorted by name as bytes, "<sha256>  <name>" per line): '
-     'tools/page-hash.py would print a different number'),
+     and re.search(r'\\\(digest\)  \\\(name\)', hash41) and re.search(r'subpathsOfDirectory', hash41),
+     'the manifest rule changed in Swift (every file under the folder, dot files left out, sorted by path as bytes, '
+     '"<sha256>  <path>" per line): tools/page-hash.py would print a different number'),
+    # what is neither a file nor a folder must cost the number, not be skipped
+    (re.search(r'guard kind == \.typeRegular else \{ return "" \}', hash41),
+     'a link in the staged folder no longer empties the hash: the number could cover less than the page loads'),
     (re.search(r'guard !lines\.isEmpty else \{ return "" \}', hash41),
      'an unreadable or empty staged folder now produces a real-looking hash of nothing'),
     # and the page has to be told, before its own script runs
@@ -2811,6 +2817,59 @@ if broken:
         fail(msg)
 else:
     ok('the staged page is hashed, logged and handed to the drawer; tools/page-hash.py is there to compare with')
+
+# The above reads the two rules; this runs one of them. Reading alone passed
+# while Web/ gained its first folder, the app's hash went empty and the tool
+# printed a different number for every spelling of the same commit. So: the
+# folder FoxyTests/PageHashTests builds, built here too, and one number expected
+# of both. The Swift test holds the number; this takes it from that file, so
+# there is one place to change and neither side can pass alone.
+test41 = os.path.join('FoxyTests', 'PageHashTests.swift')
+want41 = re.search(r'static let expected = "([0-9a-f]{64})"', open(test41, encoding='utf8').read()) \
+    if os.path.exists(test41) else None
+def tool41_says(*args):
+    r = subprocess.run([sys.executable, tool41] + list(args), capture_output=True, text=True)
+    found = re.search(r'^([0-9a-f]{64})$', r.stdout, re.M)
+    return r.returncode, found.group(1) if found else ''
+if not want41:
+    fail('FoxyTests/PageHashTests.swift no longer holds the number expected of the page-hash folder: '
+         'nothing runs the Swift rule and the tool against each other')
+else:
+    fx41 = tempfile.mkdtemp(prefix='foxy-page-hash-')
+    try:
+        # the same files as PageHashTests.files, and its one empty folder
+        for path, data in [('index.html', b'<p>page</p>\n'), ('ind', b''), ('img-x.js', b'x'), ('b.js', b'b'),
+                           ('img/a.png', b'\x89PNG'), ('img/deep/c.txt', b'c'),
+                           ('.DS_Store', b'x'), ('.hidden/in.js', b'x'), ('img/.keep', b'')]:
+            os.makedirs(os.path.dirname(os.path.join(fx41, path)), exist_ok=True)
+            open(os.path.join(fx41, path), 'wb').write(data)
+        os.makedirs(os.path.join(fx41, 'empty'))
+        code, got = tool41_says('--dir', fx41)
+        problems41 = []
+        if code != 0 or got != want41.group(1):
+            problems41.append('tools/page-hash.py prints %s for the folder PageHashTests expects %s of: the tool and '
+                              'the app no longer follow one rule' % (got or 'no number', want41.group(1)))
+        os.symlink('b.js', os.path.join(fx41, 'img', 'link.js'))
+        code, got = tool41_says('--dir', fx41)
+        if code == 0 or got:
+            problems41.append('tools/page-hash.py prints a number for a folder with a link in it: '
+                              'it would cover less than the page loads')
+    finally:
+        shutil.rmtree(fx41, ignore_errors=True)
+    # the same commit under two names must be the same number; without git, or
+    # without a commit, there is nothing to spell two ways
+    sha41 = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True)
+    if sha41.returncode == 0 and sha41.stdout.strip():
+        a = tool41_says('HEAD')
+        b = tool41_says(sha41.stdout.strip())
+        if a != b or not a[1]:
+            problems41.append('tools/page-hash.py HEAD prints %s and the same commit by its id prints %s'
+                              % (a[1] or 'no number', b[1] or 'no number'))
+    for problem in problems41:
+        fail(problem)
+    if not problems41:
+        ok('tools/page-hash.py, run over a folder with folders in it, prints the number the Swift test expects, '
+           'none for a link, and one number for a commit however it is spelled')
 
 
 # ---- 42. tap to pay: the two sides of the bridge agree on the words ---------

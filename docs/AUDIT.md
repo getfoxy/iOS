@@ -159,20 +159,35 @@ repository at that commit.
 **What the number is.** `FoxyWebView.stageWebFiles` copies the app bundle's
 `Web/` folder into the app's web directory at launch — the only folder the web
 view may load from — and `FoxyWebView.manifestHash` then hashes what it staged.
-One line per file, `<sha256 of its bytes>␠␠<name>`, sorted by name as bytes,
-names beginning with a dot left out; the manifest hash is the SHA-256 of those
-lines joined. The name is hashed with the content, so a file added, removed or
-renamed changes the number even when no file's content changed. It is the format
-`shasum -a 256` prints, so anyone can recompute it without either program:
+It covers every regular file under that folder, at any depth, each named by its
+path from the folder (`index.html`, `img/card-fx1.png`). One line per file,
+`<sha256 of its bytes>␠␠<path>`, sorted by path as bytes; a file whose name
+begins with a dot is left out, and so is everything inside a folder whose name
+does. The manifest hash is the SHA-256 of those lines joined. The path is hashed
+with the content, so a file added, removed, renamed or moved changes the number
+even when no file's content changed. Anything that is neither a regular file nor
+a folder, a symbolic link for one, leaves no number at all rather than one that
+covers less than the page loads. It is the format `shasum -a 256` prints, so
+anyone can recompute it without either program:
 
 ```
-( cd Web && ls | grep -v '^\.' | LC_ALL=C sort | tr '\n' '\0' \
-    | xargs -0 shasum -a 256 ) | shasum -a 256
+( cd Web && find . -type f -not -path '*/.*' | sed 's|^\./||' | LC_ALL=C sort \
+    | tr '\n' '\0' | xargs -0 shasum -a 256 ) | shasum -a 256
 ```
 
 That rule is written down in `tools/page-hash.py`'s header; the Swift follows
 it, and smoke check 41 holds the two sides together — that the app still hashes
-the folder it staged, by that rule, and still hands the result to the page.
+the folder it staged, by that rule, and still hands the result to the page. Both
+are also run: the tool by smoke check 41 and the Swift by
+`FoxyTests/PageHashTests`, over the same small folder with folders in it, and
+one number is expected of both.
+
+Until this rule the hash looked only at the top of `Web/`, which had no folders.
+A tree without folders gives the same number under either rule. From the commit
+that added `Web/img` until the rule changed, the app showed no number (it read
+the folder as a file, failed, and by design shows nothing rather than a hash of
+less), and the tool's answer for a commit depended on how the commit was
+spelled; a number recorded for those commits is not one to compare with.
 
 **With a build.** `sh tools/sim-build.sh` prints the built app's page hash on
 stderr, over `Foxy.app/Web` rather than the tree
@@ -232,8 +247,8 @@ once went red when two bridge actions were added to THREAT-MODEL's table and
 not to its list. It is the half of
 the Swift tests that need Foxy.app on an iOS simulator, which the `native` job
 cannot build: `BridgeTests`, `NativeSeedTests`, `RouteTests`, `SeedScreenTests`,
-`CounterRangeCheckTests`, `AnswerCapTests`, `PromptQueueTests` and
-`NativeRulesBridgeTests`. Foxy links Tor, so the app cannot build without it and
+`CounterRangeCheckTests`, `AnswerCapTests`, `PromptQueueTests`,
+`NativeRulesBridgeTests` and `PageHashTests`. Foxy links Tor, so the app cannot build without it and
 `Vendor/TorPod/tor.xcframework` is not in the repository: the job builds it from
 source on a cache miss (hours) and restores it after, keyed on the files that
 decide its bytes. It does not take the cache's word for what it restored — smoke
@@ -289,7 +304,7 @@ having read the code**, which is where a reviewer's time is worth most.
 |---|---|---|---|
 | The shipped page and wallet are the sources in `build/` | `build/README.md`, "How the shipped files are made" above | `join-sources.py --check`; `verify-shipped.sh` from a clean export of HEAD; smoke 1 | every push |
 | The page runs no script it did not ship | `THREAT-MODEL.md` §1 | smoke 16 | every push |
-| The page on a phone is the page in this repository | "The page on the phone" above | smoke 41 (the app still hashes what it staged, by the same rule, and still tells the page); the comparison itself is a person reading the drawer against `python3 tools/page-hash.py <commit>` | every push (the code); **by hand, on a phone** (the comparison) |
+| The page on a phone is the page in this repository | "The page on the phone" above | smoke 41 (the app still hashes what it staged, by the same rule, and still tells the page; the tool prints the number `PageHashTests` expects of the Swift for one folder); `PageHashTests` (the Swift, run over that folder); the comparison itself is a person reading the drawer against `python3 tools/page-hash.py <commit>` | every push (the code and the tool); **on a Mac, when run** (`PageHashTests`); **by hand, on a phone** (the comparison) |
 | The bridge exposes exactly these actions | `THREAT-MODEL.md` §1 | `FoxyTests/BridgeTests.swift` | **on demand** (the `simulator` job), and by hand on a Mac |
 | What each action needs before it acts | `THREAT-MODEL.md` §1, the table | `tests/bridge-matrix.js`, both ways | every push |
 | Only the main frame of a `file:` page is answered | `THREAT-MODEL.md` §1 | `bridge-matrix.js` (the guard is still there); `BridgeTests` (it behaves) | every push; simulator |
@@ -323,8 +338,8 @@ Two things worth knowing about that "when":
   simulator suite runs 382 — all of `FoxyTests`, with everything that needs
   `Foxy.app` compiled in: `BridgeTests`, `NativeSeedTests`, `RouteTests`,
   `SeedScreenTests`, `CounterRangeCheckTests`, `AnswerCapTests`,
-  `PromptQueueTests`, `NativeRulesBridgeTests`, and the tap, Nostr, onion, Orbot
-  and Tor-seed tests. An on-demand `simulator` job runs them, building Tor from
+  `PromptQueueTests`, `NativeRulesBridgeTests`, `PageHashTests`, and the tap,
+  Nostr, onion, Orbot and Tor-seed tests. An on-demand `simulator` job runs them, building Tor from
   source the first time; on push they do not run, so they are as fresh as the
   last time someone ran `sh tools/unit-tests.sh` on a Mac. That is why
   `tests/bridge-matrix.js` reads the sources as text: it runs on every push.

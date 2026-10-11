@@ -23,25 +23,32 @@ shows the result, and this prints the same string from the tree.
 
 THE RULE, WHICH THE APP FOLLOWS TOO
 
-The set is every regular file directly in Web/ — the folder project.yml bundles
-whole, and the folder FoxyWebView.stageWebFiles copies into the app's web
-directory at launch. Not recursive: Web/ has no subdirectories, and if it ever
-grows one this tool and the app would have to be changed together. Files whose
-name begins with a dot are left out, because .DS_Store and friends are the
-machine's, not the page's, and a Finder window should not change the number.
-Nothing else is filtered: VENDOR.md is staged with the rest and so it is hashed
-with the rest.
+The set is every regular file under Web/, at any depth — the folder project.yml
+bundles whole, and the folder FoxyWebView.stageWebFiles copies, subfolders and
+all, into the app's web directory at launch. A file is named by its path from
+Web/, with a slash between the parts: index.html, img/card-fx1.png. A file whose
+name begins with a dot is left out, and so is everything inside a folder whose
+name does, because .DS_Store and friends are the machine's, not the page's, and
+a Finder window should not change the number. Nothing else is filtered:
+VENDOR.md is staged with the rest and so it is hashed with the rest.
+
+Anything that is neither a regular file nor a folder — a symbolic link, a
+submodule — gets no number at all. The web view would follow a link, and a
+number that covered less than the page loads would be worse than none.
 
 For each file, one line:
 
-    <sha256 of its bytes><space><space><name>\n
+    <sha256 of its bytes><space><space><path from Web/>\n
 
-sorted by name compared as bytes, and the manifest hash is the SHA-256 of those
-lines joined. That is exactly what `shasum -a 256` prints for those files in
-that order, so anyone can recompute the whole thing with shasum alone:
+sorted by that path compared as bytes, and the manifest hash is the SHA-256 of
+those lines joined. That is exactly what `shasum -a 256` prints for those files
+in that order, so anyone can recompute the whole thing with shasum alone:
 
-    ( cd Web && ls | grep -v '^\\.' | LC_ALL=C sort | tr '\\n' '\\0' \\
-        | xargs -0 shasum -a 256 ) | shasum -a 256
+    ( cd Web && find . -type f -not -path '*/.*' | sed 's|^\\./||' | LC_ALL=C sort \\
+        | tr '\\n' '\\0' | xargs -0 shasum -a 256 ) | shasum -a 256
+
+A tree with no subfolders gives the number it gave when the rule looked only at
+the top of Web/: the lines are the same lines.
 
 The name is hashed alongside the content so that a file added, removed or
 renamed changes the number even when no file's content changed. A digest over
@@ -55,8 +62,9 @@ keychain and the seed screens are compiled Swift, and no number on this screen
 covers them. A phone whose page hash matches is running the reviewed page
 inside a native app that is still taken on trust.
 
-Needs python3. With a commit argument it needs git and reads that commit
-through `git show`, so nothing uncommitted takes part. No network.
+Needs python3. With a commit argument it needs git and reads that commit's
+tree, each file by its object id, so nothing uncommitted takes part and the
+number does not depend on how the commit was spelled. No network.
 """
 
 import hashlib
@@ -67,32 +75,73 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The one place the rule is written as code. The app's Swift copy is
-# FoxyWebView.manifestHash; smoke check 41 holds the two together.
+# FoxyWebView.manifestHash; smoke check 41 holds the two together, and each is
+# run over the same small folder with one number expected of both (smoke 41
+# here, FoxyTests/PageHashTests there).
 WEB = 'Web'
 
 
-def names_at_commit(commit):
-    out = subprocess.run(['git', '-C', HERE, 'ls-tree', '--name-only', commit, WEB + '/'],
-                         capture_output=True, text=True, check=True).stdout
-    return [p.split('/', 1)[1] for p in out.split('\n') if p.startswith(WEB + '/') and '/' not in p.split('/', 1)[1]]
+class NoNumber(Exception):
+    """Something under Web/ the rule cannot cover: say so instead of hashing less."""
+
+
+def hidden(path):
+    return any(part.startswith('.') for part in path.split('/'))
+
+
+def files_at_commit(commit):
+    """{path from Web/: bytes} for every regular file under Web/ at a commit."""
+    git = lambda *a: subprocess.run(('git', '-C', HERE) + a, capture_output=True, check=True).stdout
+    found = {}
+    # -r walks the folders and lists only what is in them; -z keeps a path with
+    # odd characters as it is instead of quoted
+    for entry in git('ls-tree', '-r', '-z', commit, '--', WEB + '/').split(b'\0'):
+        if not entry:
+            continue
+        meta, path = entry.split(b'\t', 1)
+        mode, kind, oid = meta.decode().split()
+        path = path.decode('utf-8')[len(WEB) + 1:]
+        if hidden(path):
+            continue
+        if kind != 'blob' or mode not in ('100644', '100755'):
+            raise NoNumber('%s/%s is not a regular file at %s' % (WEB, path, commit))
+        # by object id, not by "<commit>:<path>": the bytes are the file's and
+        # nothing about the way the commit was named can reach them
+        found[path] = git('cat-file', 'blob', oid)
+    return found
+
+
+def files_in_folder(d):
+    """{path from the folder: bytes} for every regular file under it."""
+    found = {}
+    for here, folders, names in os.walk(d):
+        rel = os.path.relpath(here, d).replace(os.sep, '/')
+        rel = '' if rel == '.' else rel + '/'
+        # os.walk lists a link to a folder among the folders and does not enter it
+        for n in folders + names:
+            full = os.path.join(here, n)
+            if n.startswith('.'):
+                continue
+            if os.path.islink(full) or not (os.path.isdir(full) or os.path.isfile(full)):
+                raise NoNumber('%s%s is neither a regular file nor a folder' % (rel, n))
+        folders[:] = [f for f in folders if not f.startswith('.')]
+        for n in names:
+            if not n.startswith('.'):
+                found[rel + n] = open(os.path.join(here, n), 'rb').read()
+    return found
 
 
 def lines(commit=None, folder=None):
     """The manifest lines, in order: one per staged file, shasum's own format."""
     if commit:
-        names = names_at_commit(commit)
-        read = lambda n: subprocess.run(['git', '-C', HERE, 'show', '%s:%s/%s' % (commit, WEB, n)],
-                                        capture_output=True, check=True).stdout
+        files = files_at_commit(commit)
     else:
         # a built Foxy.app/Web when one is named, so a build can record the page
         # it actually carries rather than the page the tree happened to hold
-        d = folder or os.path.join(HERE, WEB)
-        names = [n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n))]
-        read = lambda n: open(os.path.join(d, n), 'rb').read()
-    names = [n for n in names if not n.startswith('.')]
-    # sorted by name as bytes, which is what the app's sort does
-    names.sort(key=lambda n: n.encode('utf-8'))
-    return ['%s  %s\n' % (hashlib.sha256(read(n)).hexdigest(), n) for n in names]
+        files = files_in_folder(folder or os.path.join(HERE, WEB))
+    # sorted by path as bytes, which is what the app's sort does
+    return ['%s  %s\n' % (hashlib.sha256(files[n]).hexdigest(), n)
+            for n in sorted(files, key=lambda n: n.encode('utf-8'))]
 
 
 def page_hash(commit=None, folder=None):
@@ -114,7 +163,11 @@ def main(argv):
     if folder and not os.path.isdir(folder):
         print('no folder at %s' % folder)
         return 1
-    digest, ls = page_hash(commit, folder)
+    try:
+        digest, ls = page_hash(commit, folder)
+    except NoNumber as e:
+        print('no number: %s' % e)
+        return 1
     if not digest:
         print('no files in %s — nothing to hash' % (folder or WEB + '/'))
         return 1
