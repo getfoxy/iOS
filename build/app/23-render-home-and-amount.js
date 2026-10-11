@@ -161,15 +161,15 @@
       },
       priceCollapsed: !!s.priceCollapsed, priceExpanded: !s.priceCollapsed,
       /* The banner is the one thing on the home screen that says how Foxy
-       * reaches the world, and it said it in three words. Tapping it says the
-       * rest.
+       * reaches the world, and it says it in a few words: one, "Tor", when
+       * Tor is carrying everything. Tapping it says the rest.
        *
        * It used to be fixed markup: "Secure Tor Connection" was on the home
        * screen whenever the home screen was, whatever the route underneath it
        * was doing. Someone who tapped past the gate to continue unprotected
        * was told their connection was secure while their IP address was in
        * the clear. Now it is drawn from the route and
-       * says only what is true of it: blue and secure when Tor is carrying
+       * says only what is true of it: blue and just "Tor" when Tor is carrying
        * everything, red and plain about it when nothing is, and nothing at
        * all while Tor is still connecting — there is no claim to make yet,
        * and the gate is already saying so. */
@@ -206,11 +206,12 @@
 
   /* The home banner's three states, from the route as it is right now.
    *
-   * Secure is the strict reading: Tor up AND not continuing unprotected.
-   * Anything short of that is not a secure connection and must not be
-   * described as one. Red is for the one state where the person is actually
-   * exposed and might not know it; while Tor is merely connecting the banner
-   * is absent, because nothing has been claimed and nothing has leaked. */
+   * Secure is the strict reading: Tor up AND not continuing unprotected, and
+   * the banner then says just Tor. Anything short of that is not a secure
+   * connection and must not be described as one. Red is for the one state
+   * where the person is actually exposed and might not know it; while Tor is
+   * merely connecting the banner is absent, because nothing has been claimed
+   * and nothing has leaked. */
   torBannerVals() {
     const W = window.FoxyWallet;
     const p = (W && W.privacy) ? W.privacy() : null;
@@ -222,7 +223,7 @@
      * wifi, every request times out, the path monitor says none, and the
      * control port still says done. So the home screen told somebody who had
      * deliberately gone offline, on a phone that could not reach a mint, that
-     * they had a Secure Tor Connection.
+     * their connection was secure.
      *
      * This is the one banner whose whole job is to make a claim about the
      * connection, so it now asks what the rest of the app asks: a route is Tor
@@ -269,7 +270,7 @@
      * screen used to be:
      *
      *   SECURING YOUR CONNECTION   a network, and Tor at work on a circuit:
-     *                              nothing to do, it turns to Secure by itself
+     *                              nothing to do, it turns to Tor by itself
      *   OFFLINE - NO CONNECTION    no network at all
      *   CANNOT CONNECT             a network, and Tor has stopped or given up:
      *                              the tap brings the screen with the ways on
@@ -286,7 +287,7 @@
            : making ? 'SECURING YOUR CONNECTION' : 'CANNOT CONNECT \u2014 TAP TO RETRY')
         : exposed ? 'IP Address Exposed'
         : viaOrbot ? 'Connected Via Orbot'
-        : viaVpn ? 'Connected To Your VPN' : 'Secure Tor Connection',
+        : viaVpn ? 'Connected To Your VPN' : 'Tor',
       torBannerBg: offline ? '#E6D8A8' : exposed ? '#FF5C5C'
         : (viaOrbot || viaVpn) ? '#E6D8A8' : '#BFE3EC',
       torBannerInk: offline ? '#3A2F0B' : exposed ? '#3A0B0B'

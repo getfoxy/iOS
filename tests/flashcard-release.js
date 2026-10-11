@@ -330,8 +330,12 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     Hh.sheet.length = 0;
     Hh.circuits.length = 0;
     const out = await tap(Hh, c, (link) => Hh.W.cardWithdraw(link, { pin: '1234' }));
-    ok(out.sats === 500 && out.card === undefined && Hh.trace.filter((x) => x === 'end' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && asked(Hh, '/v1/checkstate') === 0 && asked(Hh, '/v1/swap') === 1,
+    ok(out.sats === 500 && Hh.trace.filter((x) => x === 'end' || x === 'mint /v1/swap').join(' ') === 'end mint /v1/swap' && asked(Hh, '/v1/checkstate') === 0 && asked(Hh, '/v1/swap') === 1,
        'a withdrawal that does not hold lets the card go once it has signed, asks the mint nothing first, and does not read the card again', Hh.trace.join(', '));
+    /* What its result carries for the holder's screen is the card as the tap knew it, worked out from the read at its start and not read again: no
+     * pieces left, and the balance the card has. */
+    ok(out.card && out.card.balance === 0 && out.card.pieces.length === 0 && out.card.key === c.key && c.balance() === 0 && out.card.info.unspent === 0,
+       'its result carries the card as the tap knew it: worked out from the read at the start, and with nothing left on it', JSON.stringify(out.card && { balance: out.card.balance, pieces: out.card.pieces.length }));
 
     // the card leaves part-way through signing: the sheet ends in an error, and what it signed is held for its next tap
     c.tap();

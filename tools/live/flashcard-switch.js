@@ -251,9 +251,8 @@ async function run() {
   reader.away = false;
   vals(app).fcNotes[0].tap();
   pad(app).type(PIN);
-  await wait(app, 'the money to be on the card', () => face(app) && face(app).title === 'ON THE CARD');
-  ok('D: from the right one, a tap finishes the move', bare(app.state.fc.mint) === bare(CDK) && app.state.fc.balance === waiting && W.cardOwed().length === 0, app.state.fc.balance + ' on the card at ' + app.state.fc.mint);
-  face(app).press('DONE');
+  await wait(app, 'the money to be on the card', () => !!app.state.fc && app.state.fc.balance === waiting && !app.state.fcRoll);
+  ok('D: from the right one, a tap finishes the move', bare(app.state.fc.mint) === bare(CDK) && app.state.fc.balance === waiting && W.cardOwed().length === 0 && !face(app), app.state.fc.balance + ' on the card at ' + app.state.fc.mint);
   app.showMelt = melt0;
 
   console.log('\nF. pressed with the phone at the mint the card is going to, ' + names.cdk + ' to ' + names.nutshell);

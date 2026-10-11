@@ -67,7 +67,7 @@ async function world(pin, o) {
   /* ---- 1: the card's own rules, as the model has them (the bytes) ------------------------------------------------------------ */
   {
     const fresh = newCard(P, undefined, { format: 4 });
-    ok((await fresh.send(SEL)) === '01119000', 'the latest card says 1.17 when chosen');
+    ok((await fresh.send(SEL)) === '01129000', 'the latest card says 1.18 when chosen');
     const before = newCard(P, undefined, { format: 4, software: 16 });
     await before.send(SEL);
     before.state.owner = OWNER_PUB;
@@ -142,7 +142,7 @@ async function world(pin, o) {
     ok(c.key !== oldKey && /^0[23][0-9a-f]{64}$/.test(c.key), 'a fresh key', oldKey.slice(0, 10) + ' -> ' + c.key.slice(0, 10));
     ok((await c.send('b010000000')) === c.key + '9000', 'GET_PUBKEY says the new key');
     const info = await c.send('b001010000');
-    const want = '01' + '11' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
+    const want = '01' + '12' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
       + '00000000' + '00' + NOW.toString(16).padStart(8, '0') + '00000000' + '00000000' + '00'                // no limit, no owner, the clock kept, no window, nothing spent, no change grant
       + '00000000' + '00000000' + '00000000' + '9000';                                                         // no tap limit, no allowance, none of it spent
     ok(info === want, 'GET_INFO reads as a new card, with its clock kept', info.slice(0, 60) + ' / ' + want.slice(0, 60));
@@ -228,7 +228,7 @@ async function world(pin, o) {
     ok(after.key !== oldKey && after.info.owner === false && after.info.pin === 'none' && after.info.hasRecord === false && after.info.setUp === false && after.info.tries === 3
        && after.info.limit === 0 && after.info.tapLimit === 0 && after.info.noPin.limit === 0 && after.record.mint === '' && after.record.refundKey === '' && after.balance === 0,
        'read again, it is a card out of its packet with another key', JSON.stringify([after.info.owner, after.info.pin, after.info.hasRecord, after.info.tries]));
-    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '1.17', 'with its clock and its software', after.info.now + ' ' + after.info.version);
+    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '1.18', 'with its clock and its software', after.info.now + ' ' + after.info.version);
     ok(after.info.headerBits === '' && card.state.hardest === 0, 'and the ratchet let go');
     ok((await why(H.W.cardReset(card))) === 'no-owner', 'it cannot be reset again: nobody owns it');
 
@@ -493,6 +493,7 @@ async function world(pin, o) {
   /* ---- 7: the wait of 1.17: ten signatures for the first limit's worth over, where 1.13 to 1.16 asked seven --------------- */
   {
     const info = (W, v) => W.cardParse.info('01' + v + '80' + '00' + '00' + '80' + 'ff' + '01' + '04' + '03' + '00' + '01' + '00000000' + '01' + '00000000'.repeat(3) + '00' + '00000000'.repeat(3));
+    ok(info(P.W, '12').waitMore === 4 && info(P.W, '11').waitMore === 3 && info(P.W, '10').waitMore === 3 && info(P.W, '12').waitOver === 10, 'and each further limit’s worth waits 4 on 1.18 and 3 before');
     ok(info(P.W, '11').waitOver === 10 && info(P.W, '10').waitOver === 7 && info(P.W, '0f').waitOver === 7 && info(P.W, '0d').waitOver === 7,
        'GET_INFO’s version says it: the first limit’s worth over waits 10 on 1.17 and 7 on 1.13 to 1.16', [info(P.W, '11').waitOver, info(P.W, '10').waitOver].join());
     // the wallet’s sums: a limit of 100 and a payment that leaves 250 is three limits’ worth, the first over (+ one further)
@@ -516,8 +517,8 @@ async function world(pin, o) {
       return { waited: w.card.state.waited, paid, version: w.card.version };
     };
     const now = await run(), then = await run(16);
-    ok(now.version === 17 && then.version === 16 && now.paid.sats === 500 && then.paid.sats === 500, 'a payment of 500 against a limit of 200, on the card of 1.17 and on the card of 1.16');
-    ok(now.waited - then.waited === 3, 'the model card of 1.17 waits ten where the one of 1.16 waits seven: three more askings for the same payment', now.waited + ' and ' + then.waited);
+    ok(now.version === 18 && then.version === 16 && now.paid.sats === 500 && then.paid.sats === 500, 'a payment of 500 against a limit of 200, on the card of 1.18 and on the card of 1.16');
+    ok(now.waited - then.waited === 4 && now.waited === 13 && then.waited === 9, 'the model card of 1.18 waits four more askings than the one of 1.16 for the same payment: ten and four against seven and three, less a wait each for the change it made', now.waited + ' and ' + then.waited);
     // the wait itself, at the byte: a payment begun and signed against a limit, counted by the answers 0001
     const c = newCard(P, undefined, { format: 4 });
     const c16 = newCard(P, undefined, { format: 4, software: 16 });

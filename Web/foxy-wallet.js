@@ -8907,6 +8907,8 @@
     var noPinKnown = tapKnown && b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 16));
     // software 1.17 and on: the owner can reset the card to what it was in its packet (RESET, `FoxyWallet.cardReset`)
     var resetKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 17));
+    // 1.18: each further limit's worth over waits four askings, not three
+    var moreKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 18));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -8952,6 +8954,8 @@
              /* `waitOver`: the signatures a card of this software asks for the first limit's worth over its limit on one payment:
               * seven on 1.13 to 1.16, ten from 1.17 (`cardWaitSigns`). */
              waitOver: resetKnown ? CARD_WAIT_OVER_17 : CARD_WAIT_OVER,
+             // `waitMore`: the askings for each further limit's worth: four from 1.18, three before (`cardWaitSigns`)
+             waitMore: moreKnown ? CARD_WAIT_MORE_18 : CARD_WAIT_MORE,
              /* This tap is the one after a payment: the card lets pieces be put
               * on with no PIN (the change). Said by the card for this tap only. */
              changeDue: h.length >= 60 && b(29) === 1,
@@ -9171,6 +9175,8 @@
    * as for `costed`): the further ones are three still. */
   var CARD_WAIT_OVER_17 = 10;
   var CARD_WAIT_MORE = 3;
+  // and from software 1.18 each further limit's worth waits four (`info.waitMore`)
+  var CARD_WAIT_MORE_18 = 4;
   var CARD_WAIT_UNITS = 255;
   // the longest a till asks anybody to hold a card for, in seconds: a payment that would wait longer is not begun
   var CARD_WAIT_MOST = 40;
@@ -9199,8 +9205,9 @@
    * without one, and takes the same off.
    * `over`: the signatures for the first limit's worth over the limit, which the card says by its software (`info.waitOver`):
    * 7 from 1.13 to 1.16 (and where it is not given), 10 from 1.17. */
-  function cardWaitSigns(limit, leaves, made, second, costed, over) {
+  function cardWaitSigns(limit, leaves, made, second, costed, over, more) {
     var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
+    var step = Number(more) > 0 ? Math.round(Number(more)) : CARD_WAIT_MORE;
     var l = Math.round(Number(limit) || 0), n = Math.round(Number(leaves) || 0);
     var pieces = Math.max(0, Math.round(Number(made) || 0));
     var done = costed ? Math.floor(2 * pieces / 3) : pieces;
@@ -9208,16 +9215,17 @@
     var units = n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
     if (second && units <= 1) units = 2;
     if (units <= 1) return 0;
-    return Math.max(0, first + CARD_WAIT_MORE * (units - 2) - done);
+    return Math.max(0, first + step * (units - 2) - done);
   }
   /* The most limits' worth a payment can be of and still be waited for in no more
    * than CARD_WAIT_MOST seconds (software 1.13 and on), to say what can be taken. It
    * takes nothing off for change, so it is the same whatever the card counts that
    * for (`costed`) and a part of that size is waited for no longer than that. */
-  function cardWaitUnitsMost(over) {
+  function cardWaitUnitsMost(over, more) {
     var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
+    var step = Number(more) > 0 ? Math.round(Number(more)) : CARD_WAIT_MORE;
     var units = 2;
-    while (units < CARD_WAIT_UNITS && cardWaitSeconds(first + CARD_WAIT_MORE * (units - 1)) <= CARD_WAIT_MOST) units += 1;
+    while (units < CARD_WAIT_UNITS && cardWaitSeconds(first + step * (units - 1)) <= CARD_WAIT_MOST) units += 1;
     return units;
   }
   /* The same by the rule of software 1.12: the card counts what leaves it for
@@ -12891,7 +12899,7 @@
              * which is what a payment within the limit waits for, and a payment over it too: the card does not say which, and it is said for
              * what it may be until it goes on past that. A card of 1.13 does not wait for change, only for the limit, and says so: the work of
              * making it is said as it is done (`progress`, `change`, above). */
-            try { if (typeof progress === 'function') progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
+            try { if (typeof progress === 'function') progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
                                                                 sum: plan.leaves, want: wantN, making: !cardIsShaped(card) && plan.cardChange > 0 && polls <= CARD_WAIT_SIGNS }); } catch (e) {}
             return again();
           });
@@ -13387,6 +13395,29 @@
     }, function () { return { sats: 0, made: false }; });
   }
 
+  /* The card as a holder's own taking-off leaves it, for the screen that has to show it. The card is let go as soon as it has signed and
+   * is not read again, so this is what was read at the start of the tap, less the pieces it signed for (their places are spent now).
+   * A limit that was lifted and put back begins the day again (`cardUnderPin`): nothing of it is spent, the no-PIN allowance's count goes
+   * with it, and the day turns 24 hours on from the card's own clock. Change made for the card and anything else that goes on it later
+   * is not in it: the card's next tap shows that. Null for a read that does not list the pieces whole (`bare`). */
+  function cardAfterTake(card, nonces, lifted) {
+    if (!card || card.bare || !Array.isArray(card.pieces) || !card.info) return null;
+    var gone = {};
+    (nonces || []).forEach(function (n) { if (n) gone[n] = true; });
+    var left = card.pieces.filter(function (x) { return !(x && gone[x.nonce]); });
+    var info = Object.assign({}, card.info, { unspent: left.length, spent: card.info.spent + (card.pieces.length - left.length) });
+    if (lifted && Number(info.limit) > 0) {
+      info.windowStart = info.now;
+      info.spentToday = 0;
+      info.noPin = Object.assign({}, info.noPin, { spent: 0 });
+    }
+    return Object.assign({}, card, {
+      info: info, pieces: left, balance: left.reduce(function (n, x) { return n + x.amount; }, 0),
+      slots: (card.slots || []).map(function (x) { return (x && x.state === 'unspent' && gone[x.nonce]) ? { state: 'spent', i: x.i } : x; }),
+      day: cardDayOf(info), noPin: cardNoPinOf(info),
+    });
+  }
+
   /* The one flow behind being paid by a card and emptying one (21a-flashcard.js). */
   function cardTake(link, o, memo) {
     // `info`: what a step is about, where the screen needs it (the payment's entry, for a step after the card has signed)
@@ -13410,6 +13441,8 @@
     try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     var t = cardTalk(link);
     var card, picked, worth, fee, row, result, own, cap, tapCap = null, lift = false, released = false, signedNonces = [];
+    // the card as a holder's own taking-off leaves it (`cardAfterTake`), for the result and for a mint that has not answered
+    var afterCard = null;
     // a one-signature card (format 4): the signatures it is asked for, and rows beside this payment's own to swap with it
     var all4 = false, groups = [], moreRows = [], cheaper = null;
     // a card that makes a payment's change itself (software 1.12): it is asked to, for a payment made online (`cardOwnChangeCut`)
@@ -13640,8 +13673,8 @@
           var back = worth - fee - want;
           var cut = back > 0 ? cardOwnChangeCut(w, card, groups[0] || [], back) : [];
           var madeBy = cut.reduce(function (n, a) { return n + a; }, 0);
-          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second, costed, card.info.waitOver);
-          unitsMost = cardWaitUnitsMost(card.info.waitOver);
+          signs = cardWaitSigns(tap.limited ? tap.limit : 0, worth - madeBy, cut.length, second, costed, card.info.waitOver, card.info.waitMore);
+          unitsMost = cardWaitUnitsMost(card.info.waitOver, card.info.waitMore);
         } else {
           // 1.12: what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole
           signs = ownChange ? cardWaitSigns12(tap.limit, want + fee, worth - fee > want)
@@ -13653,7 +13686,7 @@
           throw cardError('tap-limit', 'This card would have to be held for ' + secs + ' seconds to pay this. Take it in parts of '
             + mostNow + ' sats or less.', { left: mostNow, need: sumProofs(picked), limit: tap.limit, wait: secs, paced: true });
         }
-        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
+        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
       }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
@@ -13716,6 +13749,8 @@
       // with what was signed for this payment before the card left, where it was taken up again
       var signed = heldProofs.concat(fresh);
       signedNonces = signed.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
+      // a holder's own taking-off lets the card go and does not read it again (`opts.hold` does): what is on it is worked out from the read
+      if (o.lift && !o.hold) afterCard = cardAfterTake(card, signedNonces, lift);
       if (made.length) {
         row = made[0];
         moreRows = moreRows.concat(made.slice(1));
@@ -13844,7 +13879,8 @@
     }).then(function (got) {
       // held for another amount: let go now this payment is done (offline, at the next settling)
       if (offline) { if (letGoAfter) cardHeldRelease(letGoAfter, null); return got; }
-      result = { sats: want, hash: row.id, change: null, torn: tornSats };
+      result = /** @type {any} */ ({ sats: want, hash: row.id, change: null, torn: tornSats });
+      if (afterCard) result.card = afterCard;
       /* Change: what the card paid over, less what it costs to make and for the
        * card to spend again (`changeFromPile`), locked to the card again with
        * the date of what it paid with, cut to fill the gaps in its drawer, and
@@ -13882,6 +13918,10 @@
           if (!o.keepSheet) on('done');
           return result;
         });
+    }).then(null, function (e) {
+      // the mint has not answered: the card is as the tap left it all the same, and the screen that waits for the answer shows that
+      if (e && e.card === 'waiting' && afterCard) e.after = afterCard;
+      throw e;
     });
   }
 
@@ -24477,7 +24517,10 @@
      * more, for its holder's screen (`card` on the result). Only this one: a
      * till being paid learns no more of a card than it needs. A card that has
      * left by then is no failure: the money moved, and the result simply has no
-     * card on it. One that was let go when it had signed is not read again. */
+     * card on it. One that was let go when it had signed is not read again, and
+     * its result carries the card as the tap knows it instead: what was read at
+     * its start less the pieces it signed for (`cardAfterTake`). It is on the
+     * error too, if the mint has not answered (`after`, on `waiting`). */
     cardWithdraw: function (link, opts) {
       // the holder's own: where this phone is the card's owner, the day's limit is lifted, with its proof, for the taking, and put back
       return cardTake(link, Object.assign({ all: !(opts && opts.sats), lift: true }, opts || {}), 'from card').then(function (r) {

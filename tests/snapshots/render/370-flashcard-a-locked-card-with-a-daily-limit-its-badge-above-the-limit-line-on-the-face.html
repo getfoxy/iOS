@@ -1,4 +1,4 @@
-<!-- flashcard, a card with a PIN and no limit for paying without it -->
+<!-- flashcard, a locked card with a daily limit: its badge above the limit line, on the face -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -494,8 +494,11 @@
 </div>
 </div>
 <div data-card-lines="" style="position: absolute; left: 8.3cqw; bottom: 6cqw; max-width: 66cqw; display: flex; flex-direction: column; align-items: flex-start; gap: 1.2cqw;">
+<div data-card-badge="" style="max-width: 53.65cqw; text-align: left; font-family: Sora, sans-serif; font-size: 2.6cqw; font-weight: 700; letter-spacing: 0.14em; line-height: 1.4; text-transform: uppercase; color: rgb(247, 147, 26); text-wrap: balance;">
+<span class="sc-interp">Locked</span>
+</div>
 <div data-card-limit="" style="font-family: SatSymbol, Sora, sans-serif; font-size: 2.86cqw; font-weight: 600; letter-spacing: 0.24em; line-height: 1.4; color: rgba(255, 255, 255, 0.42); text-wrap: balance;">
-<span class="sc-interp">NO LIMIT</span>
+<span class="sc-interp">DAILY LIMIT $3.20</span>
 </div>
 </div>
 </div>
@@ -527,6 +530,14 @@
 </div>
 </div>
 <div role="button" aria-label="This card’s history" style="position: absolute; left: 101px; right: 0px; top: 0px; bottom: 0px; border-radius: 0 16px 16px 0; cursor: pointer;" class="scph">
+</div>
+</div>
+<div style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 0px 4px; font-family: Figtree, system-ui, sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: rgba(var(--ink-rgb),.62); line-height: 1.35;">
+<div>
+<span class="sc-interp">LEFT TODAY $0.77</span>
+</div>
+<div>
+<span class="sc-interp">THE DAY TURNS AT 12:00 AM, 1 JAN 2100</span>
 </div>
 </div>
 </div>

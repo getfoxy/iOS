@@ -1,11 +1,11 @@
-<!-- overlay: a new card’s PIN, with NO PIN under it -->
+<!-- flashcard, a card of the beaker design EL1 with no PIN, its lines on the face -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
 <div data-foxy-app="1" data-foxy-theme="true" style="width: 100%; height: 100%; position: relative;">
-<div data-foxy-theme="dark" style="height: 100%; position: relative; box-sizing: border-box; transition: padding .16s ease; --acc-set: #E8622A; --acc-lt-set: #F79A3C; --acc-dk-set: #C24A1B; --acc-rgb-set: 232,98,42; padding-bottom: 0px;">
+<div data-foxy-theme="dark" style="height: 100%; position: relative; box-sizing: border-box; padding-bottom: 0px; transition: padding .16s ease; --acc-set: #E8622A; --acc-lt-set: #F79A3C; --acc-dk-set: #C24A1B; --acc-rgb-set: 232,98,42;">
 <input type="text" tabindex="-1" aria-hidden="true" autocomplete="off" autocapitalize="off" spellcheck="false" style="position: fixed; left: 0px; bottom: 0px; width: 1px; height: 1px; padding: 0px; border: 0px; outline: none; opacity: 0; font-size: 16px; background: transparent; color: transparent; caret-color: transparent; pointer-events: none; z-index: -1;">
-<div data-template="home" style="height: 100%; display: flex; flex-direction: column; font-family: Figtree, system-ui, sans-serif; padding-top: 52px; box-sizing: border-box; overflow: hidden; position: relative; background-image: radial-gradient(125% 62% at 50% 0%,rgba(var(--frost-rgb),.16) 0%,rgba(var(--frost-rgb),0) 62%),radial-gradient(circle at 18% 22%,rgba(255,255,255,.05) 0 1px,transparent 1px),radial-gradient(circle at 68% 58%,rgba(255,255,255,.04) 0 1px,transparent 1px),radial-gradient(circle at 42% 82%,rgba(255,255,255,.035) 0 1px,transparent 1px);">
+<div data-template="list" style="height: 100%; display: flex; flex-direction: column; font-family: SatSymbol, Figtree, system-ui, sans-serif; padding-top: 52px; box-sizing: border-box; overflow: hidden; position: relative; background-image: radial-gradient(125% 62% at 50% 0%,rgba(var(--frost-rgb),.16) 0%,rgba(var(--frost-rgb),0) 62%),radial-gradient(circle at 18% 22%,rgba(255,255,255,.05) 0 1px,transparent 1px),radial-gradient(circle at 68% 58%,rgba(255,255,255,.04) 0 1px,transparent 1px),radial-gradient(circle at 42% 82%,rgba(255,255,255,.035) 0 1px,transparent 1px); animation: foxyIn .22s ease;">
 <div data-snow="home" style="position: absolute; left: 0px; right: 0px; top: 0px; bottom: 0px; overflow: hidden; pointer-events: none; z-index: 1;">
 <i style="left: 67.33%; width: 3.6px; height: 3.6px; --drift: -34px; --fallTo: 900px; animation-duration: 22.69s; animation-delay: -17.66s;">
 <i style="--sway: 9px; animation-duration: 5.34s; animation-delay: -17.66s;">
@@ -368,79 +368,149 @@
 </i>
 </i>
 </div>
-<div style="position: absolute; left: 22px; top: 56px; z-index: 29; width: 64px; height: 64px; border-radius: 50%; box-sizing: border-box; border: 2.5px solid transparent; animation: none; pointer-events: none;">
-</div>
-<div role="button" aria-label="History" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp0">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+<div role="button" aria-label="This card’s history" style="position: absolute; left: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34); visibility: visible;" class="scp0">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2">
 <path d="M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z">
 </path>
 </svg>
 </div>
-<div style="position: absolute; right: 22px; top: 56px; z-index: 27; width: 52px; height: 52px; border-radius: 50%; animation: alertGlow 10.4s ease-in-out infinite; pointer-events: none;">
-</div>
-<div style="position: absolute; right: 22px; top: 56px; z-index: 29; width: 64px; height: 64px; border-radius: 50%; box-sizing: border-box; border-width: 2.5px; border-style: solid; border-color: rgb(255, 92, 92) rgba(255, 92, 92, 0.28) transparent transparent; border-image: none; animation: foxyRing 1.15s linear infinite; pointer-events: none;">
-</div>
-<div role="button" aria-label="Menu" style="position: absolute; right: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp0">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-<path d="M4 7h16M4 12h16M4 17h16">
+<div role="button" aria-label="Close" style="position: absolute; right: 22px; top: 56px; z-index: 28; width: 64px; height: 64px; border-radius: 50%; background: var(--frost-chip); border: 1px solid var(--frost-chip-edge); display: flex; align-items: center; justify-content: center; cursor: pointer; box-sizing: border-box; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp0">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4">
+<path d="M6 6l12 12M18 6 6 18">
 </path>
 </svg>
 </div>
-<div style="flex: 1 1 0%; min-height: 0px; background: transparent; position: relative; display: flex; flex-direction: column; align-items: center; padding: 4px 0px 26px; margin-bottom: -48px; isolation: isolate; overflow: hidden; box-sizing: border-box; transition: padding .3s ease;">
+<div style="position: absolute; left: 90px; right: 90px; top: 56px; height: 64px; z-index: 27; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; pointer-events: none;">
+<div style="font-size: 19px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; white-space: nowrap;">FLASHCARD</div>
+<div style="font-size: 15px; font-weight: 600; letter-spacing: 0px; line-height: 1.15; color: rgba(var(--ink-rgb),.62); text-align: center; white-space: nowrap;">
+<span class="sc-interp">Verified At 12:00am, 31 Dec</span>
+</div>
+<div style="font-size: 15px; font-weight: 600; letter-spacing: 0px; line-height: 1.15; color: rgba(var(--ink-rgb),.62); text-align: center; white-space: nowrap;">
+<span class="sc-interp">Block 1fa7ca83…</span>
+</div>
+</div>
+<div style="flex: 1 1 0%; min-height: 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 84px 24px 62px; margin-bottom: -48px; position: relative; z-index: 1; isolation: isolate; overflow: hidden; box-sizing: border-box;">
 <div style="position: absolute; left: 0px; right: 0px; bottom: -40px; height: 210px; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 128% 100% at 50% 100%,rgba(var(--acc-rgb),.52) 0%,rgba(var(--acc-rgb),.2) 46%,rgba(var(--acc-rgb),0) 82%); animation: landingGlow 10.4s ease-in-out infinite;">
 </div>
-<div style="align-self: stretch; margin-top: 15px; display: flex; align-items: center; justify-content: center; height: 26px; font-size: 19px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; line-height: 1.3; white-space: nowrap;">
-<span class="sc-interp">BITCOIN PRICE</span>
+<div style="flex: 0 0 auto; align-self: center; width: 100%; max-width: clamp(200px,calc((100vh - 656px) * 1.587),384px); container-type: inline-size; position: relative;" data-card-design="EL1">
+<div data-snow-cap="" style="position: absolute; left: -0.7cqw; right: -0.7cqw; top: -1.3cqw; height: 5.5cqw; box-sizing: border-box; pointer-events: none; z-index: 2; border-style: solid; border-color: rgb(243, 248, 252); border-width: 2cqw 1.15cqw 0px; border-radius: 4.9cqw 4.9cqw 1cqw 1cqw / 5.5cqw 5.5cqw 1cqw 1cqw; filter: drop-shadow(0 .45cqw .5cqw rgba(0,0,0,.4)) drop-shadow(0 0 1.6cqw rgba(207,224,236,.32)); clip-path: inset(-3cqw -3cqw 100% -3cqw); animation: foxySnowDrape 22s cubic-bezier(.25,.6,.3,1) 2s forwards;">
 </div>
-<div style="font-size: 48px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; color: var(--ink); margin-top: 2px;">
-<span class="sc-interp">$ 64,000</span>
+<div data-snow-cap="" style="position: absolute; left: 2.6cqw; right: 2.6cqw; bottom: calc(100% - 1.15cqw); height: 7cqw; pointer-events: none; z-index: 2;">
+<i style="position: absolute; display: block; left: 0px; right: 0px; bottom: 0px; height: 2.5cqw; border-radius: 2.4cqw 2.4cqw 1.1cqw 1.1cqw / 2.2cqw 2.2cqw .9cqw .9cqw; background: linear-gradient(180deg, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 55%, rgb(198, 216, 230) 100%); box-shadow: 0 0 2.4cqw rgba(207,224,236,.38),inset 0 -.55cqw .7cqw rgba(140,168,190,.5); transform-origin: 50% 100%; transform: scale(.9,0); animation: foxySnowPile 30s cubic-bezier(.2,.7,.25,1) 1s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 3%; width: 9cqw; height: 3.4cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 14s cubic-bezier(.25,.7,.3,1) 3s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 13%; width: 13cqw; height: 4.6cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 18s cubic-bezier(.25,.7,.3,1) 7s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 27%; width: 8cqw; height: 3cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 12s cubic-bezier(.25,.7,.3,1) 2s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 36%; width: 15cqw; height: 5.2cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 20s cubic-bezier(.25,.7,.3,1) 10s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 52%; width: 9cqw; height: 3.3cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 13s cubic-bezier(.25,.7,.3,1) 5s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 62%; width: 12cqw; height: 4.4cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 17s cubic-bezier(.25,.7,.3,1) 12s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 76%; width: 8cqw; height: 3.1cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 12s cubic-bezier(.25,.7,.3,1) 4s forwards;">
+</i>
+<i style="position: absolute; display: block; bottom: 1.05cqw; left: 84%; width: 11cqw; height: 3.9cqw; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 16s cubic-bezier(.25,.7,.3,1) 9s forwards;">
+</i>
 </div>
-<div style="position: relative; display: flex; flex-direction: column; align-items: center; margin-top: 8px; z-index: 6;">
+<div data-card-face="" style="width: 100cqw; height: 63.02cqw; border-radius: 4.17cqw; box-sizing: border-box; position: relative; overflow: hidden; background: repeating-linear-gradient(92deg, rgba(255, 255, 255, 0.05) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, rgba(0, 0, 0, 0) 1px 4px), radial-gradient(circle at 22% 8%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 46%), linear-gradient(146deg, rgb(58, 59, 61) 0%, rgb(27, 28, 30) 38%, rgb(16, 17, 19) 72%, rgb(38, 39, 42) 100%); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6);">
+<div style="position: absolute; inset: 3.52cqw; border-radius: 2.34cqw; border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0,0,0,.5); pointer-events: none;">
 </div>
-<div style="position: relative; width: 100%; flex: 1 1 0%; min-height: 0px; margin-top: 3px; margin-bottom: 15px; cursor: pointer;">
-<svg viewBox="0 0 402 92" width="100%" height="100%" preserveAspectRatio="none" fill="none" style="display: block;">
-<path d="" fill="rgba(242,128,46,.08)" stroke="none">
+<div style="position: absolute; inset: 4.56cqw; border-radius: 1.82cqw; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.045) 0 1px, rgba(255, 255, 255, 0) 1px 5px), repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.045) 0 1px, rgba(255, 255, 255, 0) 1px 5px); pointer-events: none;">
+</div>
+<div style="position: absolute; inset: 6.25cqw; border-radius: 1.04cqw; background: radial-gradient(circle at 50% 46%, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 72%); pointer-events: none;">
+</div>
+<div style="position: absolute; left: 50%; top: 50%; width: 31.25cqw; height: 31.25cqw; transform: translate(-50%,-50%); border-radius: 50%; background: linear-gradient(150deg, rgb(46, 47, 50), rgb(18, 19, 21)); box-shadow: inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1); display: flex; align-items: center; justify-content: center; pointer-events: none;">
+<svg viewBox="0 0 236.5 366" style="height: 16.15cqw; width: 10.43cqw; display: block; opacity: 0.5;">
+<path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505">
 </path>
-<path d="" stroke="var(--acc)" stroke-width="9" stroke-linecap="round" vector-effect="non-scaling-stroke">
+<path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C">
+</path>
+<path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9">
 </path>
 </svg>
-<div data-rider="streaks" style="position: absolute; inset: 0px; pointer-events: none;">
 </div>
-<div style="display: none; position: absolute; left: 100%; top: 50%; width: 0px; height: 0px; transform-origin: 0 0; pointer-events: none; will-change: left,top,transform; visibility: hidden; transform: rotate(0deg);">
-<div style="position: absolute; left: 0px; top: 0px; background-image: url(&quot;foxy-rider.webp&quot;); background-repeat: no-repeat; transform-origin: 50% 100%; filter: drop-shadow(0 1px 3px rgba(0,0,0,.35)); transform: translate(-50%,-100%);" data-rider="body">
+<div style="position: absolute; left: 9.92cqw; top: 8.75cqw; width: 15.18cqw; height: 13.78cqw; border-radius: 1.56cqw; background: linear-gradient(150deg, rgb(232, 228, 216), rgb(169, 163, 146)); box-shadow: inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5); overflow: hidden;">
+<div style="position: absolute; left: 0px; right: 0px; top: 33%; height: 1px; background: rgba(70, 68, 60, 0.4);">
+</div>
+<div style="position: absolute; left: 0px; right: 0px; top: 66%; height: 1px; background: rgba(70, 68, 60, 0.4);">
+</div>
+<div style="position: absolute; top: 0px; bottom: 0px; left: 33%; width: 1px; background: rgba(70, 68, 60, 0.4);">
+</div>
+<div style="position: absolute; top: 0px; bottom: 0px; left: 66%; width: 1px; background: rgba(70, 68, 60, 0.4);">
+</div>
+</div>
+<div style="position: absolute; right: 7.81cqw; bottom: 6.25cqw; display: flex; flex-direction: column; align-items: center; gap: 2px;">
+<div style="font-size: 5.99cqw; font-weight: 800; line-height: 1; color: rgba(255, 255, 255, 0.5);">₿</div>
+<div style="font-family: Sora, sans-serif; font-size: 2.86cqw; font-weight: 600; letter-spacing: 0.24em; color: rgba(255, 255, 255, 0.42);">BEARER</div>
+</div>
+<div data-el1="" style="position: absolute; inset: 0px; overflow: hidden; border-radius: inherit; background: radial-gradient(120% 90% at 50% 100%, rgb(26, 29, 32) 0%, rgb(11, 12, 13) 60%, rgb(5, 5, 5) 100%); font-family: Sora, sans-serif;">
+<div style="position: absolute; inset: 0px; background: linear-gradient(115deg, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0.06) 46%, rgba(255, 255, 255, 0) 60%); pointer-events: none;">
+</div>
+<div style="position: absolute; left: 7.69cqw; top: 7.69cqw; width: 13.08cqw; height: 10.38cqw; border-radius: 1.92cqw; background-image: linear-gradient(90deg, transparent 32%, rgba(90, 55, 10, 0.3) 32% 34%, transparent 34% 66%, rgba(90, 55, 10, 0.3) 66% 68%, transparent 68%), linear-gradient(0deg, transparent 48%, rgba(90, 55, 10, 0.3) 48% 52%, transparent 52%), linear-gradient(135deg, rgb(246, 213, 138), rgb(201, 150, 63));">
+</div>
+<div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 29.81cqw; height: 44.23cqw;">
+<div style="position: absolute; inset: 0px; animation: foxyEl1Sway 3.2s ease-in-out infinite; transform-origin: 50% 90%;">
+<div style="position: absolute; left: 16.4%; width: 67.2%; top: 30%; height: 22.9%; overflow: hidden;">
+<div style="position: absolute; left: -25%; width: 150%; top: 0px; bottom: -40%; transform-origin: 50% 41%; animation: foxyEl1Slosh 3.2s ease-in-out infinite;">
+<svg viewBox="0 0 237 147" preserveAspectRatio="none" style="position: absolute; inset: 0px; width: 100%; height: 100%;">
+<g style="animation: foxyEl1FlowB 4.6s linear infinite;">
+<path d="M0 147 L0 51 L0 58.6 L3 58.1 L6 57.4 L9 56.5 L12 55.6 L15 54.5 L18 53.3 L21 52.0 L24 50.8 L27 49.5 L30 48.3 L33 47.1 L36 46.0 L39 45.1 L42 44.3 L45 43.7 L48 43.3 L51 43.0 L54 43.0 L57 43.2 L60 43.5 L63 44.1 L66 44.8 L69 45.7 L72 46.7 L75 47.8 L78 49.0 L81 50.3 L84 51.6 L87 52.8 L90 54.0 L93 55.2 L96 56.2 L99 57.1 L102 57.8 L105 58.4 L108 58.8 L111 59.0 L114 59.0 L117 58.8 L120 58.3 L123 57.7 L126 57.0 L129 56.1 L132 55.0 L135 53.9 L138 52.6 L141 51.4 L144 50.1 L147 48.9 L150 47.7 L153 46.6 L156 45.6 L159 44.7 L162 44.0 L165 43.5 L168 43.1 L171 43.0 L174 43.1 L177 43.3 L180 43.8 L183 44.4 L186 45.2 L189 46.2 L192 47.3 L195 48.4 L198 49.7 L201 50.9 L204 52.2 L207 53.4 L210 54.6 L213 55.7 L216 56.7 L219 57.5 L222 58.1 L225 58.6 L228 58.9 L231 59.0 L234 58.9 L237 58.6 L240 58.1 L243 57.4 L246 56.5 L249 55.6 L252 54.5 L255 53.3 L258 52.0 L261 50.8 L264 49.5 L267 48.3 L270 47.1 L273 46.0 L276 45.1 L279 44.3 L282 43.7 L285 43.3 L288 43.0 L291 43.0 L294 43.2 L297 43.5 L300 44.1 L303 44.8 L306 45.7 L309 46.7 L312 47.8 L315 49.0 L318 50.3 L321 51.6 L324 52.8 L327 54.0 L330 55.2 L333 56.2 L336 57.1 L339 57.8 L342 58.4 L345 58.8 L348 59.0 L351 59.0 L354 58.8 L357 58.3 L360 57.7 L363 57.0 L366 56.1 L369 55.0 L372 53.9 L375 52.6 L378 51.4 L381 50.1 L384 48.9 L387 47.7 L390 46.6 L393 45.6 L396 44.7 L399 44.0 L402 43.5 L405 43.1 L408 43.0 L411 43.1 L414 43.3 L417 43.8 L420 44.4 L423 45.2 L426 46.2 L429 47.3 L432 48.4 L435 49.7 L438 50.9 L441 52.2 L444 53.4 L447 54.6 L450 55.7 L453 56.7 L456 57.5 L459 58.1 L462 58.6 L465 58.9 L468 59.0 L471 58.9 L474 58.6 L474 147 Z" fill="#FFA24D">
+</path>
+</g>
+<g style="animation: foxyEl1Flow 2.8s linear infinite;">
+<path d="M0 147 L0 55 L0 55.0 L3 56.0 L6 56.9 L9 57.8 L12 58.6 L15 59.3 L18 59.9 L21 60.4 L24 60.7 L27 60.9 L30 61.0 L33 60.9 L36 60.7 L39 60.3 L42 59.8 L45 59.1 L48 58.4 L51 57.5 L54 56.6 L57 55.7 L60 54.8 L63 53.8 L66 52.9 L69 52.0 L72 51.2 L75 50.6 L78 50.0 L81 49.5 L84 49.2 L87 49.0 L90 49.0 L93 49.1 L96 49.4 L99 49.8 L102 50.4 L105 51.1 L108 51.8 L111 52.7 L114 53.6 L117 54.5 L120 55.5 L123 56.4 L126 57.3 L129 58.2 L132 58.9 L135 59.6 L138 60.2 L141 60.6 L144 60.9 L147 61.0 L150 61.0 L153 60.8 L156 60.5 L159 60.0 L162 59.4 L165 58.8 L168 58.0 L171 57.1 L174 56.2 L177 55.2 L180 54.3 L183 53.4 L186 52.5 L189 51.6 L192 50.9 L195 50.2 L198 49.7 L201 49.3 L204 49.1 L207 49.0 L210 49.1 L213 49.3 L216 49.6 L219 50.1 L222 50.7 L225 51.4 L228 52.2 L231 53.1 L234 54.0 L237 55.0 L240 56.0 L243 56.9 L246 57.8 L249 58.6 L252 59.3 L255 59.9 L258 60.4 L261 60.7 L264 60.9 L267 61.0 L270 60.9 L273 60.7 L276 60.3 L279 59.8 L282 59.1 L285 58.4 L288 57.5 L291 56.6 L294 55.7 L297 54.8 L300 53.8 L303 52.9 L306 52.0 L309 51.2 L312 50.6 L315 50.0 L318 49.5 L321 49.2 L324 49.0 L327 49.0 L330 49.1 L333 49.4 L336 49.8 L339 50.4 L342 51.1 L345 51.8 L348 52.7 L351 53.6 L354 54.5 L357 55.5 L360 56.4 L363 57.3 L366 58.2 L369 58.9 L372 59.6 L375 60.2 L378 60.6 L381 60.9 L384 61.0 L387 61.0 L390 60.8 L393 60.5 L396 60.0 L399 59.4 L402 58.8 L405 58.0 L408 57.1 L411 56.2 L414 55.2 L417 54.3 L420 53.4 L423 52.5 L426 51.6 L429 50.9 L432 50.2 L435 49.7 L438 49.3 L441 49.1 L444 49.0 L447 49.1 L450 49.3 L453 49.6 L456 50.1 L459 50.7 L462 51.4 L465 52.2 L468 53.1 L471 54.0 L474 55.0 L474 147 Z" fill="#F68200">
+</path>
+</g>
+</svg>
+</div>
+</div>
+<img src="img/card-el1-beaker.png" alt="" style="position: absolute; inset: 0px; width: 100%; height: 100%;">
+</div>
+<div style="position: absolute; left: 20%; right: 13%; top: 18%; bottom: 9.5%; overflow: hidden; border-radius: 0 0 3.46cqw 3.46cqw; pointer-events: none;">
+<span style="position: absolute; left: 4%; bottom: -4%; width: 1.35cqw; height: 1.35cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 5.2s cubic-bezier(.4,0,.6,1) -2.91s infinite;">
+</span>
+<span style="position: absolute; left: 9%; bottom: -4%; width: 0.77cqw; height: 0.77cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 4.4s cubic-bezier(.4,0,.6,1) -4.07s infinite;">
+</span>
+<span style="position: absolute; left: 76%; bottom: -4%; width: 1.15cqw; height: 1.15cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 5.8s cubic-bezier(.4,0,.6,1) -4.04s infinite;">
+</span>
+<span style="position: absolute; left: 84%; bottom: -4%; width: 0.77cqw; height: 0.77cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 4.8s cubic-bezier(.4,0,.6,1) -0.49s infinite;">
+</span>
+<span style="position: absolute; left: 90%; bottom: -4%; width: 0.96cqw; height: 0.96cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 6.2s cubic-bezier(.4,0,.6,1) -1.06s infinite;">
+</span>
+<span style="position: absolute; left: 40%; bottom: -4%; width: 0.58cqw; height: 0.58cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 3.6s cubic-bezier(.4,0,.6,1) -0.63s infinite;">
+</span>
+<span style="position: absolute; left: 56%; bottom: -4%; width: 0.77cqw; height: 0.77cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 4.2s cubic-bezier(.4,0,.6,1) -2.56s infinite;">
+</span>
+<span style="position: absolute; left: 14%; bottom: -4%; width: 0.58cqw; height: 0.58cqw; border-radius: 50%; border: 0.38cqw solid rgb(255, 255, 255); background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0.77cqw rgba(255,255,255,.4); box-sizing: border-box; opacity: 0; animation: foxyEl1Bub 5s cubic-bezier(.4,0,.6,1) -1.0s infinite;">
+</span>
+</div>
+</div>
+<div style="position: absolute; right: 7.69cqw; bottom: 5.77cqw; display: flex; flex-direction: column; align-items: center; gap: 1.54cqw;">
+<svg viewBox="0 0 28 34" style="width: 5.96cqw; height: 7.31cqw;" fill="none" stroke="#EB6A2E" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M8 5v24M8 5h9a5.5 5.5 0 0 1 0 11H8M8 16h10a6.5 6.5 0 0 1 0 13H8M12 1.5v3.5M16.5 1.5v3.5M12 29v3.5M16.5 29v3.5">
+</path>
+</svg>
+<span style="font-weight: 700; font-size: 2.5cqw; letter-spacing: 0.32em; color: rgb(189, 189, 189);">BEARER</span>
+</div>
+</div>
+<div data-card-lines="" style="position: absolute; left: 8.3cqw; bottom: 6cqw; max-width: 66cqw; display: flex; flex-direction: column; align-items: flex-start; gap: 1.2cqw;">
+<div data-card-limit="" style="font-family: SatSymbol, Sora, sans-serif; font-size: 2.86cqw; font-weight: 600; letter-spacing: 0.24em; line-height: 1.4; color: rgba(255, 255, 255, 0.42); text-wrap: balance;">
+<span class="sc-interp">DAILY LIMIT $3.20 | NO PIN</span>
 </div>
 </div>
 </div>
 </div>
-<div style="flex: 0 0 auto; min-height: 0px; display: flex; flex-direction: column; background: var(--frost-card); margin: 0px; border-radius: 34px 34px 0 0; position: relative; z-index: 1; border-bottom: medium; box-shadow: inset 0 2px 0 rgba(var(--frost-rgb),.5); padding-top: 8px; overflow: visible; border-top: 1px solid rgba(var(--frost-rgb),.34);">
-<div data-snow-cap="" style="position: absolute; left: -2px; right: -2px; top: -6px; height: 40px; box-sizing: border-box; pointer-events: none; z-index: 3; border-style: solid; border-color: rgb(243, 248, 252); border-width: 8px 5px 0px; border-radius: 37px 37px 4px 4px / 40px 40px 4px 4px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.4)) drop-shadow(0 0 6px rgba(207,224,236,.32)); clip-path: inset(-12px -12px 100% -12px); animation: foxySnowDrape 22s cubic-bezier(.25,.6,.3,1) 2s forwards;">
 </div>
-<div data-snow-cap="" style="position: absolute; left: 24px; right: 24px; bottom: calc(100% - 3px); height: 28px; pointer-events: none; z-index: 3;">
-<i style="position: absolute; display: block; left: 0px; right: 0px; bottom: 0px; height: 10px; border-radius: 9px 9px 4px 4px / 8px 8px 3.5px 3.5px; background: linear-gradient(180deg, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 55%, rgb(198, 216, 230) 100%); box-shadow: 0 0 9px rgba(207,224,236,.38),inset 0 -2px 3px rgba(140,168,190,.5); transform-origin: 50% 100%; transform: scale(.9,0); animation: foxySnowPile 30s cubic-bezier(.2,.7,.25,1) 1s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 3%; width: 35px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 14s cubic-bezier(.25,.7,.3,1) 3s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 13%; width: 50px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 18s cubic-bezier(.25,.7,.3,1) 7s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 27%; width: 31px; height: 11.5px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 12s cubic-bezier(.25,.7,.3,1) 2s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 36%; width: 58px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 20s cubic-bezier(.25,.7,.3,1) 10s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 52%; width: 35px; height: 12.5px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 13s cubic-bezier(.25,.7,.3,1) 5s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 62%; width: 46px; height: 17px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 17s cubic-bezier(.25,.7,.3,1) 12s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 76%; width: 31px; height: 12px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 12s cubic-bezier(.25,.7,.3,1) 4s forwards;">
-</i>
-<i style="position: absolute; display: block; bottom: 4px; left: 84%; width: 42px; height: 15px; border-radius: 50%; background: radial-gradient(circle at 36% 28%, rgb(255, 255, 255) 0%, rgb(234, 242, 248) 58%, rgb(204, 221, 234) 100%); transform-origin: 50% 100%; transform: scale(0); animation: foxySnowClump 16s cubic-bezier(.25,.7,.3,1) 9s forwards;">
-</i>
-</div>
+<div style="flex: 0 0 auto; max-height: calc(100% - 190px); min-height: 0px; display: flex; flex-direction: column; background: var(--frost-card); margin: 0px; border-radius: 34px 34px 0 0; position: relative; z-index: 1; border-bottom: medium; box-shadow: inset 0 2px 0 rgba(var(--frost-rgb),.5); padding-top: 8px; overflow: visible; border-top: 1px solid rgba(var(--frost-rgb),.34);">
 <div style="position: relative; z-index: 1; flex: 1 1 0%; min-height: 0px; display: flex; flex-direction: column; padding: 8px 0px 0px;">
 <div style="margin: 0px; padding: 4px 28px 6px; display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0px; gap: 9px;">
-<div style="position: relative; font-family: Sora, sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; margin-bottom: 1px;">YOUR MONEY</div>
+<div style="position: relative; flex: 0 0 auto; font-family: Sora, sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 0px; color: var(--ink); text-align: center; margin-bottom: 1px;">CARD BALANCE</div>
 <div style="height: 1px; background: var(--frost-rule); opacity: 0.5; margin: 8px 24px; flex: 0 0 auto;">
 </div>
-<div style="--pill-ink: #F6FAFC; --pill-ink-rgb: 246,250,252; background: var(--frost-pill); border: 1px solid var(--frost-edge); margin: 0px -2px; border-radius: 16px; transition: box-shadow .45s ease; height: 120px; flex: 0 0 auto; position: relative; display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0px 26px; box-sizing: border-box; cursor: pointer; box-shadow: 0 0 30px 2px rgba(207,224,236,.22);">
+<div style="--pill-ink: #F6FAFC; --pill-ink-rgb: 246,250,252; background: var(--frost-pill); border: 1px solid var(--frost-edge); margin: 0px -2px; border-radius: 16px; transition: box-shadow .45s ease; height: 120px; flex: 0 0 auto; position: relative; display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0px 26px; box-sizing: border-box; box-shadow: 0 0 30px 2px rgba(207,224,236,.22);">
 <div style="position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 62px; display: flex; flex-direction: column; align-items: center; gap: 3px;">
 <div style="width: 62px; height: 62px; border-radius: 16px; background: rgb(244, 248, 251); display: flex; align-items: center; justify-content: center; box-sizing: border-box; font-family: Sora, system-ui, sans-serif; font-size: 38px; font-weight: 900; line-height: 1; letter-spacing: -0.02em; color: rgb(27, 34, 40);">
 <span class="sc-interp">M</span>
@@ -453,36 +523,57 @@
 </div>
 <div style="position: absolute; left: 122px; right: 22px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: flex-start; min-width: 0px;">
 <div style="font-family: SatSymbol, Sora, system-ui, sans-serif; font-size: 33px; font-weight: 800; letter-spacing: -0.02em; color: var(--pill-ink); line-height: 1.05;">
-<span class="sc-interp">$ 160.00</span>
+<span class="sc-interp">$ 1.31</span>
 </div>
 <div style="font-family: Figtree, system-ui, sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; color: rgba(var(--pill-ink-rgb),.62); line-height: 1.15;">
-<span class="sc-interp">₿ 250,000</span>
+<span class="sc-interp">₿ 2,048</span>
 </div>
+</div>
+<div role="button" aria-label="This card’s history" style="position: absolute; left: 101px; right: 0px; top: 0px; bottom: 0px; border-radius: 0 16px 16px 0; cursor: pointer;" class="scph">
+</div>
+</div>
+<div style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 0px 4px; font-family: Figtree, system-ui, sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: rgba(var(--ink-rgb),.62); line-height: 1.35;">
+<div>
+<span class="sc-interp">LEFT TODAY $0.77</span>
+</div>
+<div>
+<span class="sc-interp">THE DAY TURNS AT 12:00 AM, 1 JAN 2100</span>
 </div>
 </div>
 </div>
 <div style="flex: 0 0 auto; padding: 10px 22px 26px; box-sizing: border-box; display: flex; flex-direction: column-reverse; align-items: center; gap: 18px;">
-<div style="position: relative; z-index: 26; align-self: stretch; display: flex; gap: 10px;">
-<div role="button" aria-label="SCAN" data-foxy-paste="" style="position: relative; overflow: hidden; flex: 1 1 0%; min-width: 0px; height: 82px; border-radius: 16px; border: 1px solid var(--slate-edge); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; cursor: pointer; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp7">
-<div style="position: absolute; inset: 0px; opacity: 0.3; pointer-events: none; background-image: repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.14) 0 2px, rgba(0, 0, 0, 0.2) 2px 7px, rgba(255, 255, 255, 0.06) 7px 11px); transform: rotate(180deg);">
-</div>
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: 0 0 auto; position: relative; z-index: 1;">
-<path d="M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17">
+<div style="align-self: stretch; display: flex; align-items: flex-start; gap: 4px;">
+<div role="button" aria-label="RESET" style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer;" class="scpa">
+<div style="width: 60px; height: 60px; border-radius: 50%; background: var(--ink); display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
+<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4">
 </path>
 </svg>
-<div style="position: relative; z-index: 1; font-family: Sora, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0px; color: var(--ink); white-space: nowrap;">
-<span class="sc-interp">SCAN</span>
+</div>
+<div style="font-size: 18px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.15; color: var(--ink); text-align: center;">
+<span class="sc-interp">RESET</span>
 </div>
 </div>
-<div role="button" aria-label="PASTE" data-foxy-paste="1" style="position: relative; overflow: hidden; flex: 1 1 0%; min-width: 0px; height: 82px; border-radius: 16px; border: 1px solid var(--slate-edge); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; cursor: pointer; box-shadow: inset 0 2px 0 var(--lift-edge),inset 0 -3px 0 var(--sink-edge),0 8px 16px rgba(0,0,0,.34);" class="scp7">
-<div style="position: absolute; inset: 0px; opacity: 0.3; pointer-events: none; background-image: repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.14) 0 2px, rgba(0, 0, 0, 0.2) 2px 7px, rgba(255, 255, 255, 0.06) 7px 11px); transform: none;">
-</div>
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: 0 0 auto; position: relative; z-index: 1;">
-<path d="M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z">
+<div role="button" aria-label="ADD PIN" style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer;" class="scpa">
+<div style="width: 60px; height: 60px; border-radius: 50%; background: var(--ink); display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
+<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+<path d="M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z">
 </path>
 </svg>
-<div style="position: relative; z-index: 1; font-family: Sora, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0px; color: var(--ink); white-space: nowrap;">
-<span class="sc-interp">PASTE</span>
+</div>
+<div style="font-size: 18px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.15; color: var(--ink); text-align: center;">
+<span class="sc-interp">ADD PIN</span>
+</div>
+</div>
+<div role="button" aria-label="LIMITS" style="flex: 1 1 0%; min-width: 0px; display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer;" class="scpa">
+<div style="width: 60px; height: 60px; border-radius: 50%; background: var(--ink); display: flex; align-items: center; justify-content: center; box-sizing: border-box;">
+<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+<path d="M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z">
+</path>
+</svg>
+</div>
+<div style="font-size: 18px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.15; color: var(--ink); text-align: center;">
+<span class="sc-interp">LIMITS</span>
 </div>
 </div>
 </div>
@@ -492,14 +583,14 @@
 <path d="M12 3.5v11m0 0-4.2-4.2M12 14.5l4.2-4.2M4.5 19.5h15">
 </path>
 </svg>
-<div style="font-family: Sora, sans-serif; font-size: 24px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">RECEIVE</div>
+<div style="font-family: Sora, sans-serif; font-size: 21px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">ADD FUNDS</div>
 </div>
 <div style="flex: 1 1 0%; min-width: 0px; height: 96px; border-radius: 16px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; position: relative; overflow: hidden; background-color: rgb(220, 228, 235); background-size: auto, 170%, 170%, auto, auto; background-position: center center, 50% 40%, 50% 40%, center center, center center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat; background-blend-mode: normal,overlay,soft-light,normal,normal; border: 1px solid rgb(255, 255, 255); box-shadow: inset 0 2px 0 rgba(255,255,255,.7),inset 0 -4px 0 rgba(120,138,152,.34),0 10px 24px rgba(var(--frost-rgb),.22);" class="scp8">
 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#10161B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
 <path d="M12 20.5v-11m0 0-4.2 4.2M12 9.5l4.2 4.2M4.5 4.5h15">
 </path>
 </svg>
-<div style="font-family: Sora, sans-serif; font-size: 24px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">SEND</div>
+<div style="font-family: Sora, sans-serif; font-size: 21px; font-weight: 900; letter-spacing: 0.01em; color: rgb(16, 22, 27); white-space: nowrap;">WITHDRAW</div>
 </div>
 </div>
 </div>
@@ -515,69 +606,5 @@
 </div>
 </div>
 </div>
-</div>
-</div>
-<!-- on document.body -->
-<div style="position: fixed; inset: 0px; z-index: 2147483647; background: var(--bg,#050505); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 118px 26px 26px; box-sizing: border-box; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
-<div style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink,#F5F1EC); text-align: center;">CHOOSE A PIN</div>
-<div style="margin-top: 10px; font-size: 17px; font-weight: 500; line-height: 1.4; color: rgba(245, 241, 236, 0.6); text-align: center; text-wrap: pretty;">Four to eight digits. The card asks for it every time it pays.</div>
-<div style="display: flex; gap: 14px; margin-top: 38px; height: 18px; align-items: center;">
-<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
-</div>
-<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
-</div>
-<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
-</div>
-<div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
-</div>
-</div>
-<div style="margin-top: 18px; min-height: 22px; font-size: 16px; font-weight: 700; color: rgb(255, 92, 92); text-align: center;">
-</div>
-<div style="margin-top: auto; display: grid; grid-template-columns: repeat(3,1fr); width: 100%; max-width: 336px; touch-action: manipulation; -webkit-user-select: none; user-select: none;">
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">1</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">2</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">3</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">4</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">5</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">6</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">7</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">8</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">9</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: rgba(245, 241, 236, 0.55); background: transparent;">
-</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: var(--ink,#F5F1EC); background: rgba(245, 241, 236, 0.08);">0</div>
-</div>
-<div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-<div style="flex: 1 1 0%; margin: 0px 7px; height: 66px; border-radius: 33px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; pointer-events: none; transition: background .1s ease; color: rgba(245, 241, 236, 0.55); background: transparent;">⌫</div>
-</div>
-</div>
-<div style="margin-top: 16px; align-self: stretch; margin-left: 2px; margin-right: 2px; height: 60px; border-radius: 30px; display: flex; align-items: center; justify-content: center; font-family: SatSymbol, Sora, sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.02em; background-repeat: no-repeat, no-repeat, no-repeat; background-size: auto, auto, 150%; background-position: center center, center center, 50% 34%; white-space: nowrap; background-color: rgba(245, 241, 236, 0.14); background-image: none; box-shadow: none; color: rgba(245, 241, 236, 0.4); cursor: default;" data-pin-cta="1" data-pin-ready="0">NEXT</div>
-<div style="margin-top: 10px; width: 100%; max-width: 300px; height: 52px; box-sizing: border-box; border-radius: 26px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 800; letter-spacing: 0.02em; color: var(--ink,#F5F1EC); cursor: pointer; border: 1.5px solid rgba(245, 241, 236, 0.2);" data-pin-second="1">NO PIN</div>
-<div style="position: absolute; left: 22px; top: 56px; width: 52px; height: 52px; border-radius: 50%; border-top: 1px solid var(--lift-edge,rgba(255,255,255,.14)); box-shadow: inset 0 2px 0 var(--lift-edge,rgba(255,255,255,.14)),inset 0 -3px 0 var(--sink-edge,rgba(0,0,0,.5)),0 8px 16px rgba(0,0,0,.34); box-sizing: border-box; display: flex; align-items: center; justify-content: center; cursor: pointer;" data-pin-back="1" role="button" aria-label="Back">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink,#F5F1EC)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M19.5 12H5m0 0 6-6m-6 6 6 6">
-</path>
-</svg>
 </div>
 </div>

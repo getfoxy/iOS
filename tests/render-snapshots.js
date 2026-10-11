@@ -291,6 +291,11 @@ function representative() {
   const TAP = { known: true, limited: true, limit: 2000, spent: 0, left: 2000, turns: 0, noTime: false };
   add('flashcard, a card with a limit on one tap', at('flashcard', { fc: FC({ tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card with a limit on one tap and a daily limit', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  /* The limit line is on the card's own face, at its bottom left (the card's badge above it where it has one), in either design; and the balance
+   * on the card's screen counts to what the card holds after money goes on or off it. */
+  add('flashcard, a locked card with a daily limit: its badge above the limit line, on the face', at('flashcard', { fc: FC({ locked: true, limit: 5000, day: DAY }) }, { wallet: CARDS() }));
+  add('flashcard, a card of the Foxy design with both limits on its face', at('flashcard', { fc: FC({ design: 'FX1', limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, the balance counting up after money went on', at('flashcard', { fc: FC({ balance: 2000 }), fcRoll: { key: KEY_A, from: 0 }, fcRollT: 0.5 }, { wallet: CARDS() }));
   // the card's own log: its last tap in a line under the balance, and a tap the card has marked
   const LOG = { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0, at: 0 },
                 last: [{ time: 4102358400, sats: 12288, pieces: 2, refused: 0, tamper: false }, { time: 4102354800, sats: 3072, pieces: 2, refused: 0, tamper: false }] };
@@ -308,7 +313,7 @@ function representative() {
   add('flashcard, a card of software 1.15 with both limits, the block its clock reads under them', at('flashcard', { fc: FC({ headers: true, clock: CLOCK, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card of software 1.15 that has been shown no block', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK }) }, { wallet: CARDS() }));
   add('flashcard, a card of software 1.15 with a daily limit and no block yet: a day with no start', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK, limit: 5000, day: DAY_ON_TRUST }) }, { wallet: CARDS() }));
-  /* Software 1.17: RESET CARD at the top left for the owner, the row under the card drawn as the receive screen's, and under the title
+  /* Software 1.17: RESET in the row under the card for the owner, the row drawn as the receive screen's (HISTORY is the round button at the top left), and under the title
    * the time the mint's word was had and the block the card's clock is at (its height where this phone has it, else its hash, else none). */
   const R17 = { resetKnown: true, headers: true, clock: CLOCK };
   add('flashcard, a card of software 1.17, with RESET CARD, its row and its block by height', at('flashcard', { fc: FC(R17) }, { wallet: CARDS({ headerHeightOf: () => 970809 }) }));
@@ -317,6 +322,8 @@ function representative() {
   add('flashcard, a card of software 1.17 on another phone: no RESET CARD', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, ownedHere: false }) }, { wallet: CARDS() }));
   add('flashcard, a locked card of software 1.17: RESET CARD is there', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, ownedHere: false, locked: true }) }, { wallet: CARDS() }));
   add('flashcard, a card with no PIN, its limit line says so', at('flashcard', { fc: FC({ resetKnown: true, headers: true, clock: CLOCK, pin: 'none', pinSet: false, noPinKnown: true,
+    limit: 5000, day: DAY, noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, { wallet: CARDS() }));
+  add('flashcard, a card of the beaker design EL1 with no PIN, its lines on the face', at('flashcard', { fc: FC({ design: 'EL1',  resetKnown: true, headers: true, clock: CLOCK, pin: 'none', pinSet: false, noPinKnown: true,
     limit: 5000, day: DAY, noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, { wallet: CARDS() }));
   add('flashcard, a card of 1.17 that names its design FL1, not yet set up', at('flashcard', { fc: FC({ resetKnown: true, design: 'FL1', balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, setUp: false, pinSet: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   // the change this card made for itself (software 1.12) that no till has handed back, as its owner's read left it: a line for each state it is in
@@ -633,8 +640,8 @@ function cards() {
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
   // LIMITS on a card of software 1.16 that has a PIN: the third limit, under the other two
   add('card: change limit, which of the three', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true }, pinSet: true, noPinKnown: true, pin: 'set' }; a.fcSetLimit(); });
-  // the pad that asks for a new card's PIN has NO PIN under it, and the one that adds a PIN says what a card with none is
-  add('overlay: a new card\u2019s PIN, with NO PIN under it', (a) => { a.state.fc = { noPinKnown: true, pinSet: false, setUp: false }; a.fcSetUp(); });
+  // a card of software before 1.16 is asked for a PIN when it is set up (a card of 1.16 and on is not: it is set up with none), and the pad that adds a PIN says what a card with none is
+  add('overlay: a new card\u2019s PIN, for a card of software before 1.16', (a) => { a.state.fc = { noPinKnown: false, pinSet: false, setUp: false }; a.fcSetUp(); });
   add('overlay: ADD PIN, the first pad', (a) => { a.state.fc = { owner: true, ownedHere: true, setUp: true, pinSet: false, noPinKnown: true }; a.fcPinAdd(); });
   // a till whose first tap, with no PIN, found the card wants one
   add('overlay: a card\u2019s PIN, for the second tap', (a) => a.fcPayAsk(500));

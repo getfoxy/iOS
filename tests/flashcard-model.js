@@ -52,17 +52,17 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
 async function replay(T, format, places, software) {
   /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
-   * latest card (1.17) is replayed at the model's default, and each earlier recording at its own software (16, 15, 14, ...),
+   * latest card (1.18) is replayed at the model's default, and each earlier recording at its own software (16, 15, 14, ...),
    * since the model's default moves on with the card. The recording says what it is of: the card repository's
-   * spec/vectors/transcript.json at 1.17 replays here as tests/fixtures/flashcard-transcript.json, and the one it
-   * replaced is kept as flashcard-transcript-116.json (and the one before it as -115, and so on). A RESET at the end of a recording
+   * spec/vectors/transcript.json at 1.18 replays here as tests/fixtures/flashcard-transcript.json, and the one it
+   * replaced is kept as flashcard-transcript-117.json (and the one before it as -116, and so on). A RESET at the end of a recording
    * gives the card a new key, which the model draws for itself: what follows it is held to the model's key (a key is another card's to
    * differ in and is verified, never compared), as everything else signed is.
    */
   if (software === undefined && format === 4 && places === undefined) {
     const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
     const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
-    if (minor > 0 && minor < 17) software = minor;
+    if (minor > 0 && minor < 18) software = minor;
   }
   const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
@@ -202,6 +202,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const reset = await replay(read('flashcard-transcript-117.json'), 4, undefined, 17);
   const optional = await replay(read('flashcard-transcript-116.json'), 4, undefined, 16);
   const headers = await replay(read('flashcard-transcript-115.json'), 4, undefined, 15);
   const costed = await replay(read('flashcard-transcript-114.json'), 4, undefined, 14);
@@ -215,7 +216,7 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  const all = [now, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

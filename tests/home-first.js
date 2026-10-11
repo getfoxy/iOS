@@ -88,7 +88,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     await sleep(60);
     ok(t.W.privacy().offline === false && t.title() === '',
        'Tor comes up: working offline is given up by itself, still with nothing shown');
-    ok(banner(t).torBannerText === 'Secure Tor Connection', 'and the banner turns to Secure', banner(t).torBannerText); }
+    ok(banner(t).torBannerText === 'Tor', 'and the banner turns to Tor', banner(t).torBannerText); }
 
   /* Before the phone has said what network it has, which is how every launch
    * begins: the first word from it must not be read as "a network appeared"

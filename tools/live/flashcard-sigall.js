@@ -88,7 +88,7 @@ const changeCredit = (made, info) => (info.costed ? Math.floor(2 * made / 3) : m
 /* The SIGN commands a payment waits before the signature under a limit on one payment, by the card's software: what leaves the card for
  * good (the pieces less the change it made for itself) and how many pieces of that change it made (`made`).
  *   1.13 and on (info.shaped): nothing within the limit, or a thirty-second over it, change or no change; otherwise seven (ten from 1.17:
- *        info.waitOver) for the first limit's worth over it and three for each after, a part counting as one (255 at most), less what the change made counts for
+ *        info.waitOver) for the first limit's worth over it and three or four (info.waitMore) for each after, a part counting as one (255 at most), less what the change made counts for
  *        (`changeCredit`: one for each piece in 1.13, two for every three from 1.14).
  *   1.12 (info.ownChange): four for every limit's worth over the limit, a part counting as one, and four for a payment within it that
  *        made change.
@@ -96,7 +96,7 @@ const changeCredit = (made, info) => (info.costed ? Math.floor(2 * made / 3) : m
 const waitsFor = (leaves, limit, made, info) => {
   if (info.shaped) {
     const units = leaves <= limit + Math.floor(limit / 32) ? 1 : Math.min(255, Math.ceil(leaves / limit));
-    return units <= 1 ? 0 : Math.max(0, (info.waitOver || 7) + 3 * (units - 2) - changeCredit(made, info));
+    return units <= 1 ? 0 : Math.max(0, (info.waitOver || 7) + (info.waitMore || 3) * (units - 2) - changeCredit(made, info));
   }
   if (!info.ownChange) return leaves > limit ? 4 * (Math.ceil(leaves / limit) - 1) : 0;
   return leaves > limit ? 4 * Math.ceil(leaves / limit) : (made > 0 ? 4 : 0);
@@ -513,7 +513,7 @@ async function at(mintKey, names, real) {
       const w2 = signatures() - 1, m2 = madePieces();
       delete card.one;
       // (the card of this software's rule for the change: 1.14 two waits off for every three pieces, 1.13 one for each)
-      const over2 = Number(first.card.info.waitOver) || 7;   // ten on 1.17, seven before
+      const over2 = Number(first.card.info.waitOver) || 7;   // ten from 1.17, seven before
       const want2 = Math.max(0, over2 - changeCredit(m2, first.card.info));
       ok('one payment a tap at full speed: the first of a time in the field goes at once, the second waits its first tier (' + over2 + ') less what its change counts for (' + (first.card.info.costed ? 'two for every three pieces' : 'one for each piece') + '), and the wallet said so before the PIN',
          p1.sats === 100 && w1 === 0 && p2.sats === 100 && w2 === want2 && (w2 === 0 ? ahead.length === 0 : (ahead.length === 1 && ahead[0].left === w2 && ahead[0].second === true)),

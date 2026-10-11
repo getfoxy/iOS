@@ -99,7 +99,9 @@ function makeCard(opts) {
    * a new key, and keeps its clock and its software. And the first limit's worth over the limit on one payment waits ten signatures where
    * 1.13 to 1.16 waited seven (`WAIT_OVER`); the further ones are three still. `software: 16` is the card before it. */
   const RESET = NOPIN && o.software !== 16;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? 17 : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  /* 1.18: each further limit's worth over waits four askings where 1.13 to 1.17 waited three (`WAIT_MORE`). `software: 17` is the card before it. */
+  const FOUR = RESET && o.software !== 17;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? 18 : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -118,7 +120,7 @@ function makeCard(opts) {
   const PACED = FORMAT === 4;
   const WAIT_SIGNS = 4;
   // software 1.13 and on: the signatures for the first limit's worth over the limit, and for each further one, and the most limits' worth that count
-  const WAIT_OVER = RESET ? 10 : 7, WAIT_MORE = 3, UNITS_MOST = 255;
+  const WAIT_OVER = RESET ? 10 : 7, WAIT_MORE = FOUR ? 4 : 3, UNITS_MOST = 255;
   // the change a payment makes for itself (1.12): eight openings are kept, and GET_CHANGE says three to a page
   const CHANGE_MOST = 8;
   const CHANGE_PAGE = 3;

@@ -22,7 +22,7 @@
    * the card's screen has. `o.go` is CONTINUE, `o.cancel` CANCEL; neither
    * does anything until the list is whole. `this._fcExplainer` is the screen
    * for the suites: `finish()`, `play()`, `close()`, `done()`. */
-  FC_EXPLAINER = { limit: 10, secs: ['2–5', '10', '12', '14'], secsBefore: ['2–5', '8', '10', '12'], speed: 1.4 };
+  FC_EXPLAINER = { limit: 10, speed: 1.4 };
   // set once the screen has played through on this phone; a tap on the list plays it again
   FC_EXPLAINED = 'foxy.flashcard.explained';
 
@@ -34,14 +34,19 @@
     const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // every statement in one shape, whatever its kind, so that a reader of the list needs no cases
     const item = (kind, o) => Object.assign({ kind, text: '', limit: '', range: '', secs: '', long: '', bar: '' }, o || {});
+    /* The seconds are what the screen behind the sheet reaches, from the card's own counts (`opts.over` askings for the first
+     * limit's worth over, `opts.more` for each further one; ten and four from software 1.18, ten and three on 1.17, seven and
+     * three before): a payment within the limit is a second or two, up to four with change. */
+    const over = Number(opts.over) || 10, more = Number(opts.more) || 4;
+    const tiers = ['1–4'].concat([over, over + more, over + 2 * more].map((n) => String(this.fcWaitSecs(n))));
+    const most = parseInt(tiers[tiers.length - 1], 10);
     const items = [
       item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),
       item('limit', { limit: '$' + E.limit }),
-    // a card of software 1.17 asks for ten signatures for the first limit's worth over its limit, one before it for seven
-    ].concat(((opts.over || 10) >= 10 ? E.secs : E.secsBefore).map((s, k, all) => item('tier', {
+    ].concat(tiers.map((s, k) => item('tier', {
       range: money(k * E.limit + 0.01) + ' – ' + money((k + 1) * E.limit),
-      secs: 'ABOUT ' + s + ' SEC', long: 'Tap for about ' + s + ' seconds',
-      bar: Math.round(parseInt(s.split('–').pop(), 10) / parseInt(String(all[all.length - 1]).split('–').pop(), 10) * 100) + '%',
+      secs: '~' + s + ' SEC TAP', long: 'Tap for ~' + s + ' seconds',
+      bar: Math.round(parseInt(s.split('–').pop(), 10) / most * 100) + '%',
     }))).concat([item('more')]);
 
     const SORA = 'font-family:Sora,system-ui,sans-serif;';

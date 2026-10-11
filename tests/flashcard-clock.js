@@ -135,11 +135,11 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   /* ---- 1: the card: three real headers at the real floor -------------------------------------------------------------- */
   {
     const c = mk();
-    ok((await read(c, SEL)).data === '0111', 'a card of the latest software says 1.17 when chosen');
+    ok((await read(c, SEL)).data === '0112', 'a card of the latest software says 1.18 when chosen');
     const c15 = mk({ software: 15 });
     ok((await read(c15, SEL)).data === '010f', 'and the card of 1.15 before it still says 1.15');
     const fresh = await infoOf(c);
-    ok(fresh.version === '1.17' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
+    ok(fresh.version === '1.18' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
     ok(blank.headerBits === '' && blank.headerHash === '' && blank.timeKey === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));

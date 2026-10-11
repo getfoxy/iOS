@@ -186,9 +186,9 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     ok((await now.send(SELECT)) === '01109000' && (await fifteen.send(SELECT)) === '010f9000' && (await fourteen.send(SELECT)) === '010e9000' && (await thirteen.send(SELECT)) === '010d9000' && (await twelve.send(SELECT)) === '010c9000' && (await before.send(SELECT)) === '010b9000',
        'SELECT says 1.16, 1.15 for the card with software 15, 1.14 for the card with software 14, 1.13 for the card with software 13, 1.12 for the card with software 12, and 1.11 for the card before that');
     const latest = newCard();
-    ok((await latest.send(SELECT)) === '01119000', 'and the card with no software is 1.17, which the tables below do not cover');
+    ok((await latest.send(SELECT)) === '01129000', 'and the card with no software is 1.18, which the tables below do not cover');
     await tap(latest);
-    ok(W.cardParse.info(dat(await latest.send('b001000000'))).version === '1.17', 'and reads as 1.17');
+    ok(W.cardParse.info(dat(await latest.send('b001000000'))).version === '1.18', 'and reads as 1.18');
     await tap(now); await tap(fifteen); await tap(fourteen); await tap(thirteen); await tap(twelve); await tap(before);
     ok((await now.send('b001000000')).slice(0, 4) === '0110' && (await fifteen.send('b001000000')).slice(0, 4) === '010f' && (await fourteen.send('b001000000')).slice(0, 4) === '010e' && (await thirteen.send('b001000000')).slice(0, 4) === '010d'
        && (await twelve.send('b001000000')).slice(0, 4) === '010c' && (await before.send('b001000000')).slice(0, 4) === '010b',

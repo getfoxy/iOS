@@ -101,16 +101,16 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    Foxy's first. Tap a new card behind the phone.
 2. The card's screen reads `This card is new. Set it up to put money on it.`
    Press **SET UP THIS CARD**.
-3. **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN**. The PIN pad
-   is the lock screen's. On a card of software 1.16 and on, **NO PIN** is under
-   the button: it takes the pad down and goes straight to the tap, with nothing
-   more to answer. A card of an earlier software is offered no such button, since it
-   cannot be without a PIN.
-4. One tap writes the PIN (none, after NO PIN), then the card's record (this phone's mint, and for
+3. A card of software 1.16 and on is set up with **no PIN**, and nothing is asked: the sheet comes up at once and the tap
+   begins (SET UP THIS CARD, then the tap, then the card's screen). Its owner adds a PIN whenever they want one, with
+   **ADD PIN** on that screen (*The PIN*, below). A card of an earlier software cannot be without a PIN, so it is asked for
+   one first: **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN** (the PIN pad is the lock screen's; the second
+   pad takes the first one's place in the same turn and with no fade, so the card's screen is never seen between the two).
+4. One tap writes the PIN (none, for a card of 1.16 and on), then the card's record (this phone's mint, and for
    a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 5. The card's screen, with a line: `The card is set up.` (with a PIN and with none alike; back from it is where the person
-   was). Nothing is read between the PIN
+   was). Nothing is read between the pad (or, for a card of 1.16 and on, the button)
    and the tap, and nothing after it; the screen is the card's own, with ADD FUNDS. What two notices used to say stands: this
    phone is the card's owner, so it can reset the card's PIN and limits, and
    whoever holds the card and this phone's seed phrase holds its money; and a
@@ -118,7 +118,7 @@ the real applet running under jCardSim (`FORK.md` in the card repository).
    card's money is gone.
 
 No limit is asked for and none is suggested. A new card has none. From software 1.16 the PIN
-may be left out with NO PIN (*No PIN, and the no-PIN allowance*, below): the tap then writes the record and the owner only,
+is left out by default (*No PIN, and the no-PIN allowance*, below): the tap writes the record and the owner only,
 and the card is cash to whoever holds it from that moment. Nothing at set-up says so; ADD PIN's first pad does (below).
 
 A card with no owner is open while it is empty, because there is nothing on it
@@ -191,7 +191,7 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
 - **Change.** The tap after such a payment writes the change back with no PIN, by the note the card makes that it has paid,
   as it does after any payment. A card with no PIN is loaded by whoever holds it, as it is spent by whoever holds it; the same goes for freeing its used places and for reading its log and receipts. What stays the owner's is the limits, ADD PIN, the mint and the lock.
 
-- **The screens.** All of them are the app's own, reused: the PIN pad (with a second button for NO PIN), `blockedCard`
+- **The screens.** All of them are the app's own, reused: the PIN pad, `blockedCard`
   dialogs (with `pills` for a third pill-shaped button), the SET AMOUNT keypad and the confirmation shell, and a toast for
   a one-line outcome.
   - *ADD PIN* stands where CHANGE PIN stands, on a card that is set up and has no PIN (`fc.setUp && !fc.pinSet`). Its first
@@ -199,16 +199,16 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
     AGAIN, then one tap, and the toast `PIN added. Every payment asks for it until you set a no-PIN limit.` A phone that is
     not the owner is told NOT THIS PHONE'S CARD before a pad is raised.
   - *NO PIN LIMIT* is the third button of CHANGE CARD LIMITS, shown only on a card that has a PIN. Its three steps are the
-    daily limit's: the warning SET NO PIN LIMIT (`A no PIN limit is the most this card will pay in one day without its PIN.
-    Over it, the PIN is asked for the whole payment. Only payments made without the PIN count against it. Anyone holding the
-    card can spend this much a day without the PIN.`, then who can change it, then CONTINUE or CANCEL); the amount, in dollars first,
+    daily limit's: the warning SET NO PIN LIMIT (`A “No PIN” limit is the most this card will pay in one day without
+    requiring your PIN.`, `Once you reach your limit, the PIN is asked for every payment until the next day.`, then who can
+    change it, then CONTINUE or CANCEL); the amount, in dollars first,
     `What is the most this card should pay in a day without its PIN?`, with NO LIMIT under NEXT, which is none, 0, and then
     every payment asks for the PIN; and the confirmation, `YOU ARE APPLYING A NO PIN LIMIT OF:` or `YOU ARE REMOVING THIS
     CARD'S NO PIN LIMIT.` with `Every payment will ask for the PIN.` One tap, no PIN, and the toast `No PIN limit set.` or
     `No PIN limit removed.` Typed in dollars, it is kept at them (`cardNoPinUsd`). Nothing about it is shown on a card with no
     PIN, which cannot have one.
-  - *The card's screen* says `NO PIN UP TO $10` in the line under the balance when it is the only limit, and in a line of its
-    own, `NO PIN UP TO $10 · LEFT TODAY $4`, beside the daily limit's and the limit on one tap's.
+  - *The card's screen* says `NO PIN UP TO $10` in the limit line on the card's face when it is the only limit, and in a line of its
+    own under the balance, `NO PIN UP TO $10 · LEFT TODAY $4`, beside the daily limit's and the limit on one tap's.
   - *The log* says `no PIN` at the end of the line for a tap in which the card signed under the allowance.
   - *Every flow that asked a card for its PIN* asks a card that has none nothing: WITHDRAW, renewing, moving to another mint,
     adding funds from a phone that is not the owner's, and the recut that a per tap limit can need.
@@ -253,22 +253,33 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   It keeps the card's row among the cards it can take back (a piece the card signed away that its receiver never swapped is
   still this phone's to take back after its date), and the withdrawal that emptied the card is an ordinary history line;
   the reset has no line of its own.
-- **The wait.** Software 1.17 asks ten signatures for the first limit's worth over the limit on one payment and three for
-  each after; 1.13 to 1.16 ask seven and three. `info.waitOver` says which a card has, and `cardWaitSigns` and `cardWait`
-  take it as their last argument (without it, seven).
+- **The wait.** Software 1.18 asks ten signatures for the first limit's worth over the limit on one payment and four for
+  each after; 1.17 asked ten and three, 1.13 to 1.16 seven and three. `info.waitOver` and `info.waitMore` say which a card
+  has, and `cardWaitSigns` and `cardWait` take them as their last arguments (without them, seven and three).
 
 ### The screens
 
 - **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
-  `Block #970809` (above). Under the balance the limit line says `NO LIMIT`, `DAILY LIMIT $5` and so on, and for a card
-  with no PIN adds a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`. The old CLOCK line is gone.
-  The row under ADD FUNDS and WITHDRAW is **HISTORY**, **CHANGE PIN** (**ADD PIN** on a card with none) and **LIMITS**,
-  drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its label under it. HISTORY is for
-  any card with a record; the other two are the owner's. The card is drawn in the design it names (`FL1` stays `FL1`, before
-  and after set-up); a card that names none is drawn in, and given, this phone's own.
-- **RESET CARD.** The round button at the top left, where HISTORY was, for the owner of a card of 1.17 and on (a locked
+  `Block #970809` (above). **HISTORY**, what has been done with this card on this phone, is the round button at the top
+  left, for any card with a record. The limit line is on the card's own face, at the bottom left of its picture: `NO LIMIT`,
+  `DAILY LIMIT $5` and so on, and for a card with no PIN a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`.
+  A card with a badge (`Blocked`, `Locked`, `No PIN yet`, ...) has it above the line, at the same left edge. The old CLOCK
+  line is gone. The line sits where the design puts BEARER at the bottom right, with the margins BEARER has, mirrored: its
+  first letter about 8.5% of the card's width in from the left edge (BEARER's last letter is that far from the right), and the baseline of
+  its last line as far above the bottom as BEARER's is (7.0% of the width on FL1, 6.4% on FX1, 5.8% on EL1: measured from the
+  markup and from `img/card-fx1.png`). It is drawn as BEARER is, in each design: on FL1 in BEARER's own type (Sora, 2.86% of the card's
+  width, semi-bold, tracked 0.24 em, white at 42%); on FX1 in the picture's ink (a dark brown, `#1A0A04`) at the size, weight
+  and tracking that match the picture's lettering (2.5%, bold, 0.3 em); on EL1 in BEARER's grey (`#BDBDBD`, 2.5%, bold,
+  0.32 em), 7.7% in from the left. All of it is in percentages of the card's width
+  (`cqw`), so it holds at any width; a long line wraps, balanced, within 66% of the width and never reaches BEARER (the
+  space before the dot of `PER TAP $2.00 · DAILY $5.00` does not break, so a line never begins with it).
+  The row under ADD FUNDS and WITHDRAW is **RESET** (a card of 1.17 and on, for its owner), **CHANGE PIN** (**ADD PIN** on a
+  card with none) and **LIMITS**, drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its
+  label under it. All three are the owner's; a card before 1.17 has the two it can offer. The card is drawn in the design it
+  names (`FL1` stays `FL1`, before and after set-up); a card that names none is drawn in, and given, this phone's own.
+- **RESET.** The first button of that row (a circular arrow), for the owner of a card of 1.17 and on (a locked
   card is offered it to any phone holding it: only the card can say whose it is; on another phone's unlocked card, and on
-  an older card, it is not drawn, and pressed it says `NOT THIS PHONE'S CARD` or `NOT ON THIS CARD`). It opens one warning:
+  an older card, it is not in the row, and a call that reaches it says `NOT THIS PHONE'S CARD` or `NOT ON THIS CARD`). It opens one warning:
   what is wiped (the PIN, the owner, the limits, the log; a new key), that the card is then anyone's to set up, and, when
   it holds money, that the money comes off to this phone first. **CONTINUE** goes to one tap (`cardEmptyAndReset`;
   the sheet says `Keep holding.`); a locked card, or a card with money and a PIN, asks for the PIN on the pad first
@@ -283,9 +294,12 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   button `TAP AGAIN`), and the second tap makes the pieces for that card's key and writes them with the PIN
   (`cardPrepare`, then `cardWrite` as a till writes change). A wrong PIN leaves them owed to the card, and TRY AGAIN asks for
   the PIN to put them on. On success: Home, and the card `ON THE CARD`. Offline it says so and goes no further.
-- **HOW TAP LIMIT WORKS** says its seconds as "about": `ABOUT 2–5 SEC` within the limit, then about 10, 12 and 14 for a card of
-  1.17 (about 8, 10 and 12 for a card before it). The limit's confirmation says the card is held about 8 seconds over the limit
-  (about 5 before 1.17), and 2 more for every limit's worth beyond.
+- **HOW TAP LIMIT WORKS** says its seconds as "~", worked out from the card's own counts as what the screen behind the sheet
+  reaches on a card held well (`fcWaitSecs`: about 3.3 seconds for the read, the pieces and the change, then 0.58 seconds an
+  asking, as measured on a phone, shown as the whole second the count comes to): `~1–4 SEC TAP` within the limit, then ~9,
+  ~11 and ~13 for a card of 1.18 (ten askings, then four more for each further limit's worth), about 9, 10 and 12 on 1.17, about
+  7, 9 and 10 before it. The limit's confirmation says the same first figure for the card over the limit
+  (about 7 before 1.17), and 2 more for every limit's worth beyond.
 
 ## Adding money
 
@@ -358,8 +372,13 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
    under the limit and the rest goes in larger ones; the card's screen says how
    much, `$X IN PIECES ABOVE THE LIMIT · A TILL HOLDS LONGER FOR THOSE`.
 4. A tap writes them, and reads them back. The screen says `GETTING IT READY`
-   while the swap runs, then the states of a tap. **ON THE CARD** gives the new
-   balance.
+   while the swap runs, then the states of a tap. Then the card's own screen is back, and no card is raised
+   over it: the balance on it counts up, from the figure it showed to what the card holds now (the card as that tap
+   read it after the write: its balance, its limits, what is left today), over about a second, with home's own ease
+   (`runBalanceAnim`'s: 1.15 seconds, an ease out; a phone set to reduce motion is shown the new figure at once).
+   What the balance cannot say is a line: that the card was moved to this phone's mint by the same tap, and that
+   more than was asked for went on, so that the card holds fewer pieces. (Money put on a card from the send screen,
+   which leaves the person at Home, and a renewal are still said by a card, **ON THE CARD**.)
 
 If the card leaves early, or the tap is cut short by Foxy being put away, the
 pieces wait on the phone. The card's screen shows a line in the warning colour, `₿500
@@ -986,10 +1005,9 @@ the third is *No PIN, and the no-PIN allowance*, above).
 Each has three steps and then a tap. The daily limit's:
 
 1. A full-screen warning, SET DAILY LIMIT: `A daily limit is the most this card
-   will spend in one day. It starts again by itself each day.` and `Only this
-   phone, or a phone restored from its seed phrase, can change or remove the
-   limit.` and `If you lose the seed phrase for this Foxy app, the PIN and the
-   limit on this card can never be changed.` CONTINUE or CANCEL.
+   will spend in one day.` and `If you lose the seed phrase for this Foxy app,
+   the limit can never be changed.` and `Do you wish to continue?` CONTINUE or
+   CANCEL.
 2. The app's SET AMOUNT screen: `What would you like the daily limit to be?`
    with NEXT, and under it **NO LIMIT**, which is how a limit is removed.
 3. A CONFIRMATION, `YOU ARE APPLYING A DAILY LIMIT OF:` and the amount, or `YOU
@@ -1035,8 +1053,9 @@ the same way, by the owner's phone and no PIN, from PER TAP LIMIT under CHANGE
 LIMIT: **HOW TAP LIMIT WORKS**, a screen that plays the rule as a short
 animation and leaves it on the screen as a list (`Any payment request over your
 limit requires you to tap and hold your card longer.`, an EXAMPLE LIMIT of $10,
-then `$0.01 – $10.00` 2–5 SEC, `$10.01 – $20.00` 8 SEC, `$20.01 – $30.00` 10
-SEC, `$30.01 – $40.00` 12 SEC, `And so on…`; a tap skips the statement on the
+then `$0.01 – $10.00` 1–4 SEC, `$10.01 – $20.00` 9 SEC, `$20.01 – $30.00` 11
+SEC, `$30.01 – $40.00` 13 SEC for a card of 1.18, the seconds the screen behind
+the sheet reaches worked out from the card's own counts, `And so on…`; a tap skips the statement on the
 screen, and a phone that asks for less motion is shown the list at once), with
 CANCEL and CONTINUE once it has played (a card of 1.12, which pays exactly or
 holds the card, is told its own rule in a warning instead), the amount (`What is the most this card should pay in
@@ -1209,15 +1228,21 @@ PIN is not asked, because the owner's phone does not know it; the card takes the
 owner's proof in its place. It ends at `PIN CHANGED`.
 
 **WITHDRAW** is an amount, or `ALL OF IT`, the PIN (not on a card that has none), and a tap. The card is let go
-the moment it has signed, as at a till, and is not read again afterwards: it ends
-at **IN YOUR WALLET**, and the card's screen goes away, so that the next tap shows
-the card as it is. (A move to another mint, and a renewal, hold the card.)
+the moment it has signed, as at a till, and is not read again afterwards. It ends on the card's own screen, with no card raised
+over it, and the balance on it counts down over about a second from the figure it showed to what the card holds now. The screen
+knows the card without reading it: the wallet gives back the card as the tap read it at its start, less the pieces it signed
+for (`cardAfterTake`, the result's `card`), or, where the change went back onto the card in the same sheet, the card as that tap
+read it after. So the balance, the pieces and the places are the card's; and where the card has a daily limit, which a
+withdrawal by the owner's phone lifts and puts back, the day has begun again: the whole limit is left, and the day turns 24
+hours on from the card's own clock. A mint that has not answered (the CHECKING screen) hands the same card on, and the screen
+comes back to it once the mint has said paid. (A move to another mint, and a renewal, hold the card, and read it at the end.)
 
 A withdrawal of many pieces takes longer than a person holds a card. If the card
 leaves part way, what it signed is kept: it is in the phone, with an entry of its
 own, and the screen says **TAP THE CARD AGAIN**, how much came off and how much
 is left. TAP CARD takes the rest with the PIN already given, and IN YOUR WALLET
-then says the whole amount. LATER ends the withdrawal; the rest stays on the card.
+then says the whole amount (a withdrawal cut short takes the card's screen away, as what it knew of the card is out of date;
+one that goes on in the same sheet, with the card asked for again, does not). LATER ends the withdrawal; the rest stays on the card.
 
 **A blocked card** shows BLOCKED on its face and a red line. Any reader in range
 can send three wrong PINs and block a card, so this is a known way to annoy a
@@ -1416,7 +1441,10 @@ said a card's pieces were good, so a phone with no connection can say `Verified 
 
 **The card's face.** A card is drawn in a design named by a code of three
 characters (`docs/CARD-DESIGNS.md` in the card repository): FL1 is Flash's,
-FX1 is Foxy's, a picture of orange fur with a sleeping fox. A card of software
+FX1 is Foxy's, a picture of orange fur with a sleeping fox; EL1 is the beaker, drawn
+in CSS and SVG with its liquid flowing and bubbling and the beaker swaying (still
+under Reduce Motion), the same block in `build/markup.html` and, for the face
+behind the sheet, `FC_EL1_FACE`. A card of software
 1.10 carries its code in its record, written at set-up and read back by every
 phone; for a card before that, the phone that set it up writes the code it
 chose on a note of its own (`foxy.flashcard.designs`, by the card's key: not

@@ -401,7 +401,7 @@
   /* Working offline, and the connection came back.
    *
    * The choice is surrendered by the wallet itself the moment Tor is really up
-   * (`_privacy`), and the banner turns from OFFLINE to SECURE with it. That is a
+   * (`_privacy`), and the banner turns from OFFLINE to TOR with it. That is a
    * quiet change on a screen somebody may not be looking at, and they have been
    * living without a connection — so it is said out loud, once. */
   sayBackOnline() {

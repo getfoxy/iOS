@@ -32,7 +32,8 @@ function at(privacy) {
   global.window = { FoxyWallet: privacy === null ? null : { privacy: () => privacy } };
   return app.torBannerVals();
 }
-const SECURE = 'Secure Tor Connection';
+// what the banner says while Tor is carrying everything: the one word, with the shield beside it
+const SECURE = 'Tor';
 const EXPOSED = 'IP Address Exposed';
 /* Offline is where every session begins now (home first), and the banner says
  * which kind it is: a connection being made, none to make one over, or one
@@ -73,8 +74,8 @@ const CANNOT = 'CANNOT CONNECT \u2014 TAP TO RETRY';
    * request times out, the path monitor says none, and the control port still
    * says done. `_privacy` surrenders the choice only when there is a network
    * under that claim, so this pair occurs — and the banner told somebody who had
-   * deliberately gone offline, on a phone that could not reach a mint, that they
-   * had a Secure Tor Connection.
+   * deliberately gone offline, on a phone that could not reach a mint, that their
+   * connection was secure.
    *
    * The choice wins. It is a state the person picked and stays in, in which the
    * wallet refuses them, and a banner that contradicts every other screen is
@@ -83,10 +84,10 @@ const CANNOT = 'CANNOT CONNECT \u2014 TAP TO RETRY';
   check('Tor claiming up does not overrule the choice to work offline',
     v.torBannerText !== SECURE && v.torBannerOffline === true, v.torBannerText);
   /* And once the choice really has been surrendered — which takes a network,
-   * not just Tor's word — the banner says secure, as it always did. */
+   * not just Tor's word — the banner says Tor, as it always did. */
   const w = at({ tor: 'up', unprotected: false, offline: false, network: 'wifi',
                  progress: 100, everUp: true });
-  check('and with the choice let go it reads secure again', w.torBannerText === SECURE,
+  check('and with the choice let go it says Tor again', w.torBannerText === SECURE,
     w.torBannerText);
   /* A claim about the connection needs a connection under it. The banner is
    * absent here rather than amber — nothing was chosen and nothing has leaked —
@@ -110,7 +111,7 @@ const CANNOT = 'CANNOT CONNECT \u2014 TAP TO RETRY';
 {
   const v = at({ tor: 'up', unprotected: false, progress: 100, everUp: true });
   check('Tor up: the banner shows', v.torBannerShown === true);
-  check('and says the connection is secure', v.torBannerText === SECURE, v.torBannerText);
+  check('and says Tor', v.torBannerText === SECURE, v.torBannerText);
   check('in iceberg blue', v.torBannerBg === '#BFE3EC', v.torBannerBg);
 }
 

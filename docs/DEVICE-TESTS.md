@@ -1519,19 +1519,22 @@ and load it), a phone whose build carries the NFC entitlement
    and SET UP THIS CARD. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
    to it at all, and times out.
-3. SET UP THIS CARD, a PIN twice, tap. Nothing is read between the PIN and
+3. SET UP THIS CARD, a PIN twice, tap. (A card of software 1.16 and on asks for
+   no PIN: SET UP THIS CARD goes straight to the tap, and ADD PIN gives it one later: 23c-10.) On the
+   earlier card the second pad (TYPE IT AGAIN) takes the first one's place with nothing flashing between
+   them: the card's screen is not seen behind the second pad as it comes up. Nothing is read between the PIN and
    the tap, nothing is asked about a lost card (cards are cash for now), and
    nothing is read after it. **Pass:** the card's screen stays up, with the line `The card is set
    up.` (Back from it is where you were; MENU, FLASHCARD, tap, shows the same screen.) The screen is home's shape: history and a cross
-   at the top with FLASHCARD and "Verified Just Now" between them, the card,
-   and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
-   over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS. (On a card of
-   software 1.16, NO PIN is under the button of CHOOSE A PIN: 23c-10.)
+   at the top with FLASHCARD and "Verified Just Now" between them, the card
+   with its limit line on it at the bottom left (`NO LIMIT`), and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
+   over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS.
 
 #### 23b. Money on, and off
 
-1. ADD FUNDS, an amount, the PIN, tap when asked. **Pass:** ON THE CARD with
-   the new balance; the pill shows it; the phone's balance is down by the
+1. ADD FUNDS, an amount, the PIN, tap when asked. **Pass:** the card's screen is back, with no card
+   raised over it, and the balance in the pill counts up from the old figure to the new one over about a
+   second (and is simply the new figure with Reduce Motion on); the phone's balance is down by the
    amount and what the mint charges; HISTORY has one entry, To card, and no
    second confirmation.
 2. Tap the balance in the pill, then go back and tap the history button at
@@ -1543,13 +1546,15 @@ and load it), a phone whose build carries the NFC entitlement
 4. With the card loaded, turn on airplane mode, wait a few minutes, and read
    it again. **Pass:** under the title it says when it was last verified
    ("Verified 5 Minutes Ago"), not "Just Now". Turn airplane mode off.
-5. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** IN YOUR WALLET; the pill
-   reads 0 on the next tap.
+5. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** the card's screen is back, with no card raised over it,
+   and the balance in the pill counts down to 0 over about a second; if the card had a daily limit, the
+   line under the balance says the whole of it is left. Tap the card again from MENU, FLASHCARD: it reads
+   the same.
 6. Load it again, WITHDRAW, ALL OF IT, and take the card away while the sheet
    is still counting pieces. **Pass:** TAP THE CARD AGAIN says how much came off
    into the phone and how much is left; HISTORY has an entry, From card, for
-   what came off; TAP CARD asks no PIN and takes the rest; IN YOUR WALLET says
-   the whole amount.
+   what came off (the screen has left the card: its figures are out of date); TAP CARD asks no PIN and
+   takes the rest; IN YOUR WALLET says the whole amount.
 
 #### 23c. Paying another phone
 
@@ -1885,11 +1890,10 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
 Needs a card on software 1.16 (`01 10` at SELECT), the holder's phone, and a second phone to be the till. Nothing here has run
 on a real card.
 
-1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** CHOOSE A PIN has a second button,
-   NO PIN, under its grey one. Press it. **Pass:** the pad goes, the sheet comes up at once, and one tap sets the card up: the card's screen,
-   `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was, and LIMITS, and its limit line reads
-   `NO LIMIT | NO PIN`. A card of 1.15 or before is
-   offered no NO PIN.
+1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** no pad: the sheet comes up at once, and
+   one tap sets the card up: the card's screen, `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was,
+   and LIMITS, and the line on the card's face reads `NO LIMIT | NO PIN`. A card of 1.15 or before is asked for a PIN
+   (CHOOSE A PIN, TYPE IT AGAIN) as it always was.
 2. **It pays in one tap.** ADD FUNDS (no PIN asked), then on the till RECEIVE, an amount, CARD. **Pass:** no pad. The sheet
    comes up and the card pays in that tap, as a card with a PIN does after its PIN; the sheet is up once. WITHDRAW on the
    holder's phone asks for no PIN either. Time the tap against a card with a PIN: it should be no longer.
@@ -1901,7 +1905,7 @@ on a real card.
    TAP AGAIN, tap: paid. Back from the pad leaves the invoice up. Count the taps: two.
 5. **NO PIN LIMIT.** LIMITS. **Pass:** CHANGE CARD LIMITS has PER TAP LIMIT, DAILY LIMIT, NO PIN LIMIT, CANCEL (a card
    with no PIN has no third). NO PIN LIMIT, CONTINUE, a few dollars, NEXT, CONFIRM, tap. **Pass:** no PIN asked;
-   `No PIN limit set.`; under the balance `NO PIN UP TO $5.00`, and a line `NO PIN UP TO $5.00 · LEFT TODAY $5.00`.
+   `No PIN limit set.`; the card's face reads `NO PIN UP TO $5.00`, and under the balance is a line `NO PIN UP TO $5.00 · LEFT TODAY $5.00`.
 6. **Within it, one tap.** On the till charge less than the limit. **Pass:** no pad; the card pays in the first tap. The
    holder's line now says how much is left today, and the log says `no PIN` beside that tap.
 7. **Over what is left, the PIN for the whole payment.** Charge more than is left. **Pass:** the first tap ends asking for the
@@ -1920,12 +1924,16 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 
 1. **The card's screen.** MENU, FLASHCARD, tap the card. **Pass:** under FLASHCARD two lines, `Verified At 11:42am` (the time the
    mint's word was had, in the phone's clock) and `Block #970809` (the block the card's clock is at; `No block yet` on a card
-   shown none). A round button at the top left (the reset arrow), and under ADD FUNDS and WITHDRAW a row of three round buttons
-   with their labels under them, the size and the look of NOTE, COPY, SCAN and CARD on the receive screen: HISTORY, CHANGE PIN
+   shown none). A round button at the top left (the clock: HISTORY), and under ADD FUNDS and WITHDRAW a row of three round buttons
+   with their labels under them, the size and the look of NOTE, COPY, SCAN and CARD on the receive screen: RESET, CHANGE PIN
    (ADD PIN on a card with none) and LIMITS. No CLOCK line. The card art is as big as before and nothing is crowded.
-2. **The limit line.** On a card with no PIN: `NO LIMIT | NO PIN`; with a daily limit, `DAILY LIMIT $5 | NO PIN`. With a PIN, no
-   `| NO PIN`.
-3. **RESET CARD on an empty card.** The top-left button. **Pass:** one warning (the PIN, the owner, the limits and the log are
+2. **The limit line.** It is on the card itself, at the bottom left of its picture, level with BEARER at the bottom right and as
+   far in from the left edge as BEARER is from the right, in BEARER's own lettering (the dark design: pale grey; the orange
+   one: the picture's dark ink), and readable on both. On a card with no PIN: `NO LIMIT | NO PIN`; with a daily limit,
+   `DAILY LIMIT $5 | NO PIN`. With a PIN, no `| NO PIN`. A long line (both limits: `PER TAP $2.00 · DAILY $5.00`) wraps into
+   two and does not reach BEARER. A locked card has `LOCKED` above the line. Look at it on both designs and at a small
+   phone and a large one: the margins hold. Nothing is under the balance in the pill but the figures.
+3. **RESET on an empty card.** The first button of the row. **Pass:** one warning (the PIN, the owner, the limits and the log are
    wiped, a new key, then anyone's to set up; nothing about money). CANCEL changes nothing. CONTINUE: no PIN is asked, the sheet
    comes up and says `Keep holding.`, one tap, Home with `The card is reset.` Tap the card again from FLASHCARD. **Pass:** it reads as
    new (SET UP THIS CARD), and a second phone can set it up as its own.
@@ -1934,8 +1942,8 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    is in the wallet (a line in HISTORY for the withdrawal and none for the reset).
 5. **A locked card.** **Pass:** it asks for the PIN first, even when empty. A wrong PIN says WRONG PIN with the tries left and
    changes nothing.
-6. **Another phone's card, and an older card.** On a second phone read the first's card: **Pass:** no reset button. A card of
-   1.16 has none either.
+6. **Another phone's card, and an older card.** On a second phone read the first's card: **Pass:** no RESET in the row (HISTORY
+   is still at the top left). A card of 1.16 has none either: its row is CHANGE PIN (or ADD PIN) and LIMITS.
 7. **Cut short.** Lift the card as the money comes off. **Pass:** `EMPTY, BUT NOT RESET` says the money is in the phone, and TAP
    CARD finishes it.
 8. **FLASHCARD on the send screen.** Send, and below TYPE a fifth button, FLASHCARD; the five buttons fit with the camera pane as
@@ -1944,9 +1952,10 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 9. **A card with a PIN.** Same, with a card that has one (any phone's). **Pass:** the sheet ends `Enter the card's PIN` in no red,
    the pad comes up with `TAP AGAIN`, and the second tap writes the money. Nothing was made for the card before the PIN. A wrong
    PIN leaves the money owed to the card; TRY AGAIN asks again.
-10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** the rows say `ABOUT 2–5 SEC`, `ABOUT 10 SEC`, `ABOUT 12 SEC`,
-    `ABOUT 14 SEC`. Time a charge over the limit: about eight seconds extra for the first limit's worth, and the till's sheet reads
-    `Over per tap limit`, `x2`, `x3` as it goes on.
+10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** for a card of 1.18 the rows say `~1–4 SEC TAP`, `~9 SEC TAP`,
+    `~11 SEC TAP`, `~13 SEC TAP` (a card of 1.17: 9, 10 and 12). Charge over the limit and watch the screen behind the sheet:
+    KEEP HOLDING counts to about the row's figure for that tier (two more seconds for each further limit's worth), and the till's
+    sheet reads `Over per tap limit`, `x2`, `x3` as it goes on.
 
 #### 23d. What a card cannot be made to do
 
@@ -2005,12 +2014,12 @@ a fresh install.*
 2. **Every launch after.** Close Foxy fully and open it. **Pass:** the splash,
    then the home screen within about a second, with the balance and the last
    price, and the banner SECURING YOUR CONNECTION at the foot. A few seconds
-   later the banner turns to Secure Tor Connection by itself, with no screen
+   later the banner turns to Tor by itself, with no screen
    in between and no toast. The diary says `tor gate: home first` and never
    `tor gate: connecting`.
 3. **No network.** Airplane mode, open Foxy. **Pass:** the home screen at
    once, with OFFLINE - NO CONNECTION. Turn the radios on: the banner goes to
-   SECURING YOUR CONNECTION and then to Secure, with no screen.
+   SECURING YOUR CONNECTION and then to Tor, with no screen.
 4. **The banner's tap.** While it says SECURING YOUR CONNECTION, tap it.
    **Pass:** the connection screen with its count, which comes down by itself
    when Tor is through. In airplane mode the tap shows NO CONNECTION with TRY
@@ -2028,7 +2037,7 @@ a fresh install.*
    from pieces on hand with change to come back.
 8. **A long return.** Put Foxy away for a minute and bring it back.
    **Pass:** the home screen at once with SECURING YOUR CONNECTION, then
-   Secure; no connection screen, no splash held.
+   Tor; no connection screen, no splash held.
 9. **Tor in trouble.** With a VPN that Tor cannot get through, or Orbot on
    and not allowing Foxy, open Foxy. **Pass:** the home screen, with CANNOT
    CONNECT on the banner (or SECURING while Tor still tries); the tap brings

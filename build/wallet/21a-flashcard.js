@@ -782,7 +782,10 @@
      * more, for its holder's screen (`card` on the result). Only this one: a
      * till being paid learns no more of a card than it needs. A card that has
      * left by then is no failure: the money moved, and the result simply has no
-     * card on it. One that was let go when it had signed is not read again. */
+     * card on it. One that was let go when it had signed is not read again, and
+     * its result carries the card as the tap knows it instead: what was read at
+     * its start less the pieces it signed for (`cardAfterTake`). It is on the
+     * error too, if the mint has not answered (`after`, on `waiting`). */
     cardWithdraw: function (link, opts) {
       // the holder's own: where this phone is the card's owner, the day's limit is lifted, with its proof, for the taking, and put back
       return cardTake(link, Object.assign({ all: !(opts && opts.sats), lift: true }, opts || {}), 'from card').then(function (r) {

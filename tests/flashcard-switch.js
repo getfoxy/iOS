@@ -181,7 +181,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     app.goFlashcard();
     await until('the card to be read', () => !!app.state.fc && app.state.fc.check !== 'asking');
     // the card's screen carries no SWITCH MINT button for now; the move is kept, and driven here by its own entry (fcSwitchMint)
-    ok(vals(app).fcLinks.map((k) => k.label).join() === 'HISTORY,CHANGE PIN,LIMITS', 'the card’s screen has HISTORY, CHANGE PIN and LIMITS, and no SWITCH MINT button');
+    ok(vals(app).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS' && vals(app).fcHistoryVis === 'visible', 'the card’s screen has CHANGE PIN and LIMITS in its row, HISTORY at the top left, and no SWITCH MINT button');
 
     app.fcSwitchMint();
     ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard', 'it opens the list of mints, asking which');
@@ -247,9 +247,9 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     U.nfc = c;
     vals(app).fcNotes[0].tap();
     ok(!pad(app), 'and the owner’s phone is asked for no PIN: its proof moves the card and writes the money');
-    await until('the money to be on the card', () => face(app) && face(app).title === 'ON THE CARD');
-    ok(c.balance() === 1980 && app.state.fc.mint === MINT && U.W.cardOwed().length === 0, 'from the right one, a tap finishes the move: the card is at that mint with its money', String(c.balance()));
-    face(app).press('DONE');
+    // the card's own screen says it: the balance counts up to what the card holds, and no card is raised over it
+    await until('the money to be on the card', () => c.balance() === 1980 && !!app.state.fc && app.state.fc.balance === 1980 && !app.state.fcRoll);
+    ok(c.balance() === 1980 && app.state.fc.mint === MINT && U.W.cardOwed().length === 0 && !face(app), 'from the right one, a tap finishes the move: the card is at that mint with its money', String(c.balance()));
     app.showMelt = melt0;
 
     /* ---- pressed with this phone at the mint the card is going to ------------- */
