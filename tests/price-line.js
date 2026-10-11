@@ -698,8 +698,9 @@ const copyStorage = (ctx) => {
     return chart.d === freshChart().d && !chart.kept ? null : 'the state was left on the old line';
   });
 
-  await test('a line that arrives with none on screen is simply put up', async () => {
-    await fresh(freshWallet());
+  await test('a line that arrives with none on screen and none kept is simply put up', async () => {
+    // nothing kept: the load has nothing to draw first (with a kept line it draws that, and the fresh one morphs from it)
+    await fresh(keptWallet({ kept: () => null, candles: () => Promise.resolve(asRows(FRESH_ROWS)) }));
     logic.loadSeries('1D');
     await until(() => logic.state.series && logic.state.series['1D'] && lineD() === logic.state.series['1D'].d, 'the line on the page');
     if (logic._morph) return 'a change of line began from nothing';

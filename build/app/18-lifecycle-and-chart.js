@@ -130,9 +130,9 @@
    * lets the fresh one replace it (`loadSeries`, `showSeries`). Nothing kept
    * for this range, or nothing that reads as a line: nothing is drawn, as
    * before. */
-  showKeptLine() {
+  showKeptLine(range) {
     if (this.props.startStatic) return;
-    const r = this.state.range;
+    const r = range || this.state.range;
     const cfg = this.rangeCfg(r);
     const W = window.FoxyWallet;
     if (!cfg || !W || !W.keptLine || (this.state.series || {})[r]) return;
@@ -156,6 +156,10 @@
     if (this.props.startStatic) return;
     const cfg = this.rangeCfg(r);
     if (!cfg) return;
+    /* The kept line first, when nothing is drawn for this range yet: the
+     * mount draws it, but the boot and a mint switch come here on their own,
+     * and a launch whose range was not yet known at the mount drew nothing. */
+    if (!(this.state.series || {})[r]) this.showKeptLine(r);
     this._loading = this._loading || {};
     if (this.seriesFresh(r) || this._loading[r]) return;
     this._loading[r] = true;
