@@ -129,15 +129,19 @@ final class RouteTests: XCTestCase {
         XCTAssertFalse(HostApprovals.approves("cashu.space", approved: HostApprovals.builtIn, carried: []))
     }
 
-    /// The two block explorers a card's clock is fetched from are approved without an alert, and no other onion is.
+    /// The two block explorers a card's clock is fetched from are approved without an alert, by their onion
+    /// addresses and by their ordinary names (asked through an exit when neither onion answers), and nothing else is.
     func testTheBlockExplorersAreApprovedAndNoOtherOnion() {
         let known = HostApprovals.builtIn.union(HostApprovals.explorers)
-        XCTAssertEqual(HostApprovals.explorers.count, 2)
+        XCTAssertEqual(HostApprovals.explorers.count, 4)
+        XCTAssertEqual(HostApprovals.explorers.filter { $0.hasSuffix(".onion") }.count, 2, "two onions")
+        XCTAssertEqual(HostApprovals.explorers.filter { !$0.hasSuffix(".onion") }, ["mempool.space", "blockstream.info"], "and their two names")
         for host in HostApprovals.explorers {
-            XCTAssertTrue(host.hasSuffix(".onion"), host)
             XCTAssertTrue(HostApprovals.approves(host, approved: known, carried: []), host)
         }
-        for other in ["example.onion", "mempool.space", "evilmempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion"] {
+        // (a name under an approved host is approved with it, as for any approved host; a name that only ends like one is not)
+        for other in ["example.onion", "evilmempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion",
+                      "mempool.space.evil.net", "blockstream.info.evil.net", "evilmempool.space"] {
             XCTAssertFalse(HostApprovals.approves(other, approved: known, carried: []), other)
         }
     }

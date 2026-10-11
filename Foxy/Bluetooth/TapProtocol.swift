@@ -593,7 +593,8 @@ final class ChangeHandover {
 /// told about each would redraw a hundred times. Both radios use this: the
 /// payer counting writes acknowledged, the receiver counting bytes in.
 struct TapProgress {
-    private var last = -1
+    // four below zero, so that the first word (0) is said at once
+    private var last = -4
 
     /// The percentage to say now, or nil when it has not moved enough.
     /// `cap` is 99 on the side that is still waiting for the last byte.

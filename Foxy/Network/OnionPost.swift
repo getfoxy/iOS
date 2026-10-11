@@ -54,7 +54,8 @@ enum OnionPost {
             done(.failure(.notOnion)); return
         }
         let host = name.lowercased()
-        let head = "POST \(pathOf(url)) HTTP/1.1\r\nHost: \(host)\r\n"
+        guard let target = requestTarget(url) else { done(.failure(.notOnion)); return }
+        let head = "POST \(target) HTTP/1.1\r\nHost: \(host)\r\n"
             + "Content-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         guard let port = portOf(url) else { done(.failure(.notOnion)); return }
         _ = connect(host: host, port: port, request: Data(head.utf8) + body,
@@ -80,14 +81,26 @@ enum OnionPost {
             done(.failure(.notOnion)); return {}
         }
         let host = name.lowercased()
-        let head = "GET \(pathOf(url)) HTTP/1.1\r\nHost: \(host)\r\n"
+        guard let target = requestTarget(url) else { done(.failure(.notOnion)); return {} }
+        let head = "GET \(target) HTTP/1.1\r\nHost: \(host)\r\n"
             + "Accept: application/json\r\nConnection: close\r\n\r\n"
         guard let port = portOf(url) else { done(.failure(.notOnion)); return {} }
         return connect(host: host, port: port, request: Data(head.utf8),
                        circuit: circuit, timeout: timeout, done: done)
     }
 
-    private static func pathOf(_ url: URL) -> String { url.path.isEmpty ? "/" : url.path }
+    /// The path as it goes on the request line: percent-encoded as the URL
+    /// holds it, never decoded. `URL.path` decodes, so a path written with
+    /// `%0d%0a` would put a real line break into the request and let a URL
+    /// the page was handed add header lines or a second request (to the same
+    /// host, which it named anyway). A target holds printable ASCII with no
+    /// spaces, or the request is not made.
+    static func requestTarget(_ url: URL) -> String? {
+        let raw = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
+        let path = raw.isEmpty ? "/" : raw
+        guard path.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7f }) else { return nil }
+        return path
+    }
     /// nil rather than a trap: the URL is built from page-supplied text
     /// (handleOnionPost), the host checks constrain the name and not the port,
     /// and `UInt16(_:)` crashes on anything that will not fit.

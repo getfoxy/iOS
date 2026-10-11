@@ -590,4 +590,24 @@ final class OnionHTTPFuzzTests: XCTestCase {
         }
         XCTAssertGreaterThan(answers, 0)
     }
+
+    // MARK: the request the phone writes to an onion
+
+    /// The path goes on the request line as the URL holds it, percent-encoded.
+    /// `URL.path` decodes, so a URL with `%0d%0a` in its path would otherwise
+    /// put a real line break into the request and let a URL the page was handed
+    /// add header lines, or a second request to the same host.
+    func testTheRequestTargetIsThePathAsEncodedAndNeverALineBreak() throws {
+        let plain = try XCTUnwrap(URL(string: "http://abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz234567abcdefghijkl.onion/api/blocks/tip/hash"))
+        XCTAssertEqual(OnionPost.requestTarget(plain), "/api/blocks/tip/hash")
+        let bare = try XCTUnwrap(URL(string: "http://abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz234567abcdefghijkl.onion"))
+        XCTAssertEqual(OnionPost.requestTarget(bare), "/", "no path is the root")
+
+        let crafted = try XCTUnwrap(URL(string: "http://abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz234567abcdefghijkl.onion/pay%0d%0aX-Added:%201%0d%0a"))
+        XCTAssertTrue(crafted.path.contains("\r\n"), "the decoded path is where the hazard was")
+        let target = try XCTUnwrap(OnionPost.requestTarget(crafted))
+        XCTAssertFalse(target.contains("\r") || target.contains("\n") || target.contains(" "), target)
+        XCTAssertEqual(target, "/pay%0d%0aX-Added:%201%0d%0a", "sent as written, one line")
+    }
+
 }

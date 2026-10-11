@@ -122,7 +122,7 @@ final class CardGateTests: XCTestCase {
         XCTAssertEqual(CardGate.progressScript(stage: "connected", text: "Scanning. Hold still."),
                        head + "{\"stage\":\"connected\",\"text\":\"Scanning. Hold still.\"})")
         XCTAssertEqual(CardGate.progressScript(stage: "connected", text: CardGate.scanning),
-                       head + "{\"stage\":\"connected\",\"text\":\"Scanning. Hold still.\"})")
+                       head + "{\"stage\":\"connected\",\"text\":\"Reading the card\"})")
         XCTAssertEqual(CardGate.progressScript(stage: "say", text: "Keep the card there"),
                        head + "{\"stage\":\"say\",\"text\":\"Keep the card there\"})")
         XCTAssertEqual(CardGate.progressScript(stage: "end", text: "Done"),

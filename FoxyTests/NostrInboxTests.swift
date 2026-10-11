@@ -201,4 +201,33 @@ final class NostrInboxTests: XCTestCase {
         inbox.took(#"["EVENT","\#(sub)",\#(event)]"#)   // the same wrap from a second relay
         XCTAssertEqual(payments, [#"{"id":"abc"}"#], "the same payment was announced twice")
     }
+
+    // MARK: the inbox, fed what a relay would send
+
+    private func relayMessage(_ event: NostrEvent.Event, for inbox: NostrInbox) -> String {
+        "[\"EVENT\",\"" + inbox.subscription + "\"," + NostrEvent.json(event) + "]"
+    }
+
+    /// Relays send whatever they like, and every relay sends the same wrap.
+    /// A wrap is remembered as seen only once it has opened and checked out:
+    /// one relay sending a wrap that merely claims the genuine wrap's id must
+    /// not make the genuine one, arriving from the others, drop as a copy.
+    func testAWrapThatOnlyClaimsTheGenuineIdDoesNotShadowIt() throws {
+        var got: [String] = []
+        let inbox = try XCTUnwrap(NostrInbox(onPayment: { got.append($0) }))
+        let payment = #"{"id":"8c0e1f22","mint":"https://mint.test","unit":"sat","proofs":[]}"#
+        let wrap = try NostrEvent.giftWrapped(payload: payment, receiver: inbox.pubkey)
+        var forged = wrap
+        forged.content = "not what the id says"     // the id and the signature are the genuine wrap's
+        XCTAssertNil(NostrEvent.unwrap(forged, to: [UInt8](repeating: 1, count: 32)), "it is not a wrap that opens")
+
+        inbox.took(relayMessage(forged, for: inbox))
+        XCTAssertEqual(got, [], "a wrap that does not check out pays nothing")
+        inbox.took(relayMessage(wrap, for: inbox))
+        XCTAssertEqual(got, [payment], "and the genuine wrap, from the next relay, is taken")
+        inbox.took(relayMessage(wrap, for: inbox))
+        XCTAssertEqual(got.count, 1, "the same wrap from a third relay is one payment, not two")
+        inbox.close()
+    }
+
 }

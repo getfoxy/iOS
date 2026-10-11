@@ -518,8 +518,11 @@ final class TapProtocolTests: XCTestCase {
 import CryptoKit
 private enum SHA256Hex {
     static func digest(_ d: Data) -> SHA256.Digest { SHA256.hash(data: d) }
+}
 
-    // MARK: change handed over, and progress (the radio's rules, without a radio)
+// MARK: change handed over, and progress (the radio's rules, without a radio)
+// (These three sat inside the enum above for a while, where XCTest could not see them.)
+extension TapProtocolTests {
 
     /// The page is answered once; a payer's word after that is "late", and
     /// anything else is nothing.

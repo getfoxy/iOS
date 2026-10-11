@@ -46,11 +46,13 @@ final class NostrInbox {
     let onPayment: (_ body: String) -> Void
 
     private let secret: [UInt8]
-    private let pubkey: [UInt8]
+    /// Internal, not private, so that a test can wrap a payment for this inbox.
+    let pubkey: [UInt8]
     private var sockets: [(task: URLSessionWebSocketTask, session: URLSession)] = []
     private var seen = Set<String>()
     private var closed = false
-    private let subscription: String
+    /// Internal, not private, so that a test can hand `took` a relay's message.
+    let subscription: String
 
     /// nil when a key could not be made, which means secp256k1 is unavailable
     /// and nothing here could work anyway.
@@ -158,9 +160,12 @@ final class NostrInbox {
               let json = try? JSONSerialization.data(withJSONObject: object),
               let wrap = NostrEvent.parse(String(decoding: json, as: UTF8.self)) else { return }
 
-        // every relay sends the same wrap, and the payer sent it to all of them
-        guard !wrap.id.isEmpty, seen.insert(wrap.id).inserted else { return }
-        if seen.count > 128 { seen.removeAll(); seen.insert(wrap.id) }
+        // every relay sends the same wrap, and the payer sent it to all of them:
+        // one that has opened is not opened again. An id is remembered only
+        // once its wrap has opened and checked out, so that a relay sending a
+        // wrap that only claims the id (the id is not checked until `unwrap`)
+        // cannot make the genuine one from every other relay drop as a copy.
+        guard !wrap.id.isEmpty, !seen.contains(wrap.id) else { return }
 
         guard let rumor = NostrEvent.unwrap(wrap, to: secret) else {
             #if DEBUG
@@ -168,6 +173,8 @@ final class NostrInbox {
             #endif
             return
         }
+        if seen.count >= 128 { seen.removeAll() }
+        seen.insert(wrap.id)
         print("[foxy] nostr inbox: a payment arrived")
         onPayment(rumor.content)
     }
