@@ -386,6 +386,17 @@ is waiting to go onto this card. Press here, then tap it.`, and the next tap
 writes them. Putting money on a card does not touch its limit. THE CARD IS FULL
 if it has no room for the load: take some money off it first.
 
+The keypad says so before the tap. The card on show was read a moment ago, so
+the wallet is asked as the amount is typed whether the card's free places hold
+what it is cut into (`cardLoadFits`: the cut `cardPrepare` makes and the check
+it refuses on, one function). An amount they do not hold is red, NEXT is off,
+and the line under the figure reads MORE THAN THE CARD CAN TAKE; NEXT pressed
+all the same says the words of the refusal above. A load needs its pieces and
+the four places a write keeps back, so a card with fewer than five places free
+takes nothing, and one with few takes the amount rounded up to fewer, larger
+pieces. FLASHCARD on the send screen has no card on show and is capped by
+this phone's balance alone, as it was.
+
 ## Paying at a till
 
 On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP. A split bill has the same **CARD** on each payer's own

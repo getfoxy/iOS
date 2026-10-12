@@ -2007,6 +2007,22 @@
     return Math.max(1, Math.min(most, room));
   }
 
+  /* What a load of `want` sats onto `card` is cut into, and whether the card
+   * has the room for it: the one cut `cardPrepare` makes and refuses on, and
+   * `cardLoadFits` asks ahead of it, so the keypad that says no and the load
+   * that says no are never at different amounts.
+   *
+   * The pieces are cut to the places a load may fill (`cardRoomFor`) and to the
+   * mint's largest key; a card whose free places (`empty` and `spent`) cannot
+   * hold those pieces and the four a write keeps back is full for it. */
+  var CARD_FULL_WORDS = 'The card has no room for that. Take some money off it first.';
+  function cardLoadCut(w, card, want) {
+    var biggest = cardMaxPiece(w);
+    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
+    var room = card.info.empty + card.info.spent;
+    return { ladder: ladder, room: room, full: ladder.denominations.length + 4 > room };
+  }
+
   /* The pieces change is made in: exactly `sats`, never rounded, cut for the
    * card it goes back on as a load is — filling the gaps in its drawer (the
    * card as it will be, without the pieces that have just been signed), in the

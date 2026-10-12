@@ -45,6 +45,7 @@ function method(src, sig) {
 }
 
 const SPLIT = part('20-split-values.js');
+const CONTEXT = part('21-render-values.js');
 const AMOUNT = part('23-render-home-and-amount.js');
 const KEYPAD = part('19-update-keypad-balance.js');
 const SEND = part('03-send.js');
@@ -54,7 +55,7 @@ const SIGS = [
   [SPLIT, 'spOthers() {'], [SPLIT, 'spEven() {'], [SPLIT, 'spSharesArr() {'],
   [SPLIT, 'spSlots() {'], [SPLIT, 'spPaidArr() {'], [SPLIT, 'spNextUnpaid() {'],
   [SPLIT, 'spInitials(n) {'], [SPLIT, 'splitVals(s, sc) {'],
-  [AMOUNT, 'renderAmount(c) {'],
+  [AMOUNT, 'renderAmount(c) {'], [CONTEXT, 'renderContext() {'],
   [KEYPAD, 'press(ch) {'], [KEYPAD, 'display() {'], [KEYPAD, 'group(n) {'],
   [SEND, 'usd(v) {'],
 ];
@@ -330,6 +331,62 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   reset({ flow: 'receive', amount: '5' });
   amountVals({ val: 5 }).next();
   ok(lightning === 1 && toasts.length === 0, 'a real amount goes on, and says nothing');
+}
+
+// ---- adding to a card: the card's room as well as the phone's balance ---------
+{
+  /* The keypad's ceiling for ADD FUNDS is what this phone holds and what the card
+   * can take. The card was read a moment ago, so the wallet can say whether its
+   * free places hold what is typed (`fcLoadFits`); the line under the figure says
+   * which limit it is. FLASHCARD on the send screen has no card on show and is
+   * capped by the balance alone. */
+  const asked = [];
+  const on = (flow, amount, fits) => {
+    reset({ flow, amount, unit: 'SATS', fc: flow === 'cardAdd' ? { key: 'k' } : null });
+    const a = Object.assign({}, app, {
+      balNow: () => ({ sats: 5000 }), satUsd: () => 0.001, px: () => 100000, heldBlocks: () => '',
+      wantedSats: () => Number(app.state.amount) || 0,
+      fcLoadFits: (n) => { asked.push(n); return fits; },
+    });
+    return a;
+  };
+  const OK = { ok: true, why: '' };
+  const FULL = { ok: false, why: 'The card has no room for that. Take some money off it first.' };
+  const label = (c) => amountVals(Object.assign({ val: 1 }, { sendOver: c.sendOver, roomOver: c.roomOver })).sendOverLabel;
+
+  let c = on('cardAdd', '1000', OK).renderContext();
+  ok(c.sendOver === false && c.roomOver === false, 'an amount within the balance, on a card with room, is not over', JSON.stringify([c.sendOver, c.roomOver]));
+  ok(asked.length === 1 && asked[0] === 1000, 'and the wallet was asked about it in sats', JSON.stringify(asked));
+
+  reset({ flow: 'cardAdd', amount: '1000', unit: 'SATS' });
+  c = on('cardAdd', '1000', FULL).renderContext();
+  ok(c.sendOver === true && c.roomOver === true, 'an amount the card has no room for is over, though the phone holds it', JSON.stringify([c.sendOver, c.roomOver]));
+  ok(label(c) === 'MORE THAN THE CARD CAN TAKE', 'and the line under the figure names the card’s limit', label(c));
+  ok(amountVals({ val: 1, sendOver: true, roomOver: true }).nextBg === 'rgba(var(--ink-rgb),.14)', 'with NEXT off, as over the balance');
+
+  c = on('cardAdd', '9000', OK).renderContext();
+  ok(c.sendOver === true && c.roomOver === false && label(c) === 'MORE THAN YOUR BALANCE',
+     'an amount over the balance on a card with room is the phone’s limit, as it was', label(c));
+
+  asked.length = 0;
+  c = on('cardAdd', '9000', FULL).renderContext();
+  ok(c.sendOver === true && c.roomOver === true && label(c) === 'MORE THAN THE CARD CAN TAKE',
+     'over both, the card’s is the one named: there is no typing less that the card would take', label(c));
+  ok(asked.length === 1 && asked[0] === 5000, 'and the wallet is asked about no more than the phone holds', JSON.stringify(asked));
+
+  asked.length = 0;
+  c = on('cardAdd', '', FULL).renderContext();
+  ok(c.sendOver === false && asked.length === 0, 'nothing typed is not asked about', JSON.stringify(asked));
+  c = on('cardAdd', '1000', null).renderContext();
+  ok(c.sendOver === false && c.roomOver === false, 'a wallet that cannot say leaves the cap as it was: the balance', JSON.stringify([c.sendOver, c.roomOver]));
+
+  asked.length = 0;
+  c = on('cardSend', '1000', FULL).renderContext();
+  ok(c.roomOver === false && c.sendOver === false && asked.length === 0,
+     'FLASHCARD on the send screen has no card on show: not capped by room, and the wallet is not asked', JSON.stringify([c.roomOver, asked]));
+  c = on('send', '1000', FULL).renderContext();
+  ok(c.roomOver === false && asked.length === 0, 'nor is any other keypad', JSON.stringify(asked));
+  ok(amountVals({ val: 1, sendOver: true }).sendOverLabel === 'MORE THAN YOUR BALANCE', 'and the balance’s line is the one it always was');
 }
 
 // ---- nothing refuses in silence ---------------------------------------

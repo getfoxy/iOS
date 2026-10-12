@@ -2893,6 +2893,62 @@ class Component extends DCLogic {
     this.setState(p => ({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
       note: '', noteDraft: '' }));
+    // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
+    this.tellPayerShort(req);
+  }
+
+  /* Is the mint this request is paid at the one this phone is on, or does it
+   * name none? Then what the wallet holds and charges here is what the payment
+   * is made from, and the screen can judge it before the button is pressed
+   * (`requestSpec`). A request for another mint is paid after connecting to
+   * that mint (`makeTokenForRequest`), which this phone has not done. */
+  requestHere(req) {
+    const W = window.FoxyWallet;
+    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    return !want || !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+  }
+
+  /* A payer that cannot cover a payment over the link says so to the phone it
+   * is touching.
+   *
+   * The offer screen holds its button at NOT ENOUGH for it (`requestSpec`), so
+   * nothing the person presses would tell the other phone, which would sit on
+   * its four digits until the link went. The word is the one a payment that
+   * was not made already sends (`gaveUp`, `makeTokenForRequest`), carrying a
+   * sentence with none of this phone's figures in it (`shortForReceiver`), so
+   * the receiver shows a refusal as it shows one then and the
+   * link's messages are the same ones, in the same order, only here: before
+   * the question asked first (`askFirst`) that a payer who cannot pay never
+   * asks. Asked of the wallet in the terms the screen asks it
+   * (`sendShortfall`), once for each request. */
+  tellPayerShort(req) {
+    const W = window.FoxyWallet;
+    if (!req || !req.viaTap || !(req.sats > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
+    if (!this.requestHere(req)) return;
+    let lack = null;
+    try {
+      lack = W.sendShortfall(req.sats, { locked: !!(req.lockTo && !(this.offlineNow && this.offlineNow())) });
+    } catch (e) { lack = null; }
+    if (!lack || !lack.short) return;
+    const told = String(req.id || req.sats);
+    if (this._shortTold === told) return;
+    this._shortTold = told;
+    console.log('[foxy] tap: this phone cannot cover the payment; telling the receiver before it promises anything');
+    W.tapQuote(JSON.stringify({ gaveUp: this.shortForReceiver() })).catch(() => {});
+  }
+
+  /* What the phone being paid is told when this one cannot cover the payment:
+   * that, and no figure. The wallet's own sentence says what the payment needs
+   * and what this phone holds, which is for the person holding this phone and
+   * for nobody across a counter from them. */
+  shortForReceiver() { return 'The payer does not have enough to cover this payment.'; }
+
+  /* A refusal's words as the other phone is given them: a balance that could
+   * not cover the payment goes without its figures (`shortForReceiver`), and
+   * anything else as the wallet said it. */
+  saidToReceiver(why) {
+    const said = String(why || '');
+    return /balance isn\u2019t enough|balance isn't enough|not enough ecash/i.test(said) ? this.shortForReceiver() : said;
   }
 
   /* Does paying this request need a connection?
@@ -3220,7 +3276,7 @@ class Component extends DCLogic {
          * not sit waiting for a payment that is not coming. It rides M10,
          * as the other things a payer says before the money do. */
         if (req && req.viaTap && W.tapQuote) {
-          W.tapQuote(JSON.stringify({ gaveUp: String(W.reason(e) || 'The payment was not made.') })).catch(() => {});
+          W.tapQuote(JSON.stringify({ gaveUp: this.saidToReceiver(W.reason(e)) || 'The payment was not made.' })).catch(() => {});
         }
         this.setState(p => ({ screen: p.screen === 'sendDone' ? 'home' : p.screen, stack: [] }));
         this.toast(W.reason(e), true);
@@ -12578,7 +12634,19 @@ class Component extends DCLogic {
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
     const overLimit = s.flow === 'send' && sendEnteredUsd > SEND_DAY_LIMIT + 0.005;
-    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit);
+    /* And adding to a card is out of what the card can take, as well as out
+     * of this phone's balance. The card on show was read a moment ago, and
+     * the wallet says whether its free places hold what the amount typed is
+     * cut into (`fcLoadFits`), the very cut the load refuses on, so THE CARD
+     * IS FULL is said here and not after the tap. Asked of no more than this
+     * phone holds: a figure over the balance is over whatever the card can
+     * take, and an enormous one is not cut into pieces on every key. FLASHCARD
+     * on the send screen has no card on show and is capped by the balance
+     * alone. */
+    const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
+      ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
+    const roomOver = !!(room && !room.ok);
+    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver);
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;
     // live series or nothing: a canned curve next to a real price is a lie
@@ -12598,8 +12666,8 @@ class Component extends DCLogic {
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
-    return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
+    return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }
 
   /* The frame every screen sits in: size, theme and accent, the keyboard, the toast,
@@ -13113,6 +13181,8 @@ class Component extends DCLogic {
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so
       ...(s.flow === 'cardWd' ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
+      // adding to one, the card has no room for the amount: its limit, not the phone's
+      ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
     };
   }
 
@@ -13820,7 +13890,25 @@ class Component extends DCLogic {
     ]).concat(this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
-     * refused after SEND. */
+     * refused after SEND.
+     *
+     * The wallet answers with the very sum `sendToken` refuses on (the amount
+     * and this mint's fee for making it) against what is held at the mint the
+     * payment is made from, in the words it refuses in (`sendShortfall`). So
+     * the button is held here and says why, and the way out is back. A
+     * request paid at the mint this phone is on, or at none in particular, is
+     * judged so; one for another mint is not (`requestHere`): that mint is
+     * connected to when the button is pressed, and what is held there, and
+     * what it charges, are known only then, so the figures below stay as they
+     * were. */
+    if (lack && lack.short && this.requestHere(req)) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
+        amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        warn: this.heldBlocks(lack.need - lack.have) || lack.why,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
+      };
+    }
     const shortBy = lack && lack.short ? lack.need - lack.have : Math.max(0, sats - (s.balSats || 0));
     const short = shortBy > 0;
     if (short) {
@@ -14900,6 +14988,7 @@ class Component extends DCLogic {
    * uses, with the fee and the wait it buys. */
   onchainSpec() {
     const s = this.state;
+    const W = window.FoxyWallet;
     const plan = s.ocPlan;
     const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
     const short = String(s.ocTo || '');
@@ -14912,17 +15001,29 @@ class Component extends DCLogic {
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
         { half: true }),
     ];
-    /* More than is here: said before the mint is asked to take it, the way a
-     * payment request that overruns the balance is. */
-    const owed = s.ocSats + (pick ? pick.fee : 0);
-    if (pick && owed > (s.balSats || 0)) {
+    const many = !!(plan && plan.options.length > 1);
+    /* Once the quote is in: can the balance cover the payout and its fees?
+     *
+     * The wallet answers with the very sum `onchainPay` refuses on (the
+     * amount, the fee option's reserve, this mint's own fee for the split and
+     * its fee again on the pieces the melt spends) against what is held at
+     * the mint it pays from, in the words it refuses in (`onchainNeed`). The
+     * balance alone fitting the amount and the reserve is not the payout
+     * fitting. So the button is held here and says why, and the way out is
+     * back, to the amount; a slower speed, where the mint offers one, costs
+     * less, and stays there to be chosen. A render must not fail on the wallet
+     * failing to say, and then SEND is there as it was: `onchainPay` refuses. */
+    let covers = null;
+    try {
+      covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+    } catch (e) { covers = null; }
+    if (covers && !covers.ok) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.money(s.ocSats).main, amountSub: this.money(s.ocSats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(owed - (s.balSats || 0))
-          || 'More than your balance — short by ' + this.money(owed - (s.balSats || 0)).main
-          + ' with the fee',
-        cta: 'CLOSE', ctaTone: 'warn', go: () => this.ocCancel(),
+        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        secondary: many ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true } : undefined,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
     if (s.ocErr) {
@@ -14934,7 +15035,6 @@ class Component extends DCLogic {
         cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.ocQuote(),
       };
     }
-    const many = !!(plan && plan.options.length > 1);
     return {
       title: 'CONFIRMATION',
       amountLabel: 'SENDING',
@@ -19034,6 +19134,20 @@ class Component extends DCLogic {
     }));
   }
 
+  /* ADD FUNDS: does the card on show have the room for `sats`? The wallet's
+   * answer ({ ok, why, … }, `cardLoadFits`) to the amount typed, for the card
+   * read a moment ago, or null where there is none to ask about: no card on
+   * show (FLASHCARD on the send screen), a card other than the one read last,
+   * or a wallet that cannot say. The keypad asks as it is typed
+   * (`renderContext`), and NEXT asks again (`fcAmountNext`). */
+  fcLoadFits(sats) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    const card = this._fcCard;
+    if (!W || !W.cardLoadFits || !fc || !card || card.key !== fc.key || !(sats > 0)) return null;
+    try { return W.cardLoadFits(card, sats); } catch (e) { return null; }
+  }
+
   fcAmountNext() {
     const flow = String(this.state.flow);
     const fc = this.state.fc;
@@ -19045,6 +19159,9 @@ class Component extends DCLogic {
      * says the same thing in red, but it is worked out in dollars and has
      * nothing to say with no price. */
     const have = Math.floor(this.balNow().sats || 0);
+    // the card's room first, as the line under the figure names it first: the wallet's own words, asked of what the phone holds at the most
+    const room = flow === 'cardAdd' ? this.fcLoadFits(Math.min(sats, have)) : null;
+    if (room && !room.ok) { this.toast(room.why, true); return; }
     if ((flow === 'cardAdd' || flow === 'cardSend') && sats > have) { this.toast('You have ' + this.fcBoth(have) + '.', true); return; }
     // the sheet comes up at once, over the keypad, which stays where it is (`fcSendRun`)
     if (flow === 'cardSend') { this.fcSendRun(sats, ''); return; }

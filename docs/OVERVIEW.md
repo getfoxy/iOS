@@ -57,7 +57,9 @@ mint is `mint.minibits.cash`.
   the address has been looked up and the fee quoted; then it reads SEND, or
   NOT ENOUGH if the balance would not cover the payment and its fee. With no
   network at all, or a Tor that has given up, the card for no connection
-  comes as it always did.
+  comes as it always did. A payout on chain and a payment request are held at
+  NOT ENOUGH the same way, in the same sentence, and the keypad for adding to
+  a card stops at what the card has room for.
 - **Coming back from the background is the same.** Once what is with a mint
   has come back (a payment is waited for up to twenty seconds, anything else
   up to three), nothing new is sent, and Tor goes off the network about

@@ -821,6 +821,24 @@ landed on a control that no longer existed.
    the lesser amount without going back.
 5. The network picker names a default, and on-chain reads **on chain**.
 
+#### 21i. A payout or a request the balance cannot cover
+
+*Needs a phone holding a few thousand sats at a mint that charges for what it
+swaps. The first step also needs a mint that pays out on chain.*
+
+1. **On chain.** Paste a Bitcoin address, type an amount a few sats under the
+   balance, NEXT. **Pass:** once the fee is quoted the button reads NOT ENOUGH
+   and does nothing, with "Your balance isn't enough to cover the payment and
+   its fee: this needs N sats and you hold M." under the rows (N is the
+   amount, the fee shown, and what the mint charges to swap what you hold);
+   back is the way out; where the mint offers a slower speed, CHANGE THE SPEED
+   is there and a speed that costs less turns the button to SEND. An amount
+   that fits with all of it reads SEND, and pays.
+2. **A payment request.** Scan a request for the most the balance holds less
+   the mint's fee, plus one sat. **Pass:** the offer's button reads NOT ENOUGH
+   with the same sentence, and pressing it makes nothing. One sat less is not
+   held.
+
 ### C. The seed and the keychain
 
 #### 14. The native seed screens
@@ -1555,6 +1573,13 @@ and load it), a phone whose build carries the NFC entitlement
    into the phone and how much is left; HISTORY has an entry, From card, for
    what came off (the screen has left the card: its figures are out of date); TAP CARD asks no PIN and
    takes the rest; IN YOUR WALLET says the whole amount.
+7. **A card with no room.** On a card with fewer than five places free (load
+   it in many small amounts until the card is full), ADD FUNDS and type any
+   amount. **Pass:** the figure is red, the line under it reads MORE THAN THE
+   CARD CAN TAKE and NEXT is grey; pressed anyway it says the card has no room
+   for that. No GETTING IT READY screen and no tap come up, and the phone's
+   balance is as it was. FLASHCARD from the send screen, with no card on show,
+   is capped by the balance alone.
 
 #### 23c. Paying another phone
 
@@ -2080,6 +2105,20 @@ a fresh install.*
     airplane mode the same invoice gets YOU'RE OFFLINE at once, as before; and
     with the radios turned off while CHECKING shows, the card comes up over
     the confirmation then.
+
+#### 22n. A payer short by the mint's fee
+
+*Needs two phones on one mint, a payer holding a little less than the amount
+plus the fee its mint charges to swap what it holds (a few sats under, at a
+mint that charges), and a till asking for that amount.*
+
+1. On the till RECEIVE, the amount, and hold the payer to it. **Pass:** the
+   payer's offer opens by itself with NOT ENOUGH and the wallet's sentence, and
+   its button does nothing; at once the till shows THE PAYER COULD NOT PAY with
+   the same sentence. The payer's diary says `this phone cannot cover the
+   payment; telling the receiver before it promises anything` and has no
+   `asked first` line; no swap is made and the payer's balance is as it was.
+   With a few sats more on the payer, the same tap pays as it always did.
 
 ## Getting a log off somebody else's phone
 

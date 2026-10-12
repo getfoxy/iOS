@@ -703,7 +703,25 @@
     ]).concat(this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
-     * refused after SEND. */
+     * refused after SEND.
+     *
+     * The wallet answers with the very sum `sendToken` refuses on (the amount
+     * and this mint's fee for making it) against what is held at the mint the
+     * payment is made from, in the words it refuses in (`sendShortfall`). So
+     * the button is held here and says why, and the way out is back. A
+     * request paid at the mint this phone is on, or at none in particular, is
+     * judged so; one for another mint is not (`requestHere`): that mint is
+     * connected to when the button is pressed, and what is held there, and
+     * what it charges, are known only then, so the figures below stay as they
+     * were. */
+    if (lack && lack.short && this.requestHere(req)) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
+        amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        warn: this.heldBlocks(lack.need - lack.have) || lack.why,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
+      };
+    }
     const shortBy = lack && lack.short ? lack.need - lack.have : Math.max(0, sats - (s.balSats || 0));
     const short = shortBy > 0;
     if (short) {

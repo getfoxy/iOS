@@ -260,6 +260,12 @@ function representative(logic) {
   const DAY = { limited: true, limit: 5000, spent: 3800, left: 1200, turns: 4102444800, now: 4102358400, noTime: false };
   // the card's three amounts, on the keypad every amount is typed on
   add('amount, adding to a card', at('amount', { flow: 'cardAdd', amount: '5', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
+  /* The card read a moment ago has no room for what is typed: the figure goes red, NEXT goes off, and the line under it names the card's
+   * limit and not the phone's. The wallet's answer is the cut a load makes and the check it refuses on (`cardLoadFits`). */
+  add('amount, adding to a card that has no room for it', at('amount', { flow: 'cardAdd', amount: '5', unit: 'USD', fc: FC({ room: 3 }) }, {
+    wallet: CARDS({ cardLoadFits: () => ({ ok: false, why: 'The card has no room for that. Take some money off it first.', sats: 8192, rounded: 0, room: 3 }) }),
+    before: (a) => { a._fcCard = { key: KEY_A, info: {}, pieces: [] }; },
+  }));
   add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
   add('amount, a card\u2019s daily limit, in sats, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
   add('fcLimitConfirm, a daily limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
@@ -461,6 +467,12 @@ function representative(logic) {
       balSats: 250000, quotedFee: 12, quotedAmt: 2100 },
     { wallet: { lookupLnurl: () => new Promise(() => {}), payNeed: () => ({ ok: true, need: 2112, have: 250000, fee: 12, why: '' }) },
       before: (a) => { a._quotedFor = 'alice@example.com|2100'; } }));
+  // a payout on chain, its quote in and the balance covering it: SEND, with the speed it was quoted at
+  const OC_PLAN = (more) => ({ id: 'oc-melt-1', address: 'bc1qexampleaddressxyz0123456789abcdef', sats: 50000, expiry: null,
+    options: [{ index: 0, fee: 500, blocks: 1 }].concat(more || []) });
+  const OC = { ocSats: 50000, ocTo: 'bc1qexampleaddressxyz0123456789abcdef', ocFee: 0, ocErr: '', balSats: 250000 };
+  add('ocConfirm, a quote that fits', at('ocConfirm', Object.assign({ ocPlan: OC_PLAN() }, OC),
+    { wallet: { onchainNeed: () => ({ ok: true, need: 50500, have: 250000, fee: 500, why: '' }) } }));
   add('depConfirm, by card', at('depConfirm', { flow: 'deposit', amount: '10', unit: 'USD', depositVia: 'DEBIT / CREDIT CARD' }));
   /* The quote in, the balance not covering the payment and its fee: the
    * button reads NOT ENOUGH and does nothing, with the wallet's sentence under
@@ -475,6 +487,19 @@ function representative(logic) {
     { wallet: { payNeed: () => ({ ok: false, need: 2113, have: 2105, fee: 13,
         why: 'Your balance isn\'t enough to cover the payment and its fee: this needs 2113 sats and you hold 2105.' }) },
       before: (a) => { a._quotedFor = 'lnbc2100n1stub'; } }));
+  /* The same on chain, and for a payment request: the quote or the request judged by the wallet's own sum, the button held at NOT
+   * ENOUGH with its sentence, and (on chain, where the mint offers a slower speed that costs less) CHANGE THE SPEED to choose it. */
+  add('ocConfirm, a quote the balance cannot cover', at('ocConfirm', Object.assign({ ocPlan: OC_PLAN() }, OC, { balSats: 50504 }),
+    { wallet: { onchainNeed: () => ({ ok: false, need: 50505, have: 50504, fee: 505,
+        why: 'Your balance isn\'t enough to cover the payment and its fee: this needs 50505 sats and you hold 50504.' }) } }));
+  add('ocConfirm, a quote the balance cannot cover, with a slower speed to choose', at('ocConfirm',
+    Object.assign({ ocPlan: OC_PLAN([{ index: 2, fee: 100, blocks: 6 }]) }, OC, { balSats: 50200 }),
+    { wallet: { onchainNeed: () => ({ ok: false, need: 50500, have: 50200, fee: 500,
+        why: 'Your balance isn\'t enough to cover the payment and its fee: this needs 50500 sats and you hold 50200.' }) } }));
+  add('reqOffer, a payment request the balance cannot cover with the mint\'s fee', at('reqOffer',
+    { req: { id: 'req-short', sats: 500, mints: ['https://mint.minibits.cash/Bitcoin'], transports: [], viaTap: true }, tapCode: '4821', balSats: 505 },
+    { wallet: { sendShortfall: () => ({ need: 511, fee: 11, have: 505, short: true,
+        why: 'Your balance isn\'t enough to cover the payment and its fee: this needs 511 sats and you hold 505.' }) } }));
   for (const kind of ['sendFail', 'mintRefused', 'netLost', 'lnNoRoute', 'badAddress']) {
     add('blocked screen ' + kind, at(kind, { flow: 'send', amount: '20', unit: 'USD' }));
   }

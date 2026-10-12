@@ -112,6 +112,34 @@ let L0 = null;
   const wrote = await H.W.cardWrite(card, { pin: '1234' });
   ok(wrote.sats === 300 && wrote.left === 0 && card.balance() === onCardBefore + 300 && H.W.cardOwed().length === 0, 'the right PIN puts them on the card', String(card.balance()));
 
+  /* ---- 2b: the room, asked before anything is made ------------------------- */
+  {
+    /* ADD FUNDS asks the keypad's amount of the wallet before the tap
+     * (`cardLoadFits`), and the answer is the load's own: the cut it makes and
+     * the check it refuses on (`cardLoadCut`), in the words it refuses in. A card
+     * with fewer than five free places has no room for any load, a piece and the
+     * four places a write keeps back. */
+    card.tap();
+    const look = await H.W.cardLook(card);
+    const crowded = (free) => Object.assign({}, look, { info: Object.assign({}, look.info, { empty: free, spent: 0 }) });
+    const FULL = 'The card has no room for that. Take some money off it first.';
+    const roomy = H.W.cardLoadFits(look, 300);
+    ok(!!roomy && roomy.ok === true && roomy.why === '' && roomy.sats >= 300 && roomy.rounded === roomy.sats - 300 && roomy.room === look.info.empty + look.info.spent,
+       'a card with its places free says a load fits, and what the load comes to', JSON.stringify(roomy));
+    for (const free of [0, 2, 4]) {
+      const none = H.W.cardLoadFits(crowded(free), 300);
+      const refused = await H.W.cardPrepare(crowded(free), 300).then(() => null, (e) => e);
+      ok(!!none && none.ok === false && none.why === FULL && none.room === free && !!refused && refused.card === 'full' && refused.message === FULL && H.W.cardOwed().length === 0,
+         free + ' free places: the keypad’s answer is the load’s own refusal, in its own words, and nothing was made', JSON.stringify(none) + ' | ' + (refused && refused.message));
+    }
+    const five = H.W.cardLoadFits(crowded(5), 300);
+    ok(!!five && five.ok === true && five.sats === 512 && five.rounded === 212,
+       'five free places hold one piece: the load is rounded up to it, and the answer says by how much', JSON.stringify(five));
+    ok(H.W.cardLoadFits(null, 300) === null && H.W.cardLoadFits(look, 0) === null && H.W.cardLoadFits(Object.assign({}, look, { info: Object.assign({}, look.info, { setUp: false }) }), 300) === null,
+       'no card, no amount, or a card not set up is no answer');
+    ok(H.W.cardOwed().length === 0 && card.balance() === onCardBefore + 300, 'asking made nothing and wrote nothing', String(card.balance()));
+  }
+
   /* ---- 3: the card taken away mid-write ----------------------------------- */
   card.tap();
   card.leaveBefore('30', 2);       // the second piece is not written

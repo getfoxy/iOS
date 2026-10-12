@@ -678,6 +678,32 @@
       + mn.need + ' sats and you hold ' + mn.have + '.';
   }
 
+  /* What a send of `want` sats finds at the connected mint, and whether it is
+   * enough: the one sum `sendToken` refuses on and `sendShortfall` asks ahead
+   * of it, so the screen that says no before the send and the send that says
+   * no after it are never at different figures or in different words.
+   *
+   * The pile less any locked piece (nothing locked leaves in a token this
+   * phone makes), and what this mint charges to swap that pile. Ecash that
+   * arrived locked to this phone and waits for a swap counts where it can be
+   * handed on as it is: with no route, and no lock asked for (`lockTo`).
+   * `held` is all of that; `need` the amount and the fee; `why` is the
+   * sentence (`notEnoughWords`, and a note of ecash taken at risk, which
+   * cannot be spent) when `held` falls short, and empty when it does not. */
+  function sendCover(w, want, lockTo) {
+    var have = proofs(mintOf(w));
+    var stuck = lockedProofs(have);
+    if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
+    var fee = swapFeeFor(w, have);
+    var waiting = (!lockTo && !routeOpen()) ? lockedPieces() : [];
+    var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
+    var held = sumProofs(have) + waitingSats;
+    var need = want + fee;
+    return { have: have, stuck: stuck, fee: fee, waiting: waiting, waitingSats: waitingSats,
+             held: held, need: need, short: held < need,
+             why: held < need ? notEnoughWords({ need: need, have: held }) + FoxyWallet._atRiskNote() : '' };
+  }
+
   function dropQuoteRecord(found) {
     if (found.key === K.move) { dropMoveNote(found.entry.quote); return; }
     var gone = function (p) { return !(p && p.quote === found.entry.quote); };

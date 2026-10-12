@@ -353,7 +353,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
         if (!got) return reply(w, m.id, null, 'not in this test');
         return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
       },
-      before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, { p2pk: true }); },
+      before: (w) => { phone.attach(w); mint = opts.sharedMint || fakeMint(w, Object.assign({ p2pk: true }, opts.mint || {})); },
     });
     ctx.mint = mint;
     ctx.requests = requests;
@@ -443,7 +443,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
    * screen's repaint after any change is a call to `syncSend`, which is what
    * its componentDidUpdate makes. */
   const LIFTED = ['connecting() {', 'offlineNow() {', 'acceptTarget(text) {', 'offlineInvoiceCard() {', 'openRequest(text, opts) {',
-    'requestNeedsRoute(req) {', 'wantedSats() {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {',
+    'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'wantedSats() {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {',
     'syncSend() {', 'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'confirmSpec() {', 'requestSpec() {', 'cfRow(label, value, opt) {',
     'sendToText() {', 'shortId(v) {', 'sendAmountText() {', 'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {', 'satUsd() {',
     'px() {', 'peerRate() {', 'peerRateLabel() {', 'peerRateRow() {', 'heldBlocks(shortBy) {', 'heldNote() {',
@@ -480,14 +480,14 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
   const phoneAt = async (route, o) => {
     const ctx = page(Object.assign({ address: addressServer }, o || {}));
     await ctx.W.connect(MINT, null, null, { remember: true });
-    await ctx.W.claim((await ctx.W.invoice(2000, '')).hash);
+    await ctx.W.claim((await ctx.W.invoice((o && o.sats) || 2000, '')).hash);
     route(ctx.W);
     ctx.W.setOffline(true);
     const app = ctx.window.eval('(function () { return {' + LIFTED.map(method).join(',') + '}; })()');
     const log = { cards: [], tokens: [], toasts: [] };
     Object.assign(app, {
       log, ctx,
-      state: { screen: 'home', stack: [], flow: 'send', unit: 'SATS', amount: '', balSats: 2000 },
+      state: { screen: 'home', stack: [], flow: 'send', unit: 'SATS', amount: '', balSats: (o && o.sats) || 2000 },
       setState(u) {
         Object.assign(app.state, typeof u === 'function' ? u(app.state) : u);
         Promise.resolve().then(() => app.syncSend());     // componentDidUpdate
@@ -590,6 +590,71 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     ok(app.state.screen === 'amount' && JSON.stringify(app.state.stack) === '["home"]',
        'closing it goes to the amount screen, not back to the confirmation, with no entry of the confirmation left behind', app.state.screen + ' ' + JSON.stringify(app.state.stack));
     ok((await W.balanceSats()) === 2000, 'and no sat moved', String(await W.balanceSats()));
+  }
+
+  /* A payment request for an amount the balance covers and the mint's fee for
+   * making it does not, at a mint that charges for each piece it swaps.
+   *
+   * The wallet's sum (`sendShortfall`, which is `sendToken`'s own) holds the
+   * offer's button at NOT ENOUGH with the wallet's sentence, at the figures it
+   * will refuse on; the payment made all the same refuses in those words, and
+   * before it asks the other phone anything; and a payer on the Bluetooth link
+   * tells the receiver it cannot pay as the offer opens. A request that fits is
+   * the button it was, and says nothing to anybody. */
+  {
+    const app = await phoneAt(coming, { sats: 3000, mint: { feePpk: 1000 } });
+    const W = app.ctx.W;
+    up(W);
+    await W.primeLocks();
+    const fee = W.sendShortfall(1, {}).fee;
+    const want = 3000 - fee + 1;
+    const sentence = 'Your balance isn\'t enough to cover the payment and its fee: this needs 3001 sats and you hold 3000.';
+    const told = [];
+    W.tapQuote = (t) => { told.push(JSON.parse(t)); return Promise.resolve('ok'); };
+    let asked = 0;
+    const askFirst = W.askFirst;
+    W.askFirst = (...a) => { asked += 1; return askFirst.apply(W, a); };
+    // a receiver that never answers is not waited on for six seconds
+    W._askWaitMs = 30;
+    const swaps = () => app.ctx.requests.filter((r) => /\/v1\/swap$/.test(r.url)).length;
+    const swapped = swaps();
+    const text = W.paymentRequest(want, { purpose: 'receive' });
+    ok(fee > 0 && want < 3000, 'a mint that charges for what it swaps, and an amount under the balance', 'fee ' + fee + ', want ' + want);
+    app.openRequest(text, { viaTap: true, theirRoute: true, asks: true });
+    const spec = app.requestSpec();
+    ok(app.state.screen === 'reqOffer' && spec.cta === 'NOT ENOUGH' && spec.ctaTone === 'warn' && spec.warn === sentence,
+       'the offer holds its button at NOT ENOUGH, with the wallet\'s sentence at the figures it will refuse on', spec.cta + ' / ' + spec.warn);
+    spec.go();
+    ok(!app.log.made, 'and pressing it makes nothing');
+    ok(told.length === 1 && told[0].gaveUp === 'The payer does not have enough to cover this payment.' && Object.keys(told[0]).join() === 'gaveUp',
+       'a payer on the link has told the receiver it gave up as the offer opened, in a sentence with none of this phone\u2019s figures in it', JSON.stringify(told));
+    app.openRequest(text, { viaTap: true, theirRoute: true, asks: true });
+    ok(told.length === 1, 'once for the request, however often it is opened');
+    let refused = '';
+    try { await W.sendToken(want, { unit: 'sat' }); } catch (e) { refused = e.message; }
+    ok(refused === sentence, 'the payment made all the same refuses in the same words', refused);
+    const req = Object.assign(W.decodeRequest(text), { sats: want, unit: 'sat', viaTap: true, theirRoute: true, asks: true });
+    let said = '';
+    try { await W.payRequest(req, () => {}, {}); } catch (e) { said = e.message; }
+    ok(said === sentence && asked === 0 && told.length === 1,
+       'and over the link it refuses before the question asked first, so the receiver is never told it will be paid', said + ' | asked ' + asked + ' | told ' + told.length);
+    ok(swaps() === swapped && (await W.balanceSats()) === 3000, 'nothing was swapped and no sat moved');
+
+    // an amount that fits with room to spare: the button it always was, and nobody is told anything
+    const fits = Object.assign({}, req, { sats: 500, id: 'fits-1' });
+    told.length = 0;
+    app.state.req = fits;
+    const ok1 = app.requestSpec();
+    ok(!/NOT ENOUGH|CLOSE/.test(ok1.cta) && !ok1.warn, 'a request that fits is not held', ok1.cta + ' / ' + ok1.warn);
+    app.tellPayerShort(fits);
+    ok(told.length === 0, 'and tells nobody anything');
+    const paying = await W.payRequest(fits, () => {}, {}).then(() => 'paid', (e) => e.message);
+    ok(asked === 1 && !/isn.t enough/.test(paying), 'the payment goes on to ask first, as it always did', asked + ' | ' + paying);
+
+    // a request for another mint cannot be judged by this pile: it reads as it did
+    app.state.req = Object.assign({}, req, { mints: ['https://other.example'], viaTap: false });
+    const other = app.requestSpec();
+    ok(other.cta === 'CLOSE' && /^More than your balance/.test(other.warn), 'a request for another mint is refused as it was, not held at NOT ENOUGH', other.cta + ' / ' + other.warn);
   }
 
   // an invoice that carries its amount: straight to the confirmation, held, and quoted when the route is up

@@ -224,6 +224,11 @@
   "markup": "9fc1ce2e82d4de1439ff068328b4ba0f8077181737ce1fcf63260cc8b33c83a2",
   "vals": "d866551712e6f508ca39aef8b93998600f40b9c1e40a73d8ed18c6effa1bd34f"
  },
+ "amount, adding to a card that has no room for it": {
+  "file": "382-amount-adding-to-a-card-that-has-no-room-for-it.html",
+  "markup": "d2945a5991c540c6c10654f0c34367f06e6b2adc46cecf4b93cd53651c25f346",
+  "vals": "81d59401a5e0db7548af8b2188377164f388c99c89fd53f72b8960162f31d739"
+ },
  "amount, withdrawing from a card, with all of it under NEXT": {
   "file": "251-amount-withdrawing-from-a-card-with-all-of-it-under-next.html",
   "markup": "05ecec304012144526c60f00ca4fd74cfeca6e921150fb4add9313abcb6c6c0e",
@@ -779,6 +784,11 @@
   "markup": "8eb8e02f97cfc8bf35fc5d7f61e39ffd4cda27876fd0a17ca5a114d2803f8231",
   "vals": "2b738dcc8aadb48ae53acf2e7d0823d7b5fe5b9094d5434af519bd3cd9939668"
  },
+ "ocConfirm, a quote that fits": {
+  "file": "383-occonfirm-a-quote-that-fits.html",
+  "markup": "c68f256a0680c9af0a562bfd6840d5ce2666b509670801234c6f0e3d1e5cec7a",
+  "vals": "88969943d35b03760e3233951c8a1693d2a47bb37e33df5fa93179bac6d1da16"
+ },
  "depConfirm, by card": {
   "file": "098-depconfirm-by-card.html",
   "markup": "b67197eb3b3a3300b017eaf2c58d2f3658f1ce5ee26dec4a691e2f0123bc8794",
@@ -788,6 +798,21 @@
   "file": "381-sendconfirm-a-quote-the-balance-cannot-cover.html",
   "markup": "a7f41d0681a8133e072f28d3762af8306a172435eb4fb9ae89b6a25ad5afe4fa",
   "vals": "b1b052f84613a127c0f1c20944e82a1ec2cac8b3bd7a21a1049727632b6f2b01"
+ },
+ "ocConfirm, a quote the balance cannot cover": {
+  "file": "384-occonfirm-a-quote-the-balance-cannot-cover.html",
+  "markup": "e52502c6dfc3b58fe1e1d088f2507ceac152617eb702e10e17ae62947de66d9b",
+  "vals": "b19eddaae174f438f9b67d69bf023f898c5dde082a31f30daa3315afbfaed658"
+ },
+ "ocConfirm, a quote the balance cannot cover, with a slower speed to choose": {
+  "file": "385-occonfirm-a-quote-the-balance-cannot-cover-with-a-slower-speed-to-choose.html",
+  "markup": "d3f45ace118829e89ac44bbc5ef9d3c3703f36cb673d7e0843786fc9607de22a",
+  "vals": "e95da269961fdb9c3bb3476a45f23757e7e6a61589b29754b3d2add14ce569d3"
+ },
+ "reqOffer, a payment request the balance cannot cover with the mint's fee": {
+  "file": "386-reqoffer-a-payment-request-the-balance-cannot-cover-with-the-mint-s-fee.html",
+  "markup": "c68e177d7383e95cf6d89ab965504c8f61d5dc760c62d1d62d49dc87ca5b345f",
+  "vals": "dfc44dfe21608787db841d49b06019d3eb1409387443326937858a37ee040379"
  },
  "blocked screen sendFail": {
   "file": "099-blocked-screen-sendfail.html",

@@ -148,6 +148,30 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'ADD FUNDS asks how much on the SET AMOUNT screen (in sats here: this phone has no price to say dollars at)');
   keyIn(holder, 99999);
   ok(!pad(holder) && holder.state.screen === 'amount' && holder.toasts.indexOf('You have ₿6,000.') >= 0, 'more than the phone holds goes no further');
+  {
+    /* The card's room, asked of the wallet for the card read a moment ago: the keypad refuses an amount the card has no room for
+     * (`fcLoadFits`), at NEXT in the wallet's own words, and the card is not asked, nor any money made. FLASHCARD from the send
+     * screen has no card on show and is not asked about room. */
+    const real = holder._fcCard;
+    const FULL = 'The card has no room for that. Take some money off it first.';
+    const roomy = holder.fcLoadFits(100);
+    ok(!!roomy && roomy.ok === true, 'a card with its places free has room for an amount typed', JSON.stringify(roomy));
+    holder._fcCard = Object.assign({}, real, { info: Object.assign({}, real.info, { empty: 3, spent: 0 }) });
+    const fit = holder.fcLoadFits(100);
+    ok(!!fit && fit.ok === false && fit.why === FULL, 'a card with three places free has none: the wallet’s answer, in its own words', JSON.stringify(fit));
+    holder.toasts.length = 0;
+    c.sent.length = 0;
+    keyIn(holder, 100);
+    ok(!pad(holder) && holder.state.screen === 'amount' && holder.toasts.indexOf(FULL) >= 0 && H.W.cardOwed().length === 0 && !c.sent.length,
+       'NEXT on it goes no further and says so, before a PIN, a tap or any money made', holder.toasts.join(' | '));
+    holder._fcCard = real;
+    const other = holder.state.fc;
+    holder.state.fc = null;
+    ok(holder.fcLoadFits(100) === null, 'with no card on show there is nothing to ask about (FLASHCARD from the send screen)');
+    holder.state.fc = Object.assign({}, other, { key: 'not-this-card' });
+    ok(holder.fcLoadFits(100) === null, 'nor for a card other than the one read last');
+    holder.state.fc = other;
+  }
   c.sent.length = 0;
   keyIn(holder, 2000);
   ok(!pad(holder) && holder.state.screen === 'flashcard', 'then no PIN is asked for: this phone owns the card, and the PIN was typed once, at set-up');

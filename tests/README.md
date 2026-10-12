@@ -119,6 +119,20 @@ up and quotes the fee by itself, Tor giving up says the card, no network
 at all is as it was; and then it mounts the real page and reads the button off
 the DOM, because only the page makes the route coming up an update.
 
+The same rule is held where the other screens ask it. A payment request is
+judged by the wallet's `sendShortfall` (which is `sendToken`'s own sum) in the
+first, and in the second at a mint that charges for what it swaps: the offer's
+button NOT ENOUGH in the wallet's sentence, the payment made all the same
+refusing in those words, and a tap payer telling the receiver it gave up as
+the offer opens. **`onchain-flow.js`** draws the on-chain confirmation against
+the wallet as it ships (`onchainNeed`, the mint's fee for the split, the
+payout refusing in the same sentence, and CHANGE THE SPEED left to choose);
+**`counter-refusal.js`** has a payer short by the mint's fee refused before the
+question asked first, with nothing crossing the link; and **`amount-entry.js`**,
+**`flashcard-money.js`** and **`flashcard-screens.js`** hold the card's room on
+the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
+check; the line under the figure; NEXT).
+
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:
 `bridgeAsk(` and `nativeJson(`, which is how the seed, counter and lock-key

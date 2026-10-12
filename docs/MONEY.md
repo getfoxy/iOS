@@ -358,6 +358,15 @@ mint. The remaining window is between two adjacent `localStorage` writes.
 
 ## 3. Send as ecash — `sendToken()`
 
+Before anything is split, the balance is put against the amount and this
+mint's fee to swap the pile (`sendCover`: the pile less any locked piece, plus
+ecash waiting locked to this phone where there is no route and no lock is
+asked for), and a pile that falls short is refused in the one sentence a
+payment the balance cannot cover is refused in, "Your balance isn't enough to
+cover the payment and its fee: this needs N sats and you hold M." The screens
+that offer a payment ask the same sum first and hold their button with that
+sentence (`sendShortfall`, §14).
+
 1. Split local proofs into the token amount and the rest. A token made this way
    is plain — Foxy's own earlier P2PK scheme was removed — and the one place
    a lock is put on ecash leaving this wallet is paying a payment request that
@@ -794,6 +803,17 @@ and two at once derive the same secrets.
    green — or `UNPAID`/`FAILED`, which returns the proofs to the pile exactly
    once and marks the entry failed.
 
+**The confirmation asks before SEND.** Once the quote is in, the screen asks
+the wallet (`onchainNeed(sats, fee)`) whether the pile covers the amount, the
+reserve of the fee option picked, this mint's fee to swap the pile and its fee
+again on the pieces the melt spends: the sum step 2 is made to (`meltNeed`),
+the one `onchainPay` refuses on. If it does not, the button reads NOT ENOUGH
+and does nothing, with the wallet's sentence under the rows, and CHANGE THE
+SPEED stays for a mint that offers a slower speed at a lower fee; back is the
+way out. The screen used to compare the balance with the amount and the
+reserve alone, and the mint's fee for the split was left for the payout to
+refuse.
+
 **The fee is measured from the proofs that went**, not from the quote: with
 `includeFees` the split hands the melt the mint's input fee as well, so the
 quote's figure is short by exactly that (the balance fell one sat more than the
@@ -1023,8 +1043,20 @@ against two CDK mints set up like them (`tools/live/mint-pair.sh`).
   (`receiveToken`, "What was already charged to this entry stays charged").
 - **The card refuses before SEND.** `sendShortfall(sats, {locked})` puts the
   amount, with the receiver's fee on the pieces it is cut into and four to
-  spare, to the same selection the swap makes; `requestSpec` shows the fee
-  and "short by … with the fee".
+  spare, to the same selection the swap makes, after the plain sum
+  `sendToken` refuses on (`sendCover`: the pile less locked pieces, this
+  mint's fee to swap it, and ecash waiting locked to this phone where there
+  is no route). It answers `{ need, fee, have, short, why }`, `why` being
+  the sentence `sendToken` refuses in ("Your balance isn't enough to cover
+  the payment and its fee: this needs N sats and you hold M."), so
+  `requestSpec` holds the offer's button at NOT ENOUGH with those very
+  words, for a request paid at the mint the phone is on. A request for
+  another mint is judged when that mint is connected, which pressing the
+  button does, and reads as it did ("short by … with the fee"). On the
+  Bluetooth link a payer that cannot cover it says "gave up" to the
+  receiver, with the sentence, as the offer opens (`tellPayerShort`), and
+  `payRequest` asks the same sum before the question asked first, so a payer
+  short by the fee alone has promised nothing (§15).
 - **A locked payment is finished after the app is killed.** A locked send's
   outputs have no counter, so they are written into the swap record before
   the request leaves. A page that lost the answer already asked the mint for
@@ -1121,10 +1153,13 @@ found, and what holds now:
   so a token shown as a code after the link dropped still gets change back.
 - **One sum for what a melt needs** (`meltNeed`): the invoice, the reserve,
   the mint's fee for the split, and its fee again on the pieces the melt
-  spends. `pay` and `transferQuote` both ask it, so the largest amount a
-  quote allows is one the payment takes, and the amount a refusal offers
-  instead is one the quote then allows. An offline payer says what it can
-  hand over, not what it holds (`stuckAtMint`).
+  spends. `pay`, `onchainPay` and `transferQuote` all ask it, so the largest
+  amount a quote allows is one the payment takes, and the amount a refusal
+  offers instead is one the quote then allows. The confirmations ask it
+  before they offer SEND (`payNeed` for a Lightning payment, `onchainNeed`,
+  which is the same, for a payout on chain), and a payment refuses in the
+  sentence they hold the button with (`notEnoughWords`). An offline payer
+  says what it can hand over, not what it holds (`stuckAtMint`).
 - **A visit is not a move.** Going to another mint to pay from it or to be
   paid at it connects with `{ remember: false }`: `moveRun(plan, onStage,
   { visit: true })`, `carryBegin`, and a late claim of another mint's ecash

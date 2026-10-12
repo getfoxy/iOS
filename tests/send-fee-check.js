@@ -23,7 +23,12 @@
  * for the question asked over it. A scanned request that needs the route is
  * held the same way; one that does not is not.
  *
- * Then the same rule on the tap card, and the way back from a send that did
+ * Then the same rule on a payment request, the tap card included: the sum is
+ * the wallet's (`sendShortfall`, which is `sendToken`'s own), the button reads
+ * NOT ENOUGH with the wallet's sentence for a request paid at the mint this
+ * phone is on, and a tap payer that cannot cover it says so to the receiver as
+ * the offer opens (`tellPayerShort`). A request for another mint cannot be
+ * judged yet and reads as it did. And the way back from a send that did
  * not happen: SEND pushes the confirmation onto the screen stack as it moves
  * to the sending screen, and every return to the confirmation has to drop
  * that entry again, or the first press of its back arrow pops the entry and
@@ -57,13 +62,19 @@ const method = (sig) => {
 };
 // several, as one object
 const lift = (sigs) => new Function('return {' + sigs.map(method).join(',\n') + '}')();
-const { confirmSpec, requestSpec, requestNeedsRoute } =
-  lift(['confirmSpec() {', 'requestSpec() {', 'requestNeedsRoute(req) {']);
+const { confirmSpec, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver } =
+  lift(['confirmSpec() {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {']);
 
 /* The sentence, as it is to be said: the wallet's (Web/foxy-wallet.js pins the
  * wallet's own copy), written out here so a change to it fails in two places. */
 const words = (need, have) => 'Your balance isn\'t enough to cover the payment and its fee: this needs '
   + need + ' sats and you hold ' + have + '.';
+
+/* What `sendShortfall` answers when `have` has to cover `need` (the amount and
+ * the mint's fee for making it): the very object the wallet gives, with its
+ * sentence. */
+const lack = (need, have, fee) => ({ need: need, fee: fee == null ? 0 : fee, have: have, short: have < need,
+  why: have < need ? words(need, have) : '' });
 
 /* What `payNeed` answers for a pile of `have` that has to cover `sats` and a
  * reserve, with `extra` sats of the mint's own fees on top. */
@@ -228,9 +239,10 @@ function reqSpec(sats, balance, shortfall, o) {
              req: Object.assign({ sats: sats, mints: ['https://mint.example'], transports: [], viaTap: false }, opt.req || {}) },
     cfRow: (label, value) => ({ label, value }),
     money: (n) => ({ main: '₿ ' + n, sub: '' }),
-    heldBlocks: () => '', mintName: () => 'MINT', px: () => 0, peerRateRow: () => [],
+    heldBlocks(shortBy) { return (opt.held > 0 && shortBy > 0 && shortBy <= opt.held) ? 'PENDING' : ''; },
+    mintName: () => 'MINT', px: () => 0, peerRateRow: () => [],
     connecting: () => !!opt.connecting, offlineNow: () => !!opt.connecting,
-    requestNeedsRoute, makeTokenForRequest() { sent.made += 1; },
+    requestNeedsRoute, requestHere, makeTokenForRequest() { sent.made += 1; },
   };
   const any = new Proxy(app, { get: (t, k) => (k in t ? t[k] : () => '') });
   const s = requestSpec.call(any);
@@ -260,26 +272,90 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
   ok(plain.cta === 'GENERATE ECASH TOKEN' && !plain.ctaBusy, 'a token to show them, from the pieces on hand, needs no connection and is not waited on', plain.cta);
   const tap = reqSpec(900, 979, { need: 911, fee: 11, have: 979, short: false }, { connecting: true, tap: true, req: Object.assign({ viaTap: true }, NOSTR) });
   ok(tap.cta !== 'CHECKING…' && !tap.ctaBusy, 'nor is one that came over the Bluetooth link in hand, which carries it', tap.cta);
-  const short = reqSpec(980, 979, { need: 991, fee: 11, have: 979, short: true }, { connecting: true, req: NOSTR });
-  ok(short.cta === 'CLOSE', 'and a request the balance cannot cover is refused, connection or not', short.cta);
+  const short = reqSpec(980, 979, lack(991, 979, 11), { connecting: true, req: NOSTR });
+  ok(short.cta === 'NOT ENOUGH', 'and a request the balance cannot cover is held at NOT ENOUGH, connection or not', short.cta);
 }
 
 /* The same rule on the tap card. A phone held 979 sats, was asked for
  * 980 at its own mint, saw SEND, pressed it and was refused for the fee, three
- * times running. The wallet's own sum answers before SEND. */
+ * times running. The wallet's own sum answers before SEND, and its own
+ * sentence is what the card says. */
 {
-  const s = reqSpec(980, 979, { need: 991, fee: 11, have: 979, short: true }, { tap: true, req: { viaTap: true } });
-  ok(s.cta === 'CLOSE' && /short by ₿ 12 with the fee/.test(s.warn || ''),
-     'a tap request the balance cannot cover with the fee is refused on the card', s.cta + ' / ' + s.warn);
+  const s = reqSpec(980, 979, lack(991, 979, 11), { tap: true, req: { viaTap: true } });
+  ok(s.cta === 'NOT ENOUGH' && s.ctaTone === 'warn' && s.warn === words(991, 979),
+     'a tap request the balance cannot cover with the fee is held at NOT ENOUGH, with the wallet\'s sentence at its figures', s.cta + ' / ' + s.warn);
   ok(s.rows.some((r) => r.label === 'FEE' && r.value === '₿ 11'), 'and the fee row says what the fee is');
+  ok(s.amountInk === '#FF5C5C' && s.code === '1234', 'the amount goes red and the four digits stay', s.amountInk + ' / ' + s.code);
+  s.go();
+  ok(s.sent.made === 0 && !s.ctaBusy && !s.secondary && !s.close, 'pressing it does nothing: nothing is made, nothing closes, no spinner, no second button', JSON.stringify(s.sent));
 }
 {
-  const s = reqSpec(900, 979, { need: 911, fee: 11, have: 979, short: false }, { tap: true, req: { viaTap: true } });
+  // the amount fits the balance and the mint's fee for making it does not: the case the card used to say SEND to
+  const s = reqSpec(900, 905, lack(911, 905, 11), {});
+  ok(s.cta === 'NOT ENOUGH' && s.warn === words(911, 905), 'short by the fee alone, with the real figures', s.cta + ' / ' + s.warn);
+  const one = reqSpec(900, 911, lack(911, 911, 11), {});
+  ok(one.cta === 'GENERATE ECASH TOKEN' && !one.warn && !one.ctaBusy, 'and one sat more is the button it always was', one.cta + ' / ' + one.warn);
+  one.go();
+  ok(one.sent.made === 1, 'which makes the token');
+}
+{
+  const s = reqSpec(900, 979, lack(911, 979, 11), { tap: true, req: { viaTap: true } });
   ok(/^SEND /.test(s.cta) && !s.warn, 'one that fits with its fee goes on to SEND', String(s.cta));
 }
 {
   const s = reqSpec(980, 979, null, { tap: true, req: { viaTap: true } });
   ok(s.cta === 'CLOSE' && /short by ₿ 1$/.test(s.warn || ''), 'with no wallet to ask, the balance alone still refuses', s.warn);
+}
+{
+  // what is short is held with the mint: that is the reason given, as on every other screen
+  const s = reqSpec(980, 979, lack(991, 979, 11), { held: 100 });
+  ok(s.cta === 'NOT ENOUGH' && s.warn === 'PENDING', 'when what is short is held with the mint, that is the reason given', s.cta + ' / ' + s.warn);
+}
+{
+  /* A request for another mint cannot be judged by the pile this phone is on:
+   * that mint is connected to when the button is pressed, and what is held
+   * there and charged there is known only then. It reads as it did. */
+  const other = reqSpec(980, 979, lack(991, 979, 11), { req: { mints: ['https://other.example'] } });
+  ok(other.cta === 'CLOSE' && /short by ₿ 12 with the fee/.test(other.warn || ''),
+     'a request for another mint is refused as it was, in the words it was', other.cta + ' / ' + other.warn);
+  const fits = reqSpec(980, 5000, lack(991, 5000, 11), { req: { mints: ['https://other.example'] } });
+  ok(fits.cta === 'GENERATE ECASH TOKEN', 'and one that fits is offered as it was', fits.cta);
+  const none = reqSpec(980, 979, lack(991, 979, 11), { req: { mints: [] } });
+  ok(none.cta === 'NOT ENOUGH', 'a request that names no mint is paid from this one, and is judged', none.cta);
+}
+
+/* A tap payer that cannot cover the payment tells the phone it is touching, as
+ * the offer screen opens and before it asks the question that comes first. The
+ * word is the one a payment that is not made already sends. */
+{
+  const tell = (o) => {
+    const told = [];
+    global.window = { FoxyWallet: { sendShortfall: () => o.lack, mintHost: () => 'mint.example',
+      tapQuote: o.noQuote ? undefined : (t) => { told.push(JSON.parse(t)); return Promise.resolve('ok'); } } };
+    const app = { offlineNow: () => false, requestHere, tellPayerShort, shortForReceiver };
+    const req = Object.assign({ id: 'r1', sats: 980, mints: ['https://mint.example'], viaTap: true }, o.req || {});
+    app.tellPayerShort(req);
+    if (o.twice) app.tellPayerShort(req);
+    return told;
+  };
+  const one = tell({ lack: lack(991, 979, 11) });
+  ok(one.length === 1 && one[0].gaveUp === 'The payer does not have enough to cover this payment.' && !/\d/.test(one[0].gaveUp)
+     && Object.keys(one[0]).join() === 'gaveUp',
+     'a payer short by the fee alone says "gave up" to the receiver, in a sentence with none of this phone\'s figures in it, and nothing else', JSON.stringify(one));
+  {
+    const app = { shortForReceiver, saidToReceiver };
+    ok(app.saidToReceiver(words(991, 979)) === 'The payer does not have enough to cover this payment.'
+       && app.saidToReceiver('Not enough ecash. That needs 991 sats including this mint\u2019s fee, and you hold 979.') === 'The payer does not have enough to cover this payment.'
+       && app.saidToReceiver('The mint refused it.') === 'The mint refused it.' && app.saidToReceiver('') === '',
+       'and a payment that fails for want of balance is passed to the receiver the same way: what this phone holds stays on this phone');
+  }
+  ok(tell({ lack: lack(991, 979, 11), twice: true }).length === 1, 'once for each request, however often the screen opens');
+  ok(tell({ lack: lack(991, 5000, 11) }).length === 0, 'a payer that can cover it says nothing');
+  ok(tell({ lack: null }).length === 0, 'nor one whose wallet cannot say');
+  ok(tell({ lack: lack(991, 979, 11), req: { viaTap: false } }).length === 0, 'nor a request scanned off a screen: there is no phone to tell');
+  ok(tell({ lack: lack(991, 979, 11), req: { mints: ['https://other.example'] } }).length === 0, 'nor one for another mint, which this phone cannot judge yet');
+  ok(tell({ lack: lack(991, 979, 11), noQuote: true }).length === 0, 'nor a wallet with no link to speak on');
+  ok(tell({ lack: lack(991, 979, 11), req: { sats: 0 } }).length === 0, 'nor a request for nothing');
 }
 
 /* The way back from a send that did not happen.

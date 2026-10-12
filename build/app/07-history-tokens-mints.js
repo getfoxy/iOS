@@ -728,6 +728,62 @@
     this.setState(p => ({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
       note: '', noteDraft: '' }));
+    // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
+    this.tellPayerShort(req);
+  }
+
+  /* Is the mint this request is paid at the one this phone is on, or does it
+   * name none? Then what the wallet holds and charges here is what the payment
+   * is made from, and the screen can judge it before the button is pressed
+   * (`requestSpec`). A request for another mint is paid after connecting to
+   * that mint (`makeTokenForRequest`), which this phone has not done. */
+  requestHere(req) {
+    const W = window.FoxyWallet;
+    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    return !want || !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+  }
+
+  /* A payer that cannot cover a payment over the link says so to the phone it
+   * is touching.
+   *
+   * The offer screen holds its button at NOT ENOUGH for it (`requestSpec`), so
+   * nothing the person presses would tell the other phone, which would sit on
+   * its four digits until the link went. The word is the one a payment that
+   * was not made already sends (`gaveUp`, `makeTokenForRequest`), carrying a
+   * sentence with none of this phone's figures in it (`shortForReceiver`), so
+   * the receiver shows a refusal as it shows one then and the
+   * link's messages are the same ones, in the same order, only here: before
+   * the question asked first (`askFirst`) that a payer who cannot pay never
+   * asks. Asked of the wallet in the terms the screen asks it
+   * (`sendShortfall`), once for each request. */
+  tellPayerShort(req) {
+    const W = window.FoxyWallet;
+    if (!req || !req.viaTap || !(req.sats > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
+    if (!this.requestHere(req)) return;
+    let lack = null;
+    try {
+      lack = W.sendShortfall(req.sats, { locked: !!(req.lockTo && !(this.offlineNow && this.offlineNow())) });
+    } catch (e) { lack = null; }
+    if (!lack || !lack.short) return;
+    const told = String(req.id || req.sats);
+    if (this._shortTold === told) return;
+    this._shortTold = told;
+    console.log('[foxy] tap: this phone cannot cover the payment; telling the receiver before it promises anything');
+    W.tapQuote(JSON.stringify({ gaveUp: this.shortForReceiver() })).catch(() => {});
+  }
+
+  /* What the phone being paid is told when this one cannot cover the payment:
+   * that, and no figure. The wallet's own sentence says what the payment needs
+   * and what this phone holds, which is for the person holding this phone and
+   * for nobody across a counter from them. */
+  shortForReceiver() { return 'The payer does not have enough to cover this payment.'; }
+
+  /* A refusal's words as the other phone is given them: a balance that could
+   * not cover the payment goes without its figures (`shortForReceiver`), and
+   * anything else as the wallet said it. */
+  saidToReceiver(why) {
+    const said = String(why || '');
+    return /balance isn\u2019t enough|balance isn't enough|not enough ecash/i.test(said) ? this.shortForReceiver() : said;
   }
 
   /* Does paying this request need a connection?
@@ -1055,7 +1111,7 @@
          * not sit waiting for a payment that is not coming. It rides M10,
          * as the other things a payer says before the money do. */
         if (req && req.viaTap && W.tapQuote) {
-          W.tapQuote(JSON.stringify({ gaveUp: String(W.reason(e) || 'The payment was not made.') })).catch(() => {});
+          W.tapQuote(JSON.stringify({ gaveUp: this.saidToReceiver(W.reason(e)) || 'The payment was not made.' })).catch(() => {});
         }
         this.setState(p => ({ screen: p.screen === 'sendDone' ? 'home' : p.screen, stack: [] }));
         this.toast(W.reason(e), true);

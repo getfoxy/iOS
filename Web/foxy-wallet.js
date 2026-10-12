@@ -4795,6 +4795,32 @@
       + mn.need + ' sats and you hold ' + mn.have + '.';
   }
 
+  /* What a send of `want` sats finds at the connected mint, and whether it is
+   * enough: the one sum `sendToken` refuses on and `sendShortfall` asks ahead
+   * of it, so the screen that says no before the send and the send that says
+   * no after it are never at different figures or in different words.
+   *
+   * The pile less any locked piece (nothing locked leaves in a token this
+   * phone makes), and what this mint charges to swap that pile. Ecash that
+   * arrived locked to this phone and waits for a swap counts where it can be
+   * handed on as it is: with no route, and no lock asked for (`lockTo`).
+   * `held` is all of that; `need` the amount and the fee; `why` is the
+   * sentence (`notEnoughWords`, and a note of ecash taken at risk, which
+   * cannot be spent) when `held` falls short, and empty when it does not. */
+  function sendCover(w, want, lockTo) {
+    var have = proofs(mintOf(w));
+    var stuck = lockedProofs(have);
+    if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
+    var fee = swapFeeFor(w, have);
+    var waiting = (!lockTo && !routeOpen()) ? lockedPieces() : [];
+    var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
+    var held = sumProofs(have) + waitingSats;
+    var need = want + fee;
+    return { have: have, stuck: stuck, fee: fee, waiting: waiting, waitingSats: waitingSats,
+             held: held, need: need, short: held < need,
+             why: held < need ? notEnoughWords({ need: need, have: held }) + FoxyWallet._atRiskNote() : '' };
+  }
+
   function dropQuoteRecord(found) {
     if (found.key === K.move) { dropMoveNote(found.entry.quote); return; }
     var gone = function (p) { return !(p && p.quote === found.entry.quote); };
@@ -10839,6 +10865,22 @@
     // a card cut deep: a load (it is a load that keeps places back) may be most of the card; change is kept short
     var most = !cardIsDeep(card) ? CARD_LOAD_PIECES : (Number(keep) > 0 ? CARD_WIDE_LOAD : CARD_WIDE_CHANGE);
     return Math.max(1, Math.min(most, room));
+  }
+
+  /* What a load of `want` sats onto `card` is cut into, and whether the card
+   * has the room for it: the one cut `cardPrepare` makes and refuses on, and
+   * `cardLoadFits` asks ahead of it, so the keypad that says no and the load
+   * that says no are never at different amounts.
+   *
+   * The pieces are cut to the places a load may fill (`cardRoomFor`) and to the
+   * mint's largest key; a card whose free places (`empty` and `spent`) cannot
+   * hold those pieces and the four a write keeps back is full for it. */
+  var CARD_FULL_WORDS = 'The card has no room for that. Take some money off it first.';
+  function cardLoadCut(w, card, want) {
+    var biggest = cardMaxPiece(w);
+    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
+    var room = card.info.empty + card.info.spent;
+    return { ladder: ladder, room: room, full: ladder.denominations.length + 4 > room };
   }
 
   /* The pieces change is made in: exactly `sats`, never rounded, cut for the
@@ -18586,6 +18628,22 @@
       });
     },
 
+    /* Can this phone cover a payout, the mint's fees included, before anything
+     * is made? `sats` is the amount the quote is for and `fee` the reserve of
+     * the fee option picked: the confirmation asks once the quote is in, and
+     * does not offer SEND to a payout that is short.
+     *
+     * A payout is split and melted the way a Lightning payment is, so it is
+     * the same sum (`payNeed`, which is `meltNeed`: the amount, the reserve,
+     * this mint's fee for the split and its fee again on the pieces the melt
+     * spends), and `onchainPay` refuses on it in the same words
+     * (`notEnoughWords`). Answers { ok, need, have, fee, why } with `why`
+     * empty when it fits, and null when there is no wallet or nothing to pay.
+     * Local, and at once. */
+    onchainNeed: function (sats, fee) {
+      return FoxyWallet.payNeed(sats, fee);
+    },
+
     /* Pay it with one of the quote's fee options.
      *
      * The mint takes the ecash and answers PENDING: it has the transaction to
@@ -18604,10 +18662,13 @@
       var at = mintOf(w);
       var owed = plan.sats + pick.fee;
       var have = proofs(at);
-      if (sumProofs(have) < owed + swapFeeFor(w, have)) {
-        return Promise.reject(new Error('Not enough ecash. That payment needs ' + owed +
-          ' sats including the fee reserve, and you hold ' + sumProofs(have) + '.'));
-      }
+      /* The one sum (`meltNeed`), as for a Lightning payment: the amount, the
+       * reserve, this mint's fee for the split and its fee again on the
+       * pieces the melt spends. The confirmation asks the same before it
+       * offers SEND (`onchainNeed`), and this says it in the same words
+       * (`notEnoughWords`). */
+      var mn = meltNeed(w, have, owed);
+      if (!mn.ok) return Promise.reject(new Error(notEnoughWords(mn)));
       stage('quote');
       var splitGuard = swapGuard(w, 'split', { inputs: have });
       return splitGuard.run('on-chain split', function () {
@@ -20338,27 +20399,26 @@
      * useless and being money. */
     /* Can this phone cover a send, fee included — before anything is made.
      *
-     * The same sum `sendToken` refuses on, asked ahead of it so the
-     * confirmation can say no. A phone held 979 sats and was asked for
+     * The same sum `sendToken` refuses on (`sendCover`), asked ahead of it so
+     * the confirmation can say no. A phone held 979 sats and was asked for
      * 980 at the same mint: the card said SEND, the person pressed it, and
      * only then came "Not enough ecash. That needs 991 sats including this
      * mint's fee" — three times in a row. The answer: what is
-     * needed with the fee, what is held, and whether that is short. Null
-     * when there is no wallet to ask; the send itself says so then. */
+     * needed with the fee, what is held, whether that is short, and the
+     * sentence that says so (`why`, the one `sendToken` refuses in, and empty
+     * when it fits). Null when there is no wallet to ask; the send itself
+     * says so then. */
     sendShortfall: function (sats, opts) {
       var w;
       try { w = needLocal(); } catch (e) { return null; }
       var want = Math.round(Number(sats));
       if (!(want > 0)) return null;
-      var have = proofs(mintOf(w));
-      var stuck = lockedProofs(have);
-      if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
-      var fee = swapFeeFor(w, have);
-      var waiting = routeOpen() ? [] : lockedPieces();
-      var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
-      var held = sumProofs(have) + waitingSats;
-      var need = want + fee;
-      var short = held < need;
+      var cover = sendCover(w, want, '');
+      var have = cover.have;
+      var fee = cover.fee;
+      var held = cover.held;
+      var need = cover.need;
+      var short = cover.short;
       /* And what the swap itself will ask for. A token made by a swap covers
        * the receiver's fee as well (includeFees), which the sum above does not
        * count: a phone held 26 sats, was asked for 22, passed the card
@@ -20398,7 +20458,8 @@
           }
         }
       }
-      return { need: need, fee: need - want, have: held, short: short };
+      return { need: need, fee: need - want, have: held, short: short,
+               why: short ? notEnoughWords({ need: need, have: held }) + FoxyWallet._atRiskNote() : '' };
     },
 
     sendToken: function (sats, opts) {
@@ -20429,8 +20490,11 @@
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       var at = mintOf(w);
-      var have = proofs(at);
-      /* Nothing locked leaves in a token this phone makes.
+      /* The pile, the fee and what is held, as one sum (`sendCover`): the
+       * confirmation asked the same before it offered the send
+       * (`sendShortfall`), and this says it in the same words.
+       *
+       * Nothing locked leaves in a token this phone makes.
        *
        * The pile is meant to hold plain ecash and nothing else, and a send
        * picks from it without looking. So when a locked piece was in there, a
@@ -20442,28 +20506,25 @@
        * Left where they are and out of every selection below — a swap would
        * be refused by the mint for them as surely as a receiver would — and
        * put back untouched when the pile is written. How one got into the
-       * pile is `setProofs`'s to say, in the diary, the next time it happens. */
-      var stuck = lockedProofs(have);
-      if (stuck.length) {
-        console.warn('[foxy] the pile holds ' + stuck.length + ' locked piece(s), ' + sumProofs(stuck)
-          + ' sats; left out of this send');
-        have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
-      }
-      var fee = swapFeeFor(w, have);
-      /* What arrived locked to this phone counts, where it can be handed on.
+       * pile is `setProofs`'s to say, in the diary, the next time it happens.
+       *
+       * What arrived locked to this phone counts, where it can be handed on.
        *
        * It is in the balance and not in the pile, and this looked only at the
        * pile — so a phone that had been paid while offline was told
        * "you hold 0" when it tried to pay part of it. Only with no route:
        * with one, the claim swaps them into the pile before a send is reached. */
-      var waiting = (!(opts && typeof opts.lockTo === 'string' && opts.lockTo) && !routeOpen())
-        ? lockedPieces() : [];
-      var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
-      if (sumProofs(have) + waitingSats < want + fee) {
-        return Promise.reject(new Error('Not enough ecash. That needs ' + (want + fee) +
-          ' sats including this mint\u2019s fee, and you hold ' + (sumProofs(have) + waitingSats) + '.'
-          + FoxyWallet._atRiskNote()));
+      var held = sendCover(w, want, opts && typeof opts.lockTo === 'string' ? opts.lockTo : '');
+      var have = held.have;
+      var stuck = held.stuck;
+      if (stuck.length) {
+        console.warn('[foxy] the pile holds ' + stuck.length + ' locked piece(s), ' + sumProofs(stuck)
+          + ' sats; left out of this send');
       }
+      var fee = held.fee;
+      var waiting = held.waiting;
+      var waitingSats = held.waitingSats;
+      if (held.short) return Promise.reject(new Error(held.why));
       /* Pieces already held that add up to exactly the amount, the receiver's
        * fee on them included, go into the token as they are: no swap, nothing
        * asked of the mint. The mint then has no moment to tie a later question
@@ -22939,6 +23000,22 @@
         console.warn('[foxy] the payment was not made:', refusal);
         return Promise.reject(new Error(refusal));
       }
+      /* Can this phone cover it, before anything is said to the other one?
+       *
+       * The question asked first (`askFirst`) is the promise: the receiver
+       * answers go, and from there it is waiting on a payment. The amount and
+       * this mint's fee for making it are the sum `sendToken` refuses on, and
+       * the confirmation asked it before it offered the payment
+       * (`sendShortfall`); a payer short by the fee alone says so here, in the
+       * same words, before it has promised anything. The screen that asked for
+       * the payment tells a receiver on the link that it was not made
+       * (`makeTokenForRequest`), as it does whenever one is not. Nothing was
+       * made, and nothing was asked of the receiver. */
+      var lack = FoxyWallet.sendShortfall(req.sats, { locked: !!lockTo });
+      if (lack && lack.short) {
+        console.warn('[foxy] the payment was not made:', lack.why);
+        return Promise.reject(new Error(lack.why));
+      }
       step('making');
       /* A key for the change, before anything is paid.
        *
@@ -24423,6 +24500,27 @@
      * or a wrong PIN, leaves the pieces owed, and the next tap finishes it.
      * `cardAdd` is both in one tap, card first. */
 
+    /* Does a load of `sats` fit the card, before anything is made? The keypad
+     * asks as the amount is typed (ADD FUNDS), with the card it read a moment
+     * ago, and refuses an amount the card has no room for, so THE CARD IS FULL
+     * is said at the keypad and not after the tap.
+     *
+     * The very cut `cardPrepare` makes and refuses on (`cardLoadCut`), in the
+     * words it refuses in. Answers { ok, why, sats, rounded, room }: `why`
+     * empty when it fits, `sats` what the cut comes to and `rounded` how many
+     * of those the places forced on top of the amount asked, `room` the
+     * card's free places. Null where the wallet cannot say: no wallet, no
+     * card, or one that has not been set up. Local, and at once. */
+    cardLoadFits: function (card, sats) {
+      var w;
+      try { w = needLocal(); } catch (e) { return null; }
+      var want = Math.round(Number(sats));
+      if (!(want > 0) || !card || !card.info || !card.info.setUp) return null;
+      var cut = cardLoadCut(w, card, want);
+      return { ok: !cut.full, why: cut.full ? CARD_FULL_WORDS : '', sats: cut.ladder.sats,
+               rounded: cut.ladder.extra, room: cut.room };
+    },
+
     /* Pieces for `sats`, locked to this card, made and filed as owed to it.
      * `card` is what `cardLook` gave. Resolves { id, sats, hash }. */
     cardPrepare: function (card, sats, opts) {
@@ -24456,10 +24554,9 @@
        * (`cardLimitCap`): a payment under the limit is then never made from a piece the
        * card waits for. Where that is more pieces than the places left, the rest goes in
        * larger ones (`cardCutUnder`), and `above` says how much. */
-      var biggest = cardMaxPiece(w);
-      var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
-      var room = card.info.empty + card.info.spent;
-      if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
+      var cut = cardLoadCut(w, card, want);
+      var ladder = cut.ladder;
+      if (cut.full) return Promise.reject(cardError('full', CARD_FULL_WORDS));
       if (ladder.above > 0) console.log('[foxy] card: ' + ladder.above + ' sats of a top-up go on in pieces above the card\u2019s limit on one tap: the places for smaller ran out');
       /* Whether this mint's ecash fits a card, asked before any is made. It
        * was asked after: the pieces were made, locked to the card, found not
@@ -25065,10 +25162,11 @@
         });
     },
 
-    /* Can this phone cover a Lightning payment, the mint's fees included,
-     * before anything is made? `sats` is the amount the quote is for and
-     * `reserve` the fee reserve it names: the confirmation asks once the
-     * quote is in, and does not offer SEND to a payment that is short.
+    /* Can this phone cover a melt, the mint's fees included, before anything
+     * is made: a Lightning payment, or a payout on chain (`onchainNeed`, which
+     * is this)? `sats` is the amount the quote is for and `reserve` the fee
+     * reserve it names: the confirmation asks once the quote is in, and does
+     * not offer SEND to a payment that is short.
      *
      * The very sum `pay` refuses on (`meltNeed`: the amount, the reserve, this
      * mint's own fee for the split and its fee again on the pieces the melt

@@ -1029,27 +1029,26 @@
      * useless and being money. */
     /* Can this phone cover a send, fee included — before anything is made.
      *
-     * The same sum `sendToken` refuses on, asked ahead of it so the
-     * confirmation can say no. A phone held 979 sats and was asked for
+     * The same sum `sendToken` refuses on (`sendCover`), asked ahead of it so
+     * the confirmation can say no. A phone held 979 sats and was asked for
      * 980 at the same mint: the card said SEND, the person pressed it, and
      * only then came "Not enough ecash. That needs 991 sats including this
      * mint's fee" — three times in a row. The answer: what is
-     * needed with the fee, what is held, and whether that is short. Null
-     * when there is no wallet to ask; the send itself says so then. */
+     * needed with the fee, what is held, whether that is short, and the
+     * sentence that says so (`why`, the one `sendToken` refuses in, and empty
+     * when it fits). Null when there is no wallet to ask; the send itself
+     * says so then. */
     sendShortfall: function (sats, opts) {
       var w;
       try { w = needLocal(); } catch (e) { return null; }
       var want = Math.round(Number(sats));
       if (!(want > 0)) return null;
-      var have = proofs(mintOf(w));
-      var stuck = lockedProofs(have);
-      if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
-      var fee = swapFeeFor(w, have);
-      var waiting = routeOpen() ? [] : lockedPieces();
-      var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
-      var held = sumProofs(have) + waitingSats;
-      var need = want + fee;
-      var short = held < need;
+      var cover = sendCover(w, want, '');
+      var have = cover.have;
+      var fee = cover.fee;
+      var held = cover.held;
+      var need = cover.need;
+      var short = cover.short;
       /* And what the swap itself will ask for. A token made by a swap covers
        * the receiver's fee as well (includeFees), which the sum above does not
        * count: a phone held 26 sats, was asked for 22, passed the card
@@ -1089,7 +1088,8 @@
           }
         }
       }
-      return { need: need, fee: need - want, have: held, short: short };
+      return { need: need, fee: need - want, have: held, short: short,
+               why: short ? notEnoughWords({ need: need, have: held }) + FoxyWallet._atRiskNote() : '' };
     },
 
     sendToken: function (sats, opts) {
@@ -1120,8 +1120,11 @@
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       var at = mintOf(w);
-      var have = proofs(at);
-      /* Nothing locked leaves in a token this phone makes.
+      /* The pile, the fee and what is held, as one sum (`sendCover`): the
+       * confirmation asked the same before it offered the send
+       * (`sendShortfall`), and this says it in the same words.
+       *
+       * Nothing locked leaves in a token this phone makes.
        *
        * The pile is meant to hold plain ecash and nothing else, and a send
        * picks from it without looking. So when a locked piece was in there, a
@@ -1133,28 +1136,25 @@
        * Left where they are and out of every selection below — a swap would
        * be refused by the mint for them as surely as a receiver would — and
        * put back untouched when the pile is written. How one got into the
-       * pile is `setProofs`'s to say, in the diary, the next time it happens. */
-      var stuck = lockedProofs(have);
-      if (stuck.length) {
-        console.warn('[foxy] the pile holds ' + stuck.length + ' locked piece(s), ' + sumProofs(stuck)
-          + ' sats; left out of this send');
-        have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
-      }
-      var fee = swapFeeFor(w, have);
-      /* What arrived locked to this phone counts, where it can be handed on.
+       * pile is `setProofs`'s to say, in the diary, the next time it happens.
+       *
+       * What arrived locked to this phone counts, where it can be handed on.
        *
        * It is in the balance and not in the pile, and this looked only at the
        * pile — so a phone that had been paid while offline was told
        * "you hold 0" when it tried to pay part of it. Only with no route:
        * with one, the claim swaps them into the pile before a send is reached. */
-      var waiting = (!(opts && typeof opts.lockTo === 'string' && opts.lockTo) && !routeOpen())
-        ? lockedPieces() : [];
-      var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
-      if (sumProofs(have) + waitingSats < want + fee) {
-        return Promise.reject(new Error('Not enough ecash. That needs ' + (want + fee) +
-          ' sats including this mint\u2019s fee, and you hold ' + (sumProofs(have) + waitingSats) + '.'
-          + FoxyWallet._atRiskNote()));
+      var held = sendCover(w, want, opts && typeof opts.lockTo === 'string' ? opts.lockTo : '');
+      var have = held.have;
+      var stuck = held.stuck;
+      if (stuck.length) {
+        console.warn('[foxy] the pile holds ' + stuck.length + ' locked piece(s), ' + sumProofs(stuck)
+          + ' sats; left out of this send');
       }
+      var fee = held.fee;
+      var waiting = held.waiting;
+      var waitingSats = held.waitingSats;
+      if (held.short) return Promise.reject(new Error(held.why));
       /* Pieces already held that add up to exactly the amount, the receiver's
        * fee on them included, go into the token as they are: no swap, nothing
        * asked of the mint. The mint then has no moment to tie a later question

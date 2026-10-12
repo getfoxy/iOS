@@ -358,6 +358,20 @@
     }));
   }
 
+  /* ADD FUNDS: does the card on show have the room for `sats`? The wallet's
+   * answer ({ ok, why, … }, `cardLoadFits`) to the amount typed, for the card
+   * read a moment ago, or null where there is none to ask about: no card on
+   * show (FLASHCARD on the send screen), a card other than the one read last,
+   * or a wallet that cannot say. The keypad asks as it is typed
+   * (`renderContext`), and NEXT asks again (`fcAmountNext`). */
+  fcLoadFits(sats) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    const card = this._fcCard;
+    if (!W || !W.cardLoadFits || !fc || !card || card.key !== fc.key || !(sats > 0)) return null;
+    try { return W.cardLoadFits(card, sats); } catch (e) { return null; }
+  }
+
   fcAmountNext() {
     const flow = String(this.state.flow);
     const fc = this.state.fc;
@@ -369,6 +383,9 @@
      * says the same thing in red, but it is worked out in dollars and has
      * nothing to say with no price. */
     const have = Math.floor(this.balNow().sats || 0);
+    // the card's room first, as the line under the figure names it first: the wallet's own words, asked of what the phone holds at the most
+    const room = flow === 'cardAdd' ? this.fcLoadFits(Math.min(sats, have)) : null;
+    if (room && !room.ok) { this.toast(room.why, true); return; }
     if ((flow === 'cardAdd' || flow === 'cardSend') && sats > have) { this.toast('You have ' + this.fcBoth(have) + '.', true); return; }
     // the sheet comes up at once, over the keypad, which stays where it is (`fcSendRun`)
     if (flow === 'cardSend') { this.fcSendRun(sats, ''); return; }

@@ -41,6 +41,9 @@ const DAY = 86400000;
 
 const results = [];
 const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + name + (ok ? '' : '  — ' + detail));
+// the sentence a payment the balance cannot cover is refused in: the wallet's, written out here so a change to it fails in two places
+const words = (need, have) => 'Your balance isn\'t enough to cover the payment and its fee: this needs '
+  + need + ' sats and you hold ' + have + '.';
 /* A behaviour this suite asks for and does not get, recorded rather than
  * dropped: `broken` is true while the wallet is still wrong, and the line
  * turns into a FAIL the day it comes right, so the check gets promoted instead
@@ -578,11 +581,17 @@ async function paying() {
   p.m.meltThrows = null;
   let short = '';
   try { await p.W.onchainPay(plan(), 0); } catch (e) { short = said(e); }
-  check('an amount the balance cannot cover with its fee is refused',
-    /Not enough ecash/.test(short), short || 'it was allowed');
+  check('an amount the balance cannot cover with its fee is refused, in the one sentence, at its figures',
+    short === words(51000, 40000), short || 'it was allowed');
   check('and nothing moved: no split, no record, the pile as it was',
     p.m.sendAsked.length === 0 && p.read(K.out, '[]').length === 0 && p.pile() === 40000,
     JSON.stringify({ sends: p.m.sendAsked.length, pile: p.pile() }));
+  /* The confirmation asks before it offers SEND, and gets the very sentence the
+   * payout refuses in: the sum is the wallet's, asked once the quote is in. */
+  const asked = p.W.onchainNeed(50000, 1000);
+  check('the confirmation asks the same sum first (onchainNeed), and is told the same',
+    !!asked && asked.ok === false && asked.need === 51000 && asked.have === 40000 && asked.why === short,
+    JSON.stringify(asked));
 
   /* The mint's own swap fee counts too: 51,000 held against 51,000 owed is
    * not enough when the split itself costs something. */
@@ -590,9 +599,18 @@ async function paying() {
   p.m.inputFee = 5;
   let byFive = '';
   try { await p.W.onchainPay(plan(), 0); } catch (e) { byFive = said(e); }
-  check('the mint’s input fee is counted before the split is attempted',
-    /Not enough ecash/.test(byFive) && p.m.sendAsked.length === 0, byFive || 'it was allowed');
+  check('the mint’s input fee is counted before the split is attempted, and said with its figures',
+    byFive === words(51005, 51000) && p.m.sendAsked.length === 0, byFive || 'it was allowed');
+  const askedFive = p.W.onchainNeed(50000, 1000);
+  check('and onchainNeed gives that sum: short by the fee alone, with the sentence',
+    !!askedFive && askedFive.ok === false && askedFive.need === 51005 && askedFive.have === 51000 && askedFive.why === byFive,
+    JSON.stringify(askedFive));
+  p.reset(51005);
+  const fits = p.W.onchainNeed(50000, 1000);
+  check('a balance that covers the amount, the reserve and the mint’s fee fits, with no sentence',
+    !!fits && fits.ok === true && fits.need === 51005 && fits.why === '', JSON.stringify(fits));
   p.m.inputFee = 0;
+  check('nothing to pay is no answer', p.W.onchainNeed(0, 0) === null);
 
   // a fee index the quote never offered
   p.reset(60000);
@@ -705,12 +723,128 @@ async function following() {
     orphan.state === 'PAID' && orphan.sats === 0, JSON.stringify(orphan));
 }
 
+/* ---- the confirmation: the quote is in, and the balance has to cover it --- */
+
+/* The app's own methods for the on-chain confirmation, lifted from the build
+ * and run against the wallet as it ships: the sum, the sentence and the
+ * figures are the wallet's, asked of it the way the screen asks. */
+const appSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'foxy-app.js'), 'utf8');
+function appMethod(sig) {
+  const at = appSrc.indexOf('\n  ' + sig);
+  if (at < 0) throw new Error('missing ' + sig);
+  let i = appSrc.indexOf('{', at), depth = 0;
+  for (; i < appSrc.length; i++) {
+    if (appSrc[i] === '{') depth++;
+    else if (appSrc[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  return appSrc.slice(at + 3, i + 1);
+}
+const onchainMethods = new Function('return {' + ['onchainSpec() {', 'ocFeeLabel(option) {'].map(appMethod).join(',\n') + '}')();
+
+async function confirming() {
+  const p = await page({});
+  const log = { pays: 0, picks: 0 };
+  /* The screen for a plan and a pile. `balSats` is what the app's own balance
+   * says, which is the pile: the screen used to compare that with the amount
+   * and the reserve, and left the mint's fee to the payout. */
+  const screen = async (pile, o) => {
+    const opt = o || {};
+    p.reset(pile);
+    p.m.inputFee = opt.inputFee || 0;
+    p.m.feeOptions = opt.options || [{ fee_index: 0, fee_reserve: 500, estimated_blocks: 1 }];
+    global.window = { FoxyWallet: Object.assign(Object.create(p.W), opt.wallet || {}) };
+    const plan = await p.W.onchainQuote('bc1qpayee', 50000);
+    const app = Object.assign({
+      state: { screen: 'ocConfirm', ocSats: 50000, ocPlan: plan, ocFee: opt.pick === undefined ? plan.options[0].index : opt.pick,
+               ocTo: 'bc1qpayeeexampleexampleexample', ocErr: opt.err || '', balSats: pile },
+      cfRow: (label, value) => ({ label, value }), mintName: () => 'a mint',
+      money: (n) => ({ main: '₿ ' + n, sub: '' }), heldBlocks: () => '',
+      ocPickFee() { log.picks += 1; }, ocPay() { log.pays += 1; }, ocCancel() {}, ocQuote() {},
+    }, onchainMethods);
+    return { app, plan, spec: app.onchainSpec() };
+  };
+
+  // covered: SEND, as it was
+  {
+    const { spec } = await screen(60000);
+    check('a balance that covers the amount and every fee goes on to SEND',
+      /^SEND /.test(spec.cta) && !spec.warn && spec.ctaTone === 'go' && !spec.ctaBusy, spec.cta + ' / ' + spec.warn);
+    spec.go();
+    check('and pressing it pays', log.pays === 1, String(log.pays));
+    log.pays = 0;
+  }
+  // short by the fee reserve: the balance cannot cover the amount and the fee the person picked
+  {
+    const { spec, plan } = await screen(50400);
+    check('a balance short of the amount and the reserve holds the button at NOT ENOUGH, with the wallet’s sentence and the real figures',
+      spec.cta === 'NOT ENOUGH' && spec.ctaTone === 'warn' && spec.warn === words(50500, 50400), spec.cta + ' / ' + spec.warn);
+    spec.go();
+    check('pressing it does nothing: nothing is paid and nothing is closed', log.pays === 0, String(log.pays));
+    check('and with one speed to choose from there is no second button: the way out is back', !spec.secondary, JSON.stringify(spec.secondary));
+    let refused = '';
+    try { await p.W.onchainPay(plan, plan.options[0].index); } catch (e) { refused = said(e); }
+    check('the payout, made all the same, refuses in the very words the screen holds it in',
+      refused === spec.warn, refused + ' | ' + spec.warn);
+  }
+  // the mint's own fee is all that is short: the amount and the reserve fit the balance
+  {
+    const { app, spec, plan } = await screen(50504, { inputFee: 5 });
+    check('the amount and the reserve fit the balance the app holds',
+      app.state.balSats >= app.state.ocSats + plan.options[0].fee, String(app.state.balSats));
+    check('and the mint’s fee for the split is what the screen refuses on, at the figures the wallet will',
+      spec.cta === 'NOT ENOUGH' && spec.warn === words(50505, 50504), spec.cta + ' / ' + spec.warn);
+    let refused = '';
+    try { await p.W.onchainPay(plan, plan.options[0].index); } catch (e) { refused = said(e); }
+    check('and the payout says the same sentence', refused === spec.warn && p.m.sendAsked.length === 0, refused);
+    const fits = await screen(50505, { inputFee: 5 });
+    check('one sat more and it is SEND', /^SEND /.test(fits.spec.cta) && !fits.spec.warn, fits.spec.cta);
+  }
+  // several speeds: the quickest is short, a slower one is not, and the speed can still be changed
+  {
+    const options = [
+      { fee_index: 1, fee_reserve: 300, estimated_blocks: 1 },
+      { fee_index: 0, fee_reserve: 500, estimated_blocks: 1 },
+      { fee_index: 2, fee_reserve: 100, estimated_blocks: 6 },
+    ];
+    const first = await screen(50200, { options });
+    check('with several speeds, the one picked decides: the quickest is short here',
+      first.spec.cta === 'NOT ENOUGH' && first.spec.warn === words(50300, 50200), first.spec.cta + ' / ' + first.spec.warn);
+    check('and CHANGE THE SPEED is there to choose another',
+      !!first.spec.secondary && first.spec.secondary.label === 'CHANGE THE SPEED', JSON.stringify(first.spec.secondary));
+    first.spec.secondary.go();
+    check('which opens the speeds', log.picks === 1, String(log.picks));
+    const slow = await screen(50200, { options, pick: 2 });
+    check('the slow one fits, and it is SEND', /^SEND /.test(slow.spec.cta) && !slow.spec.warn, slow.spec.cta + ' / ' + slow.spec.warn);
+  }
+  // before the quote is in there is nothing to ask, and the wallet is not asked
+  {
+    let asks = 0;
+    const early = await screen(1, { wallet: { onchainNeed() { asks += 1; return null; } } });
+    asks = 0;
+    early.app.state.ocPlan = null;
+    const spec = early.app.onchainSpec();
+    check('with no quote the button says it is checking the fee, and the wallet has not been asked',
+      /CHECKING THE FEE/.test(spec.cta) && spec.ctaBusy === true && asks === 0, spec.cta + ' / ' + asks);
+  }
+  // a wallet that cannot say leaves SEND as it was: the payout itself refuses
+  {
+    const none = await screen(100, { wallet: { onchainNeed: () => null } });
+    check('a wallet that cannot say leaves SEND as it was', /^SEND /.test(none.spec.cta), none.spec.cta);
+    const broke = await screen(100, { wallet: { onchainNeed: () => { throw new Error('no wallet'); } } });
+    check('one that throws does not break the screen', /^SEND /.test(broke.spec.cta), broke.spec.cta);
+    const old = await screen(100, { wallet: { onchainNeed: undefined } });
+    check('nor does a wallet with no such question', /^SEND /.test(old.spec.cta), old.spec.cta);
+  }
+  p.m.inputFee = 0;
+}
+
 async function run() {
   await limits();
   await receiving();
   await watching();
   await quoting();
   await paying();
+  await confirming();
   await following();
   await receipt();
 

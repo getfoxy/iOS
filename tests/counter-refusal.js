@@ -156,6 +156,9 @@ async function pair(o) {
   return { payer, rx, L, pay };
 }
 const swaps = (c) => c.asked.filter((x) => x === 'POST /v1/swap').length;
+// the sentence a payment the balance cannot cover is refused in: the wallet's, written out here so a change to it fails in two places
+const words = (need, have) => 'Your balance isn\'t enough to cover the payment and its fee: this needs '
+  + need + ' sats and you hold ' + have + '.';
 /* A phone's own answer to "I am about to pay this", with nothing sent over the link. */
 const askDirect = (c, intend) => {
   let out = null;
@@ -194,6 +197,31 @@ async function run() {
     ok(!short.made && short.e && short.e.foxyAskedNo && /400 sats; the request is for 500/.test(short.why), 'a payment that would be short is refused before it is made', short.why);
     const elsewhere = await t.payer.W.askFirst(Object.assign({}, t.payer.W.decodeRequest(text), { sats: 500 }), { mint: 'https://other.test', locked: true });
     ok(elsewhere.go === false && /takes that payment at m\.test/.test(elsewhere.why), 'and one that would be made at another mint', elsewhere.why);
+  }
+  {
+    /* A payer that cannot cover the amount and the mint's fee for making it
+     * does not ask. Asking is the promise: the receiver answers go and is
+     * waiting for a payment from then on. At a mint that charges for each
+     * piece it swaps, an amount one sat over what the pile holds less that
+     * fee fits the balance and not the payment. */
+    const t = await pair({ feePpk: 1000 });
+    const have = await t.payer.W.balanceSats();
+    const fee = t.payer.W.sendShortfall(1, {}).fee;
+    const want = have - fee + 1;
+    const lack = t.payer.W.sendShortfall(want, { locked: true });
+    ok(fee > 0 && want <= have && lack && lack.short === true && lack.need === have + 1 && lack.have === have,
+       'an amount the balance covers and the mint\'s fee does not', JSON.stringify({ have, fee, want, lack }));
+    const s0 = swaps(t.payer), rows0 = history(t.payer).length, rxRows0 = history(t.rx).length;
+    const r = await t.pay(want);
+    await settle();
+    ok(!r.made && r.why === words(have + 1, have) && r.why === lack.why && !r.e.foxyToken && !r.e.foxyAskedNo,
+       'it is refused in the one sentence the screen holds its button in, at the same figures', r.why + ' | ' + lack.why);
+    ok(!t.L.log.length && swaps(t.payer) === s0 && history(t.payer).length === rows0 && history(t.rx).length === rxRows0
+       && (await t.payer.W.balanceSats()) === have && !t.payer.W.atRisk().length,
+       'before the question asked first: nothing crossed the link, nothing was swapped or written, no sat moved', t.L.log.join(' ') || 'nothing crossed');
+    const fits = await t.pay(want - 40);
+    await settle();
+    ok(!!fits.made && t.L.log.indexOf('M10') >= 0, 'and a payment that fits asks first and is made, as it always was', fits.why || t.L.log.join(' '));
   }
   {
     // both with no route: plain ecash would cross and be refused; asked first, nothing crosses

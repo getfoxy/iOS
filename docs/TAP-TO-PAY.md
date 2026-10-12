@@ -534,6 +534,15 @@ and counts a payment whose change is outstanding at its gross.
   "pending with the mint", on the amount screen and the confirmations.
 - **A Lightning payment has to fit with its fee reserve** on the confirmation,
   before SEND.
+- **An ecash payment has to fit with the mint's fee** on the offer, before
+  SEND: the amount and what this mint charges to swap what the payer holds,
+  the sum the payment itself refuses on. Short by the fee alone, the button
+  reads NOT ENOUGH with the wallet's sentence, and the payer says "I gave up"
+  to the receiver as the offer opens (the receiver's card reads THE PAYER
+  COULD NOT PAY, with a sentence that says so and none of the payer's figures:
+  what a phone holds is not told across a counter). It never asks the question that
+  comes first, which is the promise: the receiver has been told nothing to
+  wait for. A request at another mint is judged when that mint is connected.
 - **Coming back online** claims what was waiting; the swap that claims it is
   shaped to fill the small-change pool (`MONEY.md` §13), and any top-up still
   owed runs the next time Foxy is put away. Nothing on screen waits for

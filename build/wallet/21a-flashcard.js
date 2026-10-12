@@ -491,6 +491,27 @@
      * or a wrong PIN, leaves the pieces owed, and the next tap finishes it.
      * `cardAdd` is both in one tap, card first. */
 
+    /* Does a load of `sats` fit the card, before anything is made? The keypad
+     * asks as the amount is typed (ADD FUNDS), with the card it read a moment
+     * ago, and refuses an amount the card has no room for, so THE CARD IS FULL
+     * is said at the keypad and not after the tap.
+     *
+     * The very cut `cardPrepare` makes and refuses on (`cardLoadCut`), in the
+     * words it refuses in. Answers { ok, why, sats, rounded, room }: `why`
+     * empty when it fits, `sats` what the cut comes to and `rounded` how many
+     * of those the places forced on top of the amount asked, `room` the
+     * card's free places. Null where the wallet cannot say: no wallet, no
+     * card, or one that has not been set up. Local, and at once. */
+    cardLoadFits: function (card, sats) {
+      var w;
+      try { w = needLocal(); } catch (e) { return null; }
+      var want = Math.round(Number(sats));
+      if (!(want > 0) || !card || !card.info || !card.info.setUp) return null;
+      var cut = cardLoadCut(w, card, want);
+      return { ok: !cut.full, why: cut.full ? CARD_FULL_WORDS : '', sats: cut.ladder.sats,
+               rounded: cut.ladder.extra, room: cut.room };
+    },
+
     /* Pieces for `sats`, locked to this card, made and filed as owed to it.
      * `card` is what `cardLook` gave. Resolves { id, sats, hash }. */
     cardPrepare: function (card, sats, opts) {
@@ -524,10 +545,9 @@
        * (`cardLimitCap`): a payment under the limit is then never made from a piece the
        * card waits for. Where that is more pieces than the places left, the rest goes in
        * larger ones (`cardCutUnder`), and `above` says how much. */
-      var biggest = cardMaxPiece(w);
-      var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
-      var room = card.info.empty + card.info.spent;
-      if (ladder.denominations.length + 4 > room) return Promise.reject(cardError('full', 'The card has no room for that. Take some money off it first.'));
+      var cut = cardLoadCut(w, card, want);
+      var ladder = cut.ladder;
+      if (cut.full) return Promise.reject(cardError('full', CARD_FULL_WORDS));
       if (ladder.above > 0) console.log('[foxy] card: ' + ladder.above + ' sats of a top-up go on in pieces above the card\u2019s limit on one tap: the places for smaller ran out');
       /* Whether this mint's ecash fits a card, asked before any is made. It
        * was asked after: the pieces were made, locked to the card, found not

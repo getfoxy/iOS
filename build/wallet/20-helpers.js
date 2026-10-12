@@ -1811,6 +1811,22 @@
         console.warn('[foxy] the payment was not made:', refusal);
         return Promise.reject(new Error(refusal));
       }
+      /* Can this phone cover it, before anything is said to the other one?
+       *
+       * The question asked first (`askFirst`) is the promise: the receiver
+       * answers go, and from there it is waiting on a payment. The amount and
+       * this mint's fee for making it are the sum `sendToken` refuses on, and
+       * the confirmation asked it before it offered the payment
+       * (`sendShortfall`); a payer short by the fee alone says so here, in the
+       * same words, before it has promised anything. The screen that asked for
+       * the payment tells a receiver on the link that it was not made
+       * (`makeTokenForRequest`), as it does whenever one is not. Nothing was
+       * made, and nothing was asked of the receiver. */
+      var lack = FoxyWallet.sendShortfall(req.sats, { locked: !!lockTo });
+      if (lack && lack.short) {
+        console.warn('[foxy] the payment was not made:', lack.why);
+        return Promise.reject(new Error(lack.why));
+      }
       step('making');
       /* A key for the change, before anything is paid.
        *

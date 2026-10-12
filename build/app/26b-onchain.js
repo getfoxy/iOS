@@ -228,6 +228,7 @@
    * uses, with the fee and the wait it buys. */
   onchainSpec() {
     const s = this.state;
+    const W = window.FoxyWallet;
     const plan = s.ocPlan;
     const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
     const short = String(s.ocTo || '');
@@ -240,17 +241,29 @@
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
         { half: true }),
     ];
-    /* More than is here: said before the mint is asked to take it, the way a
-     * payment request that overruns the balance is. */
-    const owed = s.ocSats + (pick ? pick.fee : 0);
-    if (pick && owed > (s.balSats || 0)) {
+    const many = !!(plan && plan.options.length > 1);
+    /* Once the quote is in: can the balance cover the payout and its fees?
+     *
+     * The wallet answers with the very sum `onchainPay` refuses on (the
+     * amount, the fee option's reserve, this mint's own fee for the split and
+     * its fee again on the pieces the melt spends) against what is held at
+     * the mint it pays from, in the words it refuses in (`onchainNeed`). The
+     * balance alone fitting the amount and the reserve is not the payout
+     * fitting. So the button is held here and says why, and the way out is
+     * back, to the amount; a slower speed, where the mint offers one, costs
+     * less, and stays there to be chosen. A render must not fail on the wallet
+     * failing to say, and then SEND is there as it was: `onchainPay` refuses. */
+    let covers = null;
+    try {
+      covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+    } catch (e) { covers = null; }
+    if (covers && !covers.ok) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.money(s.ocSats).main, amountSub: this.money(s.ocSats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(owed - (s.balSats || 0))
-          || 'More than your balance — short by ' + this.money(owed - (s.balSats || 0)).main
-          + ' with the fee',
-        cta: 'CLOSE', ctaTone: 'warn', go: () => this.ocCancel(),
+        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        secondary: many ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true } : undefined,
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
     if (s.ocErr) {
@@ -262,7 +275,6 @@
         cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.ocQuote(),
       };
     }
-    const many = !!(plan && plan.options.length > 1);
     return {
       title: 'CONFIRMATION',
       amountLabel: 'SENDING',

@@ -164,7 +164,10 @@ has to be more than a word.
 - *Ask first.* Before any ecash is made, the payer says on M10 what it is
   about to send: the amount, the mint, locked or not, the keyset. The
   receiver answers go or no on M11. Every honest refusal happens here, with
-  nothing sent.
+  nothing sent. A payer that cannot cover the amount and the fee its mint
+  charges to swap what it holds does not ask: it says "I gave up" on M10
+  instead, with the reason, as soon as the offer is on its screen, and sends
+  nothing after it, no question and no payment.
 - *An online receiver hands it back.* If it must still refuse unlocked ecash
   it was handed, it swaps it and sends the same value back, locked to
   `changeTo`.

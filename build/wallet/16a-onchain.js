@@ -299,6 +299,22 @@
       });
     },
 
+    /* Can this phone cover a payout, the mint's fees included, before anything
+     * is made? `sats` is the amount the quote is for and `fee` the reserve of
+     * the fee option picked: the confirmation asks once the quote is in, and
+     * does not offer SEND to a payout that is short.
+     *
+     * A payout is split and melted the way a Lightning payment is, so it is
+     * the same sum (`payNeed`, which is `meltNeed`: the amount, the reserve,
+     * this mint's fee for the split and its fee again on the pieces the melt
+     * spends), and `onchainPay` refuses on it in the same words
+     * (`notEnoughWords`). Answers { ok, need, have, fee, why } with `why`
+     * empty when it fits, and null when there is no wallet or nothing to pay.
+     * Local, and at once. */
+    onchainNeed: function (sats, fee) {
+      return FoxyWallet.payNeed(sats, fee);
+    },
+
     /* Pay it with one of the quote's fee options.
      *
      * The mint takes the ecash and answers PENDING: it has the transaction to
@@ -317,10 +333,13 @@
       var at = mintOf(w);
       var owed = plan.sats + pick.fee;
       var have = proofs(at);
-      if (sumProofs(have) < owed + swapFeeFor(w, have)) {
-        return Promise.reject(new Error('Not enough ecash. That payment needs ' + owed +
-          ' sats including the fee reserve, and you hold ' + sumProofs(have) + '.'));
-      }
+      /* The one sum (`meltNeed`), as for a Lightning payment: the amount, the
+       * reserve, this mint's fee for the split and its fee again on the
+       * pieces the melt spends. The confirmation asks the same before it
+       * offers SEND (`onchainNeed`), and this says it in the same words
+       * (`notEnoughWords`). */
+      var mn = meltNeed(w, have, owed);
+      if (!mn.ok) return Promise.reject(new Error(notEnoughWords(mn)));
       stage('quote');
       var splitGuard = swapGuard(w, 'split', { inputs: have });
       return splitGuard.run('on-chain split', function () {

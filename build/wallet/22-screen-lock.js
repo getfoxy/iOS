@@ -47,10 +47,11 @@
         });
     },
 
-    /* Can this phone cover a Lightning payment, the mint's fees included,
-     * before anything is made? `sats` is the amount the quote is for and
-     * `reserve` the fee reserve it names: the confirmation asks once the
-     * quote is in, and does not offer SEND to a payment that is short.
+    /* Can this phone cover a melt, the mint's fees included, before anything
+     * is made: a Lightning payment, or a payout on chain (`onchainNeed`, which
+     * is this)? `sats` is the amount the quote is for and `reserve` the fee
+     * reserve it names: the confirmation asks once the quote is in, and does
+     * not offer SEND to a payment that is short.
      *
      * The very sum `pay` refuses on (`meltNeed`: the amount, the reserve, this
      * mint's own fee for the split and its fee again on the pieces the melt

@@ -487,7 +487,19 @@
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
     const overLimit = s.flow === 'send' && sendEnteredUsd > SEND_DAY_LIMIT + 0.005;
-    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit);
+    /* And adding to a card is out of what the card can take, as well as out
+     * of this phone's balance. The card on show was read a moment ago, and
+     * the wallet says whether its free places hold what the amount typed is
+     * cut into (`fcLoadFits`), the very cut the load refuses on, so THE CARD
+     * IS FULL is said here and not after the tap. Asked of no more than this
+     * phone holds: a figure over the balance is over whatever the card can
+     * take, and an enormous one is not cut into pieces on every key. FLASHCARD
+     * on the send screen has no card on show and is capped by the balance
+     * alone. */
+    const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
+      ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
+    const roomOver = !!(room && !room.ok);
+    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver);
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;
     // live series or nothing: a canned curve next to a real price is a lie
@@ -507,6 +519,6 @@
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
-    return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
+    return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }

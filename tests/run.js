@@ -3583,7 +3583,8 @@ const eq = (got, want, what) =>
       const failed = await W.sendToken(250).then(() => null, (e) => e);
       // the spend elsewhere is the planted step: the wallet found it and dropped the piece, and no entry says so
       rebook(P);
-      if (!failed || !/not enough/i.test(failed.message)) return 'the send: ' + (failed ? failed.message : 'went through');
+      // the second look, at what is left once the spent piece is gone, is the one sentence a payment the balance cannot cover is refused in
+      if (!failed || !/^Your balance isn't enough to cover the payment and its fee: this needs 250 sats and you hold 44\.$/.test(failed.message)) return 'the send: ' + (failed ? failed.message : 'went through');
       const checks = log.seen.slice(mark).filter(x => x.path === '/v1/checkstate');
       if (checks.length !== 1) return checks.length + ' checks, wanted 1';
       const refused = log.seen.slice(mark).find(x => x.path === '/v1/swap');
