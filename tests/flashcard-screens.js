@@ -2394,10 +2394,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- the screen before the sheet -------------------------------------------- */
   {
-    // on a phone the sheet follows the screen by half a second (FC_TAP_LEAD 500); here sixty milliseconds, watched
+    // on a phone the sheet is asked for at once (FC_TAP_LEAD 0); a lead is still honoured where one is set: here sixty milliseconds, watched
     ok(Object.getPrototypeOf(holder).constructor.prototype.FC_TAP_LEAD === undefined ? true : true, 'the lead is a field of the app');
     const lead = new (Object.getPrototypeOf(holder).constructor)().FC_TAP_LEAD;
-    ok(lead === 500, 'the app shows TAP BEHIND PHONE for half a second before the sheet', String(lead));
+    ok(lead === 0, 'the app asks for the sheet at once, with no head start for the screen: a card already at the phone is the payment\u2019s to read and not the system banner\u2019s', String(lead));
     holder.FC_TAP_LEAD = 60;
     H.sheet.length = 0;
     H.nfc = c;

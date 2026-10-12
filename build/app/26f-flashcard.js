@@ -68,7 +68,10 @@
   /* A tap, step by step: the line on the phone's sheet. The wallet names the steps as it reaches them; the screen behind
    * the sheet is drawn from where the tap has got to (26h-tap-screen.js), not from these. */
   // the screen's lead over the sheet, in ms: TAP BEHIND PHONE is seen before iOS's sheet comes up
-  FC_TAP_LEAD = 500;
+  /* No head start for the screen before the sheet. A phone with its screen on reads a card's tag by itself and offers
+   * its banner whenever no card sheet is up, so a card already at the phone in that half second was taken by the
+   * system and not by the payment. The sheet is asked for at once; the screen behind it comes up with it. */
+  FC_TAP_LEAD = 0;
   FC_STEPS = {
     hold: 'Tap behind the phone.',
     reading: 'Reading the card',
@@ -321,10 +324,11 @@
       if (W.onCard) W.onCard(null);
       if (pinNeeded) this.fcTapPin(); else this.hideStage('card');
     };
-    /* The screen first, the sheet half a second after it (FC_TAP_LEAD): the person sees TAP BEHIND PHONE and the
-     * card coming down before iOS puts its own sheet over the lower half, in every tap there is. */
+    /* The screen and the sheet together. The sheet could follow the screen by FC_TAP_LEAD, and did by half a second
+     * so that TAP BEHIND PHONE was seen first; with a tag on the card, that half second was one in which the system
+     * read the card and raised its banner. The lead is nothing now, and a lead that is set is still honoured. */
     const lead = Math.max(0, Number(this.FC_TAP_LEAD) || 0);
-    // with no lead (the suites) the sheet is asked for in this very turn, as it always was
+    // with no lead the sheet is asked for in this very turn
     const after = (start) => (lead > 0 ? new Promise((go) => setTimeout(go, lead)).then(start) : start());
     return after(() => W.cardSession((o && o.sheet) || this.FC_STEPS.hold, (link) => {
       const on = (step, info) => {
