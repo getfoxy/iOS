@@ -21,6 +21,11 @@
 // app, and the rest of Foxy/Flashcard needs NFC, which a Mac does not have. Its
 // tests, CardTimeTests, import it as FoxyCardTime here and as Foxy in the app.
 //
+// Foxy/Flashcard/CardAddress.swift and CardTapDelivery.swift, the card's address and the
+// one message that goes to the page about it, are a module too, FoxyCardTap, for the same
+// reason: they need nothing of the app. CardAddressTests and CardTapDeliveryTests import
+// it as FoxyCardTap here and as Foxy in the app.
+//
 // libsecp256k1 is Vendor/secp256k1 (Sources/CSecp256k1's src and include are
 // links to it), compiled with the defines and optimisation project.yml gives it.
 // tools/check-all.sh runs this, and GitHub's checks run it on macOS.
@@ -57,9 +62,13 @@ let package = Package(
             name: "FoxyCardTime",
             path: "Sources/FoxyCardTime"
         ),
+        .target(
+            name: "FoxyCardTap",
+            path: "Sources/FoxyCardTap"
+        ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTime"],
+            dependencies: ["Foxy", "FoxyCardTime", "FoxyCardTap"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -79,6 +88,8 @@ let package = Package(
                 "SeedVaultTests.swift",
                 "SeedActionsTests.swift",
                 "CardTimeTests.swift",
+                "CardAddressTests.swift",
+                "CardTapDeliveryTests.swift",
             ]
         ),
     ]

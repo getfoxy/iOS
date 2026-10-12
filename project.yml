@@ -79,6 +79,12 @@ targets:
         # entitlement that claims it comes from the environment, like the team:
         # `export FOXY_ENTITLEMENTS=tools/flashcard.entitlements` in local.env.
         # Unset, Foxy builds as before and the card screens say NO CARD READER.
+        # The same file holds the associated domain a card's address opens Foxy
+        # through (applinks:getfoxy.io, Foxy/Flashcard/CardAddress.swift): another
+        # paid-team capability, which the app's identifier must have enabled and
+        # the site's association file must name. Unset, a card held to the phone
+        # opens the site's page in Safari and not Foxy. The Info.plist needs
+        # nothing for it, and nothing else in this file does.
         CODE_SIGN_ENTITLEMENTS: ${FOXY_ENTITLEMENTS}
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_UIImageName: FoxySplash

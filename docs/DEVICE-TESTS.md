@@ -45,6 +45,7 @@ first.
 | Anything with a camera | §17 (scanning another wallet's QR), §18 (animated QR), §20 steps 2–4 | No camera in a simulator |
 | The phone's own passcode and backups | §7, §12d | Erasing, restoring from a Finder backup, and turning the passcode off |
 | **Tap to pay** | §F, all of it | A simulator has no Bluetooth. `tools/sim` has a stand-in for the link that carries a tap between two simulators over loopback (`tools/sim/README.md`): it tests the pages and the bridge, not the radio (range, RSSI, edges, a link dropped by walking away). `TapCryptoTests.swift` and `TapSessionTests.swift` cover the handshake and run both roles against each other; `TapProtocolTests.swift` covers the framing and the proximity rule. The radio itself needs **two** phones |
+| **A card's address opens Foxy** | §23e | iOS reads the card's tag, raises a banner, and a tap on it opens the app the address is associated with. That needs a build signed with the associated domain (`tools/flashcard.entitlements`) on a phone, a site whose association file names that app, and a card of software 1.19. A simulator build is signed as no team, so the site does not name it, and a simulator has no tag to read. `foxy://card` in a Debug build says what comes after iOS has handed the address over: the phone's hold on it and the page's rule |
 
 ---
 
@@ -168,6 +169,7 @@ soon as the page has loaded. Each one logs a `[deeplink]` line, so
 | `foxy://token` | The amount keypad, making an ecash token |
 | `foxy://nfc` | The home screen (the payer listens from home, so there is no tap screen) |
 | `foxy://split` | Split a bill, at its keypad |
+| `foxy://card` | No screen of its own. It tells the page what a tap on a card's banner tells it (`FoxyWallet._cardTapped`), for a simulator, which cannot be handed the real address; the page then acts, keeps or ignores it for what is on screen (CARD.md, *Tapping a card to open Foxy*). It takes no parameters |
 
 | Parameter | Values | Where it applies |
 |---|---|---|
@@ -2005,6 +2007,45 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 3. On a build without the entitlement: MENU, FLASHCARD. **Pass:** NO CARD
    READER, and nothing else.
 
+#### 23e. A card's address opens Foxy
+
+Needs a card of software 1.19 with its tag on, a second card of 1.19 with its tag switched off (the card repository says how), a
+phone with a build signed with the associated domain (`tools/flashcard.entitlements`, so `FOXY_ENTITLEMENTS` in `local.env`) and the
+site's association file naming that build, and for step 7 a phone with no Foxy on it. Test money only. Nothing here has run on a real
+card. The log lines are `card tap: …` (`sh tools/pull-device-log.sh`, or LOGS in the menu); none of them has anything of the address in it.
+A build installed from Xcode is matched against Apple's cached copy of the site's association file like any other, which can lag when the
+file was changed a moment ago; Apple's developer mode for associated domains (`?mode=developer` on the entry in a local copy of the
+entitlements, never committed) makes iOS ask the site directly, for a test build.
+
+1. **The lock screen.** Lock the phone, wake it so the screen is on and still locked, and hold the card to the top of it. **Pass:**
+   iOS raises a banner that offers Foxy, not Safari. Tap it: the phone asks to be unlocked, Foxy opens, and with Foxy's own PIN or
+   Face ID on it asks for that first, with nothing of the card's screen showing behind the lock. Once you are in, within a minute,
+   the Flashcard screen's tap begins by itself (TAP BEHIND PHONE and the phone's sheet) and reads the card, which is still held.
+   The log has `kept until Foxy is open, it is locked` and then `opening the card screen from home, after N s kept`.
+2. **Foxy's home screen.** With Foxy open at home and unlocked, hold the card to the phone. **Pass:** the banner comes up over Foxy;
+   a tap on it goes to the Flashcard screen's tap at once, and the card is read; back is home. Note whether iOS raises the banner
+   again by itself while the card rests there after the read, and if it does what a tap on it does (it should read the card again).
+3. **Screens where nothing is in progress.** From HISTORY, and again from the Flashcard screen itself with no sheet up, hold the card
+   and tap the banner. **Pass:** the tap begins, the card is read, and back from the Flashcard screen is where you were.
+4. **In the middle of a payment: ignored.** Start a send and stop at its confirmation, hold the card and tap the banner. **Pass:** Foxy
+   comes forward and nothing changes: the confirmation is as it was, with no sheet and no card screen. The log has `ignored, the screen
+   is sendConfirm`. Do the same with an amount half typed on the keypad, with a receive invoice on screen, with a split bill, with a
+   notice (a card) up, and with a card's PIN pad up. **Pass:** each is left alone.
+5. **Foxy locked, and a minute.** Put Foxy away with its lock on, hold the card, tap the banner. **Pass:** Foxy opens locked and does
+   nothing until the PIN or the face is given; then the tap begins. Do it again and wait more than a minute at the lock before
+   unlocking. **Pass:** home, and nothing begins (`lapsed, Foxy was not open within 60 s`).
+6. **A cold launch.** Quit Foxy from the app switcher, hold the card and tap the banner. **Pass:** Foxy launches and, past the launch
+   screens and the lock if it has one, begins the tap once, not twice. The log has `a card's address arrived` and `told the page`, then
+   the page's own line. With the connection still coming (the banner on home) it works the same: reading a card needs none.
+7. **A phone without Foxy sees the page.** On a phone that has no Foxy, hold the card. **Pass:** the banner offers Safari and the page
+   on the site opens, saying what the card is. Compare the address on two different cards: **Pass:** it is the same on both.
+8. **A card whose tag is switched off raises nothing.** Hold the second card to a phone with Foxy closed. **Pass:** no banner. MENU,
+   FLASHCARD still reads it.
+9. **The address by hand.** Put `https://getfoxy.io/card` in Notes and tap it; then `https://getfoxy.io/card?x=1`; then
+   `https://getfoxy.io/cards`. **Pass:** the first two do what a tap on the banner does. The third opens Safari, or, if the site's
+   association file lists it, opens Foxy and does nothing: only `/card` is the card's. A Debug build in a simulator does the first
+   with `xcrun simctl openurl booted "foxy://card"`.
+
 ---
 
 #### 22l. What two diaries of offline taps showed besides the money
@@ -2153,4 +2194,4 @@ been used on a phone. Update the table when a section is run.
 | Run on a device, passed | §1, §5a, §5f, §5g, §5h, §5i, §14a, §14b, §21a (all traffic is Tor; the control run with CONTINUE UNPROTECTED is not done), §22b |
 | Run on a device, in part | §4 (each transport connects; a payment through each is not run), §5b (long returns reconnect, including the recovery from a reclaimed control listener; the 30 minute return on cellular with the phone locked is not recorded), §14c (a pasted phrase stayed on the clipboard; fixed in code, not re-run), §17 (the card and the token work and three faults it found are fixed; run it again) |
 | Simulator only | §8, §10, §11, §12 (the keychain test, not 12b to 12d), §16, §19 (steps 1, 3 and 4), §20 (steps 1 and 4), §21b (the mechanism; the 4-to-5-second claim is not tested), §21c, §21e (steps 1 and 2), §21f (step 1), §21g (steps 1 and 2) |
-| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k |
+| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k, §23e |

@@ -195,6 +195,11 @@
          * asked, while a return from the background asked it. Asked here
          * instead, once, now that the wallet can say. */
         if (!this._lockedOnce && this.pinLock) this.pinLock();
+        /* A card held to the phone (26f-flashcard.js, `cardTapped`). Put on the
+         * wallet only now, after the lock has been decided: the phone asks again
+         * until this is there, and a request taken before the page knew whether
+         * it was locked would be acted on past the lock. */
+        W._cardTapped = () => this.cardTapped();
         if (W.onCaughtUp) W.onCaughtUp(() => {
           console.log('[foxy] small change: connected and caught up; checking the pool');
           this.refreshBalance();

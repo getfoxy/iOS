@@ -95,6 +95,71 @@ every card screen says NO CARD READER. The simulator has no NFC; in simulator
 builds only, it reaches a stand-in card over the Mac's loopback, which can be
 the real applet running under jCardSim (`FORK.md` in the card repository).
 
+The same file carries the Associated Domains entitlement, `applinks:getfoxy.io`,
+that lets a card's address open Foxy (*Tapping a card to open Foxy*, below). It is
+a paid team's capability too: the app's identifier needs it enabled in the
+developer account, and the site's association file has to name the app for the
+path `/card`. Without the file there is neither, and a card held to the phone
+opens the site's page in Safari and not Foxy.
+
+## Tapping a card to open Foxy
+
+A Foxy card of software 1.19 answers as an NFC tag as well as a card. The tag
+carries one address, `https://getfoxy.io/card`, and it is the same on every
+card. No part of it belongs to one card and none ever will: the address is a way
+to open Foxy, not a name for the card, and nothing in it, or in the page behind
+it, can tell one card from another.
+
+- **On the lock screen, or from any app.** With the screen on, iOS reads a tag
+  held to the top of an iPhone (XS and later) by itself and shows a banner. A tap
+  on the banner opens the app the address is associated with, which is Foxy:
+  its build carries the associated domain `applinks:getfoxy.io`
+  (`tools/flashcard.entitlements`) and the site's association file names it for
+  the path `/card`. A locked phone asks to be unlocked first, as it does for any
+  banner.
+- **With Foxy open.** The banner comes up over Foxy, and a tap on it comes back
+  to Foxy.
+- **On a phone without Foxy**, or with a build that has no entitlements file, the
+  same tap opens the page on the site in Safari, which says what the card is.
+- **A card whose tag is switched off raises nothing.** It is read as it always
+  was, by MENU > FLASHCARD and the sheets that ask for it.
+
+iOS hands Foxy the address and no session with the card. Foxy checks the address
+(`Foxy/Flashcard/CardAddress.swift`) and tells its page one thing, that a card
+was tapped. Nothing of the address goes with it. The page then does what
+MENU > FLASHCARD does: it goes to the Flashcard screen and begins the tap
+(TAP BEHIND PHONE, and the phone's own sheet), and the card, which is usually
+still behind the phone, is read by that sheet. A card that is no longer there is
+asked for like any other: hold it again.
+
+Whether it does that depends on what is on the screen, and one function says
+(`cardTapRule`, `build/app/26f-flashcard.js`):
+
+| on the screen | what happens |
+|---|---|
+| HOME; HISTORY, CONTACTS, a transaction, YOUR CHANGE, LOGS, SWITCH, or the Flashcard screen itself with no sheet up | the tap begins; a drawer or the list of apps that sell bitcoin is shut first, as the menu's row shuts it |
+| Foxy is locked (its PIN pad or Face ID is up), or still starting (the launch screens, the first-run warning, the Tor gate's screens) | the request is kept, and acted on once the person is in, if that is within a minute; after that it lapses |
+| a send or receive, an amount being typed, a confirmation, a sending or paid screen, a split bill, a token, a restore or a backup, a card sheet or any of a card's flows, a notice, or anything else drawn over the screen | ignored: a card resting behind the phone must never pull a person out of a payment |
+| a second request while one waits or is being acted on | the same tap, ignored |
+
+What is on screen decides first, so a payment under the lock is ignored there and
+then and not kept to be acted on later. A screen the function has not been told
+about is ignored, and `tests/deep-links.js` fails until a new screen is named in
+it. It works offline and while the connection is still coming, as the menu's
+row does: reading a card needs no network. Each outcome is one line in the log
+(`card tap: …`), and none of them carries anything of the address.
+
+The phone keeps the request when the address arrives before the page can take it,
+which a launch from the banner always does, and tells the page when it can: not
+under the launch image or the app-switcher cover, and not before the page has
+been told Foxy is back from the background, so that the lock a return raises is
+up before a card is heard (`Foxy/Flashcard/CardTapDelivery.swift`). It asks again
+until the page answers, and gives up a minute after the address arrived.
+
+Anything else that opens the address does what a tap does: a link, a page, a QR
+code. It reads nothing and moves no money, and it is ignored in the middle of a
+payment (`THREAT-MODEL.md` §1).
+
 ## Setting up a card
 
 1. MENU, then FLASHCARD. It goes straight to Apple's sheet, with no screen of
@@ -1510,10 +1575,19 @@ matter to a person:
   fetched over Tor and checked) and `build/wallet/21a-flashcard.js` (set-up,
   adding and taking money, the owner's proofs).
 - Native: `Foxy/Flashcard/` (`CardLink.swift`, the NFC session; `CardGate.swift`,
-  which commands may pass; `CardTime.swift`, the interim time of the cards before 1.15), and
-  `Foxy/Bridge/FoxyBridge+Flashcard.swift`. The bridge actions are in
-  `THREAT-MODEL.md` §1, and the owner key's derivation is in `SEED-HANDLING.md`.
-- Tests: `tests/flashcard-*.js` run in `tools/check-all.sh` against a model of
+  which commands may pass; `CardTime.swift`, the interim time of the cards before 1.15;
+  `CardAddress.swift`, the card's address and the one message the page is told about it;
+  `CardTapDelivery.swift`, which keeps that message until the page can take it and
+  tells it once), and `Foxy/Bridge/FoxyBridge+Flashcard.swift`. The bridge actions are in
+  `THREAT-MODEL.md` §1, and the owner key's derivation is in `SEED-HANDLING.md`. A card's
+  address comes in through `ContentView` in `Foxy/FoxyWebView.swift`, and the page takes
+  it at `FoxyWallet._cardTapped` (`cardTapped`, `cardTapRule`, in `26f-flashcard.js`).
+- Tests: `FoxyTests/CardAddressTests.swift` and `CardTapDeliveryTests.swift` hold the
+  address and the delivery to their rules (they run in `tools/nativetests`);
+  `tests/deep-links.js` holds the rule for every screen, the request that is kept and
+  its minute, and what is read across the two languages (the one message, the
+  entitlement); `tests/flashcard-screens.js` begins a real tap from a card's address.
+  `tests/flashcard-*.js` run in `tools/check-all.sh` against a model of
   the card held to the applet's own conversation. `tests/flashcard-fewer.js` pins
   the cash-drawer cut and the exact sets it makes; `tests/flashcard-clock.js`
   pins the card's clock: three real block headers at the card's real floor and

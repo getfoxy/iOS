@@ -15,6 +15,10 @@
    *                                      money on and off it, its PIN and its
    *                                      limit, and the cards this phone can
    *                                      take back if they are lost.
+   *   a card's address, from outside     a card held to the phone raises one
+   *                                      address and iOS opens Foxy with it:
+   *                                      the same as MENU > FLASHCARD, if it is
+   *                                      a moment for it (`cardTapped`);
    *   SEND > FLASHCARD                   money onto any card held to this phone
    *                                      (`fcSendCard`);
    *   RESET (software 1.17)              the first of the row of round buttons
@@ -143,12 +147,150 @@
     clearInterval(this._fcRollT);
     if (this.state.fcRoll) this.setState({ fcRoll: null });
     if (this.FC_RECOVERABLE) {
-      this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
+      // (from the card's own screen, which a card's address can come to, it is not put on the stack again)
+      this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
       this.fcRead();
       return;
     }
     if (this.state.fc) this.setState({ fc: null });
     this.fcRead(true);
+  }
+
+  /* ---- a card's address, from outside Foxy -----------------------------------
+   *
+   * A Foxy card answers as an NFC tag that carries one address, the same on every
+   * card (https://getfoxy.io/card; Foxy/Flashcard/CardAddress.swift). With the
+   * screen on, iOS reads the tag by itself and shows a banner, and a tap on the
+   * banner opens Foxy, or brings it forward, with that address. iOS gives no
+   * session with the card; it gives the address, and the phone passes on one
+   * thing, `FoxyWallet._cardTapped()`: a card was tapped. Nothing of the address
+   * comes with it. What is done is what MENU > FLASHCARD does (`goFlashcard`:
+   * the screen, the phone's sheet, the card still behind the phone), when it is
+   * a moment for that. `cardTapRule` is the one place that says whether it is:
+   *
+   *   act      the person is at home, or on a screen where nothing is in
+   *            progress (CARD_TAP_FREE);
+   *   keep     Foxy is locked, or still starting (the launch screens, the
+   *            first-run warning, the Tor gate's screens). The request waits
+   *            for the person to be in and is acted on then, if that is within
+   *            CARD_TAP_KEEP_MS; after that it lapses;
+   *   ignore   a payment, an amount being typed, a confirmation, a sending or a
+   *            paid screen, a split bill, a card sheet or a card flow, a card
+   *            on the screen, or anything else up over it. A card resting behind
+   *            the phone must never pull a person out of a payment.
+   *
+   * A screen is a place to leave only if it is named in CARD_TAP_FREE, so one
+   * added later is ignored until somebody decides, and so is anything drawn over
+   * the screen that this code does not know. Each outcome is one log line, and
+   * none of them says anything of the address. */
+
+  // the screens on which nothing is in progress: a card's address may take the person away from any of them
+  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint'];
+  // how long a request waits for Foxy to be open before it lapses, and how often it looks again meanwhile
+  CARD_TAP_KEEP_MS = 60000;
+  CARD_TAP_POLL_MS = 250;
+
+  /* The phone's word that a card was tapped (registered as `FoxyWallet._cardTapped` by bootWallet, once the lock has
+   * been decided). Answers true when this page has the request, whatever it then does with it: that is how the phone
+   * knows to stop asking. A second request while one waits is the same tap said twice. */
+  cardTapped() {
+    if (this._cardTapAt) {
+      console.log('[foxy] card tap: ignored, one is already waiting');
+      return true;
+    }
+    this._cardTapAt = Date.now();
+    this._cardTapKept = false;
+    this.cardTapSettle();
+    return true;
+  }
+
+  /* What is true of the screen right now, as plain values for `cardTapRule`. While a screen of the gate's is up the
+   * overlays are not looked at, because the gate's own are among them; the request is kept, and looked at again when
+   * the gate has gone. */
+  cardTapFacts() {
+    const s = this.state;
+    const G = window.FoxyGate;
+    let starting = false;
+    try { starting = !!(G && G.visible && G.visible()); } catch (e) { starting = false; }
+    return {
+      locked: !!this._pinLocked,
+      starting,
+      screen: String(s.screen || ''),
+      // the mint list asked for a transfer's mint, or for the one a card moves to: money, not a list
+      transfer: !!s.trStep,
+      pick: !!s.fcPick,
+      over: starting ? '' : this.cardTapOver(),
+    };
+  }
+
+  /* What is up over the screen, by name, or ''. Nearly everything this app draws over a screen is a fixed element on the
+   * body (the PIN pad, the cards, the stage and loading screens, the explainer, the seed screens), so any such element is
+   * a reason to leave the person where they are. Not the lock's own pad (that is `locked`), the app itself, the gate, a
+   * field that is only there to hold focus, or the list of apps that sell bitcoin, which is only to be read and which
+   * a card's tap closes (`cardTapAct`). The one question the template draws over a screen that is free, the one that
+   * asks for a backup of the words over home, is named by its flag. */
+  cardTapOver() {
+    if (this.state.bkAskOpen) return 'the backup question';
+    const lockPad = this._pinLocked ? this._pinEl : null;
+    const kids = document.body ? Array.prototype.slice.call(document.body.children) : [];
+    for (let i = 0; i < kids.length; i++) {
+      const n = /** @type {any} */ (kids[i]);
+      if (!n || n === lockPad || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA') continue;
+      const id = String(n.id || '');
+      if (id === 'dc-root' || id === 'foxy-get-dollars' || id.indexOf('ftg-') === 0) continue;
+      if (n.style && n.style.position === 'fixed') return id || (n === this._pinEl ? 'a PIN pad' : n === this._blockedEl ? 'a card' : 'an overlay');
+    }
+    return '';
+  }
+
+  /* Act, keep or ignore, for the facts of `cardTapFacts`. What is on screen decides first: a request that finds a
+   * payment under the lock is ignored there and then, not kept to be acted on a minute later from wherever the person
+   * has got to. */
+  cardTapRule(f) {
+    if (f.over) return 'ignore';
+    const free = this.CARD_TAP_FREE.indexOf(f.screen) >= 0 && !(f.screen === 'switchMint' && (f.transfer || f.pick));
+    if (!free) return 'ignore';
+    if (f.locked || f.starting) return 'keep';
+    return 'act';
+  }
+
+  /* One look at the request: acted on, ignored, or kept and looked at again a moment from now, until it lapses. */
+  cardTapSettle() {
+    clearTimeout(this._cardTapT);
+    this._cardTapT = null;
+    const at = this._cardTapAt;
+    if (!at) return;
+    const f = this.cardTapFacts();
+    const say = this.cardTapRule(f);
+    if (say === 'keep') {
+      if (Date.now() - at >= this.CARD_TAP_KEEP_MS) {
+        this._cardTapAt = 0;
+        console.log('[foxy] card tap: lapsed, Foxy was not open within ' + Math.round(this.CARD_TAP_KEEP_MS / 1000) + ' s');
+        return;
+      }
+      if (!this._cardTapKept) {
+        this._cardTapKept = true;
+        console.log('[foxy] card tap: kept until Foxy is open, ' + (f.locked ? 'it is locked' : 'it is starting'));
+      }
+      this._cardTapT = setTimeout(() => this.cardTapSettle(), this.CARD_TAP_POLL_MS);
+      return;
+    }
+    this._cardTapAt = 0;
+    if (say === 'ignore') {
+      console.log('[foxy] card tap: ignored, ' + (f.over ? 'something is up over the screen (' + f.over + ')'
+        : 'the screen is ' + f.screen + (f.screen === 'switchMint' && (f.transfer || f.pick) ? ', asking where money moves' : '')));
+      return;
+    }
+    console.log('[foxy] card tap: opening the card screen from ' + f.screen
+      + (this._cardTapKept ? ', after ' + Math.round((Date.now() - at) / 1000) + ' s kept' : ''));
+    this.cardTapAct();
+  }
+
+  /* What the menu's row does when it is pressed: the drawer closes (`shut`), and the tap begins. */
+  cardTapAct() {
+    if (this.state.open0) this.setState({ open0: false });
+    if (this.hideGetDollars) this.hideGetDollars();
+    this.goFlashcard();
   }
 
   /* ---- one tap ------------------------------------------------------------

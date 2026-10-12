@@ -2666,6 +2666,155 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'and the payment begun again after a pause is taken up for the same share', JSON.stringify(runs.map((a) => a.slice(0, 5))));
     clearTimeout(bill._spResumeT);
   }
+  /* ---- a card held to the phone: its address opens Foxy (build/app/26f-flashcard.js, `cardTapped`) ---------------------------------
+   *
+   * A Foxy card answers as a tag that carries one address, and iOS opens Foxy with it when the person taps the banner. The phone
+   * tells the page one thing, that a card was tapped (FoxyWallet._cardTapped), and the page does what MENU > FLASHCARD does if it is
+   * a moment for it. The tap is the real one here, against the model of the card; tests/deep-links.js holds the rule for every
+   * screen, and what the phone may pass on. */
+  {
+    const F = await funded({}, 0);
+    const app = appOn(F);
+    const fresh = newCard(F);
+    F.nfc = fresh;
+    app.CARD_TAP_POLL_MS = 5;
+    const begins = () => F.sheet.filter((l) => /^begin: /.test(l)).length;
+    // the lock\u2019s own pad (10-pin.js), which is not a card\u2019s gated one: its keys by their digits, then UNLOCK
+    const lockPad = () => (app._pinEl && app._pinEl.parentNode ? app._pinEl : null);
+    const leaves = (root) => Array.from(root.querySelectorAll('div')).filter((d) => d.childElementCount === 0);
+    const press = (el) => el.dispatchEvent(new F.window.Event('click', { bubbles: true }));
+    const typeOnLock = (digits) => {
+      const root = lockPad();
+      String(digits).split('').forEach((d) => press(leaves(root).filter((x) => x.textContent === d)[0].parentNode));
+      press(leaves(root).filter((x) => x.textContent === 'UNLOCK')[0]);
+    };
+    // back to a quiet home, whatever the last case left
+    const quiet = () => {
+      app.hideStage();
+      app.pinDismiss();
+      if (app._blockedEl) app.dismissCard(app._blockedKind);
+      app.setState({ screen: 'home', stack: [], fc: null, open0: false });
+    };
+
+    /* from home, with the menu's drawer open: the tap begins at once, as the menu's row begins it */
+    app.state.open0 = true;
+    ok(app.cardTapped() === true, 'the page says it has the request');
+    ok(begins() === 1 && F.sheet[0] === 'begin: Tap behind the phone.' && stage(F) === 'card' && app.state.open0 === false,
+       'from home the tap begins at once, the phone’s sheet asked for in the menu’s own words, with the screen for it up and the drawer shut', F.sheet[0]);
+    await until('the card to be read', () => !!app.state.fc);
+    ok(app.state.screen === 'flashcard' && app.state.stack.slice(-1)[0] === 'home' && !stage(F),
+       'and a card read is the card’s screen, with home behind it, exactly as MENU > FLASHCARD leaves it');
+    await settle();
+
+    /* from a screen where nothing is in progress: the same, and back is where the person was */
+    app.setState({ screen: 'history', stack: ['home'], fc: null });
+    app.cardTapped();
+    await until('the card to be read from history', () => app.state.screen === 'flashcard' && !!app.state.fc);
+    ok(begins() === 2 && app.state.stack.join() === 'home,history', 'from HISTORY it is the same tap, and the card’s screen sits on top of it', app.state.stack.join());
+    app.back();
+    ok(app.state.screen === 'history', 'back from it is HISTORY');
+    await settle();
+
+    /* the card’s own screen with no sheet up: the tap begins again, and the screen stays the card’s */
+    app.setState({ screen: 'flashcard', stack: ['home'] });
+    const before = begins();
+    app.cardTapped();
+    ok(begins() === before + 1 && stage(F) === 'card', 'from the card’s own screen with no sheet up it reads the card again');
+    await until('the card to be read again', () => !!app.state.fc && !stage(F));
+    ok(app.state.screen === 'flashcard' && app.state.stack.join() === 'home', 'and stays on the card’s screen, not on the stack twice', app.state.stack.join());
+    await settle();
+
+    /* twice in a row is the same tap; with the tap’s sheet up it is ignored */
+    quiet();
+    const one = begins();
+    app.cardTapped();
+    app.cardTapped();
+    ok(begins() === one + 1, 'twice in a row, the tap begins once');
+    app.cardTapped();
+    ok(begins() === one + 1 && stage(F) === 'card', 'and with the sheet up a third is ignored too');
+    await until('the card to be read', () => !!app.state.fc && !stage(F));
+    await settle();
+    quiet();
+    app.goFlashcard();
+    app.cardTapped();
+    ok(begins() === one + 2, 'MENU > FLASHCARD and the card’s address together are one tap');
+    await until('the card to be read', () => !!app.state.fc && !stage(F));
+    await settle();
+
+    /* a payment, an amount being typed, a confirmation, a card flow in progress: ignored, and nothing is begun */
+    const mid = begins();
+    for (const screen of ['sendConfirm', 'amount', 'sendDone', 'paid', 'spPayer', 'tokenOut', 'fcMoveConfirm', 'crossConfirm']) {
+      quiet();
+      app.setState({ screen, stack: ['home'] });
+      app.cardTapped();
+      ok(begins() === mid && !stage(F) && app.state.screen === screen && app._cardTapAt === 0, 'on ' + screen + ' a card behind the phone does nothing: the person stays where they are');
+    }
+    quiet();
+    app.blockedCard('test', { tone: 'warn', title: 'A CARD', reason: 'Something to read first.' });
+    app.cardTapped();
+    ok(begins() === mid && !!card(app) && card(app).title === 'A CARD', 'a card on the screen is not covered by the sheet of another tap');
+    app.dismissCard('test');
+    ok(!card(app), 'the card goes when it is dismissed');
+    app.fcAskPin({ title: 'CARD PIN', cta: 'PAY' }, () => {});
+    app.cardTapped();
+    ok(begins() === mid && !!pad(app) && pad(app).title === 'CARD PIN', 'nor is a PIN pad of a card’s flow');
+    app.pinDismiss();
+    quiet();
+
+    /* locked: kept, and acted on once the person is in; and not for ever */
+    F.W.pinSet('4917');
+    app.pinLock();
+    ok(!!lockPad() && lockPad().children[0].textContent === 'FOXY IS LOCKED' && app._pinLocked === true, 'Foxy locked, with its PIN pad up');
+    const locked = begins();
+    app.cardTapped();
+    await settle();
+    ok(begins() === locked && !stage(F) && app._cardTapAt > 0 && !!lockPad(), 'the card behind the phone does not open Foxy past its lock: the request waits', String(begins() - locked));
+    app.cardTapped();
+    typeOnLock('4917');
+    await until('the tap to begin after the unlock', () => begins() === locked + 1);
+    ok(stage(F) === 'card' && !lockPad() && app._pinLocked === false && app._cardTapAt === 0, 'the PIN given, the tap begins, once, though it was asked for twice');
+    await until('the card to be read', () => !!app.state.fc && !stage(F));
+    await settle();
+    quiet();
+    // a minute is too long to wait for here: the same rule with a shorter one
+    app.CARD_TAP_KEEP_MS = 60;
+    app._pinLocked = false;
+    app._lockedOnce = false;
+    app.pinLock();
+    const lapsed = begins();
+    app.cardTapped();
+    await new Promise((go) => setTimeout(go, 200));
+    ok(app._cardTapAt === 0 && !app._cardTapT && begins() === lapsed, 'and a request that waited past its time has lapsed, and the person getting in after it is not sent to a card');
+    typeOnLock('4917');
+    await settle();
+    ok(begins() === lapsed && !stage(F) && !lockPad() && app._pinLocked === false, 'unlocked later, nothing begins');
+    F.W.pinClear();
+    app.CARD_TAP_KEEP_MS = 60000;
+    quiet();
+
+    /* still starting: the launch screens, the warning and the gate's screens are up, and then they are not */
+    F.window.FoxyGate = { visible: () => true };
+    const starting = begins();
+    app.cardTapped();
+    await settle();
+    ok(begins() === starting && app._cardTapAt > 0, 'while the gate’s screens are up it waits');
+    F.window.FoxyGate = { visible: () => false };
+    await until('the tap to begin when they are gone', () => begins() === starting + 1);
+    await until('the card to be read', () => !!app.state.fc && !stage(F));
+    delete F.window.FoxyGate;
+    await settle();
+    quiet();
+
+    /* with no connection it works as the menu does: reading a card needs none */
+    app.offline = true;
+    const offline = begins();
+    app.cardTapped();
+    ok(begins() === offline + 1, 'offline, the tap begins just the same');
+    await until('the card to be read', () => !!app.state.fc && !stage(F));
+    ok(app.state.screen === 'flashcard' && !!app.state.fc, 'and reads the card');
+    app.offline = false;
+    await settle();
+  }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

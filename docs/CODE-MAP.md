@@ -27,6 +27,7 @@ Foxy/               the Swift host
   Network/          the request router (Route), Orbot, onion post and inbox, loopback HTTP
   Nostr/            the Nostr transport for payment requests: gift wrap, relays, inbox
   Bluetooth/        tap to pay: the link, the handshake and the proximity rule (TAP-TO-PAY.md)
+  Flashcard/        a card that holds ecash, held to the phone: the NFC session, the commands let through, the card's address (CARD.md)
   Keychain/         the seed in the keychain (SeedStore)
   Scanner/          the full-screen and live QR scanners
   Debug/            the release-build print silencer, DEBUG-only diagnostics

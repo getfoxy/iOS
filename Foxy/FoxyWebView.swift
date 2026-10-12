@@ -275,6 +275,15 @@ final class WebHostController: UIViewController {
         }
         #endif
 
+        /* A card's address, passed on to the page as one fixed message once the page can take it (CardTapDelivery).
+         * Set after the unit-test return above, so a test host, which loads no page, is never the one asked. The
+         * answer is the page's own `true` and nothing else: no page, or one that has not put the call on its wallet
+         * yet, answers nothing, and the question is asked again. */
+        CardTapDelivery.shared.tell = { [weak self] done in
+            guard let webView = self?.webView else { done(false); return }
+            webView.evaluateJavaScript(CardAddress.pageCall) { answer, _ in done((answer as? Bool) == true) }
+        }
+
         // A fresh install must not inherit the last one's seed.
         Self.forgetSeedIfReinstalled()
         /* Tor starts itself, and the page is told every change.
@@ -334,11 +343,18 @@ final class WebHostController: UIViewController {
         view.backgroundColor = Self.appBackground
         guard let image = splash else { return }
         splash = nil
+        syncCardTapCover()
         UIView.animate(withDuration: 0.35, animations: {
             image.alpha = 0
         }, completion: { _ in
             image.removeFromSuperview()
         })
+    }
+
+    /// Whether the launch image or the app-switcher cover is over the page. A card's
+    /// address is not passed to the page while one is (CardTapDelivery).
+    private func syncCardTapCover() {
+        CardTapDelivery.shared.coverChanged(up: splash != nil || cover != nil)
     }
 
     /// The web view may load nothing from the network. WebKit enforces it.
@@ -478,8 +494,16 @@ final class WebHostController: UIViewController {
         // foxy://receive, foxy:///receive and foxy:receive all name the same screen
         let named = url.host ?? url.path.split(separator: "/").first.map(String.init) ?? ""
         let target = named.lowercased()
-        guard ["home", "receive", "send", "token", "nfc", "split"].contains(target) else {
+        guard ["home", "receive", "send", "token", "nfc", "split", "card"].contains(target) else {
             print("[deeplink] no such screen:", url.absoluteString.prefix(80))
+            return
+        }
+        /* foxy://card is the card's address said by hand, for a simulator, which cannot be handed the real one: it
+         * tells the page a card was tapped, the way the phone does when a card's banner is tapped (CardTapDelivery),
+         * and the page decides what to do about it. It takes no parameters, and not through the hash. */
+        if target == "card" {
+            print("[deeplink] a card tap")
+            CardTapDelivery.shared.cardTapped()
             return
         }
         var parts = ["foxy=" + target]
@@ -948,12 +972,14 @@ final class WebHostController: UIViewController {
         image.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         host.addSubview(image)
         cover = image
+        syncCardTapCover()
         print("[foxy] app-switcher cover up")
     }
 
     private func removeCover() {
         guard let image = cover else { return }
         cover = nil
+        syncCardTapCover()
         UIView.animate(withDuration: 0.2, animations: { image.alpha = 0 },
                        completion: { _ in image.removeFromSuperview() })
     }
@@ -972,6 +998,8 @@ final class WebHostController: UIViewController {
 
     @objc private func appEnteredBackground() {
         backgroundedAt = Date()
+        // a card's address that comes with the return waits until the page has been told Foxy is back (CardTapDelivery)
+        CardTapDelivery.shared.wentToBackground()
         coverScreen()
         /* Typed words and the unlock do not sit in memory while Foxy is away,
          * and the seed stays only for the work of being put away (the top-up
@@ -1144,6 +1172,10 @@ final class WebHostController: UIViewController {
         // Tor first: a set-up marks it not ready before the page hears of the return
         bridge.torResumed(away: away)
         webView?.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._resumed(\(away))")
+        /* After the page has been told of the return, and in that order on its side too: it raises its lock on hearing
+         * it, and a card tapped on the way back must find the lock up. A card's address that was waiting for this goes
+         * now. */
+        CardTapDelivery.shared.cameBack()
     }
 
     /// Whether the cover over a return comes off now, with no word from the page.
@@ -1320,6 +1352,7 @@ extension WebHostController: WKNavigationDelegate {
         print("[foxy] the page's process ended; loading it again")
         SeedVault.forgetUnlock()
         bridge.pageGone()
+        CardTapDelivery.shared.pageGone()
         SeedVault.pageWillLoad()
         webView.reload()
     }
@@ -1377,6 +1410,8 @@ extension WebHostController: WKNavigationDelegate {
         // a foxy:// link that launched Foxy has been waiting for this
         flushDeepLink()
         #endif
+        // a card's address that launched Foxy has been waiting for this too, and for the page to boot after it
+        CardTapDelivery.shared.pageLoaded()
         pushUptime()
         /* The splash is not lifted here at all.
          *
@@ -1405,16 +1440,28 @@ struct WebHost: UIViewControllerRepresentable {
 
 struct ContentView: View {
     var body: some View {
-        #if DEBUG
-        /* foxy://receive?amt=50&unit=sat — a testing affordance, and the whole of it is
-         * here in Debug: Release registers no such scheme (project.yml) and has no
-         * handler for one either. See WebHostController.receiveDeepLink. */
+        /* The one address that opens Foxy from outside, in every build: a card held to the phone raises
+         * https://getfoxy.io/card, and iOS hands it over when the person taps the banner. SwiftUI passes a universal
+         * link to the app as a URL (onOpenURL), and a browsing-web user activity is the other way a link has reached
+         * an app, so both are taken, and both end in CardTapDelivery.received, which keeps the card's address, drops
+         * anything else without a word, and tells the page only that a card was tapped. A launch from the banner is
+         * delivered the same way once the view is up: the scene's connection options are SwiftUI's to read, and this
+         * app is scene-based (WindowGroup, and the scene manifest generated by project.yml), so UIKit does not call
+         * the app delegate's application(_:continue:restorationHandler:) and nothing is added there. */
         WebHost()
             .ignoresSafeArea()
-            .onOpenURL { WebHostController.receiveDeepLink($0) }
-        #else
-        WebHost().ignoresSafeArea()
-        #endif
+            .onOpenURL { url in
+                #if DEBUG
+                /* foxy://receive?amt=50&unit=sat — a testing affordance, and the whole of it is here in Debug: Release
+                 * registers no such scheme (project.yml) and has no handler for one either. See
+                 * WebHostController.receiveDeepLink. */
+                WebHostController.receiveDeepLink(url)
+                #endif
+                CardTapDelivery.shared.received(url)
+            }
+            .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                CardTapDelivery.shared.received(activity.webpageURL)
+            }
     }
 
 }

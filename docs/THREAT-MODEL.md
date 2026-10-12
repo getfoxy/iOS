@@ -44,7 +44,7 @@ things the web cannot do — including every network request.
 | UI | `Web/index.html` | every screen; built from `build/app/` (joined into `build/foxy-app.js`), `build/markup.html` and the renderer `build/foxy-render.js` |
 | Wallet | `Web/foxy-wallet.js` | ecash protocol, keys, storage, and the hook every mint call goes through; joined from `build/wallet/` |
 | Gate | `Web/foxy-tor-gate.js` | the screens shown while Tor connects or cannot; decides nothing |
-| Host | `Foxy/FoxyWebView.swift` | stages `Web/` into Caches, blocks the page's network, covers the app-switcher snapshot, detects a reinstall |
+| Host | `Foxy/FoxyWebView.swift` | stages `Web/` into Caches, blocks the page's network, covers the app-switcher snapshot, detects a reinstall, and takes a card's address (`Foxy/Flashcard/CardAddress.swift`) |
 | Bridge | `Foxy/Bridge/`, `Foxy/Tor/`, `Foxy/Network/`, `Foxy/Keychain/`, `Foxy/Scanner/`, `Foxy/Bluetooth/`, `Foxy/Nostr/`, `Foxy/TorSeed/` | camera, clipboard, share, notifications, keychain, Bluetooth tap to pay, Nostr delivery, and the network: `TorService`, `Bridges`, `Route`, `OrbotLink`, the onion inbox and post, and the relay directory a first run starts Tor from |
 | Tor | Tor 0.4.9.12, built here from signed sources (`tools/build-tor.sh`), with Tor.framework 409.11.2's Objective-C wrapper, as a local CocoaPods pod | the Tor daemon, in the app's process |
 | Transports | `Vendor/IPtProxy.xcframework` | obfs4 and Snowflake, built from source by `tools/build-iptproxy.sh` |
@@ -248,6 +248,50 @@ What bounds the bridge:
   refused. A replace waiting on its alert gives up after two minutes, as a no,
   and takes the alert down.
 - **Navigation is locked** to `.html` file URLs under `Library/Caches/web/`.
+- **One address opens Foxy from outside, and none of it reaches the page.** A Foxy card
+  answers as an NFC tag carrying `https://getfoxy.io/card`, the same on every card
+  (`CARD.md`, *Tapping a card to open Foxy*). A build signed with
+  `tools/flashcard.entitlements` has the Associated Domains entitlement for that one
+  domain, `applinks:getfoxy.io`; one built without that file has none, and a card then
+  opens the site's page in Safari. What the entitlement lets the system do is hand Foxy a
+  URL on that domain when one is opened, for the paths the site's association file lists
+  for the app, whether the opening is a tap on an NFC banner, a link in a message, a web
+  page or a QR code. It lets the site do nothing more: it cannot read, call or change
+  anything in the app, and it is no URL scheme the page could be driven through (Release
+  registers none, and the Debug-only `foxy://` link is compiled out of it).
+  - **Foxy decides what the address is.** `CardAddress.isCard` reads the URL as it was
+    handed over: `https`, the host `getfoxy.io` and nothing else of the authority (not
+    `www`, not a subdomain, no user, no port), the path `/card` or `/card/`, and nothing
+    after it but a query or a fragment, which is ignored. Anything else is dropped without
+    a word, so a path the site added to its association file later would arrive and be
+    dropped. SwiftUI hands a universal link over as a URL (`onOpenURL`), and a browsing-web
+    activity is taken the same; an app with a scene is not handed a link through the app
+    delegate's `application(_:continue:restorationHandler:)`, so nothing is added there.
+  - **The page is told a fixed message.** One native-to-page call,
+    `window.FoxyWallet._cardTapped()`, with no argument and nothing drawn from the URL:
+    the query, the fragment, the path and the host stay in Swift, which keeps and logs
+    none of them. It is made the way `_resumed` and `_privacy` are, by
+    `evaluateJavaScript`, and does nothing on a page that has not put it on its wallet.
+    So nothing a link carries can name a screen, an amount, a recipient or a mint; that
+    is the difference from the Debug-only `foxy://` link, whose parameters do reach the
+    page.
+  - **The page decides, and by default does nothing.** `cardTapRule` says act, keep or
+    ignore for what is on screen: act from home and from the screens where nothing is in
+    progress, keep (a minute, no more) while Foxy is locked or starting, and ignore in any
+    payment, any amount being typed, any card flow, and under anything drawn over the screen,
+    including a screen added later that nobody has named. What it does when it acts is
+    what MENU > FLASHCARD does: a screen and the phone's card sheet, which reads a card
+    only if one is held to the phone.
+  - **Order matters for the lock.** The page puts the call on its wallet only after it has
+    decided whether it is locked, and the phone tells the page of a return from the
+    background before it lets a card through (`CardTapDelivery`), so a request is not
+    taken in the gap before a lock is raised. A launch from the banner is held until the
+    page is up and answers.
+  - **A tap makes no request.** iOS fetches the site's association file through Apple's
+    servers when the app is installed, not at a tap, so a phone that has Foxy reads a card
+    and opens Foxy without asking the site anything. A phone without Foxy opens the page in
+    Safari, which asks the site, outside Tor, as any browser would; that is the
+    reader's browser and not Foxy.
 - **Notifications**: the page names a kind, `sent` or `received`, and the
   words are Foxy's: "Payment sent" or "Payment received", titled "Foxy". Any
   other request is refused, so a script cannot write its own banner, and no
@@ -1253,6 +1297,11 @@ Superseded from the earlier list:
 
 ### Added later
 
+- **Anything that can open a card's address can start a tap.** A link in a message, a web
+  page or a QR code carrying `https://getfoxy.io/card` makes iOS open Foxy, and Foxy then
+  does what a card tapped on the lock screen does: the Flashcard screen and the phone's
+  card sheet. Nothing is read, sent or paid by that, the sheet can be dismissed, and it is
+  ignored in the middle of a payment and kept while Foxy is locked (§1).
 - **A chip card that holds ecash has limits of its own.** A terminal built to
   cheat on a card before software 1.15, whose time key is public because its
   time is interim (a card of 1.15 takes its clock from Bitcoin block headers,

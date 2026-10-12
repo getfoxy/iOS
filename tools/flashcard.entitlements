@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  flashcard.entitlements — what lets a signed Foxy open an NFC session.
+  flashcard.entitlements — what lets a signed Foxy open an NFC session, and be
+  opened by a card.
 
   Reading a card needs the NFC Tag Reading capability, which Apple gives only
   to a paid developer team: a free team cannot sign an app that claims it, and
@@ -15,12 +16,32 @@
   NO CARD READER: the session is refused by the phone and the page is told so
   (CardLinkError.unavailable). The simulator needs none of this: it reaches a
   card over the Mac's loopback (Foxy/Flashcard/CardLink.swift).
+
+  The second key is the associated domain a card's address opens Foxy through.
+  A Foxy card answers as an NFC tag carrying one address, the same on every card,
+  https://getfoxy.io/card. iOS reads it by itself with the screen on and shows a
+  banner; the app associated with that address is the one a tap on the banner
+  opens, and only a build signed with this entitlement is that app. Without it
+  the same tap opens the page on the site in Safari. Associated Domains is a
+  capability of a paid team too, so it lives in this file with the other and not
+  in a build everyone can make. The site's association file names the app and
+  the path /card; iOS reads it through Apple's servers when the app is installed,
+  and a tap on the banner makes no request of its own. What the app does with
+  the address is in Foxy/Flashcard/CardAddress.swift, and docs/CARD.md.
+
+  The simulator's build (tools/simulator.entitlements) has no such key and could
+  not use one: the association file names a team's app, and a simulator build is
+  signed as no team, so the system would not hand it the address anyway.
 -->
 <plist version="1.0">
 <dict>
 	<key>com.apple.developer.nfc.readersession.formats</key>
 	<array>
 		<string>TAG</string>
+	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:getfoxy.io</string>
 	</array>
 </dict>
 </plist>

@@ -133,6 +133,19 @@ question asked first, with nothing crossing the link; and **`amount-entry.js`**,
 the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
 check; the line under the figure; NEXT).
 
+**`deep-links.js`** holds what a link from outside Foxy may do. The first half is the
+Debug-only `foxy://` hashes. The second is the one link a Release build takes, a
+card's address (`https://getfoxy.io/card`, raised by a card's tag and handed over by
+iOS when its banner is tapped), which tells the page only that a card was tapped.
+It reads the Swift as text where the other language is (the one message, the
+entitlement, the order of a return and a lock), then drives `cardTapRule` for every
+screen the app has (a new screen fails it until it is named as a place to leave or
+not), the facts it is made from, a request that is kept while Foxy is locked or
+starting and its minute, and a second request being the same tap. The pure Swift
+(the address, the hold and its retries) is `FoxyTests/CardAddressTests.swift` and
+`CardTapDeliveryTests.swift`, run by `tools/nativetests`; **`flashcard-screens.js`**
+begins a real tap from the address, against the model of the card.
+
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:
 `bridgeAsk(` and `nativeJson(`, which is how the seed, counter and lock-key
