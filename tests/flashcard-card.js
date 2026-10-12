@@ -9,7 +9,8 @@
  * had under jCardSim and compares every answer.
  *
  *     const card = makeCard({ window, key });  // window: the page's (its CashuTS signs); key: 64 hex
- *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.17 (`software: 16` and before are the cards before it)
+ *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.20 (`software: 19` and before are the cards before it)
+ *     makeCard({ window, format: 4, proofRoom: false })   // the card of 1.20 that was refused the room for the mint's proofs: it stores a piece and keeps no proof
  *     makeCard({ window, format: 4, floorBits: 0x207fffff })   // the least work a block header must show: the real floor unless a test mines its own headers
  *     const answer = await card.send('b001000000');
  *     card.tap();                                // the card leaves and comes back
@@ -83,7 +84,7 @@ function makeCard(opts) {
    * 16-byte log entries, `6a92` for a limit and no time); `software: 15` is the card whose clock is
    * the time in the newest Bitcoin block header it has taken (`HEADERS`: SET_HEADER and TELL_TIME, no time key, 77-byte
    * receipts and 20-byte entries, and a first day on trust); `software: 16` is the card whose PIN is optional (below); the card with no
-   * `software` is the latest, 1.17 (below). */
+   * `software` is the latest, 1.20 (below). */
   const DESIGN = SEALED && o.software !== 9;
   const OWN_CHANGE = DESIGN && o.software !== 10 && o.software !== 11;
   const SHAPED = OWN_CHANGE && o.software !== 12;
@@ -101,7 +102,16 @@ function makeCard(opts) {
   const RESET = NOPIN && o.software !== 16;
   /* 1.18: each further limit's worth over waits four askings where 1.13 to 1.17 waited three (`WAIT_MORE`). `software: 17` is the card before it. */
   const FOUR = RESET && o.software !== 17;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? 18 : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  /* 1.19: the card answers as an NFC tag too (a third applet of its package, which this model does not play), and its owner can switch the tag off
+   * and on (SET_TAG, 0x52, the owner's proof, no PIN). GET_INFO with P1 = 2 is the 42 bytes P1 = 1 gives and then the tag's state (00 on, 01 off);
+   * P1 = 1 and 0 are what they were, whatever the tag's state. `software: 18` is the card before it: it knows no SET_TAG and gives the thirty bytes to P1 = 2. */
+  const TAG = FOUR && o.software !== 18;
+  /* 1.20: the card keeps the mint's NUT-12 proof (e, s, r: 96 bytes) with each piece and gives it back, and checks nothing: LOAD_PROOF with P1 = 1 takes
+   * one piece and its proof (177 bytes) and answers its place and whether the proof was kept (01, or 00 where the card has no room for proofs), and
+   * GET_DLEQ (0x1A) gives the proof of an unspent place, or of two. The store is reserved by the first SET_CARD that goes through (`s.dleq` is null until
+   * then, and for good on a card made with `proofRoom: false`, which the chip may refuse). `software: 19` is the card before it. */
+  const PROOFS = TAG && o.software !== 19;
+  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -171,6 +181,10 @@ function makeCard(opts) {
     openings: Array.from({ length: CHANGE_MOST }, () => ({ state: 'empty' })),
     // the owner's public key (hex, 04 || X || Y), given to a card with none or by the owner's proof, and never read out
     owner: null,
+    /* 1.19: whether the owner has switched the NFC tag off (a new card, a card with no owner and a card just reset have it on). 1.20: the mint's
+     * proof for each place, 96 bytes as hex (e || s || r) or '' for none: null until the first SET_CARD reserves the room, and for good on a card
+     * that is refused it. A place that is freed keeps the record it had until the next piece comes; only an unspent place is ever served. */
+    tagOff: false, dleq: null,
     // that the card has paid since it was last tapped (permanent): the next tap may put pieces on with no PIN, for the change
     changeDue: false,
     // the tap's own: what was verified, the nonce the card last gave (hex, good for one try), whether the owner has allowed
@@ -395,7 +409,9 @@ function makeCard(opts) {
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
           // the quicker card says its limit on one payment to its owner only (the grant, in this tap): zeros to anyone else
           // 1.16: the allowance and what is spent of it, to anybody (a till needs them to know whether to ask for the PIN); before it, zeros
-          + (p1 === 1 ? u32(QUICK && !s.grant ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '') + '9000';
+          // 1.19: P1 = 2 is those forty-two bytes and then the NFC tag's state, to anyone; P1 = 1 and 0 are what they were, whatever it is, and any other P1 is the thirty bytes
+          + ((p1 === 1 || (TAG && p1 === 2)) ? u32(QUICK && !s.grant ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
+          + (TAG && p1 === 2 ? (s.tagOff ? '01' : '00') : '') + '9000';
       }
       case 0x10: return pub + '9000';
       case 0x11: return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
@@ -519,6 +535,20 @@ function makeCard(opts) {
           n += 1;
         }
         return ('0' + n.toString(16)).slice(-2) + said + '9000';
+      }
+      case 0x1a: {
+        /* GET_DLEQ (1.20): the mint's proof kept with an unspent place, for one place (P2 = FF) or two. No data, no PIN, any state of the card. For each
+         * place asked, in the order asked: 01 and the 96 bytes (e, s, r) where the place is unspent and its record is not zero, and otherwise the single
+         * byte 00 (empty or spent, a piece that came with no proof, or a card with no room for proofs). The same place twice is answered twice. 6A83 for a
+         * P1 over 127, or a P2 over 127 and not FF, before anything is answered. It never gives the proof of a spent piece, and the card checks nothing. */
+        if (!PROOFS) return '6d00';
+        if (p1 >= SLOTS || (p2 !== 0xff && p2 >= SLOTS)) return '6a83';
+        let said = '';
+        for (const place of (p2 === 0xff ? [p1] : [p1, p2])) {
+          const rec = (s.dleq && s.slots[place].status === 1) ? s.dleq[place] : '';
+          said += rec ? '01' + rec : '00';
+        }
+        return said + '9000';
       }
       case 0x22: {
         // SPEND_ALL_BEGIN: the places a payment is made of, in order. Each once, unspent, all of one date. Answers what
@@ -710,17 +740,22 @@ function makeCard(opts) {
         if (!s.record.set) return '6a8c';
         if (!HEADERS && s.now === 0) return '6a92';
         if (s.slots.findIndex((x) => x.status === 0) < 0) return '6a84';
-        // one piece, or (the quicker card) up to three end to end: each as one alone would be, in order
-        if (data.length < 81 || data.length % 81 !== 0 || data.length > (QUICK ? 243 : 81)) return '6700';
-        const one = (piece) => {
+        /* One piece, or (the quicker card) up to three end to end: each as one alone would be, in order. 1.20: with P1 = 1, one piece and the mint's proof
+         * for it, 177 bytes exactly and nothing else different; any other P1 is the load it was, and leaves its pieces with no proof. */
+        const withProof = PROOFS && p1 === 1;
+        if (withProof ? data.length !== 177 : (data.length < 81 || data.length % 81 !== 0 || data.length > (QUICK ? 243 : 81))) return '6700';
+        const one = (piece, proof) => {
           const at = s.slots.findIndex((x) => x.status === 0);
           if (at < 0) return '6a84';
           if (piece.readUInt32BE(77) !== 0 && s.record.refund.slice(0, 2) === '00') return '6a8e';
-          if ((piece[44] !== 2 && piece[44] !== 3) || piece.readUInt32BE(8) === 0) return '6a80';
+          // not a point, or worth nothing, or a proof of nothing (96 zeros are what "no proof" is kept as): not a piece
+          if ((piece[44] !== 2 && piece[44] !== 3) || piece.readUInt32BE(8) === 0 || (proof && proof.every((v) => v === 0))) return '6a80';
           // a piece is on the card once: the card signs a piece's secret, which its nonce makes, and takes its amount on the
           // terminal's word, so a nonce that is in any slot, spent or not, is refused (a freed slot holds nothing)
           const nonce = hex(piece.subarray(12, 44));
           if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
+          // the place's record is its piece's proof or zeros, and is written before the place's data (a card with no room for proofs writes nothing)
+          if (s.dleq) s.dleq[at] = proof ? hex(proof) : '';
           s.slots[at] = { status: 1, data: hex(piece) };
           // change the card made for itself, back on the card: its opening is let go (1.12)
           letGo(nonce);
@@ -730,8 +765,8 @@ function makeCard(opts) {
         };
         // the first that cannot be stored stops it: first, with its own word; after others, they stand and are the answer
         let stored = '', put = 0, n = 0;
-        for (let k = 0; k * 81 < data.length; k++) {
-          const got = one(data.subarray(k * 81, k * 81 + 81));
+        for (let k = 0; k * 81 < data.length && !(withProof && k > 0); k++) {
+          const got = one(data.subarray(k * 81, k * 81 + 81), withProof ? data.subarray(81) : null);
           if (typeof got === 'string') { if (k === 0) return got; break; }
           stored += ('0' + got.toString(16)).slice(-2);
           put += data.readUInt32BE(k * 81 + 8);
@@ -739,7 +774,8 @@ function makeCard(opts) {
         }
         // the quicker card's own account of it: what was put on in this tap
         if (QUICK && n > 0) { const e = logEntry(); e.loaded = stop((e.loaded || 0) + put); e.loads = Math.min(255, (e.loads || 0) + n); }
-        return stored + '9000';
+        // with a proof: the place, and whether the proof was kept
+        return stored + (withProof ? (s.dleq ? '01' : '00') : '') + '9000';
       }
       case 0x31: {
         if (s.locked) return '6986';
@@ -779,6 +815,8 @@ function makeCard(opts) {
         const timeKey = rec.subarray(34, 99);
         if (!HEADERS && timeKey[0] !== 4) return '6a80';
         const newKey = !HEADERS && hex(timeKey) !== s.record.timeKey;
+        // 1.20: the room for the mint's proofs is reserved here, by the first SET_CARD that gets this far, once (a card that is refused it works as a card with none)
+        if (PROOFS && s.dleq === null && o.proofRoom !== false) s.dleq = Array.from({ length: SLOTS }, () => '');
         s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: HEADERS ? s.record.timeKey : hex(timeKey), mint: rec.subarray(100, 100 + mintLen).toString('latin1'), design: design };
         /* From 1.15 a new record lets the ratchet go: the hardest difficulty the card has taken is set to nothing and the next header sets it afresh, the one
          * way out for a card whose network has fallen under a quarter of its best. The clock itself, its window and the last header's hash stay. */
@@ -990,6 +1028,9 @@ function makeCard(opts) {
         s.slots.forEach((x) => { x.status = 0; x.data = ''; });
         s.pin = null; s.pinState = 0; s.tries = 3; s.verified = false; s.locked = false;
         s.owner = null; s.nonce = null; s.grant = false; s.changeGrant = false; s.changeDue = false;
+        // the NFC tag is on again (1.19) and the mint's proofs are zeros (1.20): none is a place's now, and none is for the next owner to read
+        s.tagOff = false;
+        if (s.dleq) s.dleq = s.dleq.map(() => '');
         s.record = { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '', design: '' };
         s.windowStart = 0; s.spent = 0; s.noPinLimit = 0; s.noPinSpent = 0; s.tapLimit = 0; s.tapStart = 0; s.tapSpent = 0;
         s.log = { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
@@ -1003,6 +1044,22 @@ function makeCard(opts) {
         priv = nextKey || crypto.randomBytes(32).toString('hex');
         nextKey = null;
         pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
+        return '9000';
+      }
+      case 0x52: {
+        /* SET_TAG (1.19): the owner switches the card's NFC tag off (P1 = 1) or on (P1 = 0). The owner's proof over "FoxyCard/tag", the nonce just
+         * given and the one byte after the proof, which is P1 again; no PIN, any funds. Refused in this order: 6B00 for a P1 over 1 or a P2 over 0, before
+         * anything else (the nonce is left unspent); 6986 on a locked card; 6A90 with no owner; 6A91 with no nonce asked for in this tap, or a proof that
+         * is not the owner's for this label, this nonce and these bytes (no PIN try is spent, and the nonce is); 6700 for anything but one byte after the
+         * proof; 6B00 for a byte that is not P1. The state it already has is 9000 and writes nothing. */
+        if (!TAG) return '6d00';
+        if (p1 > 1 || p2 !== 0) return '6b00';
+        if (s.locked) return '6986';
+        const got = ownerProof('FoxyCard/tag', data);
+        if (got.sw) return got.sw;
+        if (got.value.length !== 1) return '6700';
+        if (got.value[0] !== p1) return '6b00';
+        s.tagOff = p1 === 1;
         return '9000';
       }
       default: return '6d00';
@@ -1039,7 +1096,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION <= 16) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION < 20) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS, proofRoom: o.proofRoom });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, told: 0 });
       return twin;
     },

@@ -25,7 +25,9 @@ does not repeat the protocol. The limits are listed at the end and argued in
   that signs once for a payment (below), which has paid real mints only from
   the simulator, and the change such a card makes for itself (below), which
   has not been held to a real card at all, so how long a tap lasts with it is
-  not known. The list of what only a
+  not known, nor the mint's proofs a card of 1.20 keeps with its pieces (*What
+  Verified says*, below), of which a load writes one piece to a command and
+  nobody has timed it on a card. The list of what only a
   card and a hand can show is
   `DEVICE-TESTS.md` §23.
 - **A card's clock is the newest Bitcoin block header it has been shown**, from
@@ -325,7 +327,8 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 ### The screens
 
 - **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
-  `Block #970809` (above). **HISTORY**, what has been done with this card on this phone, is the round button at the top
+  `Block #970809` (above). For a card of 1.20 the first line also needs every piece on the card found real (*What
+  Verified says*, below). **HISTORY**, what has been done with this card on this phone, is the round button at the top
   left, for any card with a record. The limit line is on the card's own face, at the bottom left of its picture: `NO LIMIT`,
   `DAILY LIMIT $5` and so on, and for a card with no PIN a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`.
   A card with a badge (`Blocked`, `Locked`, `No PIN yet`, ...) has it above the line, at the same left edge. The old CLOCK
@@ -1490,9 +1493,11 @@ receiver's.
   before 1.15 a signed time) and shows it the newest header it has kept (1.15
   and on), and the daily limit is looked at as ever, by the clock the card has;
 - the card's signatures are checked on the phone, and so is each piece's DLEQ
-  proof where the card can supply one. The card holds none today, so a piece
-  the mint never signed cannot be told from a real one, which is why this stays
-  HIGH RISK;
+  proof where the card can supply one. A card before 1.20 holds none, and a card
+  of 1.20 holds the mint's proof for the pieces it was loaded with one for but
+  a till does not read it (that is not built: *What Verified says*, below), so a
+  piece the mint never signed cannot be told from a real one, which is why this
+  stays HIGH RISK;
 - the amount is kept as a trusted row with a pending entry, swapped when the
   phone is back online, and **never shown as paid while offline** (TAKEN ON
   TRUST);
@@ -1533,6 +1538,65 @@ An answer that does not come, a mint that says it is too busy, and a mint that
 cannot be asked which pieces are good, are not refusals: the row and the swap record
 wait, and the payment is made when the wallet next asks.
 
+## What Verified says (software 1.20)
+
+Up to software 1.19 the line under the card's title, `Verified At 11:42am`, rested on the mint's word that
+the card's pieces are unspent (NUT-07) and on nothing else. That is not the mint's word that they are real:
+a piece with a made-up point reads unspent until somebody tries to spend it, so a card loaded by somebody
+else's modified wallet read Verified. From 1.20 the card keeps, for each piece loaded with one, the mint's
+NUT-12 proof (e, s and the blinding factor r, 96 bytes: `FOXY-CARD-SPEC.md` 5.9 in the card repository). It
+gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This phone does.
+
+- **Writing.** A piece that has the whole of its proof goes onto a card of 1.20 alone, in a command of its own:
+  `LOAD_PROOF` with P1 = 1, the 81 bytes of the piece and then e, s and r, which the card answers with the piece's
+  place and `01` where it kept the proof or `00` where it has no room for proofs. Pieces with no proof go three to a
+  command as ever, and a card of 1.19 or before is sent what it always was, byte for byte. Every write goes
+  through `cardWriteOwed`: a top-up, change, what a payment's pieces come back as, the card's own change, the
+  put-back of a refused payment. The proof is not made at the tap. This phone made the blinding factor and the mint's
+  signature carries e and s, so a token made for a card keeps all three from the moment it exists, in the row that owes
+  it to the card (`foxy.flashcard.owed`; a row filed by an older build has none, and its pieces go on plain); for the
+  change a card makes for itself (1.12) they are the mint's e and s for the output and the blinding factor
+  the card kept in its opening, which the DLEQ is already checked with. An answer of `00` is no error: it is said
+  once in the log, and the rest of that write goes three to a command. The write leaves one line, so that the time can
+  be read off a phone: `card: wrote 32 piece(s), 32 with the mint’s proof (32 kept by the card), in N ms`
+  (from the first load to the last answer; nothing secret in it).
+- **What this phone knows is real** is kept by the piece's nonce in `foxy.flashcard.real`, shaped as
+  `foxy.flashcard.checked` is: `{ <card key>: { at, nonces } }`, twenty cards and the oldest dropped, at most a hundred and
+  twenty-eight nonces a card (the newest), and cut down to the pieces on the card at each read that checks it. It is for the
+  cards that keep proofs: a card of 1.19 or before is not in it. A nonce goes in
+  when this phone wrote the piece onto the card, the card said it stored it, and the piece was the mint's own answer to
+  this phone's swap (a top-up, change made after a payment, what the mint signed again when asked for it, NUT-09); or when
+  a proof read from the card verified. **A card's own pieces written back as they came off it are not made real by being
+  written.** Only one write does that, the put-back of a payment the mint refused: its row has each piece's keyset, amount,
+  secret and point and no proof, so the pieces go back plain, the card keeps none for them, and they are real here only if their nonces
+  were noted before. A nonce says nothing of what is spent.
+- **Reading.** The card's own screen reads the card for proofs (`opts.real` of `cardLook`) and nothing a payment does:
+  not a till's read, not the read before a signature, not the tap that writes change, not a withdrawal. After the pieces
+  have been read whole (never the short read, which lists no nonces), each unspent piece whose nonce is not in the store is
+  asked for with `GET_DLEQ`, two places to a command, and the answer is kept on the piece, `dleq: { e, s, r }` or
+  `null` for `00`. The read's line in the log gains `proofs <ms>`. Nothing is checked while the card is held.
+- **Checking.** Once the card is let go, `cardRealCheck` rebuilds each piece's secret as the card does
+  (`cardSecret`), takes its whole keyset name (`cardFullId`) and the mint's key for its amount, and asks
+  `hasValidDleq` whether that key signed it. It answers `ok` (every unspent piece on the card is in the store now), `fake`
+  (a proof was read and does not verify: a made-up point, another piece's proof in its place), or `unproven` (neither: a
+  piece has no proof, or the mint's keys for it are not at hand; keys that are not at hand never make `fake`). The keys of a
+  keyset this wallet has not loaded, an older one of its own mint's, are asked for once before the pieces are checked, for ten
+  seconds at most. It works a few
+  pieces at a time and lets the page breathe between, and leaves one line (`card: its proofs: 43 piece(s) proven (43 checked
+  now), 0 with no proof, 0 that cannot be checked here, 0 that fail, in N ms`; never a secret, a nonce or a point). A
+  proof is checked on this side and sent nowhere.
+- **The line.** For a card of 1.20 only: red `Not Verified` where the mint says a piece is spent (as before) or the check
+  says `fake`; the time where the mint was asked (or was, for these same pieces: `cardCheckedAt` answers nought for a
+  card of 1.20 unless every piece is also in the store) and the check says `ok`; amber `Not Verified` otherwise, which is
+  where a card loaded by a build that sends no proofs stands, to a phone that did not write its pieces itself. While
+  either is being worked out it says `Verifying…`. A read of the short kind keeps what the screen said. A card of 1.19
+  and before reads exactly as it did: the mint's word alone.
+
+What it does not do. It does not show that a piece is unspent: the mint says that, and is asked as ever. A till
+that takes a card's pieces on trust with no connection (*Paying with no connection*) could check their proofs first; it does
+not. The card gives the blinding factor to any reader with no PIN, for every piece that has a proof, and the mint can
+tie a piece to the request that made it from `r` (the card repository's 5.9 says so): this phone sends it nowhere.
+
 ## What is kept on the phone
 
 Nine stores, named in `STORAGE.md`: ecash made for a card and not yet written to
@@ -1540,7 +1604,7 @@ it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused; for a card that makes its own change, what the mint signed for it); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
-said a card's pieces were good, so a phone with no connection can say `Verified At 9:15am`; and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified At <time>` (with the day after it when not today), or
+said a card's pieces were good, so a phone with no connection can say `Verified At 9:15am`; which of a card of 1.20's pieces this phone has found real (`foxy.flashcard.real`); and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified At <time>` (with the day after it when not today), or
 `Not Verified`.
 
 **The card's face.** A card is drawn in a design named by a code of three
@@ -1583,7 +1647,10 @@ matter to a person:
   the key the card signs with, and nothing else is sealed to it.
 - **Pieces a terminal writes that the mint will refuse.** The card has no DLEQ
   check, so it cannot tell. A later payment that picks such a piece spends a day's
-  limit on nothing.
+  limit on nothing. From software 1.20 the card keeps the mint's proof for a piece
+  loaded with one, and the owner's screen checks it (*What Verified says*): a card
+  with such a piece reads `Not Verified` in red. A piece loaded with no proof, or a card
+  of 1.19 or before, shows nothing, and a till with no connection does not look.
 - **Three wrong PINs from any reader** block the card until the owner's phone
   unblocks it.
 - **Whoever has the twelve words and the card** has everything on it. **Whoever
@@ -1626,7 +1693,12 @@ matter to a person:
   refusal, what is forgotten and kept, a card set up afresh by another person, change the card is owed, and the ten-signature wait;
   `tests/flashcard-release.js`
   pins the card being let go before the mint, a refusal and its put-back tap, a
-  lost answer, and the circuit made ready as the sheet opens. `tests/flashcard-applet.js` is
+  lost answer, and the circuit made ready as the sheet opens; `tests/flashcard-proofs.js`
+  pins software 1.20: a load a piece to a command with P1 = 1 and the proofs read back as
+  they went, the commands to a card of 1.19 byte for byte, the store and its caps, the
+  look that asks for proofs and the payments that do not, good proofs, a made-up piece,
+  another piece's proof, no proof and no keys, a tap cut in the middle of a load, the card's
+  own change with its proof, and the three states of the line. `tests/flashcard-applet.js` is
   opt-in and drives the wallet against the applet itself over a local port.
   `tools/live/flashcard-switch.js` moves a card between two local mints.
   `DEVICE-TESTS.md` §23 is what only a card and a phone can show.

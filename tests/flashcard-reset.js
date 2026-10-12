@@ -67,7 +67,7 @@ async function world(pin, o) {
   /* ---- 1: the card's own rules, as the model has them (the bytes) ------------------------------------------------------------ */
   {
     const fresh = newCard(P, undefined, { format: 4 });
-    ok((await fresh.send(SEL)) === '01129000', 'the latest card says 1.18 when chosen');
+    ok((await fresh.send(SEL)) === '01149000', 'the latest card says 1.20 when chosen');
     const before = newCard(P, undefined, { format: 4, software: 16 });
     await before.send(SEL);
     before.state.owner = OWNER_PUB;
@@ -142,7 +142,7 @@ async function world(pin, o) {
     ok(c.key !== oldKey && /^0[23][0-9a-f]{64}$/.test(c.key), 'a fresh key', oldKey.slice(0, 10) + ' -> ' + c.key.slice(0, 10));
     ok((await c.send('b010000000')) === c.key + '9000', 'GET_PUBKEY says the new key');
     const info = await c.send('b001010000');
-    const want = '01' + '12' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
+    const want = '01' + '14' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
       + '00000000' + '00' + NOW.toString(16).padStart(8, '0') + '00000000' + '00000000' + '00'                // no limit, no owner, the clock kept, no window, nothing spent, no change grant
       + '00000000' + '00000000' + '00000000' + '9000';                                                         // no tap limit, no allowance, none of it spent
     ok(info === want, 'GET_INFO reads as a new card, with its clock kept', info.slice(0, 60) + ' / ' + want.slice(0, 60));
@@ -228,7 +228,7 @@ async function world(pin, o) {
     ok(after.key !== oldKey && after.info.owner === false && after.info.pin === 'none' && after.info.hasRecord === false && after.info.setUp === false && after.info.tries === 3
        && after.info.limit === 0 && after.info.tapLimit === 0 && after.info.noPin.limit === 0 && after.record.mint === '' && after.record.refundKey === '' && after.balance === 0,
        'read again, it is a card out of its packet with another key', JSON.stringify([after.info.owner, after.info.pin, after.info.hasRecord, after.info.tries]));
-    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '1.18', 'with its clock and its software', after.info.now + ' ' + after.info.version);
+    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '1.20', 'with its clock and its software', after.info.now + ' ' + after.info.version);
     ok(after.info.headerBits === '' && card.state.hardest === 0, 'and the ratchet let go');
     ok((await why(H.W.cardReset(card))) === 'no-owner', 'it cannot be reset again: nobody owns it');
 
@@ -317,6 +317,7 @@ async function world(pin, o) {
     };
     put('foxy.flashcard.lifted', { limit: 100, tap: 0, at: Date.now() });
     put('foxy.flashcard.checked', { at: Date.now(), nonces: ['x'] });
+    put('foxy.flashcard.real', { at: Date.now(), nonces: ['x'] });
     put('foxy.flashcard.designs', 'ABC');
     put('foxy.flashcard.logseen', { taps: 3 });
     const cardsBefore = Object.keys(H.W.cardsKnown());
@@ -326,10 +327,10 @@ async function world(pin, o) {
     const heldSats = await bal(H);
     card.tap();
     await H.W.cardReset(card);
-    const gone = ['foxy.flashcard.pace', 'foxy.flashcard.receipts', 'foxy.flashcard.lifted', 'foxy.flashcard.checked', 'foxy.flashcard.designs', 'foxy.flashcard.logseen']
+    const gone = ['foxy.flashcard.pace', 'foxy.flashcard.receipts', 'foxy.flashcard.lifted', 'foxy.flashcard.checked', 'foxy.flashcard.real', 'foxy.flashcard.designs', 'foxy.flashcard.logseen']
       .every((name) => (stored(H, name) || {})[key] === undefined);
-    ok(gone, 'after: the pace row, the receipts copied, the lifted-limit note, when it was checked, its design and where the log was read to are all dropped');
-    const kept = ['foxy.flashcard.lifted', 'foxy.flashcard.checked', 'foxy.flashcard.designs', 'foxy.flashcard.logseen'].every((name) => (stored(H, name) || {})[stranger] !== undefined);
+    ok(gone, 'after: the pace row, the receipts copied, the lifted-limit note, when it was checked, which of its pieces were found real, its design and where the log was read to are all dropped');
+    const kept = ['foxy.flashcard.lifted', 'foxy.flashcard.checked', 'foxy.flashcard.real', 'foxy.flashcard.designs', 'foxy.flashcard.logseen'].every((name) => (stored(H, name) || {})[stranger] !== undefined);
     ok(kept, 'and another card’s are not touched');
     ok(H.W.cardPaceUsd(key) === 0 && H.W.cardReceipts(key).length === 0, 'the dollars of the limit and the receipts read as none');
     ok(Object.keys(H.W.cardsKnown()).join() === cardsBefore.join() && H.W.cardsKnown()[key] && H.W.cardsKnown()[key].refundKey,
@@ -517,8 +518,8 @@ async function world(pin, o) {
       return { waited: w.card.state.waited, paid, version: w.card.version };
     };
     const now = await run(), then = await run(16);
-    ok(now.version === 18 && then.version === 16 && now.paid.sats === 500 && then.paid.sats === 500, 'a payment of 500 against a limit of 200, on the card of 1.18 and on the card of 1.16');
-    ok(now.waited - then.waited === 4 && now.waited === 13 && then.waited === 9, 'the model card of 1.18 waits four more askings than the one of 1.16 for the same payment: ten and four against seven and three, less a wait each for the change it made', now.waited + ' and ' + then.waited);
+    ok(now.version === 20 && then.version === 16 && now.paid.sats === 500 && then.paid.sats === 500, 'a payment of 500 against a limit of 200, on the card of 1.20 and on the card of 1.16');
+    ok(now.waited - then.waited === 4 && now.waited === 13 && then.waited === 9, 'the model card of 1.20 (which waits as 1.18 does) waits four more askings than the one of 1.16 for the same payment: ten and four against seven and three, less a wait each for the change it made', now.waited + ' and ' + then.waited);
     // the wait itself, at the byte: a payment begun and signed against a limit, counted by the answers 0001
     const c = newCard(P, undefined, { format: 4 });
     const c16 = newCard(P, undefined, { format: 4, software: 16 });

@@ -1626,12 +1626,15 @@
    *
    * The owner's read also looks into the change the card has made for itself and no till has handed
    * back (`change`, 08a-flashcard.js `cardOwnerChange`): fetched from the mint, and put on the card
-   * in this tap when there is any, with the sheet saying so. */
+   * in this tap when there is any, with the sheet saying so.
+   *
+   * And it is the read that asks a card of software 1.20 for the mint's proofs of the pieces this phone
+   * does not know to be real (`real`): they are checked once the card is let go (`fcReal`). */
   fcRead(open) {
     const W = this.fcW();
     if (!W) return;
     // with the price, so that a limit this phone set in dollars is kept at those dollars (08a-flashcard.js, `cardLook`)
-    this.fcTap({}, (link, on, progress) => W.cardLook(link, { mine: true, price: (this.px && this.px()) || 0, change: true, on, progress })
+    this.fcTap({}, (link, on, progress) => W.cardLook(link, { mine: true, price: (this.px && this.px()) || 0, change: true, real: true, on, progress })
       .then((card) => {
         if (card && card.owes && card.owes.wrote > 0) link.doneText = 'Done.';
         return card;
@@ -1692,6 +1695,11 @@
       check: (card.bare && prior) ? prior.check : (card.pieces || []).length ? 'asking' : 'none',
       // (a card that held nothing had nothing for the mint to dispute, and what has gone on it since this phone has just made)
       checkedAt: (card.bare && prior) ? (prior.checkedAt || (prior.check === 'none' ? Date.now() : undefined)) : undefined,
+      /* A card of software 1.20 keeps the mint's proof with its pieces, and the line under the title also says whether this phone found them
+       * real (`fcReal`): 'ok', 'fake' or 'unproven', 'asking' while it is worked out. A read of the short kind lists no nonces and has nothing
+       * to say of them, so what the screen said stands; a card with nothing on it has no piece to doubt. */
+      proofs: !!(card.info && card.info.proofs),
+      real: (card.bare && prior) ? prior.real : !(card.info && card.info.proofs) ? undefined : (card.pieces || []).length ? 'asking' : 'ok',
       // the design it is drawn in: what the card says, or what this phone wrote down for it (`FoxyWallet.cardLook`)
       design: String(card.design || ''),
       // what it holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those
@@ -1700,7 +1708,7 @@
       owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { sats: card.owes.sats, parts: card.owes.parts } : null,
     } });
     this.fcOwesLater(card);
-    if ((card.pieces || []).length) this.fcCheck(card);
+    if ((card.pieces || []).length) { this.fcCheck(card); this.fcReal(card); }
     // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
     if (W && W.cardOwedCheck) W.cardOwedCheck(card).then((gone) => { if (gone) this.forceUpdate(); }, () => {});
   }
@@ -1726,6 +1734,20 @@
       if (!o || !o.parts || !this.state.fc || this.state.fc.key !== card.key || this._fcCard !== card) return;
       this.setState({ fc: Object.assign({}, this.state.fc, { owes: { sats: o.sats, parts: o.parts } }) });
     }, () => {});
+  }
+
+  /* Whether the pieces on a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs the
+   * card was read for are checked with the keys this phone has (08a-flashcard.js, `cardRealCheck`), once the card has been let go, and the
+   * line under the title waits for it as it waits for the mint. */
+  fcReal(card) {
+    const W = this.fcW();
+    if (card.bare || !(card.info && card.info.proofs) || !W || !W.cardRealCheck) return;
+    // only the newest asking is heard: a card shown again, whole, while this one is still worked out has its own, and a short read after it asks nothing
+    const mine = this._fcRealN = (this._fcRealN || 0) + 1;
+    W.cardRealCheck(card).then((real) => {
+      if (!real || mine !== this._fcRealN || !this.state.fc || this.state.fc.key !== card.key) return;
+      this.setState({ fc: Object.assign({}, this.state.fc, { real }) });
+    });
   }
 
   /* The mint's word on what the card says it holds. A card is a list of
@@ -3137,12 +3159,18 @@
      * nothing on it has nothing a mint could dispute. */
     const DIMMED = 'rgba(var(--ink-rgb),.62)';
     const nowMs = Date.now();
+    /* A card of software 1.20 keeps the mint's proof with its pieces, and for it the line says more than the mint's word: that every piece on it
+     * is real, which the mint's word that a piece is unspent does not. Red where the mint says a piece is spent or this phone found a proof
+     * false; the time where the mint was asked (or was, for these same pieces) and every piece was found real; amber otherwise, a card
+     * loaded by a build that sends no proofs among them. A card of 1.19 and before has no proofs, and its line is the mint's word alone. */
+    const proofs = !!(fc && fc.proofs);
+    const sound = !proofs || !(fc.count > 0) || fc.real === 'ok';
     // (the mint's word is dated by the time of day it was had, in this phone's clock: "Verified At 11:42am")
     const verified = (!fc || fresh || blocked || !fc.hasRecord) ? ['', DIMMED]
-      : fc.check === 'asking' ? ['Verifying\u2026', DIMMED]
-      : (fc.check && fc.check.spent) ? ['Not Verified', RED]
-      : (fc.check === 'ok' || !(fc.count > 0)) ? ['Verified At ' + this.fcAt(fc.checkedAt || nowMs), DIMMED]
-      : fc.checkedAt ? ['Verified At ' + this.fcAt(fc.checkedAt), DIMMED]
+      : ((fc.check && fc.check.spent) || (proofs && fc.real === 'fake')) ? ['Not Verified', RED]
+      : (fc.check === 'asking' || (proofs && fc.real === 'asking')) ? ['Verifying\u2026', DIMMED]
+      : (sound && (fc.check === 'ok' || !(fc.count > 0))) ? ['Verified At ' + this.fcAt(fc.checkedAt || nowMs), DIMMED]
+      : (sound && fc.checkedAt) ? ['Verified At ' + this.fcAt(fc.checkedAt), DIMMED]
       : ['Not Verified', AMBER];
     /* And under that, for a card whose clock is Bitcoin block headers (software 1.15 and on): the block it is at, by its height
      * where this phone has that (`headerHeightOf`), else by the first digits of its hash, as the line this replaces said it;

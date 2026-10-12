@@ -20,7 +20,8 @@ const MINT2 = 'https://n.test';
 const OTHER_WORDS = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
 
 /* A page as it ships, its bridge answered by a phone that holds `words` and by
- * a mint (`sharedMint`, or one of its own). `feePpk` is the mint's input fee. */
+ * a mint (`sharedMint`, or one of its own). `feePpk` is the mint's input fee,
+ * and `dleq: false` a mint that gives no NUT-12 proof with its signatures. */
 function page(o) {
   const opts = o || {};
   const phone = nativePhone({ words: opts.words || PHONE_WORDS });
@@ -111,7 +112,7 @@ function page(o) {
     // versionByte 1: a mint whose keysets have the long names (NUT-02's second kind)
     before: (w) => {
       phone.attach(w);
-      mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte });
+      mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte, dleq: opts.dleq });
       // keys and quote numbers of its own, as two real mints have
       if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2 });
     },

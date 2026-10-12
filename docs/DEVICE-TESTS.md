@@ -2077,6 +2077,28 @@ entitlements, never committed) makes iOS ask the site directly, for a test build
    association file lists it, opens Foxy and does nothing: only `/card` is the card's. A Debug build in a simulator does the first
    with `xcrun simctl openurl booted "foxy://card"`.
 
+#### 23f. Software 1.20: the mint's proof is kept with each piece
+
+Needs a card of software 1.20 (`01 14` at SELECT), the holder's phone and a second phone at the same mint (other words), and
+for step 4 a card loaded by a build or a wallet that sends no proofs. Test money only. Nothing here has run on a real card, and
+nobody has timed a load on one: each piece with a proof is a command of its own, 177 bytes, where three went in one before. The log
+lines are `card: wrote …` (each write) and `card: its proofs: …` (each check), and the read's own line gains `proofs <ms>`
+(`sh tools/pull-device-log.sh`, or LOGS in the menu); none has a secret, a nonce or a point in it.
+
+1. **A load.** Set up a card, ADD FUNDS 2,000 sats (thirty-two pieces), the owner's tap. **Pass:** the card's screen is back with the
+   balance counted up and `Verified At <time>`; the log has `card: wrote 32 piece(s), 32 with the mint’s proof (32 kept by
+   the card), in N ms`. Write down the pieces and N: that is how long a load takes, and the sheet ends at a minute.
+2. **Read on the same phone.** MENU, FLASHCARD, tap. **Pass:** `Verified At`, and the read's line has a `proofs` of a millisecond or
+   so: the phone wrote every piece itself, from the mint's answer, and asks the card for no proof.
+3. **Read on a second phone.** Same mint, other words: MENU, FLASHCARD, tap. **Pass:** `Verifying…`, then `Verified At <time>` once the mint
+   and the proofs have both answered. The read's line has `proofs N` (two pieces to a command) and the check's `card: its proofs: 32
+   piece(s) proven (32 checked now), 0 with no proof, 0 that cannot be checked here, 0 that fail, in N ms`. Tap again: `proofs` is a millisecond or so and it says `(0 checked now)`.
+4. **A card loaded by a build that sends no proofs.** Read it on a phone that did not load it. **Pass:** `Not Verified` in amber (not red), the log's `N with no
+   proof`, and nothing else wrong with the card. The phone that wrote the pieces itself, from the mint's answer, says the time of the same card.
+5. **A card of 1.19.** Read it as before. **Pass:** `Verified At`, as it always was, and no proof is asked for.
+6. **Cut short.** Lift the card in the middle of a load. **Pass:** the sheet comes up again for the rest; what went on stays on and nothing is on the card twice;
+   `Verified At` after. With no connection, a card read just now: **Pass:** the time of the mint's last word is said only if this phone found every piece real.
+
 ---
 
 #### 22l. What two diaries of offline taps showed besides the money

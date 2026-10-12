@@ -13,9 +13,9 @@ A Cashu ecash card (a chip card running the Foxy applet) and the Foxy app's scre
 - **Change the card makes itself** (1.12 and on): the till names amounts, the card builds the pieces locked to its own key, so a till cannot divert them. It makes the four largest powers of two; the till writes any small remainder at a second tap.
 - **The drawer.** Money is cut like a till's float, in powers of two, so most prices come out exact: a 128-place card gets eight of each size from 1 to 1,024, then the rest; up to 112 pieces a load, a dozen places kept free. A per tap limit caps piece size.
 - **PIN sealed** (1.9 and on) to a key of the card's, so listening to a tap learns nothing; the till's phone still sees it.
-- **Only its own applet:** thirty commands are carried; a bank card held to the phone is not read. Reading needs the NFC Tag Reading entitlement (paid developer team), else NO CARD READER.
+- **Only its own applet:** thirty-one commands are carried; a bank card held to the phone is not read. Reading needs the NFC Tag Reading entitlement (paid developer team), else NO CARD READER.
 - **Cash.** Recoverable cards (the loading phone takes money back after a year) are built and off.
-- **The phone keeps** fourteen `foxy.flashcard.*` stores (STORAGE.md names nine): money owed to or taken from cards, swaps, receipts, the last block header.
+- **The phone keeps** fifteen `foxy.flashcard.*` stores (STORAGE.md names ten): money owed to or taken from cards, swaps, receipts, the last block header.
 
 ## 2. Setting up a card
 
@@ -98,5 +98,6 @@ Sheet lines: `Tap behind the phone.` · `Reading the card` · `Signing` or, befo
 | 1.16 | PIN optional; no-PIN allowance; ADD PIN |
 | 1.17 | RESET CARD; ten askings for the first limit's worth over |
 | 1.18 | Four askings for each further limit's worth over, three before |
+| 1.20 | The mint's proof kept with each piece, for the phone to check: `Verified At` also needs every piece found real |
 
 Before 1.4: the fork, owner key, daily limit, and a first per tap limit that refused.

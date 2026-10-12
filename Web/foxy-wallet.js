@@ -9152,6 +9152,8 @@
     var resetKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 17));
     // 1.18: each further limit's worth over waits four askings, not three
     var moreKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 18));
+    // 1.20: the card keeps the mint's proof (NUT-12) with each piece it is loaded with one for, and gives it back (`cardRealCheck`)
+    var proofsKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 20));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -9230,7 +9232,12 @@
               * `cardDayOf`). `headerTime` is its clock, the time in the last header that moved it. `headerBits` and
               * `headerHash` are the hardest difficulty it has taken and the hash of the last header taken: the card's
               * record says them (GET_CARD), and `cardLook` puts them here. */
-             headers: headers, headerTime: headers ? cardU32(h, 17) : 0, headerBits: '', headerHash: '' };
+             headers: headers, headerTime: headers ? cardU32(h, 17) : 0, headerBits: '', headerHash: '',
+             /* `proofs`: the card is of software 1.20 or later (the version says so, as for `costed`): a piece can be loaded with the mint's
+              * proof for it (LOAD_PROOF with P1 = 1, one piece to a command), and the proof is read back with GET_DLEQ. The card checks
+              * nothing; this phone does (`cardRealCheck`). Nothing in GET_INFO says whether the card has room for proofs: the answer to
+              * a load does. A card of 1.19 and before knows neither command, and is not sent them. */
+             proofs: proofsKnown };
   }
 
   /* GET_CARD: format, set, unit, limit, refund key, time key, mint, and, from
@@ -9853,6 +9860,21 @@
     return hex;
   }
 
+  /* The mint's proof for a piece (NUT-12) as a card of software 1.20 keeps it: e, s and the blinding factor r, 32 bytes each, as hex.
+   * Null unless all three are there and well formed: a piece with a part of a proof is a piece with none, and is written plain. Not
+   * all zeros either: a card refuses 96 zero bytes (6A80), which are what "no proof" is kept as. A part a few characters short (a
+   * number written without its leading zeros) is padded back to 32 bytes. */
+  function cardDleqOf(d) {
+    if (!d || typeof d !== 'object') return null;
+    var whole = function (v) {
+      var h = String(v === undefined || v === null ? '' : v).toLowerCase();
+      return /^[0-9a-f]{1,64}$/.test(h) ? ('0000000000000000000000000000000000000000000000000000000000000000' + h).slice(-64) : '';
+    };
+    var e = whole(d.e), s = whole(d.s), r = whole(d.r);
+    if (!e || !s || !r || /^0+$/.test(e + s + r)) return null;
+    return { e: e, s: s, r: r };
+  }
+
   /* ---- which of the mint's keysets a piece is of ------------------------------
    *
    * A place on the card has eight bytes for it. A mint's older keysets are
@@ -9905,6 +9927,8 @@
    * not match, and which is what the phone will carry (Foxy/Flashcard/CardGate.swift). */
   var CARD_AID = 'f0464f58594341524401';
   var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17', log: '18', getChange: '19',
+                   /* 1a is GET_DLEQ (1.20 and on): the mint's proof kept with an unspent piece, for one place or two. */
+                   dleq: '1a',
                    spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', load: '30', clear: '31', setCard: '32', setLimit: '34',
                    /* 35 is SET_TIME, a time under a signature, for a card of software 1.14 and before. From 1.15 the card's clock is
                     * the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
@@ -10390,6 +10414,10 @@
    * kept, and the mint's swap is what says paid. `card.proved` says whether
    * the key was proved here.
    *
+   * `opts.real`: the card's own screen is reading it (and nothing a payment does): on a card of
+   * software 1.20, read whole, the mint's proof is asked for each piece this phone does not
+   * know to be real (`cardProofsRead`), to be checked afterwards (`cardRealCheck`).
+   *
    * `opts.mine`: this phone's own reading of a card, for its holder's screen and
    * for what only an owner does. The card is asked whether this phone is its
    * owner (`card.mine`, by the grant to load, which also lets this tap load with
@@ -10497,6 +10525,17 @@
       mark('pieces');
       card.slots = slots;
       card.pieces = card.slots.filter(function (x) { return x.state === 'unspent'; });
+      /* The mint's proof for each piece this phone does not know to be real, for the card's own screen (`o.real`) and nothing a payment
+       * does: a read that lists the pieces whole, of a card that keeps proofs. It is kept on the piece for `cardRealCheck`, which the
+       * screen calls once the card is let go; nothing is checked while the card is held. */
+      if (!(o.real && card.info.proofs && !card.bare)) return null;
+      return cardProofsRead(t, card).then(function () { mark('proofs'); }, function (e) {
+        // a card that leaves is a read that failed, as ever; nothing else about the proofs is allowed to fail it
+        if (e && e.card) throw e;
+        console.warn('[foxy] card: its proofs could not be read:', (e && e.message) || e);
+        mark('proofs');
+      });
+    }).then(function () {
       card.balance = card.pieces.reduce(function (n, x) { return n + x.amount; }, 0);
       card.day = cardDayOf(card.info);
       card.tap = cardTapOf(card.info);
@@ -10601,6 +10640,109 @@
     if (link && link.one && key) link.one.proved = key;
   }
 
+  /* The mint's proof for each unspent piece of a card that this phone does not know to be real (`cardRealSet`), read from the card
+   * with GET_DLEQ, two places to a command, and kept on the piece: `dleq: { e, s, r }` as hex, or null where the card gave none (`00`:
+   * a piece loaded with no proof, a card with no room for proofs, or an answer that is not the shape of one). Checked by nobody here:
+   * the card has not checked it and this does not either (`cardRealCheck`). Resolves how many proofs there were. A card that leaves
+   * rejects, as it does in any read. */
+  function cardProofsRead(t, card) {
+    var had = cardRealSet(card.key);
+    var want = (card.pieces || []).filter(function (x) { return x && !had[String(x.nonce)] && Number.isInteger(x.i); });
+    var got = 0;
+    var walk = Promise.resolve();
+    for (var from = 0; from < want.length; from += 2) {
+      (function (two) {
+        walk = walk.then(function () {
+          return t.ask(cardCommand(CARD_INS.dleq, two[0].i, '', 0, two.length > 1 ? two[1].i : 255));
+        }).then(function (r) {
+          var h = r.sw === '9000' ? r.data : '', at = 0, list = [], whole = true;
+          two.forEach(function () {
+            var tag = h.substr(at, 2);
+            if (tag === '00') { list.push(null); at += 2; return; }
+            if (tag === '01' && h.length >= at + 194) {
+              list.push({ e: h.substr(at + 2, 64), s: h.substr(at + 66, 64), r: h.substr(at + 130, 64) });
+              at += 194;
+              return;
+            }
+            whole = false;
+          });
+          if (!whole || at !== h.length) list = two.map(function () { return null; });
+          two.forEach(function (x, k) { x.dleq = list[k]; if (list[k]) got += 1; });
+        });
+      })(want.slice(from, from + 2));
+    }
+    return walk.then(function () { return got; });
+  }
+
+  /* What the mint's proofs on a card show of its pieces, once they have been read (`cardProofsRead`): for each unspent piece the secret is
+   * built again as the card builds it (`cardSecret`), the piece's whole keyset name (`cardFullId`) and the mint's key for its amount are
+   * had from this wallet, and `hasValidDleq` is asked whether that key signed it (NUT-12, with the blinding factor the card kept). A piece
+   * whose nonce is in the real store already is not asked again. It answers, as a promise:
+   *   'ok'        every unspent piece on the card is real, here and now (the store has them all);
+   *   'fake'      a proof was read and does not verify: the card holds a piece the mint did not sign;
+   *   'unproven'  none was shown fake, but not every piece is known real: one has no proof, or the mint's keys for it are not at hand
+   *               (keys that are not at hand never make 'fake'), or the card was not read for them.
+   * The store is cut down to the pieces on the card, and the pieces that verify are written down as real. Null for a read that lists
+   * no nonces (`bare`) and for a card that keeps no proofs, which say nothing. A few pieces at a time, with the page let breathe between, since each takes a little time
+   * of its own and a card holds a hundred and twenty-eight. One line in the log: how many were proven, had no proof, and failed (never
+   * a secret, a nonce or a point). Never rejects. */
+  function cardRealCheck(w, card) {
+    var CT = window.CashuTS;
+    // a card that keeps no proofs, or a read that lists no nonces, has nothing to say
+    if (!card || !card.key || card.bare || !Array.isArray(card.pieces) || !(card.info && card.info.proofs)) return Promise.resolve(null);
+    var began = Date.now();
+    var pieces = card.pieces;
+    // the list is cut down to the pieces on the card now, before the work, so that a piece a write notes while it goes on is not cut with it
+    try { cardRealNote(card.key, [], pieces.map(function (x) { return String(x.nonce); })); } catch (e0) {}
+    var had = cardRealSet(card.key);
+    var found = [], proven = 0, none = 0, away = 0, fake = 0, checked = 0;
+    var one = function (x) {
+      if (had[String(x.nonce)]) { proven += 1; return; }
+      var d = cardDleqOf(x.dleq);
+      // none read, or an answer that is not a whole proof: a piece with no proof is not shown real, and is not shown fake either
+      if (!d) { if (x.dleq) fake += 1; else none += 1; return; }
+      var id = '', ks = null, key = '', secret = '';
+      try {
+        id = cardFullId(w, x.keyset);
+        ks = id ? keysetFor(w, id) : null;
+        key = (ks && ks.keys) ? String(ks.keys[String(satsOf(x.amount))] || '') : '';
+        secret = cardSecret(x.nonce, card.key, x.date, card.record && card.record.refundKey, card.info && card.info.format);
+      } catch (e) { key = ''; }
+      if (!key) { away += 1; return; }
+      var good = false;
+      checked += 1;
+      try { good = !!CT && CT.hasValidDleq({ id: id, amount: satsOf(x.amount), C: String(x.C), secret: secret, dleq: d }, ks, { require: true }) === true; } catch (e2) { good = false; }
+      if (good) { found.push(String(x.nonce)); proven += 1; } else fake += 1;
+    };
+    var at = 0;
+    var step = function () {
+      for (var end = at + 4; at < pieces.length && at < end; at++) one(pieces[at]);
+      if (at >= pieces.length) return Promise.resolve();
+      return new Promise(function (go) { setTimeout(go, 0); }).then(step);
+    };
+    /* The keys of a keyset this wallet has not loaded (an older one of the mint's, after it has changed its keys) are asked for first,
+     * where a piece that waits to be checked is of one, as the card's own change does it (`cardAskChange`): once, and not for long.
+     * Keys that do not come leave those pieces unproven, and never fake. A keyset that is not this mint's has no name here (`cardFullId`)
+     * and is not asked for. */
+    var need = {};
+    pieces.forEach(function (x) {
+      if (had[String(x.nonce)] || !cardDleqOf(x.dleq)) return;
+      var id = '';
+      try { id = cardFullId(w, x.keyset); } catch (e) { id = ''; }
+      if (id && !keysetFor(w, id)) need[id] = true;
+    });
+    var missing = Object.keys(need);
+    var loaded = (missing.length && w && typeof w.ensureOperableKeysets === 'function')
+      ? withTimeout(Promise.resolve().then(function () { return w.ensureOperableKeysets(missing); }), CARD_REAL_KEYS_MS, 'the keys of a card\u2019s keyset').then(function () {}, function () {})
+      : Promise.resolve();
+    return loaded.then(step).then(function () {
+      try { cardRealNote(card.key, found); } catch (e) {}
+      console.log('[foxy] card: its proofs: ' + proven + ' piece(s) proven (' + checked + ' checked now), ' + none + ' with no proof, ' + away
+        + ' that cannot be checked here, ' + fake + ' that fail, in ' + (Date.now() - began) + ' ms');
+      return fake ? 'fake' : (proven === pieces.length ? 'ok' : 'unproven');
+    }).then(null, function () { return 'unproven'; });
+  }
+
   /* ---- the cards this phone knows ---------------------------------------------
    *
    * A card this phone set up as recoverable has a key of this phone's on it:
@@ -10702,14 +10844,75 @@
   }
   /* When, for the card as it is now: every piece on it was among those the
    * mint vouched for. Nought when any was not, or the card was never asked
-   * about here. */
+   * about here. A card of software 1.20 (`info.proofs`) is also held to what this phone has found real
+   * (`cardRealSet`): the mint's word that its pieces are unspent is not its word that they are real, so
+   * with a piece on it that is not known real the mint's word of an hour ago is worth nothing here. */
   function cardCheckedAt(card) {
     if (!card || !card.key || !card.pieces || !card.pieces.length) return 0;
     var note = cardCheckedAll()[card.key];
     if (!note || !Array.isArray(note.nonces) || !(Number(note.at) > 0)) return 0;
     var had = {};
     note.nonces.forEach(function (n) { had[String(n)] = true; });
-    return card.pieces.every(function (x) { return had[String(x.nonce)]; }) ? Number(note.at) : 0;
+    if (!card.pieces.every(function (x) { return had[String(x.nonce)]; })) return 0;
+    if (card.info && card.info.proofs) {
+      var real = cardRealSet(card.key);
+      if (!card.pieces.every(function (x) { return real[String(x.nonce)]; })) return 0;
+    }
+    return Number(note.at);
+  }
+
+  /* ---- which of a card's pieces this phone knows are real ---------------------------------------
+   *
+   * The mint's word that a card's pieces are unspent (above) is not its word that they are real: a made-up C reads unspent until
+   * somebody tries to spend it. From software 1.20 a card keeps the mint's NUT-12 proof with a piece it is loaded with one for, and
+   * this phone checks it with the mint's keys (`cardRealCheck`). What it has found real is kept by the piece's nonce, as the store above
+   * is: { <card key>: { at, nonces } }, twenty cards and the oldest dropped, and at most CARD_REAL_NONCES nonces a card, cut down to the
+   * pieces on the card at each read of it that checks it. A nonce goes in when this phone wrote that piece onto the card and the card
+   * said it stored it, the piece being one this phone had from the mint itself (`cardWriteOwed`), or when a proof read from the card
+   * verified. A piece that came off a card and is written back as it was is real only if its nonce was here already. A nonce says
+   * nothing of what is spent; the store is read by the line under the card's title and by nothing else, so a write that does not land
+   * costs a proof read from the card again and nothing more. */
+  var CARD_REAL = 'foxy.flashcard.real';
+  var CARD_REAL_CARDS = 20;
+  var CARD_REAL_NONCES = 128;
+  // how long the keys of a keyset this wallet has not loaded are waited for before the pieces of it are left unproven (`cardRealCheck`)
+  var CARD_REAL_KEYS_MS = 10000;
+  function cardRealAll() {
+    var o = load(CARD_REAL, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+  // the nonces this phone knows to be real on a card, as a set
+  function cardRealSet(cardKey) {
+    var row = cardRealAll()[cardKey];
+    var had = {};
+    if (row && Array.isArray(row.nonces)) row.nonces.forEach(function (n) { had[String(n)] = true; });
+    return had;
+  }
+  /* `add`: nonces found real; `only`, where given, the nonces of the pieces on the card now, which the card's list is cut down to first.
+   * Written only when the list changes. */
+  function cardRealNote(cardKey, add, only) {
+    if (!cardKey) return;
+    var all = cardRealAll();
+    var row = all[cardKey];
+    var was = (row && Array.isArray(row.nonces)) ? row.nonces.map(String) : [];
+    var list = was.slice();
+    if (Array.isArray(only)) {
+      var on = {};
+      only.forEach(function (n) { on[String(n)] = true; });
+      list = list.filter(function (n) { return on[n]; });
+    }
+    var has = {};
+    list.forEach(function (n) { has[n] = true; });
+    (add || []).forEach(function (n) {
+      var nonce = String(n || '');
+      if (nonce && !has[nonce]) { has[nonce] = true; list.push(nonce); }
+    });
+    if (list.length > CARD_REAL_NONCES) list = list.slice(-CARD_REAL_NONCES);
+    if (list.length === was.length && list.every(function (n, i) { return n === was[i]; })) return;
+    if (list.length) all[cardKey] = { at: Date.now(), nonces: list }; else delete all[cardKey];
+    var keys = Object.keys(all).sort(function (a, b) { return (Number(all[a].at) || 0) - (Number(all[b].at) || 0); });
+    while (keys.length > CARD_REAL_CARDS) { var oldest = keys.shift(); if (oldest !== undefined) delete all[oldest]; }
+    save(CARD_REAL, all);
   }
 
   /* The fields of a locked piece's secret: its nonce, the key it is locked
@@ -11124,7 +11327,9 @@
       var built = '';
       try { built = cardSecret(parts.nonce, card.key, parts.date, card.record.refundKey, card.info && card.info.format); } catch (e) { built = ''; }
       if (built !== String(pr.secret)) throw cardError('misfit', 'That ecash is not written the way this card writes it.');
-      return { keyset: id, amount: satsOf(pr.amount), nonce: parts.nonce, C: String(pr.C).toLowerCase(), date: parts.date };
+      /* The mint's proof that goes with it (`proof`: e, s, r), where the token has the whole of one: this phone made the blinding factor and
+       * the mint's signature came with the rest, and a token this phone made keeps all three. Rows filed by builds that kept less have none. */
+      return { keyset: id, amount: satsOf(pr.amount), nonce: parts.nonce, C: String(pr.C).toLowerCase(), date: parts.date, proof: cardDleqOf(pr.dleq) };
     });
   }
 
@@ -11253,7 +11458,10 @@
                         secret: cardSecret(hit.nonce, card.key, hit.date, card.record.refundKey, card.info && card.info.format) };
           if (CT.hasValidDleq(proof, { id: String(b.id), keys: keys }, { require: true }) !== true) { stuck.push({ blind: b, why: 'signature' }); return; }
         }
-        pieces.push({ keyset: hit.keyset, amount: amount, nonce: hit.nonce, C: C, date: hit.date });
+        /* With the mint's proof where it gave one: its e and s, and the blinding factor the card kept in the opening, which the DLEQ above
+         * was checked with. The card's own change is as much a piece with a proof as any other. */
+        pieces.push({ keyset: hit.keyset, amount: amount, nonce: hit.nonce, C: C, date: hit.date,
+                      proof: (b.dleq && b.dleq.e && b.dleq.s) ? cardDleqOf({ e: b.dleq.e, s: b.dleq.s, r: hit.r }) : null });
       } catch (e) { stuck.push({ blind: b, why: 'signature' }); }
     });
     return { pieces: pieces, stuck: stuck };
@@ -11382,6 +11590,10 @@
     };
     var tell = function (info) { try { if (typeof progress === 'function') progress(info); } catch (e) {} };
     var done = [], left = [], sats = 0, back = 0, change = 0, refund = 0, stopped = null, misfit = null;
+    /* For the one line this write leaves in the log (how many pieces went on, how many with the mint's proof, how many of those the card kept,
+     * and how long the loading took), and for the real store: the nonces of the pieces that went on and are from the mint itself. A card that
+     * says it has no room for proofs (`noRoom`, once, as the answer to a load with one) is sent the rest plain, three to a command. */
+    var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [];
     // its used places freed first, where it has any: a card with none is not asked
     var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
       // a locked card frees nothing, and may still have room
@@ -11408,18 +11620,26 @@
         } catch (e) { misfit = misfit || e; left.push(row.id); return null; }
         return got.then(function (prep) {
           var pieces = prep.pieces;
+          /* Where the pieces came from: the mint's own answer to a swap of this phone's (a top-up, change, a refund, the card's own change,
+           * what the mint signed again on a restore), or a card's own pieces written back as they came off it (a payment the mint refused:
+           * `putback`). Only the first are known real by being written (`cardRealNote`): the second are real if they were known to be already. */
+          var fromMint = row.kind !== 'putback';
           /* Three pieces to a command on a card that takes them (`quick`), one
            * on a card that does not: a command each was most of what loading
            * took. The card answers the place of each piece it stored; fewer
            * than were sent, and the next one was refused, so it is sent alone
-           * to hear why, and the ones after it follow one at a time. */
+           * to hear why, and the ones after it follow one at a time.
+           * A piece that has the whole of the mint's proof goes onto a card of software 1.20 alone, with P1 = 1, which takes the piece
+           * and the proof together (177 bytes) and answers its place and whether the proof was kept (`sendProved`). */
           var todo = pieces.filter(function (piece) { return !onCard[piece.nonce]; });
           var size = (card.info && card.info.quick) ? 3 : 1;
+          var proved = function (piece) { return !noRoom && !!(card.info && card.info.proofs) && !!piece.proof; };
           var send = function (some) {
             tell({ step: 'writing', i: written + 1, n: Math.max(toWrite, written + 1) });
+            if (!loadBegan) loadBegan = Date.now();
             return t.want(cardCommand(CARD_INS.load, 0, some.map(cardPieceBytes).join(''), some.length), some.length > 1 ? 'some pieces' : 'a piece').then(function (d) {
               var stored = some.length === 1 ? 1 : Math.min(some.length, Math.floor(String(d || '').length / 2));
-              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; }
+              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; if (fromMint) fresh.push(some[k].nonce); }
               return some.slice(stored).reduce(function (chain, piece) {
                 return chain.then(function () { return send([piece]); });
               }, Promise.resolve());
@@ -11436,10 +11656,36 @@
               }, Promise.resolve());
             });
           };
-          var each = Promise.resolve();
-          for (var from = 0; from < todo.length; from += size) {
-            (function (some) { each = each.then(function () { return send(some); }); })(todo.slice(from, from + size));
-          }
+          var sendProved = function (piece) {
+            tell({ step: 'writing', i: written + 1, n: Math.max(toWrite, written + 1) });
+            if (!loadBegan) loadBegan = Date.now();
+            return t.want(cardCommand(CARD_INS.load, 1, cardPieceBytes(piece) + piece.proof.e + piece.proof.s + piece.proof.r, 2), 'a piece').then(function (d) {
+              // the place, and 01 where the proof was kept or 00 where the card has no room for proofs: the piece is on it either way
+              var h = String(d || '').toLowerCase();
+              onCard[piece.nonce] = true;
+              written += 1;
+              sentWith += 1;
+              if (fromMint) fresh.push(piece.nonce);
+              if (h.length === 4 && h.substr(2, 2) === '01') kept += 1;
+              else if (h.length === 4 && h.substr(2, 2) === '00' && !noRoom) {
+                noRoom = true;
+                console.log('[foxy] card: this card has no room for the mint\u2019s proofs; its pieces go on without them');
+              }
+            }, function (e) {
+              // a piece the card holds already (a tap cut short wrote it, with its proof): it is on the card, which is all that was wanted
+              if (!(card.bare && e && e.card === 'on-card')) throw e;
+              onCard[piece.nonce] = true;
+              return null;
+            });
+          };
+          var next = function (from) {
+            if (from >= todo.length) return Promise.resolve();
+            if (proved(todo[from])) return sendProved(todo[from]).then(function () { return next(from + 1); });
+            var some = [todo[from]];
+            while (some.length < size && from + some.length < todo.length && !proved(todo[from + some.length])) some.push(todo[from + some.length]);
+            return send(some).then(function () { return next(from + some.length); });
+          };
+          var each = next(0);
           return each.then(function () {
             // what could not be finished stays on file, marked, and is no longer owed: what is promised is what can be done
             var lost = prep.stuck.reduce(function (n, x) { return n + satsOf(x.blind.amount); }, 0);
@@ -11472,6 +11718,14 @@
       });
     });
     return walk.then(function () {
+      /* What went on, from the mint itself, is real (`cardRealNote`); and the one line of it, so that the time it took can be read off a phone:
+       * how many pieces, how many of them were sent with the mint's proof (and how many of those the card kept), and the milliseconds from
+       * the first load command to the last answer. No secret, nonce or point in it. */
+      if (fresh.length && card.info && card.info.proofs) { try { cardRealNote(card.key, fresh); } catch (xr) {} }
+      if (written > 0) {
+        console.log('[foxy] card: wrote ' + written + ' piece(s), ' + sentWith + ' with the mint\u2019s proof' + (sentWith ? ' (' + kept + ' kept by the card)' : '')
+          + ', in ' + (Date.now() - (loadBegan || Date.now())) + ' ms');
+      }
       /* Nothing finished, but some pieces went on before the card left: said on
        * the error (`wrote`), so the screen can ask for the tap that finishes it
        * at once, as for any write cut short part way. */
@@ -13353,7 +13607,7 @@
       var all = load(store, {});
       if (all && typeof all === 'object' && !Array.isArray(all) && Object.prototype.hasOwnProperty.call(all, key)) { delete all[key]; save(store, all); }
     };
-    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_DESIGNS, CARD_LOG_SEEN].forEach(drop);
+    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_REAL, CARD_DESIGNS, CARD_LOG_SEEN].forEach(drop);
     if (!abandon) return;
     var keep = function (r) { return !(r && r.card === key); };
     var owed = cardStore(CARD_OWED);
@@ -25080,6 +25334,12 @@
      * card was good, in milliseconds; nought when it never had (`cardCheck`
      * writes it down). */
     cardCheckedAt: function (card) { return cardCheckedAt(card); },
+
+    /* Whether the pieces of a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs
+     * the card was read for (`cardLook`'s `opts.real`) are checked with the keys this wallet has (08a-flashcard.js, `cardRealCheck`).
+     * Resolves 'ok' (every piece on the card is real), 'fake' (a proof does not verify) or 'unproven' (not every piece is shown real, and
+     * none is shown false); null for a read that lists no nonces (`bare`). Never rejects. What it finds real is kept by nonce. */
+    cardRealCheck: function (card) { return cardRealCheck(wallet, card); },
 
     /* Ecash found for this card (`cardAdopt`), asked of the mint: what was on
      * a card once and spent is struck off. Resolves how many rows went. */

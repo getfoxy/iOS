@@ -353,6 +353,35 @@ function wire(port) {
     ok(off.sats > 0 && (await bal(H)) === hb + off.sats, 'the card is emptied into its owner’s phone with the new PIN', String(off.sats));
   }
 
+  /* ---- the mint's proof is kept with each piece (software 1.20) ------------------------------------------------------ */
+  if (made.info.proofs) {
+    await w.ask('ctl new');
+    await tap();
+    await H.W.cardSetUp(link, { recoverable: true });
+    // every command each phone sends the applet from here, in order
+    const sentH = [], sentR = [];
+    const spyH = { send: async (a) => { sentH.push(a); return link.send(a); } };
+    const spyR = { send: async (a) => { sentR.push(a); return link.send(a); } };
+    await tap();
+    const put = await H.W.cardAdd(spyH, { sats: 300, owner: true });
+    const loads = sentH.filter((a) => /^b030/.test(a));
+    ok(put.card.balance >= 300 && loads.length === put.card.pieces.length && loads.length >= 4 && loads.every((a) => a.slice(0, 10) === 'b0300100b1' && a.length === 366),
+       'the applet takes a load a piece to a command with P1 = 1: the piece and its proof, 177 bytes, and keeps the proof', loads.length + ' loads | ' + (await show()));
+    await tap();
+    const seen = await R.W.cardLook(spyR, { real: true });
+    const verdict = await R.W.cardRealCheck(seen);
+    ok(seen.pieces.length === loads.length && seen.pieces.every((p) => p.dleq && /^[0-9a-f]{192}$/.test(p.dleq.e + p.dleq.s + p.dleq.r)) && sentR.filter((a) => /^b01a/.test(a)).length === Math.ceil(loads.length / 2),
+       'a phone with other words asks the applet for the proofs, two places to a command, and gets all of them');
+    ok(verdict === 'ok', 'and finds the applet’s bytes good against the mint’s keys: every piece is real', verdict);
+    sentR.length = 0;
+    await tap();
+    const again = await R.W.cardLook(spyR, { real: true });
+    ok(sentR.every((a) => !/^b01a/.test(a)) && (await R.W.cardRealCheck(again)) === 'ok', 'a second look asks for none, since every piece is known real');
+    await tap();
+    await link.send(SELECT);
+    ok((await link.send('b01a7fff00')) === '009000' && (await link.send('b01a80ff00')) === '6a83', 'a place with nothing in it gives 00, and a place there is not is refused 6A83');
+  }
+
   w.close();
   console.log('\n' + (failed ? failed + ' flashcard-applet check(s) failed' : 'all flashcard-applet checks pass'));
   process.exit(failed ? 1 : 0);

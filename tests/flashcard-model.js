@@ -10,14 +10,15 @@
  * (1.12), waits only over its limit and one payment a tap at full speed (1.13),
  * and counts the change it made toward that wait for what it cost, two waits
  * for every three pieces (1.14), keeps its clock in Bitcoin block headers (1.15), has an optional PIN and a no-PIN
- * allowance (1.16), and can be reset by its owner (1.17).
- * The others are the same of the cards before it: -116 (before RESET and its ten-signature wait), -115 (whose PIN was a must), -113 (which took one wait off
+ * allowance (1.16), can be reset by its owner (1.17), waits four askings for each further limit's worth (1.18), answers as an
+ * NFC tag its owner can switch off (1.19), and keeps the mint's proof with each piece, for a phone to read and check (1.20).
+ * The others are the same of the cards before it: -118 (before the tag and the proofs), -117 (before its four askings), -116 (before RESET and its ten-signature wait), -115 (whose PIN was a must), -113 (which took one wait off
  * for each piece of change), -112 (which waited four signatures to a limit's
  * worth and for change within it), -111 (before it made its own change), -110
  * (before its signing was made quicker), -19 (before the design was in its
  * record), -18 (no sealed PIN), -17 (its pieces burned inside the payment's
  * transaction), -16 (sixty-four places), and -3, which signs for each piece
- * (format 3). The model is held to all twelve. The model in
+ * (format 3). The model is held to every one of them. The model in
  * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
  * model gets wrong is a rule those tests prove nothing about. Each command is
  * sent to the model again and its answer compared: to the byte, except where
@@ -52,17 +53,18 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
 async function replay(T, format, places, software) {
   /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
-   * latest card (1.18) is replayed at the model's default, and each earlier recording at its own software (16, 15, 14, ...),
+   * latest card (1.20) is replayed at the model's default, and each earlier recording at its own software (18, 17, 16, ...),
    * since the model's default moves on with the card. The recording says what it is of: the card repository's
-   * spec/vectors/transcript.json at 1.18 replays here as tests/fixtures/flashcard-transcript.json, and the one it
-   * replaced is kept as flashcard-transcript-117.json (and the one before it as -116, and so on). A RESET at the end of a recording
+   * spec/vectors/transcript.json at 1.20 replays here as tests/fixtures/flashcard-transcript.json, and the one it
+   * replaced is kept as flashcard-transcript-118.json (and the one before it as -117, and so on; the phone skipped a
+   * recording of its own for 1.19, whose tag the 1.20 one plays as well). A RESET at the end of a recording
    * gives the card a new key, which the model draws for itself: what follows it is held to the model's key (a key is another card's to
    * differ in and is verified, never compared), as everything else signed is.
    */
   if (software === undefined && format === 4 && places === undefined) {
     const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
     const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
-    if (minor > 0 && minor < 18) software = minor;
+    if (minor > 0 && minor < 20) software = minor;
   }
   const card = makeCard({ window: ctx.window, format, places, software });
   let exact = 0, verified = 0;
@@ -202,6 +204,7 @@ async function replay(T, format, places, software) {
 
 (async () => {
   const now = await replay(read('flashcard-transcript.json'), 4);
+  const fourMore = await replay(read('flashcard-transcript-118.json'), 4, undefined, 18);
   const reset = await replay(read('flashcard-transcript-117.json'), 4, undefined, 17);
   const optional = await replay(read('flashcard-transcript-116.json'), 4, undefined, 16);
   const headers = await replay(read('flashcard-transcript-115.json'), 4, undefined, 15);
@@ -216,7 +219,7 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  const all = [now, fourMore, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras
@@ -228,6 +231,22 @@ async function replay(T, format, places, software) {
   ok(left === 'gone', 'a card that has left answers nothing');
   c2.tap();
   ok((await c2.send('b001000000')).slice(-4) === '6999', 'and back in the field it must be selected again');
+
+  /* The cards before 1.20 are still played: they know neither GET_DLEQ nor a load with a proof, and a card before 1.19 has no NFC tag to
+   * switch (SET_TAG is 6D00 to it, and GET_INFO with P1 = 2 gives it the thirty bytes, where a card of 1.19 and 1.20 give the forty-two and
+   * the tag's state). The version is the one thing the three forms of GET_INFO differ in. */
+  {
+    const play = async (software) => { const c = makeCard({ window: ctx.window, format: 4, software }); await c.send('00a4040009f0464f58594341524400'); return c; };
+    const latest = await play(undefined), v19 = await play(19), v18 = await play(18);
+    const bytes = async (c, p1) => ((await c.send('b001' + ('0' + p1).slice(-2) + '0000')).length - 4) / 2;
+    ok((await latest.send('b01a00ff00')) === '009000' && (await v19.send('b01a00ff00')) === '6d00' && (await v18.send('b01a00ff00')) === '6d00',
+       'GET_DLEQ is the card of 1.20’s alone: a card of 1.19 and one of 1.18 answer 6D00');
+    ok((await bytes(latest, 2)) === 43 && (await bytes(v19, 2)) === 43 && (await bytes(v18, 2)) === 30 && (await bytes(latest, 1)) === 42 && (await bytes(v19, 1)) === 42 && (await bytes(latest, 0)) === 30,
+       'GET_INFO is the thirty and the forty-two bytes it was, and with P1 = 2 the forty-three of 1.19 and 1.20 and the thirty of the card before them');
+    ok((await v18.send('b05200000a08000000000000000000')) === '6d00' && (await v19.send('b05200000a08000000000000000000')) === '6a90' && (await latest.send('b05202000a08000000000000000000')) === '6b00',
+       'SET_TAG is 6D00 to a card of 1.18, and a card of 1.19 or 1.20 with no owner says so (6A90); a P1 over 1 is 6B00 before anything else');
+    ok((await latest.send('b01a80ff00')) === '6a83' && (await latest.send('b01a00ff00')) === '009000', 'and a place there is not is 6A83');
+  }
 
   /* What the page sends and what the phone carries are one list. The phone's
    * gate (Foxy/Flashcard/CardGate.swift) lets through the instructions it

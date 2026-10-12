@@ -105,10 +105,12 @@ function holdRestores(ctx) {
     const want = openings.map((op) => op.amount + ':' + blindedFor(op)).sort();
     const got = asked[0].outputs.map((o) => Number(o.amount) + ':' + o.B_).sort();
     ok(parts(got) === parts(want) && asked[0].outputs.every((o) => o.id === H.mint.id), 'and they are the openings’ blinded messages, with their sizes and the mint’s keyset', got.map((x) => x.slice(0, 14)).join(' '));
-    ok(cmds.indexOf('19') > 0 && cmds.indexOf('19') < cmds.indexOf('30') && count(card, '19') === (k === 3 ? 2 : 1) && count(card, '30') === 1 && count(card, '40') === 0,
-       'the openings are read (a page of three, and the page after it where that page is full), then the pieces go on, three to a command, and no PIN is sent',
+    // a card of 1.20 keeps the mint's proof with each piece, which goes onto it alone: one command and one line of progress for each (the cards before it take them three to a command)
+    const loads = card.version >= 20 ? k : 1;
+    ok(cmds.indexOf('19') > 0 && cmds.indexOf('19') < cmds.indexOf('30') && count(card, '19') === (k === 3 ? 2 : 1) && count(card, '30') === loads && count(card, '40') === 0,
+       'the openings are read (a page of three, and the page after it where that page is full), then the pieces go on, three to a command (one each, with the mint’s proof, on a card of 1.20), and no PIN is sent',
        count(card, '19') + ' GET_CHANGE, ' + count(card, '30') + ' LOAD, ' + count(card, '40') + ' PIN');
-    ok(steps.join(' ') === 'mint writing' && lines.filter((p) => p.step === 'fetching' && p.sats === change).length === 1 && lines.filter((p) => p.step === 'writing' && p.n === k).length === 1,
+    ok(steps.join(' ') === 'mint writing' && lines.filter((p) => p.step === 'fetching' && p.sats === change).length === 1 && lines.filter((p) => p.step === 'writing' && p.n === k).length === loads,
        'the screen is told the mint is being asked, for how much, and then that pieces are being written', steps.join(' ') + '; ' + lines.length + ' line(s)');
     ok(pending(card).length === 0 && (await card.send('b019000000')) === '009000', 'the card lists no openings after: it let each go as its piece was written');
     ok(owedRows(H).length === hOwed && H.W.cardOwed().length === 0 && new Set(nonces(card)).size === nonces(card).length, 'the owner owes it nothing, and nothing is on the card twice');

@@ -875,6 +875,12 @@
      * writes it down). */
     cardCheckedAt: function (card) { return cardCheckedAt(card); },
 
+    /* Whether the pieces of a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs
+     * the card was read for (`cardLook`'s `opts.real`) are checked with the keys this wallet has (08a-flashcard.js, `cardRealCheck`).
+     * Resolves 'ok' (every piece on the card is real), 'fake' (a proof does not verify) or 'unproven' (not every piece is shown real, and
+     * none is shown false); null for a read that lists no nonces (`bare`). Never rejects. What it finds real is kept by nonce. */
+    cardRealCheck: function (card) { return cardRealCheck(wallet, card); },
+
     /* Ecash found for this card (`cardAdopt`), asked of the mint: what was on
      * a card once and spent is struck off. Resolves how many rows went. */
     cardOwedCheck: function (card) { return cardOwedPrune(card); },
