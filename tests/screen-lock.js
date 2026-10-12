@@ -6,13 +6,13 @@
  * Foxy had two settings people both call Face ID, and until it was fixed neither
  * locked the screen:
  *
- *   - `secureChoice` is the menu's USE FACE ID switch, and it guards the SEED
+ *   - `secureChoice` is the menu's FACE / FINGER LOCK switch, and it guards the SEED
  *     in the keychain, so a face was asked when money was SPENT and never for
  *     looking;
  *   - `pinBio`, later `faceInsteadOfPin`, was asked once as a PIN was set and
  *     kept by itself with no switch for it. It is gone: a phone that said yes
  *     to it opened by face with the PIN screen never showing, under a menu
- *     whose USE FACE ID was off, and only removing the PIN undid it. The
+ *     whose FACE / FINGER LOCK was off, and only removing the PIN undid it. The
  *     switch is the one thing that says whether a face opens the screen.
  *
  * And `pinLock()` opened with `if (!W.pinIsSet()) return`. So on a
@@ -177,7 +177,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
    *
    * The report: somebody set a PIN, let the phone scan their face when asked,
    * and from then on Foxy opened by face — the PIN screen never showed — while
-   * the menu's USE FACE ID stayed off. Removing the PIN was the only way out. */
+   * the menu's FACE / FINGER LOCK stayed off. Removing the PIN was the only way out. */
   {
     const src = fs.readFileSync(path.join(ROOT, 'build', 'foxy-app.js'), 'utf8');
     const method = (sig) => {
@@ -226,9 +226,9 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
 
     // a PIN, the switch off: the pad, and no face
     for (const [what, extra] of [
-      ['USE FACE ID off', { 'foxy.secure.choice': '"none"' }],
+      ['FACE / FINGER LOCK off', { 'foxy.secure.choice': '"none"' }],
       ['nobody asked about Face ID', {}],
-      ['USE FACE ID off and the yes an older Foxy kept', { 'foxy.secure.choice': '"none"', 'foxy.pin.bio': 'true' }],
+      ['FACE / FINGER LOCK off and the yes an older Foxy kept', { 'foxy.secure.choice': '"none"', 'foxy.pin.bio': 'true' }],
     ]) {
       const t = mount(realPin(extra), 'yes');
       t.app.pinLock();
@@ -264,7 +264,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
       const t = mount(realPin({ 'foxy.secure.choice': '"device"' }), 'yes');
       t.app.pinLock();
       ok(t.faces.length === 1 && t.faces[0].reason === 'Unlock Foxy' && t.faces[0].passcode === false,
-         'a PIN, USE FACE ID on: a face is asked as the lock comes up, biometrics only',
+         'a PIN, FACE / FINGER LOCK on: a face is asked as the lock comes up, biometrics only',
          JSON.stringify(t.faces));
       await settle();
       ok(t.app._pinLocked === false && !t.root(), '  and the face opens Foxy');
@@ -297,7 +297,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
       const t = mount({ 'foxy.secure.choice': '"device"' }, 'yes');
       t.app.pinLock();
       ok(t.faces.length === 1 && t.faces[0].passcode === true && !t.pad(),
-         'no PIN, USE FACE ID on: the face is the lock, with the passcode behind it and no keypad',
+         'no PIN, FACE / FINGER LOCK on: the face is the lock, with the passcode behind it and no keypad',
          JSON.stringify(t.faces));
       await settle();
       ok(t.app._pinLocked === false, '  and it opens');
@@ -305,9 +305,9 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
 
     // setting a PIN asks nothing about a face, and keeps nothing about one
     for (const [what, extra, on] of [
-      ['USE FACE ID off', { 'foxy.secure.choice': '"none"' }, false],
+      ['FACE / FINGER LOCK off', { 'foxy.secure.choice': '"none"' }, false],
       ['nobody asked about Face ID', {}, false],
-      ['USE FACE ID on', { 'foxy.secure.choice': '"device"' }, true],
+      ['FACE / FINGER LOCK on', { 'foxy.secure.choice': '"device"' }, true],
     ]) {
       const t = mount(extra, 'yes');
       let done = null;
@@ -327,7 +327,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
       const off = mount({ 'foxy.secure.choice': '"none"' }, 'yes');
       off.app.pinSetup();
       ok(/You will enter this every time you open Foxy\./.test(off.root().textContent),
-         'choosing a PIN with USE FACE ID off says it is entered at every opening');
+         'choosing a PIN with FACE / FINGER LOCK off says it is entered at every opening');
       const on = mount({ 'foxy.secure.choice': '"device"' }, 'yes');
       on.app.pinSetup();
       ok(/It opens Foxy when Face ID does not\./.test(on.root().textContent)
@@ -372,7 +372,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
        * so there is no "FACE ID OFF" to misread. */
       const off = face({ secureChoice: () => 'none' });
       const on = face({ secureChoice: () => 'device' });
-      ok(off === 'USE FACE ID' && on === 'USE FACE ID', 'Face ID is one label, USE FACE ID, whichever way it is',
+      ok(off === 'FACE / FINGER LOCK' && on === 'FACE / FINGER LOCK', 'Face ID is one label, FACE / FINGER LOCK, whichever way it is',
          [off, on].join(' / '));
       ok(/const faceOn = !!\(W22 && W22\.secureChoice && W22\.secureChoice\(\) === 'device'\)/.test(vals)
          && /\}, sw\(faceOn\)\)/.test(vals),

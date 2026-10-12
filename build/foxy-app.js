@@ -5393,7 +5393,7 @@ class Component extends DCLogic {
       title: 'NO PROTECTION?',
       reason: 'Anyone holding your phone unlocked will be able to spend what is in '
         + 'Foxy and read your twelve words.',
-      chip: 'MENU \u203a USE FACE ID turns it back on.',
+      chip: 'MENU \u203a FACE / FINGER LOCK turns it back on.',
       retry: 'KEEP FACE ID',
       go: () => this.chooseProtection('device'),
       shut: { label: 'TURN IT OFF', tap: () => this.chooseProtection('none') },
@@ -5609,7 +5609,7 @@ class Component extends DCLogic {
         + 'cursor:pointer;display:none', 'USE FACE ID');
       face.addEventListener('click', o.face);
       root.appendChild(face);
-      /* Shown only where the menu's USE FACE ID is on and there is a PIN to
+      /* Shown only where the menu's FACE / FINGER LOCK is on and there is a PIN to
        * type beside it — and never beside a CTA that is already the same
        * button (noKeypad, the face-alone lock, where the face IS the way in). */
       if (W && W.biometric && !o.noKeypad
@@ -5657,7 +5657,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this.pinOverlay({
       title: 'CHOOSE A PIN',
-      // true to the menu's switch: with USE FACE ID on, a face opens Foxy first
+      // true to the menu's switch: with FACE / FINGER LOCK on, a face opens Foxy first
       subtitle: W && W.faceLock && W.faceLock()
         ? 'Four digits or more. It opens Foxy when Face ID does not.'
         : 'Four digits or more. You will enter this every time you open Foxy.',
@@ -5711,7 +5711,7 @@ class Component extends DCLogic {
           /* Nothing is asked about a face here. It was, once, and the answer
            * was kept where no switch showed it: a face then opened Foxy with
            * the PIN screen never appearing, under a menu that said Face ID
-           * was off. MENU > USE FACE ID is the one place a face is turned on
+           * was off. MENU > FACE / FINGER LOCK is the one place a face is turned on
            * or off (faceLock, 22-screen-lock.js). */
           if (onDone) onDone(true);
         } catch (e) {
@@ -5752,14 +5752,14 @@ class Component extends DCLogic {
    * ID row sets `secureChoice`, which guards the
    * SEED, so a face was asked when money was spent and never for looking.
    *
-   * One setting decides whether a face is offered, the menu's USE FACE ID
+   * One setting decides whether a face is offered, the menu's FACE / FINGER LOCK
    * (`faceLock()`, 22-screen-lock.js), and whether a PIN is set decides what
    * the face is:
    *
    *   no PIN     the face is the lock, and the phone's own passcode may
    *              stand in for it
    *   a PIN      the face is the quick way in and the PIN is the way in when
-   *              it will not scan; with USE FACE ID off, only the PIN opens */
+   *              it will not scan; with FACE / FINGER LOCK off, only the PIN opens */
   pinLock() {
     const W = window.FoxyWallet;
     if (!W || !W.screenLocked || !W.screenLocked()) return;
@@ -12356,7 +12356,7 @@ class Component extends DCLogic {
      *   TRANSFER (only with money at more than one mint)
      *   SWITCH · YOUR CHANGE
      *   SETTINGS, which opens and closes in place:
-     *     AUTO TAP TO PAY and USE FACE ID as switches, SET PIN, RESTORE,
+     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches, SET PIN, RESTORE,
      *     BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
@@ -12417,7 +12417,7 @@ class Component extends DCLogic {
        * Nobody having answered reads as off, which is what `faceLock()` does
        * with it. */
       Object.assign({
-        label: 'USE FACE ID',
+        label: 'FACE / FINGER LOCK',
         path: MENU_ICON.faceid,
         tap: shut(() => {
           const W = window.FoxyWallet;

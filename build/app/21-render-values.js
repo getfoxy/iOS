@@ -182,7 +182,7 @@
      *   TRANSFER (only with money at more than one mint)
      *   SWITCH · YOUR CHANGE
      *   SETTINGS, which opens and closes in place:
-     *     AUTO TAP TO PAY and USE FACE ID as switches, SET PIN, RESTORE,
+     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches, SET PIN, RESTORE,
      *     BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
@@ -243,7 +243,7 @@
        * Nobody having answered reads as off, which is what `faceLock()` does
        * with it. */
       Object.assign({
-        label: 'USE FACE ID',
+        label: 'FACE / FINGER LOCK',
         path: MENU_ICON.faceid,
         tap: shut(() => {
           const W = window.FoxyWallet;

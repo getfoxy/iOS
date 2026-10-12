@@ -83,7 +83,7 @@ The section above describes a seed behind `.userPresence`. That is now a
 `SeedVault.protection = .none` at its install marker, so its seed is written to
 the older item `foxy.seed.v1` (this device only, readable while the phone is
 unlocked, **no Face ID or passcode on a read**), and stays there until the
-person turns USE FACE ID on in MENU › SETTINGS or answers the SECURE FOXY card.
+person turns FACE / FINGER LOCK on in MENU › SETTINGS or answers the SECURE FOXY card.
 An installation from before that keeps `device`.
 
 What `.none` gives up, plainly:

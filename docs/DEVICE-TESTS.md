@@ -222,7 +222,7 @@ setup above, unless a step says otherwise.
 
 **Menu paths.** BACKUP is at the top of the menu until the words are verified,
 and under SETTINGS after that. RESTORE, LOGS, SET PIN and the AUTO TAP TO PAY
-and USE FACE ID switches are under MENU → SETTINGS. SPLIT is SPLIT A BILL.
+and FACE / FINGER LOCK switches are under MENU → SETTINGS. SPLIT is SPLIT A BILL.
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -1199,9 +1199,9 @@ payment is still unclaimed is refused with "A payment or swap is still settling"
    then 1 s, 2 s, 4 s…
 3. While it says wait, enter the right PIN. It must be refused.
 4. Force-quit Foxy (swipe it away), open it again, enter a wrong PIN.
-5. With USE FACE ID off in the menu, remove the PIN and set it again. Lock and
+5. With FACE / FINGER LOCK off in the menu, remove the PIN and set it again. Lock and
    return, twice.
-6. Turn USE FACE ID on. Lock and return; then again, cancelling the Face ID
+6. Turn FACE / FINGER LOCK on. Lock and return; then again, cancelling the Face ID
    prompt.
 
 **Pass:** 3 refused without unlocking. 4 still waits, and the count did not
