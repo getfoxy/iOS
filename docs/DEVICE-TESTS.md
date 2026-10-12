@@ -1637,6 +1637,36 @@ and load it), a phone whose build carries the NFC entitlement
    On the smallest phone you have, KEEP HOLDING · 12 s is still on one line. Open FLASHCARD, tap a card of this phone's own,
    and one of a Flash card: **Pass:** the card in the picture is the card's own design once it is read. Look at how much of the
    amount the sheet covers on each phone.
+2e. The screen behind the sheet when the mint is slow. A swap that hangs cannot be made on demand; the nearest is a request that
+   goes nowhere: 100% Loss from the Network Link Conditioner (Settings, Developer, on a phone set up for development), switched
+   on as the sheet ends, on a price an exact set of the card's pieces makes (so there is no change, and the sheet ends at once
+   with only its tick). If Foxy answers that at once with NO CONNECTION the request did not hang, and the CHECKING card is what
+   is shown, as in step 4. **Pass:** where it hangs, behind the sheet the screen says REMOVE, and by a second and a half after
+   the card signed, or as the sheet is seen to go, whichever is first, it says CHECKING in its place and not REMOVE: on the same
+   orange ground, the card settled, no CANCEL. About a minute after CHECKING came up it says STILL CHECKING (the wait the CHECKING
+   card makes: a first asking at 3 seconds and a dozen at 5). Turn the condition off: the payment is made once the mint has
+   answered, and PAYMENT RECEIVED goes up after the screen has come down. A payment that makes change is different: **Pass:**
+   the sheet stays up saying `Hold for change.` and the screen behind it says VERIFYING CARD, as it always did, and TAP FOR
+   CHANGE if the card must be tapped again.
+2f. A confirmation does not come up over a card being tapped. With two phones on one mint, the first holding a card to ADD FUNDS
+   (or WITHDRAW), and sheet up, have the second phone pay the first (a request, or a tap), and a third payment too if you
+   can. **Pass:** nothing comes up on the first phone while its sheet is up, or the screen behind it, or the PIN pad that
+   asks for the card's PIN, or GETTING IT READY, or a card that asks for the card to be tapped again (TAP CARD); the sheet is not
+   taken down. A moment after the last of those has come down
+   PAYMENT RECEIVED goes up for the first payment, and after it is dismissed the next, in the order they came. The same with
+   a till taking a card's payment while another payment arrives: the card's own PAYMENT RECEIVED is held as before until its
+   change is back on the card, and the other waits for the card flow to end and then comes up. The first phone's diary
+   says `confirmation held back: a card is being read or written`.
+2g. A swap that goes silent. It cannot be made on demand (a Tor circuit that carries nothing is the cause), so this is read from the
+   log when a payment is slow, on the till or any phone that receives ecash: **Pass:** where the mint's answer to a swap does not
+   come within twelve seconds of the request leaving, the log says `the mint has said nothing of this swap yet; asking what
+   became of its inputs on another circuit (1)`, and again every five seconds with a new number; if the inputs are spent, `its
+   inputs are spent at the mint and its outputs are there, so the swap was made and only its answer is lost; finished from the
+   mint, on another circuit`, and the payment is made then, not a minute later; if they are not, nothing is done and the swap is
+   not sent a second time (one `swap` line for the payment). A request whose answer comes late after that does nothing: no
+   second entry in HISTORY, the balance is what the first said. A transport that gives up on the swap after its minute is
+   followed by `asking for the outputs it reserved, on another circuit`. The mint's own log shows the questions from different
+   exits (MINT-PRIVACY.md, N1c).
 2b. Pay from one card online several times (a few thousand sats each, from a
    card of forty thousand or so), then put the receiving phone in airplane mode
    and pay it three odd amounts. **Pass:** each offline payment is taken (HIGH
@@ -1655,7 +1685,8 @@ and load it), a phone whose build carries the NFC entitlement
    time out: NOT PAID YET, with TAP CARD and CANCEL; CANCEL puts what it signed
    back on the card at a tap that comes up by itself.
 4. Put Foxy away the moment the sheet says "Done" and wait. **Pass:** on return
-   the payment is paid, or CHECKING says it is still being asked; the wallet asks
+   the payment is paid, or CHECKING says it is still being asked (and no REMOVE
+   is on the screen once the sheet has gone); the wallet asks
    again by itself. A mint that refuses a payment after the card has signed cannot
    be made on demand: PAYMENT FAILED with TAP CARD, and the next tap that says PUT
    BACK ON THE CARD, are driven in the simulated runs only.

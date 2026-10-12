@@ -28,6 +28,8 @@ const methods = new Function('return {' + [
   'claimWatchResume() {', 'claimWatchTick() {', 'claimWatchDue() {', 'scanTokenToReceive() {', 'syncPreview() {',
   'claimWaitFor(age, onScreen) {', 'tokenOnScreen(hash) {', 'watchToken(sats, hash, quick) {', 'tidyChangeLater(more) {', 'hushSweepEntries() {',
   'spScanToken(idx) {',
+  // whether a card is being read or written, which the real announcement asks (26f-flashcard.js)
+  'cardFlowBusy() {', 'cardFlowHolds(ev) {', 'fcPadUp() {', 'fcAskingForCard() {', 'keepForCardFlow(ev) {',
 ].map(method).join(',\n') + '}')();
 // the real announcement, for the test that needs it; the others count calls
 // announcePayment reads the app's list of confirmation screens, which lives
@@ -86,6 +88,8 @@ function app(W, state) {
     offerNewMint: () => false, tokenSwitchRefused: () => false, claimFailed(e) { this.claimErr = e; },
     closeReceive() { W.calls.push('closeReceive'); this.setState({ screen: 'home', stack: [] }); },
     announcePayment(ev) { this.announced.push(ev); },
+    // no card screen is up, unless a test says so
+    stageUp() { return false; }, queueLater() { this.queued = (this.queued || 0) + 1; },
   }, methods);
   return a;
 }
@@ -203,6 +207,49 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
     b.announcePayment = announce;
     b.announcePayment({ dir: 'out', sats: 10, hash: 'tokenclaim-token-10', to: 'ecash', tokenHash: 'token-10' });
     check('the token on screen being redeemed still ends there', b._returnTo === null, JSON.stringify(b._returnTo));
+  }
+  {
+    /* A payment's confirmation is not raised while a card is being read or written. It waits in the queue of confirmations, with all it carried,
+     * to be raised when the card flow is over; the very payment the flow is making is not held by it; and a Foxy that is away is not one
+     * where a card is being tapped, and its banner goes. */
+    const W = wallet({ notify() { this.calls.push('notify'); } });
+    const a = app(W, { screen: 'flashcard', stack: ['home'] });
+    global.document = { visibilityState: 'visible' };
+    a.announcePayment = announce;
+    a._fcTaps = 1;
+    a.announcePayment({ dir: 'in', sats: 50, hash: 'req-x', to: 'ecash', says: 'PAID' });
+    check('a confirmation that comes while a card is being tapped is not raised over the card\'s screen',
+      a.state.screen === 'flashcard' && !a._returnTo && !a.state.recvResolved, JSON.stringify({ screen: a.state.screen, back: a._returnTo }));
+    check('it waits in the queue of confirmations with all it carried, and the queue is come back for',
+      a._paidQueue.length === 1 && a._paidQueue[0].hash === 'req-x' && a._paidQueue[0].ev.says === 'PAID' && a._paidQueue[0].ev.to === 'ecash' && a.queued === 1,
+      JSON.stringify({ queue: a._paidQueue, queued: a.queued }));
+    a.announcePayment({ dir: 'in', sats: 50, hash: 'req-x', to: 'ecash' });
+    check('the same payment found again while it waits is queued once', a._paidQueue.length === 1, JSON.stringify(a._paidQueue.map(q => q.hash)));
+    a.announcePayment({ dir: 'in', sats: 9, hash: 'req-y', to: 'ecash' });
+    check('and the next one behind it, in the order they came', a._paidQueue.map(q => q.hash).join() === 'req-x,req-y', JSON.stringify(a._paidQueue.map(q => q.hash)));
+    a._holdConfirmFor = 'card-1';
+    a._holdConfirmUntil = Date.now() + 60000;
+    a.announcePayment({ dir: 'in', sats: 7, hash: 'card-1' });
+    check('the payment the card flow is itself making goes to the flow\'s own hold, and is not put in the queue',
+      a._heldConfirm && a._heldConfirm.hash === 'card-1' && a._paidQueue.length === 2 && a.state.screen === 'flashcard', JSON.stringify({ held: a._heldConfirm && a._heldConfirm.hash, queue: a._paidQueue.length }));
+    a._holdConfirmFor = '';
+    a._holdConfirmUntil = 0;
+    a._heldConfirm = null;
+    // the card flow is over: the queued confirmation is raised as it was asked, once, and does not wait again
+    a._fcTaps = 0;
+    const first = a._paidQueue[0];
+    a.announcePayment(Object.assign({}, first.ev, { dir: first.dir, sats: first.sats, hash: first.hash }));
+    check('when the card flow is over it is raised as it was asked',
+      a.state.screen === 'paid' && a.state.paidSays === 'PAID' && a.state.amount === '50' && a._returnTo && a._returnTo.screen === 'flashcard', JSON.stringify({ screen: a.state.screen, says: a.state.paidSays, amount: a.state.amount }));
+    // away from the app, nothing is being tapped, and the banner is what the person needs
+    const b = app(W, { screen: 'flashcard', stack: ['home'] });
+    global.document = { visibilityState: 'hidden' };
+    b.announcePayment = announce;
+    b._fcTaps = 1;
+    W.calls.length = 0;
+    b.announcePayment({ dir: 'in', sats: 50, hash: 'req-z', to: 'ecash' });
+    check('a Foxy that is away is not held: its banner goes, and nothing is queued', W.calls.indexOf('notify') >= 0 && !b._paidQueue, JSON.stringify({ calls: W.calls, queue: b._paidQueue }));
+    global.document = { visibilityState: 'visible' };
   }
   {
     // a move's own entries, already queued for a confirmation by a history pass, are taken out

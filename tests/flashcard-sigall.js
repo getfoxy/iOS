@@ -14,7 +14,7 @@
  * whether each phone's entries account for what it holds.
  */
 const crypto = require('crypto');
-const { funded, binaryLoad, why, history, settle, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
+const { funded, binaryLoad, why, history, settle, MINT, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 const { makeCard } = require('./flashcard-card');
 const { appOn, until, pad, stage, card: uiCard, explainer: uiExplainer, vals } = require('./flashcard-ui-kit');
 
@@ -1637,6 +1637,42 @@ async function world(feePpk, sats, make) {
     ok(LB.card.balance() === 1000, 'and written', String(LB.card.balance()));
     await settle();
   
+  }
+
+  /* ---- 25h: the swap's request goes silent, and the mint made it --------------------------------------
+   * The card has signed and the swap is out, on a request nothing comes back for. The wallet asks the mint, on a circuit made for the
+   * asking, what became of the pieces; they are spent, so the outputs the card signed for are asked for on that circuit (NUT-09), and
+   * the payment is made at once. The card's own change is had from the mint by its blinded messages, as when the answer is lost outright
+   * (25f); the request answering later, with its real answer, writes nothing and owes the card nothing a second time. */
+  for (const [label, make, change, pieces] of [['1.12', card12, 280, 3], ['1.15', card4, 24, 2]]) {
+    const HS = await world(0, 9000, make);
+    await binaryLoad(HS.H, HS.card, 2000);
+    HS.card.tap();
+    HS.R.W._swapSilentMs = 150;
+    HS.R.W._swapLookMs = 80;
+    let hung = 0;
+    HS.R.hang = () => (++hung === 1 ? { reach: true, answerAfter: 3000 } : null);
+    const mark = HS.R.circuits.length;
+    const paid = await HS.R.W.cardPay(HS.card, { sats: 1000, pin: '1234' }).then((r) => r, (e) => e);
+    const done = Date.now();
+    const sent = HS.R.circuits.slice(mark).filter((x) => x.path === '/v1/swap');
+    ok(sent.length === 1 && paid && paid.sats === 1000 && (await bal(HS.R)) === 1000 && done - sent[0].at < 2300,
+       label + ': a card payment whose swap goes silent is made as soon as the mint is asked what became of it, and the swap is sent once',
+       JSON.stringify({ paid: paid && (paid.sats || paid.card), swaps: sent.length, ms: sent[0] && done - sent[0].at }));
+    const after = HS.R.circuits.slice(mark).slice(HS.R.circuits.slice(mark).indexOf(sent[0]) + 1);
+    ok(after.length > 0 && after.every((x) => x.circuit && x.circuit !== sent[0].circuit),
+       label + ': and what was asked after the silence left on circuits other than the swap\'s', after.map((x) => x.path.split('/').pop()).join());
+    const rows = owedRows(HS.R);
+    ok(rows.length === 1 && rows[0].blind && rows[0].blind.length === pieces && rows[0].sats === change && paid.change && paid.change.sats === change && swaps(HS.R).length === 0
+       && HS.R.W.cardTaken().length === 0 && HS.R.W.cardDue().length === 0,
+       label + ': the card\'s own change is had from the mint by its blinded messages and owed, once, and nothing is left waiting', JSON.stringify(paid && paid.change) + ', ' + rows.length + ' owed');
+    const stood = JSON.stringify([owedRows(HS.R), swaps(HS.R), HS.R.storage.getItem('foxy.cashu.log'), HS.R.storage.getItem('foxy.cashu.proofs.' + MINT), HS.R.W.cardTaken()]);
+    await new Promise((r) => setTimeout(r, Math.max(0, sent[0].at + 3000 + 600 - Date.now())));
+    ok(JSON.stringify([owedRows(HS.R), swaps(HS.R), HS.R.storage.getItem('foxy.cashu.log'), HS.R.storage.getItem('foxy.cashu.proofs.' + MINT), HS.R.W.cardTaken()]) === stood && (await bal(HS.R)) === 1000,
+       label + ': the answer arriving at last writes nothing: not the card\'s change again, not the payment', String(await bal(HS.R)));
+    HS.card.tap();
+    const wrote = await HS.R.W.cardWrite(HS.card, { change: true });
+    ok(wrote.left === 0 && HS.card.balance() === 1000 && HS.R.W.cardOwed().length === 0, label + ': and the change goes back on the card at its next tap', 'the card has ' + HS.card.balance());
   }
 
   /* ---- 25g: a change write cut short ----------------------------------------------

@@ -45,6 +45,8 @@ function page(state, o) {
       if (state.dead) return null;
       if (m.action === 'mintRequest') {
         const path = String(m.url || '');
+        // every request the mint is sent, and the circuit it left on
+        if (ctx) ctx.seen.push({ path: new URL(path).pathname, circuit: m.circuit || '', at: Date.now() });
         if (ctx && ctx.deaf) return answer(w, m.id, null, 'The Internet connection appears to be offline.');
         /* A mint that remembers the payment's own signatures and none of the
          * change's: `restoreOnly` is the set of blinded messages it answers for. */
@@ -60,6 +62,17 @@ function page(state, o) {
         if (state.kill && path.indexOf('/v1/swap') >= 0) {
           if (state.acts) { mint.handle(m); state.acted = true; }   // the mint swaps, or never sees it
           state.dead = true;
+          return null;
+        }
+        /* A swap the mint makes and whose request then goes silent: the transport gives up on it `failAfter` ms later. */
+        if (state.hang && path.indexOf('/v1/swap') >= 0) {
+          const hang = state.hang;
+          state.hang = null;
+          state.acted = true;
+          mint.handle(m);
+          // the transport gives up, or the mint's coded refusal comes (what a request sent twice is answered)
+          setTimeout(() => (hang.refuse ? answer(w, m.id, '400\n' + JSON.stringify({ code: hang.refuse, detail: 'Token already spent.' }))
+                                        : answer(w, m.id, null, 'mintRequest did not answer.')), hang.failAfter);
           return null;
         }
         if (state.drop && path.indexOf('/v1/swap') >= 0) {
@@ -79,6 +92,7 @@ function page(state, o) {
   ctx.W._nodeProbeDelay = [86400000, 86400000];
   ctx.mint = mint;
   ctx.phone = phone;
+  ctx.seen = [];
   return ctx;
 }
 
@@ -172,6 +186,43 @@ async function run() {
       + ' held + ' + sent2 + ' in the token');
     ok((await W2.balanceSats()) + sent2 <= before2,
       'and the piece that paid it is out of the pile (' + (await W2.balanceSats()) + ' held)');
+  }
+
+  // ---- the request goes silent, and the mint made the swap -----------------
+  /* The mint swaps and nothing comes back for far longer than a payment can wait. The wallet asks the mint, on a circuit made
+   * for the asking, what became of the swap's inputs; they are spent, so the payment's written-down outputs are asked for
+   * on that circuit, and the send goes on with the payment it finds, as it does when the answer is lost outright. The
+   * request, failing later, changes nothing. */
+  for (const [how, refuse] of [['failing', 0], ['refused as already spent', 11001]]) {
+    const st = { hang: null, acted: false };
+    const c = page(st);
+    c.W._swapSilentMs = 150;
+    c.W._swapLookMs = 80;
+    await c.W.connect(MINT, { remember: true });
+    await c.W.claim((await c.W.invoice(400, '')).hash);
+    const before = await c.W.balanceSats();
+    await c.W.primeLocks();
+    const req = c.W.decodeRequest(c.W.paymentRequest(21, { purpose: 'receive' }));
+    st.hang = { failAfter: 3000, refuse };
+    const mark = c.seen.length;
+    const made = await c.W.sendToken(21, { unit: 'sat', lockTo: req.lockTo }).catch((e) => ({ why: e.message }));
+    const done = Date.now();
+    const swap = c.seen.slice(mark).filter((x) => x.path === '/v1/swap');
+    ok(st.acted && swap.length === 1, 'the mint made the swap, and it was sent once (' + swap.length + ')' + (refuse ? ', and the refusal that comes later is not answered by sending it again' : ''));
+    ok(!!(made && made.token) && done - swap[0].at < 2300, 'the payment comes back long before the transport would have given up on the request ('
+      + (done - swap[0].at) + ' ms after it left)' + (made && made.why ? ' — ' + made.why.slice(0, 80) : ''));
+    const after = c.seen.slice(mark).slice(c.seen.slice(mark).indexOf(swap[0]) + 1);
+    ok(after.length > 0 && after.every((x) => x.circuit && x.circuit !== swap[0].circuit),
+      'what was asked after the silence left on circuits other than the swap\'s (' + after.map((x) => x.path.split('/').pop()).join() + ')');
+    const sent = made && made.token ? c.W.tokenInfo(made.token).proofs.reduce((a, p) => a + Number(p.amount), 0) : 0;
+    ok(sent >= 21 && (await c.W.balanceSats()) + sent <= before && (await c.W.balanceSats()) + sent >= before - 2,
+      'with the whole payment in the token, and the rest held once (' + (await c.W.balanceSats()) + ' held, ' + sent + ' in the token, of ' + before + ')');
+    ok(!JSON.parse(c.storage.getItem('foxy.cashu.swaps') || '[]').length, 'and no record is left');
+    const settled = JSON.stringify([c.storage.getItem('foxy.cashu.proofs.' + MINT), c.storage.getItem('foxy.cashu.swaps'), c.storage.getItem('foxy.cashu.log')]);
+    await new Promise((r) => setTimeout(r, Math.max(0, swap[0].at + 3000 + 500 - Date.now())));
+    ok(JSON.stringify([c.storage.getItem('foxy.cashu.proofs.' + MINT), c.storage.getItem('foxy.cashu.swaps'), c.storage.getItem('foxy.cashu.log')]) === settled,
+      'the request ' + how + ' later changes nothing the page holds or has written');
+    ok(c.seen.slice(mark).filter((x) => x.path === '/v1/swap').length === 1, 'and the swap was not sent again');
   }
 
   // ---- the app killed with the swap at the mint ----------------------------

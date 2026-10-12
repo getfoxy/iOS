@@ -3691,8 +3691,12 @@
    * The card's own change (software 1.12) is in it, as outputs this phone can
    * name and not make (`cardStandIns`). What comes back is this phone's own
    * proofs, as ever; the mint's signatures on the card's outputs are written down
-   * as the row the card is owed, before this returns (`cardBlindRow`). */
-  function cardSwapFixed(w, text, spec) {
+   * as the row the card is owed, before this returns (`cardBlindRow`).
+   *
+   * `superseded()`: the swap was found at the mint while this request was still out, and finished from there (`swapGuard`).
+   * An answer that comes after that writes nothing: the card's change is had from the mint by the payment's entry
+   * (`cardChangeOwe`), and a row written now could be owed to the card a second time, long after the first was written back. */
+  function cardSwapFixed(w, text, spec, superseded) {
     var caught = {}, marks = [];
     return cardOutputsAt(w, spec).then(function (outputs) {
       var stands = spec.change && Array.isArray(spec.change.outs) && spec.change.outs.length ? cardStandIns(spec, caught, marks) : [];
@@ -3710,7 +3714,7 @@
       return w.completeSwap(pre);
     }).then(function (done) {
       var mine = ((done && done.keep) || []).filter(function (p) { return marks.indexOf(p) < 0; });
-      if (!marks.length) return mine;
+      if (!marks.length || (superseded && superseded())) return mine;
       // owed to the card before anything else is done with the answer
       var row = cardBlindRow(spec, caught, w);
       if (!row) throw cardError('refused', 'The mint did not sign all of the card’s change.', { id: spec.id });

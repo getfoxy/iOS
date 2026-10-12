@@ -688,12 +688,16 @@ function cards() {
   add('overlay: a card\u2019s PIN, to pay, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay $0.43 (\u20bf500). The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.', cta: 'PAY $0.43' }, () => {}));
   /* The screen behind the card sheet (26h-tap-screen.js), one view for each of its states, and the card in each design; the
    * seconds of KEEP HOLDING are fixed so the view does not move with the clock */
-  const behind = (o, fn) => (a) => { a._fcTapO = Object.assign({ amount: '$25.75' }, o || {}); a.fcHeldSeconds = () => 7; a.fcStage('hold'); if (fn) fn(a); };
+  const behind = (o, fn) => (a) => { a.FC_TAP_REMOVE_MS = 1500; a._fcTapO = Object.assign({ amount: '$25.75' }, o || {}); a.fcHeldSeconds = () => 7; a.fcStage('hold'); if (fn) fn(a); };
   const link = (a, stage) => a.fcTapEvent({ stage, text: '' });
   add('stage: tap behind phone', behind());
   add('stage: keep holding', behind({}, (a) => link(a, 'connected')));
   add('stage: verifying card', behind({}, (a) => { link(a, 'connected'); a.fcStage('mint'); }));
-  add('stage: remove', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); }));
+  // (REMOVE gives way to CHECKING a second and a half after the card signed: held here, so the view does not move with the clock)
+  add('stage: remove', behind({}, (a) => { a.FC_TAP_REMOVE_MS = 3600 * 1000; link(a, 'connected'); a.fcStage('checking'); }));
+  // the mint not heard from once the card is gone: CHECKING, and after the wait the CHECKING card makes (58 seconds), STILL CHECKING
+  add('stage: checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 5000; a.fcTapDraw(); }));
+  add('stage: still checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 100000; a.fcTapDraw(); }));
   add('stage: tap for change', behind({ look: 'receive' }));
   add('stage: please tap again', behind({}, (a) => { link(a, 'connected'); link(a, 'lost'); }));
   add('stage: enter pin', behind({}, (a) => { link(a, 'connected'); a.fcTapPin(); }));

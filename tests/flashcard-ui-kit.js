@@ -34,6 +34,8 @@ function appOn(ctx, start, o) {
   a.toasts = [];
   // the sheet at once in the suites: the half-second the screen is shown before it on a phone is checked on its own
   a.FC_TAP_LEAD = 0;
+  // REMOVE keeps its place behind the sheet, whatever a busy machine does to a payment's timing, unless a test is about the clock that gives way to CHECKING (26h-tap-screen.js)
+  a.FC_TAP_REMOVE_MS = 3600 * 1000;
   a.seen = {};
   a.toast = (m) => a.toasts.push(m);
   a.group = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -77,6 +79,9 @@ function appOn(ctx, start, o) {
   a.balNow = () => ({ sats: a.have || 0 });
   a.refreshBalance = () => ctx.W.balanceSats().then((n) => { a.have = n; });
   a.loadHistory = () => {};
+  // the queue of confirmations is the app's own (15-paid-wake-keyboard.js), and a card flow's end lets it move on: a suite that is about it lifts the real one (`withConfirmations`, flashcard-screens.js)
+  a.nextPaidScreen = () => {};
+  a.queueLater = () => {};
   a.closeReceive = () => { a.state.screen = 'home'; };
   a.noteReceived = () => {};
   a.txIsNew = (h) => { const fresh = !a.seen[h]; a.seen[h] = true; return fresh; };

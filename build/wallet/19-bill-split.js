@@ -833,7 +833,9 @@
          * a till and "paid"). */
         var connected = (opts && opts.now) ? needNow() : need();
         intoMint = mintOf(connected);
-        return unit === 'sat' ? connected : unitWallet(connected, unit);
+        /* A token in another unit is swapped by a wallet of its own, on the circuit this job has, so that its swap
+         * is looked into when it goes silent like any other's (`swapGuard`). */
+        return unit === 'sat' ? connected : unitWallet(connected, unit).then(function (uw) { return sameCircuit(connected, uw); });
       }).then(function (w) {
         if (w && w.kept) return w;      // already kept, with no route
         intoWallet = w;
@@ -884,8 +886,16 @@
             expect: fixed ? fixed.amounts.reduce(function (n, a) { return n + Number(a); }, 0)
               : (incomingProofs.length ? sumProofs(incomingProofs) - swapFeeFor(w, incomingProofs) : undefined),
             fixed: fixed ? [{ keysetId: fixed.keyset, start: Number(fixed.counter), count: fixed.amounts.length }] : undefined });
-          return guard.run('receive', function () {
-            if (fixed) return cardSwapFixed(w, FoxyWallet.unwrap(text), fixed).then(function (made) { cardSwapDrop(fixed.id); return made; });
+          /* `superseded`: whether the swap was found at the mint while its request was still out (`swapGuard`). The
+           * request may yet return, and what it would do then is not done: the card's own change is had from the mint
+           * by the payment's entry, from the swap's row, which is left where it is. */
+          return guard.run('receive', function (superseded) {
+            if (fixed) {
+              return cardSwapFixed(w, FoxyWallet.unwrap(text), fixed, superseded).then(function (made) {
+                if (!(superseded && superseded())) cardSwapDrop(fixed.id);
+                return made;
+              });
+            }
             /* Its outputs fill the pool (shapeOutputs): what comes in is the
              * pieces the next payment needs, not a few large ones to break
              * later. Only when the fee is known, which is what the amount of

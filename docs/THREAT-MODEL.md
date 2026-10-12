@@ -522,7 +522,12 @@ request now logs in to the SOCKS port with a label (`MintCircuit`,
 different circuits (`IsolateSOCKSAuth`, on by default). The page labels a job:
 one payment's quote, swap and melt; one invoice's polls and claim; one sent
 token's checks; each held melt, swap record and invoice in a sweep. A request
-with no label gets a circuit of its own. Tested locally: the credential
+with no label gets a circuit of its own. The exceptions are questions that read
+and change nothing, asked again on circuits of their own when one has gone
+silent (a fee quote, an invoice, a proof check), and a swap that has said nothing
+for twelve seconds, whose inputs are asked about on another circuit every five
+seconds and whose outputs are asked for on the one that answered; the swap itself
+is never sent twice (MINT-PRIVACY.md N1a and N1c). Tested locally: the credential
 reaches a SOCKS server as a username/password login, and a new URLSession
 resumes no TLS session from another, so connections share nothing but timing.
 What a mint can still link, and why, is in MINT-PRIVACY.md.

@@ -546,8 +546,10 @@ figures at once, and the line under its title says `Verifying…` until the mint
 has answered.
 
 If the mint has not answered once the card has signed, the screen says
-**CHECKING**, then **STILL CHECKING**, and the phone goes on asking. It ends as
-paid, or as money that goes back on the card. A timeout or a lost answer is not
+**CHECKING**, then **STILL CHECKING**, and the phone goes on asking. The screen
+behind the card's sheet says the same words by the same wait (see the table
+below), so that it does not tell a person to remove a card that is long gone.
+It ends as paid, or as money that goes back on the card. A timeout or a lost answer is not
 a refusal: the swap record and the signed pieces are kept, and the wallet's own
 recovery (`recoverSwaps` on the next connection, then the card's own settling)
 makes the payment or finds it was made. If the mint refuses, see *A payment the
@@ -594,10 +596,18 @@ once it is there; for a person who asks for less motion it is just drawn settled
 | TAP BEHIND PHONE | waiting for the first contact (CANCEL is here only) | light | loops |
 | KEEP HOLDING · 7 s | in contact, the card being asked; the seconds count up from the contact, a whole second at a time, with no estimate (change takes it past two seconds, a wait over the limit past five) | orange | settled |
 | VERIFYING CARD | the card has signed and is still there: the mint is asked, and change is fetched or written | orange | settled |
-| REMOVE | the card has signed and is let go, nothing more is wanted of it | orange | settled |
+| REMOVE | the card has signed and is let go, nothing more is wanted of it: said for as long as the phone's sheet may still be showing, which is until it is seen to go (the app has the screen back) or a second and a half after the card signed, whichever is first | orange | settled |
+| CHECKING | then, while the mint has not answered the swap of what the card signed: there is nothing to remove, and the mint is asked. The words and the wait are those of the CHECKING card (`fcChecking`) | orange | settled |
+| STILL CHECKING | once that wait has run out: a first asking 3 seconds after the card is let go and then one every 5, a dozen in all, so 58 seconds after CHECKING came up. The phone goes on asking | orange | settled |
 | TAP FOR CHANGE | the card has signed and contact broke before the change went on, or the second tap of a payment is waiting for the card | light | loops |
 | PLEASE TAP AGAIN | contact broke part way and the same sheet asks for the card again (also the tap after the PIN pad, and a refused payment going back on the card) | light | loops |
 | ENTER PIN | the sheet ended asking for the PIN; the pad is up over the screen, which goes with the pad's back button, or is taken up by the tap that follows it as PLEASE TAP AGAIN | light | settled |
+
+A payment that makes change keeps the titles it had: VERIFYING CARD while the card
+is there and the mint is asked, TAP FOR CHANGE and PLEASE TAP AGAIN where it must be
+tapped again. A mint that answers inside the second and a half, or answers while the
+screen says CHECKING (the change is then being made), leaves the screen saying what it
+said until it comes down.
 
 There is no countdown anywhere: the till cannot know the count, and the card does
 not say it. Each title is one line, made smaller on a narrow phone if it would not
@@ -868,6 +878,20 @@ one way of paying:
    change left for later, or after two and a half minutes whatever happens. A
    confirmation still held when the next card payment begins is dropped; the
    payment is in HISTORY.
+
+   **No other payment's PAYMENT RECEIVED comes up while a card is being read or
+   written.** One rose over the Flashcard screen with the phone's sheet up under it,
+   and the sheet came down. Any confirmation that comes while a tap is in progress
+   (the phone's sheet, the screen behind it, the pause between two taps of one flow),
+   while the pieces for a tap are being made (GETTING IT READY, TAKING IT BACK), while
+   a card's PIN is asked for a tap, or while a card is up that asks for the card to be
+   tapped again (TAP CARD: the rest of a withdrawal, a payment held, change still to
+   take), is kept in the queue of confirmations, behind
+   the ones before it, and raised one at a time, in the order it came, a moment after
+   the card screens have come down. The payment the card flow is making is not held by
+   this: it has its own hold, above. Nothing waits for ever: a confirmation that has
+   waited as long as a change tap may (two and a half minutes) is raised whatever is on
+   the screen, and a Foxy that is away from the screen gets its banner as ever.
 
 There is one sheet for all of it: a second sheet opened for the change was
 refused by iOS as often as not. iOS ends a sheet after a minute; where the mint

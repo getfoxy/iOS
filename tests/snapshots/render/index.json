@@ -1384,6 +1384,16 @@
   "markup": "e517510c5089884498b699ada517d8e56d0373a8e95f96e2087155096bcfe987",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
+ "stage: checking": {
+  "file": "387-stage-checking.html",
+  "markup": "44cff4cccf579781695ec5e2496343af58936c9d3385f7948c576f61d494f813",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
+ "stage: still checking": {
+  "file": "388-stage-still-checking.html",
+  "markup": "522364a201216ba42df3653c80a11f060313e6213f20a1a165e95c68689e588b",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
  "stage: tap for change": {
   "file": "365-stage-tap-for-change.html",
   "markup": "fb9a32f5b46ffd94b0e2de53f83b799993f942d8a67a339ec4a8d23be9a2bc6c",

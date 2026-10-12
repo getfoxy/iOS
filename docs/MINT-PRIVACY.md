@@ -29,6 +29,7 @@ names everything linked to it.
 | Receive by Lightning | quote, polls, mint | the amount, the invoice it made, a one-time NUT-20 key, new blinded outputs |
 | Receive a token | checkstate, swap | the token's proofs (amounts, secrets), new blinded outputs |
 | Send a token | swap | inputs taken from the pile, blinded outputs for the token and the change |
+| A swap that has said nothing for 12 s | checkstate of the swap's inputs on another circuit, again every 5 s on another (a dozen at most), then a restore on the one that found them spent | the swap's inputs' fingerprints (Ys) from other exits than the swap's, and the blinded outputs it reserved |
 | Pay an invoice | melt quote, swap, melt | the invoice (amount, destination, description), the inputs, blank change outputs |
 | Send a token from pieces held | nothing | nothing: no swap, no request |
 | Keep small change | one swap, only once Foxy is put away; a payment's own swap fills the pool too | a piece swapped for small ones |
@@ -102,6 +103,28 @@ after five minutes, when the mint changes, and when Foxy has been away. The
 cost is one more public question to the mint each time Foxy is opened. Tests:
 "a circuit is made ready ahead of time, and the next invoice leaves on it" and
 the three after it.
+
+**N1c. A swap that goes silent is looked into on other circuits — a small, chosen
+cost.** A swap's request can leave on a circuit that never answers, and the
+transport gives up on it after a minute. A swap is never sent twice for that. But
+once it has said nothing for twelve seconds the mint is asked what became of
+its inputs (NUT-07: a question that reads and changes nothing), on a circuit made
+for the asking and then, every five seconds, on another, a dozen at most while the
+request is out; and when they turn up spent, the outputs the swap reserved are
+asked for (NUT-09) on the circuit that answered. The recovery after the
+transport gives up is on a circuit of its own too, not the silent one
+(`swapGuard`, MONEY.md §17). What the mint can join by it: those circuits'
+exits, each with the swap's, by the fingerprints of the proofs the swap carried.
+Where the swap reached the mint it already had those fingerprints, so it
+learns that the exits it saw are one wallet's, and no more than the
+swap itself shows (C4); up to a dozen more exits over a minute, in the case that a
+swap has gone silent for twelve seconds and not otherwise. Where the swap never
+reached it, the fingerprints are new to it, and the question names them: the
+same proofs are then swapped by the retry the person makes, or the token is
+spent, and the mint has seen them from one more exit than it would have. Nothing
+else is joined: the asks carry no invoice and no amount beyond what the proofs
+are. Tests: "a swap whose request never reached the mint finishes nothing
+early, asks about its inputs on a circuit each time…" and the ones beside it.
 
 **N2. TLS session resumption — not a vector.** Checked locally: a new
 URLSession offers no session from another (TLS 1.2 and 1.3), and Foxy makes a

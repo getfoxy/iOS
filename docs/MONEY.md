@@ -112,6 +112,12 @@ quote `ISSUED` and the next sweep dropped it as claimed; a swap whose answer
 was dropped left its inputs spent and its outputs nowhere. Both were reachable
 only by a full seed restore that nothing prompted.
 
+That asking is made on a circuit made for it, never on the one the request
+went by: a circuit that has gone silent is the likeliest thing to go silent
+again. And it is not left until the transport gives up on a request after a
+minute: a swap whose request has said nothing for twelve seconds is looked
+into while the request is still out (§17).
+
 **Each reads and writes its own mint's pile.** Proofs are stored per mint
 (`foxy.cashu.proofs.<mint>`). Every function above names the pile of the mint
 its own wallet object talks to, taken when it starts. They used to
@@ -338,7 +344,8 @@ secrets) is still marked.
 **If killed during 2, or the split's answer is lost:** a swap at the mint may
 have happened. Its output ranges are **written** to `foxy.cashu.swaps` as they
 are reserved, before the request. A refusal clears the record. With no answer
-the ranges are restored at once; if the mint signed them, the outputs go back in
+the ranges are restored at once (on a circuit of their own, and sooner than the
+transport's minute if the request goes silent: §17); if the mint signed them, the outputs go back in
 the pile, the inputs the mint now calls `SPENT` come out (seed-derived ones;
 imported ones are left for reconcile), and the payment fails with nothing paid.
 If the mint cannot be asked yet, `recoverSwaps()` does the same on the next
@@ -385,7 +392,7 @@ sentence (`sendShortfall`, §14).
    a slowing ladder for up to a day. It is not asked as a sweep at launch: there
    the app only says, once per token, that a token may not have been claimed.
 
-**If killed during 1, or the swap's answer is lost:** as §2 step 2 — the
+**If killed during 1, or the swap's answer is lost, or goes silent:** as §2 step 2 and §17 — the
 swap's output ranges are in `foxy.cashu.swaps`, restored at once or by
 `recoverSwaps()`, and the spent inputs leave the pile. No token was made, so the
 send fails and the whole value is back in the balance. On an answer the rest is
@@ -456,7 +463,8 @@ not swapped, which is why there is no offline receive.
 **If killed during 4, or the answer is lost:** either the mint swapped or it
 did not (the original token is still valid and can be pasted again). The swap's
 output ranges are **written** to `foxy.cashu.swaps` before the request. With no
-answer they are restored at once, and if the mint signed them the receive
+answer they are restored at once (on a circuit of their own; a request that goes
+silent is looked into after twelve seconds rather than a minute: §17), and if the mint signed them the receive
 completes from the restored proofs as if the answer had come; otherwise
 `recoverSwaps()` restores them on the next connect or resume, files them in the
 token's unit and logs the receipt. `reclaimToken` and each batch of
@@ -1435,6 +1443,87 @@ file that as trouble.
 
 Proof: `tests/crossings.js` 5 and 8, `tests/cross-mint-online-only.js`.
 
+## 17. A swap whose request goes silent — `swapGuard`
+
+Every swap that moves value is run inside `swapGuard` (`04-lost-answers.js`):
+a token received, whether by a scan, a payment request's delivery or a card's
+signed pieces (`receiveToken`, `reclaimToken`, `importProofs`), the split a
+send or a payment makes (`sendToken`, `pay`, `onchainPay`), the small change a
+top-up makes (`tidyChange`) and the swap that makes ecash another phone has
+refused safe again (`_settleAtRiskOnce`). A request can leave on a Tor circuit
+that never answers, and the transport gives up on it only after a minute. The
+recovery that followed asked the mint on the same circuit, which was as silent.
+A card payment at a till showed it: the card had signed in under a second, and
+the till waited a minute and more for the mint's word, with the screen behind
+the card's sheet telling the person to remove a card that was long gone.
+
+**The rule: a swap is never sent a second time for being silent.** What is
+shortened is how soon the wallet learns what became of it, and by which road.
+
+1. From the moment the request leaves (the wallet view tells the guard which
+   proofs it carries), twelve seconds of nothing (`FoxyWallet._swapSilentMs`)
+   start the looking. The mint is asked the state of those proofs (NUT-07:
+   it reads and changes nothing) on a circuit made for the asking, and again
+   every five seconds (`_swapLookMs`) on another, a dozen times at most, for
+   as long as the request is out.
+2. **Unspent or pending:** the request may still be on its way. It is left
+   out, and nothing is done.
+3. **Spent:** the swap reached the mint and only its answer is lost. The
+   outputs it reserved are asked for (NUT-09) on the circuit that answered,
+   exactly as the recovery above asks for them (`restoreSwap`, and for a locked
+   send `restoreLocked` and the change's range), and the swap is finished from
+   what comes back the way a lost answer is finished: a token received resolves
+   with the proofs it would have made, a send or split puts the outputs in the
+   pile and takes its spent inputs out and fails with nothing sent, a locked
+   send is carried on with the payment found. Spent is only the cue to look:
+   inputs spent by someone else (the sender of a token took it back first) find
+   no outputs of this swap's, and nothing is finished.
+4. **The transport gives up:** the recovery of §2 to §4 runs as before, on a
+   circuit of its own (never the one that went silent). A swap whose request
+   never reached the mint finishes nothing early, and is as it was after the
+   transport's minute.
+
+**Finished once, whichever comes first.** The swap leaves its first state
+once: the request answers, the transport gives up on it, or a look finds it.
+Only that one acts. A look that is under way when the request answers or is
+given up on finishes nothing. And once a look has found the swap, the request
+that is still out changes nothing, whatever it does and whenever: it is no
+longer listened to, its watches on the wallet are let go (so counters another
+operation reserves are never written to this record), what it would write to
+the record is not written (a late refusal cannot bring back a record the finish
+dropped), a retry on used counters is not sent, and a card's own change, which
+the swap's answer would write as an owed row, is not written by a late answer
+(the payment's entry has it from the mint instead: `cardChangeOwe`).
+
+**What is written, and when, is as it was.** The record of the swap's outputs
+is written as they are reserved, before the request leaves (§4), and a locked
+send's written-down outputs the same (`mustSave`). A look reads and writes
+nothing. The finish writes what the lost-answer recovery writes, in the order
+it writes it: the pile (or the guard's caller does), then the inputs' removal,
+then the record dropped last, so the statement of every path above stays true: a
+kill at any moment leaves the record, and `recoverSwaps` on the next launch finds
+the outputs unspent and held nowhere, adds them once, and drops the record. A
+kill after the finish leaves no record and the proofs in the pile, and nothing
+is recovered a second time. Between the finish deciding and the pile being
+written there is no `await` that a kill could land in, and a pile that cannot be
+written throws with the record still in place (§4).
+
+**Which swaps get it.** Every swap run inside `swapGuard` in the app, a token
+in another unit included (its wallet is put on the job's circuit,
+`receiveToken`). The one exception is a wallet whose requests do not go to the
+phone (a browser, a test with a stand-in), which has no circuits to look by and
+no view to tell the guard what the request carries; it is as it was, and the
+transport's own timeout is its only clock.
+
+**What a look shows the mint** is in `MINT-PRIVACY.md` (N1c): the swap's inputs'
+fingerprints from other exits than the swap's.
+
+`tests/run.js` ("a swap whose answer is lost while the mint made it is finished
+from another circuit…", "a swap whose request never reached the mint…", "a
+swap whose answer comes inside the wait…", "a token send whose answer is
+lost…", "a swap found at the mint is finished once however the page is
+killed…"), `tests/locked-send-lost.js` and `tests/flashcard-sigall.js` 25h.
+
 ## Paths that move proofs and have no section above
 
 Named here rather than left out, because MONEY.md claims to enumerate where
@@ -1488,6 +1577,12 @@ value moves and these were once missing:
    thing between a payer and a relay, and comparing them is offered rather than
    enforced. That is a deliberate decision and the right one for a
    counter; it is the wrong one for a room full of strangers.
+10. **§17's three roads.** A swap whose request has gone silent is finished by
+   the request's answer, by the transport giving up on it, or by a look that
+   finds its inputs spent and its outputs at the mint, and `claim` lets only the
+   first of them act. What to look hardest at is anything the request can still
+   do after a look has found the swap: a write, a retry, a watch left on the
+   wallet, a row owed to a card.
 
 *Superseded:* this list used to name "concurrent reconcile — three reports of
 one event" and "a pending-melt record would close it". The proof chain (§5)

@@ -61,6 +61,16 @@
       return;
     }
 
+    /* A card being read or written: this waits where it is, and the ones behind it, until that is over (`cardFlowHolds`, 26f-flashcard.js),
+     * not ageing meanwhile. A card flow that goes on past the longest a confirmation waits for a change tap lets it through. */
+    if (this.cardFlowHolds(next)) {
+      // all of them are timed from now, those behind this one too: a card left up for good does not make each wait its turn and then as long again
+      queue.forEach((q) => { if (q && !q.held) q.held = Date.now(); });
+      if (Date.now() - next.held < this.FC_HOLD_MS) { this.queueLater(); return; }
+      console.log('[foxy] confirmation: a card flow has gone on for ' + Math.round(this.FC_HOLD_MS / 1000) + ' s; it waits no longer');
+      next.cardDone = true;
+    }
+
     /* Announce once, whatever happens next.
      *
      * Draining is paidDismissed's job, which means the queue only empties if
@@ -82,9 +92,10 @@
     }
     next.said = Date.now();
 
-    this.announcePayment({
-      dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '',
-    });
+    // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
+    this.announcePayment(Object.assign({}, next.ev || {}, {
+      dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
+    }));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
@@ -286,8 +297,9 @@
       const W = window.FoxyWallet;
       // the native side says how long Foxy was really in the background
       if (typeof away === 'number') {
-        // Face ID and Control Center take focus without the background: Foxy never left
-        if (away < 1) return;
+        /* Face ID and Control Center take focus without the background: Foxy never left. So does the phone's card sheet, and its going is the page
+         * coming back with no time away: the screen behind the sheet can stop telling a person to remove a card that is long gone. */
+        if (away < 1) { this.fcSheetGone(); return; }
         console.log('[foxy] wake:', away + 's in the background');
         // A phone handed over while Foxy was in the background: lock first.
         this.pinLock();

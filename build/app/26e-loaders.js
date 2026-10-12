@@ -207,11 +207,15 @@
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    // the card screen's count of seconds (26h-tap-screen.js)
+    // the card screen's count of seconds, and its look that comes of time (26h-tap-screen.js)
     clearInterval(this._fcCountT);
-    this._stageT = null; this._stageQrT = null; this._fcCountT = null;
+    clearTimeout(this._fcLookT);
+    this._stageT = null; this._stageQrT = null; this._fcCountT = null; this._fcLookT = null;
+    const was = old.getAttribute('data-stage');
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
+    // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
+    if (was === 'card' || was === 'cardReady' || was === 'cardBack') this.cardFlowMayHaveEnded();
     return true;
   }
 

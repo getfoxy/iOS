@@ -82,22 +82,43 @@
     var list = (Array.isArray(initial) ? initial : []).filter(function (r) {
       return r && r.keysetId && Number(r.count) > 0;
     }).map(copyRange);
+    /* `stop()`: the swap this records has been settled some other way while its
+     * request was still out (found at the mint: `swapGuard`). The watches on the
+     * wallet are let go at once, so that counters another operation reserves from
+     * now on are never written to this record, and what the request does when it
+     * finally returns writes nothing: not a range, and not the record itself. */
+    var watches = [];
+    var quiet = false;
+    var put = function () { if (!quiet) write(list.map(copyRange)); };
     return {
       list: function () { return list.slice(); },
+      stop: function () {
+        quiet = true;
+        var offs = watches;
+        watches = [];
+        offs.forEach(function (off) { try { off(); } catch (e) {} });
+      },
       attempt: function (run) {
         var mine = [];
         var off = watchReserved(w, function (r) {
+          if (quiet) return;
           mine.push(r);
           list.push(r);
-          write(list.map(copyRange));
+          put();
         });
-        var call;
-        try { call = Promise.resolve(run()); } catch (e) { off(); return Promise.reject(e); }
-        return call.then(function (res) { off(); return res; }, function (e) {
+        watches.push(off);
+        var done = function () {
+          var at = watches.indexOf(off);
+          if (at >= 0) watches.splice(at, 1);
           off();
+        };
+        var call;
+        try { call = Promise.resolve(run()); } catch (e) { done(); return Promise.reject(e); }
+        return call.then(function (res) { done(); return res; }, function (e) {
+          done();
           if (mine.length && mintRefused(e)) {
             list = list.filter(function (r) { return mine.indexOf(r) < 0; });
-            write(list.map(copyRange));
+            put();
           }
           throw e;
         });
@@ -1345,13 +1366,18 @@
    *
    * run(label, fn) makes the request (retried on used counters, as before).
    * The record is written as cashu-ts reserves the outputs, before the request
-   * leaves. A refusal clears it. No answer: those ranges are restored at once.
-   * If the mint had signed them, and what is unspent there adds up to what
+   * leaves. A refusal clears it. No answer: those ranges are restored at once,
+   * on a circuit made for the asking and never the one that went silent. If the
+   * mint had signed them, and what is unspent there adds up to what
    * this swap would have made (restoreSwap), a swap that brought proofs in resolves with
    * them as if the answer had come; one that spent the pile's own proofs puts
    * them back and still fails, since no token was made and nothing was paid.
    * If nothing is signed yet — or the mint cannot be reached — the record
    * stays for recoverSwaps on the next connect or resume.
+   *
+   * A request that is still out and has said nothing for a while is looked into
+   * before the transport gives up on it (below). The swap is never sent again;
+   * what comes sooner is the wallet's finding out what became of it.
    *
    * done() clears the record. A swap that took from the pile calls it before
    * anything is written, so a token's proofs can never later be restored as
@@ -1362,6 +1388,13 @@
    * the swap was handed, kept as secret, amount and keyset only — no
    * signature, so nothing here can be spent — for swapExpectation to ask the
    * mint about. Only a restore that matches those is ever added. */
+  /* How long a swap's request may say nothing before the mint is asked what became of
+   * it, how often it is asked after that, and how many times at most
+   * (`FoxyWallet._swapSilentMs` and `_swapLookMs`, which the tests shorten). */
+  var SWAP_SILENT_MS = 12000;
+  var SWAP_LOOK_MS = 5000;
+  var SWAP_LOOKS_MOST = 12;
+
   function swapGuard(w, kind, meta) {
     var rec = {
       id: kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
@@ -1388,18 +1421,25 @@
         return { id: p.id, amount: satsOf(p.amount) || 0, secret: p.secret };
       });
     };
-    if (meta && Array.isArray(meta.inputs)) {
-      rec.inputs = keep(meta.inputs);
-      /* cashu-ts picks from the pile inside send; the swap as it goes out says
-       * which it took, and the record keeps only those. A lost answer then asks
-       * the mint about what that swap sent, which it has seen, and not about
-       * every proof held. */
-      if (w && w.foxyCircuit) {
-        w.foxyOnSwap = function (sent) {
-          rec.inputs = keep(sent);
+    if (meta && Array.isArray(meta.inputs)) rec.inputs = keep(meta.inputs);
+    /* The swap as it goes out says which proofs it carries, to the view it goes by,
+     * before the request leaves.
+     *
+     * A send or a split: cashu-ts picks from the pile inside send, so the record
+     * keeps only those it took. A lost answer then asks the mint about what that
+     * swap sent, which it has seen, and not about every proof held.
+     *
+     * Every kind: the request is out from this moment, and its silence is timed
+     * from it (`swapOut`). What it carries is held in memory for the mint to be asked
+     * about; for a receive it is not written down. */
+    if (w && w.foxyCircuit) {
+      w.foxyOnSwap = function (out) {
+        if (meta && Array.isArray(meta.inputs)) {
+          rec.inputs = keep(out);
           if (swapKept(rec.id)) writeSwap(rec);
-        };
-      }
+        }
+        swapOut(out);
+      };
     }
     /* `meta.fixed`: the outputs are made already, at these counters, and the
      * swap can be for no others (a card's one signature is over them:
@@ -1416,6 +1456,232 @@
      * (03-seed-counters-logs.js). Synchronously, before the request: that is
      * the whole point of the record. */
     var locked = !!(meta && meta.locked);
+
+    /* ---- a request that has said nothing ----------------------------------------
+     *
+     * A swap's request can leave on a Tor circuit that never answers. The transport
+     * gives up on it after a minute, and only then was the mint asked what became
+     * of it, on that same circuit, which was as silent as before. The swap is never
+     * sent a second time for that. What is shortened is how soon the wallet finds
+     * out what became of it, and by which road.
+     *
+     * Once the request has been out for twelve seconds with no word, the mint is
+     * asked, on a circuit made for the asking, what became of the proofs the swap
+     * carries (NUT-07, which reads and changes nothing), and again every five
+     * seconds on another, until the request answers, the transport gives up on it,
+     * or a dozen askings are done.
+     *   unspent, or pending: the request may still be on its way. Left out.
+     *   spent: the swap reached the mint and its answer is what is lost. The outputs
+     *     it reserved are asked for (NUT-09), on the circuit that answered, as the
+     *     recovery below asks for them, and a swap that is found by that is
+     *     finished at once with what comes back (`findEarly`).
+     *
+     * Where the swap stands is `phase`, and it leaves 'out' once: the request answers
+     * ('answered'), the transport gives up on it ('gave up': the recovery below runs,
+     * on a circuit made for it), or a look finds it ('found'). `claim` says which came
+     * first, and only that one does anything more. A look that is under way when the
+     * request answers or is given up on finishes nothing. And once a look has found the
+     * swap, what its request does (answers late, fails, is given up on) changes
+     * nothing: its watches on the wallet are let go, what it would write is not written,
+     * what it carries is not used, a retry on used counters is not sent, and a card's
+     * own change is not written a second time (`superseded`, handed to `fn`).
+     *
+     * What is written to disk before the request leaves is as it was, and a look
+     * writes nothing: a kill at any moment leaves the record, and `recoverSwaps` on
+     * the next launch finishes the swap once. */
+    var phase = 'out';
+    var claim = function (to) {
+      if (phase !== 'out') return false;
+      phase = to;
+      return true;
+    };
+    var superseded = function () { return phase === 'found'; };
+    var settle = /** @type {any} */ (null);            // how the promise `_run` returned is answered from the looks
+    var asked = '';                                    // what the swap is called in the log
+    var sent = /** @type {any} */ (null);              // the proofs the request carries, as the mint is asked about them
+    var lookT = /** @type {any} */ (null);
+    var looks = 0, finding = false;
+    var releases = /** @type {Array<function(): void>} */ ([]);   // what lets go of each attempt's watch on locked outputs
+    var silentMs = function () { return Number(FoxyWallet._swapSilentMs) > 0 ? Number(FoxyWallet._swapSilentMs) : SWAP_SILENT_MS; };
+    var lookMs = function () { return Number(FoxyWallet._swapLookMs) > 0 ? Number(FoxyWallet._swapLookMs) : SWAP_LOOK_MS; };
+    var stopLooking = function () { clearTimeout(lookT); lookT = null; };
+
+    // the request is on its way: its silence is timed from now
+    function swapOut(out) {
+      if (phase !== 'out') return;
+      stopLooking();
+      looks = 0;
+      sent = (out || []).filter(function (p) { return p && p.secret; }).map(function (p) { return { secret: p.secret }; });
+      if (sent.length) lookT = setTimeout(lookInto, silentMs());
+    }
+
+    // one asking, on a circuit made for it; the next is set before this one is answered
+    function lookInto() {
+      lookT = null;
+      if (phase !== 'out' || !sent || looks >= SWAP_LOOKS_MOST) return;
+      looks += 1;
+      var via = /** @type {any} */ (null);
+      try { via = onCircuit(w); } catch (e) { via = null; }
+      if (via && typeof via.checkProofsStates === 'function') {
+        console.log('[foxy] ' + asked + ': the mint has said nothing of this swap yet; asking what became of its inputs on another circuit (' + looks + ')');
+        Promise.resolve().then(function () { return via.checkProofsStates(sent); }).then(function (rows) {
+          if (phase !== 'out') return;
+          var spent = (rows || []).some(function (r) { return String((r && (r.state || r.State)) || '').toUpperCase() === 'SPENT'; });
+          if (spent) findEarly(via);
+        }, function () { /* no word from this circuit: the next asking is on another */ });
+      }
+      if (looks < SWAP_LOOKS_MOST) lookT = setTimeout(lookInto, lookMs());
+    }
+
+    /* The proofs were spent. Whether it was this swap that spent them is the
+     * outputs' to tell, exactly as in the recovery below: the ranges (or, for a
+     * locked send, the written-down outputs) are asked for, on the circuit that
+     * has just answered, and the swap is found only if what is unspent there adds
+     * up to what it would have made. Nothing found, or the mint not saying: the
+     * request is left to answer, and the next look tries again. */
+    function findEarly(via) {
+      if (finding || phase !== 'out' || !settle) return;
+      finding = true;
+      var seek = locked
+        ? findLocked(via).then(function (both) { return both ? { both: both } : null; })
+        : restoreSwap(via, rec).then(function (got) { return got.take ? { take: got.take } : null; });
+      seek.then(function (hit) {
+        finding = false;
+        if (!hit || !claim('found')) return;
+        // settled from here: the request that is still out is no longer listened to. The promise is answered below whatever this comes to.
+        try {
+          stopLooking();
+          recorder.stop();
+          releases.forEach(function (release) { release(); });
+        } catch (x) { console.warn('[foxy] ' + asked + ': a request let go of imperfectly:', x && x.message); }
+        console.log('[foxy] ' + asked + ': its inputs are spent at the mint and its outputs are there, so the swap was made and only its answer is lost; finished from the mint, on another circuit');
+        if (hit.both) { settle.no(lockedMade(hit.both)); return; }
+        Promise.resolve().then(function () { return swapMade(via, hit.take); }).then(settle.ok, settle.no);
+      }, function () { finding = false; });
+    }
+
+    // a locked payment found whole at the mint: the error `sendToken` carries on from, as if the answer had come
+    function lockedMade(both) {
+      var got = /** @type {any} */ (new Error('The mint did not answer, but it had already made the payment. ' +
+        'Foxy rebuilt it; hand it over as a token.'));
+      got.recovered = true;
+      got.definite = true;
+      got.lockedProofs = both.send;
+      got.changeProofs = both.keep;
+      /* Which proofs the swap actually spent. cashu-ts picks a subset of
+       * the pile, so the change it made is not the whole of what is left
+       * — everything it never touched is still the wallet's, and the
+       * caller has to put both back or the difference is lost. */
+      got.spentInputs = (rec.inputs || []).slice();
+      return got;
+    }
+
+    // a swap found at the mint, with the proofs it made: what the answer would have been
+    function swapMade(wv, take) {
+      releaseHeld(rec.id, false);
+      if (SWAP_IN[kind]) return take;
+      addProofs(take, rec.mint, wv, rec.unit);
+      /* The spent input goes before the record does. With the input left
+       * in the pile (`freeInputs`), a prune that failed after the record
+       * was dropped left the piece counted with nothing to say it was
+       * spent (an audit finding). The mint said so (swapExpectation):
+       * it is removed on that word, and the record falls after. */
+      dropInputsOf(rec);
+      dropSwap(rec.id);
+      return pruneSpent(wv, rec.mint, rec.unit, rec.inputs).then(function () {
+        var back = /** @type {any} */ (new Error('The mint did not answer, but it had already swapped the ecash. ' +
+          'Foxy restored it from this wallet’s seed; nothing was sent.'));
+        back.recovered = true;
+        back.definite = true;
+        throw back;
+      });
+    }
+
+    /* A locked send's outputs are the money that left, and no counter names
+     * them. Whole, they are the payment, and the caller is handed them to make
+     * the token it was going to make anyway. Resolves { send, keep }, or null. */
+    function findLocked(wv) {
+      return restoreLocked(wv, rec).then(function (madeLocked) {
+        if (!madeLocked) return null;
+        /* The payment is back. Its change is not: those outputs are
+         * ordinary and deterministic, named by the ranges the recorder
+         * kept, so they come back the way every other lost answer's do.
+         * Both halves or neither — handing back the payment while the
+         * change stayed lost would be a worse trade than refusing. */
+        return restoreRanges(wv, rec.outputs, 'the locked send’s change', 1000).then(function (rows) {
+          var found = [];
+          rows.forEach(function (r) { found = found.concat(r.proofs); });
+          /* Both halves or neither, and this is where that is decided.
+           *
+           * It said so and did not do it: an empty or short change restore
+           * fell through as `change = []`, `sendToken` wrote that as the
+           * whole remaining pile and the record — the only thing naming the
+           * change's counters — was dropped straight after. 107 sats of 400
+           * destroyed and reported as a success. A record that
+           * reserved ranges and cannot get them back is left alone for the
+           * next connect instead. */
+          var ranges = /** @type {Array<any>} */ (rec.outputs || []);
+          var wanted = ranges.reduce(function (n, r) { return n + (Number(r && r.count) || 0); }, 0);
+          if (wanted > 0 && !found.length) {
+            console.warn('[foxy] lost locked send: the payment is back but its change is not;'
+              + ' nothing is written and the record is kept');
+            return null;
+          }
+          return (found.length ? liveUnheld(wv, found) : Promise.resolve([])).then(function (change) {
+            console.log('[foxy] lost locked send: the mint had signed it —',
+                        formatAmount(sumProofs(madeLocked), rec.unit || 'sat'), 'rebuilt, with',
+                        formatAmount(sumProofs(change), rec.unit || 'sat'), 'change');
+            return { send: madeLocked, keep: change };
+          });
+        });
+      });
+    }
+
+    /* The request failed, or the transport gave up on it: what became of the swap
+     * is not known, and the mint is asked for the outputs it reserved, on a circuit
+     * made for the asking and not the one that went silent. */
+    function lost(label, e) {
+      // refused, or never sent at all: nothing of it is at the mint to restore
+      /* Fixed outputs the mint has signed before. Either this very swap (its
+       * answer lost, and found below), or this phone's counters are behind
+       * what the mint has seen of its seed: then they are moved on, as any
+       * other swap's are before it tries again (`onceMoreIfSigned`), so
+       * that the next payment set out here is not refused the same way. */
+      if (fixed && alreadySigned(e)) { try { skipSignedCounters(w, COUNTER_SKIPS[1]).then(null, function () {}); } catch (x0) {} }
+      if (!(fixed && alreadySigned(e) && swapKept(rec.id)) && (mintRefused(e) || neverSent(e) || !swapKept(rec.id))) { dropSwap(rec.id); throw e; }
+      var w2 = onCircuit(w);
+      console.warn('[foxy] ' + label + ': no answer from the mint (' + String((e && e.message) || e).slice(0, 60) +
+        '); asking for the outputs it reserved, on another circuit');
+      var first = locked ? findLocked(w2) : Promise.resolve(null);
+      return first.then(function (both) {
+        if (both) {
+          /* Not dropped here. The caller writes the change first and clears
+           * the record after, so a pile that cannot be written leaves the
+           * record in place and the next connect tries again (W6). */
+          throw lockedMade(both);
+        }
+        return restoreSwap(w2, rec).then(function (got) {
+          if (!got.take) {
+            // signed, and none of it unspent and unheld: nothing there to add, ever.
+            // Unspent but not what this swap made: the record stays, nothing is added.
+            if (got.signed && !got.live.length) { dropSwap(rec.id); releaseHeld(rec.id, false); }
+            else if (!got.signed) holdInputs(rec, e);
+            throw e;
+          }
+          return swapMade(w2, got.take);
+        }, function (x) {
+          if (x && x.recovered) throw x;
+          // the mint could not be asked (offline): the inputs wait with the record
+          if (swapKept(rec.id)) holdInputs(rec, e);
+          throw e;
+        });
+      }, function (x) {
+        if (x && x.recovered) throw x;
+        if (swapKept(rec.id)) holdInputs(rec, e);
+        throw e;
+      });
+    }
+
     return {
       record: rec,
       run: function (label, fn) {
@@ -1425,6 +1691,7 @@
                                          function (e) { settled(); throw e; });
       },
       _run: function (label, fn) {
+        asked = label;
         /* Watched inside the retried body, not around it.
          *
          * `onceMoreIfSigned` runs the body again when the mint says it has seen
@@ -1436,119 +1703,35 @@
          * and starts by forgetting the last one's: outputs the mint refused as
          * already signed are not this wallet's to rebuild. */
         if (fixed) writeSwap(rec);
-        return (fixed ? function (w0, l0, body) { return body(); } : onceMoreIfSigned)(w, label, function () {
+        var request = (fixed ? function (w0, l0, body) { return body(); } : onceMoreIfSigned)(w, label, function () {
+          // a retry on used counters, after the swap was found at the mint while the request was out: not sent
+          if (phase !== 'out') return Promise.reject(new Error('This swap was settled while its request was out; it is not sent again.'));
           var stop = null;
           if (locked) {
             rec.locked = [];
             stop = watchLockedOutputs(function (made) {
+              if (phase === 'found') return;
               rec.locked = (rec.locked || []).concat(made.map(lockedRow).filter(Boolean));
               writeSwap(rec);
             });
           }
           var release = function () { if (stop) { stop(); stop = null; } };
-          return recorder.attempt(fn).then(function (r) { release(); return r; },
-                                           function (e) { release(); throw e; });
-        }).catch(function (e) {
-          // refused, or never sent at all: nothing of it is at the mint to restore
-          /* Fixed outputs the mint has signed before. Either this very swap (its
-           * answer lost, and found below), or this phone's counters are behind
-           * what the mint has seen of its seed: then they are moved on, as any
-           * other swap's are before it tries again (`onceMoreIfSigned`), so
-           * that the next payment set out here is not refused the same way. */
-          if (fixed && alreadySigned(e)) { try { skipSignedCounters(w, COUNTER_SKIPS[1]).then(null, function () {}); } catch (x0) {} }
-          if (!(fixed && alreadySigned(e) && swapKept(rec.id)) && (mintRefused(e) || neverSent(e) || !swapKept(rec.id))) { dropSwap(rec.id); throw e; }
-          console.warn('[foxy] ' + label + ': no answer from the mint (' + String((e && e.message) || e).slice(0, 60) +
-            '); asking for the outputs it reserved');
-          /* A locked send first: its outputs are the money that left, and no
-           * counter names them. Whole, they are the payment, and the caller is
-           * handed them to make the token it was going to make anyway. */
-          var first = locked ? restoreLocked(w, rec) : Promise.resolve(null);
-          return first.then(function (madeLocked) {
-            if (!madeLocked) return null;
-            /* The payment is back. Its change is not: those outputs are
-             * ordinary and deterministic, named by the ranges the recorder
-             * kept, so they come back the way every other lost answer's do.
-             * Both halves or neither — handing back the payment while the
-             * change stayed lost would be a worse trade than refusing. */
-            return restoreRanges(w, rec.outputs, 'the locked send’s change', 1000).then(function (rows) {
-              var found = [];
-              rows.forEach(function (r) { found = found.concat(r.proofs); });
-              /* Both halves or neither, and this is where that is decided.
-               *
-               * It said so and did not do it: an empty or short change restore
-               * fell through as `change = []`, `sendToken` wrote that as the
-               * whole remaining pile and the record — the only thing naming the
-               * change's counters — was dropped straight after. 107 sats of 400
-               * destroyed and reported as a success. A record that
-               * reserved ranges and cannot get them back is left alone for the
-               * next connect instead. */
-              var ranges = /** @type {Array<any>} */ (rec.outputs || []);
-              var wanted = ranges.reduce(function (n, r) { return n + (Number(r && r.count) || 0); }, 0);
-              if (wanted > 0 && !found.length) {
-                console.warn('[foxy] lost locked send: the payment is back but its change is not;'
-                  + ' nothing is written and the record is kept');
-                return null;
-              }
-              return (found.length ? liveUnheld(w, found) : Promise.resolve([])).then(function (change) {
-                console.log('[foxy] lost locked send: the mint had signed it —',
-                            formatAmount(sumProofs(madeLocked), rec.unit || 'sat'), 'rebuilt, with',
-                            formatAmount(sumProofs(change), rec.unit || 'sat'), 'change');
-                return { send: madeLocked, keep: change };
-              });
-            });
-          }).then(function (both) {
-          if (both) {
-            /* Not dropped here. The caller writes the change first and clears
-             * the record after, so a pile that cannot be written leaves the
-             * record in place and the next connect tries again (W6). */
-            var got = /** @type {any} */ (new Error('The mint did not answer, but it had already made the payment. ' +
-              'Foxy rebuilt it; hand it over as a token.'));
-            got.recovered = true;
-            got.definite = true;
-            got.lockedProofs = both.send;
-            got.changeProofs = both.keep;
-            /* Which proofs the swap actually spent. cashu-ts picks a subset of
-             * the pile, so the change it made is not the whole of what is left
-             * — everything it never touched is still the wallet's, and the
-             * caller has to put both back or the difference is lost. */
-            got.spentInputs = (rec.inputs || []).slice();
-            throw got;
-          }
-          return restoreSwap(w, rec).then(function (got) {
-            if (!got.take) {
-              // signed, and none of it unspent and unheld: nothing there to add, ever.
-              // Unspent but not what this swap made: the record stays, nothing is added.
-              if (got.signed && !got.live.length) { dropSwap(rec.id); releaseHeld(rec.id, false); }
-              else if (!got.signed) holdInputs(rec, e);
-              throw e;
-            }
-            releaseHeld(rec.id, false);
-            if (SWAP_IN[kind]) return got.take;
-            addProofs(got.take, rec.mint, w, rec.unit);
-            /* The spent input goes before the record does. With the input left
-             * in the pile (`freeInputs`), a prune that failed after the record
-             * was dropped left the piece counted with nothing to say it was
-             * spent (an audit finding). The mint said so (swapExpectation):
-             * it is removed on that word, and the record falls after. */
-            dropInputsOf(rec);
-            dropSwap(rec.id);
-            return pruneSpent(w, rec.mint, rec.unit, rec.inputs).then(function () {
-              var back = /** @type {any} */ (new Error('The mint did not answer, but it had already swapped the ecash. ' +
-                'Foxy restored it from this wallet’s seed; nothing was sent.'));
-              back.recovered = true;
-              back.definite = true;
-              throw back;
-            });
-          }, function (x) {
-            if (x && x.recovered) throw x;
-            // the mint could not be asked (offline): the inputs wait with the record
-            if (swapKept(rec.id)) holdInputs(rec, e);
-            throw e;
-          });
-          }, function (x) {
-            if (x && x.recovered) throw x;
-            if (swapKept(rec.id)) holdInputs(rec, e);
-            throw e;
+          releases.push(release);
+          return recorder.attempt(function () { return fn(superseded); }).then(function (r) { release(); return r; },
+                                                                              function (e) { release(); throw e; });
+        });
+        return new Promise(function (ok, no) {
+          settle = { ok: ok, no: no };
+          request.then(function (r) {
+            // found at the mint while it was out: this late answer changes nothing
+            if (!claim('answered')) return;
+            stopLooking();
+            ok(r);
+          }, function (e) {
+            // found at the mint while it was out: nor does this late failure
+            if (!claim('gave up')) return;
+            stopLooking();
+            Promise.resolve().then(function () { return lost(label, e); }).then(ok, no);
           });
         });
       },

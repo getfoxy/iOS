@@ -946,6 +946,16 @@
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
+    /* Not while a card is being read or written. A confirmation rose over the Flashcard screen with the phone's sheet up under it, and the
+     * sheet came down. It is kept in the queue of confirmations, in its place, and raised when the card flow is over (`keepForCardFlow`,
+     * 26f-flashcard.js). Not the payment the card flow is itself making, whose confirmation the flow holds (below), and not a Foxy that is
+     * away: nothing is being tapped, and the banner is what that person needs. `again` is a held confirmation being let go; `cardDone` one
+     * that has waited as long as a confirmation may. */
+    if (!away && !ev.again && !ev.cardDone && this.cardFlowHolds(ev)) {
+      this.keepForCardFlow(ev);
+      return;
+    }
+
     const out = ev.dir !== 'in';
     if (away) {
       /* No amount in the body.

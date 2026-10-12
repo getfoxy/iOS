@@ -49,10 +49,22 @@ function page(o) {
       if (m.action === 'mintRequest') {
         // every request the mint is sent, in order with the card's sheet (`ctx.trace`), and which circuit it left on
         ctx.trace.push('mint ' + new URL(m.url).pathname);
-        ctx.circuits.push({ path: new URL(m.url).pathname, circuit: m.circuit || '' });
+        ctx.circuits.push({ path: new URL(m.url).pathname, circuit: m.circuit || '', at: Date.now() });
         if (ctx.deaf) return reply(w, m.id, null, 'The Internet connection appears to be offline');
         // by the address asked: the second mint's requests are the second mint's
         const at = (mint2 && new URL(m.url).origin === MINT2) ? mint2 : mint;
+        /* A swap whose request goes silent (`ctx.hang(message)`): { reach, answerAfter | failAfter } says whether the mint gets the
+         * request and does what it asks, and then when the bridge hears the real answer, late, or the transport's own failure
+         * (it gave up). With neither, never. Falsy: the swap goes as any other. */
+        if (ctx.hang && /\/v1\/swap$/.test(new URL(m.url).pathname)) {
+          const hang = ctx.hang(m);
+          if (hang) {
+            const done = hang.reach ? at.handle(m) : null;
+            if (hang.answerAfter != null) setTimeout(() => reply(w, m.id, done), hang.answerAfter);
+            else if (hang.failAfter != null) setTimeout(() => reply(w, m.id, null, 'mintRequest did not answer.'), hang.failAfter);
+            return null;
+          }
+        }
         return reply(w, m.id, (ctx.fate && ctx.fate(m)) || at.handle(m));
       }
       if (m.action === 'inboxAnswer') return reply(w, m.id, 'ok');
@@ -105,6 +117,7 @@ function page(o) {
     },
   });
   ctx.deaf = !!opts.deaf;
+  ctx.hang = null;
   ctx.nfc = null;
   ctx.sheet = [];
   ctx.events = [];

@@ -7866,6 +7866,16 @@ class Component extends DCLogic {
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
+    /* Not while a card is being read or written. A confirmation rose over the Flashcard screen with the phone's sheet up under it, and the
+     * sheet came down. It is kept in the queue of confirmations, in its place, and raised when the card flow is over (`keepForCardFlow`,
+     * 26f-flashcard.js). Not the payment the card flow is itself making, whose confirmation the flow holds (below), and not a Foxy that is
+     * away: nothing is being tapped, and the banner is what that person needs. `again` is a held confirmation being let go; `cardDone` one
+     * that has waited as long as a confirmation may. */
+    if (!away && !ev.again && !ev.cardDone && this.cardFlowHolds(ev)) {
+      this.keepForCardFlow(ev);
+      return;
+    }
+
     const out = ev.dir !== 'in';
     if (away) {
       /* No amount in the body.
@@ -8489,6 +8499,16 @@ class Component extends DCLogic {
       return;
     }
 
+    /* A card being read or written: this waits where it is, and the ones behind it, until that is over (`cardFlowHolds`, 26f-flashcard.js),
+     * not ageing meanwhile. A card flow that goes on past the longest a confirmation waits for a change tap lets it through. */
+    if (this.cardFlowHolds(next)) {
+      // all of them are timed from now, those behind this one too: a card left up for good does not make each wait its turn and then as long again
+      queue.forEach((q) => { if (q && !q.held) q.held = Date.now(); });
+      if (Date.now() - next.held < this.FC_HOLD_MS) { this.queueLater(); return; }
+      console.log('[foxy] confirmation: a card flow has gone on for ' + Math.round(this.FC_HOLD_MS / 1000) + ' s; it waits no longer');
+      next.cardDone = true;
+    }
+
     /* Announce once, whatever happens next.
      *
      * Draining is paidDismissed's job, which means the queue only empties if
@@ -8510,9 +8530,10 @@ class Component extends DCLogic {
     }
     next.said = Date.now();
 
-    this.announcePayment({
-      dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '',
-    });
+    // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
+    this.announcePayment(Object.assign({}, next.ev || {}, {
+      dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
+    }));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
@@ -8714,8 +8735,9 @@ class Component extends DCLogic {
       const W = window.FoxyWallet;
       // the native side says how long Foxy was really in the background
       if (typeof away === 'number') {
-        // Face ID and Control Center take focus without the background: Foxy never left
-        if (away < 1) return;
+        /* Face ID and Control Center take focus without the background: Foxy never left. So does the phone's card sheet, and its going is the page
+         * coming back with no time away: the screen behind the sheet can stop telling a person to remove a card that is long gone. */
+        if (away < 1) { this.fcSheetGone(); return; }
         console.log('[foxy] wake:', away + 's in the background');
         // A phone handed over while Foxy was in the background: lock first.
         this.pinLock();
@@ -18510,11 +18532,15 @@ class Component extends DCLogic {
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    // the card screen's count of seconds (26h-tap-screen.js)
+    // the card screen's count of seconds, and its look that comes of time (26h-tap-screen.js)
     clearInterval(this._fcCountT);
-    this._stageT = null; this._stageQrT = null; this._fcCountT = null;
+    clearTimeout(this._fcLookT);
+    this._stageT = null; this._stageQrT = null; this._fcCountT = null; this._fcLookT = null;
+    const was = old.getAttribute('data-stage');
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
+    // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
+    if (was === 'card' || was === 'cardReady' || was === 'cardBack') this.cardFlowMayHaveEnded();
     return true;
   }
 
@@ -18871,6 +18897,14 @@ class Component extends DCLogic {
   FC_RENEW_DAYS = 30;
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
+  /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
+   * counts too (26h-tap-screen.js): the first asking this long after the card is let go, then one every FC_CHECK_EVERY_MS, FC_CHECK_ASKS in all.
+   * CHECKING until the last has gone unanswered, and STILL CHECKING after it. */
+  FC_CHECK_FIRST_MS = 3000;
+  FC_CHECK_EVERY_MS = 5000;
+  FC_CHECK_ASKS = 12;
+  // how long after a card screen has come down a confirmation waits to be sure the card flow has not gone straight on to its next screen
+  FC_END_SETTLE_MS = 300;
   /* Cards are cash, for now.
    *
    * The card and the wallet can do more: a card set up as recoverable names a
@@ -19088,6 +19122,9 @@ class Component extends DCLogic {
   fcTap(o, fn) {
     const W = this.fcW();
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
+    // a tap is in progress from here until it settles, whatever is on the screen meanwhile (`cardFlowBusy`)
+    this._fcTaps = (this._fcTaps || 0) + 1;
+    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); };
     /* The tap that follows the PIN pad (the last sheet ended asking for it) starts as PLEASE TAP AGAIN, on the screen
      * the last tap left up (26h-tap-screen.js). */
     const was = document.getElementById('foxy-stage');
@@ -19166,8 +19203,8 @@ class Component extends DCLogic {
        * found. */
       if (line) this.fcTapLost();
       return line;
-    } : null }).then((r) => { over(false); return r; },
-            (e) => { over(!!(e && e.card === 'pin-needed')); throw e; }));
+    } : null }).then((r) => { free(); over(false); return r; },
+            (e) => { free(); over(!!(e && e.card === 'pin-needed')); throw e; }));
   }
 
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
@@ -19221,8 +19258,15 @@ class Component extends DCLogic {
     const t = this.fcTapState();
     if (step !== 'hold') t.touched = true;
     if (step === 'mint' || step === 'change') t.signed = true;
-    if (step === 'checking' || step === 'making' || step === 'done') { t.signed = true; t.gone = true; t.connected = false; }
-    if (step === 'receive') { t.signed = true; t.connected = false; t.gone = false; }
+    /* The card is let go with the mint not yet heard from (`checking`): REMOVE, then CHECKING (26h-tap-screen.js). With the mint's word in
+     * (`making`: the change is being made; `done`: the tap is over) there is nothing left to check, and the screen keeps the look it had, whichever
+     * of REMOVE, CHECKING and STILL CHECKING that was, until it comes down. */
+    if (step === 'checking') { t.signed = true; t.gone = true; t.connected = false; if (!t.goneAt) t.goneAt = Date.now(); }
+    if (step === 'making' || step === 'done') {
+      if (t.gone && t.goneAt && !t.kept) t.kept = this.fcGoneKey(t);
+      t.signed = true; t.gone = true; t.connected = false;
+    }
+    if (step === 'receive') { t.signed = true; t.connected = false; t.gone = false; t.goneAt = 0; t.kept = ''; t.sheetGoneAt = 0; }
     if (step === 'lost') { t.lost = true; t.connected = false; }
     this.fcTapDraw();
   }
@@ -19239,7 +19283,8 @@ class Component extends DCLogic {
    * for an instant between the two. */
   fcAskPin(o, then) {
     const opt = o || {};
-    this.pinOverlay({
+    // the pad is remembered, so that a card flow waiting on a PIN can be told from a pad that is gone (`cardFlowBusy`)
+    this._fcPadEl = this.pinOverlay({
       title: opt.title || 'CARD PIN',
       subtitle: opt.subtitle || '',
       warn: opt.warn || '',
@@ -19517,9 +19562,10 @@ class Component extends DCLogic {
    *
    * The one state in which nobody knows yet: the card has marked its pieces
    * spent, and whether they became this phone's is the mint's to say. Asked
-   * again every five seconds, a dozen times, and never past this screen: the
-   * wallet asks again by itself whenever it connects, and the payment is in
-   * HISTORY when it lands. */
+   * again every five seconds, a dozen times (FC_CHECK_*; the screen behind
+   * the card sheet says CHECKING and STILL CHECKING by the same wait), and
+   * never past this screen: the wallet asks again by itself whenever it
+   * connects, and the payment is in HISTORY when it lands. */
   fcChecking(id, o) {
     const W = this.fcW();
     const opt = o || {};
@@ -19563,12 +19609,12 @@ class Component extends DCLogic {
           return W.transactions(50).then((list) => settled((list || []).some(t => t.hash === id) ? 'paid' : 'spent'));
         }
         tries += 1;
-        if (tries >= 12) return settled('waiting');
-        this._fcCheckT = setTimeout(ask, 5000);
+        if (tries >= this.FC_CHECK_ASKS) return settled('waiting');
+        this._fcCheckT = setTimeout(ask, this.FC_CHECK_EVERY_MS);
         return null;
       }, () => settled('waiting'));
     };
-    this._fcCheckT = setTimeout(ask, 3000);
+    this._fcCheckT = setTimeout(ask, this.FC_CHECK_FIRST_MS);
   }
 
   /* Money has moved by a card and the screens catch up. A payment is
@@ -20155,6 +20201,65 @@ class Component extends DCLogic {
     if (this.fcOwedAfterPaying()) return false;
     this.fcReleaseConfirm(why || 'nothing is waiting for the card');
     return true;
+  }
+
+  /* ---- no confirmation over a card that is being read or written ------------------------------------------------------
+   *
+   * A payment's PAYMENT RECEIVED is raised over whatever screen is up (`announcePayment`, 12-receive.js), and one that came while a card
+   * was being tapped (the late end of an earlier payment's swap, say) rose over the card's own screen, with the phone's sheet up
+   * under it. It waits instead, in the queue of confirmations (`_paidQueue`, which `nextPaidScreen` empties one at a time, in order),
+   * until the card flow is over.
+   *
+   * A card flow is going on while: a tap is in progress (the phone's sheet is up, or the screen behind it, or the pause between two taps
+   * of one flow, which keeps that screen), the pieces for a tap are being made (GETTING IT READY, TAKING IT BACK), a card's PIN is being
+   * asked for a tap, or a card is up that asks for the card to be tapped again (TAP CARD: the rest of a withdrawal, a payment held, change
+   * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
+  cardFlowBusy() {
+    return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard();
+  }
+
+  // a card's PIN pad, asked for a tap, is still up
+  fcPadUp() {
+    const pad = this._fcPadEl;
+    return !!(pad && pad.parentNode && pad === this._pinEl);
+  }
+
+  // a card of the card screens is up, and its button is the card to be tapped again
+  fcAskingForCard() {
+    const up = this._blockedEl;
+    return !!(up && up.parentNode && /^fc-/.test(String(this._blockedKind || '')) && /TAP CARD/.test(up.textContent || ''));
+  }
+
+  /* Whether this payment's confirmation waits for the card flow: there is one, and the payment is not the one it is making. The flow's
+   * own payment is held by the flow, from the moment the card has signed until its change is back (`fcHoldConfirm`), and that is not
+   * touched here. */
+  cardFlowHolds(ev) {
+    if (!this.cardFlowBusy()) return false;
+    const hash = String((ev && (ev.hash || ev.tokenHash)) || '');
+    return !(hash && hash === String(this._holdConfirmFor || '') && Date.now() < (this._holdConfirmUntil || 0));
+  }
+
+  /* A confirmation that came while a card was being tapped: kept in the queue, behind the ones before it, to be raised when the card
+   * flow is over. One already queued under its name (the history pass found it) waits where it is. */
+  keepForCardFlow(ev) {
+    const hash = String((ev && (ev.hash || ev.tokenHash)) || '');
+    const queue = this._paidQueue = this._paidQueue || [];
+    if (!(hash && queue.some((q) => q && q.hash === hash))) {
+      queue.push({ dir: ev.dir || 'in', sats: ev.sats, hash: ev.hash, party: ev.to || '', ev: Object.assign({}, ev), held: Date.now() });
+    }
+    console.log('[foxy] confirmation held back: a card is being read or written; it is raised when that is over');
+    this.queueLater();
+  }
+
+  /* A card screen has come down. If that was the end of the card flow, the confirmations kept for it are raised; a moment later, so that a flow that
+   * goes straight on to its next screen (a pause, a card, the next tap) is not mistaken for one that has ended. */
+  cardFlowMayHaveEnded() {
+    clearTimeout(this._fcEndT);
+    this._fcEndT = setTimeout(() => {
+      this._fcEndT = null;
+      if (this.cardFlowBusy()) return;
+      if (this._paidQueue && this._paidQueue.length) this.nextPaidScreen();
+    }, this.FC_END_SETTLE_MS);
   }
 
   fcWriteAgain(o) {
@@ -22170,7 +22275,14 @@ class Component extends DCLogic {
    *                            the contact, a whole second at a time
    *   VERIFYING CARD           the card has signed and is still there: the mint is
    *                            asked, and change is fetched or written
-   *   REMOVE                   the card has signed and nothing more is wanted of it
+   *   REMOVE                   the card has signed and nothing more is wanted of it:
+   *                            for as long as the phone's sheet may still be showing, which
+   *                            is until it has gone or a second and a half after the card
+   *                            signed, whichever is first
+   *   CHECKING                 and then, while the mint has not answered the swap of what the
+   *                            card signed: there is nothing to remove, and the mint is asked
+   *   STILL CHECKING           the wait the CHECKING card makes (`fcChecking`) has run out, and
+   *                            the phone goes on asking
    *   TAP FOR CHANGE           the card has signed and contact broke before the
    *                            change went on (or the second tap is waiting for it)
    *   PLEASE TAP AGAIN         contact broke part way, and the same sheet asks again
@@ -22191,8 +22303,11 @@ class Component extends DCLogic {
   };
   FC_TAP_TITLES = {
     hold: 'TAP BEHIND PHONE', keep: 'KEEP HOLDING · ', verify: 'VERIFYING CARD', remove: 'REMOVE',
+    checking: 'CHECKING', still: 'STILL CHECKING',
     change: 'TAP FOR CHANGE', again: 'PLEASE TAP AGAIN', pin: 'ENTER PIN',
   };
+  // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
+  FC_TAP_REMOVE_MS = 1500;
   // the steps that mean the card is in the field, whether or not the phone has said so
   FC_TAP_CONTACT = { reading: 1, signing: 1, writing: 1, resetting: 1, mint: 1, change: 1 };
 
@@ -22208,8 +22323,8 @@ class Component extends DCLogic {
         touched: false,
         // the card has signed (a payment's second tap, and a put back, begin so)
         signed: o.look === 'receive' || !!o.putBack,
-        // the card is let go and nothing more is wanted of it
-        gone: false,
+        // the card is let go and nothing more is wanted of it; when it was, when the sheet was seen to go, and the look kept once the mint has answered
+        gone: false, goneAt: 0, sheetGoneAt: 0, kept: '',
         lost: false, wrote: false,
         // the sheet ended asking for the PIN; and the tap that follows the pad
         pin: false, pinAgain: !!o.pinAgain,
@@ -22254,6 +22369,51 @@ class Component extends DCLogic {
     if (this.stageUp('card')) this.fcTapDraw();
   }
 
+  /* The phone's sheet has gone: the app has the screen back (the native side tells the page of every return, with no time away when the app only
+   * lost focus for a sheet: 15-paid-wake-keyboard.js, `watchWake`). Only a card that has been let go can have its sheet go; REMOVE gives way to CHECKING
+   * then, if the clock has not done it already. */
+  fcSheetGone() {
+    // the app comes back to the screen for many reasons; with no tap begun there is nothing for a sheet to have been in
+    if (!(this._fcTapO && this._fcTapO.t)) return;
+    const t = this.fcTapState();
+    if (!t.gone || t.sheetGoneAt) return;
+    t.sheetGoneAt = Date.now();
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* The wait for the mint's word, in milliseconds: the one the CHECKING card makes before it says STILL CHECKING (`fcChecking`): the first asking, and the rest
+   * of a dozen at their pace. */
+  fcCheckWait() {
+    return this.FC_CHECK_FIRST_MS + (this.FC_CHECK_ASKS - 1) * this.FC_CHECK_EVERY_MS;
+  }
+
+  /* When a card that was let go stops being REMOVE: the sheet has gone, or the clock has run out, whichever is first. Nought for a tap that is not waiting on the
+   * mint (it has answered: the look is kept as it was, `kept`). */
+  fcCheckingFrom(t) {
+    if (!t.gone || !t.goneAt || t.kept) return 0;
+    const byClock = t.goneAt + this.FC_TAP_REMOVE_MS;
+    return t.sheetGoneAt ? Math.min(t.sheetGoneAt, byClock) : byClock;
+  }
+
+  /* Which of REMOVE, CHECKING and STILL CHECKING a card that was let go is on. */
+  fcGoneKey(t) {
+    if (t.kept) return t.kept;
+    const from = this.fcCheckingFrom(t);
+    const now = Date.now();
+    if (!from || now < from) return 'remove';
+    return now - from >= this.fcCheckWait() ? 'still' : 'checking';
+  }
+
+  /* Milliseconds until the screen changes by itself, with no step or event to change it: REMOVE to CHECKING, CHECKING to STILL CHECKING. Nought when it will not. */
+  fcTapDue(key) {
+    const from = this.fcCheckingFrom(this.fcTapState());
+    if (!from) return 0;
+    const now = Date.now();
+    if (key === 'remove') return Math.max(1, from - now);
+    if (key === 'checking') return Math.max(1, from + this.fcCheckWait() - now);
+    return 0;
+  }
+
   /* What the phone's own link reports (`FoxyWallet.onCard`): the card found, the card lost. */
   fcTapEvent(ev) {
     if (!ev || !this.stageUp('card')) return;
@@ -22278,7 +22438,7 @@ class Component extends DCLogic {
     const t = this.fcTapState();
     let key;
     if (t.pin) key = 'pin';
-    else if (t.gone) key = 'remove';
+    else if (t.gone) key = this.fcGoneKey(t);
     else if (t.connected) key = t.signed ? 'verify' : 'keep';
     // contact broke: before any of the change went on it is the change that is asked for, and otherwise it is the tap
     else if (t.lost) key = (t.signed && !t.wrote) ? 'change' : 'again';
@@ -22287,7 +22447,7 @@ class Component extends DCLogic {
     // the tap that follows the PIN pad: nothing has been asked of the card yet, and it was asked before
     else if (t.pinAgain) key = 'again';
     else key = 'hold';
-    const warm = key === 'keep' || key === 'verify' || key === 'remove';
+    const warm = key === 'keep' || key === 'verify' || key === 'remove' || key === 'checking' || key === 'still';
     return {
       key, scheme: warm ? '03' : '01',
       // the card is wanted, and the loop says so; once it is there it stays settled
@@ -22397,6 +22557,16 @@ class Component extends DCLogic {
     else if (k.key !== 'keep') { clearInterval(this._fcCountT); this._fcCountT = null; }
     if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key);
     if (fresh && this.syncPreview) this.syncPreview();
+    /* A look that comes of time alone is drawn when it is due, and the timer goes with the screen (`hideStage`). */
+    clearTimeout(this._fcLookT);
+    this._fcLookT = null;
+    const due = this.fcTapDue(k.key);
+    if (due > 0) {
+      this._fcLookT = setTimeout(() => {
+        this._fcLookT = null;
+        if (this.stageUp('card')) this.fcTapDraw();
+      }, due);
+    }
   }
 
   /* The title, one line: KEEP HOLDING carries the seconds, whose unit stays lowercase. */

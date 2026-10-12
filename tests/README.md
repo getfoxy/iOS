@@ -225,7 +225,10 @@ a check that quietly stops checking reads like a passing one. The proof box and
 the lock are still asserted there. Removing the lock's serialisation makes it
 fail, which is how it is known to work.
 
-**`run.js`** is the suite: 234 tests, among them the one-time move of an older
+**`run.js`** is the suite: 255 tests, among them a swap whose request goes silent
+(looked into on other circuits after a short wait, finished once from the mint
+when its inputs are spent, left alone when they are not, never sent twice, and
+inert when its request answers, fails or is refused long after), the one-time move of an older
 install onto the phone (words migrated, the same, different, refused and sent
 again, past the phone's window; counters sent once and never written after;
 a fresh install with nothing to move), a cancelled Face ID followed by a launch

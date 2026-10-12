@@ -3429,6 +3429,18 @@ const eq = (got, want, what) =>
         bridge: (w, m) => {
           if (m.action === 'mintRequest') {
             if (o.onMint) o.onMint(m);
+            /* o.hangSwap(message), for a swap whose request goes silent, answers { reach, answerAfter | failAfter }: whether the
+             * mint gets the request and does what it asks, and then when the bridge hears an answer (the real one, late) or
+             * the transport's own failure (it gave up); with neither, never. Falsy: the swap goes as any other. */
+            const hang = (o.hangSwap && new URL(m.url).pathname === '/v1/swap') ? o.hangSwap(m) : null;
+            if (hang) {
+              const done = hang.reach ? mint.handle(m) : null;
+              if (hang.answerAfter != null) setTimeout(() => answer(w, m.id, done), hang.answerAfter);
+              else if (hang.failAfter != null) setTimeout(() => answer(w, m.id, null, 'mintRequest did not answer.'), hang.failAfter);
+              // a refusal, late: a mint's coded 400 (what a request sent twice, or on used counters, is answered)
+              else if (hang.refuseAfter != null) setTimeout(() => answer(w, m.id, '400\n' + JSON.stringify({ code: hang.code, detail: hang.detail })), hang.refuseAfter);
+              return;
+            }
             const out = o.rewrite ? o.rewrite(m, mint.handle(m)) : mint.handle(m);
             if (o.loseSwap && new URL(m.url).pathname === '/v1/swap' && o.loseSwap()) {
               return answer(w, m.id, null, 'The network connection was lost.');
@@ -4808,6 +4820,199 @@ const eq = (got, want, what) =>
       if (biggest > sent + (swap.body.outputs || []).length) return 'a check asked about ' + biggest + ' proofs; the swap sent ' + sent;
       const pileYs = checks.filter(x => x.body.Ys.length === held);
       if (pileYs.length) return 'the whole pile was asked about';
+    });
+
+    // ---- a swap whose request has gone silent: looked into on another circuit, never sent twice ----
+    /* A token of 100 made by one page and received by another at the same mint, the receiver's swap going out on a request
+     * the bridge does not answer (`hangSwap`). The wallet's clocks are shortened: after 120 ms of silence it asks the mint what
+     * became of the swap's inputs, and again every 60 (twelve seconds and five, on a phone); the transport gives up when the
+     * test says. */
+    const silent = async (hang, o) => {
+      const log = onMintLog();
+      const Q = nsPage({});
+      await Q.W.seedReady();
+      await Q.W.connect(NS_MINT);
+      await Q.W.claim((await Q.W.invoice(300, '')).hash);
+      const made = await Q.W.sendToken(100);
+      const also = (o && o.onMint) || null;
+      const P = nsPage(Object.assign({ mint: Q.mint, words: NS_OTHER, hangSwap: hang }, o || {}, { onMint: (m) => { log.onMint(m); if (also) also(m); } }));
+      await P.W.seedReady();
+      await P.W.connect(NS_MINT);
+      P.W._swapSilentMs = 120;
+      P.W._swapLookMs = 60;
+      return { Q, P, log, token: made.token };
+    };
+    const nap = (ms) => new Promise((r) => setTimeout(r, ms));
+    const swapsKept = (P) => JSON.parse(P.storage.getItem('foxy.cashu.swaps') || '[]');
+    const heldBack = (P) => Object.keys(JSON.parse(P.storage.getItem('foxy.cashu.held') || '{}'));
+    const rowsIn = (P) => JSON.parse(P.storage.getItem('foxy.cashu.log') || '[]').filter(e => e.dir === 'in');
+    // what a page holds and has written, as one string, for "it changed nothing"
+    const standing = (P) => JSON.stringify([secretsOf(nsPile(P.storage)), swapsKept(P).map(r => r.id), heldBack(P), rowsIn(P).map(e => [e.hash, e.sats])]);
+
+    /* Times are taken from the moment the swap's request leaves (`at`, in the mint's log), not from the call: a page that is
+     * slow to blind its outputs on a busy machine has not been silent for that long. */
+    const swapOf = (log, mark) => log.seen.slice(mark).find(x => x.path === '/v1/swap');
+    const untilSwap = async (log, mark) => { for (let i = 0; i < 3000 && !swapOf(log, mark); i++) await nap(5); return swapOf(log, mark); };
+
+    for (const [late, hang] of [['failing', { reach: true, failAfter: 3000 }], ['answering', { reach: true, answerAfter: 3000 }],
+                                // refused as a request on used counters is: which the wallet answers, if it can, by sending the swap again with others
+                                ['refused as using outputs already signed', { reach: true, refuseAfter: 3000, code: 11008, detail: 'Duplicate outputs' }]]) {
+      await test('a swap whose answer is lost while the mint made it is finished from another circuit after the short wait, once; its request ' + late + ' later changes nothing', async () => {
+        const { P, log, token } = await silent(() => hang);
+        const mark = log.seen.length;
+        const got = await P.W.receiveToken(token);
+        const done = Date.now();
+        if (!got || got.sats !== 100) return 'the receive: ' + JSON.stringify(got);
+        const seen = log.seen.slice(mark);
+        const swaps = seen.filter(x => x.path === '/v1/swap');
+        if (swaps.length !== 1) return 'the swap left ' + swaps.length + ' times';
+        const took = done - swaps[0].at;
+        const lateAt = hang.failAfter || hang.answerAfter || hang.refuseAfter;
+        // well before the transport would have given up on the request, or the real answer come
+        if (took > lateAt - 700) return 'it waited ' + took + ' ms after the swap left, as long as the transport would have';
+        const after = seen.slice(seen.indexOf(swaps[0]) + 1);
+        const checks = after.filter(x => x.path === '/v1/checkstate'), restore = after.filter(x => x.path === '/v1/restore');
+        if (!checks.length || !restore.length) return 'the mint was asked ' + checks.length + ' state check(s) and ' + restore.length + ' restore(s)';
+        const onSwap = after.filter(x => x.circuit === swaps[0].circuit);
+        if (onSwap.length) return onSwap.length + ' question(s) after the silence left on the circuit the swap went by (' + onSwap.map(x => x.path).join() + ')';
+        if (restore.some(x => x.circuit !== checks[0].circuit)) return 'the outputs were not asked for on the circuit that said the inputs were spent';
+        if (await P.W.balanceSats() !== 100 || rowsIn(P).length !== 1 || rowsIn(P)[0].sats !== 100) return 'balance ' + await P.W.balanceSats() + ', entries ' + JSON.stringify(rowsIn(P).map(e => e.sats));
+        if (swapsKept(P).length || heldBack(P).length) return 'a record was left: ' + JSON.stringify([swapsKept(P).length, heldBack(P).length]);
+        const settled = standing(P), asked = log.seen.length;
+        await nap(Math.max(0, swaps[0].at + lateAt + 500 - Date.now()));
+        if (standing(P) !== settled) return 'the request ' + late + ' later changed what the page holds: ' + settled + ' then ' + standing(P);
+        if (log.seen.length !== asked) return 'the mint was asked ' + (log.seen.length - asked) + ' more time(s) after the swap was finished';
+        if (log.seen.slice(mark).filter(x => x.path === '/v1/swap').length !== 1) return 'the swap was sent again';
+        return null;
+      });
+    }
+
+    await test('a swap whose request never reached the mint finishes nothing early, asks about its inputs on a circuit each time, and the recovery after the transport gives up is on another', async () => {
+      let n = 0;
+      const { P, log, token } = await silent(() => (++n === 1 ? { reach: false, failAfter: 2200 } : null));
+      const mark = log.seen.length;
+      let state = 'waiting';
+      const pending = P.W.receiveToken(token).then(() => { state = 'done'; return null; }, (e) => { state = 'failed'; return e; });
+      const swap = await untilSwap(log, mark);
+      if (!swap) return 'no swap left';
+      await nap(700);
+      if (state !== 'waiting') return 'the receive ended (' + state + ') before the transport gave up';
+      const early = log.seen.slice(mark);
+      const looks = early.slice(early.indexOf(swap) + 1);
+      if (looks.some(x => x.path !== '/v1/checkstate')) return 'asked more than the state of its inputs: ' + looks.map(x => x.path).join();
+      if (looks.length < 2) return 'only ' + looks.length + ' look(s) in 700 ms';
+      if (new Set(looks.map(x => x.circuit)).size !== looks.length || looks.some(x => x.circuit === swap.circuit)) return 'the looks did not each leave on a circuit of their own';
+      if (await P.W.balanceSats() !== 0) return 'something was added before the transport gave up';
+      const err = await pending;
+      if (!err || !/did not answer/.test(err.message)) return 'the receive ended: ' + (err && err.message);
+      const rest = log.seen.slice(mark);
+      const restores = rest.filter(x => x.path === '/v1/restore');
+      if (!restores.length) return 'the outputs were never asked for once the transport gave up';
+      const used = new Set([swap.circuit].concat(rest.filter(x => x.path === '/v1/checkstate').map(x => x.circuit)));
+      if (restores.some(x => used.has(x.circuit))) return 'the recovery left on a circuit already used: ' + restores.map(x => x.circuit.slice(0, 6)).join();
+      if (rest.filter(x => x.path === '/v1/swap').length !== 1) return 'the swap was sent again';
+      if (await P.W.balanceSats() !== 0 || rowsIn(P).length) return 'a swap the mint never saw put something in';
+      // the token is still good: taken once, the next time, by the same page
+      const again = await P.W.receiveToken(token);
+      return again && again.sats === 100 && await P.W.balanceSats() === 100 ? null : 'the token was not taken afterwards: ' + JSON.stringify(again);
+    });
+
+    await test('a swap whose inputs the mint calls pending is left out like one it calls unspent, and finished at the look that finds them spent', async () => {
+      // the mint is mid-way through the swap for the first two looks: its inputs read PENDING, then SPENT
+      let pending = 0, afterSwap = false;
+      const { P, log, token } = await silent(() => { afterSwap = true; return { reach: true, failAfter: 3500 }; }, {
+        rewrite: (m, out) => {
+          if (!afterSwap || new URL(m.url).pathname !== '/v1/checkstate') return out;
+          if (pending++ < 2) return out.replace(/"SPENT"/g, '"PENDING"');
+          return out;
+        },
+      });
+      const mark = log.seen.length;
+      const got = await P.W.receiveToken(token);
+      const done = Date.now();
+      if (!got || got.sats !== 100) return 'the receive: ' + JSON.stringify(got);
+      const seen = log.seen.slice(mark);
+      const swap = seen.find(x => x.path === '/v1/swap');
+      const after = seen.slice(seen.indexOf(swap) + 1);
+      const checks = after.filter(x => x.path === '/v1/checkstate');
+      const firstRestore = after.findIndex(x => x.path === '/v1/restore');
+      if (checks.length < 3) return 'only ' + checks.length + ' look(s) before it was finished';
+      if (after.slice(0, firstRestore).filter(x => x.path === '/v1/checkstate').length < 3) return 'it asked for the outputs before the inputs read spent: ' + after.map(x => x.path.split('/').pop()).join();
+      if (new Set(checks.slice(0, 3).map(x => x.circuit)).size !== 3) return 'the looks did not each leave on a circuit of their own';
+      if (done - swap.at > 3500 - 700) return 'it waited ' + (done - swap.at) + ' ms after the swap left';
+      return await P.W.balanceSats() === 100 && rowsIn(P).length === 1 ? null : 'balance ' + await P.W.balanceSats();
+    });
+
+    await test('a swap whose answer comes just inside the wait (eleven seconds of twelve, here five sixths of the wait) is not asked about at all', async () => {
+      const { P, log, token } = await silent(() => ({ reach: true, answerAfter: 2000 }));
+      P.W._swapSilentMs = 2400;
+      const mark = log.seen.length;
+      const got = await P.W.receiveToken(token);
+      if (!got || got.sats !== 100) return 'the receive: ' + JSON.stringify(got);
+      const swap = swapOf(log, mark);
+      // past the moment the first look would have been
+      await nap(Math.max(0, swap.at + 2400 + 600 - Date.now()));
+      const asked = log.seen.slice(mark).slice(log.seen.slice(mark).indexOf(swap) + 1);
+      if (asked.length) return 'the mint was asked ' + asked.map(x => x.path).join() + ' after a swap that answered in time';
+      return await P.W.balanceSats() === 100 ? null : 'balance ' + await P.W.balanceSats();
+    });
+
+    await test('a token send whose answer is lost while the mint made it fails at once with the money back, and its request answering later changes nothing', async () => {
+      const log = onMintLog();
+      let n = 0;
+      const P = nsPage({ onMint: log.onMint, hangSwap: () => (++n === 1 ? { reach: true, answerAfter: 2000 } : null) });
+      const W = P.W;
+      await W.seedReady();
+      await W.connect(NS_MINT);
+      for (const k of [64, 64, 64, 64]) await W.claim((await W.invoice(k, '')).hash);
+      W._swapSilentMs = 120;
+      W._swapLookMs = 60;
+      const before = await W.balanceSats();
+      const mark = log.seen.length;
+      const e = await W.sendToken(10).then(() => null, (x) => x);
+      const done = Date.now();
+      const swaps = log.seen.slice(mark).filter(x => x.path === '/v1/swap');
+      if (swaps.length !== 1) return 'the swap left ' + swaps.length + ' times';
+      if (!e || !e.recovered || !/restored it from this wallet/.test(e.message)) return 'the send ended: ' + (e ? e.message : 'with a token');
+      if (done - swaps[0].at > 1300) return 'it waited ' + (done - swaps[0].at) + ' ms after the swap left';
+      const after = log.seen.slice(mark).slice(1);
+      if (after.filter(x => x.circuit === swaps[0].circuit).length) return 'a question after the silence left on the circuit the swap went by';
+      if (await W.balanceSats() !== before) return 'the balance went from ' + before + ' to ' + await W.balanceSats();
+      if (P.storage.getItem('foxy.cashu.outtoken') || swapsKept(P).length || heldBack(P).length) return 'a token or a record was left behind';
+      const settled = standing(P);
+      await nap(Math.max(0, swaps[0].at + 2000 + 500 - Date.now()));
+      return standing(P) === settled && await W.balanceSats() === before ? null : 'the answer coming later changed the page: ' + await W.balanceSats();
+    });
+
+    await test('a swap found at the mint is finished once however the page is killed: while it is being looked into, or after it is finished', async () => {
+      // killed while the outputs are being asked for: the record is on disk and the pile has nothing from the swap
+      let snap = null;
+      const { P, log, token } = await silent(() => ({ reach: true, failAfter: 2500 }), {
+        onMint: (m) => { if (!snap && new URL(m.url).pathname === '/v1/restore') snap = storageOf(P); },
+      });
+      const mark = log.seen.length;
+      const got = await P.W.receiveToken(token);
+      if (!got || got.sats !== 100) return 'the receive: ' + JSON.stringify(got);
+      if (!snap) return 'the outputs were never asked for';
+      const kept = JSON.parse(snap['foxy.cashu.swaps'] || '[]');
+      if (kept.length !== 1 || kept[0].kind !== 'receive' || !kept[0].outputs.length) return 'the record at the kill: ' + JSON.stringify(kept);
+      const held = Object.keys(snap).filter(k => /^foxy\.cashu\.proofs\./.test(k)).reduce((n, k) => n + JSON.parse(snap[k] || '[]').length, 0);
+      if (held) return 'the pile at the kill already had ' + held + ' proof(s) from the swap';
+      // killed after it was finished, the request still out
+      const after = storageOf(P);
+      for (const [when, storage] of [['while it was being looked into', snap], ['after it was finished', after]]) {
+        const S = nsPage({ mint: P.mint, words: NS_OTHER, phone: P.phone, storage });
+        await S.W.seedReady();
+        await S.W.connect(NS_MINT);
+        await S.W.recoverSwaps();
+        await nap(60);
+        await S.W.recoverSwaps();
+        if (await S.W.balanceSats() !== 100) return 'killed ' + when + ', the next launch holds ' + await S.W.balanceSats();
+        if (swapsKept(S).length || heldBack(S).length || rowsIn(S).length !== 1) return 'killed ' + when + ': ' + JSON.stringify([swapsKept(S).length, heldBack(S).length, rowsIn(S).length]);
+      }
+      // and the page that was not killed ends where it was
+      await nap(Math.max(0, swapOf(log, mark).at + 2500 + 500 - Date.now()));
+      return await P.W.balanceSats() === 100 && rowsIn(P).length === 1 ? null : 'the page itself ended at ' + await P.W.balanceSats();
     });
 
     for (const vb of [0, 1]) {

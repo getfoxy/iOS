@@ -25,6 +25,30 @@ const ok = (good, name, detail) => {
 
 const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn } = require('./flashcard-ui-kit');
 
+/* The app's own announcement of a payment (12-receive.js) and the queue that raises them one at a time (15-paid-wake-keyboard.js), lifted out of their
+ * files and given to an app made of the card's parts, which has neither. A confirmation raised is the screen going to 'paid' with its amount. */
+const withConfirmations = (app) => {
+  const fs = require('fs');
+  const path = require('path');
+  const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8');
+  const lift = (src, sig) => {
+    const from = src.indexOf('\n  ' + sig) + 1;
+    return src.slice(from, src.indexOf('\n  }\n', from) + 5);
+  };
+  const receive = read('12-receive.js'), wake = read('15-paid-wake-keyboard.js');
+  const body = [lift(receive, 'announcePayment(ev) {'), lift(wake, 'nextPaidScreen() {'), lift(wake, 'queueLater() {'), lift(wake, 'paidDismissed() {')].join(',');
+  const lifted = new Function('window', 'document', 'CONFIRM_SCREENS', 'return {' + body + '}')(
+    { FoxyWallet: { notify: () => {} } }, { visibilityState: 'visible' }, []);
+  Object.assign(app, lifted);
+  app.SPLIT_SCREENS = [];
+  app.QUEUE_RETRY_MS = 40;
+  app.PASTE_SETTLE_MS = 0;
+  app.offerSecureFoxy = () => {};
+  // as it is in the app: a confirmation is dismissed from its own screen
+  app.dismissPaid = () => { app.state.screen = 'home'; app.paidDismissed(); };
+  return app;
+};
+
 /* The daily limit's three steps, as a person takes them: the warning's CONTINUE, an amount on the keypad
  * (or NO LIMIT under it, for 0), and the confirmation's CONFIRM. */
 const takeLimitSteps = (app, sats, which) => {
@@ -530,6 +554,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(/^The card was taken away before it had signed for all of ₿768\. Tap it again to finish paying\.$/.test(card(till2).reason) && card(till2).has('TAP CARD') && card(till2).has('CANCEL')
        && RT.W.cardOwed().length === 0 && (await RT.W.balanceSats()) === rb4,
        'a tap to finish that reads no card says NOT PAID YET, with TAP CARD to finish and CANCEL', card(till2).all);
+    ok(till2.cardFlowBusy() === true, 'a payment waiting for its card to be tapped again is a card flow still: a confirmation that comes waits');
     RT.nfc = c4;
     c4.tap();
     card(till2).press('CANCEL');
@@ -1062,6 +1087,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(first > 0 && c.balance() === 1500 - first && /came off the card into this phone before it was taken away\. Tap it again for the rest/.test(card(holder).reason)
        && card(holder).has('TAP CARD') && card(holder).has('LATER') && H.W.cardOwed().length === 0,
        'where that sheet reads no card, it says what came off and offers the tap for the rest; nothing waits to go back', card(holder).reason);
+    ok(holder.cardFlowBusy() === true, 'a withdrawal waiting for the rest is a card flow still: a confirmation that comes waits');
     H.nfc = c;
     c.tap();
     card(holder).press('TAP CARD');
@@ -1393,6 +1419,86 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       link('lost');
       ok(behind(R).look === 'remove', 'and the card going is not “lost” then');
 
+      /* REMOVE is right only while there is something to take away: the sheet may still be showing for a second and a half after the card
+       * signed, or until it is seen to go, whichever is first. Then, with the mint not yet heard from, the screen says CHECKING, and STILL CHECKING
+       * once the wait the CHECKING card makes (`fcChecking`) has run out. The clock is wound back here; the timer that draws it by itself is below. */
+      {
+        const gone = () => S._fcTapO.t;
+        const fresh = () => { begin(); link('connected'); S.fcStage('mint'); S.fcStage('checking'); };
+        // (the suites hold REMOVE in place; here it is the clock of a phone, a second and a half)
+        S.FC_TAP_REMOVE_MS = 1500;
+        fresh();
+        ok(behind(R).look === 'remove' && gone().goneAt > 0, 'the card let go: REMOVE, from the moment it signed');
+        gone().goneAt = Date.now() - 1400;
+        S.fcTapDraw();
+        ok(behind(R).look === 'remove', 'still REMOVE a second and four tenths after it signed');
+        gone().goneAt = Date.now() - 1600;
+        S.fcTapDraw();
+        b = behind(R);
+        ok(is(b, 'checking', 'CHECKING', WARM, false, false), 'a second and a half after the card signed, the mint not yet heard from: CHECKING, on the same warm ground, settled, and no CANCEL', JSON.stringify(b));
+        const wait = S.fcCheckWait();
+        ok(wait === S.FC_CHECK_FIRST_MS + (S.FC_CHECK_ASKS - 1) * S.FC_CHECK_EVERY_MS && wait === 58000, 'the wait for STILL CHECKING is the one the CHECKING card makes: a first asking at 3 s and a dozen at 5 s', String(wait));
+        gone().goneAt = Date.now() - 1500 - wait + 500;
+        S.fcTapDraw();
+        ok(behind(R).look === 'checking', 'CHECKING until that wait has run out');
+        gone().goneAt = Date.now() - 1500 - wait - 500;
+        S.fcTapDraw();
+        b = behind(R);
+        ok(is(b, 'still', 'STILL CHECKING', WARM, false, false), 'and STILL CHECKING after it', JSON.stringify(b));
+        link('lost');
+        ok(behind(R).look === 'still', 'and the card going is not “lost” then either');
+        // the sheet seen to go before the clock has run out: CHECKING at once
+        fresh();
+        ok(behind(R).look === 'remove', 'a card just let go is REMOVE again on a tap of its own');
+        S.fcSheetGone();
+        ok(behind(R).look === 'checking' && gone().sheetGoneAt > 0, 'the phone\'s sheet going (the app has the screen back) is CHECKING at once, with no wait for the clock');
+        // a sheet that goes before any card was let go says nothing
+        begin();
+        link('connected');
+        S.fcSheetGone();
+        ok(behind(R).look === 'keep' && !gone().sheetGoneAt, 'a sheet going while the card is still being asked for something changes nothing');
+        // the mint has answered (the change is being made, or the tap is over): nothing is left to check, and the screen keeps the look it had
+        fresh();
+        S.fcStage('making');
+        gone().goneAt = Date.now() - 100000;
+        S.fcTapDraw();
+        ok(behind(R).look === 'remove' && !S._fcLookT, 'answered inside the second and a half, while the change is made: it is still REMOVE, and stays so, with no clock behind it');
+        fresh();
+        gone().goneAt = Date.now() - 2000;
+        S.fcTapDraw();
+        S.fcStage('making');
+        gone().goneAt = Date.now() - 100000;
+        S.fcTapDraw();
+        ok(behind(R).look === 'checking' && !S._fcLookT, 'answered while it said CHECKING: it says CHECKING until the screen comes down, and does not turn to STILL CHECKING or back to REMOVE');
+        fresh();
+        gone().goneAt = Date.now() - 100000;
+        S.fcTapDraw();
+        S.fcStage('done');
+        ok(behind(R).look === 'still', 'answered while it said STILL CHECKING: the same');
+        fresh();
+        S.fcStage('done');
+        gone().goneAt = Date.now() - 100000;
+        S.fcTapDraw();
+        ok(behind(R).look === 'remove', 'and a tap that is over as the card is let go stays REMOVE');
+        // a payment that makes change keeps the titles it had: VERIFYING CARD while the card is there, TAP FOR CHANGE when it must be tapped again
+        begin();
+        link('connected');
+        S.fcStage('mint');
+        ok(behind(R).look === 'verify' && !S._fcLookT, 'a card still in the field after it signed is VERIFYING CARD, with no clock behind it: it stays so however long the mint takes');
+        link('lost');
+        ok(behind(R).look === 'change', 'and TAP FOR CHANGE when it must be tapped again');
+        // the timer that draws the change of look by itself, and goes with the screen
+        S.FC_TAP_REMOVE_MS = 60;
+        fresh();
+        ok(behind(R).look === 'remove' && !!S._fcLookT, 'REMOVE has a timer behind it for the look that follows');
+        await until('CHECKING to come up by itself', () => behind(R) && behind(R).look === 'checking');
+        ok(behind(R).title === 'CHECKING' && !!S._fcLookT, 'the screen turns to CHECKING by itself, with no step or event to turn it, and has a timer behind it for STILL CHECKING');
+        S.hideStage('card');
+        ok(!S._fcLookT && !stage(R), 'and the timer goes with the screen: nothing left running');
+        S.FC_TAP_REMOVE_MS = 3600 * 1000;
+        ok(S.FC_TAP_REMOVE_MS > 0 && S.FC_TAP_TITLES.checking === 'CHECKING' && S.FC_TAP_TITLES.still === 'STILL CHECKING', 'the words are the CHECKING card\'s: CHECKING, and STILL CHECKING');
+      }
+
       // the second tap of a payment, asked for before the card is found
       begin({ look: 'receive' });
       b = behind(R);
@@ -1441,6 +1547,127 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       S.fcTapTick();
       ok(!stage(R) && !S._fcCountT, 'and a tick that comes after draws nothing');
       S._fcTapO = {};
+    }
+
+    /* a holder of its own for these cards: the one above has spent most of what it had */
+    const HX = await funded({ sharedMint: H.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 5000);
+    /* ---- a payment the mint is slow to answer: the screen says what is true at each moment -------------------------------
+     * REMOVE while the sheet may still be showing, then CHECKING while the mint is asked, then STILL CHECKING once the wait the CHECKING card makes
+     * has run out (shortened here to a fifth of a second). The swap is answered at last, and the payment is made. */
+    {
+      const d = newCard(HX);
+      await HX.W.cardSetUp(d, { pin: '1234' });
+      await binaryLoad(HX, d, 1000);            // 512 256 128 64 32 8
+      const slow = appOn(R, { screen: 'confirm' });
+      slow.asking = 960;                       // 512 + 256 + 128 + 64: four pieces and no change
+      // wide enough that a machine that stalls for half a second does not step over CHECKING (the look follows the clock, not the order of the timers)
+      slow.FC_TAP_REMOVE_MS = 200;
+      slow.FC_CHECK_FIRST_MS = 600; slow.FC_CHECK_EVERY_MS = 600; slow.FC_CHECK_ASKS = 3;
+      R.nfc = d;
+      d.tap();
+      const before = await R.W.balanceSats();
+      R.hang = () => { R.hang = null; return { reach: true, answerAfter: 5000 }; };
+      const seen = watchBehind(slow, R);
+      slow.payByCard();
+      await until('the PIN pad', () => !!pad(slow));
+      d.tap();
+      pad(slow).type('1234');
+      await until('the screen to say STILL CHECKING', () => seen.some((x) => x.look === 'still'));
+      ok(/remove > checking > still$/.test(seen.path()) && seen.titles().indexOf('REMOVE > CHECKING > STILL CHECKING') >= 0 && !!stage(R) && (await R.W.balanceSats()) === before,
+         'a payment the mint is slow to answer: the screen says REMOVE, then CHECKING, then STILL CHECKING, and the payment is not made yet', seen.path());
+      ok(seen.filter((x) => x.look === 'checking' || x.look === 'still').every((x) => x.scheme === '03' && !x.loop && !x.cancel),
+         'on the warm ground, settled, with no CANCEL, as REMOVE was');
+      await until('the swap to be answered and the payment made', () => !stage(R) && slow.state.screen === 'home');
+      seen.stop();
+      ok((await R.W.balanceSats()) === before + 960 && !slow._fcLookT && !slow._fcCountT, 'and when the mint answers the payment is made, the screen is down, and no timer is left running', String((await R.W.balanceSats()) - before));
+      await settle();
+    }
+
+    /* ---- a confirmation that comes while a card is being tapped waits for the tap ----------------------------------------
+     * Another payment's PAYMENT RECEIVED must not rise over the screen behind the phone's sheet, or over the PIN pad of a tap: it is kept, in the order
+     * it came in, and raised one at a time when the card flow is over. The payment the flow is making is not held by this (it has its own hold). */
+    {
+      const d = newCard(HX);
+      await HX.W.cardSetUp(d, { pin: '1234' });
+      await binaryLoad(HX, d, 1000);
+      const busy = withConfirmations(appOn(R, { screen: 'confirm' }));
+      busy.asking = 960;
+      busy.FC_END_SETTLE_MS = 40;
+      ok(busy.cardFlowBusy() === false, 'with no card being tapped, no card flow is going on');
+      let let_go = null;
+      const gate = new Promise((r) => { let_go = r; });
+      R.nfc = { tap: () => d.tap(), send: (a) => (/^b020/.test(a) ? gate.then(() => d.send(a)) : d.send(a)) };
+      const before = await R.W.balanceSats();
+      R.sheet.length = 0;
+      busy.payByCard();
+      await until('the PIN pad', () => !!pad(busy));
+      ok(busy.cardFlowBusy() === true, 'the first tap ended asking for the PIN, with the screen under the pad: a card flow is going on');
+      busy.announcePayment({ hash: 'req-asked', dir: 'in', sats: 33, to: 'ecash' });
+      ok(busy.state.screen === 'confirm' && busy._paidQueue.length === 1 && busy._paidQueue[0].hash === 'req-asked',
+         'a PIN being asked for a tap: a confirmation that comes is kept, and not raised over the pad’s screen', busy.state.screen + ' ' + JSON.stringify(busy._paidQueue));
+      pad(busy).type('1234');
+      await until('the card to be asked to sign', () => R.sheet.indexOf('say: Signing piece 1 of 4') >= 0);
+      ok(busy.cardFlowBusy() === true && (busy._fcTaps || 0) === 1 && !!stage(R), 'the card on the phone, its sheet up: a tap is in progress');
+      busy.announcePayment({ hash: 'req-two', dir: 'in', sats: 77, to: 'ecash' });
+      busy.announcePayment({ hash: 'req-three', dir: 'out', sats: 5, to: 'ecash', says: 'WITHDRAWAL SENT' });
+      busy.announcePayment({ hash: 'req-two', dir: 'in', sats: 77, to: 'ecash' });
+      await settle();
+      ok(busy.state.screen === 'confirm' && busy._paidQueue.map((q) => q.hash).join() === 'req-asked,req-two,req-three',
+         'while the card is on the phone, confirmations are kept in the order they came, each once, and the screen is as it was', busy.state.screen + ' ' + busy._paidQueue.map((q) => q.hash).join());
+      let_go();
+      await until('the payment to be made', () => busy.state.screen !== 'confirm' && !stage(R) && (busy._fcTaps || 0) === 0);
+      ok((await R.W.balanceSats()) === before + 960, 'the tap goes on to the end, as it did', String((await R.W.balanceSats()) - before));
+      await until('the first confirmation to be raised', () => busy.state.screen === 'paid');
+      ok(busy.state.amount === '33' && !stage(R) && !busy.cardFlowBusy() && busy._paidQueue.length === 3,
+         'when the card flow is over the first is raised, with the card’s screen down, and the rest wait behind it', busy.state.amount + ' ' + busy._paidQueue.length);
+      busy.dismissPaid();
+      await until('the second confirmation', () => busy.state.screen === 'paid' && busy.state.amount === '77');
+      busy.dismissPaid();
+      await until('the third confirmation', () => busy.state.screen === 'paid' && busy.state.amount === '5');
+      ok(busy.state.paidSays === 'WITHDRAWAL SENT' && busy.state.payOut === true, 'each as it was asked, in the order it came: the third carries its own heading and direction', busy.state.paidSays);
+      busy.dismissPaid();
+      await until('the queue to be empty', () => !(busy._paidQueue && busy._paidQueue.length));
+      await settle();
+    }
+    {
+      // the pad backed out of: the screen under it goes with it, and what waited for the pad is raised
+      const d = newCard(HX);
+      await HX.W.cardSetUp(d, { pin: '1234' });
+      await binaryLoad(HX, d, 1000);
+      const backed = withConfirmations(appOn(R, { screen: 'confirm' }));
+      backed.asking = 960;
+      backed.FC_END_SETTLE_MS = 40;
+      R.nfc = d;
+      d.tap();
+      backed.payByCard();
+      await until('the PIN pad', () => !!pad(backed));
+      backed.announcePayment({ hash: 'req-late', dir: 'in', sats: 12, to: 'ecash' });
+      ok(backed.state.screen === 'confirm' && backed._paidQueue.length === 1, 'a confirmation that comes while the PIN is asked for waits');
+      pad(backed).back();
+      await until('the confirmation to be raised', () => backed.state.screen === 'paid');
+      ok(backed.state.amount === '12' && !pad(backed) && !stage(R) && !backed.cardFlowBusy(), 'and when the pad is backed out of, with nothing left of the card flow, it is raised', backed.state.amount);
+      backed.dismissPaid();
+      await settle();
+    }
+    {
+      // ADD FUNDS making the pieces for the tap (GETTING IT READY), and a flow that goes on too long
+      const add = withConfirmations(appOn(H, { screen: 'flashcard' }));
+      add.FC_END_SETTLE_MS = 40;
+      const realPrepare = H.W.cardPrepare;
+      H.W.cardPrepare = () => new Promise(() => {});
+      add._fcCard = { key: 'a-card', record: {}, pieces: [] };
+      add.fcAddRun(500, '', true);
+      ok(stage(H) === 'cardReady' && add.cardFlowBusy() === true, 'ADD FUNDS making the pieces for the tap: a card flow is going on');
+      add.announcePayment({ hash: 'req-ready', dir: 'in', sats: 21, to: 'ecash' });
+      ok(add.state.screen === 'flashcard' && add._paidQueue.length === 1, 'and a confirmation that comes waits');
+      add._paidQueue[0].held = Date.now() - add.FC_HOLD_MS - 1000;
+      add.nextPaidScreen();
+      ok(add.state.screen === 'paid' && add.state.amount === '21', 'a card flow that goes on past the longest a confirmation waits for a change tap does not hold it for ever');
+      add.dismissPaid();
+      H.W.cardPrepare = realPrepare;
+      add.hideStage();
+      add._fcAdding = null;
+      await settle();
     }
 
     /* ---- with no route: the HIGH RISK card first, a yes or a no, the exact set only ------ */

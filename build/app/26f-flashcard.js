@@ -90,6 +90,14 @@
   FC_RENEW_DAYS = 30;
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
+  /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
+   * counts too (26h-tap-screen.js): the first asking this long after the card is let go, then one every FC_CHECK_EVERY_MS, FC_CHECK_ASKS in all.
+   * CHECKING until the last has gone unanswered, and STILL CHECKING after it. */
+  FC_CHECK_FIRST_MS = 3000;
+  FC_CHECK_EVERY_MS = 5000;
+  FC_CHECK_ASKS = 12;
+  // how long after a card screen has come down a confirmation waits to be sure the card flow has not gone straight on to its next screen
+  FC_END_SETTLE_MS = 300;
   /* Cards are cash, for now.
    *
    * The card and the wallet can do more: a card set up as recoverable names a
@@ -307,6 +315,9 @@
   fcTap(o, fn) {
     const W = this.fcW();
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
+    // a tap is in progress from here until it settles, whatever is on the screen meanwhile (`cardFlowBusy`)
+    this._fcTaps = (this._fcTaps || 0) + 1;
+    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); };
     /* The tap that follows the PIN pad (the last sheet ended asking for it) starts as PLEASE TAP AGAIN, on the screen
      * the last tap left up (26h-tap-screen.js). */
     const was = document.getElementById('foxy-stage');
@@ -385,8 +396,8 @@
        * found. */
       if (line) this.fcTapLost();
       return line;
-    } : null }).then((r) => { over(false); return r; },
-            (e) => { over(!!(e && e.card === 'pin-needed')); throw e; }));
+    } : null }).then((r) => { free(); over(false); return r; },
+            (e) => { free(); over(!!(e && e.card === 'pin-needed')); throw e; }));
   }
 
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
@@ -440,8 +451,15 @@
     const t = this.fcTapState();
     if (step !== 'hold') t.touched = true;
     if (step === 'mint' || step === 'change') t.signed = true;
-    if (step === 'checking' || step === 'making' || step === 'done') { t.signed = true; t.gone = true; t.connected = false; }
-    if (step === 'receive') { t.signed = true; t.connected = false; t.gone = false; }
+    /* The card is let go with the mint not yet heard from (`checking`): REMOVE, then CHECKING (26h-tap-screen.js). With the mint's word in
+     * (`making`: the change is being made; `done`: the tap is over) there is nothing left to check, and the screen keeps the look it had, whichever
+     * of REMOVE, CHECKING and STILL CHECKING that was, until it comes down. */
+    if (step === 'checking') { t.signed = true; t.gone = true; t.connected = false; if (!t.goneAt) t.goneAt = Date.now(); }
+    if (step === 'making' || step === 'done') {
+      if (t.gone && t.goneAt && !t.kept) t.kept = this.fcGoneKey(t);
+      t.signed = true; t.gone = true; t.connected = false;
+    }
+    if (step === 'receive') { t.signed = true; t.connected = false; t.gone = false; t.goneAt = 0; t.kept = ''; t.sheetGoneAt = 0; }
     if (step === 'lost') { t.lost = true; t.connected = false; }
     this.fcTapDraw();
   }
@@ -458,7 +476,8 @@
    * for an instant between the two. */
   fcAskPin(o, then) {
     const opt = o || {};
-    this.pinOverlay({
+    // the pad is remembered, so that a card flow waiting on a PIN can be told from a pad that is gone (`cardFlowBusy`)
+    this._fcPadEl = this.pinOverlay({
       title: opt.title || 'CARD PIN',
       subtitle: opt.subtitle || '',
       warn: opt.warn || '',
@@ -736,9 +755,10 @@
    *
    * The one state in which nobody knows yet: the card has marked its pieces
    * spent, and whether they became this phone's is the mint's to say. Asked
-   * again every five seconds, a dozen times, and never past this screen: the
-   * wallet asks again by itself whenever it connects, and the payment is in
-   * HISTORY when it lands. */
+   * again every five seconds, a dozen times (FC_CHECK_*; the screen behind
+   * the card sheet says CHECKING and STILL CHECKING by the same wait), and
+   * never past this screen: the wallet asks again by itself whenever it
+   * connects, and the payment is in HISTORY when it lands. */
   fcChecking(id, o) {
     const W = this.fcW();
     const opt = o || {};
@@ -782,12 +802,12 @@
           return W.transactions(50).then((list) => settled((list || []).some(t => t.hash === id) ? 'paid' : 'spent'));
         }
         tries += 1;
-        if (tries >= 12) return settled('waiting');
-        this._fcCheckT = setTimeout(ask, 5000);
+        if (tries >= this.FC_CHECK_ASKS) return settled('waiting');
+        this._fcCheckT = setTimeout(ask, this.FC_CHECK_EVERY_MS);
         return null;
       }, () => settled('waiting'));
     };
-    this._fcCheckT = setTimeout(ask, 3000);
+    this._fcCheckT = setTimeout(ask, this.FC_CHECK_FIRST_MS);
   }
 
   /* Money has moved by a card and the screens catch up. A payment is
@@ -1374,6 +1394,65 @@
     if (this.fcOwedAfterPaying()) return false;
     this.fcReleaseConfirm(why || 'nothing is waiting for the card');
     return true;
+  }
+
+  /* ---- no confirmation over a card that is being read or written ------------------------------------------------------
+   *
+   * A payment's PAYMENT RECEIVED is raised over whatever screen is up (`announcePayment`, 12-receive.js), and one that came while a card
+   * was being tapped (the late end of an earlier payment's swap, say) rose over the card's own screen, with the phone's sheet up
+   * under it. It waits instead, in the queue of confirmations (`_paidQueue`, which `nextPaidScreen` empties one at a time, in order),
+   * until the card flow is over.
+   *
+   * A card flow is going on while: a tap is in progress (the phone's sheet is up, or the screen behind it, or the pause between two taps
+   * of one flow, which keeps that screen), the pieces for a tap are being made (GETTING IT READY, TAKING IT BACK), a card's PIN is being
+   * asked for a tap, or a card is up that asks for the card to be tapped again (TAP CARD: the rest of a withdrawal, a payment held, change
+   * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
+  cardFlowBusy() {
+    return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard();
+  }
+
+  // a card's PIN pad, asked for a tap, is still up
+  fcPadUp() {
+    const pad = this._fcPadEl;
+    return !!(pad && pad.parentNode && pad === this._pinEl);
+  }
+
+  // a card of the card screens is up, and its button is the card to be tapped again
+  fcAskingForCard() {
+    const up = this._blockedEl;
+    return !!(up && up.parentNode && /^fc-/.test(String(this._blockedKind || '')) && /TAP CARD/.test(up.textContent || ''));
+  }
+
+  /* Whether this payment's confirmation waits for the card flow: there is one, and the payment is not the one it is making. The flow's
+   * own payment is held by the flow, from the moment the card has signed until its change is back (`fcHoldConfirm`), and that is not
+   * touched here. */
+  cardFlowHolds(ev) {
+    if (!this.cardFlowBusy()) return false;
+    const hash = String((ev && (ev.hash || ev.tokenHash)) || '');
+    return !(hash && hash === String(this._holdConfirmFor || '') && Date.now() < (this._holdConfirmUntil || 0));
+  }
+
+  /* A confirmation that came while a card was being tapped: kept in the queue, behind the ones before it, to be raised when the card
+   * flow is over. One already queued under its name (the history pass found it) waits where it is. */
+  keepForCardFlow(ev) {
+    const hash = String((ev && (ev.hash || ev.tokenHash)) || '');
+    const queue = this._paidQueue = this._paidQueue || [];
+    if (!(hash && queue.some((q) => q && q.hash === hash))) {
+      queue.push({ dir: ev.dir || 'in', sats: ev.sats, hash: ev.hash, party: ev.to || '', ev: Object.assign({}, ev), held: Date.now() });
+    }
+    console.log('[foxy] confirmation held back: a card is being read or written; it is raised when that is over');
+    this.queueLater();
+  }
+
+  /* A card screen has come down. If that was the end of the card flow, the confirmations kept for it are raised; a moment later, so that a flow that
+   * goes straight on to its next screen (a pause, a card, the next tap) is not mistaken for one that has ended. */
+  cardFlowMayHaveEnded() {
+    clearTimeout(this._fcEndT);
+    this._fcEndT = setTimeout(() => {
+      this._fcEndT = null;
+      if (this.cardFlowBusy()) return;
+      if (this._paidQueue && this._paidQueue.length) this.nextPaidScreen();
+    }, this.FC_END_SETTLE_MS);
   }
 
   fcWriteAgain(o) {

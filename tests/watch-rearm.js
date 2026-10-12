@@ -14,7 +14,8 @@
  *     share once a payer pays it. They give up after an hour and nothing
  *     re-watched, and a return from the background did not either;
  *   - the confirmation queue, which only moved when something else happened to
- *     call it, so a payment held behind a busy screen was never shown;
+ *     call it, so a payment held behind a busy screen was never shown (and which
+ *     now also waits, in order, for a card that is being read or written);
  *   - walletReady's fifteen-second balance and history refresh, armed on the
  *     last line of a method whose eight preceding calls all reach out to the
  *     wallet.
@@ -49,6 +50,8 @@ function field(name) {
 const methods = new Function('return {' + [
   'resumeSplit(force) {', 'resumeSplitNow(force) {', 'splitWatchLater() {', 'spStopWatch() {',
   'nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {',
+  // whether a card is being read or written, and what waits for it to be over (26f-flashcard.js)
+  'cardFlowBusy() {', 'cardFlowHolds(ev) {', 'fcPadUp() {', 'fcAskingForCard() {', 'cardFlowMayHaveEnded() {',
   'walletReady(w) {',
   'spSyncPaid() {', 'spPaidArr() {', 'spOthers() {', 'spWaysN() {',
   'spPaidOnScreen(idx, how) {', 'spAdvanceAfterPaid(idx, how) {', 'spStopOne(i, hash) {',
@@ -59,6 +62,8 @@ const methods = new Function('return {' + [
 
 const SPLIT_REWATCH_MS = field('SPLIT_REWATCH_MS');
 const QUEUE_RETRY_MS = field('QUEUE_RETRY_MS');
+const FC_HOLD_MS = field('FC_HOLD_MS');
+const FC_END_SETTLE_MS = field('FC_END_SETTLE_MS');
 const SPLIT_SCREENS = field('SPLIT_SCREENS');
 
 /* The watchers chain a promise or two before they set the next timer, and the
@@ -101,6 +106,11 @@ function app(over) {
     SPLIT_SCREENS: SPLIT_SCREENS,
     SPLIT_REWATCH_MS: SPLIT_REWATCH_MS,
     QUEUE_RETRY_MS: QUEUE_RETRY_MS,
+    FC_HOLD_MS: FC_HOLD_MS,
+    FC_END_SETTLE_MS: FC_END_SETTLE_MS,
+    // the card screens that are up, by the name the stage keeps (`stageUp`)
+    stages: {},
+    stageUp(kind) { return !!a.stages[kind]; },
     state: { screen: 'home' },
     setState(p) { Object.assign(a.state, typeof p === 'function' ? p(a.state) : p); },
     refreshBalance() { said.push('balance'); },
@@ -437,6 +447,99 @@ async function run() {
     a.nextPaidScreen();
     check('an empty queue arms nothing, so the poll ends of its own accord', !a.clock.next(),
       'an empty queue kept polling');
+  }
+
+  // ---- a card being read or written: what is queued waits, in order, and is raised when it is over --------
+  /* A confirmation rose over the Flashcard screen with the phone's card sheet up under it. The queue does not move while a card is
+   * being tapped (the sheet or the screen behind it, the pause between two taps, the pieces for a tap being made, a PIN being asked
+   * for a tap), loses nothing and does not age; the payment the card flow is itself making is not held by it; and nothing waits
+   * for ever. */
+  {
+    const busy = {
+      'a tap in progress, with no screen up': (a) => { a._fcTaps = 1; },
+      'the screen behind the sheet': (a) => { a.stages.card = true; },
+      'the pieces for a tap being made': (a) => { a.stages.cardReady = true; },
+      'the pieces of a card being taken back': (a) => { a.stages.cardBack = true; },
+      'a card\'s PIN asked for a tap': (a) => { const pad = { parentNode: {} }; a._fcPadEl = pad; a._pinEl = pad; },
+      'a card that asks for the card to be tapped again': (a) => { a._blockedEl = { parentNode: {}, textContent: 'TAP THE CARD AGAIN \u20bf128 came off the card. TAP CARD LATER' }; a._blockedKind = 'fc-part'; },
+    };
+    for (const name of Object.keys(busy)) {
+      const a = app({ state: { screen: 'flashcard' }, _paidQueue: [{ sats: 10, hash: 'a' }, { sats: 20, hash: 'b' }] });
+      global.window = { FoxyWallet: {} };
+      busy[name](a);
+      a.nextPaidScreen();
+      check(name + ': a queued confirmation is not raised, is come back for, and does not age',
+        a.said.length === 0 && !!a.clock.next() && !a._paidQueue[0].said && a._paidQueue.length === 2, JSON.stringify({ said: a.said, queue: a._paidQueue }));
+      a._fcTaps = 0; a.stages = {}; a._fcPadEl = null; a._pinEl = null; a._blockedEl = null; a._blockedKind = '';
+      await a.clock.fire();
+      check(name + ': when it is over the first of them is raised, in its place',
+        a.said.join() === 'announce a' && a._paidQueue[0].hash === 'a' && a._paidQueue.length === 2, JSON.stringify(a.said));
+    }
+    {
+      // a pad that has been taken away, or that another pad has replaced, is not a card flow
+      const a = app({ state: { screen: 'home' }, _paidQueue: [{ sats: 10, hash: 'a' }] });
+      global.window = { FoxyWallet: {} };
+      a._fcPadEl = { parentNode: null };
+      a._pinEl = a._fcPadEl;
+      check('a PIN pad that is gone is not a card flow', a.cardFlowBusy() === false);
+      a._fcPadEl = { parentNode: {} };
+      a._pinEl = { parentNode: {} };
+      check('nor is another pad (the lock\'s, say) put up in its place', a.cardFlowBusy() === false);
+      // a card that is not asking for the card to be tapped is not a card flow: another card, or a card of the screens with a different button
+      a._blockedEl = { parentNode: {}, textContent: 'WRONG PIN 2 tries left. TRY AGAIN CANCEL' };
+      a._blockedKind = 'fc-wrong-pin';
+      check('a card of the card screens that offers TRY AGAIN is not a card being waited for', a.cardFlowBusy() === false);
+      a._blockedEl = { parentNode: {}, textContent: 'NOT ENOUGH Your balance. TAP CARD' };
+      a._blockedKind = 'netLost';
+      check('nor is a card of another part of the app, whatever its button says', a.cardFlowBusy() === false);
+      a._blockedEl = { parentNode: null, textContent: 'TAP CARD' };
+      a._blockedKind = 'fc-part';
+      check('nor is a card that has been taken away', a.cardFlowBusy() === false);
+    }
+    {
+      // the payment the flow is making is the flow's own, and goes on to its own hold
+      const a = app({ state: { screen: 'flashcard' }, _fcTaps: 1, _holdConfirmFor: 'card-a', _holdConfirmUntil: Date.now() + 60000,
+                      _paidQueue: [{ sats: 10, hash: 'card-a' }, { sats: 20, hash: 'b' }] });
+      global.window = { FoxyWallet: {} };
+      a.nextPaidScreen();
+      check('the confirmation of the very payment the card flow is making is not held by it (the flow\'s own hold has it)',
+        a.said.join() === 'announce card-a', JSON.stringify(a.said));
+      const b = app({ state: { screen: 'flashcard' }, _fcTaps: 1, _holdConfirmFor: 'card-a', _holdConfirmUntil: Date.now() + 60000,
+                      _paidQueue: [{ sats: 20, hash: 'b' }] });
+      b.nextPaidScreen();
+      check('and another payment\'s is', b.said.length === 0, JSON.stringify(b.said));
+      const c = app({ state: { screen: 'flashcard' }, _fcTaps: 1, _holdConfirmFor: 'card-a', _holdConfirmUntil: Date.now() - 1,
+                      _paidQueue: [{ sats: 10, hash: 'card-a' }] });
+      c.nextPaidScreen();
+      check('a hold that has run out names nothing as the flow\'s own', c.said.length === 0, JSON.stringify(c.said));
+    }
+    {
+      // nothing waits for ever: past the longest a confirmation is held for a change tap it goes up whatever is on the screen
+      const a = app({ state: { screen: 'flashcard' }, _fcTaps: 1, _paidQueue: [{ sats: 10, hash: 'a' }],
+                      announcePayment(ev) { a.said.push('announce ' + ev.hash + (ev.cardDone ? ' (past the wait)' : '')); a.state.screen = 'paid'; } });
+      global.window = { FoxyWallet: {} };
+      a.nextPaidScreen();
+      a._paidQueue[0].held = Date.now() - FC_HOLD_MS - 1000;
+      await a.clock.fire();
+      check('a card flow that goes on past the longest a confirmation waits does not hold it any longer, and the announcement is told so (it is not held again)',
+        a.said.join() === 'announce a (past the wait)', JSON.stringify(a.said));
+    }
+    {
+      // a card screen coming down is what raises them, a moment after: not if the flow has gone straight on to its next screen
+      const a = app({ state: { screen: 'flashcard' }, _paidQueue: [{ sats: 10, hash: 'a' }] });
+      global.window = { FoxyWallet: {} };
+      a.stages.card = true;
+      a.cardFlowMayHaveEnded();
+      const timer = a.clock.next();
+      check('a card screen coming down sets a short wait before anything is raised, not a raise at once', !!timer && timer.ms === FC_END_SETTLE_MS && a.said.length === 0,
+        JSON.stringify({ ms: timer && timer.ms, said: a.said }));
+      await a.clock.fire(timer);
+      check('and if the flow is still going on (the next screen is up) it raises nothing', a.said.length === 0, JSON.stringify(a.said));
+      a.stages = {};
+      a.cardFlowMayHaveEnded();
+      await a.clock.fire(a.clock.next());
+      check('and if it is over, the queue is moved on', a.said.join() === 'announce a', JSON.stringify(a.said));
+    }
   }
 
   // ---- the balance and history heartbeat ----------------------------------

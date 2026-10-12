@@ -22,7 +22,14 @@
    *                            the contact, a whole second at a time
    *   VERIFYING CARD           the card has signed and is still there: the mint is
    *                            asked, and change is fetched or written
-   *   REMOVE                   the card has signed and nothing more is wanted of it
+   *   REMOVE                   the card has signed and nothing more is wanted of it:
+   *                            for as long as the phone's sheet may still be showing, which
+   *                            is until it has gone or a second and a half after the card
+   *                            signed, whichever is first
+   *   CHECKING                 and then, while the mint has not answered the swap of what the
+   *                            card signed: there is nothing to remove, and the mint is asked
+   *   STILL CHECKING           the wait the CHECKING card makes (`fcChecking`) has run out, and
+   *                            the phone goes on asking
    *   TAP FOR CHANGE           the card has signed and contact broke before the
    *                            change went on (or the second tap is waiting for it)
    *   PLEASE TAP AGAIN         contact broke part way, and the same sheet asks again
@@ -43,8 +50,11 @@
   };
   FC_TAP_TITLES = {
     hold: 'TAP BEHIND PHONE', keep: 'KEEP HOLDING · ', verify: 'VERIFYING CARD', remove: 'REMOVE',
+    checking: 'CHECKING', still: 'STILL CHECKING',
     change: 'TAP FOR CHANGE', again: 'PLEASE TAP AGAIN', pin: 'ENTER PIN',
   };
+  // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
+  FC_TAP_REMOVE_MS = 1500;
   // the steps that mean the card is in the field, whether or not the phone has said so
   FC_TAP_CONTACT = { reading: 1, signing: 1, writing: 1, resetting: 1, mint: 1, change: 1 };
 
@@ -60,8 +70,8 @@
         touched: false,
         // the card has signed (a payment's second tap, and a put back, begin so)
         signed: o.look === 'receive' || !!o.putBack,
-        // the card is let go and nothing more is wanted of it
-        gone: false,
+        // the card is let go and nothing more is wanted of it; when it was, when the sheet was seen to go, and the look kept once the mint has answered
+        gone: false, goneAt: 0, sheetGoneAt: 0, kept: '',
         lost: false, wrote: false,
         // the sheet ended asking for the PIN; and the tap that follows the pad
         pin: false, pinAgain: !!o.pinAgain,
@@ -106,6 +116,51 @@
     if (this.stageUp('card')) this.fcTapDraw();
   }
 
+  /* The phone's sheet has gone: the app has the screen back (the native side tells the page of every return, with no time away when the app only
+   * lost focus for a sheet: 15-paid-wake-keyboard.js, `watchWake`). Only a card that has been let go can have its sheet go; REMOVE gives way to CHECKING
+   * then, if the clock has not done it already. */
+  fcSheetGone() {
+    // the app comes back to the screen for many reasons; with no tap begun there is nothing for a sheet to have been in
+    if (!(this._fcTapO && this._fcTapO.t)) return;
+    const t = this.fcTapState();
+    if (!t.gone || t.sheetGoneAt) return;
+    t.sheetGoneAt = Date.now();
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* The wait for the mint's word, in milliseconds: the one the CHECKING card makes before it says STILL CHECKING (`fcChecking`): the first asking, and the rest
+   * of a dozen at their pace. */
+  fcCheckWait() {
+    return this.FC_CHECK_FIRST_MS + (this.FC_CHECK_ASKS - 1) * this.FC_CHECK_EVERY_MS;
+  }
+
+  /* When a card that was let go stops being REMOVE: the sheet has gone, or the clock has run out, whichever is first. Nought for a tap that is not waiting on the
+   * mint (it has answered: the look is kept as it was, `kept`). */
+  fcCheckingFrom(t) {
+    if (!t.gone || !t.goneAt || t.kept) return 0;
+    const byClock = t.goneAt + this.FC_TAP_REMOVE_MS;
+    return t.sheetGoneAt ? Math.min(t.sheetGoneAt, byClock) : byClock;
+  }
+
+  /* Which of REMOVE, CHECKING and STILL CHECKING a card that was let go is on. */
+  fcGoneKey(t) {
+    if (t.kept) return t.kept;
+    const from = this.fcCheckingFrom(t);
+    const now = Date.now();
+    if (!from || now < from) return 'remove';
+    return now - from >= this.fcCheckWait() ? 'still' : 'checking';
+  }
+
+  /* Milliseconds until the screen changes by itself, with no step or event to change it: REMOVE to CHECKING, CHECKING to STILL CHECKING. Nought when it will not. */
+  fcTapDue(key) {
+    const from = this.fcCheckingFrom(this.fcTapState());
+    if (!from) return 0;
+    const now = Date.now();
+    if (key === 'remove') return Math.max(1, from - now);
+    if (key === 'checking') return Math.max(1, from + this.fcCheckWait() - now);
+    return 0;
+  }
+
   /* What the phone's own link reports (`FoxyWallet.onCard`): the card found, the card lost. */
   fcTapEvent(ev) {
     if (!ev || !this.stageUp('card')) return;
@@ -130,7 +185,7 @@
     const t = this.fcTapState();
     let key;
     if (t.pin) key = 'pin';
-    else if (t.gone) key = 'remove';
+    else if (t.gone) key = this.fcGoneKey(t);
     else if (t.connected) key = t.signed ? 'verify' : 'keep';
     // contact broke: before any of the change went on it is the change that is asked for, and otherwise it is the tap
     else if (t.lost) key = (t.signed && !t.wrote) ? 'change' : 'again';
@@ -139,7 +194,7 @@
     // the tap that follows the PIN pad: nothing has been asked of the card yet, and it was asked before
     else if (t.pinAgain) key = 'again';
     else key = 'hold';
-    const warm = key === 'keep' || key === 'verify' || key === 'remove';
+    const warm = key === 'keep' || key === 'verify' || key === 'remove' || key === 'checking' || key === 'still';
     return {
       key, scheme: warm ? '03' : '01',
       // the card is wanted, and the loop says so; once it is there it stays settled
@@ -249,6 +304,16 @@
     else if (k.key !== 'keep') { clearInterval(this._fcCountT); this._fcCountT = null; }
     if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key);
     if (fresh && this.syncPreview) this.syncPreview();
+    /* A look that comes of time alone is drawn when it is due, and the timer goes with the screen (`hideStage`). */
+    clearTimeout(this._fcLookT);
+    this._fcLookT = null;
+    const due = this.fcTapDue(k.key);
+    if (due > 0) {
+      this._fcLookT = setTimeout(() => {
+        this._fcLookT = null;
+        if (this.stageUp('card')) this.fcTapDraw();
+      }, due);
+    }
   }
 
   /* The title, one line: KEEP HOLDING carries the seconds, whose unit stays lowercase. */
