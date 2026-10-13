@@ -2,8 +2,7 @@
 
 Effective date: 2026-10-13
 
-This policy covers Foxy Wallet for iPhone (bundle identifier `io.getfoxi.foxy`),
-published by Island Bitcoin LLC. Questions go to apple@islandbitcoin.com.
+This policy covers Foxy Wallet for iPhone, published by Island Bitcoin LLC. Questions go to apple@islandbitcoin.com.
 
 ## Summary
 
