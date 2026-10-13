@@ -8,9 +8,9 @@ This policy covers Foxy Wallet for iPhone, published by Island Bitcoin LLC. Ques
 
 Foxy is a bitcoin wallet for Lightning and Cashu ecash whose seed stays on
 your iPhone. The app talks directly to the services you pay and get paid
-through. Island Bitcoin runs no server for Foxy and receives no data from the
-app. Foxy works without an account. The app contains no analytics, advertising
-or crash-reporting code.
+through. Island Bitcoin runs no server that the app talks to, and receives no
+data from the app. Foxy works without an account. The app contains no
+analytics, advertising or crash-reporting code.
 
 ## What leaves your iPhone, and where it goes
 
@@ -107,6 +107,12 @@ Three exceptions leave Foxy's Tor:
   the iPhone, and iOS lets it talk only to the Foxy card applet. A Flashcard's
   web address (getfoxy.io/card) opens Foxy; to allow that, iOS checks
   getfoxy.io's association file through Apple's servers.
+- **The Flashcard.** A Foxy Flashcard answers any NFC reader held to it.
+  Without a PIN, a reader can see how much the card holds and the card's
+  public key. That key is the same every time, so two readers could tell it is
+  the same card. Spending needs the card itself, and its PIN where one is
+  required. The card's own log opens only to its owner's phone. The web
+  address in a card's tag is the same on every card.
 - **Face ID, Touch ID and the PIN.** FACE / FINGER LOCK uses iOS's own Face ID,
   Touch ID or passcode prompt, and Foxy receives only whether it succeeded. A
   Foxy PIN, if you set one, is stored as a salted hash.
@@ -125,7 +131,7 @@ Three exceptions leave Foxy's Tor:
   amounts stay in it. A shorter record of the connection is saved on the
   iPhone for the next launch, so a stuck start can be explained, and deleted
   when it is read. You can read the log on the LOGS screen. It leaves the
-  iPhone only if you tap COPY and paste it somewhere yourself.
+  iPhone only if you tap SHARE and send it somewhere yourself.
 
 Deleting Foxy deletes its storage from the iPhone. Keychain items survive an
 app deletion on iOS, so on the first launch after a reinstall Foxy deletes the
@@ -154,6 +160,15 @@ learn from each operation.
 These are all the permissions Foxy asks for. Foxy does not use location,
 contacts, photos, the microphone or tracking, and it reads no advertising or
 device identifier.
+
+## The getfoxy.io website
+
+getfoxy.io is a separate website run by Island Bitcoin. The app sends it
+nothing. A Flashcard held to a phone without Foxy opens getfoxy.io/flashcard
+in the browser. Like any website, its server receives your IP address and
+browser type with the request. It keeps no visitor log and uses no analytics.
+Its pages load their fonts from Google Fonts, so your browser also contacts
+Google. Mail sent to an address at getfoxy.io is forwarded to Island Bitcoin.
 
 ## Apple and TestFlight
 
