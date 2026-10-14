@@ -12,7 +12,7 @@
   The key is the list of card applets Foxy may speak to over NFC, by name. iOS
   hands the app a card only if the card answers to one of these names, so a
   bank card or a passport held to the phone is never Foxy's to talk to. There
-  is one name: the applet of the Cashu card protocol 2.0 (applet/build.xml in
+  is one name: the applet of the shared Cashu card protocol 2.x (spec/APDU.md in
   https://github.com/lnflash/cashu-javacard), its package's ten bytes (F0 and
   CASHUCARD) and 01.
   Foxy/Flashcard/CardGate.swift holds the same name and checks every command

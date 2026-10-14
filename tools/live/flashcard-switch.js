@@ -2,8 +2,8 @@
 /* flashcard-switch.js — a card moved between two real mints, and back.
  *
  *   sh tools/live/local-mint.sh up
- *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
- *   (the card repository is https://github.com/lnflash/cashu-javacard)
+ *   sh <cashu-javacard>/tools/cardsim/run.sh 47436      (optional: the applet itself)
+ *   (the shared protocol's applet and simulator: https://github.com/lnflash/cashu-javacard)
  *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
  *     node tools/live/flashcard-switch.js [card port]
  *

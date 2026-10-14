@@ -1524,9 +1524,9 @@ This has run on one card and one phone, and not beyond that. The wallet, the
 screens and the applet have also been driven together with no card in the loop
 (tests/flashcard-*.js, and the simulator against the applet in a JavaCard
 simulator); what is left is what only more cards, more phones, a radio and a
-hand can show. Needs a card with the applet on it (the applet repository is
-https://github.com/lnflash/cashu-javacard, and its README says how to build the applet
-and load it), a phone whose build carries the NFC entitlement
+hand can show. Needs a card with the applet on it (the card repository is
+https://github.com/getfoxy/card; the 2.x applet is built and loaded as the README of
+https://github.com/lnflash/cashu-javacard says), a phone whose build carries the NFC entitlement
 (tools/flashcard.entitlements), and a second phone at the same mint. How the card works, and what the app does with it, is in
 [CARD.md](CARD.md).
 
@@ -2081,14 +2081,15 @@ lines are `card: wrote …` (each write) and `card: its proofs: …` (each check
 
 #### 23g. The Cashu card protocol 2.0
 
-Needs a card with the applet of https://github.com/lnflash/cashu-javacard v2.0 on it, the holder's phone with Tor up, a
+Needs a card with a 2.x applet on it (the shared protocol's, https://github.com/lnflash/cashu-javacard 2.1; its install on the J3R180 is pending a hardware run), the holder's phone with Tor up, a
 second phone, and if there is one a card with another version of the applet. Test money only. Nothing here has run on a real card. The
 protocol is `spec/NUT-XX.md` and `spec/APDU.md` there.
 
-1. **The name.** MENU, FLASHCARD, tap a 2.0 card. **Pass:** it reads. The log's read line has no `not a card`, and a bank
+1. **The name.** MENU, FLASHCARD, tap a 2.x card. **Pass:** it reads. The log's read line has no `not a card`, and a bank
    card held to the phone is still not read.
-2. **A card that needs an update.** Tap a card whose applet answers to the 2.0 name with a version other than 02 00, if
-   there is one. **Pass:** CARD NEEDS AN UPDATE, `This card needs an update.`, and nothing is written to it. A card with an
+2. **A card that needs an update.** Tap a card whose applet answers to the 2.x name with a major version other than 02, if
+   there is one. **Pass:** below 02, CARD NEEDS AN UPDATE, `This card needs an update.`; above it, UPDATE FOXY, `This card is
+   newer than this Foxy. Update the app to use it.`; and nothing is written to it. A card with an
    older applet name is not offered to Foxy by iOS at all: the sheet does not react to it.
 3. **Set-up anchors the clock.** Set up a new card on the holder's phone a minute after Tor has come up. **Pass:** the card's
    screen says `Block #<height>` straight after the set-up tap, with no second tap: the owner key went on with the newest block
@@ -2097,8 +2098,17 @@ protocol is `spec/NUT-XX.md` and `spec/APDU.md` there.
    holder's phone. **Pass:** the limit is whole again the next day. The holder's phone, online, taps the card: the log says
    `card: refreshed with block` and the budget is full again (seven days unless set otherwise).
 5. **Past the budget.** With the budget set to one day (the card tools, or a test build), leave the card two days with no tap
-   from the holder's phone. **Pass:** on the second day the till is refused with what was spent still counted; once the holder's
-   phone taps it online, the day starts again.
+   from the holder's phone. **Pass:** on the second day the till is refused with what was spent still counted, in words with no
+   day and no time (`The card has … left, and this payment is more than that. Its daily limit does not renew until its owner's
+   phone taps it with a connection.`); the card's screen on the second phone says `LEFT` and `RENEWS WHEN ITS OWNER'S PHONE TAPS
+   IT ONLINE`; on the holder's phone offline, `This card's daily limit has stopped renewing.`; once the holder's phone taps it
+   online, it says `This card's daily limit had stopped renewing. This tap renewed it.` and the day starts again.
+6. **A locked card is refreshed.** With the budget partly spent, lock the card and tap it on the holder's phone online.
+   **Pass:** the log says `card: refreshed with block`; on the second phone the same tap logs `would not take a refresh … (6a91)`
+   and its screen says nothing of it.
+7. **A payment of nothing rolls nothing (2.1).** Hard to make by hand; the applet's own tests and the recorded conversation
+   hold it. On a card past its day, a payment whose change is all of it (if a test build can make one) leaves GET_CARD's byte 76
+   as it was.
 
 ---
 

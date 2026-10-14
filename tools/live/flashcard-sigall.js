@@ -2,8 +2,8 @@
 /* flashcard-sigall.js — a card that signs once for a payment, at real mints.
  *
  *   sh tools/live/local-mint.sh up
- *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
- *   (the card repository is https://github.com/lnflash/cashu-javacard)
+ *   sh <cashu-javacard>/tools/cardsim/run.sh 47436      (optional: the applet itself)
+ *   (the shared protocol's applet and simulator: https://github.com/lnflash/cashu-javacard)
  *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
  *     node tools/live/flashcard-sigall.js [card port]
  *
@@ -683,7 +683,7 @@ async function at(mintKey, names, real) {
 
   /* RESET (software 1.17): the owner gives the card back to what it was in its packet, with whatever is on it taken off first, in the one
    * tap; another person (the till's words) sets it up, and the first owner is no longer its owner. Not run before there is a 1.17 card to run
-   * it on (the applet of the card repository's tools/cardsim, or the model). */
+   * it on (the applet of cashu-javacard's tools/cardsim, or the model). */
   if (first.card.info.resetKnown) {
     await card.tap();
     const oldKey = (await holder.W.cardLook(card, { mine: true, short: true })).key;

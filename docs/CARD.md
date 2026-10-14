@@ -4,17 +4,19 @@ What Foxy does with a card: a chip card that holds ecash and pays a Foxy by a
 tap and a PIN. This file is the phone's side: set-up, the PIN, adding money,
 paying at a till, change, the daily limit, a blocked card, and what the person
 sees. The card's own side, the applet and its commands, is in the card
-repository, https://github.com/lnflash/cashu-javacard, whose v2.0 is the Cashu
-card protocol 2.0 that Foxy's cards and Flash's speak alike. The protocol is
-`spec/NUT-XX.md` there
+repository, https://github.com/getfoxy/card. The protocol it speaks is the shared
+Cashu card protocol 2.x, which Foxy's cards and Flash's speak alike: `spec/NUT-XX.md`
 (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), with its
-commands in `spec/APDU.md` and the reasons for them in `docs/DECISIONS.md`.
-Foxy speaks 2.0 and nothing older: no card of an older version is in anybody's
+commands in `spec/APDU.md` and the reasons for them in `docs/DECISIONS.md`, in
+lnflash/cashu-javacard, whose 2.1 (`02 01`) is what the tests here are held to.
+Foxy speaks 2.x and nothing older: no card of an older version is in anybody's
 hands, so there is no fallback. This file does not repeat the protocol. The limits are listed at the end and argued in
 `THREAT-MODEL.md`.
 
 ## State of it
 
+- **The 2.x applet's install on the J3R180 is pending a hardware run.** Until it
+  has run, nothing of protocol 2.x below has been on a chip.
 - **Almost nothing has run on a real card.** One phone and one card have been
   tested together: a card set up, loaded, paid from, and given its change back
   over NFC. Everything else here has been driven against a model of the card
@@ -70,8 +72,10 @@ nothing from this: the receiver always asks the mint first.
 - **Foxy speaks only to its own applet.** The phone selects the applet by its
   whole name, F0 43 41 53 48 55 43 41 52 44 01 (F0, `CASHUCARD`, 01), and
   carries a fixed list of its commands. The card answers the select with its
-  version, 02 00. A card that answers with another version is told `This card
-  needs an update.` (CARD NEEDS AN UPDATE), and nothing is sent to it. The page cannot send
+  version, 02 01 (2.1; any 02 is read, so a card left on 2.0 reads too). A card
+  that answers with an older version is told `This card needs an update.` (CARD
+  NEEDS AN UPDATE), and one of a later major `This card is newer than this Foxy.
+  Update the app to use it.` (UPDATE FOXY); nothing is sent to either. The page cannot send
   anything else to a card, and a bank card held to the phone is not read.
 
 ## Who holds what
@@ -100,7 +104,7 @@ sign it, and a build that claimed it would not install. A paid team sets
 the project (`BUILDING.md`). Without it Foxy builds and runs as before, and
 every card screen says NO CARD READER. The simulator has no NFC; in simulator
 builds only, it reaches a stand-in card over the Mac's loopback, which can be
-the real applet running under jCardSim (`tools/cardsim` in the card repository).
+the real applet running under jCardSim (`tools/cardsim` in lnflash/cashu-javacard).
 
 The same file carries the Associated Domains entitlement, `applinks:getfoxy.io`,
 that lets a card's address open Foxy (*Tapping a card to open Foxy*, below). It is
@@ -182,7 +186,9 @@ payment (`THREAT-MODEL.md` §1).
    will not take) is given the key alone, 65 bytes, and its clock begins at the next tap that shows it one.
    The owner goes in last so that no step needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 5. The card's screen, with a line: `The card is set up.` (with a PIN and with none alike; back from it is where the person
-   was). Nothing is read between the button
+   was). Where the clock was not anchored the line says why: `The card is set up. This phone had no Bitcoin block to set
+   its clock by: its clock starts at its next tap online.`, or `... It would not take this phone's newest Bitcoin block to
+   set its clock by: ...`. Nothing is read between the button
    and the tap, and nothing after it; the screen is the card's own, with ADD FUNDS. What two notices used to say stands: this
    phone is the card's owner, so it can reset the card's PIN and limits, and
    whoever holds the card and this phone's seed phrase holds its money; and a
@@ -292,7 +298,7 @@ repository's `spec/NUT-XX.md` and `docs/FOXY-CARD-DAILY-LIMIT.md`.
 ## Resetting a card
 
 A card's owner can give it back to what it was in its packet, so that another person can set it up.
-This is the phone's side; the card's is in the card repository's `spec/APDU.md`.
+This is the phone's side; the card's wire is `spec/APDU.md` in lnflash/cashu-javacard.
 
 - **What the card does.** RESET (instruction 51, P1 = 0, P2 = 0xAD) under the owner's proof over `CashuCard/reset` and an
   empty value (nothing else may follow it). The card then has no PIN (three tries), no owner, no record, no limit, no
@@ -1086,7 +1092,10 @@ Each has three steps and then a tap. The daily limit's:
    with NEXT, and under it **NO LIMIT**, which is how a limit is removed.
 3. A CONFIRMATION, `YOU ARE APPLYING A DAILY LIMIT OF:` and the amount, with
    `This card will spend no more than this in one day. The limit starts again by
-   itself each day, for up to 7 days after this phone last tapped it online.`
+   itself each day, for up to 7 days after this phone last tapped it online, and
+   then stops until this phone taps it online again. Only this phone, or a phone
+   restored from its seed phrase, can change or remove it. Without the seed
+   phrase the card pays at most one more day's limit, and the rest stays on it.`
    (the card's budget, where it is not seven), or `YOU ARE REMOVING THIS CARD'S
    DAILY LIMIT.` with `It will be able to spend everything on it.` CONFIRM or
    CANCEL.
@@ -1097,7 +1106,9 @@ ones not being changed as the card has them, so that a change to one begins no
 other's window again.
 
 The card's screen shows `DAILY LIMIT` and its amount, or `NO LIMIT`; with a limit,
-`LEFT TODAY` and `THE DAY TURNS AT` a time.
+`LEFT TODAY` and `THE DAY TURNS AT` a time. On a card whose rollover budget is
+spent (below) it shows `LEFT` and `RENEWS WHEN ITS OWNER'S PHONE TAPS IT ONLINE`
+instead, on any phone: that day will not turn by itself.
 
 How it behaves:
 
@@ -1123,9 +1134,32 @@ How it behaves:
   whenever it reads its own card online with the budget not full; the card takes
   the header as its clock too, and its budget is full again. A card set up with
   the anchoring header (*Setting up a card*) has a clock from its first tap, so
-  its first day is not on trust. A day that will not turn until the owner's phone
-  taps it says so under the limit: `This card's daily limit renews again once
-  this phone is online and taps it.`
+  its first day is not on trust. Only a payment that moves value turns the day
+  (cashu-javacard D26, protocol 2.1): a payment whose change is the whole of its
+  pieces spends no roll and begins no day, and a `SET_LIMIT` without the
+  thirteenth byte leaves the budget as it was.
+- **When the budget is spent, every screen says so.** The card's own screen, on
+  any phone, says `RENEWS WHEN ITS OWNER'S PHONE TAPS IT ONLINE` under what is
+  left. A till asked for more than is left says `The card has 100 sats left,
+  and this payment is more than that. Its daily limit does not renew until its
+  owner's phone taps it with a connection.`, with no day and no time in it. On
+  the owner's phone offline: `This card's daily limit has stopped renewing. It
+  renews again once this phone is online and taps it.` Online, the read
+  refreshes the card before the screen is drawn, and the screen then says
+  `This card's daily limit had stopped renewing. This tap renewed it.` Where it
+  could not: `... and this phone has no Bitcoin block to renew it with yet.` or
+  `... and the card would not take this phone's newest Bitcoin block.`, each
+  with `Press here to try again.` A locked card is refreshed by its owner's
+  phone too (the card takes REFRESH locked; a phone that is not its owner is
+  refused at no cost).
+- **What renewal costs when the seed phrase is lost.** Only the owner's proof
+  refreshes the budget, and the owner key is derived from the seed phrase. Lose
+  the phrase and no phone can refresh the card again: once its budget's days have
+  rolled, its day stops for good, and the card pays what is left of that one day
+  and nothing more, ever. Everything else on it stays on it (a recoverable
+  card's money comes back after its date only to a phone with the same seed
+  phrase, so not then either). A card with no daily limit and no no-PIN
+  allowance has no day to stop, and loses nothing to this.
 - **A payment the mint refuses still charges the day.** The card counted what it
   signed when it signed, and putting the pieces back (*A payment the mint
   refuses*) gives the day nothing back. Only the owner's phone can set the limit,
@@ -1480,7 +1514,7 @@ wait, and the payment is made when the wallet next asks.
 The mint's word that the card's pieces are unspent (NUT-07) is not its word that they are real: a piece
 with a made-up point reads unspent until somebody tries to spend it, so a card loaded by somebody else's
 modified wallet would read Verified on that word alone. So the card keeps, for each piece loaded with one,
-the mint's NUT-12 proof (e, s and the blinding factor r, 96 bytes: `spec/NUT-XX.md` in the card repository). It
+the mint's NUT-12 proof (e, s and the blinding factor r, 96 bytes: `spec/NUT-XX.md` in lnflash/cashu-javacard). It
 gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This phone does.
 
 - **Writing.** A piece that has the whole of its proof goes onto a card alone, in a command of its own:
@@ -1529,7 +1563,7 @@ gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This 
 What it does not do. It does not show that a piece is unspent: the mint says that, and is asked as ever. A till
 that takes a card's pieces on trust with no connection (*Paying with no connection*) could check their proofs first; it does
 not. The card gives the blinding factor to any reader with no PIN, for every piece that has a proof, and the mint can
-tie a piece to the request that made it from `r` (the card repository's spec says so): this phone sends it nowhere.
+tie a piece to the request that made it from `r` (the shared spec says so): this phone sends it nowhere.
 
 ## What is kept on the phone
 
@@ -1553,7 +1587,7 @@ This phone sets up its cards as FX1.
 
 ## What it does not protect against
 
-The card repository's `spec/NUT-XX.md` (Security considerations) and
+lnflash/cashu-javacard's `spec/NUT-XX.md` (Security considerations) and
 `docs/SECURITY-MODEL.md` have the full list. The ones that matter to a person:
 
 - **A card that is never shown a newer block** keeps its day where it was. No
@@ -1610,7 +1644,7 @@ The card repository's `spec/NUT-XX.md` (Security considerations) and
   entitlement); `tests/flashcard-screens.js` begins a real tap from a card's address.
   `tests/flashcard-*.js` run in `tools/check-all.sh` against a model of
   the card held to the applet's own conversation (`tests/fixtures/flashcard-transcript.json`
-  is `spec/vectors/transcript.json` of the card repository, replayed command by command). `tests/flashcard-fewer.js` pins
+  is `spec/vectors/transcript.json` of lnflash/cashu-javacard, replayed command by command). `tests/flashcard-fewer.js` pins
   the cash-drawer cut and the exact sets it makes; `tests/flashcard-clock.js`
   pins the card's clock: three real block headers at the card's real floor and
   mined ones at a cheap floor for the rules a real one cannot reach, the fetch
@@ -1632,6 +1666,6 @@ The card repository's `spec/NUT-XX.md` (Security considerations) and
   another piece's proof, no proof and no keys, a tap cut in the middle of a load, the card's
   own change with its proof, and the three states of the line. `tests/flashcard-applet.js` is
   opt-in and drives the wallet against the applet itself over a local port
-  (`tools/cardsim/run.sh` in the card repository).
+  (`tools/cardsim/run.sh` in lnflash/cashu-javacard).
   `tools/live/flashcard-switch.js` moves a card between two local mints.
   `DEVICE-TESTS.md` §23 is what only a card and a phone can show.

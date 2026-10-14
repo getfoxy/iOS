@@ -1,6 +1,6 @@
 # Flashcard: what it does
 
-A Cashu ecash card and the Foxy app's screens for it. The card runs the applet of https://github.com/lnflash/cashu-javacard and speaks the Cashu card protocol 2.0 (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), which Flash's cards speak too. Foxy speaks 2.0 only. Where older docs differ from the code, this follows the code. Button and screen names are in capitals as the app shows them.
+A Cashu ecash card and the Foxy app's screens for it. The card speaks the shared Cashu card protocol 2.x (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), which Flash's cards speak too. Foxy speaks 2.x only. The 2.x applet's install on the J3R180 is pending a hardware run. Where older docs differ from the code, this follows the code. Button and screen names are in capitals as the app shows them.
 
 **Status.** Over NFC, one card and one phone have been through set-up, loading, a payment and change. The rest has run against a model of the card, the applet in a simulator, and the chip in a contact reader. No audit has covered the card. A card is cash.
 
@@ -13,7 +13,7 @@ A Cashu ecash card and the Foxy app's screens for it. The card runs the applet o
 - **Change the card makes itself:** the till names amounts, the card builds the pieces locked to its own key, so a till cannot divert them. It makes the four largest powers of two; the till writes any small remainder at a second tap.
 - **The drawer.** Money is cut like a till's float, in powers of two, so most prices come out exact: a 128-place card gets eight of each size from 1 to 1,024, then the rest; up to 112 pieces a load, a dozen places kept free. A per tap limit caps piece size.
 - **PIN sealed** to a key of the card's, so listening to a tap learns nothing; the till's phone still sees it.
-- **Only its own applet:** Foxy selects it by its whole name, F0 43 41 53 48 55 43 41 52 44 01 (F0, `CASHUCARD`, 01), and the card answers with its version, 02 00. Thirty commands are carried; a bank card held to the phone is not read. A card that answers with another version is told `This card needs an update.` (CARD NEEDS AN UPDATE). Reading needs the NFC Tag Reading entitlement (paid developer team), else NO CARD READER.
+- **Only its own applet:** Foxy selects it by its whole name, F0 43 41 53 48 55 43 41 52 44 01 (F0, `CASHUCARD`, 01), and the card answers with its version, 02 01 (any 02 is read; a later major is told to update the app). Thirty commands are carried; a bank card held to the phone is not read. A card that answers with another version is told `This card needs an update.` (CARD NEEDS AN UPDATE). Reading needs the NFC Tag Reading entitlement (paid developer team), else NO CARD READER.
 - **Cash.** Recoverable cards (the loading phone takes money back after a year) are built and off.
 - **The phone keeps** fifteen `foxy.flashcard.*` stores (STORAGE.md names ten): money owed to or taken from cards, swaps, receipts, the last block header.
 
@@ -81,9 +81,9 @@ Sheet lines: `Tap behind the phone.` · `Reading the card` · `Signing` · `Maki
 
 ## 8. The protocol
 
-The card and the phone speak the Cashu card protocol 2.0 of https://github.com/lnflash/cashu-javacard (the spec is `spec/NUT-XX.md` and the commands are `spec/APDU.md` there). Foxy's cards and Flash's speak the same protocol. Foxy speaks 2.0 and nothing older, since no card of an older version is in anybody's hands. What 2.0 asks of the phone:
+The card and the phone speak the shared Cashu card protocol 2.x (the spec is `spec/NUT-XX.md` and the commands are `spec/APDU.md` in https://github.com/lnflash/cashu-javacard). Foxy's cards and Flash's speak the same protocol. Foxy speaks 2.0 and nothing older, since no card of an older version is in anybody's hands. What 2.0 asks of the phone:
 
-- The applet's name is F0 43 41 53 48 55 43 41 52 44 01, and SELECT answers 9000 with the version, 02 00.
+- The applet's name is F0 43 41 53 48 55 43 41 52 44 01, and SELECT answers 9000 with the version, 02 01 (2.1: only a payment that moves value rolls the day, and a SET_LIMIT without the budget's byte leaves it; cashu-javacard D26).
 - The owner's proofs are over `CashuCard/` and the label: change-pin, set-limit, set-owner, set-card, load, reset and refresh.
 - SET_LIMIT from this phone is always 13 bytes: the day's limit, the per tap limit, the no-PIN allowance and the rollover budget (1 to 30, seven by default).
 - SET_OWNER is 145 bytes, the owner key and the block header that anchors the card's clock, or 65 bytes when the card refuses the header.
