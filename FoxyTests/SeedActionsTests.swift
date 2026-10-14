@@ -699,6 +699,33 @@ final class SeedActionsTests: XCTestCase {
         }
     }
 
+    /// A card's record with its design after the mint is signed whole: the signature
+    /// is over the three bytes too, which is what the card checks. Three zeros there are no design, and signed the
+    /// same. What follows a mint and is no design is refused before the seed is read.
+    func testARecordThatCarriesTheCardsDesignIsSignedWhole() throws {
+        vault.words = abandonAbout
+        let pub = ownerPub(cardKey)
+        let plain = sampleValue(.setCard)
+        for design in ["465831", "000000"] {                  // FX1, and none
+            let value = plain + design
+            let body: [String: Any] = ["key": cardKey, "label": "set-card", "nonce": nonce, "value": value]
+            let request = try XCTUnwrap(CardOwner.signRequest(body), "a record and \(design)")
+            let sig = ownerSig(request)
+            XCTAssertTrue(verifies(sig, pub: pub, label: "set-card", nonce: nonce, value: value), "a record and \(design)")
+            XCTAssertFalse(verifies(sig, pub: pub, label: "set-card", nonce: nonce, value: plain), "not the record without them")
+            XCTAssertFalse(verifies(sig, pub: pub, label: "set-card", nonce: nonce, value: plain + "464c31"), "nor with another design")
+        }
+        let before = vault.reads
+        for design in ["667831", "4658", "46583141", "004658"] {       // fx1; FX; FX1A; a zero, F and X
+            let request = CardOwner.SignRequest(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: bytes(plain + design))
+            XCTAssertFalse(request.isWellFormed, design)
+            let reply = run(SeedActions.cardOwnerSign(request, env: env))
+            XCTAssertNil(reply.text, design)
+            XCTAssertEqual(reply.error, "bad request", design)
+        }
+        XCTAssertEqual(vault.reads, before, "the seed was not asked for")
+    }
+
     func testTheOwnerAnswersHoldNeitherTheWordsNorTheSeedNorTheKey() throws {
         vault.words = abandonAbout
         let seed = try NUT13.seed(mnemonic: abandonAbout)

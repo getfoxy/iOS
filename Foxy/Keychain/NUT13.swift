@@ -379,7 +379,8 @@ enum CardOwner {
     static let nonceLength = 16
 
     /// The longest value any label takes: SET_CARD's data with the longest mint
-    /// (100 bytes before it and 80 for the mint).
+    /// (100 bytes before it and 80 for the mint). With a design it is no longer:
+    /// the mint is then 77 bytes at the most, and the design three.
     static let mostValueBytes = 180
 
     /// What the page may have signed: the short names of the owner's commands,
@@ -410,7 +411,10 @@ enum CardOwner {
         ///    an anchor block header (80 bytes) where the phone has one: 65 or 145;
         ///  - set-card: the card's record, unit (1), refund key (33), 65 bytes the card
         ///    does not read (all zeros, or a key beginning 04 as cards before 2.0 took),
-        ///    mint length L (1, from 1 to 80) and the mint (L bytes);
+        ///    mint length L (1, from 1 to 80) and the mint (L bytes); and after the mint
+        ///    nothing, or the card's design (3, each a capital letter or a digit, or all
+        ///    three zero for none), after a mint of 77 bytes at the most. A record with no
+        ///    design clears the card's, so a card that has one is sent it again;
         ///  - load: nothing;
         ///  - reset: nothing;
         ///  - refresh: a block header, 80 bytes.
@@ -426,7 +430,11 @@ enum CardOwner {
             case .setCard:
                 guard value.count >= 100, value[34] == 0x04 || value[34..<99].allSatisfy({ $0 == 0 }) else { return false }
                 let mint = Int(value[99])
-                return (1...80).contains(mint) && value.count == 100 + mint
+                if (1...80).contains(mint) && value.count == 100 + mint { return true }
+                // or with the design after the mint: three bytes more, and a mint no longer than a card that keeps a design takes
+                guard (1...77).contains(mint), value.count == 103 + mint else { return false }
+                let design = value[(100 + mint)...]
+                return design.allSatisfy { $0 == 0 } || design.allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) }
             case .load, .reset:
                 return value.isEmpty
             case .refresh:

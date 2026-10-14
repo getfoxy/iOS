@@ -351,8 +351,10 @@ final class NUT13Tests: XCTestCase {
     /// beginning 04 as cards before 2.0 took, or zeros), mint length (1), mint. `carried` is
     /// how many bytes of mint follow, when that is not what the length byte says. `noTimeKey`: the
     /// 65 bytes are zeros, as the page writes them; `spoilTimeKey` then sets one of the 65 to 1.
+    /// `design` is what follows the mint: the three bytes of the card's design, or whatever a
+    /// test puts there.
     private func record(unit: UInt8 = 1, timeKeyFirst: UInt8 = 0x04, noTimeKey: Bool = false, spoilTimeKey: Int? = nil,
-                        length: Int, carried: Int? = nil) -> [UInt8] {
+                        length: Int, carried: Int? = nil, design: [UInt8] = []) -> [UInt8] {
         var out: [UInt8] = [unit, 0x02]
         out += [UInt8](repeating: 0x22, count: 32)
         var key: [UInt8] = noTimeKey ? [UInt8](repeating: 0x00, count: 65) : [timeKeyFirst] + [UInt8](repeating: 0x33, count: 64)
@@ -360,6 +362,7 @@ final class NUT13Tests: XCTestCase {
         out += key
         out.append(UInt8(truncatingIfNeeded: length))
         out += [UInt8](repeating: 0x6D, count: carried ?? length)
+        out += design
         return out
     }
 
@@ -422,6 +425,58 @@ final class NUT13Tests: XCTestCase {
         for n in [0, 1, 4, 79, 81, 145] { XCTAssertFalse(CardOwner.Label.refresh.accepts([UInt8](repeating: 0x66, count: n)), "\(n) bytes") }
     }
 
+    /// A card keeps its design after its mint: a code of three characters, each a
+    /// capital letter or a digit, or three zeros for none. A record that leaves the three bytes off clears
+    /// the card's design, so the record such a card is moved with carries them, and its owner signs it.
+    /// Nothing else follows a mint, and the rest of the record is held to what it was.
+    func testSetCardTakesADesignAfterTheMintAndNothingElseThere() {
+        let setCard = CardOwner.Label.setCard
+        let code = { (text: String) in Array(text.utf8) }
+        // a code of three, after a time key and after none
+        for text in ["FX1", "FL1", "EL1", "AAA", "ZZZ", "000", "999", "A0Z", "9Z0"] {
+            XCTAssertTrue(setCard.accepts(record(length: 24, design: code(text))), "\(text), with a time key")
+            XCTAssertTrue(setCard.accepts(record(noTimeKey: true, length: 24, design: code(text))), "\(text), with no time key")
+        }
+        // or three zeros, which is no design
+        XCTAssertTrue(setCard.accepts(record(length: 24, design: [0, 0, 0])), "three zeros, with a time key")
+        XCTAssertTrue(setCard.accepts(record(noTimeKey: true, length: 24, design: [0, 0, 0])), "three zeros, with no time key")
+        // after a mint of 1 to 77, which is as long as a card that keeps a design takes one: 180 bytes at the most, as with none
+        for length in [1, 2, 76, 77] {
+            XCTAssertTrue(setCard.accepts(record(noTimeKey: true, length: length, design: code("FX1"))), "a design after a mint of \(length)")
+            XCTAssertTrue(setCard.accepts(record(length: length, design: [0, 0, 0])), "three zeros after a mint of \(length)")
+        }
+        XCTAssertEqual(record(length: 77, design: code("FX1")).count, CardOwner.mostValueBytes)
+        for length in [78, 79, 80, 81] {
+            XCTAssertFalse(setCard.accepts(record(noTimeKey: true, length: length, design: code("FX1"))), "a design after a mint of \(length)")
+            XCTAssertFalse(setCard.accepts(record(length: length, design: [0, 0, 0])), "three zeros after a mint of \(length)")
+        }
+        XCTAssertFalse(setCard.accepts(record(length: 0, design: code("FX1"))), "a design and no mint")
+        // one byte, two, four or six after the mint are no design, whatever they are
+        for extra in [code("F"), code("FX"), code("FX1A"), code("FX1FX1"), [0], [0, 0], [0, 0, 0, 0]] {
+            XCTAssertFalse(setCard.accepts(record(length: 24, design: extra)), "\(extra.count) bytes after the mint")
+            XCTAssertFalse(setCard.accepts(record(noTimeKey: true, length: 24, design: extra)), "\(extra.count) bytes after the mint, with no time key")
+        }
+        // each of the three is a capital letter or a digit: not the byte either side of those, and not a lower-case letter
+        for bad: UInt8 in [0x01, 0x20, 0x2F, 0x3A, 0x40, 0x5B, 0x60, 0x61, 0x66, 0x7A, 0x7B, 0x80, 0xC6, 0xFF] {
+            for at in 0..<3 {
+                var design = code("FX1")
+                design[at] = bad
+                XCTAssertFalse(setCard.accepts(record(length: 24, design: design)), "byte \(bad) at \(at) of the design")
+            }
+        }
+        XCTAssertFalse(setCard.accepts(record(length: 24, design: code("fx1"))), "a design in lower case")
+        XCTAssertFalse(setCard.accepts(record(length: 24, carried: 27)), "three more bytes of mint than the length says")
+        // three zeros or three characters, and not some of each
+        for mixed: [UInt8] in [[0, 0x58, 0x31], [0x46, 0, 0x31], [0x46, 0x58, 0], [0, 0, 0x31], [0, 0x58, 0], [0x46, 0, 0]] {
+            XCTAssertFalse(setCard.accepts(record(length: 24, design: mixed)), "zeros and characters: \(mixed)")
+        }
+        // and what comes before the design is read as it always was
+        XCTAssertFalse(setCard.accepts(record(timeKeyFirst: 0x02, length: 24, design: code("FX1"))), "a design after a time key that is not uncompressed")
+        XCTAssertFalse(setCard.accepts(record(noTimeKey: true, spoilTimeKey: 30, length: 24, design: code("FX1"))), "a design after zeros but for one byte of the time key")
+        XCTAssertFalse(setCard.accepts(record(length: 24, carried: 23, design: code("FX1"))), "a design after a mint one byte short")
+        XCTAssertFalse(setCard.accepts(record(length: 24, carried: 25, design: code("FX1"))), "a design after a mint one byte long")
+    }
+
     private let nonceText = "000102030405060708090a0b0c0d0e0f"
 
     private func sign(_ label: Any?, _ value: Any?, key: Any? = nil, nonce: Any? = nil) -> [String: Any] {
@@ -440,7 +495,10 @@ final class NUT13Tests: XCTestCase {
                                       ("set-owner", "04" + String(repeating: "ab", count: 64)),
                                       ("set-owner", "04" + String(repeating: "ab", count: 64) + String(repeating: "cd", count: 80)),
                                       ("load", ""), ("reset", ""), ("refresh", String(repeating: "cd", count: 80)),
-                                      ("set-card", NUT13.hex(record(length: 24)))]
+                                      ("set-card", NUT13.hex(record(length: 24))),
+                                      // with the card's design after the mint, or three zeros for none
+                                      ("set-card", NUT13.hex(record(noTimeKey: true, length: 24, design: Array("FX1".utf8)))),
+                                      ("set-card", NUT13.hex(record(length: 77, design: [0, 0, 0])))]
         for (label, value) in ok {
             let request = try XCTUnwrap(CardOwner.signRequest(sign(label, value)), "\(label) \(value.prefix(8))")
             XCTAssertEqual(request.label.rawValue, label)
@@ -479,6 +537,10 @@ final class NUT13Tests: XCTestCase {
         XCTAssertNil(CardOwner.signRequest(sign("set-owner", "02" + String(repeating: "ab", count: 64))))
         XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 81)))), "181 bytes: past the longest record")
         XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 5, carried: 6)))))
+        XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 78, design: Array("FX1".utf8))))), "181 bytes: a design after a mint past 77")
+        XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 5, design: Array("fx1".utf8))))), "a design in lower case")
+        XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 5, design: Array("FX".utf8))))), "two bytes after the mint")
+        XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 5, design: Array("FX1A".utf8))))), "four bytes after the mint")
         XCTAssertNil(CardOwner.signRequest(sign("set-card", String(repeating: "00", count: 4_000))), "a long text is refused before it is read")
         for value in [5, true, ["31323334"], ["value": "31323334"]] as [Any] {
             XCTAssertNil(CardOwner.signRequest(sign("change-pin", value)), "value \(value)")
