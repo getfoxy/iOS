@@ -67,7 +67,7 @@ async function world(pin, o) {
   /* ---- 1: the card's own rules, as the model has them (the bytes) ------------------------------------------------------------ */
   {
     const fresh = newCard(P, undefined, { format: 4 });
-    ok((await fresh.send(SEL)) === '02009000', 'the card says 2.0 when chosen');
+    ok((await fresh.send(SEL)) === '02019000', 'the card says 2.1 when chosen');
 
     const make = async () => {
       const c = newCard(P, undefined, { format: 4 });
@@ -138,7 +138,7 @@ async function world(pin, o) {
     ok(c.key !== oldKey && /^0[23][0-9a-f]{64}$/.test(c.key), 'a fresh key', oldKey.slice(0, 10) + ' -> ' + c.key.slice(0, 10));
     ok((await c.send('b010000000')) === c.key + '9000', 'GET_PUBKEY says the new key');
     const info = await c.send('b001010000');
-    const want = '02' + '00' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
+    const want = '02' + '01' + '80' + '00' + '00' + '80' + 'ff' + '00' + '04' + '03' + '00' + '00'          // version, places, none unspent or spent, 128 empty, caps, no PIN, format 4, three tries, not locked, no record
       + '00000000' + '00' + NOW.toString(16).padStart(8, '0') + '00000000' + '00000000' + '00'                // no limit, no owner, the clock kept, no window, nothing spent, no change grant
       + '00000000' + '00000000' + '00000000' + '9000';                                                         // no tap limit, no allowance, none of it spent
     ok(info === want, 'GET_INFO reads as a new card, with its clock kept', info.slice(0, 60) + ' / ' + want.slice(0, 60));
@@ -220,7 +220,7 @@ async function world(pin, o) {
     ok(after.key !== oldKey && after.info.owner === false && after.info.pin === 'none' && after.info.hasRecord === false && after.info.setUp === false && after.info.tries === 3
        && after.info.limit === 0 && after.info.tapLimit === 0 && after.info.noPin.limit === 0 && after.record.mint === '' && after.record.refundKey === '' && after.balance === 0,
        'read again, it is a card out of its packet with another key', JSON.stringify([after.info.owner, after.info.pin, after.info.hasRecord, after.info.tries]));
-    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '2.0', 'with its clock and its software', after.info.now + ' ' + after.info.version);
+    ok(after.info.now === NOW && after.record.headerHash === HEADER_HASH && after.info.version === '2.1', 'with its clock and its software', after.info.now + ' ' + after.info.version);
     ok(after.record.rolls === 0 && after.record.budget === 7 && after.record.armed === false, 'and its rollover wiped with the rest: no rolls, the default budget, nothing armed');
     ok(after.info.headerBits === '' && card.state.hardest === 0, 'and the ratchet let go');
     ok((await why(H.W.cardReset(card))) === 'no-owner', 'it cannot be reset again: nobody owns it');
@@ -479,7 +479,7 @@ async function world(pin, o) {
   /* ---- 7: the wait: ten signatures for the first limit's worth over, and four for each further one ------------------------ */
   {
     const info = P.W.cardParse.info('02' + '00' + '80' + '00' + '00' + '80' + 'ff' + '01' + '04' + '03' + '00' + '01' + '00000000' + '01' + '00000000'.repeat(3) + '00' + '00000000'.repeat(3));
-    ok(info.waitOver === 10 && info.waitMore === 4, 'a 2.0 card waits 10 for the first limit’s worth over and 4 for each further one', [info.waitOver, info.waitMore].join());
+    ok(info.waitOver === 10 && info.waitMore === 4, 'a 2.1 card waits 10 for the first limit’s worth over and 4 for each further one', [info.waitOver, info.waitMore].join());
     // the wallet’s sums: a limit of 100 and a payment that leaves 250 is three limits’ worth, the first over (+ one further)
     ok(P.W.cardWaitSigns(100, 250, 0, false, true, 10, 4) === 14 && P.W.cardWaitSigns(100, 250, 0, false, true) === 14,
        'cardWaitSigns: 10 + 4 = 14, and 10 and 4 are the default');

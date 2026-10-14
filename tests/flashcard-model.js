@@ -5,9 +5,12 @@
  *
  * tests/fixtures/flashcard-transcript.json is a conversation the applet had
  * under jCardSim: every command it was sent and what it answered. It is the
- * card of the Cashu card protocol 2.0, the cashu-javacard repository's
+ * card of the Cashu card protocol 2.1, the cashu-javacard repository's
  * spec/vectors/transcript.json as it is at the commit this wallet is pinned to
- * (bced1c4, v2.0.0): it signs once for a payment (format 4), has 128 places,
+ * (3876a11, 2.1): every SELECT names the whole AID, and it ends with the
+ * rollover on the wire (an anchored SET_OWNER, the thirteen-byte SET_LIMIT, a
+ * short one that leaves the budget, a payment of nothing that rolls nothing, a
+ * budget spent, REFRESH refused and taken; D20, D26). It signs once for a payment (format 4), has 128 places,
  * burns a payment of any number of pieces, takes its PIN sealed, makes its own
  * change and counts it toward its wait for what it cost, keeps its clock in
  * Bitcoin block headers, has an optional PIN and a no-PIN allowance, can be
@@ -46,16 +49,16 @@ const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
 async function replay(T) {
-  /* The recording says what it is of in its first SELECT, which the applet answered with its version: 02 00. A RESET at the end
+  /* The recording says what it is of in its first SELECT, which the applet answered with its version: 02 01. A RESET at the end
    * of a recording gives the card a new key, which the model draws for itself: what follows it is held to the model's key (a key
    * is another card's to differ in and is verified, never compared), as everything else signed is. */
   const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
-  ok(!!chosen && chosen.data === '0200', 'the recording is of protocol 2.0', chosen && chosen.data);
+  ok(!!chosen && chosen.data === '0201', 'the recording is of protocol 2.1', chosen && chosen.data);
   const format = 4;
   const card = makeCard({ window: ctx.window });
   let exact = 0, verified = 0;
-  // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
-  const recorded = (T.find((x) => x.kind === 'key') || {}).data;
+  // the key the recording's card had: its first, and after a RESET_CARD the new one it was asked for again (a `key` entry)
+  let recorded = (T.find((x) => x.kind === 'key') || {}).data;
   // a payment being put to a one-signature card: its places and its outputs, as the commands gave them
   let pay = null;
   // what the model last gave for sealing a PIN: the recording's sixteen bytes (the model is given them) and the model's own PIN key
@@ -131,6 +134,7 @@ async function replay(T) {
       card.setNonce(e.data);
       verified += 1;
     } else if (e.kind === 'key') {
+      recorded = e.data;
       ok(data.length === 66 && /^0[23]/.test(data) && data === card.key, e.name + ': a compressed key');
     } else if (e.kind === 'sig') {
       const slot = parseInt(e.apdu.substr(4, 2), 16);
@@ -203,23 +207,50 @@ async function replay(T) {
   c2.tap();
   ok((await c2.send('b001000000')).slice(-4) === '6999', 'and back in the field it must be selected again');
 
-  /* What 2.0 changed on the wire, which the recording does not cover: the old names and commands, the opener, REFRESH, the
-   * thirteenth byte of SET_LIMIT, the anchor of SET_OWNER and the rollover's bytes in GET_CARD (D19, D20, D25). */
+  /* What the recording does not cover: the old names and commands, the opener, REFRESH on a card with no owner and the
+   * rollover's bytes on a new card (D19, D20, D25). */
   {
     const c = makeCard({ window: ctx.window });
     ok((await c.send('00a404000af0464f5859434152440100')) === '6a82' && (await c.send('00a4040007d276000085010200')) === '6a82',
        'a 1.x applet’s name and a 0.x applet’s are no applet here: 6A82');
-    ok((await c.send('00a404000b' + AID + '00')) === '02009000', 'the whole name answers the version, 02 00');
+    ok((await c.send('00a404000b' + AID + '00')) === '02019000', 'the whole name answers the version, 02 01');
     ok((await c.send('b020000040')) === '6d00' && (await c.send('b035000006010203040000')) === '6d00', 'SPEND_PROOF (20) and SET_TIME (35) are 6D00');
     ok((await c.send('b05300005100' + '00'.repeat(80))) === '6a90', 'REFRESH on a card with no owner: 6A90');
     const info = await c.send('b001010000');
-    ok(info.slice(0, 4) === '0200' && info.length === 84 + 4, 'GET_INFO says 2.0, in forty-two bytes to P1 = 1');
+    ok(info.slice(0, 4) === '0201' && info.length === 84 + 4, 'GET_INFO says 2.1, in forty-two bytes to P1 = 1');
     const record = await c.send('b016000000');
     ok(record.substr(152, 6) === '000000', 'GET_CARD bytes 76 to 78, the rollover, are zeros on a new card');
     const chip = makeCard({ window: ctx.window, chip: true });
     ok((await chip.send('00a404000a' + PACKAGE + '00')) === '9000', 'on a chip the package’s ten bytes reach the opener: 9000 and no version');
     ok((await chip.send('b001010000')) === '6d00', 'and the opener answers 6D00 to what comes after');
-    ok((await chip.send('00a404000b' + AID + '00')) === '02009000' && (await chip.send('b001010000')).slice(0, 4) === '0200', 'the whole name reaches the applet on a chip too');
+    ok((await chip.send('00a404000b' + AID + '00')) === '02019000' && (await chip.send('b001010000')).slice(0, 4) === '0201', 'the whole name reaches the applet on a chip too');
+  }
+
+  /* D26 (2.1) is in the recording, and the model is held to it there: a short SET_LIMIT leaves the budget, a payment of nothing
+   * (all of it back as the card's own change) rolls nothing and begins no day, a roll then spends the budget, the day stands
+   * (6A8F), REFRESH by another key is refused and by the owner's taken. A recording without those steps would hold the model to
+   * nothing of D26, so their names are asked for here. */
+  {
+    const T = read('flashcard-transcript.json');
+    const named = (re, sw) => T.some((e) => re.test(e.name || '') && (!sw || e.sw === sw));
+    ok(named(/a form without the budget's byte leaves the budget as it was \(D26\)/), 'the recording has a short SET_LIMIT that leaves the budget (D26)');
+    ok(named(/all of it back as the card's own change/, '9000') && named(/no roll spent by a payment that moves no value \(D26\)/), 'and a payment of nothing that spends no roll (D26)');
+    ok(named(/the budget is spent, the day stands/, '6a8f'), 'and a day that stands once the budget is spent (6A8F)');
+    ok(named(/^REFRESH by the old owner's key$/, '6a91') && named(/^REFRESH: the owner's phone/, '9000'), 'and REFRESH refused by another key and taken by the owner\u2019s');
+    ok(named(/SET_OWNER with an anchor that has not the work: refused/, '6a93') && named(/SET_OWNER with an anchor \(145 bytes/, '9000'), 'and an anchor refused for its work, then taken (145 bytes)');
+    ok(T.filter((e) => e.apdu && e.apdu.slice(0, 8) === '00a40400').every((e) => e.apdu.slice(8, 10) === '0b' && e.apdu.slice(10, 32) === AID),
+       'and every SELECT in it names the whole AID (eleven bytes), as a chip needs (D25)');
+  }
+  /* The model's own D26 for the PIN's form (SET_LIMIT_PIN, 33), which the recording does not send: it has no budget's byte and
+   * leaves the card's budget as it is. */
+  {
+    const c = makeCard({ window: ctx.window });
+    await c.send('00a404000b' + AID + '00');
+    ok((await c.send('b041000004' + '31323334')) === '9000' && (await c.send('b040000004' + '31323334')) === '9000', 'a new card takes a PIN, and is shown it');
+    c.state.budget = 5;
+    ok((await c.send('b033000004' + '000001f4')) === '9000' && c.state.budget === 5 && c.state.record.limit === 500,
+       'SET_LIMIT_PIN of four bytes sets the day\u2019s limit and leaves a budget of 5 as it was (D26)', String(c.state.budget));
+    ok((await c.send('b033000008' + '000001f4' + '00000064')) === '9000' && c.state.budget === 5, 'and of eight bytes too', String(c.state.budget));
   }
 
   /* What the page sends and what the phone carries are one list. The phone's

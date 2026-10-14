@@ -190,13 +190,13 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
   /* ---- 2: which card it is -------------------------------------------------------------------------------------- */
   {
     const now = newCard();
-    ok((await now.send(SELECT)) === '02009000', 'SELECT says 2.0');
+    ok((await now.send(SELECT)) === '02019000', 'SELECT says 2.1');
     await tap(now);
     const info = W.cardParse.info(dat(await now.send('b001010000')));
-    ok(info.version === '2.0' && info.shaped === true && info.costed === true && info.ownChange === true && info.headers === true && info.waitOver === 10 && info.waitMore === 4,
+    ok(info.version === '2.1' && info.shaped === true && info.costed === true && info.ownChange === true && info.headers === true && info.waitOver === 10 && info.waitMore === 4,
        'and the wallet reads a card that makes its own change, waits ten and four, counts its change for what it cost, and keeps its time by block headers', JSON.stringify([info.version, info.waitOver, info.waitMore]));
     ok(sw(await listing(now)) === '9000', 'GET_CHANGE is known to it');
-    ok((await now.copy().send(SELECT)) === '02009000', 'and a copy of a card is a 2.0 card too');
+    ok((await now.copy().send(SELECT)) === '02019000', 'and a copy of a card is a 2.1 card too');
   }
 
   /* ---- 3: a payment with change: one signature over the pieces, the terminal's output and the card's own ------- */
@@ -825,7 +825,7 @@ const states = (card) => card.state.openings.map((x) => x.state[0]).join('');
     const twin = first.copy();
     await tap(twin);
     ok((await pay(twin, 1)).waits === 0 && (await pay(first, 1)).waits === 10, 'a copy of a card that has paid is not slowed for it, and the card itself is' + V);
-    ok((await twin.copy().send(SELECT)) === '02009000', 'and the copy is a 2.0 card' + V);
+    ok((await twin.copy().send(SELECT)) === '02019000', 'and the copy is a 2.1 card' + V);
   }
   /* ---- 10: the beginning that lets drafts go, and the one that does not ---------------------------------------- */
   {

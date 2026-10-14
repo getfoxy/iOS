@@ -1,9 +1,9 @@
 'use strict';
-/* flashcard-card.js — a model of the card, for tests: the Cashu card protocol 2.0.
+/* flashcard-card.js — a model of the card, for tests: the Cashu card protocol 2.1.
  *
- * The card is a JavaCard applet: https://github.com/lnflash/cashu-javacard, whose wire is
- * spec/APDU.md there (protocol 2.0: Foxy's card software 1.20 with a neutral identity and the
- * fixes of docs/DECISIONS.md D18 to D25). Flash's wallets and this one speak it to the same
+ * The card is a JavaCard applet of the shared Cashu card protocol, whose wire is spec/APDU.md in
+ * https://github.com/lnflash/cashu-javacard (protocol 2.1: Foxy's card software 1.20 with a neutral
+ * identity and the fixes of docs/DECISIONS.md D18 to D26 there). Flash's wallets and this one speak it to the same
  * card. A wallet cannot be tested against a card in a test run, so this answers the same
  * commands with the same bytes: APDUs in, as hex, and the answer out with its status word.
  * It is held to the applet by tests/flashcard-model.js, which replays a conversation the
@@ -30,7 +30,7 @@ const { p256Verify } = require('./harness');
 // the card's applet: the package AID (F0, "CASHUCARD") and 01. The package AID alone is a partial name (D25).
 const AID = 'f043415348554341524401';
 const PACKAGE = AID.slice(0, 20);
-const VERSION = '0200';
+const VERSION = '0201';
 const PAGE_MAX = 255;
 const DAY = 86400;
 // how long a tap is, to the card, for the limit on one tap (the applet's TAP_SECONDS)
@@ -255,10 +255,13 @@ function makeCard(opts) {
   /* The day (D20): whether it is over by the card's clock, whether the window has never begun (its start is 0: its first beginning
    * is no roll), and whether a payment now begins a new one: the day is over, and the window has rolled fewer times since the
    * owner's last REFRESH than its budget (the applet's `windowRolls`). Past the budget the window stays where it is, and what was
-   * signed for in it still counts. */
+   * signed for in it still counts. And only a payment that moves value (2.1, D26): `allNet`, what the payment in hand takes off
+   * the card for good (its pieces less the card's own change, set at SPEND_ALL_SIGN), is above 0. A payment of nothing begins no
+   * day, first or later, and spends no roll. */
+  let allNet = 0;
   const dayOver = () => s.now >= s.windowStart + DAY;
   const notBegun = () => s.windowStart === 0;
-  const windowRolls = () => dayOver() && (notBegun() || s.rolls < (s.budget || ROLL_BUDGET));
+  const windowRolls = () => allNet > 0 && dayOver() && (notBegun() || s.rolls < (s.budget || ROLL_BUDGET));
   /* The limits, held to what a payment takes off the card: '' when it is within them; over the day, written down and refused. */
   const overLimits = (total, carry) => {
     if (s.record.limit !== 0) {
@@ -293,7 +296,7 @@ function makeCard(opts) {
    * then the one payment's; twelve add the no-PIN allowance; thirteen (the owner's form only) add the rollover budget. A day's
    * number that changes begins its window at `now` with nothing spent (the allowance's count too); in the longer forms a number
    * that does not change keeps its window and count. An allowance whose number changes counts from nothing in the window as it
-   * stands. Every form without the thirteenth byte sets the budget back to its default (0, read as 7). */
+   * stands. A form without the thirteenth byte leaves the budget as it is (2.1, D26; 2.0 set it back to its default). */
   const writeLimit = (value) => {
     const both = value.length >= 8;
     const day = value.readUInt32BE(0);
@@ -307,7 +310,7 @@ function makeCard(opts) {
     if (both && tap !== s.tapLimit) s.tapLimit = tap;
     // an allowance that changes counts from nothing, in the window as it stands (the window is the day's, and stays)
     if (allowed !== null && allowed !== s.noPinLimit) { s.noPinLimit = allowed; s.noPinSpent = 0; }
-    s.budget = value.length === 13 ? value[12] : 0;
+    if (value.length === 13) s.budget = value[12];
     return '9000';
   };
   /* A block header checked as SET_HEADER checks it (the applet's `checkHeader`): '' when it may be taken, else the status word. */
@@ -384,7 +387,7 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [2, 0, SLOTS, n(1), n(2), n(0), 255, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        return [parseInt(VERSION.slice(0, 2), 16), parseInt(VERSION.slice(2), 16), SLOTS, n(1), n(2), n(0), 255, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
           // P1 = 1 asks for twelve bytes more, and the thirty before them as they are without it: the limit on one payment, to its
@@ -604,6 +607,7 @@ function makeCard(opts) {
         const pay = s.all;
         // what leaves the card for good: the pieces less the change it made for itself
         const net = pay.total - pay.change;
+        allNet = net;
         /* What the allowance would have counted in the day if this payment is signed with no PIN (the applet's `requireAllowanceOrPin`):
          * it begins again with the day only where the day rolls and the allowance is armed, or the window has never begun (D20). */
         const noPinBefore = () => (windowRolls() && (s.armed || notBegun())) ? 0 : s.noPinSpent;

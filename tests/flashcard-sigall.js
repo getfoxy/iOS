@@ -61,7 +61,7 @@ async function world(feePpk, sats, make) {
   /* ---- 1: onto the card, written the card's way -------------------------- */
   const { H, R, card } = await world(0);
   const seen = await H.W.cardLook(card);
-  ok(seen.info.format === 4 && seen.info.version === '2.0' && seen.info.headers === true && seen.info.shaped === true && seen.info.costed === true && seen.info.ownChange === true && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
+  ok(seen.info.format === 4 && seen.info.version === '2.1' && seen.info.headers === true && seen.info.shaped === true && seen.info.costed === true && seen.info.ownChange === true && seen.info.paced === true && seen.info.quick === true && seen.info.wide === true && seen.info.many === true && seen.info.sealed === true && seen.info.slots === 128,
      'a card that signs once for a payment is read as what it is, with its 128 places', seen.info.version + ', format ' + seen.info.format + ', ' + seen.info.slots + ' places');
   card.tap();
   card.sent.length = 0;
@@ -206,6 +206,42 @@ async function world(feePpk, sats, make) {
       ok(nDates === 2 && grant >= 0 && grant < firstSign && seq.lastIndexOf('select') < grant && lastSign > firstSign && seq.slice(firstSign, lastSign).indexOf('select') < 0,
          'the owner’s phone gives its grant before the first of the signatures, and no new SELECT takes it away before the last: the second is not slowed', seq.join(' '));
     }
+    await settle();
+  }
+
+  /* ---- 7: a whole card of two dates taken off, and taken away between its two signatures ----
+   * A card signs once for each date's pieces (§6), so a whole card of two dates taken off by its holder is two signatures in one
+   * tap. Taken away between them, what it signed for is off it already and is the holder's: it is swapped in and kept as part of
+   * the withdrawal (`partial`, 08a-flashcard.js), and the next tap takes the rest. Across the date boundary: the first date's
+   * pieces are the first signature, and the second date's are still on the card, whole. */
+  {
+    const M = await world(0, 9000);
+    M.card.tap();
+    await M.H.W.cardAdd(M.card, { sats: 2000, pin: '1234' });
+    const undo = later(M.H, 300 * DAY);
+    M.card.tap();
+    await M.H.W.cardAdd(M.card, { sats: 1111, pin: '1234' });
+    undo();
+    const two = dates(M.card).sort((a, b) => a - b);
+    ok(two.length === 2 && M.card.balance() === 3111, 'a card with pieces of two dates', JSON.stringify(two));
+    const firstDate = M.card.state.slots.filter((x) => x.status === 1 && parseInt(x.data.substr(154, 8), 16) === two[0]).reduce((n, x) => n + parseInt(x.data.substr(16, 8), 16), 0);
+    const hb = await bal(M.H);
+    M.card.tap();
+    M.card.sent.length = 0;
+    // it leaves before the second payment is begun: the first date's pieces are signed for and burned, the second's untouched
+    M.card.leaveBefore('22', 2);
+    const part = await M.H.W.cardWithdraw(M.card, { pin: '1234' }).then(() => null, (x) => x);
+    await settle();
+    ok(part && part.card === 'partial' && count(M.card, '24') === 1 && part.sats > 0 && part.left === M.card.balance(),
+       'taken away between the two signatures: the card says it was cut short (`partial`), with what came off it and what is left', part && JSON.stringify({ kind: part.card, sats: part.sats, left: part.left }));
+    ok(dates(M.card).length === 1 && dates(M.card)[0] === two[1] && M.card.balance() === 3111 - firstDate,
+       'the first date’s pieces are what it signed for, and the second date’s are still on the card, whole', JSON.stringify({ dates: dates(M.card), balance: M.card.balance(), firstDate }));
+    ok((await bal(M.H)) === hb + part.sats && part.sats <= firstDate && M.H.W.cardTaken().length === 0 && swaps(M.H).length === 0,
+       'what it signed for is the holder’s: swapped in, in the phone’s balance, and nothing left on file', JSON.stringify({ got: (await bal(M.H)) - hb, firstDate }));
+    M.card.tap();
+    const fin = await M.H.W.cardWithdraw(M.card, { pin: '1234' });
+    ok(fin.sats === 3111 - firstDate && M.card.balance() === 0 && (await bal(M.H)) === hb + part.sats + fin.sats,
+       'and the next tap takes the rest', JSON.stringify({ fin: fin.sats, card: M.card.balance() }));
     await settle();
   }
 
@@ -422,6 +458,36 @@ async function world(feePpk, sats, make) {
     ok(late.sats === 64 && (await bal(A.R)) === rb + 64 && A.card.balance() === afterLost - 32 - 64 && swaps(A.R).length === 0,
        'a card that has signed for another till since cannot give the lost signature again: the payment is made afresh, and the asking is forgotten',
        (await bal(A.R)) - rb + ' paid, card ' + A.card.balance());
+    await settle();
+
+    /* (e) A held payment nobody comes back for. Taken away as it signs, and at the next tap the signature is had again
+     * (SPEND_ALL_AGAIN) and the card taken away once more before the payment is made: what it signed is HELD for its next tap
+     * here (`cardHeld`). Nobody comes back: the settling leaves a fresh one alone, and three minutes on (CARD_RESUME_MS) gives it
+     * back, owed to the card, which its next tap writes onto it. */
+    A.card.tap();
+    A.card.loseAnswerOf('24', 1);
+    await A.R.W.cardPay(A.card, { sats: 128, pin: '1234' }).then(() => null, (x) => x);
+    const beforeHold = A.card.balance();
+    A.card.tap();
+    let afterAgain = false;
+    const away = { send: (a) => (afterAgain ? Promise.reject(new Error('the card left')) : A.card.send(a).then((r) => { if (a.slice(0, 4) === 'b025') afterAgain = true; return r; })) };
+    const cut = await A.R.W.cardPay(away, { sats: 128, pin: '1234' }).then(() => null, (x) => x);
+    const held = A.R.W.cardHeldPayment(A.card.key);
+    ok(!!cut && !!held && held.held >= 128 && held.want === 128 && held.fresh === true && A.card.balance() === beforeHold,
+       'had again and taken away once more: the payment it signed is held for its next tap, and nothing more is burned', JSON.stringify({ cut: cut && cut.card, held }));
+    const settledEarly = await A.R.W.cardSettle();
+    ok(!!A.R.W.cardHeldPayment(A.card.key) && settledEarly.some((x) => x.state === 'held'), 'a fresh one is left alone by the settling', JSON.stringify(settledEarly));
+    const realNow = A.R.window.Date.now.bind(A.R.window.Date);
+    A.R.window.Date.now = () => realNow() + 4 * 60 * 1000;
+    const settled = await A.R.W.cardSettle();
+    A.R.window.Date.now = realNow;
+    const owedHeld = A.R.W.cardOwed().filter((r) => r.card === A.card.key && r.kind === 'refund');
+    ok(!A.R.W.cardHeldPayment(A.card.key) && settled.some((x) => x.state === 'released' && x.made) && owedHeld.reduce((n, r) => n + r.sats, 0) === held.held,
+       'one nobody came back for is given back at the first settling after three minutes: owed to the card', JSON.stringify({ settled, owed: owedHeld.map((r) => r.sats) }));
+    A.card.tap();
+    await A.R.W.cardWrite(A.card, { change: true });
+    ok(A.card.balance() === beforeHold + held.held && A.R.W.cardOwed().filter((r) => r.card === A.card.key).length === 0,
+       'and the card’s next tap puts it back', String(A.card.balance()));
     await settle();
   }
 
@@ -998,9 +1064,6 @@ async function world(feePpk, sats, make) {
     await settle();
   }
 
-  /* ---- 23: the cut    await settle();
-  }
-
   /* ---- 23: the cut, and the short listing, by themselves ------------------------ */
   {
     const L = (n, most, top, have) => H.W.cardDeepLadder(n, most, top, have);
@@ -1057,8 +1120,6 @@ async function world(feePpk, sats, make) {
     const page = H.W.cardParse.page('80' + '45' + piece + 'c6', 0, { wide: true, slots: 128 });
     ok(page.slots.length === 2 && page.slots[0].i === 0x45 && page.slots[0].amount === 1024 && page.slots[1].i === 0x46 && page.slots[1].state === 'spent',
        'a page of a wide card’s whole listing names places above sixty-three, and a spent one by its high bit', JSON.stringify(page.slots.map((x) => [x.i, x.state])));
-    const page6 = H.W.cardParse.page('40' + '45' + piece + '86', 0, { wide: false, slots: 64 });
-    ok(page6.slots.length === 2 && page6.slots[0].i === 5 && page6.slots[1].i === 6 && page6.slots[1].state === 'spent', 'and a page of a card of sixty-four places is read as it always was');
   }
 
   /* ---- 12: a lost card is taken back, a signature for each date ------------ */

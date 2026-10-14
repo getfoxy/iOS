@@ -113,6 +113,7 @@ final class CardGateTests: XCTestCase {
         XCTAssertTrue(CardGate.allows(bytes(select), selected: true), "choosing again is how a session starts over")
         XCTAssertFalse(CardGate.allows(bytes("00b2010c00"), selected: true), "reading a payment card's record, even after ours was chosen")
         XCTAssertTrue(CardGate.succeeded(bytes("02009000")))
+        XCTAssertTrue(CardGate.succeeded(bytes("02019000")))
         XCTAssertTrue(CardGate.succeeded(bytes("9000")))
         XCTAssertFalse(CardGate.succeeded(bytes("6a82")))
         XCTAssertFalse(CardGate.succeeded(bytes("90")))

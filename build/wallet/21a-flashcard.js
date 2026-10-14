@@ -113,7 +113,8 @@
         return Promise.reject(cardError('bad-mint', 'This mint\u2019s address is too long for a card.'));
       }
       var t = cardTalk(link);
-      var card, ownerPub, anchored = null;
+      // `anchor`: 'anchored', or why not: 'no-header' (this phone has kept none) or 'refused' (the card would not take it)
+      var card, ownerPub, anchored = null, anchorWhy = 'no-header';
       // read the short way: what is on the card is no part of setting it up
       return cardLook(link, { short: true }).then(function (c) {
         card = c;
@@ -146,10 +147,14 @@
           var kept = headerKept();
           var anchor = (kept && cardHexOk(kept.hex, 80)) ? kept.hex : '';
           var block = kept ? headerShort(kept.hash) : '';
-          if (!anchor) return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
+          if (!anchor) {
+            console.warn('[foxy] card: this phone has kept no block header to anchor its clock with; its owner is given alone');
+            return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
+          }
           return t.ask(cardCommand(CARD_INS.setOwner, 0, ownerPub + anchor)).then(function (r) {
             if (r.sw === '9000') { anchored = kept; return; }
             if (r.sw !== '6a93' && r.sw !== '6a80') throw cardRefused(r.sw, 'its owner');
+            anchorWhy = 'refused';
             console.warn('[foxy] card: it would not take block ' + block + ' as its anchor (' + r.sw + '); its owner is given alone');
             return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
           });
@@ -157,7 +162,11 @@
       }).then(function () {
         console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with ' + (noPin ? 'no PIN and ' : '') + 'no limit'
           + (anchored ? ', its clock anchored at block ' + headerShort(anchored.hash) : ', its clock not anchored'));
-        return FoxyWallet.cardLook(link, { mine: true });
+        return FoxyWallet.cardLook(link, { mine: true }).then(function (c) {
+          // how the clock was set, for the screen to say (`fcSetUpSaid`)
+          if (c) c.anchor = anchored ? 'anchored' : anchorWhy;
+          return c;
+        });
       });
     },
 

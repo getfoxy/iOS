@@ -606,8 +606,9 @@
         chip: 'FLASHCARD › CARDS YOU LOADED' }),
       'empty': () => ({ tone: 'warn', title: 'NO MONEY ON THIS CARD',
         reason: 'It has not been set up, or nothing has been put on it.' }),
-      // a 0.x or 1.x card, or anything else that does not answer the Cashu card protocol 2.0's applet: "This card needs an update."
-      'not-a-card': () => ({ title: e.needsUpdate ? 'CARD NEEDS AN UPDATE' : 'NOT A FOXY CARD', reason: said }),
+      // a 0.x or 1.x card, or anything else that does not answer the Cashu card protocol 2.x's applet: "This card needs an update."
+      // A card of a later protocol than this app speaks is the app's to update (`appUpdate`).
+      'not-a-card': () => ({ title: e.appUpdate ? 'UPDATE FOXY' : e.needsUpdate ? 'CARD NEEDS AN UPDATE' : 'NOT A FOXY CARD', reason: said }),
       'no-route': () => Object.assign({ tone: 'warn', title: opt.taken ? 'NOT PAID' : 'NO CONNECTION',
         reason: 'The mint could not be reached.' + safe }, again),
       /* A till, and the card's day has too little left for this payment: said
@@ -738,6 +739,13 @@
   }
 
   fcLimitRefusal(e) {
+    /* A card whose rollover budget is spent (D20): its day does not turn by itself, so neither "in a day" nor a time is true.
+     * What it has left is all it pays until its owner's phone, online, taps it. */
+    if (e.stuck) {
+      return (e.left > 0 ? 'The card has ' + this.fcBoth(e.left) + ' left, and this payment is more than that.'
+        : 'The card has nothing left to spend.')
+        + ' Its daily limit does not renew until its owner\u2019s phone taps it with a connection.';
+    }
     if (e.turns > 0 && e.left < e.limit) {
       return 'The card can still spend ' + this.fcBoth(e.left) + ' today. Its day turns at ' + this.fcWhen(e.turns) + '.';
     }
@@ -1676,6 +1684,11 @@
       owner: !!(card.info && card.info.owner),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
+      /* The rollover budget (D20), as the owner's read left it: `renewed` is what this tap's REFRESH undid ({ rolls, stuck }:
+       * `stuck` where the card's day had stopped turning), and `refreshMissed` why a refresh that was due did not happen
+       * ('no-header': this phone has no block header to send; 'refused': the card would not take it). */
+      renewed: card.renewed || null,
+      refreshMissed: card.refreshMissed || '',
       mint: (card.record && card.record.mint) || '',
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -1876,8 +1889,18 @@
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast('The card is set up.');
+        this.toast(this.fcSetUpSaid(card));
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
+  }
+
+  /* What a set-up says when it is done. The card's clock is anchored at set-up to the newest Bitcoin block this phone has kept
+   * (the 145-byte SET_OWNER, D20); with no block kept, or one the card would not take, the owner is written alone, and the
+   * card's clock waits for the first block a phone shows it. That is said, so that it is not learned from the log alone. */
+  fcSetUpSaid(card) {
+    const anchor = card && card.anchor;
+    if (anchor === 'no-header') return 'The card is set up. This phone had no Bitcoin block to set its clock by: its clock starts at its next tap online.';
+    if (anchor === 'refused') return 'The card is set up. It would not take this phone\u2019s newest Bitcoin block to set its clock by: its clock starts at its next tap online.';
+    return 'The card is set up.';
   }
 
   fcSetUpKind(pin) {
@@ -2281,9 +2304,12 @@
       amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
       /* The two sentences go under the amount, in this order. They are set as
        * `warn` because the shell's subtitle sits above the amount, and would read first. */
+      /* And what renews it: the card's rollover budget (D20). Past it the day stops turning until this phone, online, taps it,
+       * so a lost seed phrase leaves the card one more day's limit at the most, for good, and the rest stays on it. */
       warn: 'This card will spend no more than this in one day. The limit starts again by itself each day, for up to '
-        + this.fcRollBudget() + ' days after this phone last tapped it online. '
-        + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+        + this.fcRollBudget() + ' days after this phone last tapped it online, and then stops until this phone taps it online again. '
+        + 'Only this phone, or a phone restored from its seed phrase, can change or remove it. Without the seed phrase the card '
+        + 'pays at most one more day\u2019s limit, and the rest stays on it.',
       secondary, cta: 'CONFIRM', ctaTone: 'go',
       go: () => this.fcLimitConfirmed(),
     };
@@ -2826,7 +2852,7 @@
    *
    * A card maker takes a code nobody has taken and adds its drawing; the
    * codes taken are listed here and in docs/CARD-DESIGNS.md of the card
-   * repository (https://github.com/lnflash/cashu-javacard), so that anybody can see which are. FL1 is the first
+   * repository (https://github.com/getfoxy/card), so that anybody can see which are. FL1 is the first
    * Flash design, drawn in CSS; FX1 is Foxy's, a picture; EL1 is the beaker,
    * drawn in CSS and SVG and animated (build/markup.html, the card on the
    * FLASHCARD screen, and the face behind the sheet in 26h-tap-screen.js). The
@@ -3107,9 +3133,21 @@
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }
     /* A card whose day has rolled its whole budget since its owner's phone last saw it online (D20): its daily limit does not
-     * renew until that phone, online, taps it, which refreshes it (the wallet's `cardRefresh`). Pressed, the line reads the card. */
-    if (on && fc && limited && day.stuck && fc.ownedHere === true) {
-      notes.push({ text: 'This card\u2019s daily limit renews again once this phone is online and taps it.', tap: () => this.fcRead(true) });
+     * renew until that phone, online, taps it, which refreshes it (the wallet's `cardRefresh`). Pressed, the line reads the card.
+     * Where this phone was online and the refresh could not be made, it says why; where this tap made it, it says what it undid
+     * (the read refreshes before the screen is drawn, so this is the one place the owner sees that the budget had run out). */
+    const stuckHere = !!fc && fc.ownedHere === true && ((limited && day.stuck) || !!(noPin && noPin.stuck));
+    if (on && stuckHere) {
+      notes.push({
+        text: fc.refreshMissed === 'no-header'
+          ? 'This card\u2019s daily limit has stopped renewing, and this phone has no Bitcoin block to renew it with yet. Press here to try again.'
+          : fc.refreshMissed === 'refused'
+            ? 'This card\u2019s daily limit has stopped renewing, and the card would not take this phone\u2019s newest Bitcoin block. Press here to try again.'
+            : 'This card\u2019s daily limit has stopped renewing. It renews again once this phone is online and taps it.',
+        tap: () => this.fcRead(true),
+      });
+    } else if (on && fc && fc.ownedHere === true && fc.renewed && fc.renewed.stuck) {
+      notes.push({ text: 'This card\u2019s daily limit had stopped renewing. This tap renewed it.', tap: () => {} });
     }
 
     /* RESET, for the card's owner: a locked card is not asked whether this phone owns it, so it is offered to
@@ -3208,12 +3246,14 @@
         : limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT') + (noPinCard ? ' | NO PIN' : ''),
       // under the balance, where there is a limit: what the day has left, and when it turns
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
-      fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
+      // (a card whose budget is spent has no "today": what is left is all it pays until its owner's phone taps it online)
+      fcDayLeft: limited ? (day.stuck ? 'LEFT ' : 'LEFT TODAY ') + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
       // under it, for a card with a PIN that pays some of a day without it: how much, and what is left of it today
       fcNoPinShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && !!noPin,
-      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit) + ' \u00b7 LEFT TODAY ' + (noPin.left > 0 || !px ? this.fcPrice(noPin.left) : '$0.00') : '',
+      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit) + ' \u00b7 ' + (noPin.stuck ? 'LEFT ' : 'LEFT TODAY ') + (noPin.left > 0 || !px ? this.fcPrice(noPin.left) : '$0.00') : '',
       // a card with a limit and no block yet has a day with no start: it begins with the first block the card is shown
-      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
+      fcDayTurns: limited ? (day.stuck ? 'RENEWS WHEN ITS OWNER\u2019S PHONE TAPS IT ONLINE'
+        : day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
         : day.onTrust ? 'THE DAY BEGINS WITH THE CARD\u2019S FIRST BLOCK' : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,

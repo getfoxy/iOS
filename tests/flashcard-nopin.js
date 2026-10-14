@@ -52,8 +52,14 @@ async function world(pin, o) {
     ok(info.tapStart === 0 && info.tapSpent === 0, 'which are not read as a tap window’s start and count');
     for (const v of ['0110', '0114', '0300']) {
       const said = (() => { try { W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^0200/, v)); return 'read'; } catch (e) { return (e && e.card) + ' ' + (e && e.message); } })();
-      ok(said === 'not-a-card This card needs an update.', 'a GET_INFO of version ' + v + ' is not read: the card needs an update', said);
+      const words = v === '0300' ? 'not-a-card This card is newer than this Foxy. Update the app to use it.' : 'not-a-card This card needs an update.';
+      ok(said === words, 'a GET_INFO of version ' + v + ' is not read: ' + (v === '0300' ? 'the app needs an update' : 'the card needs an update'), said);
     }
+    // a 2.x of any minor is read: 2.0 (the v2.0.0 release) and 2.1 alike
+    ok(W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^0200/, '0201')).version === '2.1', 'and one of 2.1 is read as 2.0 is');
+    // a card of the protocol with a capability this phone needs missing is no card of it
+    const lacking = (() => { try { W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^(.{12})ff/, '$17f')); return 'read'; } catch (e) { return (e && e.card) + ' ' + (e && e.message); } })();
+    ok(lacking === 'not-a-card This card needs an update.', 'a GET_INFO without the sealed PIN’s capability bit is not read', lacking);
     const none = W.cardParse.info(longInfo(0, 0, 1000, 900, false));
     ok(none.pin === 'none' && none.pinSet === false && none.hasRecord === true && none.setUp === true, 'a card with a record, an owner and no PIN is set up', JSON.stringify([none.pin, none.hasRecord, none.setUp]));
 
@@ -84,7 +90,7 @@ async function world(pin, o) {
     const P = await funded({}, 0);
     const c = newCard(P, undefined, { format: 4 });
     const read = async (apdu) => { const r = await c.send(apdu); return { sw: r.slice(-4), data: r.slice(0, -4) }; };
-    ok((await c.send(SEL)) === '02009000', 'the card says 2.0 when chosen');
+    ok((await c.send(SEL)) === '02019000', 'the card says 2.1 when chosen');
     const fresh = await read('b001010000');
     ok(fresh.sw === '9000' && fresh.data.length === 84 && fresh.data.slice(68) === '0000000000000000' && fresh.data.substr(14, 2) === '00',
        'GET_INFO P1=1 is 42 bytes; on a new card there is no PIN (byte 7) and bytes 34 to 41 are nothing', fresh.data.slice(0, 20) + ' ... ' + fresh.data.slice(60));

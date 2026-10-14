@@ -114,9 +114,9 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     ok(pages.length > 15 && pages.length <= 64, 'sixty-four places take about twenty pages', String(pages.length));
     ok((await full.send('b017800000')) === '6a83', 'and a page from a slot there is not is refused');
     const bad = (hex) => { try { H.W.cardParse.page(hex, 0); return 'read'; } catch (e) { return 'refused'; } };
-    ok(bad('40') === 'read' && bad('00') === 'refused' && bad('41') === 'refused' && bad('40c0') === 'refused'
-       && bad('4040' + '00'.repeat(10)) === 'refused' && bad('') === 'refused' && bad('zz') === 'refused',
-       'a page that does not move on, runs past the card, has a state that is not one or is cut short is not read');
+    ok(bad('80') === 'read' && bad('00') === 'refused' && bad('81') === 'refused' && bad('40c0') === 'refused'
+       && bad('8001' + '00'.repeat(10)) === 'refused' && bad('') === 'refused' && bad('zz') === 'refused',
+       'a page that does not move on, runs past the card, names a place past its own end or is cut short is not read');
   }
 
   /* ---- 2: no AUTH in a payment, and paid only by the mint ------------------------ */
@@ -153,8 +153,20 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     const liar = { send: (x) => lie.send(x).then((r) => (x.slice(0, 4) === CMD.key ? card.key + '9000' : r)) };
     const takenBefore = R.W.cardTaken().length;
     const b = await why(R.W.cardPay(liar, { sats: 64, pin: '1234' }));
-    ok((b === 'bad-signature' || b === 'not-a-card') && (await bal(R)) === rBefore && R.W.cardTaken().length === takenBefore,
-       'one that names the real card’s key and signs with another is refused (its PIN key, or its signature, is not signed by that key), and nothing is kept', b);
+    ok(b === 'not-a-card' && (await bal(R)) === rBefore && R.W.cardTaken().length === takenBefore,
+       'one that names the real card’s key and signs with another, with a PIN, is refused at its PIN key (not signed by that key), and nothing is kept', b);
+    /* With NO PIN there is no PIN key to stop it, and the wallet's own check of the card's signature for the payment (`cardSignGroup`,
+     * `bad-signature`) is what does: the only defence a till has offline against a card with no PIN. */
+    card.tap();
+    const lie2 = makeCard({ window: R.window });
+    Object.assign(lie2.state, JSON.parse(JSON.stringify(card.state)), { verified: false, nonce: null, grant: false, selected: false, pinState: 0, pin: '', tries: 3 });
+    const liar2 = { send: (x) => lie2.send(x).then((r) => (x.slice(0, 4) === CMD.key ? card.key + '9000' : r)) };
+    const swapsBefore = JSON.parse(R.storage.getItem('foxy.flashcard.swaps') || '[]').length;
+    const b2 = await why(R.W.cardPay(liar2, { sats: 64 }));
+    await settle();
+    ok(b2 === 'bad-signature' && (await bal(R)) === rBefore && R.W.cardTaken().length === takenBefore
+       && JSON.parse(R.storage.getItem('foxy.flashcard.swaps') || '[]').length === swapsBefore && lie2.sent.some((x) => x.slice(0, 4) === 'b024'),
+       'one with no PIN that names the real card’s key: its signature for the payment is not good for that key, and is refused as that (`bad-signature`), with nothing kept and no swap left', b2);
   }
 
   /* ---- 3: the exact set, found by search ---------------------------------------- */
@@ -567,7 +579,15 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     Object.assign(fakeCard.state, JSON.parse(JSON.stringify(c.state)), { verified: false, nonce: null, grant: false, selected: false });
     const liar = { send: (x) => fakeCard.send(x).then((r) => (x.slice(0, 4) === CMD.key ? c.key + '9000' : r)) };
     const noSig = await why(Rv.W.cardPay(liar, { sats: 40, pin: '1234', trusted: true }));
-    ok((noSig === 'bad-signature' || noSig === 'not-a-card') && Rv.W.trustedWaiting().length === 1, 'a card that cannot sign for its key is refused offline (its PIN key, or its signature, is not the key’s), and nothing more is kept', noSig);
+    ok(noSig === 'not-a-card' && Rv.W.trustedWaiting().length === 1, 'a card with a PIN that cannot sign for its key is refused offline at its PIN key, and nothing more is kept', noSig);
+    // and one with no PIN: offline the wallet's check of its signature is all there is, and it holds (`bad-signature`)
+    c.tap();
+    const fakeNoPin = makeCard({ window: Rv.window });
+    Object.assign(fakeNoPin.state, JSON.parse(JSON.stringify(c.state)), { verified: false, nonce: null, grant: false, selected: false, pinState: 0, pin: '', tries: 3 });
+    const liarNoPin = { send: (x) => fakeNoPin.send(x).then((r) => (x.slice(0, 4) === CMD.key ? c.key + '9000' : r)) };
+    const noSig2 = await why(Rv.W.cardPay(liarNoPin, { sats: 40, trusted: true }));
+    ok(noSig2 === 'bad-signature' && Rv.W.trustedWaiting().length === 1 && fakeNoPin.sent.some((x) => x.slice(0, 4) === 'b024'),
+       'a card with no PIN that cannot sign for its key is refused offline at its signature (`bad-signature`), and nothing more is kept', noSig2);
 
     // a second payment, and then a copy of the card gets there first: the one signature is good only for this till's outputs,
     // so nobody can swap what the card signed here to outputs of their own; a copy of the card can spend the same pieces elsewhere

@@ -113,7 +113,7 @@ async function forge(ctx, card, o) {
     const card = newCard(H, undefined, { format: 4 });
     await card.send(SELECT);
     const info = H.W.cardParse.info((await card.send('b001010000')).slice(0, -4));
-    ok(card.version === '0200' && info.version === '2.0' && info.proofs === true, 'the wallet reads the card as one that keeps proofs', info.version);
+    ok(card.version === '0201' && info.version === '2.1' && info.proofs === true, 'the wallet reads the card as one that keeps proofs', info.version);
 
     await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
     card.tap();
@@ -148,9 +148,6 @@ async function forge(ctx, card, o) {
        'every piece it wrote from the mint’s own answer is noted as real, by its nonce, once the card said it stored it', real.length + ' nonces');
 
     await settle();
-  }
-
-  /* ---- 2:    await settle();
   }
 
   /* ---- 2: a card loaded elsewhere, with good proofs ----------------------------------------------------------------- */

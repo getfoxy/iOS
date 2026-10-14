@@ -119,7 +119,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be set up', () => holder.state.screen === 'flashcard' && !!c.state.owner && holder.state.fc && holder.state.fc.owner);
   ok(c.state.record.limit === 0 && c.state.owner && c.state.pinState === 0 && holder.state.fc.limit === 0 && holder.state.fc.owner && holder.state.fc.ownedHere === true,
      'one tap gave the card its record and its owner, no PIN and no limit', JSON.stringify({ limit: c.state.record.limit }));
-  ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && holder.state.stack.slice(-1)[0] === 'home' && holder.toasts.indexOf('The card is set up.') >= 0,
+  ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && holder.state.stack.slice(-1)[0] === 'home' && holder.toasts.some((x) => String(x).indexOf('The card is set up.') === 0),
      'and the person stays on the card’s screen, told so in a line, with nothing to read or press; back from it is where they were', holder.toasts.slice(-1)[0]);
   await settle();
   // a PIN for the rest of this walk, given by the wallet as ADD PIN gives it (ADD PIN on the screen is walked further down)
@@ -591,7 +591,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   {
     const cf = holder.fcLimitSpec();
     ok(cf.amountLabel === 'YOU ARE APPLYING A DAILY LIMIT OF:' && cf.amount === '\u20bf 700' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
-       && cf.warn === 'This card will spend no more than this in one day. The limit starts again by itself each day, for up to 7 days after this phone last tapped it online. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+       && cf.warn === 'This card will spend no more than this in one day. The limit starts again by itself each day, for up to 7 days after this phone last tapped it online, and then stops until this phone taps it online again. Only this phone, or a phone restored from its seed phrase, can change or remove it. Without the seed phrase the card pays at most one more day\u2019s limit, and the rest stays on it.',
        'which says the amount, what it means and who can change it, with CONFIRM and CANCEL', JSON.stringify([cf.amountLabel, cf.amount]));
     cf.secondary.go();
     ok(holder.state.screen === 'flashcard' && c.state.record.limit === 0 && !card(holder) && !pad(holder),
@@ -1983,7 +1983,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     owner.fcSetUp();
     ok(!pad(owner) && !card(owner) && H2.sheet[0] === 'begin: Tap behind the phone.' && !n.state.owner,
        'SET UP asks for no PIN: there is no pad, the sheet comes up at once and begins the tap, with nothing to read first and nothing to answer', H2.sheet[0]);
-    await until('the card to be set up with no PIN', () => !!n.state.owner && owner.toasts.indexOf('The card is set up.') >= 0);
+    await until('the card to be set up with no PIN', () => !!n.state.owner && owner.toasts.some((x) => String(x).indexOf('The card is set up.') === 0));
     ok(n.state.pinState === 0 && n.state.pin === null && n.state.record.set && n.state.record.limit === 0 && !n.sent.some((a) => /^b04[01]/.test(a))
        && owner.state.screen === 'flashcard' && !card(owner),
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line', owner.state.screen);
@@ -2196,7 +2196,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       owner.fcSetUp();
       ok(!pad(owner) && card(owner) && card(owner).title === 'IF THE CARD IS LOST' && card(owner).has('RECOVERABLE'), 'with cards that can be taken back, SET UP goes straight to that question: no PIN is asked first');
       card(owner).press('RECOVERABLE');
-      await until('the recoverable card to be set up with no PIN', () => owner.state.screen === 'flashcard' && !!n2.state.owner && owner.toasts.indexOf('The card is set up.') >= 0);
+      await until('the recoverable card to be set up with no PIN', () => owner.state.screen === 'flashcard' && !!n2.state.owner && owner.toasts.some((x) => String(x).indexOf('The card is set up.') === 0));
       ok(n2.state.pinState === 0 && n2.state.record.refund !== '00'.repeat(33) && H2.W.cardsList().length === 1, 'and the card is set up with no PIN and its key of this phone’s on it');
       owner.FC_RECOVERABLE = false;
     }
@@ -2265,7 +2265,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const setUpWith = async (app, ctx, cd, pin) => {
       await look(app, ctx, cd);
       app.fcSetUp();
-      await until('the card to be set up', () => !!cd.state.owner && app.toasts.indexOf('The card is set up.') >= 0);
+      await until('the card to be set up', () => !!cd.state.owner && app.toasts.some((x) => String(x).indexOf('The card is set up.') === 0));
       await settle();
       if (!pin) return;
       await look(app, ctx, cd);

@@ -241,8 +241,8 @@
  },
  "fcLimitConfirm, a daily limit, to be confirmed": {
   "file": "253-fclimitconfirm-a-daily-limit-to-be-confirmed.html",
-  "markup": "70e6bca8e1c23991c5ac7f14433dd5dceedca5f516257d5ce7565cc3f6fdbef3",
-  "vals": "3b3499683c6f962134a8a1fd1f28802e451c615b83489f69531384ff71b38196"
+  "markup": "ea8d2dd43cdbf2f64778e58aee53443bb45df28b109547449d221a0c63e66c43",
+  "vals": "e3fdedcd8edebc2908448e6e2090431592c0fce4a3a028d2aebc6e1579f65cd9"
  },
  "fcLimitConfirm, no limit, to be confirmed": {
   "file": "254-fclimitconfirm-no-limit-to-be-confirmed.html",
@@ -328,6 +328,31 @@
   "file": "312-flashcard-a-card-with-a-limit-on-one-tap-and-a-daily-limit.html",
   "markup": "558d59d097ddbbc42965c165a6d9d4021969f5c0e37f19c3d24ad0ccf4403923",
   "vals": "68e5fe00d7fa97fb6d8791198a170d06bec28b5ba96bcb5420e5da50e2df09b7"
+ },
+ "flashcard, another phone’s card whose rollover budget is spent: what is left, and that it renews at its owner’s tap": {
+  "file": "390-flashcard-another-phone-s-card-whose-rollover-budget-is-spent-what-is-left-and-that-it-renews-at-its-owner-s-tap.html",
+  "markup": "7efb41b50f6c843c1f93aac7ace28b2ef7fdfd7a46479259f429427ff21b71d2",
+  "vals": "bedb680d563146793428d2b28f18627b02922b9348b0ab4b4c211c002cd3b950"
+ },
+ "flashcard, a card whose rollover budget is spent, on its owner’s phone offline": {
+  "file": "391-flashcard-a-card-whose-rollover-budget-is-spent-on-its-owner-s-phone-offline.html",
+  "markup": "71a0639058b47a2bfeb1b695260e026e44f6255b6323497115466d1f66e0e7b3",
+  "vals": "af027742147e8c1267b84191d52a225f46c0b93957791b60932d7d0d1c81aa23"
+ },
+ "flashcard, a card whose rollover budget is spent, on its owner’s phone with no block to renew it": {
+  "file": "392-flashcard-a-card-whose-rollover-budget-is-spent-on-its-owner-s-phone-with-no-block-to-renew-it.html",
+  "markup": "5e215f2fee1b5531ac0bac11ec0d4719e982050230caf473c2aaf3d7fca141f2",
+  "vals": "ca9617562925059965601d56656c73a0a0bc8eb0f2e19e05b66a28435d88c76e"
+ },
+ "flashcard, a card whose rollover budget is spent, that would not take its owner’s block": {
+  "file": "393-flashcard-a-card-whose-rollover-budget-is-spent-that-would-not-take-its-owner-s-block.html",
+  "markup": "4b59c5d21e821fadf95ac32ccf828ef05c7eade24f804259207cf24038cd4c94",
+  "vals": "d0452d544975c1b9f36c4b101c058cfdb4a08638563f0803896b079961eb1e3f"
+ },
+ "flashcard, a card whose rollover budget was spent, renewed by its owner’s tap": {
+  "file": "394-flashcard-a-card-whose-rollover-budget-was-spent-renewed-by-its-owner-s-tap.html",
+  "markup": "8ac5172c7c00e1d47e87914ef58998b720252b3cc9a047fc1df906549bcbae85",
+  "vals": "869bd9c436c922c98204e8614b3acc6f4ab17e86bcda633fec8b1e0239ebf861"
  },
  "flashcard, a locked card with a daily limit: its badge above the limit line, on the face": {
   "file": "370-flashcard-a-locked-card-with-a-daily-limit-its-badge-above-the-limit-line-on-the-face.html",
@@ -1534,6 +1559,16 @@
   "markup": "ad5cbd6099f56b000d62f0e7abeb6b008d641f1cb8e8de01eb91392b9a13232c",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
+ "card: a till, over what is left of a card whose rollover budget is spent": {
+  "file": "395-card-a-till-over-what-is-left-of-a-card-whose-rollover-budget-is-spent.html",
+  "markup": "6636b6035f92dd8f7e3d60e1b1cde63ded9b36ce605ab4ca09b66be7ece1770c",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
+ "card: a till, a card whose rollover budget is spent and nothing is left": {
+  "file": "396-card-a-till-a-card-whose-rollover-budget-is-spent-and-nothing-is-left.html",
+  "markup": "545b9f0cd91f38d22da9637bdc98e3f2dc0f6de041edb88eb480d7f5ae9b6ad4",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
  "card: another phone’s card": {
   "file": "276-card-another-phone-s-card.html",
   "markup": "622fe66de0cec51f7f3181b707d3815061afdfdcba06dadd0f91cbc03fcbb977",
@@ -1542,6 +1577,11 @@
  "card: a card that needs an update, older than the Cashu card protocol 2.0": {
   "file": "389-card-a-card-that-needs-an-update-older-than-the-cashu-card-protocol-2-0.html",
   "markup": "2a948c093ffc323b5f346b28bfbf52fecb3c6e1dd23c801df0ee569d19e154e5",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
+ "card: a card of a later protocol than this app": {
+  "file": "397-card-a-card-of-a-later-protocol-than-this-app.html",
+  "markup": "e43d3bfad829739474e1b5b33dabf038582214a65013bf84071f473b6e54612c",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
  "card: a card’s wrong PIN": {

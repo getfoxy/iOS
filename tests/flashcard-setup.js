@@ -41,8 +41,8 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
   const seen = await W.cardLook(card);
   ok(seen.key === card.key && seen.info.pin === 'none' && !seen.info.hasRecord && seen.balance === 0 && seen.info.slots === 128,
      'a new card says it is new: no PIN, no record, nothing on it', JSON.stringify(seen.info));
-  ok(seen.info.version === '2.0' && seen.info.format === 4 && seen.info.limit === 0 && !seen.info.owner && seen.info.now === 0 && seen.info.windowStart === 0 && seen.info.spentToday === 0,
-     'of the Cashu card protocol 2.0, in format 4, with no limit, no owner, and no clock', JSON.stringify(seen.info));
+  ok(seen.info.version === '2.1' && seen.info.format === 4 && seen.info.limit === 0 && !seen.info.owner && seen.info.now === 0 && seen.info.windowStart === 0 && seen.info.spentToday === 0,
+     'of the Cashu card protocol 2.1, in format 4, with no limit, no owner, and no clock', JSON.stringify(seen.info));
   ok(card.sent.some((a) => a.slice(2, 4) === '15'), 'and is made to prove it holds its key');
   ok(card.sent[0] === '00a404000b' + 'f043415348554341524401' + '00', 'the applet is chosen by its whole name', card.sent[0]);
   ok(insOf(card).slice(0, 2).join() === '01,37' && !insOf(card).includes('35'),
@@ -58,11 +58,17 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     const chip = newCard(P, undefined, { chip: true });
     const opened = await W.cardLook({ send: (a) => chip.send(a.slice(0, 10) === '00a404000b' ? '00a404000a' + a.slice(10, 30) + '00' : a) }).then(() => null, (e) => e);
     ok(opened && opened.needsUpdate === true && chip.sent.length === 1, 'and a SELECT answered 9000 with no version (the opener) is no answer: nothing more is said', opened && opened.message);
-    // a version that is not 2: a 1.x answer under the new name, or a 3.0
-    for (const v of ['0114', '0300']) {
-      const odd = await W.cardLook({ send: (a) => Promise.resolve(a.slice(0, 4) === '00a4' ? v + '9000' : '6d00') }).then(() => null, (e) => e);
-      ok(odd && odd.needsUpdate === true, 'a card that answers version ' + v + ' needs an update', odd && odd.message);
-    }
+    // a version that is not 2: a 1.x answer under the new name needs an update; a 3.0 is newer than this app, which is what needs one
+    const odd = await W.cardLook({ send: (a) => Promise.resolve(a.slice(0, 4) === '00a4' ? '0114' + '9000' : '6d00') }).then(() => null, (e) => e);
+    ok(odd && odd.needsUpdate === true && !odd.appUpdate, 'a card that answers version 0114 needs an update', odd && odd.message);
+    const newer = await W.cardLook({ send: (a) => Promise.resolve(a.slice(0, 4) === '00a4' ? '0300' + '9000' : '6d00') }).then(() => null, (e) => e);
+    ok(newer && newer.card === 'not-a-card' && newer.appUpdate === true && !newer.needsUpdate && newer.message === 'This card is newer than this Foxy. Update the app to use it.',
+       'a card that answers version 0300 is newer than this app, and the app is what is said to need the update', newer && newer.message);
+    // and any minor of 2 is the protocol: 2.0 as 2.1
+    const zero = newCard(P);
+    const asTwoZero = { send: (a) => zero.send(a).then((r) => (a.slice(0, 4) === '00a4' && r === '02019000' ? '02009000' : r)) };
+    const read20 = await W.cardLook(asTwoZero).then((c) => c, (e) => e);
+    ok(read20 && read20.key === zero.key && !read20.card, 'a card whose SELECT answers 02 00 is read as one of 02 01 is', read20 && (read20.message || read20.key));
   }
 
   /* ---- not a card, or not the card it says ------------------------------- */

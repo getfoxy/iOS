@@ -18,8 +18,10 @@
  *      3c a new record (an empty card told its mint) that keeps the clock
  *   4  the record, the log and the receipts a card gives (77 bytes and 20)
  *   5  the FLASHCARD screen: the block line under its title, and a log that shows the phone's time beside the block's
- *   6  the clock walked a day at a time (the Cashu card protocol 2.0, D20): the anchor of SET_OWNER, the rollover budget of
- *      SET_LIMIT's thirteenth byte, the no-PIN allowance that begins again only when armed, and the owner's REFRESH
+ *   6  the clock walked a day at a time (the Cashu card protocol 2.x, D20 and D26): the anchor of SET_OWNER and the set-up's
+ *      words when it is refused or there is none, the rollover budget of SET_LIMIT's thirteenth byte, a spent budget as the
+ *      till and every screen read it, the no-PIN allowance that begins again only when armed, and the owner's REFRESH:
+ *      offline, with no block kept, refused by the card, taken, and on a locked card
  *
  * The headers named TIP, OLD and GENESIS are real, and public: this checks their hashes with a sha256 of its own. */
 const crypto = require('crypto');
@@ -136,9 +138,9 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   /* ---- 1: the card: three real headers at the real floor -------------------------------------------------------------- */
   {
     const c = mk();
-    ok((await read(c, SEL)).data === '0200', 'a card says 2.0 when chosen');
+    ok((await read(c, SEL)).data === '0201', 'a card says 2.1 when chosen');
     const fresh = await infoOf(c);
-    ok(fresh.version === '2.0' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
+    ok(fresh.version === '2.1' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
     ok(blank.headerBits === '' && blank.headerHash === '' && blank.rolls === 0 && blank.budget === 7 && blank.armed === false, 'its record names no header yet, and its rollover is nothing of a budget of 7', JSON.stringify([blank.headerBits, blank.headerHash]));
@@ -1023,6 +1025,22 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     await H6.W.cardSetUp(strict, { pin: '1234', recoverable: true });
     ok(!!strict.state.owner && strict.state.now === 0 && ownerSet(strict).length === 2 && ownerSet(strict)[1].length === 10 + 130,
        'a card that refuses the anchor is given its owner alone, and its clock waits for its first block', ownerSet(strict).map((x) => (x.length - 10) / 2).join(','));
+    // and the set-up says which: anchored, refused, or no block kept on this phone at all (a phone that has fetched none)
+    {
+      const strictMade = await H6.W.cardLook(strict, { mine: true });
+      const app6 = appOn(H6);
+      ok(made.anchor === 'anchored' && app6.fcSetUpSaid(made) === 'The card is set up.', 'an anchored set-up says only that the card is set up', made.anchor);
+      const refusedAt = newCard(H6);
+      const refusedMade = await H6.W.cardSetUp(refusedAt, { pin: '1234' });
+      ok(refusedMade.anchor === 'refused' && /would not take this phone\u2019s newest Bitcoin block/.test(app6.fcSetUpSaid(refusedMade)),
+         'a set-up the card refused the anchor of says so on the screen', app6.fcSetUpSaid(refusedMade));
+      const N6 = await funded({ sharedMint: H6.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
+      const bare = newCard(N6, undefined, { floorBits: CHEAP });
+      const bareMade = await N6.W.cardSetUp(bare, { pin: '1234' });
+      ok(bareMade.anchor === 'no-header' && ownerSet(bare).length === 1 && ownerSet(bare)[0].length === 10 + 130 && /had no Bitcoin block/.test(appOn(N6).fcSetUpSaid(bareMade)),
+         'a phone with no block kept gives the owner alone (65 bytes) and says the clock starts at the next tap online', appOn(N6).fcSetUpSaid(bareMade));
+      ok(strictMade.info.owner === true, '(the refused card is its owner\u2019s all the same)');
+    }
 
     // a daily limit with a rollover budget of 2: the thirteenth byte of SET_LIMIT
     card.tap();
@@ -1034,15 +1052,76 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     ok((await R6.W.cardPay(card, { sats: 500, pin: '1234' })).sats === 500, 'the first day pays its 500');
     // a till walks the card's clock a day at a time with real headers: the window rolls the budget's times, and then stays
     const days = [];
+    let refusedDay = null;
     for (let d = 1; d <= 3; d++) {
       await walk(card, t0 + d * DAY + d);
       card.tap();
-      days.push(await R6.W.cardPay(card, { sats: 500, pin: '1234' }).then((x) => 'paid ' + x.sats + ', rolls ' + card.state.rolls, (e) => (e && e.card) + ', rolls ' + card.state.rolls));
+      days.push(await R6.W.cardPay(card, { sats: 500, pin: '1234' }).then((x) => 'paid ' + x.sats + ', rolls ' + card.state.rolls, (e) => { refusedDay = e; return (e && e.card) + ', rolls ' + card.state.rolls; }));
     }
     ok(days.join(' | ') === 'paid 500, rolls 1 | paid 500, rolls 2 | limit, rolls 2', 'a terminal that walks the clock gets the budget\u2019s days and no more: the third day is refused', days.join(' | '));
     card.tap();
     const stuck = await R6.W.cardLook(card);
     ok(stuck.day.stuck === true && stuck.day.left === 0 && stuck.record.rolls === 2 && stuck.record.budget === 2, 'and the till reads the day as stuck where it is', JSON.stringify(stuck.day));
+    /* What the till says: the card's day does not turn by itself, so neither "in a day" nor a time (the review's "can spend
+     * 10,000 in a day", untrue of a card that has 100 left until its owner's tap). */
+    {
+      const till = appOn(R6);
+      const words = refusedDay ? till.fcLimitRefusal(refusedDay) : '';
+      ok(!!refusedDay && refusedDay.card === 'limit' && refusedDay.stuck === true && refusedDay.turns === 0 && refusedDay.left === 0,
+         'the third day\u2019s refusal says the card\u2019s budget is spent (`stuck`), with nothing left and no time', JSON.stringify(refusedDay && [refusedDay.card, refusedDay.stuck, refusedDay.left, refusedDay.turns]));
+      ok(words === 'The card has nothing left to spend. Its daily limit does not renew until its owner\u2019s phone taps it with a connection.',
+         'and the till says so in words, with no day and no time', words);
+      ok(till.fcLimitRefusal({ left: 100, limit: 10000, turns: 0, stuck: true }) === 'The card has \u20bf100 left, and this payment is more than that. Its daily limit does not renew until its owner\u2019s phone taps it with a connection.',
+         'a card with 100 left of a 10,000 limit is said to have 100 left, with no day and no time', till.fcLimitRefusal({ left: 100, limit: 10000, turns: 0, stuck: true }));
+      // the card's own screen on the till's phone (not its owner): what is left, and when it renews, and no "new day"
+      till.state.screen = 'flashcard';
+      till.fcShow(stuck);
+      const v = vals(till);
+      ok(v.fcDayTurns === 'RENEWS WHEN ITS OWNER\u2019S PHONE TAPS IT ONLINE' && /^LEFT /.test(v.fcDayLeft) && !/TODAY/.test(v.fcDayLeft) && !(v.fcNotes || []).some((n) => /renew/i.test(n.text)),
+         'the card\u2019s screen on another phone says it renews at its owner\u2019s tap, and names no new day', JSON.stringify([v.fcDayLeft, v.fcDayTurns]));
+    }
+    /* Its owner's phone OFFLINE: no REFRESH (no route), and the screen says the budget is spent and what renews it. */
+    {
+      H6.W._privacy({ tor: 'connecting', progress: 20, everUp: true, network: 'wifi' });
+      card.tap();
+      card.sent.length = 0;
+      const away = await H6.W.cardLook(card, { mine: true });
+      ok(away.mine === true && away.day.stuck === true && !away.refreshed && !away.refreshMissed && !card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 2,
+         'its owner\u2019s phone with no route sends no REFRESH, and reads the budget as spent', JSON.stringify([away.mine, away.day.stuck, away.refreshMissed]));
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(away);
+      ok((vals(own).fcNotes || []).some((n) => n.text === 'This card\u2019s daily limit has stopped renewing. It renews again once this phone is online and taps it.'),
+         'and its screen says the daily limit has stopped renewing until this phone is online and taps it', JSON.stringify((vals(own).fcNotes || []).map((n) => n.text)));
+      H6.W._privacy({ tor: 'up', progress: 100, everUp: true, network: 'wifi' });
+    }
+    /* Online with no block kept (a phone with the same words that has fetched none): no REFRESH, and the screen says why. */
+    {
+      const O6 = await funded({ sharedMint: H6.mint }, 0);
+      card.tap();
+      card.sent.length = 0;
+      const none = await O6.W.cardLook(card, { mine: true });
+      const own = appOn(O6);
+      own.state.screen = 'flashcard';
+      own.fcShow(none);
+      ok(none.mine === true && none.refreshMissed === 'no-header' && !card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => /no Bitcoin block to renew it with yet\. Press here to try again\./.test(n.text)),
+         'its owner\u2019s phone online with no block kept sends nothing, and says it has no block to renew it with', JSON.stringify([none.refreshMissed, (vals(own).fcNotes || []).map((n) => n.text)]));
+    }
+    /* REFRESH refused by the card: the tap goes on, nothing is changed, and the screen says the card would not take the block. */
+    {
+      await ownerAt(t0 + 3 * DAY + 20);
+      card.tap();
+      card.sent.length = 0;
+      const refusing = Object.assign(Object.create(card), { send: (a) => (/^b053/.test(a) ? Promise.resolve('6a93') : card.send(a)) });
+      const no = await H6.W.cardLook(refusing, { mine: true });
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(no);
+      ok(no.mine === true && no.refreshMissed === 'refused' && !no.refreshed && no.day.stuck === true && card.state.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => /would not take this phone\u2019s newest Bitcoin block\. Press here to try again\./.test(n.text)),
+         'a REFRESH the card refuses fails nothing else of the read, and the screen says the card would not take the block', JSON.stringify([no.refreshMissed, no.day.stuck]));
+    }
     // the owner's phone, online with the newest block, refreshes it
     await ownerAt(t0 + 3 * DAY + 30);
     card.tap();
@@ -1050,12 +1129,57 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     const fresh = await H6.W.cardLook(card, { mine: true });
     ok(fresh.refreshed === true && card.state.rolls === 0 && card.sent.some((a) => /^b0530000/.test(a)) && fresh.day.stuck !== true,
        'its owner\u2019s phone, online, sends REFRESH with its newest block (the owner\u2019s proof over CashuCard/refresh): the budget is full again', JSON.stringify([fresh.refreshed, card.state.rolls]));
+    /* The read refreshes before the screen is drawn, so the owner would never see the budget spent: the read keeps what it undid,
+     * and the screen says this tap renewed it. */
+    {
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(fresh);
+      ok(!!fresh.renewed && fresh.renewed.stuck === true && fresh.renewed.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => n.text === 'This card\u2019s daily limit had stopped renewing. This tap renewed it.'),
+         'and the read keeps what the refresh undid, which its owner\u2019s screen says', JSON.stringify(fresh.renewed));
+    }
     card.tap();
     card.sent.length = 0;
     const calm = await H6.W.cardLook(card, { mine: true });
     ok(!calm.refreshed && !card.sent.some((a) => /^b053/.test(a)), 'and a card whose budget is full is not refreshed again at the next tap');
     card.tap();
     ok((await R6.W.cardPay(card, { sats: 500, pin: '1234' })).sats === 500 && card.state.rolls === 1, 'the day rolls again: 500 is paid, one roll of the budget');
+
+    /* A LOCKED card is refreshed too: the card takes REFRESH locked, and the owner's phone sends it although a locked card is
+     * not asked for the grant. Another phone's proof is refused (6A91) at no cost, and that phone says nothing of it. */
+    {
+      const rollsBefore = card.state.rolls;
+      card.state.locked = true;
+      await ownerAt(t0 + 3 * DAY + 40);
+      tipIs(R6, hdr(t0 + 3 * DAY + 40));
+      R6.window.Date.now = H6.window.Date.now;
+      await R6.W.headerRefresh({ force: true });
+      card.tap();
+      card.sent.length = 0;
+      const other = await R6.W.cardLook(card, { mine: true });
+      ok(rollsBefore === 1 && card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 1 && !other.refreshed && !other.refreshMissed && other.mine !== true,
+         'a locked card read by a phone that is not its owner: its proof is refused, nothing changes, and nothing is said', JSON.stringify([rollsBefore, card.state.rolls, other.refreshMissed]));
+      card.tap();
+      card.sent.length = 0;
+      const locked = await H6.W.cardLook(card, { mine: true });
+      ok(locked.info.locked === true && locked.refreshed === true && card.state.rolls === 0 && card.sent.some((a) => /^b0530000/.test(a)) && !card.sent.some((a) => /^b045/.test(a)),
+         'a locked card read by its owner\u2019s phone online is refreshed, with no grant asked', JSON.stringify([locked.refreshed, card.state.rolls]));
+      card.state.locked = false;
+      R6.window.Date.now = realNow;
+    }
+
+    /* A budget spent before the day is over (`cardDayOf`): the day will not turn at its end, so no screen names a time it turns. */
+    {
+      const day = (o) => H6.W.cardParse.day(Object.assign({ limit: 500, now: 1000 + DAY, windowStart: 1000, spentToday: 400, rolls: 0, budget: 2 }, o));
+      const notOver = day({ now: 1000 + DAY - 1, rolls: 2 });
+      ok(notOver.stuck === true && notOver.turns === 0 && notOver.left === 100,
+         'a budget spent before the day is over: the day will not turn at its end, so it has no time, and 100 is all it pays', JSON.stringify(notOver));
+      const turns = day({ now: 1000 + DAY - 1, rolls: 1 });
+      ok(!turns.stuck && turns.turns === 1000 + DAY && turns.left === 100, 'with a roll left it turns at its end as before', JSON.stringify(turns));
+      const over = day({ rolls: 2 });
+      ok(over.stuck === true && over.turns === 0 && over.left === 100, 'and over, with none left, it stays where it is', JSON.stringify(over));
+    }
 
     // the no-PIN allowance begins again with the day only where a PIN or the owner's proof has armed it (D20)
     card.tap();

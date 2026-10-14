@@ -100,6 +100,29 @@ const N = BigInt('0x' + V.n);
       ok(wrong.length === 0, 'a card’s record is signed whole with its design after the mint, or three zeros there, and with nothing else after a mint', wrong.join('; '));
     }
   }
+  /* The shared protocol's own owner vectors (tests/fixtures/flashcard-owner-proofs.json is cashu-javacard's spec/vectors/owner.json
+   * at 3876a11, protocol 2.1): each proof verifies against the file's owner key over "CashuCard/", the label, the nonce and the
+   * value; each value for a label this phone signs has the shape the fake phone (and native, FoxyTests/NUT13Tests.swift) takes,
+   * the thirteen-byte limit, refresh's header and the 145-byte anchored owner among them; `lock` and `tag` it never signs. */
+  {
+    const P = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'flashcard-owner-proofs.json'), 'utf8'));
+    const phone = nativePhone({ words: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about' });
+    const cardKey = V.cases[0].cardKey;
+    const wrong = [], labels = new Set();
+    for (const pr of P.proofs) {
+      const name = pr.label.replace(/^CashuCard\//, '');
+      const message = Buffer.concat([Buffer.from(pr.label), Buffer.from(pr.nonce, 'hex'), Buffer.from(pr.value, 'hex')]);
+      if (!pr.label.startsWith('CashuCard/') || !p256Verify(P.ownerKey, message, pr.signature)) wrong.push('does not verify: ' + pr.label);
+      const r = await Promise.resolve(phone.answer(null, { action: 'cardOwnerSign', key: cardKey, label: name, nonce: pr.nonce, value: pr.value }));
+      const refused = !!(r && r[1] === 'bad request');
+      if (CARD_LABELS.includes(name)) { labels.add(name); if (refused) wrong.push('refused: ' + name + ' of ' + pr.value.length / 2 + ' bytes'); }
+      else if (!refused || ['lock', 'tag'].indexOf(name) < 0) wrong.push('not refused, or not known: ' + name);
+    }
+    ok(P.proofs.length >= 12 && wrong.length === 0, 'cashu-javacard’s owner vectors verify over the label, nonce and value, and each signable value has the shape the phone takes', wrong.join('; '));
+    ok(CARD_LABELS.every((l) => labels.has(l)), 'and they have a proof for every label the phone signs', CARD_LABELS.filter((l) => !labels.has(l)).join());
+    ok(P.proofs.some((x) => x.label === 'CashuCard/set-limit' && x.value.length === 26) && P.proofs.some((x) => x.label === 'CashuCard/refresh' && x.value.length === 160)
+       && P.proofs.some((x) => x.label === 'CashuCard/set-owner' && x.value.length === 290), 'among them the 13-byte SET_LIMIT, REFRESH’s header and the 145-byte anchored SET_OWNER (2.1)');
+  }
   console.log('\n' + (failed ? failed + ' flashcard-owner-vectors check(s) failed' : 'all flashcard-owner-vectors checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

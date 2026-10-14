@@ -477,6 +477,38 @@ final class NUT13Tests: XCTestCase {
         XCTAssertFalse(setCard.accepts(record(length: 24, carried: 25, design: code("FX1"))), "a design after a mint one byte long")
     }
 
+    /// The shared protocol's own owner vectors (tests/fixtures/flashcard-owner-proofs.json is cashu-javacard's
+    /// spec/vectors/owner.json at 3876a11, protocol 2.1): every proof is over "CashuCard/", the label, the nonce and
+    /// the value, as `CardOwner.message` builds it, and verifies against the file's owner key. Every value for a label
+    /// this phone signs has the shape `CardOwner.Label` accepts (the 13-byte limit, refresh's header and the 145-byte
+    /// anchored owner among them); `lock` and `tag` are labels the card takes and this phone never signs.
+    func testTheSharedOwnerVectorsAreSignedOverTheMessageThisPhoneBuildsAndHaveItsShapes() throws {
+        let file = try fixture("flashcard-owner-proofs.json")
+        let ownerKey = try NUT13.bytes(hex: try XCTUnwrap(file["ownerKey"] as? String))
+        let key = try P256.Signing.PublicKey(x963Representation: Data(ownerKey))
+        let proofs = try XCTUnwrap(file["proofs"] as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(proofs.count, 12)
+        var seen = Set<String>()
+        for proof in proofs {
+            let full = try XCTUnwrap(proof["label"] as? String)
+            XCTAssertTrue(full.hasPrefix("CashuCard/"), full)
+            let name = String(full.dropFirst("CashuCard/".count))
+            let nonce = try NUT13.bytes(hex: try XCTUnwrap(proof["nonce"] as? String))
+            let value = try NUT13.bytes(hex: try XCTUnwrap(proof["value"] as? String))
+            let sig = try P256.Signing.ECDSASignature(derRepresentation: Data(try NUT13.bytes(hex: try XCTUnwrap(proof["signature"] as? String))))
+            let signed = Array(full.utf8) + nonce + value
+            XCTAssertTrue(key.isValidSignature(sig, for: Data(signed)), "\(full) \(value.count) bytes")
+            guard let label = CardOwner.Label(rawValue: name) else {
+                XCTAssertTrue(["lock", "tag"].contains(name), "a label this phone does not know: \(name)")
+                continue
+            }
+            seen.insert(name)
+            XCTAssertEqual(CardOwner.message(label: label, nonce: nonce, value: value), signed, full)
+            XCTAssertTrue(label.accepts(value), "\(full): \(value.count) bytes")
+        }
+        XCTAssertEqual(seen, Set(CardOwner.Label.allCases.map(\.rawValue)), "the file has a proof for every label this phone signs")
+    }
+
     private let nonceText = "000102030405060708090a0b0c0d0e0f"
 
     private func sign(_ label: Any?, _ value: Any?, key: Any? = nil, nonce: Any? = nil) -> [String: Any] {

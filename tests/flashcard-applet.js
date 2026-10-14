@@ -8,14 +8,14 @@
  * (flashcard-card.js), which flashcard-model.js holds to a recording of the
  * applet. This one has no model in it: every command the wallet builds goes
  * over a socket to the applet's own class, running in the JavaCard simulator
- * (the card repository's CardServer), and every answer is the applet's. The
- * mint is the test mint, in this process. The card repository is
- * https://github.com/lnflash/cashu-javacard (the Cashu card protocol 2.0;
- * tools/cardsim/run.sh there is this line protocol, kept for this wallet).
+ * (cashu-javacard's CardServer), and every answer is the applet's. The
+ * mint is the test mint, in this process. The applet is the shared Cashu card
+ * protocol's, 2.1, in https://github.com/lnflash/cashu-javacard (tools/cardsim/run.sh
+ * there is this line protocol, kept for this wallet).
  *
  * It is the same road the iOS Simulator takes (Foxy/Flashcard/CardLink.swift),
  * with Node where the phone would be. Not in check-all.sh: it needs a JDK and
- * the card repository, and says so and passes over when no card is listening.
+ * that repository, and says so and passes over when no card is listening.
  */
 const net = require('net');
 const { funded, history, OTHER_WORDS, tipIs } = require('./flashcard-kit');
@@ -76,7 +76,7 @@ function wire(port) {
 (async () => {
   let w;
   try { w = await wire(PORT); } catch (e) {
-    console.log('no card is listening on 127.0.0.1:' + PORT + ' (run the card repository’s tools/cardsim/run.sh ' + PORT + '); nothing checked');
+    console.log('no card is listening on 127.0.0.1:' + PORT + ' (run cashu-javacard’s tools/cardsim/run.sh ' + PORT + '); nothing checked');
     process.exit(0);
   }
   await w.ask('ctl new');
@@ -98,8 +98,8 @@ function wire(port) {
   /* ---- a new card, read and set up ------------------------------------------ */
   await tap();
   const fresh = await H.W.cardLook(link);
-  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === fresh.info.slots && /^0[23][0-9a-f]{64}$/.test(fresh.key),
-     'the applet is chosen by its whole name, proves it holds its key, and reads as new', fresh.info.version);
+  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === fresh.info.slots && /^0[23][0-9a-f]{64}$/.test(fresh.key) && fresh.info.version === '2.1',
+     'the applet is chosen by its whole name, proves it holds its key, and reads as new, of protocol 2.1', fresh.info.version);
   await tap();
   const made = await H.W.cardSetUp(link, { pin: '1234', recoverable: true });
   ok(made.info.pin === 'set' && made.info.hasRecord && made.record.mint === 'https://m.test' && H.W.cardIsMine(made),
@@ -394,7 +394,7 @@ function wire(port) {
     ok((await link.send('b01a7fff00')) === '009000' && (await link.send('b01a80ff00')) === '6a83', 'a place with nothing in it gives 00, and a place there is not is refused 6A83');
   }
 
-  /* ---- the anchor, the rollover budget and REFRESH (the Cashu card protocol 2.0, D20) ------------------------------- */
+  /* ---- the anchor, the rollover budget and REFRESH (the Cashu card protocol 2.x, D20 and D26) ------------------------------- */
   {
     const show = async (hex) => { await tap(); await link.send(SELECT); return link.send('b0360000' + '50' + hex + '04'); };
     await w.ask('ctl new');
@@ -431,8 +431,9 @@ function wire(port) {
     await tap();
     const stuck = await R.W.cardLook(link);
     await tap();
-    ok((await why(R.W.cardPay(link, { sats: 50 }))) === 'limit' && stuck.day.stuck === true && stuck.day.left === 0,
-       'past its budget the day does not roll: what was signed for in it still counts, and 50 is refused', JSON.stringify(stuck.day));
+    const stuckErr = await R.W.cardPay(link, { sats: 50 }).then(() => null, (e) => e);
+    ok(!!stuckErr && stuckErr.card === 'limit' && stuckErr.stuck === true && stuckErr.turns === 0 && stuck.day.stuck === true && stuck.day.left === 0,
+       'past its budget the day does not roll: what was signed for in it still counts, and 50 is refused as a budget spent (no day, no time)', JSON.stringify([stuck.day, stuckErr && stuckErr.stuck]));
     // the owner's phone, online with the newest block, refreshes it at a tap
     at(3);
     tipIs(H, WALK[3]);
@@ -440,8 +441,9 @@ function wire(port) {
     await tap();
     const sent = [];
     const refreshed = await H.W.cardLook({ send: async (a) => { sent.push(a); return link.send(a); } }, { mine: true });
-    ok(refreshed.refreshed === true && sent.some((a) => /^b053/.test(a)) && refreshed.info.rolls === 0 && refreshed.info.now === WALK_TIME[3],
-       'its owner\u2019s phone sends REFRESH with the newest block: the budget is full again', JSON.stringify([refreshed.refreshed, refreshed.info.rolls]));
+    ok(refreshed.refreshed === true && sent.some((a) => /^b053/.test(a)) && refreshed.info.rolls === 0 && refreshed.info.now === WALK_TIME[3]
+       && !!refreshed.renewed && refreshed.renewed.stuck === true && refreshed.renewed.rolls === 1,
+       'its owner\u2019s phone sends REFRESH with the newest block: the budget is full again, and the read keeps that it had been spent', JSON.stringify([refreshed.refreshed, refreshed.info.rolls, refreshed.renewed]));
     await tap();
     const third = await R.W.cardPay(link, { sats: 100 });
     ok(third.sats === 100, 'and the day rolls again: a till is paid 100');
