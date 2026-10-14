@@ -879,7 +879,7 @@
            * mint takes its signature for nothing else. Their counters go on
            * the record before the request does, as any swap's do. */
           var fixed = unit === 'sat' ? cardSwapFor(incomingProofs) : null;
-          /* The card's own change (software 1.12) is in that swap too, as outputs this phone has no part in: the amount the record
+          /* The card's own change is in that swap too, as outputs this phone has no part in: the amount the record
            * keeps is what the token came to for this phone, so that what is not found of it later is the mint's fee and not the card's change. */
           var forCard = (fixed && fixed.change && Array.isArray(fixed.change.outs)) ? fixed.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
           guard = swapGuard(w, 'receive', { unit: unit, amount: tok.amount - forCard, into: into || undefined,

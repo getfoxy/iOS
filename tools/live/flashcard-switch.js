@@ -3,7 +3,7 @@
  *
  *   sh tools/live/local-mint.sh up
  *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
- *   (the card repository is https://github.com/getfoxy/card)
+ *   (the card repository is https://github.com/lnflash/cashu-javacard)
  *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
  *     node tools/live/flashcard-switch.js [card port]
  *

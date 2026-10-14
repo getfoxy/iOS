@@ -17,7 +17,7 @@ them:
   those apps, and no connection with or endorsement by any of them is implied.
 - The fonts with a recorded licence keep it (`Web/VENDOR.md`).
 
-The chip card's applet is a separate repository, https://github.com/getfoxy/card,
-a fork of `lnflash/cashu-javacard`. It is MIT-licensed too, with the copyright
-line of the upstream project kept and the Foxy project's added (its `LICENSE`).
-This repository's `docs/CARD.md` is the phone's side of it.
+The chip card's applet is a separate repository, https://github.com/lnflash/cashu-javacard.
+Foxy's cards and Flash's run it, and it speaks the Cashu card protocol 2.0. It is
+MIT-licensed too (its `LICENSE`). This repository's `docs/CARD.md` is the phone's
+side of it.

@@ -35,10 +35,9 @@ final class NativeSeedTests: XCTestCase {
             "cardOwnerKey", "cardOwnerSign",
         ])
         XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 21)
-        // the draft's action that handed the page a secret is gone, and the time needs no seed
+        // the draft's action that handed the page a secret is gone, and so is the signed time of the cards before 2.0
         XCTAssertNil(FoxyBridge.handlers["cardOwner"])
-        XCTAssertFalse(FoxyBridge.nativeSeedActions.contains("cardTime"))
-        XCTAssertNotNil(FoxyBridge.handlers["cardTime"])
+        XCTAssertNil(FoxyBridge.handlers["cardTime"])
         // No switch since stage 4: the test host is launched with no arguments,
         // and every seed action runs its handler, as in a Release build.
         for action in FoxyBridge.nativeSeedActions {
@@ -118,20 +117,23 @@ final class NativeSeedTests: XCTestCase {
         XCTAssertEqual(FoxyBridge.cardOwnerKeyCheck(["key": key + "11"]), .refuse("bad request"), "68 characters")
     }
 
-    /// cardOwnerSign {key, label, nonce, value}: the six labels, each with the shape of
+    /// cardOwnerSign {key, label, nonce, value}: the seven labels, each with the shape of
     /// value it takes, and nothing else; refused before the seed is read.
-    func testCardOwnerSignTakesSixLabelsAndTheirValuesAndNothingElse() throws {
+    func testCardOwnerSignTakesSevenLabelsAndTheirValuesAndNothingElse() throws {
         let key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
         let nonce = "000102030405060708090a0b0c0d0e0f"
         let owner = "04" + String(repeating: "ab", count: 64)
         let record = "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
+        let header = String(repeating: "cd", count: 80)
         let cardKey = key
         func body(_ label: Any, _ value: Any, key: Any? = nil, nonce given: Any? = nil) -> [String: Any] {
             ["action": "cardOwnerSign", "id": "5", "key": key ?? cardKey, "label": label, "nonce": given ?? nonce, "value": value]
         }
         // whole requests: each label, a value of its shape
         let whole: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "00000000"),
-                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"), ("set-owner", owner), ("set-card", record), ("load", ""), ("reset", "")]
+                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"),
+                                         ("set-limit", "00000000000013880000271007"), ("set-owner", owner), ("set-owner", owner + header), ("set-card", record),
+                                         ("load", ""), ("reset", ""), ("refresh", header)]
         for (label, value) in whole {
             switch FoxyBridge.cardOwnerSignCheck(body(label, value)) {
             case .ok(let request):
@@ -143,8 +145,9 @@ final class NativeSeedTests: XCTestCase {
                 XCTFail("\(label) was refused: \(why)")
             }
         }
-        // a label that is not one of the six, and in particular not a lock or a time, however it is written
-        for label in ["lock", "time", "auth", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "", "Load", "LOAD", "change-pin ", "set-allowance"] as [Any] {
+        // a label that is not one of the seven, and in particular not a lock or the tag's switch, however it is written
+        for label in ["lock", "time", "auth", "tag", "CashuCard/lock", "CashuCard/load", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "", "Load", "LOAD",
+                      "change-pin ", "set-allowance"] as [Any] {
             XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
         }
         for label in [5, NSNull(), true, ["load"]] as [Any] {
@@ -152,7 +155,9 @@ final class NativeSeedTests: XCTestCase {
         }
         // a value of another label's shape, or not hex, or not text
         let wrong: [(String, Any)] = [("load", "00"), ("reset", "00"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
-                                      ("set-limit", "000000"), ("set-limit", "0000000000"), ("set-owner", String(owner.dropFirst(2))),
+                                      ("set-limit", "000000"), ("set-limit", "0000000000"), ("set-limit", "00000000000013880000271000"),
+                                      ("set-limit", "0000000000001388000027101f"), ("refresh", String(header.dropLast(2))), ("refresh", header + "cd"), ("refresh", ""),
+                                      ("set-owner", owner + String(header.dropLast(2))), ("set-owner", String(owner.dropFirst(2))),
                                       ("set-owner", "02" + String(owner.dropFirst(2))), ("set-card", String(record.dropLast(2))),
                                       ("set-card", record + "6d"), ("set-card", ""), ("change-pin", "31323334 "), ("change-pin", "0x31323334"),
                                       ("change-pin", "3132333"), ("change-pin", 31323334), ("load", NSNull()), ("load", true), ("set-limit", [0, 0, 0, 0])]

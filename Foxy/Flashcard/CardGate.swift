@@ -13,14 +13,16 @@ import Foundation
 ///
 /// Nothing here touches NFC, so FoxyTests can hold it to its rules.
 enum CardGate {
-    /// The applet on a Foxy card (applet/build.xml in
-    /// https://github.com/getfoxy/card): its package's nine bytes and 01.
-    static let applet = Data([0xF0, 0x46, 0x4F, 0x58, 0x59, 0x43, 0x41, 0x52, 0x44, 0x01])
+    /// The card's applet in the shared Cashu card protocol 2.0 (spec/APDU.md in
+    /// https://github.com/lnflash/cashu-javacard): its package's ten bytes,
+    /// F0 and "CASHUCARD", and 01. The package's name alone is not the applet's:
+    /// on a chip it reaches the opener, which is installed first (D25 there).
+    static let applet = Data([0xF0, 0x43, 0x41, 0x53, 0x48, 0x55, 0x43, 0x41, 0x52, 0x44, 0x01])
 
     /// The applet's class byte.
     static let appletClass: UInt8 = 0xB0
 
-    /// The instructions the page uses, and no others the applet has: thirty-one.
+    /// The instructions the page uses, and no others the applet has: thirty.
     /// tests/flashcard-model.js holds this list to the page's own (`CARD_INS`,
     /// build/wallet/08a-flashcard.js), both ways: an instruction the page sends and
     /// the phone does not carry is a card that cannot be used.
@@ -33,21 +35,20 @@ enum CardGate {
     static let instructions: Set<UInt8> = [
         0x01, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16, 0x17,   // what it is, its key, what it holds, proof it is the card, its record, which pieces it holds
         0x18,                                       // the card's own log (it gives it to its owner, or under its PIN)
-        0x19,                                       // the openings of the change the card made for itself (software 1.12), to finish its pieces
-        0x1A,                                       // the mint's proof the card keeps with an unspent piece (software 1.20), for a phone to check; and 30 with P1 = 1 writes a piece with it
-        0x20,                                       // sign for a piece (a card that signs for each)
+        0x19,                                       // the openings of the change the card made for itself, to finish its pieces
+        0x1A,                                       // the mint's proof the card keeps with an unspent piece, for a phone to check; and 30 with P1 = 1 writes a piece with it
         0x22, 0x23, 0x24, 0x25,                     // one signature for a payment: its pieces, its outputs, the signature, and the last one again
-        0x26,                                       // one output of a payment's change, which the card makes for itself (software 1.12)
+        0x26,                                       // one output of a payment's change, which the card makes for itself
         0x30, 0x31, 0x32,                           // write a piece, free used places, its record
         0x34,                                       // set the card's daily limit (the owner's proof, no PIN)
-        0x35,                                       // tell a card of software 1.14 and before the time, signed (CardTime.swift)
-        0x36,                                       // show a card of software 1.15 and on a Bitcoin block header: its clock is the time in the newest it has taken
-        0x37,                                       // tell a card of 1.15 and on this phone's own time, a note it keeps for the tap and trusts for nothing
+        0x36,                                       // show the card a Bitcoin block header: its clock is the time in the newest it has taken
+        0x37,                                       // tell the card this phone's own time, a note it keeps for the tap and trusts for nothing
         0x40, 0x41, 0x42,                           // its PIN: check, set, change
         0x43,                                       // give it its owner key, or change it
         0x44,                                       // a nonce to answer with the owner's proof
         0x45,                                       // the owner's grant to load, in this tap, with no PIN
-        0x51,                                       // reset the card to what it was in its packet (software 1.17), under the owner's proof
+        0x51,                                       // reset the card to what it was in its packet, under the owner's proof
+        0x53,                                       // REFRESH: the owner's proof over the newest block header, which fills the card's rollover budget again
     ]
 
     /// A short command at its longest: four of header, a length, 255 of data

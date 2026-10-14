@@ -33,8 +33,8 @@ const N = BigInt('0x' + V.n);
     ok(p256Public(d) === c.pub, 'and its public key, which is all the page is given', c.pub.slice(0, 12));
     for (const s of c.signatures) {
       const message = Buffer.from(s.message, 'hex');
-      ok(Buffer.from('FoxyCard/' + s.label).equals(message.subarray(0, 9 + s.label.length)) && CARD_LABELS.includes(s.label),
-         'the file’s ' + s.label + ' signature is over “FoxyCard/” and the label, a label the fake signs for');
+      ok(Buffer.from('CashuCard/' + s.label).equals(message.subarray(0, 10 + s.label.length)) && CARD_LABELS.includes(s.label),
+         'the file’s ' + s.label + ' signature is over “CashuCard/” and the label, a label the fake signs for');
       ok(p256Verify(c.pub, message, s.sig), '… and the fake’s verifier accepts it');
       ok(p256Verify(c.pub, Buffer.concat([message, Buffer.from([0])]), s.sig) === false, '… and not for another message');
       // and the fake signs the same message in a way the file’s key accepts
@@ -60,11 +60,13 @@ const N = BigInt('0x' + V.n);
     const asked = await Promise.resolve(phone.answer(null, { action: 'cardOwnerSign', key: c.cardKey, label: s.label, nonce: s.nonce, value: s.value }));
     const sig = asked && !asked[1] ? JSON.parse(asked[0]) : {};
     ok(Object.keys(sig).join() === 'sig' && p256Verify(c.pub, Buffer.from(s.message, 'hex'), sig.sig), 'cardOwnerSign answers a signature the file’s key accepts, and nothing else');
-    for (const bad of [{ label: 'lock' }, { label: 'time' }, { label: 'FoxyCard/load' }, { label: 'change-pin', value: '313233' }, { label: 'set-limit', value: '00' },
-                       { label: 'load', value: '00' }, { label: 'reset', value: '00' }, { label: 'set-owner', value: '04' }, { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
+    for (const bad of [{ label: 'lock' }, { label: 'tag' }, { label: 'time' }, { label: 'CashuCard/load' }, { label: 'change-pin', value: '313233' }, { label: 'set-limit', value: '00' },
+                       { label: 'set-limit', value: '000000000000000000000000' + '00' }, { label: 'set-limit', value: '000000000000000000000000' + '1f' },
+                       { label: 'load', value: '00' }, { label: 'reset', value: '00' }, { label: 'set-owner', value: '04' }, { label: 'refresh', value: 'ab'.repeat(79) },
+                       { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
       const body = Object.assign({ action: 'cardOwnerSign', key: c.cardKey, label: 'load', nonce: s.nonce, value: '' }, bad);
       const r = await Promise.resolve(phone.answer(null, body));
-      ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the six, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
+      ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the seven, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
     }
   }
   console.log('\n' + (failed ? failed + ' flashcard-owner-vectors check(s) failed' : 'all flashcard-owner-vectors checks pass'));

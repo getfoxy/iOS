@@ -14,8 +14,7 @@
  *     change (if any) still owed, and the PIN writes it;
  *   a tap that only reads the card (its holder's phone) uses the note up, so the
  *     till is asked for the PIN after all, and nothing is lost;
- *   the note opens nothing but loading: a spend in that tap still needs the PIN;
- *   a card of version 1.1, which says nothing of the sort, is written with the PIN.
+ *   the note opens nothing but loading: a spend in that tap still needs the PIN.
  */
 const { funded, newCard, binaryLoad, why, OTHER_WORDS } = require('./flashcard-kit');
 
@@ -39,7 +38,8 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
   const paid = await R.W.cardPay(card, { sats: 200, pin: '1234' });
   ok(paid.sats === 200 && paid.change && paid.change.sats === 824 && paid.change.written === false && (await bal(R)) === 200,
      'a card of one piece pays 200: the receiver is paid, and 824 of change waits for the card', JSON.stringify(paid.change));
-  ok(R.W.cardOwed().length === 1 && R.W.cardOwed()[0].kind === 'change' && R.W.cardOwed()[0].sats === 824, 'owed to it, as change');
+  ok(R.W.cardOwed().length >= 1 && R.W.cardOwed().every((r) => r.kind === 'change') && R.W.cardOwed().reduce((n, r) => n + r.sats, 0) === 824, 'owed to it, as change',
+     JSON.stringify(R.W.cardOwed().map((r) => [r.kind, r.sats])));
   ok(card.state.changeDue === true && card.state.changeGrant === false, 'the card has noted that it paid, for the next tap and not this one');
 
   card.tap();
@@ -87,35 +87,17 @@ const pinSent = (card) => card.sent.some((a) => /^b040/.test(a));
     await R.W.cardPay(c3, { sats: 512, pin: '1234' });   // exact: 512, which leaves a 2 and a 1 and no gap; the note is set all the same
     ok(c3.state.changeDue === true, 'an exact payment leaves the note too (the card cannot know there is no change)');
     c3.tap();
-    await c3.send('00a40400' + '0a' + 'f0464f58594341524401' + '00');
+    await c3.send('00a40400' + '0b' + 'f043415348554341524401' + '00');
     const info = await c3.send('b001000000');
     ok(info.slice(58, 60) === '01', 'GET_INFO says this tap may load', info);
-    const spend = await c3.send('b020000040');
-    ok(spend === '6982', 'but a spend in it still needs the PIN', spend);
+    const begun = await c3.send('b0220000' + '01' + ('0' + c3.state.slots.findIndex((x) => x.status === 1).toString(16)).slice(-2));
+    const spend = await c3.send('b024000040');
+    ok(begun.slice(-4) === '9000' && spend === '6a94', 'but a spend in it still needs the PIN: the signature is refused, 6A94', begun.slice(-4) + ' ' + spend);
     const limit = await c3.send('b03300000400000064');
     ok(limit === '6982' || limit === '6a91', 'and so does anything else the PIN opens', limit);
     const info2 = await c3.send('b001000000');
     ok(info2.slice(58, 60) === '01', 'the refusals did not use the grant up', info2);
     ok(c3.balance() === 3, 'nothing was spent');
-  }
-
-  /* ---- 5: a card that says nothing of the sort (version 1.1) is written with the PIN -- */
-  {
-    const old = newCard(H);
-    await H.W.cardSetUp(old, { pin: '1234' });
-    await binaryLoad(H, old, 1024);
-    old.tap();
-    const p = await R.W.cardPay(old, { sats: 100, pin: '1234' });
-    ok(p.change && p.change.sats === 924, 'an old card pays 100 with change owed');
-    // its GET_INFO is 29 bytes: the answer is cut before the last byte
-    const send = old.send.bind(old);
-    old.send = (apdu) => send(apdu).then((r) => (/^b001/.test(String(apdu)) ? r.slice(0, 58) + '9000' : r));
-    old.tap();
-    const r = await why(R.W.cardWrite(old, { change: true }));
-    ok(r === 'pin-needed', 'a tap with no PIN is refused: it says nothing of a grant', r);
-    old.tap();
-    const w = await R.W.cardWrite(old, { pin: '1234' });
-    ok(w.sats === 924 && old.balance() === 924, 'and the PIN writes the change', String(old.balance()));
   }
 
   console.log(failed ? '\n' + failed + ' FAILED' : '\nall passed');

@@ -582,6 +582,7 @@ final class SeedActionsTests: XCTestCase {
         case .setOwner: return "04" + String(repeating: "ab", count: 64)
         case .setCard: return "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
         case .load, .reset: return ""
+        case .refresh: return String(repeating: "cd", count: 80)
         }
     }
 
@@ -613,12 +614,12 @@ final class SeedActionsTests: XCTestCase {
         return object["sig"] as? String
     }
 
-    /// Whether `sig` is the owner key's signature, as CryptoKit reads it, over "FoxyCard/" + label || nonce || value.
+    /// Whether `sig` is the owner key's signature, as CryptoKit reads it, over "CashuCard/" + label || nonce || value.
     private func verifies(_ sig: String?, pub: String?, label: String, nonce: String, value: String) -> Bool {
         guard let sig, let pub,
               let key = try? P256.Signing.PublicKey(x963Representation: Data(bytes(pub))),
               let signature = try? P256.Signing.ECDSASignature(derRepresentation: Data(bytes(sig))) else { return false }
-        return key.isValidSignature(signature, for: Data(Array("FoxyCard/\(label)".utf8) + bytes(nonce) + bytes(value)))
+        return key.isValidSignature(signature, for: Data(Array("CashuCard/\(label)".utf8) + bytes(nonce) + bytes(value)))
     }
 
     /// The public key is Node's, for the two phrases the stub vault can hold, and moves nothing.

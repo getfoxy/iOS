@@ -77,7 +77,7 @@ const bal = (c) => c.W.balanceSats();
     const cash = newCard(H);
     await H.W.cardSetUp(cash, { pin: '1234' });
     const had = await bal(H);
-    const lost = await H.W.sendToken(23, { unit: 'sat', lockTo: cash.key, purpose: 'card' });
+    const lost = await H.W.sendToken(23, { unit: 'sat', lockTo: cash.key, purpose: 'card', sigAll: true });
     ok(lost.sats === 23 && (await bal(H)) === had - 23 && H.W.cardOwed().length === 0,
        '23 sats locked to a card and owed to nobody: out of the balance and on no list');
     cash.tap();
@@ -106,7 +106,7 @@ const bal = (c) => c.W.balanceSats();
     // another card's ecash is not this card's
     const other = newCard(H);
     await H.W.cardSetUp(other, { pin: '1234' });
-    await H.W.sendToken(8, { unit: 'sat', lockTo: other.key, purpose: 'card' });
+    await H.W.sendToken(8, { unit: 'sat', lockTo: other.key, purpose: 'card', sigAll: true });
     cash.tap();
     await H.W.cardLook(cash);
     ok(H.W.cardOwed().length === 0, 'ecash made for another card is not filed to this one');
@@ -124,7 +124,7 @@ const bal = (c) => c.W.balanceSats();
      * card and spent before such things were marked. */
     const notes = () => JSON.parse(H.storage.getItem('foxy.txmeta') || '{}');
     // the same card's key, another mint's name on the token
-    const here = await H.W.sendToken(4, { unit: 'sat', lockTo: other.key, purpose: 'card' });
+    const here = await H.W.sendToken(4, { unit: 'sat', lockTo: other.key, purpose: 'card', sigAll: true });
     const elsewhere = H.window.CashuTS.getEncodedToken({ mint: 'https://another.test', proofs: H.W.tokenInfo(here.token).proofs, unit: 'sat' });
     H.W.tag(here.hash, { token: elsewhere });
     other.tap();

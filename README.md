@@ -37,7 +37,7 @@ simulator and the checks are in [docs/BUILDING.md](docs/BUILDING.md).
 - [Threat model](docs/THREAT-MODEL.md): what it defends against and what it does not.
 - [Money](docs/MONEY.md): every path where value moves, and what a kill at each step costs.
 - [Cashu conformance](docs/CASHU-CONFORMANCE.md): each NUT, and where Foxy differs.
-- [The card](docs/CARD.md): a chip card that holds ecash, paid by a tap and a PIN, and what it does not protect against.
+- [The card](docs/CARD.md): a chip card that holds ecash, paid by a tap and a PIN, and what it does not protect against. The card speaks the Cashu card protocol 2.0 of [lnflash/cashu-javacard](https://github.com/lnflash/cashu-javacard) ([spec](https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md)), which Flash's cards speak too.
 - [Reporting a vulnerability](docs/SECURITY.md).
 
 The rest are listed in [docs/](docs/README.md).

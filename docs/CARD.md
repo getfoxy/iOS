@@ -4,9 +4,13 @@ What Foxy does with a card: a chip card that holds ecash and pays a Foxy by a
 tap and a PIN. This file is the phone's side: set-up, the PIN, adding money,
 paying at a till, change, the daily limit, a blocked card, and what the person
 sees. The card's own side, the applet and its commands, is in the card
-repository, https://github.com/getfoxy/card (start with its `FORK.md`; the
-protocol is `docs/FOXY-CARD-SPEC.md` and `docs/FOXY-CARD-DAILY-LIMIT.md` there). This file
-does not repeat the protocol. The limits are listed at the end and argued in
+repository, https://github.com/lnflash/cashu-javacard, whose v2.0 is the Cashu
+card protocol 2.0 that Foxy's cards and Flash's speak alike. The protocol is
+`spec/NUT-XX.md` there
+(https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), with its
+commands in `spec/APDU.md` and the reasons for them in `docs/DECISIONS.md`.
+Foxy speaks 2.0 and nothing older: no card of an older version is in anybody's
+hands, so there is no fallback. This file does not repeat the protocol. The limits are listed at the end and argued in
 `THREAT-MODEL.md`.
 
 ## State of it
@@ -20,21 +24,18 @@ does not repeat the protocol. The limits are listed at the end and argued in
   payment with no key proof, the progress lines on the sheet, loading like a
   cash drawer, SWITCH TO a mint, taking a card payment with no connection, and
   letting the card go before the mint is asked (with the put-back tap when the
-  mint refuses), the two-tap payment that signs at most two pieces, the
-  withdrawal that keeps what a cut-short tap signed, and the whole of a card
+  mint refuses), and the whole of a card
   that signs once for a payment (below), which has paid real mints only from
   the simulator, and the change such a card makes for itself (below), which
   has not been held to a real card at all, so how long a tap lasts with it is
-  not known, nor the mint's proofs a card of 1.20 keeps with its pieces (*What
+  not known, nor the mint's proofs a card keeps with its pieces (*What
   Verified says*, below), of which a load writes one piece to a command and
   nobody has timed it on a card. The list of what only a
   card and a hand can show is
   `DEVICE-TESTS.md` §23.
-- **A card's clock is the newest Bitcoin block header it has been shown**, from
-  software 1.15, which no terminal can set; before it, the clock was a time told
-  under a signature by a key built into the app, which a terminal could (*The
-  time*, below). Neither the fetch of the header nor a card that takes it has
-  run on a real card.
+- **A card's clock is the newest Bitcoin block header it has been shown**, which
+  no terminal can set (*The time*, below). Neither the fetch of the header nor a
+  card that takes it has run on a real card.
 - **A card is cash.** Lose it and the money on it is gone. Whoever has the card
   and its PIN has the money, up to the daily limit if there is one.
 - No independent review or audit has covered the card code. Do not put on a
@@ -42,10 +43,10 @@ does not repeat the protocol. The limits are listed at the end and argued in
 
 ## What a card is
 
-A card holds up to 128 pieces of ecash (64 with software before 1.7), each locked to the card's own key, and
+A card holds up to 128 pieces of ecash, each locked to the card's own key, and
 the card signs a spend of a piece only when the right PIN has been given. It
 also keeps its PIN, the address of the one mint its pieces are at, an owner's
-public key, a clock, and a daily limit. It has no battery and no network.
+public key, a clock, its limits and a rollover budget. It has no battery and no network.
 
 The receiving phone does the rest. It asks the card to sign, takes the
 signatures to the mint, swaps the pieces for ecash of its own, and says paid
@@ -67,7 +68,10 @@ nothing from this: the receiver always asks the mint first.
   off (`FC_RECOVERABLE` in `build/app/26f-flashcard.js`). Nothing in the app
   offers it.
 - **Foxy speaks only to its own applet.** The phone selects the applet by its
-  whole name and carries a fixed list of its commands. The page cannot send
+  whole name, F0 43 41 53 48 55 43 41 52 44 01 (F0, `CASHUCARD`, 01), and
+  carries a fixed list of its commands. The card answers the select with its
+  version, 02 00. A card that answers with another version is told `This card
+  needs an update.` (CARD NEEDS AN UPDATE), and nothing is sent to it. The page cannot send
   anything else to a card, and a bank card held to the phone is not read.
 
 ## Who holds what
@@ -76,7 +80,8 @@ nothing from this: the receiver always asks the mint first.
 - **The owner** is the phone that set the card up. The owner key is worked out
   inside the app from the twelve words and the card's public key. Its private
   half never leaves the native side: the page is given the public half and
-  signatures, nothing else, and only five kinds of signature are made. A holder
+  signatures, nothing else, and only seven kinds of signature are made, each
+  over `CashuCard/` and its label. A holder
   with no phone of their own has a card set up on a friend's phone, and that
   phone is then the owner.
 - **The receiver** is the phone being paid. It sees the PIN, because the PIN is
@@ -95,7 +100,7 @@ sign it, and a build that claimed it would not install. A paid team sets
 the project (`BUILDING.md`). Without it Foxy builds and runs as before, and
 every card screen says NO CARD READER. The simulator has no NFC; in simulator
 builds only, it reaches a stand-in card over the Mac's loopback, which can be
-the real applet running under jCardSim (`FORK.md` in the card repository).
+the real applet running under jCardSim (`tools/cardsim` in the card repository).
 
 The same file carries the Associated Domains entitlement, `applinks:getfoxy.io`,
 that lets a card's address open Foxy (*Tapping a card to open Foxy*, below). It is
@@ -106,7 +111,7 @@ opens the site's page in Safari and not Foxy.
 
 ## Tapping a card to open Foxy
 
-A Foxy card of software 1.19 answers as an NFC tag as well as a card. The tag
+A card answers as an NFC tag as well as a card. The tag
 carries one address, `https://getfoxy.io/card`, and it is the same on every
 card. No part of it belongs to one card and none ever will: the address is a way
 to open Foxy, not a name for the card, and nothing in it, or in the page behind
@@ -168,23 +173,23 @@ payment (`THREAT-MODEL.md` §1).
    Foxy's first. Tap a new card behind the phone.
 2. The card's screen reads `This card is new. Set it up to put money on it.`
    Press **SET UP THIS CARD**.
-3. A card of software 1.16 and on is set up with **no PIN**, and nothing is asked: the sheet comes up at once and the tap
+3. A card is set up with **no PIN**, and nothing is asked: the sheet comes up at once and the tap
    begins (SET UP THIS CARD, then the tap, then the card's screen). Its owner adds a PIN whenever they want one, with
-   **ADD PIN** on that screen (*The PIN*, below). A card of an earlier software cannot be without a PIN, so it is asked for
-   one first: **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN** (the PIN pad is the lock screen's; the second
-   pad takes the first one's place in the same turn and with no fade, so the card's screen is never seen between the two).
-4. One tap writes the PIN (none, for a card of 1.16 and on), then the card's record (this phone's mint, and for
-   a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
-   needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
+   **ADD PIN** on that screen (*The PIN*, below).
+4. One tap writes the card's record (this phone's mint and a design), and last the owner key, with the newest
+   block header this phone has kept: SET_OWNER's 145 bytes are the key and the header, and the header anchors
+   the card's clock in the same tap. A card that refuses the header (a phone with no header, or one the card
+   will not take) is given the key alone, 65 bytes, and its clock begins at the next tap that shows it one.
+   The owner goes in last so that no step needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 5. The card's screen, with a line: `The card is set up.` (with a PIN and with none alike; back from it is where the person
-   was). Nothing is read between the pad (or, for a card of 1.16 and on, the button)
+   was). Nothing is read between the button
    and the tap, and nothing after it; the screen is the card's own, with ADD FUNDS. What two notices used to say stands: this
    phone is the card's owner, so it can reset the card's PIN and limits, and
    whoever holds the card and this phone's seed phrase holds its money; and a
    card is cash, so whoever has it and its PIN has what is on it, and a lost
    card's money is gone.
 
-No limit is asked for and none is suggested. A new card has none. From software 1.16 the PIN
+No limit is asked for and none is suggested. A new card has none. The PIN
 is left out by default (*No PIN, and the no-PIN allowance*, below): the tap writes the record and the owner only,
 and the card is cash to whoever holds it from that moment. Nothing at set-up says so; ADD PIN's first pad does (below).
 
@@ -202,44 +207,48 @@ Three wrong PINs in a row block the card. After a wrong one the screen says
 how many tries are left and that nothing was taken, and on the last try that
 one more blocks the card.
 
-The PIN is typed on the receiver's phone and goes to the card in the clear over
-the few centimetres between them. Anyone running a till, or holding a phone
-altered to look like one, sees it.
+The PIN is typed on the receiver's phone and sealed to a key of the card's own
+on its way, so listening to a tap learns nothing. Anyone running a till, or
+holding a phone altered to look like one, sees it.
 
-## No PIN, and the no-PIN allowance (software 1.16)
+## No PIN, and the no-PIN allowance
 
-From software 1.16 a card's PIN is optional. This is the phone's side of it; the card's is in the card
-repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
+A card's PIN is optional. This is the phone's side of it; the card's is in the card
+repository's `spec/NUT-XX.md` and `docs/FOXY-CARD-DAILY-LIMIT.md`.
 
 - **A card may have no PIN.** `cardSetUp(link, { recoverable })`, with no `pin`, writes the record and then the owner
-  and nothing else: no PIN is set or shown, and the tap is one command shorter than before. Such a card pays with no PIN,
+  and nothing else: no PIN is set or shown. Such a card pays with no PIN,
   is loaded and emptied by its owner's grant as any card is, and has its per tap and daily limits set by the owner's
   proof as any card does; those limits apply to every payment, PIN or not. It has no allowance, and nothing asks for one
-  (`cardSetLimit` with `noPin` says `no-pin`, and the card refuses it all the same, `6985`). A card of an earlier
-  software cannot be set up without a PIN (`old-card`), and neither can a card that has a PIN already (`has-pin`: a set-up
-  cut off after the PIN, whose PIN this phone does not know).
+  (`cardSetLimit` with `noPin` says `no-pin`, and the card refuses it all the same, `6985`). A card that has a PIN
+  already cannot be set up without one (`has-pin`: a set-up cut off after the PIN, whose PIN this phone does not know).
 - **ADD PIN.** `cardAddPin(link, { pin })`: the owner's grant in the tap, then the PIN sealed as at set-up. One tap. It
   works on a card that holds money (the money stays), refuses a card that has a PIN (`has-pin`, which is CHANGE PIN's), a
-  phone that is not the owner (`not-owner`, at no cost) and a card of an earlier software (`old-card`). The card's
+  phone that is not the owner (`not-owner`, at no cost). The card's
   allowance is nothing when a PIN is added: every payment asks for the PIN until the owner sets one.
 - **The allowance.** A card with a PIN may carry a third limit, the most it signs for in a day WITHOUT the PIN. It shares
   the day's window with the daily limit (the same clock, the same day), and only payments signed for with no PIN count
   against it. `cardSetLimit(link, { sats, noPin: true, usd })` sets it (or `noPin: <sats>`; zero is none), as the owner, in
-  the twelve-byte form of the owner's limit command: the day's limit and the limit on one tap as the card has them, so
-  neither's window or count begins again, and then the allowance. An allowance whose number does not change keeps its
+  the thirteen-byte form of the owner's limit command that this phone always sends: the day's limit and the limit on one
+  tap as the card has them, so neither's window or count begins again, then the allowance, then the rollover budget as
+  the card has it (*The daily limit and the owner's phone*, below). An allowance whose number does not change keeps its
   count; a new number counts from nothing in the window as it stands. Set in dollars (`usd`), it is kept in dollars on
   the phone that set it, apart from the limit on one tap's, and followed with the price as that limit is: the owner's
   phone sets the card's sats again when it reads the card and the price has moved by more than two in a hundred
   (`card.repacedNoPin`; `cardNoPinUsd(key)` is the dollars).
+- **When the allowance begins again.** With a new day, and only once it has been armed since the day before: by a right
+  PIN given to the card, or by the owner's proof (a tap on the owner's phone). A card nobody has given its PIN or shown
+  its owner since does not begin its allowance again, so a lost card's allowance is spent once and no more. GET_CARD's byte
+  78 says whether it is armed (`info.armed`).
 - **What the phone reads.** `info.noPin` is `{ limit, spent }`, from bytes 34 to 41 of the long answer to GET_INFO,
   which the card gives to anybody (a till needs them to know whether to ask for the PIN; the limit on one tap, bytes 30
   to 33, is still the owner's alone). `card.noPin` is `{ known, set, limit, spent, left, turns }` worked out over the
   day's window as the daily limit's `card.day` is: `left` is the allowance less what is spent when the window is
   current, and the whole of it when the window is over; with no block header yet the window has no start and does not
   end, so the count runs from set-up (`onTrust`). `info.pinSet` is whether a PIN exists, and `info.setUp` whether the card
-  is set up at all (a record, and before 1.16 a PIN as well). `cardNeedsPin(card, net)` is whether the card will ask for
+  is set up at all (a record). `cardNeedsPin(card, net)` is whether the card will ask for
   its PIN to sign a payment that takes `net` sats off it: no for a card with no PIN, no for an allowance with `net` or
-  more left, yes otherwise, and always yes for a card of an earlier software.
+  more left, yes otherwise.
 - **At a till, the tap comes first.** `cardPay(link, { sats })` with no `pin` shows the card none. The card is read; if
   it has a PIN and the allowance does not cover the payment (never less than the price and the mint's fee), the call
   rejects at once with `pin-needed` and `early: true`, before the card is asked to begin anything, with `need` (what the
@@ -248,8 +257,7 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
   answers `6A94` at the signature, the call rejects with `pin-needed` and `sw: '6a94'`. The card has signed nothing and
   given the payment up, as it does for a limit, and the phone's row for it goes with it: nothing asked for, nothing
   taken, nothing owed. The error carries `sheetText`, `Enter the card's PIN`, so the sheet ends with that line as a note and not in red. The person is asked for the PIN, and the card is tapped again with `pin`. With the PIN the payment
-  is as it ever was, and counts nothing against the allowance. A card of an earlier software always rejects `pin-needed`
-  early when no PIN is given, since it would waste a tap. A signature the card gave under the allowance and whose answer
+  is as it ever was, and counts nothing against the allowance. A signature the card gave under the allowance and whose answer
   was lost is given again with no PIN; one it gave with the PIN is given again with it, and the call says `pin-needed`
   with `again: true` and keeps the signature asked for.
 - **The log.** A tap in which a payment was signed for under the allowance (a PIN set, none shown, the allowance
@@ -281,23 +289,22 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
     adding funds from a phone that is not the owner's, and the recut that a per tap limit can need.
   - *At a till*, *Paying at a till*, below.
 
-## Resetting a card (software 1.17)
+## Resetting a card
 
-From software 1.17 a card's owner can give it back to what it was in its packet, so that another person can set it up.
-This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC.md`.
+A card's owner can give it back to what it was in its packet, so that another person can set it up.
+This is the phone's side; the card's is in the card repository's `spec/APDU.md`.
 
-- **What the card does.** RESET (instruction 51, P1 = 0, P2 = 0xAD) under the owner's proof over `FoxyCard/reset` and an
+- **What the card does.** RESET (instruction 51, P1 = 0, P2 = 0xAD) under the owner's proof over `CashuCard/reset` and an
   empty value (nothing else may follow it). The card then has no PIN (three tries), no owner, no record, no limit, no
   allowance, no log, no receipts, no change in hand and no lock, and **a new key** (the old key tied two owners' payments
   together). It keeps its clock (what it reads now and the hash of the last header; the ratchet goes to nothing, as a new
   record does it) and its software. It refuses a card with anything unspent on it (`6A8D`), one with no owner (`6A90`), a
   proof that is not the owner's (`6A91`), and a LOCKED card whose PIN was not verified in the same tap (`6982`); an
   unlocked card asks for no PIN, and a blocked PIN is no bar to it (the owner is resetting, not unblocking).
-- **The owner's key.** The proof is the owner's, so native signs for a sixth label, `reset` (empty value). A lock and the
-  time are still not signed for.
+- **The owner's key.** The proof is the owner's, so native signs for the label `reset` (empty value). A lock and the
+  tag's switch are not signed for.
 - **`cardReset(link, { pin })`.** Reads the card as its owner, proves ownership, verifies the PIN first where the card is
-  locked, and sends RESET. Resolves `{ reset: true, key }` (the card's old key). Rejects, with `card`: `old-card`
-  (before 1.17), `no-owner`, `not-owner` (these words are not the card's; costs no try), `has-money` ("Take the money off
+  locked, and sends RESET. Resolves `{ reset: true, key }` (the card's old key). Rejects, with `card`: `no-owner`, `not-owner` (these words are not the card's; costs no try), `has-money` ("Take the money off
   the card first."), `locked` (a locked card and no PIN, said before the card is sent anything), `bad-pin`, `wrong-pin`,
   `blocked` (a locked card whose PIN is blocked cannot be reset), `gone`, `change-owed` and `unsettled` (below). Nothing is
   changed by any of them. The key the tap had kept (`link.one`) is forgotten, so a read after it asks the card for its new key.
@@ -320,14 +327,14 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   It keeps the card's row among the cards it can take back (a piece the card signed away that its receiver never swapped is
   still this phone's to take back after its date), and the withdrawal that emptied the card is an ordinary history line;
   the reset has no line of its own.
-- **The wait.** Software 1.18 asks ten signatures for the first limit's worth over the limit on one payment and four for
-  each after; 1.17 asked ten and three, 1.13 to 1.16 seven and three. `info.waitOver` and `info.waitMore` say which a card
-  has, and `cardWaitSigns` and `cardWait` take them as their last arguments (without them, seven and three).
+- **The wait.** A card asks ten signatures for the first limit's worth over the limit on one payment and four for
+  each after. `info.waitOver` and `info.waitMore` are those two, and `cardWaitSigns` and `cardWait` take them as their last
+  arguments (without them, ten and four).
 
 ### The screens
 
-- **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
-  `Block #970809` (above). For a card of 1.20 the first line also needs every piece on the card found real (*What
+- **The card's screen.** The title has two lines under it: `Verified At 11:42am` and
+  `Block #970809` (above). The first line also needs every piece on the card found real (*What
   Verified says*, below). **HISTORY**, what has been done with this card on this phone, is the round button at the top
   left, for any card with a record. The limit line is on the card's own face, at the bottom left of its picture: `NO LIMIT`,
   `DAILY LIMIT $5` and so on, and for a card with no PIN a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`.
@@ -341,13 +348,13 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   0.32 em), 7.7% in from the left. All of it is in percentages of the card's width
   (`cqw`), so it holds at any width; a long line wraps, balanced, within 66% of the width and never reaches BEARER (the
   space before the dot of `PER TAP $2.00 · DAILY $5.00` does not break, so a line never begins with it).
-  The row under ADD FUNDS and WITHDRAW is **RESET** (a card of 1.17 and on, for its owner), **CHANGE PIN** (**ADD PIN** on a
+  The row under ADD FUNDS and WITHDRAW is **RESET** (for its owner), **CHANGE PIN** (**ADD PIN** on a
   card with none) and **LIMITS**, drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its
-  label under it. All three are the owner's; a card before 1.17 has the two it can offer. The card is drawn in the design it
+  label under it. All three are the owner's. The card is drawn in the design it
   names (`FL1` stays `FL1`, before and after set-up); a card that names none is drawn in, and given, this phone's own.
-- **RESET.** The first button of that row (a circular arrow), for the owner of a card of 1.17 and on (a locked
-  card is offered it to any phone holding it: only the card can say whose it is; on another phone's unlocked card, and on
-  an older card, it is not in the row, and a call that reaches it says `NOT THIS PHONE'S CARD` or `NOT ON THIS CARD`). It opens one warning:
+- **RESET.** The first button of that row (a circular arrow), for the card's owner (a locked
+  card is offered it to any phone holding it: only the card can say whose it is; on another phone's unlocked card it is
+  not in the row, and a call that reaches it says `NOT THIS PHONE'S CARD`). It opens one warning:
   what is wiped (the PIN, the owner, the limits, the log; a new key), that the card is then anyone's to set up, and, when
   it holds money, that the money comes off to this phone first. **CONTINUE** goes to one tap (`cardEmptyAndReset`;
   the sheet says `Keep holding.`); a locked card, or a card with money and a PIN, asks for the PIN on the pad first
@@ -365,9 +372,8 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 - **HOW TAP LIMIT WORKS** says its seconds as "~", worked out from the card's own counts as what the screen behind the sheet
   reaches on a card held well (`fcWaitSecs`: about 3.3 seconds for the read, the pieces and the change, then 0.58 seconds an
   asking, as measured on a phone, shown as the whole second the count comes to): `~1–4 SEC TAP` within the limit, then ~9,
-  ~11 and ~13 for a card of 1.18 (ten askings, then four more for each further limit's worth), about 9, 10 and 12 on 1.17, about
-  7, 9 and 10 before it. The limit's confirmation says the same first figure for the card over the limit
-  (about 7 before 1.17), and 2 more for every limit's worth beyond.
+  ~11 and ~13 (ten askings, then four more for each further limit's worth). The limit's confirmation says the same first
+  figure for the card over the limit, and 2 more for every limit's worth beyond.
 
 ## Adding money
 
@@ -413,11 +419,11 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 
    The cost of a deep drawer is pieces: taking everything off a card signs
    every one, most of a second each, which is longer than a person holds a
-   card. A withdrawal cut short keeps what the card signed, and the next tap
-   takes the rest (*Change PIN, withdraw, and a blocked card*).
+   card. A withdrawal cut short as the card signs is had again at the next tap
+   (*Change PIN, withdraw, and a blocked card*).
 
-   **A card of 128 places that burns any number of pieces at once (software
-   1.8) is cut deeper, and differently.** A
+   **A card of 128 places burns any number of pieces at once, so it is cut
+   deeper.** A
    price typed in dollars is an odd number of sats, so every payment needs a
    1 or a 2 or a 4 of its own, and nothing larger can stand in for one (two
    256s make a 512; nothing but 1s makes a 1). Three deep, the third payment
@@ -482,45 +488,35 @@ tap, which pays with the PIN, as the rest of this section describes. The card's 
 the allowance would cover it and the card says `6A94` at the signature, the sheet ends the same way and the same pad comes
 up. A wrong PIN comes back to the same pad, with TRY AGAIN, as it always did. *No PIN, and the no-PIN allowance*, above.
 
-A card of an earlier software always wants its PIN, and the phone cannot tell it from one that does not before it is tapped, so
-it too is tapped first and ends that tap asking: one tap more than it used to take. (The refusals that need no PIN, a payment
-over a limit, more than the card holds, a mint that is not this one, no connection and the price a card cannot make
-exactly, are said in that first tap, with no pad.)
+The refusals that need no PIN (a payment over the daily limit, more than the card holds, a mint that is not this one,
+no connection and the price a card cannot make exactly) are said in the first tap, with no pad.
 
 1. **CARD PIN**, for a card that wants one: the pad above. In the order below, step 2 is the first tap
    for a card that needs no PIN, and the second for one that does.
 2. Apple's sheet asks for the card. The card is read in a few commands: its
-   state and key, its record, and its pieces three to a page (`GET_PIECES`; an
-   older applet is read the old way). A till does not ask the card to prove its
-   key: the signatures it is about to give prove that, piece by piece, and the
+   state and key, its record, and its pieces three to a page (`GET_PIECES`). A till does not ask the card to prove its
+   key: the signature it is about to give proves that, and the
    mint's swap is what says paid. The phone checks,
    before it sends the PIN, what it can: that the card is at this mint, that it
    holds enough, and that what is left of today's limit can cover the payment. A
    refusal here takes nothing.
-3. The phone chooses the pieces, as few as it can, because a tap should take
-   under three seconds and each piece is most of a second of signing. The card
-   is read in about 1.2 seconds, so a payment signs at most two pieces where two
-   cover the price: the one or two that overpay least **and leave the card's
-   drawer with no gap**. Where no two do, it signs the fewest pieces that cover
-   it, the set of that many chosen the same way. A card that paid 3,000 with its
-   last 2048 and 1024 was left holding large pieces and small change, and could
-   pay nothing in between exactly, which is the only way a till with no route can
-   be paid (*With no connection*); so it pays with a 4096 instead, and the change
-   is cut to fill the drawer. What the card would hold afterwards is worked out
-   before anything is signed, from the pieces left and the change as it will be
-   cut. A card with a gap already is mended the same way, by the change of a
-   larger piece. Where no set leaves it whole, the one that overpays least is
-   taken; and under a daily limit it always is, because the day is charged the
-   whole worth of what is signed.
-   What they come to over the price is change, made after the swap and written
-   back at the second tap (*Change*). From a drawer of $50, every price from $1
-   to $10 is one or two pieces. The mint's fee for swapping them, where it
+3. The phone chooses the pieces: an exact set where the card's drawer has one,
+   which it has for most prices, and otherwise the set that overpays least and
+   leaves the drawer with no gap. A card that paid 3,000 with its last 2048 and
+   1024 was left holding large pieces and small change, and could pay nothing in
+   between exactly, which is the only way a till with no route can be paid
+   (*With no connection*); so it pays with a 4096 instead, and the change is cut
+   to fill the drawer. What the card would hold afterwards is worked out before
+   anything is signed, from the pieces left and the change as it will be cut.
+   What they come to over the price is change, made in the swap and written
+   back at the second tap (*Change*). From a drawer of $50, a price from $1
+   to $10 is five to nine pieces, all under the one signature. The mint's fee for swapping them, where it
    charges one, is added to the price, and the card pays it.
 4. The phone writes down the outputs of the swap to come, so a lost answer can be
-   recovered. Then it sends the PIN and asks the card to sign each piece. From
-   here the card's slots are spent. The card signs each piece in software, about
-   three quarters of a second a piece on the card tested, so a payment of many
-   pieces keeps the card against the phone for several seconds.
+   recovered. Then it sends the PIN and asks the card for one signature over the
+   pieces and the outputs (*A card that signs once for a payment*, below). From
+   here the card's slots are spent. One signature is about three quarters of a
+   second on the card tested, however many pieces the payment is made of.
 5. **The card is let go the moment it has signed.** The signed pieces are
    written down first (`foxy.flashcard.taken`: they are now the only copy of the
    right to spend them), and then the sheet ends with `Done.` The
@@ -574,9 +570,9 @@ The sheet's line, by step:
 |---|---|
 | waiting | Tap behind the phone. |
 | reading | Reading the card (and Scanning. Hold still. from the phone's link) |
-| signing | Signing piece 3 of 9 |
-| the card's change (1.12 and on) | Making change 2 of 4. |
-| a wait (1.13: only over the limit) | Over per tap limit (then `x2` as the second limit's worth begins, `x3` the third, and so on: ten askings for the first on 1.17, seven before it, three for each after) |
+| signing | Signing |
+| the card's change | Making change 2 of 4. |
+| a wait (only over the limit) | Over per tap limit (then `x2` as the second limit's worth begins, `x3` the third, and so on: ten askings for the first, four for each after) |
 | a wait for change, or a second payment in one tap | Keep holding. |
 | the change is owed (the owner's read) | Asking for change owed. |
 | signed | Done. (the sheet ends here), or Hold for change. when change is coming |
@@ -633,14 +629,15 @@ or two buttons. The ones a payment can end in:
 | CARD BLOCKED | too many wrong PINs; the card pays again when its owner sets a new PIN on it |
 | NOT ENOUGH ON THE CARD | what it holds |
 | OVER THE CARD'S DAILY LIMIT | what is left of today, and when the day turns; said before the PIN is sent |
-| OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the sheet says `Over per tap limit`, and the level (`x2`, `x3`) as it goes on. (An older card, whose limit was a window: the most it pays in one tap, or what the tap has left) |
+| OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the sheet says `Over per tap limit`, and the level (`x2`, `x3`) as it goes on |
 | A DIFFERENT MINT | the card's mint and this phone's. Adding funds to a card that holds money: "You need to withdraw all funds on the card before you can switch mints." and CLOSE. To an empty card, on its owner's phone: SWITCH TO <MINT>, which goes to the amount and moves the card in the tap that writes the funds; on any other phone, that only the phone that set the card up can switch it |
 | NO CHANGE WHILE OFFLINE | no connection, and the card has no pieces that make the price exactly; said before the PIN |
 | TAKEN ON TRUST | no connection: kept, not paid, swapped in when online |
 | NO MONEY ON THIS CARD | a card with no PIN, or nothing on it |
 | NOT A FOXY CARD | it could not be read, or is another kind |
+| CARD NEEDS AN UPDATE | the card answered with a version of the protocol other than 2.0: `This card needs an update.` Nothing is sent to it |
 | NO CARD READER | this phone, or this build, cannot read a card |
-| NOT PAID YET | the card left while it was signing, and the sheet that came up again to finish read no card: TAP CARD finishes the payment, CANCEL gives back what it signed |
+| NOT PAID YET | the card left as it signed, and the sheet that came up again to finish read no card: TAP CARD finishes the payment, CANCEL gives back what it signed |
 | NOT PAID | the card was refused, or gave a bad signature, part way through: nothing was paid, and the next tap puts back what it signed, with no PIN (or, where the mint has not answered, once it has) |
 | TAP TO RECEIVE | the payment is made and its change is waiting for the second tap, with no PIN |
 | COMPLETE | the second tap did it: what was paid, and the change back on the card |
@@ -656,20 +653,22 @@ A card held to a phone for a second or two is sometimes taken away too soon.
 Wherever some of the work was done, the next tap does the rest, and the phone's
 sheet comes up again by itself for it, with the PIN already given:
 
-- **A payment.** The card signs a piece before it marks it spent, and marks it
-  spent before the signature leaves the card, so a card pulled away while it
-  signs has lost nothing. What the card signed before it left is held by the till for
-  that payment, and the next tap of the same card for the same amount signs only
-  the rest. The two are swapped at the mint as one payment. Nothing has to be
+- **A payment.** The card burns the pieces as it gives its one signature, so a
+  card pulled away before it signs has lost nothing, and one pulled away as it
+  signs has given a signature that this phone did not hear. The next tap of the
+  same card asks it for that signature again (GET_SIGNATURE), with nothing more
+  burned, and the payment of the same amount is made with it. Nothing has to be
   written back to the card, so the card is never short for a payment that was
-  finished. Cut short again, what it signed is held with the rest. Offline, taken
-  on trust, it works the same way: the rest of the exact set, kept on trust as one
-  payment. A held payment is given back to the card, by the road a refund always
+  finished. A card that has signed for something else since cannot give the lost
+  signature again; that payment is made afresh, and the asking is forgotten.
+  A held payment is given back to the card, by the road a refund always
   took, when the person presses CANCEL, when the card pays another amount at that
   till (its money then goes back in the same tap as that payment's change), or
   three minutes later, at the next settling.
-- **A withdrawal.** What the card signed is already in the phone, with an entry
-  of its own, and the next tap takes the rest.
+- **A withdrawal.** The next withdrawal asks the card for the signature it gave
+  as it left. What that signature was for is held for the card, as a payment cut
+  short is, and goes back on it when it is let go; the amount asked for now is
+  taken afresh.
 - **Money going onto the card.** Whatever pieces went on stay on, and the next
   tap writes the rest.
 
@@ -679,12 +678,10 @@ through a payment is not taken up again: what the card signed goes back to it.
 
 ## A card that signs once for a payment
 
-There are two kinds of card. The first signs for each piece it pays with, most
-of a second apiece, and everything above about signing few pieces and taking
-change at a second tap is written for it. The second (the card's software 1.4,
-which says of itself that it is format 4) signs **once** for a whole payment,
-whatever the number of pieces. Foxy reads which kind a card is and pays with
-either; a piece is written the way its own card writes it.
+A card signs **once** for a whole payment, whatever the number of pieces. It
+says of itself that it is format 4, which is the only format of the Cashu card
+protocol 2.0; Foxy reads that, and a card that says otherwise needs an update.
+A piece is written the way the card writes it.
 
 One signature is over more than the pieces. It is over the pieces **and the
 outputs they are swapped for** (NUT-11's `SIG_ALL`), and a mint takes it for
@@ -705,7 +702,7 @@ What that changes:
   with no words on it, only the phone's own tick as it closes. The wait for the
   mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
   Where change is coming the sheet stays, as below.
-- **The PIN is sealed to the card (software 1.9).** A PIN typed at a till
+- **The PIN is sealed to the card.** A PIN typed at a till
   crossed the air to the card as it was typed, and anybody listening to the
   tap had it. A bank card's PIN is enciphered to a key of the card's, and so
   is this one. The card has a key for it and nothing else (never the key it
@@ -720,10 +717,9 @@ What that changes:
   bytes, so its length says nothing of the PIN's. A new card's first PIN and
   a PIN changed by its owner go the same way (the owner's proof and the seal
   under the same sixteen bytes). It costs one more command and one key
-  agreement on the card, a fraction of a second. A card that does not say it
-  takes a sealed PIN is shown it as before. What it does not do is in *What it
+  agreement on the card, a fraction of a second. What it does not do is in *What it
   does not protect against*.
-- **A card of 128 places (1.7) is read in one command.** Its short listing
+- **A card of 128 places is read in one command.** Its short listing
   is two bytes a piece (the place and the power of two it is worth, with the
   keyset and date only where they change), so a till reads a drawer of a
   hundred pieces in one answer, and then asks for the pieces it chose. A till
@@ -734,33 +730,17 @@ What that changes:
 - **Eight in a row, and then change that is worth the second tap.** With a
   deep drawer a price is nearly always made exactly. When none is, the drawer
   is short of some small size, and the set that overpays least would bring
-  back a sat or two: one piece, and the payment after it short again. So a
-  till takes the cheapest set that brings back 256 sats or more (and no more
-  than 1,024), and that change is cut to fill the small sizes, in thirty-two
-  pieces at the most (eight, where the card makes it itself). One second tap in ten payments or so, where it would be
-  one in two. The larger set may be over a per tap limit the till is not
-  told: the card then answers "not yet" before it has signed anything, and
-  the till pays with the cheapest set after all, at once. Nobody is told to
-  keep holding for the sake of change. (A card of 1.13 is paid otherwise:
-  *A card that makes its own change*, below. Its change is cut plainly and
-  restocks nothing in particular, so the till takes the set that overpays least,
-  and the drawer's small sizes are put back by a top-up.)
+  back a sat or two: one piece, and the payment after it short again. The
+  card makes that change itself (*A card that makes its own change*, below),
+  cut plainly, so the till takes the set that overpays least, and the drawer's
+  small sizes are put back by a top-up.
 - **How many pieces one signature is for.** A card burns the pieces of a
-  payment as it signs. Before software 1.8 it did so inside one transaction,
-  a status byte a piece, and the chip's transaction holds few: on the card
-  itself eleven pieces were signed for and thirty-two were refused, with
-  nothing burned. No simulator shows that, since a simulator's transaction
-  has no size. So a card that does not say it burns any number is asked for
-  **eight pieces at the most**: a payment is paid with a larger piece and
-  change where its exact set is more, a payment no eight pieces cover is
-  refused before the PIN with `TAKE IT IN PARTS` and the most the card can
-  pay at once, and a whole card comes off in as many signatures as it takes,
-  in the one tap. Such a card is not cut deep. A card of 1.8 commits the
-  payment with one byte and marks its pieces after (finishing at its next
-  command, should it leave the field first), and says so: it is asked for
-  thirty-two pieces or fewer wherever such a set pays, and for as many as it
-  has where nothing that few does, which is most of a small card.
-- **A card of software 1.6 is quicker to hold.** A till reads its brief
+  payment as it signs. It commits the payment with one byte and marks its
+  pieces after (finishing at its next command, should it leave the field
+  first), so the chip's small transaction is no bar to any number of pieces.
+  It is asked for thirty-two pieces or fewer wherever such a set pays, and for
+  as many as it has where nothing that few does, which is most of a small card.
+- **A card is quick to hold.** A till reads its brief
   listing (what each piece is worth, its date and its keyset: three commands
   for a full card where the whole listing is eleven), chooses, and asks for
   only the pieces it chose, checking each against what the listing said. Not
@@ -785,8 +765,8 @@ What that changes:
 - **Exactly, where the card can.** Signing costs the same for one piece as for
   thirty-two, so the pieces are chosen to come to exactly the price (and the
   mint's fee on them) where the card holds them: no change, and no second tap.
-  Where it cannot, the choice is the one the other kind of card makes, with
-  change owed and written back as ever. The change is locked to the card with
+  Where it cannot, the set that overpays least is taken, with change made and
+  written back as below. The change is locked to the card with
   the same flag, and is money it signs for again.
 - **One date.** A mint takes one signature only for pieces whose secrets agree
   in everything but the nonce, and a recoverable card's pieces carry a date.
@@ -795,8 +775,7 @@ What that changes:
   that, so a card is mostly of one date. A card topped up near the end of its
   year holds two; a price that neither covers alone is refused before the PIN
   with `TAKE IT IN TWO PARTS` and the most it can pay at once. The holder's own
-  phone, taking a whole card off, asks for a signature for each date (and for
-  each eight pieces, on a card before 1.8) in the one tap. Where that is more
+  phone, taking a whole card off, asks for a signature for each date in the one tap. Where that is more
   than one, the pieces are dealt out by size, a piece to each signature in
   turn, so that each has its share of the money: cut as they lay, a run of
   small pieces made a signature's worth that came to no more than the mint's
@@ -837,7 +816,7 @@ payment kept on trust for days) leaves pieces the card's signature can no
 longer spend; on a recoverable card they come back to the holder's phone after
 their date.
 
-The limits are held to what a payment's pieces come to together (from 1.12, less
+The limits are held to what a payment's pieces come to together (less
 the change the card makes for itself: *A card that makes its own change*), by the
 card, before it signs; and the card's log counts the payment once.
 
@@ -847,18 +826,17 @@ The card signs whole pieces, so a payment of $0.43 may use a piece worth more.
 The difference is made into new pieces **locked to the card's key**, cut to fill
 the gaps in what the card will then hold (*Adding money*), after the swap has
 landed. Change is never the receiver's: it is kept in a store of its own, outside
-the balance, until it is on the card. (A card of software 1.12 makes the change
-itself, in the swap, and this phone finishes the pieces at the second tap:
-*A card that makes its own change*, below; from 1.13 the card makes the four
-largest powers of two the change is made of and this phone only the small tail.
-What follows is the change a till makes, which is every card's before 1.12, and a
-later part of a bigger change.)
+the balance, until it is on the card. (The card makes the four largest powers of
+two the change is made of itself, in the swap, and this phone finishes those
+pieces at the second tap: *A card that makes its own change*, below. What follows
+is the change a till makes: the small tail of a bigger change, and all of it
+where the card makes none, as with no connection or a whole card taken off.)
 
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
 
-1. **SEND.** The PIN, and the first tap, under KEEP HOLDING. The card signs its
-   one or two pieces and may be taken away.
+1. **SEND.** The PIN, and the first tap, under KEEP HOLDING. The card signs once
+   for its pieces and may be taken away.
 2. **VERIFY.** The phone's sheet stays up and says `Hold for change.` while the swap runs and the change is made; Foxy's screen
    behind it says VERIFYING CARD. "Paid" first, since the card's part is over
    the moment it has signed, and the words are what say so: iOS plays no
@@ -928,10 +906,10 @@ keeps it.
 
 ## A card that makes its own change
 
-From software 1.12 the card makes a payment's change itself. Before it, a till
-paid in pieces worth more than the price made the difference into new pieces
-after the swap, locked to the card, and the card could not tell what it was given
-back, so its limits had to count the pieces whole. Now the till names an amount
+The card makes a payment's change itself. A till that made the difference into
+new pieces after the swap, locked to the card, would leave the card unable to
+tell what it was given back, and its limits would have to count the pieces whole.
+So the till names an amount
 for each piece of change and the card makes the piece: it draws the nonce and
 the blinding factor, builds the secret as it builds its own pieces' (locked to
 its own key), hashes it to the curve, blinds it, and answers the blinded message.
@@ -961,41 +939,35 @@ What it means for the holder:
   not take its word.
 - **The wait on a per tap limit is by the same.** It is counted on what leaves the
   card, and overpaying costs no wait, so the pieces are not chosen to overpay the
-  least for the wait's sake. **From software 1.13** a payment within the limit
+  least for the wait's sake. A payment within the limit
   goes at once, with change or without (a thirty-second over the limit counts as
   within it: a limit set in dollars at one moment and a price in dollars at
-  another lands a few sats over). Over it the card does seven signatures of work
-  (ten from software 1.17: `info.waitOver`),
-  about five seconds, for the first limit's worth over the limit and three more,
-  about two seconds, for every limit's worth after that, whole or in part. The
-  change the card made counts toward them as work done, for what it cost: **from
-  software 1.14** two waits off for every three pieces (a piece is about two thirds
-  of a signature's work, so one for one took off more than a piece cost), and none
-  is below nothing; at most 255 limits' worth are counted. A payment over the limit
-  takes about the same time in the hand with change as without, and what is felt
-  says how far over the limit it was; and asking for more pieces buys a terminal
-  nothing, since each costs the holder's hand what it takes off. (**Software
-  1.13** took one off for each piece, and a terminal could buy the wait down with
-  pieces of a sat: eight of them took eight off for less than six signatures of
-  work.) That change is coming is the phone's to say and not the card's: see
-  *Three buzzes*, below. **Software 1.12** waited four signatures for every limit's
-  worth, three seconds, and for a payment within the limit that made change. While
-  it waits the till's sheet says `Over per tap limit` (and `x2`, `x3` as each
-  further limit's worth begins), and nothing of how long; a card of 1.12 for its first limit's worth said `Keep
-  holding.` The day's limit is held at the card's
+  another lands a few sats over). Over it the card does ten signatures of work
+  (`info.waitOver`), about eight seconds, for the first limit's worth over the
+  limit and four more (`info.waitMore`), about two and a half seconds, for every
+  limit's worth after that, whole or in part. The change the card made counts
+  toward them as work done, for what it cost: two waits off for every three pieces
+  (a piece is about two thirds of a signature's work), and none is below nothing;
+  at most 255 limits' worth are counted. A payment over the limit takes about the
+  same time in the hand with change as without, and what is felt says how far
+  over the limit it was; and asking for more pieces buys a terminal nothing, since
+  each costs the holder's hand what it takes off. That change is coming is the
+  phone's to say and not the card's: see *Three buzzes*, below. While it waits the
+  till's sheet says `Over per tap limit` (and `x2`, `x3` as each further limit's
+  worth begins), and nothing of how long. The day's limit is held at the card's
   first SIGN and not at the start of the payment, so a refusal comes after the
   outputs and the change were sent, and gives the payment up: the swap's row is
   dropped, nothing is burned.
-- **One payment a tap at full speed (1.13).** A second payment signed in the
-  same time in the field waits as one over the limit does, seven signatures (ten from 1.17) and
+- **One payment a tap at full speed.** A second payment signed in the
+  same time in the field waits as one over the limit does, ten signatures and
   its own count where that is more, whether the card has a limit or not, unless
   the owner's grant is in the tap. Without it a terminal that has the PIN could
   take a limit's worth a second for as long as the card is held. A new SELECT
   is the same time in the field; the card out of it and back is a new one. The
   change tap, a refund and any load are not payments. A till is not told the
   limit, but it knows what it has had the card sign in its sheet, so it says the
-  seven before the PIN is sent, with what the change it will ask for counts for
-  taken off (two for every three pieces from 1.14, one for each before), and
+  ten before the PIN is sent, with what the change it will ask for counts for
+  taken off (two for every three pieces), and
   the screen says `A second payment in one tap. Keep holding`. The owner's phone,
   which gives the grant first and takes a whole card off in as many signatures as
   its pieces have dates, is not slowed. Nothing a till does in one sheet makes a
@@ -1011,7 +983,7 @@ What it means for the holder:
   none when all is back. An output the card no longer lists and does not hold (it
   was wiped and set up again) cannot be finished: the row is kept, marked, and
   left out of what the screen says is owed.
-- **Four pieces at most, from 1.13** (eight, from 1.12 to 1.13), and the card
+- **Four pieces at most**, and the card
   keeps openings for eight, of which the change not yet written back counts.
   Each piece costs the card about half a second of its own work over NFC (its
   hash to the curve) while it is held to the phone, in the first tap, and change
@@ -1019,7 +991,7 @@ What it means for the holder:
   the powers of two the amount is made of, and the card makes the four largest:
   2,357 sats is 2048 + 256 + 32 + 16 + 4 + 1, of which the card makes the first
   four. The rest, the small tail, is made by the till after the swap and written
-  at the change tap, as before 1.12 (a `change` token row beside the card's own;
+  at the change tap (a `change` token row beside the card's own;
   the log line says how it was split: `the card makes 2352 sats of the change
   itself, in 4 pieces (2048 + 256 + 32 + 16); 5 sats more are made here after the
   swap`). That tail leaves the card with the price as far as its day's limit and
@@ -1029,8 +1001,7 @@ What it means for the holder:
   little more (an eighth of the price, 64 sats at the least), and only where there
   is none does the tail take the road after the swap. Stocking the drawer's small
   sizes is a top-up's work (the owner's phone cuts the drawer, eight deep) and not
-  a till's; a card of 1.12 was asked for eight pieces cut to the gaps in its
-  drawer, and is still. A card with no opening free refuses the first request for
+  a till's. A card with no opening free refuses the first request for
   change, and the payment is begun again with none asked of it. The card makes its
   pieces in the keyset of its first piece, which has to be the one in use at the mint;
   if it is not, the change is the till's.
@@ -1039,7 +1010,7 @@ What it means for the holder:
   four seconds, and the holder pulled the card. Now each piece is said as the card
   is asked for it, `Making change 2 of 4.`, and
   then the wait, if there is one.
-- **Three buzzes (1.13), asked for and not felt.** When the card has signed and
+- **Three buzzes, asked for and not felt.** When the card has signed and
   change is coming back to it in this sheet, the page asks the phone being paid
   for three buzzes, 0.15 seconds apart (a `triple` haptic; nothing else in the
   app asks for three), in place of the single quiet tap it asks for when the
@@ -1090,12 +1061,9 @@ What it means for the holder:
   a card is only to be held so long. What the mint learns is that something asked
   after outputs it signed itself, from a circuit of its own.
 
-A card before 1.12 is paid as it always was, and the wait is by what its pieces
-come to (*The limit on one tap*).
-
 ## The daily limit and the owner's phone
 
-(From software 1.16 the day's window is also the no-PIN allowance's: it begins at the first payment when either is set,
+(The day's window is also the no-PIN allowance's: it begins at the first payment when either is set,
 and when the day turns both counts go to nothing. A daily limit that is set or changed begins the window again, and with
 it the allowance's count; a limit on one tap that is set leaves both. *No PIN, and the no-PIN allowance*, above.)
 
@@ -1105,10 +1073,9 @@ changes or removes it, and it asks for no PIN.
 
 **LIMITS** on the card's screen first asks which of the card's limits,
 under CHANGE CARD LIMITS: `Which limit would you like to add or change?`, with
-**PER TAP LIMIT**, **DAILY LIMIT** and, on a card that has a PIN (software 1.16
-and on), **NO PIN LIMIT**, each a button, and CANCEL (*The limit on
-one tap*, below; a card whose software has only the daily limit is not asked;
-the third is *No PIN, and the no-PIN allowance*, above).
+**PER TAP LIMIT**, **DAILY LIMIT** and, on a card that has a PIN,
+**NO PIN LIMIT**, each a button, and CANCEL (*The limit on
+one tap*, below; the third is *No PIN, and the no-PIN allowance*, above).
 Each has three steps and then a tap. The daily limit's:
 
 1. A full-screen warning, SET DAILY LIMIT: `A daily limit is the most this card
@@ -1117,31 +1084,55 @@ Each has three steps and then a tap. The daily limit's:
    CANCEL.
 2. The app's SET AMOUNT screen: `What would you like the daily limit to be?`
    with NEXT, and under it **NO LIMIT**, which is how a limit is removed.
-3. A CONFIRMATION, `YOU ARE APPLYING A DAILY LIMIT OF:` and the amount, or `YOU
-   ARE REMOVING THIS CARD'S DAILY LIMIT.` with `It will be able to spend
-   everything on it.` CONFIRM or CANCEL.
+3. A CONFIRMATION, `YOU ARE APPLYING A DAILY LIMIT OF:` and the amount, with
+   `This card will spend no more than this in one day. The limit starts again by
+   itself each day, for up to 7 days after this phone last tapped it online.`
+   (the card's budget, where it is not seven), or `YOU ARE REMOVING THIS CARD'S
+   DAILY LIMIT.` with `It will be able to spend everything on it.` CONFIRM or
+   CANCEL.
+
+Every limit this phone writes goes in SET_LIMIT's thirteen-byte form: the day's
+limit, the limit on one tap, the no-PIN allowance and the rollover budget, the
+ones not being changed as the card has them, so that a change to one begins no
+other's window again.
 
 The card's screen shows `DAILY LIMIT` and its amount, or `NO LIMIT`; with a limit,
 `LEFT TODAY` and `THE DAY TURNS AT` a time.
 
 How it behaves:
 
-- **It counts the pieces signed, not the price.** A payment of $0.43 made with
-  one piece worth $1.00 costs the day $1.00. A piece worth more than what is
-  left of today cannot be spent today, whatever the payment.
+- **It counts what leaves the card.** That is the pieces signed
+  less the change the card makes for itself (*A card that makes its own
+  change*), so a payment of $0.43 made with a piece worth $1.00 costs the day
+  $0.43 and the mint's fee, and any change the till makes after the swap.
 - **A day is 24 hours from when its window began.** Setting the limit begins a
   window. The first spend after a day has passed begins the next. A terminal
   that straddles a boundary can take up to two days' limit in a short time. The
-  hours are the card's own clock's: from 1.15 the newest block header it has
+  hours are the card's own clock's: the newest block header it has
   been shown, so a day turns when a block of a day later reaches the card, and
   a limit set before the card has seen any block begins its day with the first
   (*The time*).
+- **It starts again by itself for a budget of days.** The card counts the days
+  its window has rolled over since its owner's phone last showed it a block
+  online (REFRESH), against a budget of one to thirty days, seven unless the owner
+  sets another (GET_CARD's bytes 76 and 77: `info.rolls`, `info.budget`). While
+  the budget lasts, a day turns as above. Past it the window stays where it is and
+  what was spent in it still counts, so a lost card is spent to its limit on a
+  first day and no more days after it than its budget (seven, unless set). The owner's phone sends REFRESH (instruction 53, under the
+  owner's proof over `CashuCard/refresh` and the newest block header it has kept)
+  whenever it reads its own card online with the budget not full; the card takes
+  the header as its clock too, and its budget is full again. A card set up with
+  the anchoring header (*Setting up a card*) has a clock from its first tap, so
+  its first day is not on trust. A day that will not turn until the owner's phone
+  taps it says so under the limit: `This card's daily limit renews again once
+  this phone is online and taps it.`
 - **A payment the mint refuses still charges the day.** The card counted what it
   signed when it signed, and putting the pieces back (*A payment the mint
   refuses*) gives the day nothing back. Only the owner's phone can set the limit,
   and so only it can give a day back.
 - **A payment over what is left is refused before the PIN is sent**, and the
-  screen says how much the card can still spend and when its day turns. The card
+  screen says how much the card can still spend and when its day turns. The
+  card holds it too: it refuses, and writes the refusal in its log. The card
   may hold enough and still be over the limit.
 - **The owner takes money off at any limit.** WITHDRAW, renewing and taking
   everything off lift the limit with the owner's proof, spend under the PIN, and
@@ -1161,22 +1152,15 @@ LIMIT: **HOW TAP LIMIT WORKS**, a screen that plays the rule as a short
 animation and leaves it on the screen as a list (`Any payment request over your
 limit requires you to tap and hold your card longer.`, an EXAMPLE LIMIT of $10,
 then `$0.01 – $10.00` 1–4 SEC, `$10.01 – $20.00` 9 SEC, `$20.01 – $30.00` 11
-SEC, `$30.01 – $40.00` 13 SEC for a card of 1.18, the seconds the screen behind
+SEC, `$30.01 – $40.00` 13 SEC, the seconds the screen behind
 the sheet reaches worked out from the card's own counts, `And so on…`; a tap skips the statement on the
 screen, and a phone that asks for less motion is shown the list at once), with
-CANCEL and CONTINUE once it has played (a card of 1.12, which pays exactly or
-holds the card, is told its own rule in a warning instead), the amount (`What is the most this card should pay in
+CANCEL and CONTINUE once it has played, the amount (`What is the most this card should pay in
 one tap straight away?`, with NO LIMIT under it), and a CONFIRMATION (`YOU ARE
 APPLYING A PER TAP LIMIT OF:`). The card's screen then says `PER TAP LIMIT` and
 the amount, or `PER TAP $2.00 · DAILY $5.00` where it has both.
 
-This is the card that signs once for a payment (software 1.5). An older card's
-second limit was a window of ten seconds of its clock, and refused; what
-follows is the one a card has now.
-
-- **It asks no clock, and refuses nothing.** The card's clock moves only when
-  it is told something (*The time*), and before 1.15 whoever could tell it a
-  time could turn a day, or a window of seconds. This limit counts nothing
+- **It asks no clock, and refuses nothing.** This limit counts nothing
   against time and remembers nothing from one payment to the next, so there is
   nothing to replay: a payment is judged by its own size, every time.
 - **The drawer is cut to it.** A top-up onto a card with this limit cuts
@@ -1189,23 +1173,15 @@ follows is the one a card has now.
   cost. Without the PIN the card is left as it is, and its screen says what it
   holds above the limit.
 - **A payment over it waits.** The card does signatures of its own work before
-  it signs, and nothing is taken until that is done. From software 1.13: nothing
-  within the limit (change or no change); about five seconds, seven signatures
-  (ten from 1.17: about eight seconds),
-  for the first limit's worth over it, and about two seconds, three, for every
-  limit's worth after that, less what the change the card made counts for: two
-  for every three pieces from 1.14, one for each piece in 1.13 (a piece is about
-  two thirds of a signature's work; one for one let a terminal shorten the wait
-  with pieces of a sat). The till's sheet says `Over per tap limit`, and `x2`, `x3` as
-  each further limit's worth begins; how long is left it cannot say, because
-  the card does not tell it. The limit's worth is of what leaves the card (*A
-  card that makes its own change*).
-  Software 1.12 waited four signatures, three seconds, for every limit's worth,
-  ceil(what leaves / limit) of them, and for one when a payment within the limit
-  made change. Before 1.12 the card waited by what its pieces come to, the first
-  limit's worth free, so a small payment made with a piece worth twice the price or
-  more waited too: the screen then says `Paying from a larger piece. Keep
-  holding`, since it is the piece that is over the limit and not the payment.
+  it signs, and nothing is taken until that is done: nothing within the limit
+  (change or no change); about eight seconds, ten signatures, for the first
+  limit's worth over it, and about two and a half seconds, four, for every
+  limit's worth after that, less what the change the card made counts for, two
+  for every three pieces (a piece is about two thirds of a signature's work). The
+  till's sheet says `Over per tap limit`, and `x2`, `x3` as each further limit's
+  worth begins; how long is left it cannot say, because the card does not tell
+  it. The limit's worth is of what leaves the card (*A card that makes its own
+  change*).
   Lifted in the wait, the card has paid nothing and the till holds nothing; tapped
   again, it waits the whole of it again. A second payment in the same time in the
   field waits as one over the limit does (*A card that makes its own change*).
@@ -1221,16 +1197,13 @@ follows is the one a card has now.
   payment of that size would, so a card lifted when the payment ought to be
   over has lost about what it ought to have paid. It is a rate and not a
   ceiling: the daily limit is the ceiling, and that one does ask the clock.
-- **It counts what leaves the card.** Before 1.12 that was the pieces signed, not
-  the price, so the pieces for such a card were chosen to overpay the least where
-  they could not come to the price exactly. From 1.12 it is the pieces less the
-  change the card makes for itself, and overpaying costs no wait; but the part of
-  the change the card does not make (more than four pieces, from 1.13) is made by
-  the till, leaves with the price, and is counted.
+- **It counts what leaves the card**: the pieces less the change the card
+  makes for itself, and overpaying costs no wait; but the part of the change the
+  card does not make (more than four pieces) is made by the till, leaves with
+  the price, and is counted.
 - **A wait longer than a tap lasts is given up**: after forty seconds of "not
   yet" the till stops asking, with nothing signed, and says to take the
-  payment in smaller parts (sixteen limits' worth is as much as a card of 1.13
-  or later waits that long for).
+  payment in smaller parts (the screen says how much can be taken at a time).
 - **It is kept in dollars.** The card holds sats and has no price. A limit typed
   in dollars is kept as dollars on the phone that set it
   (`foxy.flashcard.pace`), and when that phone reads its own card and the price
@@ -1251,7 +1224,7 @@ record of a card's use that does not depend on any terminal being honest.
 
 - **Four counts**: taps, sats signed for, spends refused for being over a
   limit, and runs of such refusals (below).
-- **The last eight taps**, newest first: when (the card's clock; from 1.15 also
+- **The last eight taps**, newest first: when (the card's clock, and beside it
   the time the terminal told the card at that tap), sats signed for, how many
   pieces, how many refusals, and a mark.
 - **A tap is one time in a phone's field**, from the card being powered to its
@@ -1263,13 +1236,13 @@ record of a card's use that does not depend on any terminal being honest.
   what the card has left before it asks. So three or more refusals inside ten
   seconds of the card's clock are a terminal trying the limit again and again,
   and the card marks that tap. One refusal at each of three visits is not that.
-  It needs a limit to be set: a card with none refuses nothing. From 1.15 the
+  It needs a daily limit to be set: a card with none refuses nothing. The
   card's clock moves only as it is shown newer blocks, so the ten seconds are
   the card's own, and three refusals before its clock next moves are one run;
   the log says `before its clock moved on`. A card that has been shown no block
   yet has no clock to tell visits apart by, so each of its refusals is a run of
   its own and it marks nothing: a false mark is worse than none.
-- **No PIN, from 1.16.** A tap in which a payment was signed for under the no-PIN allowance (a PIN set, none shown)
+- **No PIN.** A tap in which a payment was signed for under the no-PIN allowance (a PIN set, none shown)
   carries a mark for it, and the owner's log says so beside the tap; a card with no PIN marks nothing. A payment the card
   refused for want of the PIN (`6A94`) is nothing in the log: it is not a refusal over a limit and no part of a run of them.
 
@@ -1277,8 +1250,7 @@ The holder's phone reads it whenever it reads a card it owns (the owner's proof
 opens it, with no PIN; a till is not shown it). The card's screen says nothing
 of it unless the card has something to accuse: `TAMPER: a terminal tried 5
 times to take more than this card's limit. Press here.` for as long as a marked
-tap is among the eight, or, for a card before 1.15, `TAMPER: this card has been
-told a false time. Press here.` What else the card did is in this phone's
+tap is among the eight. What else the card did is in this phone's
 history, which has it already.
 The line opens **TAMPER ON THIS CARD**: the taps, the totals, and `Since this
 phone last looked:` what has been added, which the phone works out from the
@@ -1286,28 +1258,14 @@ counts it saw last time (`foxy.flashcard.logseen`).
 
 What it does not do: it says when and how much, never who; a terminal that
 overcharges within the limits leaves no mark, only the amount; and the times in
-it are, before 1.15, the times the card was told, which a terminal built to
-cheat can choose. From 1.15 each tap has two: the card's own, a block's, which
-nobody can choose, and the terminal's, a note, which it can (*The time*).
+it are two for each tap: the card's own, a block's, which nobody can choose, and the terminal's, a note, which it can (*The time*).
 
-### What was put on, a false time, and receipts
+### What was put on, and receipts
 
-A card of software 1.6 writes three more things, and its holder's phone reads
-them with the log.
+A card writes two more things, and its holder's phone reads them with the log.
 
 - **What was put on.** Each tap's line says what was put onto the card in it
   as well as what the card signed for: `$2.00 put on`.
-- **A false time** (a card before 1.15). The card cannot know the time, but it
-  can see being told it twice in one tap, more than two minutes apart, and
-  marks that tap; and this phone can see a card whose clock is more than five
-  minutes ahead of its own. Either way the card's screen says `TAMPER: this
-  card has been told a false time`, and the log says which it was. A till
-  whose own clock is wrong does the second by accident; a terminal walking the
-  clock forward to turn the card's day does both. The daily limit rests on
-  that clock and cannot be relied on while it is ahead. A card of 1.15 cannot
-  be told a false time: its clock is a block header, which no one can make for
-  a time that has not come. It writes no such mark, and neither screen speaks
-  of one.
 - **Receipts.** For every payment the card keeps when, what its pieces were
   worth, a hash of exactly what it signed, and the first output of the swap
   the money went into. It gives them to its owner's phone only, sixteen back;
@@ -1317,16 +1275,16 @@ them with the log.
   this one among them. So a receipt does not say who took a payment; it lets
   a wallet be shown to be the one that did, or not. COPY RECEIPTS on the log
   copies them as text, for whoever has to be shown.
-- **Two times, from 1.15.** A receipt is 73 bytes, and from 1.15 77: the card's
+- **Two times.** A receipt is 77 bytes: the card's
   clock (the newest block's time) and, beside it, the time the terminal told
   the card at that tap, a note the card trusts for nothing. The log's entries
-  are 16 bytes, and from 1.15 20, with the told time at the end. The log shows
+  are 20 bytes, with the told time at the end. The log shows
   each tap at the time the phone told the card with the block's beside it
   (`3:41 PM (block 3:30 PM)`), and COPY RECEIPTS gives both, in two columns.
 
 ## Change PIN, withdraw, and a blocked card
 
-On a card that has no PIN (software 1.16 and on) the button reads **ADD PIN**: two pads, `CHOOSE A PIN`, with a line that a
+On a card that has no PIN the button reads **ADD PIN**: two pads, `CHOOSE A PIN`, with a line that a
 card with no PIN is cash to whoever holds it, and `TYPE IT AGAIN`, then a tap, and a toast. *No PIN, and the no-PIN
 allowance*, above. The rest of this section is for a card that has one.
 
@@ -1344,12 +1302,13 @@ withdrawal by the owner's phone lifts and puts back, the day has begun again: th
 hours on from the card's own clock. A mint that has not answered (the CHECKING screen) hands the same card on, and the screen
 comes back to it once the mint has said paid. (A move to another mint, and a renewal, hold the card, and read it at the end.)
 
-A withdrawal of many pieces takes longer than a person holds a card. If the card
-leaves part way, what it signed is kept: it is in the phone, with an entry of its
-own, and the screen says **TAP THE CARD AGAIN**, how much came off and how much
-is left. TAP CARD takes the rest with the PIN already given, and IN YOUR WALLET
-then says the whole amount (a withdrawal cut short takes the card's screen away, as what it knew of the card is out of date;
-one that goes on in the same sheet, with the card asked for again, does not). LATER ends the withdrawal; the rest stays on the card.
+A withdrawal is one signature, however many pieces it takes off. A card taken
+away before it signs has given nothing, and the screen says **THE CARD LEFT TOO
+SOON**. A card taken away as it signs has burned the pieces, and this phone did
+not hear the signature: the next withdrawal here asks the card for it again, holds
+what it was for for the card (as a payment cut short is held), and takes the
+amount asked for afresh. Let go, what was held goes back on the card at its next
+tap (*A tap cut short is taken up again*).
 
 **A blocked card** shows BLOCKED on its face and a red line. Any reader in range
 can send three wrong PINs and block a card, so this is a known way to annoy a
@@ -1362,10 +1321,9 @@ twelve words stays blocked.
 
 ## The time
 
-A card has no running clock. It keeps a number and moves it forward, and what
-moves it changed in software 1.15.
+A card has no running clock. It keeps a number and moves it forward.
 
-**From 1.15, the time is the newest Bitcoin block header the card has been
+**The time is the newest Bitcoin block header the card has been
 shown.** The card believes a header for the work in it, and not for who brings
 it (`SET_HEADER`, 80 bytes, as the network carries them). It hashes them twice
 and the hash, read as a number, must be at or under the target the header's own
@@ -1390,6 +1348,13 @@ ratchet go. The hardest difficulty the card has taken is forgotten and the next
 header sets it afresh, and the clock, its day and the hash of the last block
 stay as they were.
 
+The card's clock is anchored at set-up where it can be: the owner key goes on
+with the newest header this phone has kept (SET_OWNER, 145 bytes), and the card
+takes the header as its clock in the same command. And the owner's phone shows
+it the newest header under its proof whenever it reads its own card online and
+the card's rollover budget is not full (REFRESH, 0x53: *The daily limit and the
+owner's phone*).
+
 A day's limit counts against that clock: a window of 24 hours of block time from
 its start. A limit set before the card has seen any header has a window with no
 start, which the first header it takes begins; until then the card spends its
@@ -1397,7 +1362,7 @@ first day on trust: it loads and spends up to the limit and no further, and
 nothing answers `6A92` (never told the time) any more.
 
 - **What a tap sends.** After the card has said what its clock reads, every
-  phone sends it two things. The newest header the phone has kept, if it is
+  phone sends it two things (the owner's phone may send a third, REFRESH, above). The newest header the phone has kept, if it is
   later than the card's clock: once, and a card that is current is sent none.
   And the phone's own time (`TELL_TIME`), once in each time in the field. That
   one is a note, kept in the card's RAM and written into the receipts and the
@@ -1434,8 +1399,7 @@ nothing answers `6A92` (never told the time) any more.
   phone's clock) and the block the card's clock is at, `Block #970809` (its height, where this phone has it: it keeps the last twenty
   blocks' heights), else the eight digits after the zeros every block hash begins with (`Block 1fa7ca83…`), or `No block yet`. A card with a day's limit and no block yet says `THE DAY
   BEGINS WITH THE CARD'S FIRST BLOCK`. The log shows each tap at the time the
-  phone told the card with the block's beside it. Nothing says a card has been
-  told a false time, because it cannot be. A card more than three hours ahead of
+  phone told the card with the block's beside it. A card more than three hours ahead of
   the newest header this phone has kept is a line in the log, and nothing else:
   another phone or a till showed it a block this one has not fetched yet.
 - **What it does not do.** A card that is never shown a newer block keeps its
@@ -1446,31 +1410,6 @@ nothing answers `6A92` (never told the time) any more.
   trusts the work in a header and no source for it, so who a header came from
   is of no account, and neither is any key.
 
-**Before 1.15, the time was told under a signature, and was weak.** A card
-before 1.15 keeps the latest time it has been told, and accepts a time only if
-it carries a signature by the card's **time key**, which is written to the card
-at set-up. The clock only moves forward. Every tap tells the card the time once,
-before anything that depends on the day is read. Such a card is still told the
-time that way, and set up with that key, until the last of them is gone.
-
-**For those cards the time is the receiving phone's own clock, signed by a key
-that is inside the app.** Its private half is a constant named `InterimCardTime`
-in `Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy
-of the app, and in the tests. That is on purpose and is documented where it is
-used. It makes the daily limit **as weak as trusting the receiver's clock** (the
-limit on one tap asks no clock, and is not weakened by this):
-
-- an honest receiver cannot be talked into taking more than a day's limit by
-  accident, and the holder's own spending is held to the day;
-- a terminal built to cheat can sign any time it likes, day after day in one
-  tap, and with the card and the PIN take everything the PIN reaches. Against
-  it the limit is no better than having none;
-- a clock set far ahead on an honest phone signs that time too, and the card
-  never takes an earlier one, so its day is frozen. The way out is for the owner
-  to write the card a different time key while the card is empty.
-
-No screen says that the limit stops an attacker, because on those cards it does
-not.
 
 ## Paying with no connection
 
@@ -1489,12 +1428,10 @@ receiver's.
   none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE).
   It is one tap, with no second, and a longer one than online: from a drawer of
   $50 a price of $1 to $10 is five to nine pieces;
-- the card's clock needs no connection: the phone tells it the time (a note, or
-  before 1.15 a signed time) and shows it the newest header it has kept (1.15
-  and on), and the daily limit is looked at as ever, by the clock the card has;
+- the card's clock needs no connection: the phone tells it the time (a note)
+  and shows it the newest header it has kept, and the daily limit is looked at as ever, by the clock the card has;
 - the card's signatures are checked on the phone, and so is each piece's DLEQ
-  proof where the card can supply one. A card before 1.20 holds none, and a card
-  of 1.20 holds the mint's proof for the pieces it was loaded with one for but
+  proof where the card can supply one. A card holds the mint's proof for the pieces it was loaded with one for but
   a till does not read it (that is not built: *What Verified says*, below), so a
   piece the mint never signed cannot be told from a real one, which is why this
   stays HIGH RISK;
@@ -1538,32 +1475,30 @@ An answer that does not come, a mint that says it is too busy, and a mint that
 cannot be asked which pieces are good, are not refusals: the row and the swap record
 wait, and the payment is made when the wallet next asks.
 
-## What Verified says (software 1.20)
+## What Verified says
 
-Up to software 1.19 the line under the card's title, `Verified At 11:42am`, rested on the mint's word that
-the card's pieces are unspent (NUT-07) and on nothing else. That is not the mint's word that they are real:
-a piece with a made-up point reads unspent until somebody tries to spend it, so a card loaded by somebody
-else's modified wallet read Verified. From 1.20 the card keeps, for each piece loaded with one, the mint's
-NUT-12 proof (e, s and the blinding factor r, 96 bytes: `FOXY-CARD-SPEC.md` 5.9 in the card repository). It
+The mint's word that the card's pieces are unspent (NUT-07) is not its word that they are real: a piece
+with a made-up point reads unspent until somebody tries to spend it, so a card loaded by somebody else's
+modified wallet would read Verified on that word alone. So the card keeps, for each piece loaded with one,
+the mint's NUT-12 proof (e, s and the blinding factor r, 96 bytes: `spec/NUT-XX.md` in the card repository). It
 gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This phone does.
 
-- **Writing.** A piece that has the whole of its proof goes onto a card of 1.20 alone, in a command of its own:
+- **Writing.** A piece that has the whole of its proof goes onto a card alone, in a command of its own:
   `LOAD_PROOF` with P1 = 1, the 81 bytes of the piece and then e, s and r, which the card answers with the piece's
   place and `01` where it kept the proof or `00` where it has no room for proofs. Pieces with no proof go three to a
-  command as ever, and a card of 1.19 or before is sent what it always was, byte for byte. Every write goes
+  command. Every write goes
   through `cardWriteOwed`: a top-up, change, what a payment's pieces come back as, the card's own change, the
   put-back of a refused payment. The proof is not made at the tap. This phone made the blinding factor and the mint's
   signature carries e and s, so a token made for a card keeps all three from the moment it exists, in the row that owes
   it to the card (`foxy.flashcard.owed`; a row filed by an older build has none, and its pieces go on plain); for the
-  change a card makes for itself (1.12) they are the mint's e and s for the output and the blinding factor
+  change a card makes for itself they are the mint's e and s for the output and the blinding factor
   the card kept in its opening, which the DLEQ is already checked with. An answer of `00` is no error: it is said
   once in the log, and the rest of that write goes three to a command. The write leaves one line, so that the time can
   be read off a phone: `card: wrote 32 piece(s), 32 with the mint’s proof (32 kept by the card), in N ms`
   (from the first load to the last answer; nothing secret in it).
 - **What this phone knows is real** is kept by the piece's nonce in `foxy.flashcard.real`, shaped as
   `foxy.flashcard.checked` is: `{ <card key>: { at, nonces } }`, twenty cards and the oldest dropped, at most a hundred and
-  twenty-eight nonces a card (the newest), and cut down to the pieces on the card at each read that checks it. It is for the
-  cards that keep proofs: a card of 1.19 or before is not in it. A nonce goes in
+  twenty-eight nonces a card (the newest), and cut down to the pieces on the card at each read that checks it. A nonce goes in
   when this phone wrote the piece onto the card, the card said it stored it, and the piece was the mint's own answer to
   this phone's swap (a top-up, change made after a payment, what the mint signed again when asked for it, NUT-09); or when
   a proof read from the card verified. **A card's own pieces written back as they came off it are not made real by being
@@ -1585,17 +1520,16 @@ gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This 
   pieces at a time and lets the page breathe between, and leaves one line (`card: its proofs: 43 piece(s) proven (43 checked
   now), 0 with no proof, 0 that cannot be checked here, 0 that fail, in N ms`; never a secret, a nonce or a point). A
   proof is checked on this side and sent nowhere.
-- **The line.** For a card of 1.20 only: red `Not Verified` where the mint says a piece is spent (as before) or the check
-  says `fake`; the time where the mint was asked (or was, for these same pieces: `cardCheckedAt` answers nought for a
-  card of 1.20 unless every piece is also in the store) and the check says `ok`; amber `Not Verified` otherwise, which is
+- **The line.** Red `Not Verified` where the mint says a piece is spent or the check
+  says `fake`; the time where the mint was asked (or was, for these same pieces: `cardCheckedAt` answers nought
+  unless every piece is also in the store) and the check says `ok`; amber `Not Verified` otherwise, which is
   where a card loaded by a build that sends no proofs stands, to a phone that did not write its pieces itself. While
-  either is being worked out it says `Verifying…`. A read of the short kind keeps what the screen said. A card of 1.19
-  and before reads exactly as it did: the mint's word alone.
+  either is being worked out it says `Verifying…`. A read of the short kind keeps what the screen said.
 
 What it does not do. It does not show that a piece is unspent: the mint says that, and is asked as ever. A till
 that takes a card's pieces on trust with no connection (*Paying with no connection*) could check their proofs first; it does
 not. The card gives the blinding factor to any reader with no PIN, for every piece that has a proof, and the mint can
-tie a piece to the request that made it from `r` (the card repository's 5.9 says so): this phone sends it nowhere.
+tie a piece to the request that made it from `r` (the card repository's spec says so): this phone sends it nowhere.
 
 ## What is kept on the phone
 
@@ -1604,7 +1538,7 @@ it (`foxy.flashcard.owed`: a load, change, and the pieces of a payment the mint
 refused; for a card that makes its own change, what the mint signed for it); pieces a card has signed for that the mint has not swapped yet
 (`foxy.flashcard.taken`), which are the only copy of the right to spend them,
 written down before the card is let go; the cards this phone loaded as recoverable; and when the mint last
-said a card's pieces were good, so a phone with no connection can say `Verified At 9:15am`; which of a card of 1.20's pieces this phone has found real (`foxy.flashcard.real`); and the counts it last read from a card's own log, to say what is new; and, for a card that signs once for a payment, the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified At <time>` (with the day after it when not today), or
+said a card's pieces were good, so a phone with no connection can say `Verified At 9:15am`; which of a card's pieces this phone has found real (`foxy.flashcard.real`); and the counts it last read from a card's own log, to say what is new; and the swap each signature was asked for (`foxy.flashcard.swaps`), without which the signed pieces could not be swapped; the dollars a card's per tap limit was set in (`foxy.flashcard.pace`); the receipts read from this phone's own cards (`foxy.flashcard.receipts`); and the newest Bitcoin block header fetched for the cards' clocks (`foxy.flashcard.header`). The card's screen shows `Verifying…`, `Verified At <time>` (with the day after it when not today), or
 `Not Verified`.
 
 **The card's face.** A card is drawn in a design named by a code of three
@@ -1612,32 +1546,28 @@ characters (`docs/CARD-DESIGNS.md` in the card repository): FL1 is Flash's,
 FX1 is Foxy's, a picture of orange fur with a sleeping fox; EL1 is the beaker, drawn
 in CSS and SVG with its liquid flowing and bubbling and the beaker swaying (still
 under Reduce Motion), the same block in `build/markup.html` and, for the face
-behind the sheet, `FC_EL1_FACE`. A card of software
-1.10 carries its code in its record, written at set-up and read back by every
-phone; for a card before that, the phone that set it up writes the code it
-chose on a note of its own (`foxy.flashcard.designs`, by the card's key: not
-the list of cards it can take back, which a cash card is never on), and any
-other phone draws it as FL1. This phone sets up its cards as FX1.
+behind the sheet, `FC_EL1_FACE`. A card carries its code in its record, written
+at set-up and read back by every phone; a card that names none is drawn as FL1.
+This phone sets up its cards as FX1.
 
 
 ## What it does not protect against
 
-The card repository's `FOXY-CARD-SPEC.md` §10 has the full list. The ones that
-matter to a person:
+The card repository's `spec/NUT-XX.md` (Security considerations) and
+`docs/SECURITY-MODEL.md` have the full list. The ones that matter to a person:
 
-- **A terminal built to cheat**, on a card before 1.15, whose time is interim
-  (above). A card of 1.15 cannot be told a time it has to believe, but one that
-  is never shown a newer block keeps its day where it was.
+- **A card that is never shown a newer block** keeps its day where it was. No
+  terminal can tell a card a time it has to believe, and past its rollover
+  budget the day does not turn at all until the owner's phone taps it online.
 - **A receiver's phone that shows one amount and asks the card for more.** The
   limit does not check a payment, and nothing on the card can. Looking at the
   card's balance afterwards finds it out; it does not undo it.
 - **The PIN, typed on a phone that may not be honest.** Whoever's phone it is
-  typed on has it. A card of software 1.9 takes it sealed, which keeps it from
+  typed on has it. The card takes it sealed, which keeps it from
   anybody listening to the tap, then or later; it does nothing about the phone
   it was typed on. A pretend card can still collect a PIN typed for it: it
   signs its own PIN key with its own key, and a receiver has no way to know a
-  stranger's card is real (it loses nothing if it is not). A card before 1.9
-  is shown its PIN in the clear, over a few centimetres.
+  stranger's card is real (it loses nothing if it is not).
 - **A terminal that puts points of its own choosing to the card's PIN key.**
   An envelope that does not open costs a try of the PIN, so a card with a PIN
   set allows two before it blocks. A new card's first PIN and an owner's
@@ -1647,10 +1577,10 @@ matter to a person:
   the key the card signs with, and nothing else is sealed to it.
 - **Pieces a terminal writes that the mint will refuse.** The card has no DLEQ
   check, so it cannot tell. A later payment that picks such a piece spends a day's
-  limit on nothing. From software 1.20 the card keeps the mint's proof for a piece
+  limit on nothing. The card keeps the mint's proof for a piece
   loaded with one, and the owner's screen checks it (*What Verified says*): a card
-  with such a piece reads `Not Verified` in red. A piece loaded with no proof, or a card
-  of 1.19 or before, shows nothing, and a till with no connection does not look.
+  with such a piece reads `Not Verified` in red. A piece loaded with no proof
+  shows nothing, and a till with no connection does not look.
 - **Three wrong PINs from any reader** block the card until the owner's phone
   unblocks it.
 - **Whoever has the twelve words and the card** has everything on it. **Whoever
@@ -1661,12 +1591,12 @@ matter to a person:
 - Screens: `build/app/26f-flashcard.js`, and the FLASHCARD block of
   `build/markup.html`.
 - The wallet's side: `build/wallet/08a-flashcard.js` (reading, signing, pieces,
-  the clock a tap gives a card, the interim time key of the cards before 1.15),
+  the clock a tap gives a card, REFRESH and the rollover budget),
   `build/wallet/08b-block-headers.js` (the block headers that clock is made of,
   fetched over Tor and checked) and `build/wallet/21a-flashcard.js` (set-up,
   adding and taking money, the owner's proofs).
 - Native: `Foxy/Flashcard/` (`CardLink.swift`, the NFC session; `CardGate.swift`,
-  which commands may pass; `CardTime.swift`, the interim time of the cards before 1.15;
+  which commands may pass, and the applet's name;
   `CardAddress.swift`, the card's address and the one message the page is told about it;
   `CardTapDelivery.swift`, which keeps that message until the page can take it and
   tells it once), and `Foxy/Bridge/FoxyBridge+Flashcard.swift`. The bridge actions are in
@@ -1679,26 +1609,29 @@ matter to a person:
   its minute, and what is read across the two languages (the one message, the
   entitlement); `tests/flashcard-screens.js` begins a real tap from a card's address.
   `tests/flashcard-*.js` run in `tools/check-all.sh` against a model of
-  the card held to the applet's own conversation. `tests/flashcard-fewer.js` pins
+  the card held to the applet's own conversation (`tests/fixtures/flashcard-transcript.json`
+  is `spec/vectors/transcript.json` of the card repository, replayed command by command). `tests/flashcard-fewer.js` pins
   the cash-drawer cut and the exact sets it makes; `tests/flashcard-clock.js`
   pins the card's clock: three real block headers at the card's real floor and
   mined ones at a cheap floor for the rules a real one cannot reach, the fetch
   from two explorers over a fake Tor and what it will not believe, a tap that
   sends the header only when the card is behind and never waits for a fetch,
-  and what the log, the receipts and the CLOCK line make of it;
+  and what the log, the receipts and the CLOCK line make of it, the anchored
+  set-up, REFRESH and the rollover budget walked a day at a time;
   `tests/flashcard-nopin.js` pins
-  software 1.16: a card with no PIN, ADD PIN, the allowance and its dollars, the early and the card's own `pin-needed`
-  with nothing left pending, the shared window, the log's mark, and a card of 1.15 that keeps asking for its PIN;
-  `tests/flashcard-reset.js` pins software 1.17: the model's RESET byte for byte, `cardReset` and `cardEmptyAndReset` and every
+  a card with no PIN, ADD PIN, the allowance and its dollars and its arming, the early and the card's own `pin-needed`
+  with nothing left pending, the shared window, and the log's mark;
+  `tests/flashcard-reset.js` pins the model's RESET byte for byte, `cardReset` and `cardEmptyAndReset` and every
   refusal, what is forgotten and kept, a card set up afresh by another person, change the card is owed, and the ten-signature wait;
   `tests/flashcard-release.js`
   pins the card being let go before the mint, a refusal and its put-back tap, a
   lost answer, and the circuit made ready as the sheet opens; `tests/flashcard-proofs.js`
-  pins software 1.20: a load a piece to a command with P1 = 1 and the proofs read back as
-  they went, the commands to a card of 1.19 byte for byte, the store and its caps, the
+  pins a load a piece to a command with P1 = 1 and the proofs read back as
+  they went, the store and its caps, the
   look that asks for proofs and the payments that do not, good proofs, a made-up piece,
   another piece's proof, no proof and no keys, a tap cut in the middle of a load, the card's
   own change with its proof, and the three states of the line. `tests/flashcard-applet.js` is
-  opt-in and drives the wallet against the applet itself over a local port.
+  opt-in and drives the wallet against the applet itself over a local port
+  (`tools/cardsim/run.sh` in the card repository).
   `tools/live/flashcard-switch.js` moves a card between two local mints.
   `DEVICE-TESTS.md` §23 is what only a card and a phone can show.

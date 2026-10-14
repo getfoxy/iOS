@@ -45,7 +45,7 @@ first.
 | Anything with a camera | §17 (scanning another wallet's QR), §18 (animated QR), §20 steps 2–4 | No camera in a simulator |
 | The phone's own passcode and backups | §7, §12d | Erasing, restoring from a Finder backup, and turning the passcode off |
 | **Tap to pay** | §F, all of it | A simulator has no Bluetooth. `tools/sim` has a stand-in for the link that carries a tap between two simulators over loopback (`tools/sim/README.md`): it tests the pages and the bridge, not the radio (range, RSSI, edges, a link dropped by walking away). `TapCryptoTests.swift` and `TapSessionTests.swift` cover the handshake and run both roles against each other; `TapProtocolTests.swift` covers the framing and the proximity rule. The radio itself needs **two** phones |
-| **A card's address opens Foxy** | §23e | iOS reads the card's tag, raises a banner, and a tap on it opens the app the address is associated with. That needs a build signed with the associated domain (`tools/flashcard.entitlements`) on a phone, a site whose association file names that app, and a card of software 1.19. A simulator build is signed as no team, so the site does not name it, and a simulator has no tag to read. `foxy://card` in a Debug build says what comes after iOS has handed the address over: the phone's hold on it and the page's rule |
+| **A card's address opens Foxy** | §23e | iOS reads the card's tag, raises a banner, and a tap on it opens the app the address is associated with. That needs a build signed with the associated domain (`tools/flashcard.entitlements`) on a phone, a site whose association file names that app, and a card with its tag on. A simulator build is signed as no team, so the site does not name it, and a simulator has no tag to read. `foxy://card` in a Debug build says what comes after iOS has handed the address over: the phone's hold on it and the page's rule |
 
 ---
 
@@ -1525,7 +1525,7 @@ screens and the applet have also been driven together with no card in the loop
 (tests/flashcard-*.js, and the simulator against the applet in a JavaCard
 simulator); what is left is what only more cards, more phones, a radio and a
 hand can show. Needs a card with the applet on it (the applet repository is
-https://github.com/getfoxy/card, and its FORK.md says how to build the applet
+https://github.com/lnflash/cashu-javacard, and its README says how to build the applet
 and load it), a phone whose build carries the NFC entitlement
 (tools/flashcard.entitlements), and a second phone at the same mint. How the card works, and what the app does with it, is in
 [CARD.md](CARD.md).
@@ -1539,16 +1539,13 @@ and load it), a phone whose build carries the NFC entitlement
    and SET UP THIS CARD. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
    to it at all, and times out.
-3. SET UP THIS CARD, a PIN twice, tap. (A card of software 1.16 and on asks for
-   no PIN: SET UP THIS CARD goes straight to the tap, and ADD PIN gives it one later: 23c-10.) On the
-   earlier card the second pad (TYPE IT AGAIN) takes the first one's place with nothing flashing between
-   them: the card's screen is not seen behind the second pad as it comes up. Nothing is read between the PIN and
-   the tap, nothing is asked about a lost card (cards are cash for now), and
-   nothing is read after it. **Pass:** the card's screen stays up, with the line `The card is set
+3. SET UP THIS CARD, tap. No PIN is asked: SET UP THIS CARD goes straight to the tap, and ADD PIN gives
+   the card one later (23c-10). Nothing is asked about a lost card (cards are cash for now), and
+   nothing is read after the tap. **Pass:** the card's screen stays up, with the line `The card is set
    up.` (Back from it is where you were; MENU, FLASHCARD, tap, shows the same screen.) The screen is home's shape: history and a cross
    at the top with FLASHCARD and "Verified Just Now" between them, the card
    with its limit line on it at the bottom left (`NO LIMIT`), and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
-   over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS.
+   over ADD FUNDS, WITHDRAW, and the row of RESET, ADD PIN and LIMITS.
 
 #### 23b. Money on, and off
 
@@ -1570,11 +1567,12 @@ and load it), a phone whose build carries the NFC entitlement
    and the balance in the pill counts down to 0 over about a second; if the card had a daily limit, the
    line under the balance says the whole of it is left. Tap the card again from MENU, FLASHCARD: it reads
    the same.
-6. Load it again, WITHDRAW, ALL OF IT, and take the card away while the sheet
-   is still counting pieces. **Pass:** TAP THE CARD AGAIN says how much came off
-   into the phone and how much is left; HISTORY has an entry, From card, for
-   what came off (the screen has left the card: its figures are out of date); TAP CARD asks no PIN and
-   takes the rest; IN YOUR WALLET says the whole amount.
+6. Load it again, WITHDRAW, ALL OF IT, and take the card away the instant the
+   sheet says `Signing`. **Pass:** either the card never signed and nothing
+   came off, or THE CARD LEFT TOO SOON says nothing was taken yet. The next
+   withdrawal on this phone asks the card for the signature it gave as it left,
+   and nothing is lost: afterwards the card's balance, the phone's balance and
+   HISTORY agree to the sat.
 7. **A card with no room.** On a card with fewer than five places free (load
    it in many small amounts until the card is full), ADD FUNDS and type any
    amount. **Pass:** the figure is red, the line under it reads MORE THAN THE
@@ -1585,17 +1583,16 @@ and load it), a phone whose build carries the NFC entitlement
 
 #### 23c. Paying another phone
 
-1. On the second phone: RECEIVE, an amount, CARD, the card's PIN, tap.
-   (A card of software 1.16 is tapped at once, with no PIN asked for first, and
-   the PIN is typed only if the card wants it: 23c-10. The card tested so far is
-   an earlier one, which ends that first tap asking for the PIN, and is tapped
-   again once it has been typed.)
+1. On the second phone: RECEIVE, an amount, CARD, tap. The card is tapped at
+   once, with no PIN asked for first, and the PIN is typed only if the card
+   wants it (23c-10): a card with a PIN and no no-PIN allowance ends that first
+   tap asking for the PIN, and is tapped again once it has been typed.
    **Pass:** behind the sheet the screen is TAP BEHIND PHONE (light blue, a card
    coming down behind a phone with three waves rising, looping) over the amount;
    the moment the card connects it turns orange with the fur and the card
    settles, saying KEEP HOLDING · 0 s and counting up a second at a time; the
-   sheet reads the card and counts the pieces it signs ("Signing piece 2 of 4"),
-   and the moment the last is signed says "Hold for change." while the screen
+   sheet reads the card and says "Signing" (one signature for the payment),
+   and the moment the card has signed says "Hold for change." while the screen
    says VERIFYING CARD; then, where there is change, the sheet asks for the card
    again and the screen is TAP FOR CHANGE (light blue, looping) until the card
    is found, VERIFYING CARD while the change goes on; and after that the
@@ -1677,9 +1674,9 @@ and load it), a phone whose build carries the NFC entitlement
 3. The same, lifting the card away the moment the sheet first changes.
    **Pass:** one of two ends, and never a third: nothing was taken and the
    screen says so, or the card had signed and the payment stands (or is
-   checked) with the sheet ended. Pulling it away between two signatures leaves
+   checked) with the sheet ended. Pulling it away as it signs leaves
    nothing paid yet: the sheet comes up again by itself ("Hold to finish
-   paying"), and the next tap signs only the rest and pays.
+   paying"), and the next tap asks the card for the signature it gave and pays.
    **Pass:** HISTORY has one payment for the whole amount, and the card is down
    by exactly that (and its change). Pull it away again and let the second sheet
    time out: NOT PAID YET, with TAP CARD and CANCEL; CANCEL puts what it signed
@@ -1707,8 +1704,8 @@ and load it), a phone whose build carries the NFC entitlement
 
 #### 23c-2. The limit on one tap
 
-Needs a card with the software that waits (1.5: its screen offers PER TAP LIMIT
-under LIMITS, and a charge over the limit is not refused).
+Needs a card set up by this phone (its screen offers PER TAP LIMIT under
+LIMITS; a charge over the limit waits and is not refused).
 
 1. On the holder's phone: LIMITS. **Pass:** CHANGE CARD LIMITS asks
    which, with PER TAP LIMIT and DAILY LIMIT as two buttons and CANCEL under
@@ -1719,14 +1716,13 @@ under LIMITS, and a charge over the limit is not refused).
    card's screen says PER TAP LIMIT and the amount (or both limits on one line).
 2. On the second phone, charge the card an amount at or under the limit.
    **Pass:** paid as fast as any payment. Charge it again straight away: the
-   same. Nothing is remembered from the first. (Software 1.13: with a fresh tap
-   each; two payments in one tap are the 23c-8 case.)
+   same. Nothing is remembered from the first (with a fresh tap each; two
+   payments in one tap are the 23c-8 case).
 3. Charge it about twice the limit. **Pass:** the sheet and the screen say
    `Over per tap limit`, and `x2`, `x3` as each further limit's worth begins;
    then PAYMENT RECEIVED. Time it: about eight seconds for the first limit's
-   worth over the limit (ten askings of the card; about six on software 1.13
-   to 1.16, which ask seven) and about two and a half more for each after it
-   (three askings; 1.12 was about three seconds for each limit).
+   worth over the limit (ten askings of the card) and about two and a half
+   more for each after it (four askings).
 4. Charge it about three times the limit and lift the card while it counts.
    **Pass:** nothing is taken (read the card on the holder's phone: the same
    balance). Tap again: it counts the whole wait again, and pays.
@@ -1746,7 +1742,7 @@ under LIMITS, and a charge over the limit is not refused).
 
 #### 23c-3. The card's own log
 
-Needs the same card software as 23c-2.
+Needs a card as in 23c-2.
 
 1. Pay another phone from the card, then read the card on the holder's phone.
    **Pass:** under the balance, `Last tap:` with what the card signed for (the
@@ -1757,15 +1753,15 @@ Needs the same card software as 23c-2.
 2. Read the card on the second phone (not its owner). **Pass:** no log line.
 3. A tamper cannot be made with Foxy itself, which never asks a card for more
    than its limit; it is driven in the simulated runs and in the card's own
-   tests. With a desk reader and the card tools: set a limit on one tap, then
-   send three spends of a piece larger than it, with the PIN. **Pass:** each is
+   tests. With a desk reader and the card tools, on a card that has been shown
+   a block: set a daily limit, then send three payments larger than it, with the
+   PIN, within one tap. **Pass:** each is
    refused; the holder's phone then says `TAMPER: a terminal tried 3 times...`
    and TAMPER ON THIS CARD lists a tap of three refusals and nothing signed.
 
-#### 23c-4. A card that signs once for a payment (software 1.4)
+#### 23c-4. One signature for a payment
 
-A card with the newer software, set up and loaded by this build. An older card
-(1.3 and before) is still paid with as in 23a to 23c.
+A card set up and loaded by this build.
 
 1. FLASHCARD reads it: its screen is as any card's. Load it: the money goes on
    in one tap, as before.
@@ -1776,7 +1772,7 @@ A card with the newer software, set up and loaded by this build. An older card
 3. A larger amount, of many pieces: still one tap, and about as long. Note the
    time; how long the card takes over thirty-two pieces is not known yet.
 4. An amount it cannot make exactly (empty the small pieces first by paying
-   small amounts): one tap, then the change tap, as with an older card. Pay
+   small amounts): one tap, then the change tap. Pay
    again with that change on the card: it is taken.
 5. Take the card away the instant the sheet says `Signing`. NOT PAID YET. Tap
    again for the same amount: paid, and the card is out the amount once. Do it
@@ -1785,8 +1781,8 @@ A card with the newer software, set up and loaded by this build. An older card
 6. The same, and at the second tap cancel and ask for another amount: the new
    amount is paid, and what was signed for the first goes back on the card at
    the change tap.
-7. A per tap limit, then an amount over it: refused before the PIN. An amount
-   under it made of many pieces: paid (the limit is on what they come to).
+7. A per tap limit, then an amount over it: the card waits (23c-2). An amount
+   under it made of many pieces: paid at once (the limit is on what they come to).
 8. Top the card up a second time, then pay an amount larger than either load:
    one tap (both loads carry one date).
 9. WITHDRAW the whole card to its holder's phone: one tap, however many pieces.
@@ -1796,7 +1792,7 @@ A card with the newer software, set up and loaded by this build. An older card
 11. The card's own log (23c-3) counts each payment once, with the number of
     pieces it was made of.
 
-#### 23c-5. Software 1.6: speed, the hidden limit, receipts, a false time
+#### 23c-5. Speed, the hidden limit, receipts
 
 1. **Speed.** Time a payment of many pieces from card found to the tick, and a
    whole card taken off. The log's `card: signed in` line says what each part
@@ -1814,16 +1810,10 @@ A card with the newer software, set up and loaded by this build. An older card
    payments`, and COPY RECEIPTS copies one line a payment. On the second
    phone the card has no log line at all.
 6. **What was put on.** The log's lines say `put on` for the loads.
-7. **A false time** (a card before software 1.15; 23c-9 is the card after it).
-   Set a second phone's clock a day ahead by hand, and read
-   the card on it. Then read the card on the holder's phone. **Pass:** `TAMPER:
-   this card has been told a false time`, and the log says the card's clock is
-   about a day ahead of this phone's. (Put the second phone's clock back.)
 
-#### 23c-6. Software 1.8: 128 places and the deep drawer
+#### 23c-6. 128 places and the deep drawer
 
-A card with software 1.8 (the card's screen says its version nowhere; a card
-that takes more than thirty-two pieces in a load is one).
+A card set up and loaded by this build.
 
 1. **The load.** Put about fifteen dollars on an empty card. It takes
    noticeably longer than before (about a hundred pieces; note the seconds from
@@ -1833,7 +1823,7 @@ that takes more than thirty-two pieces in a load is one).
    in dollars and none alike (50c, $1.50, 45c, ...), each under $1.65. Each is
    **one tap**: PAYMENT RECEIVED with no second tap for change. Note the time
    from card found to the tick in the log (`card: read in`, `card: signed in`):
-   the read should be shorter than on a 1.6 card, not longer.
+   note both.
 3. **When the drawer runs short.** Keep paying small odd amounts until a
    payment asks for the second tap. Its change should be worth going back for
    (a few hundred sats, not one or two), and the tap that writes it takes a
@@ -1845,11 +1835,10 @@ that takes more than thirty-two pieces in a load is one).
    the log says `card: it would wait for … sats; paid with … instead` where the
    till first asked for the larger set.
 5. **Most of a small card.** Put five dollars on an empty card and charge
-   $4.80. One tap. This is about fifty pieces in one signature, which is what
-   1.8 is for and has only been run in the simulator: note whether it is
-   paid, and how long the card was held. The card before it refused anything
-   over a dozen pieces (`more pieces than the card signs for at once`); if
-   this one does, say so.
+   $4.80. One tap. This is about fifty pieces in one signature, which has
+   only been run in the simulator: note whether it is paid, and how long the
+   card was held. If the card refuses it (`more pieces than the card signs
+   for at once`), say so.
 6. **Taking it all off.** WITHDRAW a card with a full drawer to its holder's
    phone: one tap and one signature, about a hundred pieces. Note the seconds.
 7. **Lifted as it signs.** Charge an amount of many pieces and lift the card
@@ -1857,30 +1846,23 @@ that takes more than thirty-two pieces in a load is one).
    NOT PAID YET and paid at the next tap with nothing more taken, or was never
    signed and is paid afresh. Afterwards the card's balance and the phone's
    history agree to the sat: no piece is left on the card that was paid with.
-8. **An older card.** A card still on software 1.6 or 1.7 pays, takes change
-   and is topped up as before, with its thirty-two-piece drawer; WITHDRAW of
-   more than eight pieces is several signatures in the one tap.
 
-#### 23c-7. Software 1.9: the PIN is sealed
+#### 23c-7. The PIN is sealed
 
 1. Set a new card up, put money on it, and pay at a till: everything is as
    before, and a payment takes a fraction of a second longer (one more command
    and the card's key agreement). The log's `card: signed in` line now begins
-   after the PIN: note the time from card found to the tick against a 1.8 card.
+   after the PIN: note the time from card found to the tick.
 2. A wrong PIN at a till: `Wrong PIN. 2 tries left.` Then the right one: paid,
    and the tries are back.
 3. CHANGE PIN on the holder's phone: the old PIN is refused at a till and the
    new one pays.
 4. A blocked card (three wrong PINs) is unblocked by its holder's CHANGE PIN,
    as before.
-5. With a second phone that has an older build, if there is one: it cannot read
-   this card at all (it does not know a card of 128 places). There is no way
-   to make this build send a 1.9 card its PIN in the clear.
 
-#### 23c-8. Software 1.13: the wait only over the limit, change in four pieces, three buzzes
+#### 23c-8. The wait only over the limit, change in four pieces, three buzzes
 
-Needs a card on software 1.13 (`01 0d` at SELECT), with a per tap limit, and a
-second phone to be the till.
+Needs a card with a per tap limit, and a second phone to be the till.
 
 1. Charge the card an amount within its limit that it cannot make exactly (a
    card with one large piece, say 4,096 sats, charged 1,631). **Pass:** no
@@ -1903,8 +1885,7 @@ second phone to be the till.
    in 4 pieces (2048 + 256 + 32 + 16); 5 sats more are made here after the swap`).
    The second tap writes six pieces.
 4. Over the limit by a sat or more: charge about twice the limit. **Pass:** the
-   `Over per tap limit` wait of about eight seconds (about six on software 1.13
-   to 1.16), after the change pieces if any.
+   `Over per tap limit` wait of about eight seconds, after the change pieces if any.
 5. **One payment a tap.** On the holder's own phone, WITHDRAW a card whose pieces
    are of two dates. **Pass:** both signatures with no wait: its grant is given
    first, and nothing takes it away between them. (A till makes one payment in a
@@ -1912,9 +1893,9 @@ second phone to be the till.
    the second payment of a tap today; if a build ever makes one, the sheet says
    `Keep holding.` and the card waits about five seconds.)
 
-#### 23c-9. Software 1.15: the clock is Bitcoin block headers
+#### 23c-9. The clock is Bitcoin block headers
 
-Needs a card on software 1.15 (`01 0f` at SELECT), the holder's phone with Tor
+Needs a card, the holder's phone with Tor
 up, and a second phone to be the till. Foxy fetches the newest block header
 from two block explorers over Tor and shows it to a card whose clock is behind.
 
@@ -1933,7 +1914,7 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
    clock a day ahead by hand, and charge the card on it. **Pass:** the payment is
    made; the holder's phone reads the card with its block still the same
    (the day did not move), and the log shows that tap at the second phone's time,
-   a day ahead, with `(block ...)` beside it. No `TAMPER` line, no false time.
+   a day ahead, with `(block ...)` beside it. No `TAMPER` line.
    (Put the second phone's clock back.) A phone whose own clock is a day out
    keeps no header either: its log says `no block header could be used`, each
    being more than three hours from its clock.
@@ -1952,18 +1933,17 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
    has two time columns.
 7. **How long a tap takes.** The phone sends the time (a few bytes) and, if it
    is newer, a block header (80 bytes). Note the time from card found to the
-   tick against a 1.14 card: it should be no longer by more than a few tens of
+   tick against a tap with no header to show: it should be no longer by more than a few tens of
    milliseconds, and a stale header must never hold the tap up.
 
-#### 23c-10. Software 1.16: the PIN is optional, and a limit for paying without it
+#### 23c-10. The PIN is optional, and a limit for paying without it
 
-Needs a card on software 1.16 (`01 10` at SELECT), the holder's phone, and a second phone to be the till. Nothing here has run
+Needs a new card, the holder's phone, and a second phone to be the till. Nothing here has run
 on a real card.
 
-1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** no pad: the sheet comes up at once, and
+1. **Set up with no PIN.** MENU, FLASHCARD, a new card, SET UP THIS CARD. **Pass:** no pad: the sheet comes up at once, and
    one tap sets the card up: the card's screen, `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was,
-   and LIMITS, and the line on the card's face reads `NO LIMIT | NO PIN`. A card of 1.15 or before is asked for a PIN
-   (CHOOSE A PIN, TYPE IT AGAIN) as it always was.
+   and LIMITS, and the line on the card's face reads `NO LIMIT | NO PIN`.
 2. **It pays in one tap.** ADD FUNDS (no PIN asked), then on the till RECEIVE, an amount, CARD. **Pass:** no pad. The sheet
    comes up and the card pays in that tap, as a card with a PIN does after its PIN; the sheet is up once. WITHDRAW on the
    holder's phone asks for no PIN either. Time the tap against a card with a PIN: it should be no longer.
@@ -1981,16 +1961,16 @@ on a real card.
 7. **Over what is left, the PIN for the whole payment.** Charge more than is left. **Pass:** the first tap ends asking for the
    PIN, the pad comes up, and the second tap pays all of it with the PIN (nothing is split); the line under the balance
    has not moved: only a payment with no PIN counts.
-8. **The day.** Leave it a day, with a block fetched in between. **Pass:** `LEFT TODAY` is the whole limit again.
+8. **The day.** Leave it a day, with a block fetched in between, and pay once with the PIN (which arms the allowance).
+   **Pass:** `LEFT TODAY` is the whole limit again. Without a right PIN or the owner's tap since the last day, the
+   allowance does not begin again: the PIN is asked.
 9. **No limit.** NO PIN LIMIT, CONTINUE, NO LIMIT under the keypad, CONFIRM. **Pass:** `No PIN limit removed.`; every
    payment asks for the PIN again.
-10. **An older card at a till.** Charge a 1.15 card. **Pass:** it too is tapped first and ends that tap asking for the PIN;
-    the second tap pays. Note that this costs a tap more than it did.
 
-#### 23c-11. Software 1.17: RESET CARD, the row, and FLASHCARD on the send screen
+#### 23c-11. RESET CARD, the row, and FLASHCARD on the send screen
 
-Needs a card on software 1.17 (`01 11` at SELECT), the holder's phone, and (for 6, 8 and 9) a second phone. Nothing here has run
-on a real card. The sheet's lines are short from this release: `Tap behind the phone.`, `Keep holding.`, `Hold for change.`, `Done.`
+Needs a card, the holder's phone, and (for 6, 8 and 9) a second phone. Nothing here has run
+on a real card. The sheet's lines are short: `Tap behind the phone.`, `Keep holding.`, `Hold for change.`, `Done.`
 
 1. **The card's screen.** MENU, FLASHCARD, tap the card. **Pass:** under FLASHCARD two lines, `Verified At 11:42am` (the time the
    mint's word was had, in the phone's clock) and `Block #970809` (the block the card's clock is at; `No block yet` on a card
@@ -2012,8 +1992,8 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    is in the wallet (a line in HISTORY for the withdrawal and none for the reset).
 5. **A locked card.** **Pass:** it asks for the PIN first, even when empty. A wrong PIN says WRONG PIN with the tries left and
    changes nothing.
-6. **Another phone's card, and an older card.** On a second phone read the first's card: **Pass:** no RESET in the row (HISTORY
-   is still at the top left). A card of 1.16 has none either: its row is CHANGE PIN (or ADD PIN) and LIMITS.
+6. **Another phone's card.** On a second phone read the first's card: **Pass:** no RESET in the row (HISTORY
+   is still at the top left).
 7. **Cut short.** Lift the card as the money comes off. **Pass:** `EMPTY, BUT NOT RESET` says the money is in the phone, and TAP
    CARD finishes it.
 8. **FLASHCARD on the send screen.** Send, and below TYPE a fifth button, FLASHCARD; the five buttons fit with the camera pane as
@@ -2022,8 +2002,8 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 9. **A card with a PIN.** Same, with a card that has one (any phone's). **Pass:** the sheet ends `Enter the card's PIN` in no red,
    the pad comes up with `TAP AGAIN`, and the second tap writes the money. Nothing was made for the card before the PIN. A wrong
    PIN leaves the money owed to the card; TRY AGAIN asks again.
-10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** for a card of 1.18 the rows say `~1–4 SEC TAP`, `~9 SEC TAP`,
-    `~11 SEC TAP`, `~13 SEC TAP` (a card of 1.17: 9, 10 and 12). Charge over the limit and watch the screen behind the sheet:
+10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** the rows say `~1–4 SEC TAP`, `~9 SEC TAP`,
+    `~11 SEC TAP`, `~13 SEC TAP`. Charge over the limit and watch the screen behind the sheet:
     KEEP HOLDING counts to about the row's figure for that tier (two more seconds for each further limit's worth), and the till's
     sheet reads `Over per tap limit`, `x2`, `x3` as it goes on.
 
@@ -2040,7 +2020,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 
 #### 23e. A card's address opens Foxy
 
-Needs a card of software 1.19 with its tag on, a second card of 1.19 with its tag switched off (the card repository says how), a
+Needs a card with its tag on, a second card with its tag switched off (the card repository says how), a
 phone with a build signed with the associated domain (`tools/flashcard.entitlements`, so `FOXY_ENTITLEMENTS` in `local.env`) and the
 site's association file naming that build, and for step 7 a phone with no Foxy on it. Test money only. Nothing here has run on a real
 card. The log lines are `card tap: …` (`sh tools/pull-device-log.sh`, or LOGS in the menu); none of them has anything of the address in it.
@@ -2077,9 +2057,9 @@ entitlements, never committed) makes iOS ask the site directly, for a test build
    association file lists it, opens Foxy and does nothing: only `/card` is the card's. A Debug build in a simulator does the first
    with `xcrun simctl openurl booted "foxy://card"`.
 
-#### 23f. Software 1.20: the mint's proof is kept with each piece
+#### 23f. The mint's proof is kept with each piece
 
-Needs a card of software 1.20 (`01 14` at SELECT), the holder's phone and a second phone at the same mint (other words), and
+Needs a card, the holder's phone and a second phone at the same mint (other words), and
 for step 4 a card loaded by a build or a wallet that sends no proofs. Test money only. Nothing here has run on a real card, and
 nobody has timed a load on one: each piece with a proof is a command of its own, 177 bytes, where three went in one before. The log
 lines are `card: wrote …` (each write) and `card: its proofs: …` (each check), and the read's own line gains `proofs <ms>`
@@ -2095,9 +2075,30 @@ lines are `card: wrote …` (each write) and `card: its proofs: …` (each check
    piece(s) proven (32 checked now), 0 with no proof, 0 that cannot be checked here, 0 that fail, in N ms`. Tap again: `proofs` is a millisecond or so and it says `(0 checked now)`.
 4. **A card loaded by a build that sends no proofs.** Read it on a phone that did not load it. **Pass:** `Not Verified` in amber (not red), the log's `N with no
    proof`, and nothing else wrong with the card. The phone that wrote the pieces itself, from the mint's answer, says the time of the same card.
-5. **A card of 1.19.** Read it as before. **Pass:** `Verified At`, as it always was, and no proof is asked for.
-6. **Cut short.** Lift the card in the middle of a load. **Pass:** the sheet comes up again for the rest; what went on stays on and nothing is on the card twice;
+5. **Cut short.** Lift the card in the middle of a load. **Pass:** the sheet comes up again for the rest; what went on stays on and nothing is on the card twice;
    `Verified At` after. With no connection, a card read just now: **Pass:** the time of the mint's last word is said only if this phone found every piece real.
+
+
+#### 23g. The Cashu card protocol 2.0
+
+Needs a card with the applet of https://github.com/lnflash/cashu-javacard v2.0 on it, the holder's phone with Tor up, a
+second phone, and if there is one a card with another version of the applet. Test money only. Nothing here has run on a real card. The
+protocol is `spec/NUT-XX.md` and `spec/APDU.md` there.
+
+1. **The name.** MENU, FLASHCARD, tap a 2.0 card. **Pass:** it reads. The log's read line has no `not a card`, and a bank
+   card held to the phone is still not read.
+2. **A card that needs an update.** Tap a card whose applet answers to the 2.0 name with a version other than 02 00, if
+   there is one. **Pass:** CARD NEEDS AN UPDATE, `This card needs an update.`, and nothing is written to it. A card with an
+   older applet name is not offered to Foxy by iOS at all: the sheet does not react to it.
+3. **Set-up anchors the clock.** Set up a new card on the holder's phone a minute after Tor has come up. **Pass:** the card's
+   screen says `Block #<height>` straight after the set-up tap, with no second tap: the owner key went on with the newest block
+   header (145 bytes). On a phone that has no header yet the set-up still works, and the card says `No block yet`.
+4. **The rollover budget.** Set a daily limit, pay up to it at the second phone, and leave the card a day with no tap from the
+   holder's phone. **Pass:** the limit is whole again the next day. The holder's phone, online, taps the card: the log says
+   `card: refreshed with block` and the budget is full again (seven days unless set otherwise).
+5. **Past the budget.** With the budget set to one day (the card tools, or a test build), leave the card two days with no tap
+   from the holder's phone. **Pass:** on the second day the till is refused with what was spent still counted; once the holder's
+   phone taps it online, the day starts again.
 
 ---
 

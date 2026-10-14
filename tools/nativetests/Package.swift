@@ -16,14 +16,10 @@
 // whose replies must hold no words, and the rules the phone mock answers by
 // (tests/fixtures/native-rules.json) against the Swift that holds them.
 //
-// Foxy/Flashcard/CardTime.swift, the card's interim time signer, is its own module,
-// FoxyCardTime, linked file by file (Sources/FoxyCardTime): it needs nothing of the
-// app, and the rest of Foxy/Flashcard needs NFC, which a Mac does not have. Its
-// tests, CardTimeTests, import it as FoxyCardTime here and as Foxy in the app.
-//
 // Foxy/Flashcard/CardAddress.swift and CardTapDelivery.swift, the card's address and the
-// one message that goes to the page about it, are a module too, FoxyCardTap, for the same
-// reason: they need nothing of the app. CardAddressTests and CardTapDeliveryTests import
+// one message that goes to the page about it, are their own module, FoxyCardTap, linked
+// file by file (Sources/FoxyCardTap): they need nothing of the app, and the rest of
+// Foxy/Flashcard needs NFC, which a Mac does not have. CardAddressTests and CardTapDeliveryTests import
 // it as FoxyCardTap here and as Foxy in the app.
 //
 // libsecp256k1 is Vendor/secp256k1 (Sources/CSecp256k1's src and include are
@@ -59,16 +55,12 @@ let package = Package(
             exclude: ["bip39-english.txt"]
         ),
         .target(
-            name: "FoxyCardTime",
-            path: "Sources/FoxyCardTime"
-        ),
-        .target(
             name: "FoxyCardTap",
             path: "Sources/FoxyCardTap"
         ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTime", "FoxyCardTap"],
+            dependencies: ["Foxy", "FoxyCardTap"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -87,7 +79,6 @@ let package = Package(
                 "SeedMigrationWindowTests.swift",
                 "SeedVaultTests.swift",
                 "SeedActionsTests.swift",
-                "CardTimeTests.swift",
                 "CardAddressTests.swift",
                 "CardTapDeliveryTests.swift",
             ]
