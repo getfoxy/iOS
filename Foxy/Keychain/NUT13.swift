@@ -352,18 +352,22 @@ enum NUT13 {
 /// wanted, and never leaves. The page is given the owner PUBLIC key, signatures
 /// for a fixed list of labels (each with the shape of value that label takes) and
 /// nothing else, so a page that had been got at cannot take the key, and cannot
-/// have anything signed that this list does not name: not LOCK_CARD, and not a time.
+/// have anything signed that this list does not name: not LOCK_CARD.
 /// Restoring the twelve words on another phone makes the same key, so that phone
 /// is the owner of every card this one was. The card's key is in the message, so
 /// two cards of one owner have two keys.
 ///
-/// h(counter) is HMAC-SHA256 keyed with the 64-byte BIP-39 seed, over "FoxyCard/owner",
+/// h(counter) is HMAC-SHA256 keyed with the 64-byte BIP-39 seed, over "CashuCard/owner",
 /// a zero byte, the card's 33-byte compressed public key and, from counter 1 on,
 /// that counter as one more byte. d is h(0) mod n, n being P-256's order; where
 /// that is 0 it is h(1) mod n, and so on. That is a 1 in 2^256 event, and the
 /// loop is there so that the key is always found and never left to chance.
+///
+/// The labels are those of the shared Cashu card protocol 2.0 (spec/NUT-XX.md and
+/// spec/APDU.md in https://github.com/lnflash/cashu-javacard), which Flash's wallet
+/// derives and signs with too, so one card has one owner key in both apps.
 enum CardOwner {
-    static let tag = Array("FoxyCard/owner".utf8)
+    static let tag = Array("CashuCard/owner".utf8)
 
     /// P-256's group order n, big-endian.
     static let order: [UInt8] = [
@@ -380,44 +384,49 @@ enum CardOwner {
     static let mostValueBytes = 180
 
     /// What the page may have signed: the short names of the owner's commands,
-    /// and no others. The bytes signed begin with "FoxyCard/" and the name, so
-    /// LOCK_CARD ("FoxyCard/lock") and the time ("FoxyCard/time") are not on this
-    /// list and cannot be asked for. No name is the start of another, so what was
-    /// signed names its label in one way only.
+    /// and no others. The bytes signed begin with "CashuCard/" and the name, so
+    /// LOCK_CARD ("CashuCard/lock") and the NFC tag's switch ("CashuCard/tag") are
+    /// not on this list and cannot be asked for. No name is the start of another,
+    /// so what was signed names its label in one way only.
     enum Label: String, CaseIterable {
         case changePin = "change-pin"
         case setLimit = "set-limit"
         case setOwner = "set-owner"
         case setCard = "set-card"
         case load
-        /// RESET, card software 1.17: the card is given back to what it was in its packet, with a new key. The owner's proof is over
+        /// RESET: the card is given back to what it was in its packet, with a new key. The owner's proof is over
         /// the label and the nonce, and no value, as for load.
         case reset
+        /// REFRESH (0x53): the owner's phone shows the card the newest block header, and the card's rollover
+        /// budget is full again (D20 in the protocol's DECISIONS.md). The value is the header, 80 bytes.
+        case refresh
 
         /// Whether `value` has the shape this label's command takes, which is
         /// what the card will read it as:
         ///  - change-pin: the new PIN, 4 to 8 bytes, each an ASCII digit;
         ///  - set-limit: the new limit, 4 bytes (the day's), or 8 (the day's and then
-        ///    the limit on one tap, for a card that has one), or 12 (and then the
-        ///    no-PIN allowance, for a card of software 1.16 and on);
-        ///  - set-owner: the new owner key, 65 bytes, the first of them 04;
-        ///  - set-card: the card's record, unit (1), refund key (33), time key (65, the
-        ///    first of them 04, or all zeros: a card of software 1.15 and on has no time
-        ///    key and reads none), mint length L (1, from 1 to 80) and the mint (L bytes);
-        ///    and after the mint nothing, or the card's design (3, each a capital letter
-        ///    or a digit, or all three zero for none), which a card of software 1.10 and
-        ///    on reads there, after a mint of 77 bytes at the most. A record with no
+        ///    the limit on one payment), or 12 (and then the no-PIN allowance), or 13
+        ///    (and then the rollover budget, one byte from 1 to 30); the page sends 13;
+        ///  - set-owner: the new owner key, 65 bytes, the first of them 04, and after it
+        ///    an anchor block header (80 bytes) where the phone has one: 65 or 145;
+        ///  - set-card: the card's record, unit (1), refund key (33), 65 bytes the card
+        ///    does not read (all zeros, or a key beginning 04 as cards before 2.0 took),
+        ///    mint length L (1, from 1 to 80) and the mint (L bytes); and after the mint
+        ///    nothing, or the card's design (3, each a capital letter or a digit, or all
+        ///    three zero for none), after a mint of 77 bytes at the most. A record with no
         ///    design clears the card's, so a card that has one is sent it again;
         ///  - load: nothing;
-        ///  - reset: nothing.
+        ///  - reset: nothing;
+        ///  - refresh: a block header, 80 bytes.
         func accepts(_ value: [UInt8]) -> Bool {
             switch self {
             case .changePin:
                 return (4...8).contains(value.count) && value.allSatisfy { (0x30...0x39).contains($0) }
             case .setLimit:
+                if value.count == 13 { return (1...30).contains(value[12]) }
                 return value.count == 4 || value.count == 8 || value.count == 12
             case .setOwner:
-                return value.count == 65 && value[0] == 0x04
+                return (value.count == 65 || value.count == 145) && value[0] == 0x04
             case .setCard:
                 guard value.count >= 100, value[34] == 0x04 || value[34..<99].allSatisfy({ $0 == 0 }) else { return false }
                 let mint = Int(value[99])
@@ -428,6 +437,8 @@ enum CardOwner {
                 return design.allSatisfy { $0 == 0 } || design.allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) }
             case .load, .reset:
                 return value.isEmpty
+            case .refresh:
+                return value.count == 80
             }
         }
     }
@@ -463,7 +474,7 @@ enum CardOwner {
     }
 
     /// cardOwnerSign's {key, label, nonce, value}: the key as above; a label that is exactly one
-    /// of the six names; a nonce of 32 hex characters; and a value in hex that has the
+    /// of the seven names; a nonce of 32 hex characters; and a value in hex that has the
     /// shape the label takes (an empty string for load). Nothing is read until this has passed.
     static func signRequest(_ body: [String: Any]) -> SignRequest? {
         guard let key = key(from: body["key"]),
@@ -521,9 +532,9 @@ enum CardOwner {
         try withPrivateKey(seed: seed, cardKey: cardKey) { Array($0.publicKey.x963Representation) }
     }
 
-    /// What the card verifies: "FoxyCard/" and the label, the nonce, the value.
+    /// What the card verifies: "CashuCard/" and the label, the nonce, the value.
     static func message(label: Label, nonce: [UInt8], value: [UInt8]) -> [UInt8] {
-        Array("FoxyCard/".utf8) + Array(label.rawValue.utf8) + nonce + value
+        Array("CashuCard/".utf8) + Array(label.rawValue.utf8) + nonce + value
     }
 
     /// The owner's signature for a request that has passed its checks: ECDSA over

@@ -477,10 +477,10 @@ enum SeedActions {
     }
 
     /// cardOwnerSign {key, label, nonce, value} → {"sig"}: the owner key's
-    /// signature, DER as lowercase hex, over "FoxyCard/" and the label, the
-    /// nonce and the value. The label is one of six and the value has the shape
+    /// signature, DER as lowercase hex, over "CashuCard/" and the label, the
+    /// nonce and the value. The label is one of seven and the value has the shape
     /// that label takes; anything else is refused before the seed is read, so the
-    /// page cannot have the key sign LOCK_CARD, a time, or anything else it
+    /// page cannot have the key sign LOCK_CARD, the tag's switch, or anything else it
     /// invents. The answer is the signature and nothing else.
     ///
     /// A page that had been got at can ask for a signature for any card whose key

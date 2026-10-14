@@ -297,6 +297,19 @@ function representative(logic) {
   const TAP = { known: true, limited: true, limit: 2000, spent: 0, left: 2000, turns: 0, noTime: false };
   add('flashcard, a card with a limit on one tap', at('flashcard', { fc: FC({ tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card with a limit on one tap and a daily limit', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  /* A card whose rollover budget is spent (D20): its day does not turn by itself, so it says what is left and when it renews, on
+   * any phone; its owner's phone says why, offline or where the refresh could not be made, and says it when its tap renewed it. */
+  const STUCK = { limited: true, limit: 5000, spent: 4900, left: 100, turns: 0, now: 4102358400, stuck: true };
+  add('flashcard, another phone\u2019s card whose rollover budget is spent: what is left, and that it renews at its owner\u2019s tap',
+      at('flashcard', { fc: FC({ ownedHere: false, mine: false, limit: 5000, day: STUCK }) }, { wallet: CARDS() }));
+  add('flashcard, a card whose rollover budget is spent, on its owner\u2019s phone offline',
+      at('flashcard', { fc: FC({ limit: 5000, day: STUCK }) }, { wallet: CARDS() }));
+  add('flashcard, a card whose rollover budget is spent, on its owner\u2019s phone with no block to renew it',
+      at('flashcard', { fc: FC({ limit: 5000, day: STUCK, refreshMissed: 'no-header' }) }, { wallet: CARDS() }));
+  add('flashcard, a card whose rollover budget is spent, that would not take its owner\u2019s block',
+      at('flashcard', { fc: FC({ limit: 5000, day: STUCK, refreshMissed: 'refused' }) }, { wallet: CARDS() }));
+  add('flashcard, a card whose rollover budget was spent, renewed by its owner\u2019s tap',
+      at('flashcard', { fc: FC({ limit: 5000, day: DAY, renewed: { rolls: 7, stuck: true } }) }, { wallet: CARDS() }));
   /* The limit line is on the card's own face, at its bottom left (the card's badge above it where it has one), in either design; and the balance
    * on the card's screen counts to what the card holds after money goes on or off it. */
   add('flashcard, a locked card with a daily limit: its badge above the limit line, on the face', at('flashcard', { fc: FC({ locked: true, limit: 5000, day: DAY }) }, { wallet: CARDS() }));
@@ -717,10 +730,8 @@ function cards() {
   add('overlay: a card\u2019s PIN, for the second tap', (a) => a.fcPayAsk(500));
   // LIMITS asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
   add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
-  add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
   // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
   add('card: how tap limit works, played out', (a) => { a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
-  add('card: how tap limit works, for a card before 1.17, played out', (a) => { a._fcCard = { info: { waitOver: 7 } }; a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
   // RESET CARD (software 1.17): the warning, with and without money on the card, and the PIN of a locked one
   add('card: reset, the warning', (a) => { a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 0 }; a.fcReset(); });
   add('card: reset, the warning with money on the card', (a) => { a._fcCard = {}; a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 2048, mint: MINT }; a.fcReset(); },
@@ -746,11 +757,14 @@ function cards() {
     last: [{ time: 4102358400, told: 4102358460, sats: 0, pieces: 0, refused: 5, tamper: true, clock: false }] } }; a.fcLogCard(); });
   add('card: a till, over the card\u2019s per tap limit', (a) => a.fcFailed({ card: 'tap-limit', left: 2000, need: 4096, limit: 2000, turns: 0, message: 'x' }, { taken: true }));
   add('card: a till, over what is left of this tap', (a) => a.fcFailed({ card: 'tap-limit', left: 300, need: 512, limit: 2000, turns: 4102444800, message: 'x' }, { taken: true }));
-  add('card: a per tap limit on a card whose software has none', (a) => a.fcFailed({ card: 'old-card', message: 'This card\u2019s software has no limit on one tap.' }, {}));
   add('card: a till, over the card\u2019s daily limit, with what is left today', (a) => a.fcFailed({ card: 'limit', left: 1200, need: 2000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
   add('card: a till, over what a card can spend in a day', (a) => a.fcFailed({ card: 'limit', left: 5000, need: 9000, limit: 5000, turns: 4102444800, message: 'x' }, { taken: true }));
+  // a card whose rollover budget is spent: no "in a day" and no time, since its day does not turn by itself (D20)
+  add('card: a till, over what is left of a card whose rollover budget is spent', (a) => a.fcFailed({ card: 'limit', left: 100, need: 500, limit: 10000, turns: 0, stuck: true, message: 'x' }, { taken: true }));
+  add('card: a till, a card whose rollover budget is spent and nothing is left', (a) => a.fcFailed({ card: 'limit', left: 0, need: 500, limit: 10000, turns: 0, stuck: true, message: 'x' }, { taken: true }));
   add('card: another phone\u2019s card', (a) => a.fcFailed({ card: 'not-owner', message: 'x' }, {}));
-  add('card: not a Foxy card, another signer\u2019s', (a) => a.fcFailed({ card: 'wrong-signer', message: 'That card keeps its time by another signer than this Foxy.' }, { taken: true }));
+  add('card: a card that needs an update, older than the Cashu card protocol 2.0', (a) => a.fcFailed({ card: 'not-a-card', message: 'This card needs an update.', needsUpdate: true }, {}));
+  add('card: a card of a later protocol than this app', (a) => a.fcFailed({ card: 'not-a-card', message: 'This card is newer than this Foxy. Update the app to use it.', appUpdate: true }, {}));
   add('card: a card\u2019s wrong PIN', (a) => a.fcFailed({ card: 'wrong-pin', tries: 2, message: 'Wrong PIN. 2 tries left.' }, { taken: true, again() {} }));
   add('card: a blocked card', (a) => a.fcFailed({ card: 'blocked', message: 'x' }, { taken: true }));
   add('card: not enough on the card', (a) => a.fcFailed({ card: 'not-enough', balance: 900, message: 'The card holds 900 sats.' }, { taken: true }));

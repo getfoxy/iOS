@@ -1,25 +1,26 @@
 'use strict';
 /* flashcard-applet.js — the wallet against the applet itself.
  *
- *     sh <card repository>/tools/cardsim/run.sh 47435      (in another terminal)
+ *     sh <cashu-javacard>/tools/cardsim/run.sh 47435      (in another terminal)
  *     node tests/flashcard-applet.js [port]
  *
  * The other flashcard suites tap a model of the card written in JavaScript
  * (flashcard-card.js), which flashcard-model.js holds to a recording of the
  * applet. This one has no model in it: every command the wallet builds goes
  * over a socket to the applet's own class, running in the JavaCard simulator
- * (the card repository's CardServer), and every answer is the applet's. The
- * mint is the test mint, in this process. The card repository is
- * https://github.com/getfoxy/card.
+ * (cashu-javacard's CardServer), and every answer is the applet's. The
+ * mint is the test mint, in this process. The applet is the shared Cashu card
+ * protocol's, 2.1, in https://github.com/lnflash/cashu-javacard (tools/cardsim/run.sh
+ * there is this line protocol, kept for this wallet).
  *
  * It is the same road the iOS Simulator takes (Foxy/Flashcard/CardLink.swift),
  * with Node where the phone would be. Not in check-all.sh: it needs a JDK and
- * the card repository, and says so and passes over when no card is listening.
+ * that repository, and says so and passes over when no card is listening.
  */
 const net = require('net');
-const { funded, history, OTHER_WORDS } = require('./flashcard-kit');
+const { funded, history, OTHER_WORDS, tipIs } = require('./flashcard-kit');
 
-/* A real block header, as the network carries it (80 bytes), and the time in it. A card of software 1.15 takes its clock from the
+/* A real block header, as the network carries it (80 bytes), and the time in it. The card takes its clock from the
  * newest it has been shown, and believes a header for the work in it, so one that was made years ago and is public does as well as
  * one from this minute: it needs no network, and the applet's day logic runs on it. */
 const TIP = '00c02133b973a14eab498ae41fd2054685e7250b36c4bd758ca801000000000000000000ba4fd6d57bfebf73fcf0552a92d5430b78b735cf59c6c58243b2fc48d4669b5a75dcc96af01e021736a8ee8c';
@@ -27,7 +28,18 @@ const TIP_TIME = 1791614069;
 const TIP_HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
 const OLD = '00e0ff3f5c9163e913a6431d7ef2fce013c71bc6a96a9fdaad1a020000000000000000000db1148f11b5c527caef5a8f54ed8bab7a2096b40d2a204b5c8e7f38d3501c5f7273c86af01e02177f6bf671';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
-const SELECT = '00a404000af0464f5859434152440100';
+/* Four real headers 180 blocks apart, each more than a day after the one before (cashu-javacard spec/vectors/headers.json, heights
+ * 969,120 to 969,660), for a clock walked a day at a time: the anchor, the rollover budget and REFRESH (D20). */
+const WALK = [
+  '00000038764910efec7641bbc70ce4fc5f2669cf48f4dbcb7e0502000000000000000000180a1fb181e4643d64b60ced12b8ea75ff2f2b14de2d4c2a8b7009101402a1ffc96bbb6ac51e02173afa2094',
+  '00e06e2a0af12f4fd2d71ab114983cbcae50975108959e4dfa4a000000000000000000007d26a410097e7c4eb91470bf08829048a535de64e919ec10515471838b5f0f84e3f0bc6ac51e021778cecdbb',
+  '00600b245332430a9c506987b0bdbcad5dcc5e66e150f2aedddc00000000000000000000019a8bb1e80fe7668f513deec1e8e7c53957a7e1e5cba1bc56e0f88c2e660ca060acbe6ac51e02170bf35bdb',
+  '0060032054c36edc4f0d4156e7f4174a2784475ffb593f23ea4d000000000000000000007f0ad654f9efbeb798f573e4626ae0aa76e0c74c6bfdfb2bbac77ba1faf004959769c06ac51e0217a75e31c2',
+];
+const WALK_TIME = WALK.map((h) => Buffer.from(h, 'hex').readUInt32LE(68));
+const WALK_HASH = '0000000000000000000120121321f57d08db963cf64f998ebb4d71ea7055f737';
+const { AID } = require('./flashcard-card');
+const SELECT = '00a404000b' + AID + '00';
 
 const PORT = Number(process.argv[2]) || 47435;
 let failed = 0;
@@ -64,7 +76,7 @@ function wire(port) {
 (async () => {
   let w;
   try { w = await wire(PORT); } catch (e) {
-    console.log('no card is listening on 127.0.0.1:' + PORT + ' (run the card repository’s tools/cardsim/run.sh ' + PORT + '); nothing checked');
+    console.log('no card is listening on 127.0.0.1:' + PORT + ' (run cashu-javacard’s tools/cardsim/run.sh ' + PORT + '); nothing checked');
     process.exit(0);
   }
   await w.ask('ctl new');
@@ -86,16 +98,16 @@ function wire(port) {
   /* ---- a new card, read and set up ------------------------------------------ */
   await tap();
   const fresh = await H.W.cardLook(link);
-  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === fresh.info.slots && /^0[23][0-9a-f]{64}$/.test(fresh.key),
-     'the applet is chosen by its whole name, proves it holds its key, and reads as new', fresh.info.version);
+  ok(fresh.info.pin === 'none' && !fresh.info.hasRecord && fresh.info.empty === fresh.info.slots && /^0[23][0-9a-f]{64}$/.test(fresh.key) && fresh.info.version === '2.1',
+     'the applet is chosen by its whole name, proves it holds its key, and reads as new, of protocol 2.1', fresh.info.version);
   await tap();
   const made = await H.W.cardSetUp(link, { pin: '1234', recoverable: true });
   ok(made.info.pin === 'set' && made.info.hasRecord && made.record.mint === 'https://m.test' && H.W.cardIsMine(made),
      'set up: a PIN, this phone’s mint, and this phone’s refund key', made.record.mint);
-  // a card of 1.15 has no time key: its record has zeros where one was, and its clock is Bitcoin block headers; one before it was given the interim key
+  // the card's clock is Bitcoin block headers, and this phone has none kept: its owner is given with no anchor, and its clock has been shown none
   ok(made.info.owner === true && made.info.limit === 0 && fresh.info.owner === false && fresh.info.limit === 0
-     && (made.info.headers ? made.record.timeKey === '' && made.record.headerBits === '' && made.record.headerHash === '' : made.record.timeKey === H.W.cardTimeKey),
-     made.info.headers ? 'and an owner and no limit, and no time key (the applet reads none): its clock is block headers, and it has been shown none' : 'and an owner, no limit, and the time key, which the applet kept: the new card had none of them');
+     && made.record.headerBits === '' && made.record.headerHash === '' && made.record.rolls === 0 && made.record.budget === 7,
+     'and an owner and no limit: its clock is block headers, and it has been shown none; its rollover is 0 of a budget of 7');
   await tap();
   ok((await why(H.W.cardSetUp(link, { pin: '1234', recoverable: true }))) === 'set-up', 'and it will not be set up twice');
 
@@ -120,7 +132,7 @@ function wire(port) {
   // It reads a piece and writes it back stating an amount of 1. The card signs a piece's secret and not its amount, so
   // that copy would be spent for 1 and signed for the real piece. The applet refuses a nonce that is on the card already.
   await tap();
-  await link.send('00a4040009f0464f58594341524400');
+  await link.send(SELECT);
   ok((await link.send('b0400000' + '04' + '31323334')) === '9000', 'a terminal with the PIN is let in');
   const slotsBefore = await link.send('b014000000');
   const realPiece = (await link.send('b013000000')).slice(2, -4);
@@ -129,16 +141,16 @@ function wire(port) {
   ok((await link.send('b0300000' + '51' + realPiece + '01')) === '6a94' && (await link.send('b014000000')) === slotsBefore,
      'and so is the piece itself, again, and nothing on the card has changed');
 
-  /* ---- its clock (software 1.15 and on): a real block header, and the time a terminal tells it --------------------- */
-  if (made.info.headers) {
+  /* ---- its clock: a real block header, and the time a terminal tells it ------------------------------------------- */
+  {
     await tap();
     await link.send(SELECT);
     ok((await link.send('b0370000' + '04' + u32(1790000000))) === '9000', 'a terminal tells it its own time: a note, nothing back');
-    ok((await link.send('b0350000' + '00')) === '6d00', 'and SET_TIME, a time under a signature, is gone');
+    ok((await link.send('b0350000' + '00')) === '6d00' && (await link.send('b0200000' + '40')) === '6d00', 'and SET_TIME, a time under a signature, and SPEND_PROOF, one piece signed, are gone (6D00)');
     const took = await link.send('b0360000' + '50' + TIP + '04');
     ok(took === u32(TIP_TIME) + '9000', 'a block header is taken and the applet says its clock: the time in it', took);
     const info = H.W.cardParse.info((await link.send('b001010000')).slice(0, -4));
-    const rec = H.W.cardParse.record((await link.send('b016000000')).slice(0, -4), info);
+    const rec = H.W.cardParse.record((await link.send('b016000000')).slice(0, -4));
     ok(info.now === TIP_TIME && info.headerTime === TIP_TIME && rec.headerHash === TIP_HASH && rec.headerBits === TIP.substr(144, 8),
        'its clock is the block’s, and its record says the block: the hash, and the difficulty it was made at', rec.headerHash.slice(0, 24) + ' ' + rec.headerBits);
     ok((await link.send('b0360000' + '50' + OLD + '04')) === u32(TIP_TIME) + '9000' && H.W.cardParse.info((await link.send('b001010000')).slice(0, -4)).now === TIP_TIME,
@@ -207,8 +219,8 @@ function wire(port) {
   /* ---- its limit, its PIN, and money off ------------------------------------- */
   await tap();
   const limited = await H.W.cardSetLimit(link, { sats: 50 });
-  ok(limited.record.limit === 50 && limited.info.limit === 50 && limited.info.windowStart === limited.info.now && (!limited.info.headers || limited.info.windowStart === TIP_TIME),
-     'a daily limit of 50 is set, with the owner’s proof and no PIN, by the applet' + (limited.info.headers ? ', and its day begins at the block’s time' : ''));
+  ok(limited.record.limit === 50 && limited.info.limit === 50 && limited.info.windowStart === limited.info.now && limited.info.windowStart === TIP_TIME && limited.record.budget === 7,
+     'a daily limit of 50 is set, with the owner’s proof and no PIN, by the applet, in thirteen bytes with the default budget, and its day begins at the block’s time');
   await tap();
   ok((await why(R.W.cardPay(link, { sats: 400, pin: '1234' }))) === 'limit', 'and a till asking for 400 is refused');
   await tap();
@@ -253,8 +265,8 @@ function wire(port) {
   H.window.Date.now = real;
   ok(back.sats === 256, 'and its money comes back to the phone that loaded it, a year on, with no card', String(back.sats));
 
-  /* ---- the PIN is optional (software 1.16): a card with none, ADD PIN, and the no-PIN allowance ----------------- */
-  if (made.info.noPinKnown) {
+  /* ---- the PIN is optional: a card with none, ADD PIN, and the no-PIN allowance ----------------------------------- */
+  {
     await w.ask('ctl new');
     await tap();
     const bare = await H.W.cardSetUp(link, { recoverable: true });
@@ -274,11 +286,11 @@ function wire(port) {
        'and its log marks nothing for it: a card with no PIN has no PIN to be without (the mark is for the allowance)', JSON.stringify(bareLog.log && bareLog.log.last[0]));
     await tap();
     ok((await why(H.W.cardSetLimit(link, { noPin: 100 }))) === 'no-pin', 'no allowance can be set on a card with no PIN (the wallet says so before the applet is asked)');
-    // the applet itself, asked for twelve bytes with no PIN: 6985. The wallet is made to believe a PIN is set, so that it asks.
+    // the applet itself, asked for an allowance with no PIN: 6985. The wallet is made to believe a PIN is set, so that it asks.
     await tap();
     const asked = { send: async (a) => { const r = await link.send(a); return (a.slice(0, 6) === 'b00101' && r.length === 88) ? r.slice(0, 14) + '01' + r.slice(16) : r; } };
     const six = await H.W.cardSetLimit(asked, { noPin: 100 }).then(() => null, (e) => e);
-    ok(!!six && six.sw === '6985', 'asked for twelve bytes with an allowance on a card with no PIN, the applet answers 6985', six && six.sw);
+    ok(!!six && six.sw === '6985', 'asked for an allowance on a card with no PIN, the applet answers 6985', six && six.sw);
     await tap();
     await H.W.cardSetLimit(link, { sats: 150 });
     await tap();
@@ -320,7 +332,7 @@ function wire(port) {
     await H.W.cardSetLimit(link, { noPin: 200 });
     await tap();
     const set = await R.W.cardLook(link);
-    ok(set.noPin.set && set.noPin.limit === 200 && set.noPin.spent === 0, 'an allowance of 200 is set by the owner in twelve bytes, and said to anybody', JSON.stringify(set.noPin));
+    ok(set.noPin.set && set.noPin.limit === 200 && set.noPin.spent === 0, 'an allowance of 200 is set by the owner, and said to anybody', JSON.stringify(set.noPin));
     await tap();
     const within = await R.W.cardPay(link, { sats: 120 });
     await tap();
@@ -337,7 +349,7 @@ function wire(port) {
     // the day: a header begins the window if none had (the allowance was set before one), and keeps the count
     await tap();
     await link.send(SELECT);
-    if (made.info.headers) {
+    {
       const took = await link.send('b0360000' + '50' + TIP + '04');
       await tap();
       const anchored = await R.W.cardLook(link);
@@ -353,8 +365,8 @@ function wire(port) {
     ok(off.sats > 0 && (await bal(H)) === hb + off.sats, 'the card is emptied into its owner’s phone with the new PIN', String(off.sats));
   }
 
-  /* ---- the mint's proof is kept with each piece (software 1.20) ------------------------------------------------------ */
-  if (made.info.proofs) {
+  /* ---- the mint's proof is kept with each piece ------------------------------------------------------------------ */
+  {
     await w.ask('ctl new');
     await tap();
     await H.W.cardSetUp(link, { recoverable: true });
@@ -380,6 +392,65 @@ function wire(port) {
     await tap();
     await link.send(SELECT);
     ok((await link.send('b01a7fff00')) === '009000' && (await link.send('b01a80ff00')) === '6a83', 'a place with nothing in it gives 00, and a place there is not is refused 6A83');
+  }
+
+  /* ---- the anchor, the rollover budget and REFRESH (the Cashu card protocol 2.x, D20 and D26) ------------------------------- */
+  {
+    const show = async (hex) => { await tap(); await link.send(SELECT); return link.send('b0360000' + '50' + hex + '04'); };
+    await w.ask('ctl new');
+    // the owner's phone keeps a block only where it is within three hours of its own clock: its clock is set to each block's time
+    const realNow = H.window.Date.now.bind(H.window.Date);
+    const at = (i) => { H.window.Date.now = () => (WALK_TIME[i] + 600) * 1000; };
+    // the owner's phone has the first block kept: it is the new card's anchor
+    at(0);
+    tipIs(H, WALK[0]);
+    await H.W.headerRefresh({ force: true });
+    await tap();
+    const anchored = await H.W.cardSetUp(link, { recoverable: true });
+    ok(anchored.info.now === WALK_TIME[0] && anchored.record.headerHash === WALK_HASH && anchored.record.rolls === 0,
+       'a card set up by a phone that has a block header is anchored at it: its clock never runs at 0', JSON.stringify([anchored.info.now, anchored.record.headerHash.slice(0, 16)]));
+    await tap();
+    await H.W.cardAdd(link, { sats: 1000, owner: true });
+    await tap();
+    const budgeted = await H.W.cardSetLimit(link, { sats: 100, budget: 1 });
+    ok(budgeted.record.limit === 100 && budgeted.record.budget === 1 && budgeted.info.windowStart === WALK_TIME[0],
+       'the owner sets a daily limit of 100 with a rollover budget of 1, the thirteenth byte', JSON.stringify([budgeted.record.limit, budgeted.record.budget]));
+    await tap();
+    const first = await R.W.cardPay(link, { sats: 100 });
+    await tap();
+    ok(first.sats === 100 && (await why(R.W.cardPay(link, { sats: 50 }))) === 'limit', 'a till takes the day\u2019s 100, and is refused 50 more');
+    // a day later by a real block: the window rolls, once
+    ok((await show(WALK[1])) === u32(WALK_TIME[1]) + '9000', 'a block more than a day on moves its clock');
+    await tap();
+    const second = await R.W.cardPay(link, { sats: 100 });
+    await tap();
+    const rolled = await R.W.cardLook(link);
+    ok(second.sats === 100 && rolled.record.rolls === 1 && rolled.day.left === 0, 'the day rolls and 100 more is paid: one roll of the budget', JSON.stringify([rolled.record.rolls, rolled.day]));
+    // and another day on: the budget is spent, and the window stays where it is
+    ok((await show(WALK[2])) === u32(WALK_TIME[2]) + '9000', 'a block another day on moves its clock again');
+    await tap();
+    const stuck = await R.W.cardLook(link);
+    await tap();
+    const stuckErr = await R.W.cardPay(link, { sats: 50 }).then(() => null, (e) => e);
+    ok(!!stuckErr && stuckErr.card === 'limit' && stuckErr.stuck === true && stuckErr.turns === 0 && stuck.day.stuck === true && stuck.day.left === 0,
+       'past its budget the day does not roll: what was signed for in it still counts, and 50 is refused as a budget spent (no day, no time)', JSON.stringify([stuck.day, stuckErr && stuckErr.stuck]));
+    // the owner's phone, online with the newest block, refreshes it at a tap
+    at(3);
+    tipIs(H, WALK[3]);
+    await H.W.headerRefresh({ force: true });
+    await tap();
+    const sent = [];
+    const refreshed = await H.W.cardLook({ send: async (a) => { sent.push(a); return link.send(a); } }, { mine: true });
+    ok(refreshed.refreshed === true && sent.some((a) => /^b053/.test(a)) && refreshed.info.rolls === 0 && refreshed.info.now === WALK_TIME[3]
+       && !!refreshed.renewed && refreshed.renewed.stuck === true && refreshed.renewed.rolls === 1,
+       'its owner\u2019s phone sends REFRESH with the newest block: the budget is full again, and the read keeps that it had been spent', JSON.stringify([refreshed.refreshed, refreshed.info.rolls, refreshed.renewed]));
+    await tap();
+    const third = await R.W.cardPay(link, { sats: 100 });
+    ok(third.sats === 100, 'and the day rolls again: a till is paid 100');
+    await tap();
+    const after = await H.W.cardLook({ send: async (a) => { sent.push(a); return link.send(a); } }, { mine: true });
+    ok(after.refreshed === true && after.info.rolls === 0, 'the owner\u2019s next tap online refreshes the roll that payment spent', JSON.stringify([after.refreshed, after.info.rolls]));
+    H.window.Date.now = realNow;
   }
 
   w.close();

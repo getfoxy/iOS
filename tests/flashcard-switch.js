@@ -101,8 +101,8 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
   await W.connect(MINT2, null, null, { remember: false });
   card.tap();
   const on = await W.cardWrite(card, { owner: true });
-  ok(card.state.record.limit === 700 && card.state.record.timeKey === W.cardTimeKey,
-     'the card’s limit is what it was before it was emptied, and moving it kept its time key: the second tap changed its mint and nothing else', String(card.state.record.limit));
+  ok(card.state.record.limit === 700,
+     'the card’s limit is what it was before it was emptied: the second tap changed its mint and nothing else', String(card.state.record.limit));
   ok(on.sats === 1990 && on.left === 0 && on.card.record.mint === MINT2 && on.card.balance === 1990 && card.balance() === 1990 && W.cardOwed().length === 0,
      'the second tap tells the card its new mint, then writes the money onto it', on.card.record.mint + ' ' + on.card.balance);
   const check = await W.cardCheck(on.card);
@@ -170,8 +170,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
 
   /* ---- a card that names its design -------------------------------------------- */
   {
-    /* The cards above are of the software before a card's record named its design (1.10), and were set up with none.
-     * A card of the software since keeps the design it was set up with after its mint, and every card the app sets up
+    /* The cards above were set up with no design. A card keeps the design it was set up with after its mint, and every card the app sets up
      * is given one (FC_SETUP_DESIGN, 26f-flashcard.js). A record that names no design clears the card's, so the record
      * such a card is moved with carries it, three bytes longer, and that is the record this phone signs as its owner. */
     const D = await funded({ second: true }, 6000);
@@ -216,7 +215,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     app.goFlashcard();
     await until('the card to be read', () => !!app.state.fc && app.state.fc.check !== 'asking');
     // the card's screen carries no SWITCH MINT button for now; the move is kept, and driven here by its own entry (fcSwitchMint)
-    ok(vals(app).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS' && vals(app).fcHistoryVis === 'visible', 'the card’s screen has CHANGE PIN and LIMITS in its row, HISTORY at the top left, and no SWITCH MINT button');
+    ok(vals(app).fcLinks.map((k) => k.label).join() === 'RESET,CHANGE PIN,LIMITS' && vals(app).fcHistoryVis === 'visible', 'the card’s screen has RESET, CHANGE PIN and LIMITS in its row, HISTORY at the top left, and no SWITCH MINT button', vals(app).fcLinks.map((k) => k.label).join());
 
     app.fcSwitchMint();
     ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard', 'it opens the list of mints, asking which');

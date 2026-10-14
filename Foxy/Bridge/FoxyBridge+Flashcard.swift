@@ -13,11 +13,9 @@ import Foundation
  * dismisses the sheet, after a minute with no card, and when Foxy leaves the
  * foreground (the system ends an NFC session then).
  *
- * A fifth action, cardTime, needs no session and no seed: it gives the page the
- * time a card is to be told, signed (CardTime.swift). Only a card of software 1.14
- * or before is told a time that way; a card of 1.15 and on takes its clock from
- * Bitcoin block headers, which the page fetches over Tor (mintRequest) and sends
- * through cardSend like any other command (CardGate lets 0x36 and 0x37 through).
+ * The card's clock is the time in the newest Bitcoin block header it has taken,
+ * which the page fetches over Tor (mintRequest) and sends through cardSend like
+ * any other command (CardGate lets 0x36, 0x37 and the owner's 0x53 through).
  * The card's owner key is the seed actions' (NativeSeedBridge.swift), and never
  * comes here. */
 extension FoxyBridge {
@@ -142,18 +140,5 @@ extension FoxyBridge {
             self.cardSelected = false
             self.resolve(id: id, text: "ok", error: nil)
         }
-    }
-
-    /// {} → {"sig", "time"}: the phone's clock in whole seconds since 1970, and the
-    /// signature a card checks it by, which is the INTERIM signer's (InterimCardTime:
-    /// as weak as trusting this phone's own clock, and no bound on a terminal that
-    /// means to cheat). The page tells the card with SET_TIME. Arguments are
-    /// ignored. It needs no card in hand and no seed, and says nothing secret.
-    func handleCardTime(id: String, body: [String: Any]) {
-        guard let text = InterimCardTime.reply(now: Date()) else {
-            resolve(id: id, text: nil, error: "The clock on this phone is not a time a card can be told.")
-            return
-        }
-        resolve(id: id, text: text, error: nil)
     }
 }

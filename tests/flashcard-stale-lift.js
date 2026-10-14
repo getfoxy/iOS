@@ -24,8 +24,6 @@ const ok = (good, name, detail) => {
   const card = newCard(H);
   await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
   card.tap();
-  const clock = { ms: Date.now() };
-  H.phone.clockMs = () => clock.ms;
   const limit = (c) => c.state.record.limit;
   const note = () => JSON.parse(H.storage.getItem('foxy.flashcard.lifted') || '{}')[card.key];
 
@@ -36,7 +34,7 @@ const ok = (good, name, detail) => {
 
   // a withdrawal: the limit is lifted, and the card is taken away before it can be put back
   card.tap();
-  card.leaveBefore('20', 1);
+  card.leaveBefore('22', 1);
   const gone = await H.W.cardWithdraw(card, { pin: '1234' }).then(() => null, (e) => e);
   ok(gone && gone.card === 'gone' && limit(card) === 0 && note() && note().limit === 600,
      'a card taken away while lifted is left with no limit and the phone has noted 600', JSON.stringify({ err: gone && gone.card, limit: limit(card), note: note() }));
@@ -52,7 +50,7 @@ const ok = (good, name, detail) => {
   card.tap();
   await H.W.cardSetLimit(card, { sats: 600 });
   card.tap();
-  card.leaveBefore('20', 1);
+  card.leaveBefore('22', 1);
   const gone2 = await H.W.cardWithdraw(card, { pin: '1234' }).then(() => null, (e) => e);
   ok(gone2 && gone2.card === 'gone' && limit(card) === 0 && note() && note().limit === 600, 'a second card taken away while lifted leaves a note of 600', JSON.stringify({ limit: limit(card), note: note() }));
   card.tap();

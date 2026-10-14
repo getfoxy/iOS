@@ -2,8 +2,8 @@
 /* flashcard-sigall.js — a card that signs once for a payment, at real mints.
  *
  *   sh tools/live/local-mint.sh up
- *   sh <card repository>/tools/cardsim/run.sh 47436      (optional: the applet itself)
- *   (the card repository is https://github.com/getfoxy/card)
+ *   sh <cashu-javacard>/tools/cardsim/run.sh 47436      (optional: the applet itself)
+ *   (the shared protocol's applet and simulator: https://github.com/lnflash/cashu-javacard)
  *   NODE_EXTRA_CA_CERTS=build/live-tls/cert.pem FOXY_LIVE_LOCAL=1 \
  *     node tools/live/flashcard-sigall.js [card port]
  *
@@ -49,7 +49,7 @@ const TIP = '00c02133b973a14eab498ae41fd2054685e7250b36c4bd758ca8010000000000000
 const TIP_TIME = 1791614069;
 const TIP_HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
-const SELECT = '00a404000af0464f5859434152440100';
+const SELECT = '00a404000bf04341534855434152440100';
 
 /* The applet over a socket, as the iOS Simulator reaches it; null when no card server is listening. */
 function applet(port) {
@@ -129,8 +129,8 @@ async function at(mintKey, names, real) {
     if (!CHIP) renew = async () => { await real.fresh(); };
     card = { what: real.what, tap: real.tap, send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, real.send(a)); } };
   } else {
-    let m = makeCard({ window: holder.w, format: Number(process.env.FOXY_CARD_MODEL) === 3 ? 3 : 4 });
-    if (Number(process.env.FOXY_CARD_MODEL) !== 3) renew = async () => { m = makeCard({ window: holder.w, format: 4 }); };
+    let m = makeCard({ window: holder.w });
+    renew = async () => { m = makeCard({ window: holder.w }); };
     card = { what: 'the JavaScript model of the card (no card server on ' + PORT + ')', tap: async () => m.tap(), send: (a) => { sent.push(String(a).toLowerCase()); ever.push(String(a).toLowerCase()); return seeing(a, m.send(a)); } };
   }
   const signatures = () => sent.filter((a) => a.slice(0, 4) === 'b024').length;
@@ -350,7 +350,7 @@ async function at(mintKey, names, real) {
     const reads = sent.filter((a) => a.slice(0, 4) === 'b019').length;
     // the card is chosen again, and asked what its change is made of: nothing is left
     await card.tap();
-    await card.send('00a404000af0464f5859434152440100');
+    await card.send('00a404000bf04341534855434152440100');
     const none = await card.send('b019000000');
     ok('  the next tap finishes its pieces from the card’s openings with no PIN, and the card lists none after', back.left === 0 && back.change === change && till.W.cardOwed().length === 0
        && reads >= 1 && /^009000$/i.test(none), back.card.balance + ' on the card, ' + reads + ' page(s) of openings read');
@@ -542,7 +542,7 @@ async function at(mintKey, names, real) {
     const good = await till.W.cardPay(card, { sats: 100, pin: PIN });
     const heard = sent.filter((a) => /^b04001/.test(a))[0];
     await card.tap();
-    await card.send('00a404000af0464f5859434152440100');
+    await card.send('00a404000bf04341534855434152440100');
     const cold = await card.send(heard);
     await card.send('b044010071');
     const stale = await card.send(heard);
@@ -683,7 +683,7 @@ async function at(mintKey, names, real) {
 
   /* RESET (software 1.17): the owner gives the card back to what it was in its packet, with whatever is on it taken off first, in the one
    * tap; another person (the till's words) sets it up, and the first owner is no longer its owner. Not run before there is a 1.17 card to run
-   * it on (the applet of the card repository's tools/cardsim, or the model). */
+   * it on (the applet of cashu-javacard's tools/cardsim, or the model). */
   if (first.card.info.resetKnown) {
     await card.tap();
     const oldKey = (await holder.W.cardLook(card, { mine: true, short: true })).key;

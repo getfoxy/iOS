@@ -1,10 +1,9 @@
 'use strict';
-/* flashcard-clock.js — the clock of a card of software 1.15: Bitcoin block headers.
+/* flashcard-clock.js — the clock of a card: Bitcoin block headers, and its rollover budget.
  *
  *     node tests/flashcard-clock.js
  *
- * Until 1.15 a card was told the time under a signature by a key built into the app, which anyone could copy out of it.
- * Now its clock is the time written in the newest block header it has been shown (SET_HEADER): it hashes the 80 bytes
+ * A card's clock is the time written in the newest block header it has been shown (SET_HEADER): it hashes the 80 bytes
  * twice and believes the header for the work in it, and the phone's own time is a note it keeps (TELL_TIME) and trusts
  * for nothing. This pins both halves.
  *
@@ -17,8 +16,12 @@
  *   3  a tap: TELL_TIME once per time in the field, SET_HEADER only when the card is behind, neither one waiting for the fetch;
  *      3b a daily limit through the wallet, turning when a block of a day later reaches the card and not when a till says;
  *      3c a new record (an empty card told its mint) that keeps the clock
- *   4  the record, the log and the receipts a card of 1.15 gives (77 bytes and 20), and one before it (73 and 16)
+ *   4  the record, the log and the receipts a card gives (77 bytes and 20)
  *   5  the FLASHCARD screen: the block line under its title, and a log that shows the phone's time beside the block's
+ *   6  the clock walked a day at a time (the Cashu card protocol 2.x, D20 and D26): the anchor of SET_OWNER and the set-up's
+ *      words when it is refused or there is none, the rollover budget of SET_LIMIT's thirteenth byte, a spent budget as the
+ *      till and every screen read it, the no-PIN allowance that begins again only when armed, and the owner's REFRESH:
+ *      offline, with no block kept, refused by the card, taken, and on a locked card
  *
  * The headers named TIP, OLD and GENESIS are real, and public: this checks their hashes with a sha256 of its own. */
 const crypto = require('crypto');
@@ -32,7 +35,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const SEL = '00a4040009f0464f58594341524400';
+const SEL = '00a404000bf04341534855434152440100';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 const headerCmd = (hex) => 'b0360000' + '50' + hex + '04';
 const tellCmd = (secs) => 'b0370000' + '04' + u32(secs);
@@ -74,7 +77,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   const mk = (o) => makeCard(Object.assign({ window: P.window, format: 4 }, o || {}));
   const read = async (card, cmd) => { const a = await card.send(cmd); return { sw: a.slice(-4), data: a.slice(0, -4) }; };
   const infoOf = async (card) => W.cardParse.info((await read(card, INFO)).data);
-  const recordOf = async (card) => W.cardParse.record((await read(card, RECORD)).data, await infoOf(card));
+  const recordOf = async (card) => W.cardParse.record((await read(card, RECORD)).data);
 
   /* ---- 0: the headers named here are what they are ----------------------------------------------------------------- */
   for (const [name, h] of [['TIP', TIP], ['OLD', OLD], ['GENESIS', GENESIS]]) {
@@ -135,14 +138,12 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   /* ---- 1: the card: three real headers at the real floor -------------------------------------------------------------- */
   {
     const c = mk();
-    ok((await read(c, SEL)).data === '0114', 'a card of the latest software says 1.20 when chosen');
-    const c15 = mk({ software: 15 });
-    ok((await read(c15, SEL)).data === '010f', 'and the card of 1.15 before it still says 1.15');
+    ok((await read(c, SEL)).data === '0201', 'a card says 2.1 when chosen');
     const fresh = await infoOf(c);
-    ok(fresh.version === '1.20' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
+    ok(fresh.version === '2.1' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
-    ok(blank.headerBits === '' && blank.headerHash === '' && blank.timeKey === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));
+    ok(blank.headerBits === '' && blank.headerHash === '' && blank.rolls === 0 && blank.budget === 7 && blank.armed === false, 'its record names no header yet, and its rollover is nothing of a budget of 7', JSON.stringify([blank.headerBits, blank.headerHash]));
     // no PIN, no owner, no record: a header is taken by a card in any state
     ok((await read(c, headerCmd(GENESIS.hex))).sw === '6a93', 'the first block there was has real work and far too little: refused 6A93, under the floor');
     ok((await infoOf(c)).now === 0, 'and the clock stays where it was');
@@ -168,10 +169,10 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
        'the phone’s time is four bytes, and is a note: it moves nothing', String((await infoOf(c)).now));
     ok((await read(c, 'b0350000' + '00')).sw === '6d00', 'and SET_TIME, a time under a signature, is gone');
     ok((await infoOf(c)).now === TIP.time, 'the clock is the block’s, whatever the phone said');
-    // told twice in one tap, hours apart, which a card before 1.15 marked as a false time: a note is a note, and nothing is written down
+    // told twice in one tap, hours apart: a note is a note, and nothing is written down
     await read(c, tellCmd(1791614000));
     await read(c, tellCmd(1791614000 + 3 * 3600));
-    const quiet = W.cardParse.log((await read(c, 'b018000000')).data, true, true);
+    const quiet = W.cardParse.log((await read(c, 'b018000000')).data);
     ok(quiet.tampers === 0 && quiet.taps === 0 && (await infoOf(c)).now === TIP.time, 'told the time twice in one tap, three hours apart, it marks nothing and moves nothing', JSON.stringify([quiet.tampers, quiet.taps]));
   }
 
@@ -186,7 +187,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     const before = await infoOf(c);
     ok(before.limit === 1000 && before.now === 0 && before.windowStart === 0, 'its day has no start', JSON.stringify([before.now, before.windowStart]));
     const dayBefore = W.cardParse.day(before);
-    ok(dayBefore.limited && dayBefore.onTrust === true && dayBefore.noTime === false && dayBefore.turns === 0 && dayBefore.left === 1000,
+    ok(dayBefore.limited && dayBefore.onTrust === true && !dayBefore.noTime && dayBefore.turns === 0 && dayBefore.left === 1000,
        'the wallet reads it as a day on trust: not a card that cannot sign, and no hour for the day to turn', JSON.stringify(dayBefore));
     await read(c, headerCmd(TIP.hex));
     const anchored = await infoOf(c);
@@ -591,10 +592,10 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     const c = newCard(H, undefined, { format: 4, floorBits: CHEAP });
     await HW.cardSetUp(c, { pin: '1234', recoverable: true });
     const setup = c.sent.map((a) => a.slice(0, 6));
-    ok(!H.phone.asks.some((a) => a.action === 'cardTime'), 'a card of 1.15 is not told a signed time: the page never asks the phone to sign one');
-    ok(c.state.now === 0 && c.state.record.timeKey === '00'.repeat(65) && !!c.state.owner,
-       'set up with no header kept: it has no clock, and its record has no time key (zeros where one was), and an owner', setup.join(' '));
-    // the SET_CARD the phone sent carried zeros where the time key was (a 1.14 phone sent the key)
+    ok(!H.phone.asks.some((a) => a.action === 'cardTime'), 'a card is not told a signed time: the page never asks the phone to sign one');
+    ok(c.state.now === 0 && !!c.state.owner,
+       'set up with no header kept: it has no clock, and an owner', setup.join(' '));
+    // the SET_CARD the phone sent carried zeros where 1.x cards kept a time key
     const setCard = c.sent.filter((a) => a.slice(0, 6) === 'b03200')[0] || '';
     ok(setCard.length > 0 && /^b0320000[0-9a-f]{2}[0-9a-f]{2}[0-9a-f]{66}0{130}[0-9a-f]{2}/.test(setCard) && setCard.substr(10 + 2 + 66, 130) === '0'.repeat(130),
        'the record the phone wrote to it holds 65 zeros where a time key would be', setCard.slice(0, 40) + '…');
@@ -607,7 +608,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
        'a tap with no header kept: GET_INFO, then TELL_TIME, and no SET_HEADER', insOf(c).join(' '));
     ok(count(c, '36') === 0 && count(c, '35') === 0 && c.state.told === 1790000000 && c.state.now === 0,
        'the phone’s own clock is the time told (whole seconds), and the card’s clock has not moved', String(c.state.told));
-    ok(seen.clock && seen.clock.told === true && seen.clock.sent === false && seen.info.headers && seen.day.noTime === false, 'card.clock says what was done');
+    ok(seen.clock && seen.clock.told === true && seen.clock.sent === false && seen.info.headers, 'card.clock says what was done');
 
     // now a header is kept, newer than the card's clock
     H.window.Date.now = real;
@@ -669,19 +670,6 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       brief.leaveBefore('36', 1);
       ok((await why(HW.cardLook(brief))) === 'gone', 'a card that leaves as the header is sent has gone: the tap fails as it does for any command');
     }
-    // 1.14 is as it was: told the time under a signature, before GET_INFO, and no header
-    {
-      const old = newCard(H, undefined, { format: 4, floorBits: CHEAP, software: 14 });
-      await HW.cardSetUp(old, { pin: '1234', recoverable: true });
-      ok(old.state.record.timeKey === HW.cardTimeKey, 'a card of 1.14 is set up with the interim time key in its record, as ever');
-      old.tap(); old.sent.length = 0;
-      const readOld = await HW.cardLook(old);
-      ok(insOf(old).slice(0, 3).join(' ') === '35 01 10' && count(old, '36') === 0 && count(old, '37') === 0 && readOld.info.version === '1.14' && !readOld.info.headers
-         && readOld.info.now > 1700000000,
-         'a card of 1.14 is told the time as it was: signed, before it says what it is; no header, no note', insOf(old).join(' '));
-      ok(H.phone.asks.some((a) => a.action === 'cardTime'), 'and the page asked the phone to sign it');
-    }
-
     // a tap does not wait for the fetch
     {
       H.window.console.log = log; H.window.console.warn = warn;
@@ -785,7 +773,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
   {
     // an empty card told its new mint, with the owner's proof: the record it is sent has zeros where a time key was (the phone's rules for what it will
     // sign allow that), and the card keeps the clock and the hash of the last block it had, and lets the ratchet go (the hardest difficulty it has taken is
-    // forgotten, the next block sets it afresh); a card before 1.15 that was sent a different time key lost its clock instead
+    // forgotten, the next block sets it afresh)
     const M = await funded({ second: true }, 0);
     const c = newCard(M, undefined, { format: 4, floorBits: CHEAP });
     await M.W.cardSetUp(c, { pin: '1234', recoverable: true });
@@ -799,7 +787,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     c.tap();
     c.sent.length = 0;
     const moved = await M.W.cardRepoint(c);
-    // the command’s data is the owner’s proof (its length, then it) and then the record: unit (1), refund key (33), the time key's 65 bytes, the mint
+    // the command’s data is the owner’s proof (its length, then it) and then the record: unit (1), refund key (33), 65 bytes not read, the mint
     const setCard = c.sent.filter((a) => a.slice(0, 4) === 'b032')[0] || '';
     const data = setCard.slice(10), proofLen = parseInt(data.substr(0, 2), 16), record = data.slice(2 + proofLen * 2);
     ok(moved.record.mint === MINT2 && c.state.record.mint === MINT2 && record.substr(34 * 2, 130) === '0'.repeat(130) && parseInt(record.substr(99 * 2, 2), 16) === MINT2.length,
@@ -810,47 +798,44 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
        'but the new record lets the ratchet go: the hardest difficulty it had taken is nothing, as the record says', String(c.state.hardest));
   }
 
-  /* ---- 4: what a card of 1.15 gives of its record, its log and its receipts -------------------------------------------------------- */
+  /* ---- 4: what a card gives of its record, its log and its receipts -------------------------------------------------------------- */
   {
-    // the layouts, by hand: the record, with the clock's proof where the time key was
-    const rec = '04' + '01' + '00' + '00000000' + '02' + '11'.repeat(32) + 'f01e0217' + TIP.hash + '00'.repeat(29) + '0e' + Buffer.from('https://m.test', 'latin1').toString('hex') + '000000';
-    const info15 = { headers: true };
-    const parsed = W.cardParse.record(rec, info15);
-    ok(parsed.headerBits === 'f01e0217' && parsed.headerHash === TIP.hash && parsed.timeKey === '' && parsed.mint === 'https://m.test',
-       'the record of a card of 1.15 is read with its difficulty and its last hash where the time key was', JSON.stringify([parsed.headerBits, parsed.headerHash.slice(0, 12)]));
-    const old = W.cardParse.record(rec, { headers: false });
-    ok(old.timeKey.length === 130 && old.headerBits === '' && old.headerHash === '', 'and the same bytes are a time key to a card before it, which knows no better');
-    ok(W.cardParse.record(rec).timeKey.length === 130, 'and with no word of the card’s software the old layout is read, as it always was');
-    const zeros = W.cardParse.record(rec.replace('f01e0217' + TIP.hash + '00'.repeat(29), '00'.repeat(65)), info15);
-    ok(zeros.headerBits === '' && zeros.headerHash === '', 'a card that has taken no header says zeros, which read as none');
+    // the layouts, by hand: the record, with the clock's proof after the refund key and then the rollover's three bytes (D20)
+    const rec = '04' + '01' + '00' + '00000000' + '02' + '11'.repeat(32) + 'f01e0217' + TIP.hash + '03' + '05' + '01' + '00'.repeat(26) + '0e' + Buffer.from('https://m.test', 'latin1').toString('hex') + '000000';
+    const parsed = W.cardParse.record(rec);
+    ok(parsed.headerBits === 'f01e0217' && parsed.headerHash === TIP.hash && parsed.mint === 'https://m.test',
+       'the record is read with its difficulty and its last hash after the refund key', JSON.stringify([parsed.headerBits, parsed.headerHash.slice(0, 12)]));
+    ok(parsed.rolls === 3 && parsed.budget === 5 && parsed.armed === true, 'and bytes 76 to 78: three rolls of a budget of five, and the allowance armed', JSON.stringify([parsed.rolls, parsed.budget, parsed.armed]));
+    const zeros = W.cardParse.record(rec.replace('f01e0217' + TIP.hash + '03' + '05' + '01' + '00'.repeat(26), '00'.repeat(65)));
+    ok(zeros.headerBits === '' && zeros.headerHash === '' && zeros.rolls === 0 && zeros.budget === 7 && zeros.armed === false,
+       'a card that has taken no header says zeros, which read as none, and a budget of 0 is the default, 7');
+    let short = false;
+    try { W.cardParse.record(rec.slice(0, -6)); } catch (e) { short = true; }
+    ok(short, 'a record with no design after the mint is no 2.0 record');
     // the log: twenty bytes an entry
     const head = '00000003' + '00000064' + '00000001' + '00000000';
     const entry = (time, sats, pieces, refused, flags, loads, loaded, told) => u32(time) + u32(sats) + ('0' + pieces.toString(16)).slice(-2) + ('0' + refused.toString(16)).slice(-2)
       + ('0' + flags.toString(16)).slice(-2) + ('0' + loads.toString(16)).slice(-2) + u32(loaded) + u32(told);
     const logHex = head + entry(1791614069, 100, 3, 0, 2, 2, 50, 1791614100) + entry(1791614069, 0, 0, 1, 1, 0, 0, 0) + entry(0, 0, 0, 0, 4, 0, 0, 0);
-    const log = W.cardParse.log(logHex, true, true);
+    const log = W.cardParse.log(logHex);
     ok(log.taps === 3 && log.sats === 100 && log.refused === 1 && log.last.length === 3, 'a log of three entries of twenty bytes is read', JSON.stringify([log.taps, log.last.length]));
     ok(log.last[0].time === 1791614069 && log.last[0].told === 1791614100 && log.last[0].sats === 100 && log.last[0].pieces === 3 && log.last[0].waited === true && log.last[0].loads === 2 && log.last[0].loaded === 50,
        'each with the card’s clock, the time its terminal told it, what was signed for and what was put on', JSON.stringify(log.last[0]));
     ok(log.last[1].tamper === true && log.last[1].told === 0 && log.last[1].refused === 1, 'a refusal run is marked, and no time was told');
-    ok(log.last[2].clock === false, 'the flag that once meant a clock moved twice is not read: a card of 1.15 never sets it');
+    ok(log.last[2].clock === false, 'the flag that once meant a clock moved twice is not read: a card never sets it');
     let rejected = false;
-    try { W.cardParse.log(logHex, true, false); } catch (e) { rejected = true; }
-    ok(rejected, 'twenty-byte entries are not read as sixteen (a log of the wrong shape is no log)');
-    const sixteen = W.cardParse.log(head + '6b49d26e' + '00000064' + '01' + '00' + '05' + '00' + '00000000', true, false);
-    ok(sixteen.last[0].told === 0 && sixteen.last[0].time === 0x6b49d26e && sixteen.last[0].clock === true, 'and sixteen-byte entries (1.14 and before) are read as ever, with the flag, and told nothing');
+    try { W.cardParse.log(head + '6b49d26e' + '00000064' + '01' + '00' + '05' + '00' + '00000000'); } catch (e) { rejected = true; }
+    ok(rejected, 'sixteen-byte entries (1.x) are no log of this card');
     // the receipts: seventy-seven bytes
     const receipt = (time, told, sats, hash, out) => u32(time) + u32(told) + u32(sats) + hash + out;
     const rHex = '00000002' + receipt(1791614069, 1791614100, 700, 'ab'.repeat(32), '02' + 'cd'.repeat(32)) + receipt(1791600000, 0, 20, 'ef'.repeat(32), '03' + '12'.repeat(32));
-    const receipts = W.cardParse.receipts(rHex, true);
+    const receipts = W.cardParse.receipts(rHex);
     ok(receipts.count === 2 && receipts.list.length === 2 && receipts.list[0].time === 1791614069 && receipts.list[0].told === 1791614100 && receipts.list[0].sats === 700
        && receipts.list[0].hash === 'ab'.repeat(32) && receipts.list[0].out === '02' + 'cd'.repeat(32) && receipts.list[1].told === 0 && receipts.list[1].sats === 20,
        'receipts of seventy-seven bytes are read: the card’s clock, the time told, the sats, the hash and the output', JSON.stringify(receipts.list[0]).slice(0, 120));
-    const rOld = W.cardParse.receipts('00000001' + u32(1791614069) + u32(700) + 'ab'.repeat(32) + '02' + 'cd'.repeat(32), false);
-    ok(rOld.list[0].time === 1791614069 && rOld.list[0].sats === 700 && rOld.list[0].told === undefined && rOld.list[0].hash === 'ab'.repeat(32), 'and receipts of seventy-three (1.14 and before) as ever, with no time told');
     let bad = false;
-    try { W.cardParse.receipts(rHex, false); } catch (e) { bad = true; }
-    ok(bad, 'seventy-seven-byte receipts are not read as seventy-three');
+    try { W.cardParse.receipts('00000001' + u32(1791614069) + u32(700) + 'ab'.repeat(32) + '02' + 'cd'.repeat(32)); } catch (e) { bad = true; }
+    ok(bad, 'receipts of seventy-three bytes (1.x) are no receipts of this card');
     // and from the card itself: a payment, then what its owner reads
     const Hh = await funded({}, 6000);
     const Rr = await funded({ sharedMint: Hh.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 0);
@@ -877,7 +862,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
        'and the receipt with both', JSON.stringify(own.receipts && own.receipts.list[0]).slice(0, 140));
     const saved = Hh.W.cardReceipts(card.key);
     ok(saved.length === 1 && saved[0].told === 1790000000, 'and keeps it, the told time too');
-    ok(own.log.last.every((x) => x.clock === false) && own.log.last.every((x) => !x.tamper), 'a card of 1.15 marks nothing as a false time, and the till’s clock being days out moved nothing');
+    ok(own.log.last.every((x) => x.clock === false) && own.log.last.every((x) => !x.tamper), 'a card marks nothing as a false time, and the till’s clock being days out moved nothing');
     // the day the card counts is by its block clock, and the till cannot move it
     ok(card.state.now === blockAt, 'the till’s false clock did not move the card’s: its day is where the block put it', String(card.state.now));
     await settle();
@@ -899,7 +884,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     await until('the card to be read', () => !!holder.state.fc && holder.state.fc.hasRecord);
     let v = vals(holder);
     ok(holder.state.fc.headers === true && v.fcBlockShown === true && v.fcBlockLine === 'No block yet',
-       'a card of 1.15 that has been shown no block says so, under its title', v.fcBlockLine);
+       'a card that has been shown no block says so, under its title', v.fcBlockLine);
     // a block, shown
     const h = mineHeader(t0 - 90, CHEAP);
     tipIs(H, h);
@@ -924,16 +909,6 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     v = vals(holder);
     ok(holder.state.fc.hasRecord === false && v.fcBlockShown === false, 'a card that is new (no PIN, no record) has no limits and no block line', v.fcBlockLine);
     ok(holder.state.fc.clock.short === '1fa7ca83' && holder.state.fc.clock.time === TIP.time, 'the real tip reads as 1fa7ca83 and its time', holder.state.fc.clock.short);
-    // a card of 1.14 has no such line
-    const old = newCard(H, undefined, { format: 4, software: 14, floorBits: CHEAP });
-    await H.W.cardSetUp(old, { pin: '1234', recoverable: true });
-    old.tap();
-    H.nfc = old;
-    holder.state.fc = null;
-    holder.fcRead(true);
-    await until('the 1.14 card to be read', () => holder.state.fc && holder.state.fc.hasRecord);
-    v = vals(holder);
-    ok(holder.state.fc.headers === false && v.fcBlockShown === false && v.fcBlockLine === '', 'a card of 1.14 has no block line: its clock is a signed time');
     // a limit set on a card with no block yet: the day begins with the first block (a phone that has none kept: H has one by now)
     const Z = await funded({ sharedMint: H.mint }, 6000);
     const zed = appOn(Z);
@@ -989,7 +964,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     owner.goFlashcard();
     await until('the owner to read the card', () => !!owner.state.fc && !!owner.state.fc.log && !!owner.state.fc.receipts);
     const notes = vals(owner).fcNotes.map((x) => x.text).join(' | ');
-    ok(!/false time|TAMPER/.test(notes), 'the card’s screen has no talk of a false time for a card of 1.15', notes);
+    ok(!/false time|TAMPER/.test(notes), 'the card’s screen has no talk of a false time', notes);
     owner.fcLogCard();
     const lc = uiCard(owner);
     const paidLine = lc && lc.reason.split('\n').filter((l) => /signed|\$|sats|piece/.test(l) && /\(block /.test(l))[0];
@@ -1019,8 +994,216 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     owner.fcLogCard();
     const ahead = uiCard(owner);
     ok(owner.state.fc.clockAhead === 0 && !/false time|TAMPER/.test(aheadNotes) && ahead && !/ahead of this phone|told this card the time twice/.test(ahead.reason),
-       'a card of 1.15 five hours ahead of the newest block this phone has is no accusation on any screen', aheadNotes.slice(0, 80));
+       'a card five hours ahead of the newest block this phone has is no accusation on any screen', aheadNotes.slice(0, 80));
     if (ahead) ahead.press('CLOSE');
+    await settle();
+  }
+
+  /* ---- 6: the clock walked a day at a time (D20) ------------------------------------------------------------------------------------ */
+  {
+    const DAY = 86400;
+    const H6 = await funded({}, 9000);
+    const R6 = await funded({ sharedMint: H6.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 0);
+    const realNow = H6.window.Date.now.bind(H6.window.Date);
+    const t0 = Math.floor(Date.now() / 1000) - 10 * DAY;
+    const heads = {};
+    const hdr = (t) => heads[t] || (heads[t] = mineHeader(t, CHEAP));
+    // the owner's phone keeps a header only within three hours of its own clock, so its clock is set to each block's time
+    const ownerAt = async (t) => { H6.window.Date.now = () => (t + 60) * 1000; tipIs(H6, hdr(t)); await H6.W.headerRefresh({ force: true }); };
+    // a till (or anybody) shows the card a block: SET_HEADER, no proof
+    const walk = async (card, t) => { card.tap(); await card.send(SEL); return card.send(headerCmd(hdr(t))); };
+    const ownerSet = (card) => card.sent.filter((a) => /^b043/.test(a));
+
+    // the anchor: SET_OWNER carries the owner's newest block, and the card's clock starts there
+    await ownerAt(t0);
+    const card = newCard(H6, undefined, { floorBits: CHEAP });
+    const made = await H6.W.cardSetUp(card, { pin: '1234', recoverable: true });
+    ok(card.state.now === t0 && made.info.now === t0 && card.state.rolls === 0 && ownerSet(card).length === 1 && parseInt(ownerSet(card)[0].substr(8, 2), 16) === 145,
+       'set up by a phone that has a block kept, the owner\u2019s key goes with that block as its anchor (145 bytes): the card\u2019s clock starts there', JSON.stringify([card.state.now - t0, ownerSet(card).map((x) => x.length)]));
+    // a card that will not take the block as its anchor (6A93: too little work for its floor) is given its owner alone, and has no clock yet
+    const strict = newCard(H6);
+    await H6.W.cardSetUp(strict, { pin: '1234', recoverable: true });
+    ok(!!strict.state.owner && strict.state.now === 0 && ownerSet(strict).length === 2 && ownerSet(strict)[1].length === 10 + 130,
+       'a card that refuses the anchor is given its owner alone, and its clock waits for its first block', ownerSet(strict).map((x) => (x.length - 10) / 2).join(','));
+    // and the set-up says which: anchored, refused, or no block kept on this phone at all (a phone that has fetched none)
+    {
+      const strictMade = await H6.W.cardLook(strict, { mine: true });
+      const app6 = appOn(H6);
+      ok(made.anchor === 'anchored' && app6.fcSetUpSaid(made) === 'The card is set up.', 'an anchored set-up says only that the card is set up', made.anchor);
+      const refusedAt = newCard(H6);
+      const refusedMade = await H6.W.cardSetUp(refusedAt, { pin: '1234' });
+      ok(refusedMade.anchor === 'refused' && /would not take this phone\u2019s newest Bitcoin block/.test(app6.fcSetUpSaid(refusedMade)),
+         'a set-up the card refused the anchor of says so on the screen', app6.fcSetUpSaid(refusedMade));
+      const N6 = await funded({ sharedMint: H6.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
+      const bare = newCard(N6, undefined, { floorBits: CHEAP });
+      const bareMade = await N6.W.cardSetUp(bare, { pin: '1234' });
+      ok(bareMade.anchor === 'no-header' && ownerSet(bare).length === 1 && ownerSet(bare)[0].length === 10 + 130 && /had no Bitcoin block/.test(appOn(N6).fcSetUpSaid(bareMade)),
+         'a phone with no block kept gives the owner alone (65 bytes) and says the clock starts at the next tap online', appOn(N6).fcSetUpSaid(bareMade));
+      ok(strictMade.info.owner === true, '(the refused card is its owner\u2019s all the same)');
+    }
+
+    // a daily limit with a rollover budget of 2: the thirteenth byte of SET_LIMIT
+    card.tap();
+    await H6.W.cardAdd(card, { sats: 4000, owner: true });
+    card.tap();
+    const lim = await H6.W.cardSetLimit(card, { sats: 500, budget: 2 });
+    ok(card.state.budget === 2 && lim.record.budget === 2 && lim.info.limit === 500 && lim.info.windowStart === t0, 'a daily limit of 500 with a rollover budget of 2', JSON.stringify([lim.record.budget, lim.info.windowStart - t0]));
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 500, pin: '1234' })).sats === 500, 'the first day pays its 500');
+    // a till walks the card's clock a day at a time with real headers: the window rolls the budget's times, and then stays
+    const days = [];
+    let refusedDay = null;
+    for (let d = 1; d <= 3; d++) {
+      await walk(card, t0 + d * DAY + d);
+      card.tap();
+      days.push(await R6.W.cardPay(card, { sats: 500, pin: '1234' }).then((x) => 'paid ' + x.sats + ', rolls ' + card.state.rolls, (e) => { refusedDay = e; return (e && e.card) + ', rolls ' + card.state.rolls; }));
+    }
+    ok(days.join(' | ') === 'paid 500, rolls 1 | paid 500, rolls 2 | limit, rolls 2', 'a terminal that walks the clock gets the budget\u2019s days and no more: the third day is refused', days.join(' | '));
+    card.tap();
+    const stuck = await R6.W.cardLook(card);
+    ok(stuck.day.stuck === true && stuck.day.left === 0 && stuck.record.rolls === 2 && stuck.record.budget === 2, 'and the till reads the day as stuck where it is', JSON.stringify(stuck.day));
+    /* What the till says: the card's day does not turn by itself, so neither "in a day" nor a time (the review's "can spend
+     * 10,000 in a day", untrue of a card that has 100 left until its owner's tap). */
+    {
+      const till = appOn(R6);
+      const words = refusedDay ? till.fcLimitRefusal(refusedDay) : '';
+      ok(!!refusedDay && refusedDay.card === 'limit' && refusedDay.stuck === true && refusedDay.turns === 0 && refusedDay.left === 0,
+         'the third day\u2019s refusal says the card\u2019s budget is spent (`stuck`), with nothing left and no time', JSON.stringify(refusedDay && [refusedDay.card, refusedDay.stuck, refusedDay.left, refusedDay.turns]));
+      ok(words === 'The card has nothing left to spend. Its daily limit does not renew until its owner\u2019s phone taps it with a connection.',
+         'and the till says so in words, with no day and no time', words);
+      ok(till.fcLimitRefusal({ left: 100, limit: 10000, turns: 0, stuck: true }) === 'The card has \u20bf100 left, and this payment is more than that. Its daily limit does not renew until its owner\u2019s phone taps it with a connection.',
+         'a card with 100 left of a 10,000 limit is said to have 100 left, with no day and no time', till.fcLimitRefusal({ left: 100, limit: 10000, turns: 0, stuck: true }));
+      // the card's own screen on the till's phone (not its owner): what is left, and when it renews, and no "new day"
+      till.state.screen = 'flashcard';
+      till.fcShow(stuck);
+      const v = vals(till);
+      ok(v.fcDayTurns === 'RENEWS WHEN ITS OWNER\u2019S PHONE TAPS IT ONLINE' && /^LEFT /.test(v.fcDayLeft) && !/TODAY/.test(v.fcDayLeft) && !(v.fcNotes || []).some((n) => /renew/i.test(n.text)),
+         'the card\u2019s screen on another phone says it renews at its owner\u2019s tap, and names no new day', JSON.stringify([v.fcDayLeft, v.fcDayTurns]));
+    }
+    /* Its owner's phone OFFLINE: no REFRESH (no route), and the screen says the budget is spent and what renews it. */
+    {
+      H6.W._privacy({ tor: 'connecting', progress: 20, everUp: true, network: 'wifi' });
+      card.tap();
+      card.sent.length = 0;
+      const away = await H6.W.cardLook(card, { mine: true });
+      ok(away.mine === true && away.day.stuck === true && !away.refreshed && !away.refreshMissed && !card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 2,
+         'its owner\u2019s phone with no route sends no REFRESH, and reads the budget as spent', JSON.stringify([away.mine, away.day.stuck, away.refreshMissed]));
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(away);
+      ok((vals(own).fcNotes || []).some((n) => n.text === 'This card\u2019s daily limit has stopped renewing. It renews again once this phone is online and taps it.'),
+         'and its screen says the daily limit has stopped renewing until this phone is online and taps it', JSON.stringify((vals(own).fcNotes || []).map((n) => n.text)));
+      H6.W._privacy({ tor: 'up', progress: 100, everUp: true, network: 'wifi' });
+    }
+    /* Online with no block kept (a phone with the same words that has fetched none): no REFRESH, and the screen says why. */
+    {
+      const O6 = await funded({ sharedMint: H6.mint }, 0);
+      card.tap();
+      card.sent.length = 0;
+      const none = await O6.W.cardLook(card, { mine: true });
+      const own = appOn(O6);
+      own.state.screen = 'flashcard';
+      own.fcShow(none);
+      ok(none.mine === true && none.refreshMissed === 'no-header' && !card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => /no Bitcoin block to renew it with yet\. Press here to try again\./.test(n.text)),
+         'its owner\u2019s phone online with no block kept sends nothing, and says it has no block to renew it with', JSON.stringify([none.refreshMissed, (vals(own).fcNotes || []).map((n) => n.text)]));
+    }
+    /* REFRESH refused by the card: the tap goes on, nothing is changed, and the screen says the card would not take the block. */
+    {
+      await ownerAt(t0 + 3 * DAY + 20);
+      card.tap();
+      card.sent.length = 0;
+      const refusing = Object.assign(Object.create(card), { send: (a) => (/^b053/.test(a) ? Promise.resolve('6a93') : card.send(a)) });
+      const no = await H6.W.cardLook(refusing, { mine: true });
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(no);
+      ok(no.mine === true && no.refreshMissed === 'refused' && !no.refreshed && no.day.stuck === true && card.state.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => /would not take this phone\u2019s newest Bitcoin block\. Press here to try again\./.test(n.text)),
+         'a REFRESH the card refuses fails nothing else of the read, and the screen says the card would not take the block', JSON.stringify([no.refreshMissed, no.day.stuck]));
+    }
+    // the owner's phone, online with the newest block, refreshes it
+    await ownerAt(t0 + 3 * DAY + 30);
+    card.tap();
+    card.sent.length = 0;
+    const fresh = await H6.W.cardLook(card, { mine: true });
+    ok(fresh.refreshed === true && card.state.rolls === 0 && card.sent.some((a) => /^b0530000/.test(a)) && fresh.day.stuck !== true,
+       'its owner\u2019s phone, online, sends REFRESH with its newest block (the owner\u2019s proof over CashuCard/refresh): the budget is full again', JSON.stringify([fresh.refreshed, card.state.rolls]));
+    /* The read refreshes before the screen is drawn, so the owner would never see the budget spent: the read keeps what it undid,
+     * and the screen says this tap renewed it. */
+    {
+      const own = appOn(H6);
+      own.state.screen = 'flashcard';
+      own.fcShow(fresh);
+      ok(!!fresh.renewed && fresh.renewed.stuck === true && fresh.renewed.rolls === 2
+         && (vals(own).fcNotes || []).some((n) => n.text === 'This card\u2019s daily limit had stopped renewing. This tap renewed it.'),
+         'and the read keeps what the refresh undid, which its owner\u2019s screen says', JSON.stringify(fresh.renewed));
+    }
+    card.tap();
+    card.sent.length = 0;
+    const calm = await H6.W.cardLook(card, { mine: true });
+    ok(!calm.refreshed && !card.sent.some((a) => /^b053/.test(a)), 'and a card whose budget is full is not refreshed again at the next tap');
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 500, pin: '1234' })).sats === 500 && card.state.rolls === 1, 'the day rolls again: 500 is paid, one roll of the budget');
+
+    /* A LOCKED card is refreshed too: the card takes REFRESH locked, and the owner's phone sends it although a locked card is
+     * not asked for the grant. Another phone's proof is refused (6A91) at no cost, and that phone says nothing of it. */
+    {
+      const rollsBefore = card.state.rolls;
+      card.state.locked = true;
+      await ownerAt(t0 + 3 * DAY + 40);
+      tipIs(R6, hdr(t0 + 3 * DAY + 40));
+      R6.window.Date.now = H6.window.Date.now;
+      await R6.W.headerRefresh({ force: true });
+      card.tap();
+      card.sent.length = 0;
+      const other = await R6.W.cardLook(card, { mine: true });
+      ok(rollsBefore === 1 && card.sent.some((a) => /^b053/.test(a)) && card.state.rolls === 1 && !other.refreshed && !other.refreshMissed && other.mine !== true,
+         'a locked card read by a phone that is not its owner: its proof is refused, nothing changes, and nothing is said', JSON.stringify([rollsBefore, card.state.rolls, other.refreshMissed]));
+      card.tap();
+      card.sent.length = 0;
+      const locked = await H6.W.cardLook(card, { mine: true });
+      ok(locked.info.locked === true && locked.refreshed === true && card.state.rolls === 0 && card.sent.some((a) => /^b0530000/.test(a)) && !card.sent.some((a) => /^b045/.test(a)),
+         'a locked card read by its owner\u2019s phone online is refreshed, with no grant asked', JSON.stringify([locked.refreshed, card.state.rolls]));
+      card.state.locked = false;
+      R6.window.Date.now = realNow;
+    }
+
+    /* A budget spent before the day is over (`cardDayOf`): the day will not turn at its end, so no screen names a time it turns. */
+    {
+      const day = (o) => H6.W.cardParse.day(Object.assign({ limit: 500, now: 1000 + DAY, windowStart: 1000, spentToday: 400, rolls: 0, budget: 2 }, o));
+      const notOver = day({ now: 1000 + DAY - 1, rolls: 2 });
+      ok(notOver.stuck === true && notOver.turns === 0 && notOver.left === 100,
+         'a budget spent before the day is over: the day will not turn at its end, so it has no time, and 100 is all it pays', JSON.stringify(notOver));
+      const turns = day({ now: 1000 + DAY - 1, rolls: 1 });
+      ok(!turns.stuck && turns.turns === 1000 + DAY && turns.left === 100, 'with a roll left it turns at its end as before', JSON.stringify(turns));
+      const over = day({ rolls: 2 });
+      ok(over.stuck === true && over.turns === 0 && over.left === 100, 'and over, with none left, it stays where it is', JSON.stringify(over));
+    }
+
+    // the no-PIN allowance begins again with the day only where a PIN or the owner's proof has armed it (D20)
+    card.tap();
+    await H6.W.cardSetLimit(card, { sats: 5000 });
+    card.tap();
+    await H6.W.cardSetLimit(card, { noPin: 300, budget: 30 });
+    ok(card.state.noPinLimit === 300 && card.state.budget === 30 && card.state.armed === true && card.state.record.limit === 5000,
+       'the owner sets a daily limit of 5,000, then an allowance of 300 and a budget of 30; the owner\u2019s proof arms the allowance');
+    const begun = card.state.windowStart;
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 200 })).sats === 200 && card.state.noPinSpent === 200, 'a till is paid 200 with no PIN, within the allowance');
+    await walk(card, begun + DAY + 100);
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 200 })).sats === 200 && card.state.armed === false && card.state.noPinSpent === 200,
+       'a day later the allowance begins again, armed: 200 more with no PIN, and the roll spends the arming');
+    await walk(card, begun + 2 * DAY + 200);
+    card.tap();
+    const unarmed = await R6.W.cardPay(card, { sats: 200 }).then(() => null, (e) => e);
+    ok(unarmed && unarmed.card === 'pin-needed' && card.state.noPinSpent === 200, 'another day on, nothing has armed it: the 200 counted still stands, and the PIN is wanted for 200 more', unarmed && unarmed.card);
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 200, pin: '1234' })).sats === 200 && card.state.noPinSpent === 0, 'with the PIN it pays, which arms the allowance and begins it again with the day');
+    card.tap();
+    ok((await R6.W.cardPay(card, { sats: 100 })).sats === 100 && card.state.noPinSpent === 100, 'and the next payment with no PIN counts from nothing');
+    H6.window.Date.now = realNow;
     await settle();
   }
 

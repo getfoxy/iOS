@@ -29,9 +29,8 @@ function later(c, ms) {
   const R = await funded({ sharedMint: H.mint, words: OTHER_WORDS }, 0);
   const card = newCard(H);
   await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
-  // loaded as a card is, a drawer of 2,000: 1,000 is paid with its 512 and two 256s, and 24 of change
-  card.tap();
-  await H.W.cardAdd(card, { sats: 2000, pin: '1234' });
+  // 2,000 cut in the powers of two it is made of (1024 512 256 128 64 16): 1,000 is paid with the 1024, and 24 of change
+  await binaryLoad(H, card, 2000);
   card.tap();
   const paid = await R.W.cardPay(card, { sats: 1000, pin: '1234' });
   ok(paid.sats === 1000 && paid.change && paid.change.sats === 24 && paid.change.written === false && card.balance() === 976,

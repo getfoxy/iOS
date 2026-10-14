@@ -50,7 +50,7 @@ for (const p of V.pieces) {
    * first key go on spending beside the refund key, and the bundled library
    * follows that, while an older mint takes the refund key only. The wallet
    * leans on neither: it treats a piece near its date as one to renew, and
-   * refuses to be paid with it (docs/FOXY-CARD-SPEC.md in https://github.com/getfoxy/card, section 6). So only
+   * refuses to be paid with it (docs/FOXY-CARD-SPEC.md in https://github.com/lnflash/cashu-javacard, section 6). So only
    * the case that is the same everywhere is held to here. */
   const past = p.date !== 0 && p.date * 1000 < Date.now();
   if (!past) ok(spendable === true, 'date ' + p.date + ': the library says the card may spend it', String(spendable));
@@ -83,8 +83,9 @@ bad('a date the card cannot hold is refused', () => W.cardSecret(V.pieces[0].non
 bad('half a date is refused', () => W.cardSecret(V.pieces[0].nonce, V.cardKey, 1.5, V.refundKey));
 
 /* ---- a card that signs once for a payment (format 4) -----------------------
- * tests/fixtures/flashcard-vectors-4.json is the same, written by the applet
- * that signs once for a whole payment. Every piece's secret ends with the
+ * tests/fixtures/flashcard-vectors-4.json is the same for the Cashu card
+ * protocol 2.0, which signs once for a whole payment: spec/vectors/secret.json
+ * of https://github.com/lnflash/cashu-javacard, copied as it is. Every piece's secret ends with the
  * SIG_ALL flag, and the signature recorded for each is the card's for a
  * payment of that one piece and no outputs: over the piece's secret and its
  * C, which is the whole of NUT-11's message for such a swap. */

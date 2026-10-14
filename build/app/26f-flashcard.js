@@ -21,7 +21,7 @@
    *                                      a moment for it (`cardTapped`);
    *   SEND > FLASHCARD                   money onto any card held to this phone
    *                                      (`fcSendCard`);
-   *   RESET (software 1.17)              the first of the row of round buttons
+   *   RESET                              the first of the row of round buttons
    *                                      under the holder's card (`fcReset`).
    *
    * The daily limit is the most the card signs for in one day. The card keeps
@@ -31,17 +31,15 @@
    * words the card was set up with, the owner, can set, change or remove it,
    * change the card's PIN, or add funds without the PIN.
    *
-   * A card of software 1.15 and on takes its clock from the newest Bitcoin
-   * block header it has been shown (build/wallet/08b-block-headers.js): no one
-   * can show it a block from a time that has not come, so no terminal can walk
-   * its day forward, and a screen of ours says the block its clock reads
-   * ("Block #970809", under the title). The phone's own time is only a note the card
-   * writes in its log and receipts, and the log shows it beside the block's.
-   * An older card is told the time by the phone that taps it, under a signature
-   * whose key is built into the app (build/wallet/08a-flashcard.js,
-   * CARD_TIME_KEY): there the limit bounds an honest receiver and the holder's
-   * own overspending, and nothing is said anywhere on these screens about
-   * stopping an attacker.
+   * The card takes its clock from the newest Bitcoin block header it has been
+   * shown (build/wallet/08b-block-headers.js): no one can show it a block from
+   * a time that has not come, and a screen of ours says the block its clock
+   * reads ("Block #970809", under the title). A terminal can still bring it
+   * real headers, so the card rolls its day at most its rollover budget of
+   * times (7 unless its owner sets another) until its owner's phone, online,
+   * taps it again (the Cashu card protocol 2.0, D20). The phone's own time is
+   * only a note the card writes in its log and receipts, and the log shows it
+   * beside the block's.
    *
    * Three things here are not this app's to draw. The sheet that slides up
    * while the phone looks for a card is the phone's own, and one line of text
@@ -55,7 +53,7 @@
    * is the pad a person already knows; it is held in a variable for the length
    * of one flow, passed to the card, and never stored.
    *
-   * A card of software 1.16 and on need not have one. It is set up with none
+   * A card need not have one. It is set up with none
    * and asked for none (no pad: SET UP, then the tap), and a PIN can be added
    * to it later (ADD PIN, in CHANGE PIN's place). A card with a PIN has a third limit, the NO
    * PIN LIMIT: how much it signs for in a day without the PIN. At a till the
@@ -406,16 +404,14 @@
     /* A card made to wait by its own limit on one tap (08a-flashcard.js,
      * `cardWaitSigns`): how long is left, counted down as the card says. */
     if (p && p.step === 'waiting') {
-      // a card of software 1.12 waits a limit's worth for the change it makes, within the limit as well as over it
       if (p.making) return 'Keep holding.';
-      /* A card before 1.12 waits by what its pieces come to. A small payment made
-       * with a piece worth much more than the price is not over anybody's
-       * limit, and was being told it was: it is the piece that is. */
+      /* A payment that makes no change waits by what its pieces come to. A small payment made with a piece worth much more
+       * than the price is not over anybody's limit, and is not said to be: it is the piece that is. */
       if (p.want > 0 && p.sum >= 2 * p.want) return 'Paying from a larger piece.';
-      // a card of 1.13 slows a second payment signed in one time in the field, limit or no limit (08a-flashcard.js, `cardPaid`)
+      // the card slows a second payment signed in one time in the field, limit or no limit (08a-flashcard.js, `cardPaid`)
       if (p.second) return 'Keep holding.';
-      /* Over the limit: the first limit's worth over takes ten askings of the card (seven before software 1.17, `info.waitOver`),
-       * and each further limit's worth three or four (`info.waitMore`); said as the level it has come to, "x2" when the second begins, and so on. */
+      /* Over the limit: the first limit's worth over takes ten askings of the card (`info.waitOver`), and each further limit's
+       * worth four (`info.waitMore`); said as the level it has come to, "x2" when the second begins, and so on. */
       const over = Number(p.over) || this.fcWaitOver();
       const more = Number(p.more) || this.fcWaitMore();
       const polls = Math.round(Number(p.polls) || 0);
@@ -494,7 +490,7 @@
     });
   }
 
-  /* Whether the card on screen has no PIN (software 1.16 and on can be set up without one). */
+  /* Whether the card on screen has no PIN (a card can be set up without one). */
   fcHasNoPin() {
     const fc = this.state.fc;
     return !!(fc && fc.setUp && !fc.pinSet);
@@ -610,7 +606,9 @@
         chip: 'FLASHCARD › CARDS YOU LOADED' }),
       'empty': () => ({ tone: 'warn', title: 'NO MONEY ON THIS CARD',
         reason: 'It has not been set up, or nothing has been put on it.' }),
-      'not-a-card': () => ({ title: 'NOT A FOXY CARD', reason: said }),
+      // a 0.x or 1.x card, or anything else that does not answer the Cashu card protocol 2.x's applet: "This card needs an update."
+      // A card of a later protocol than this app speaks is the app's to update (`appUpdate`).
+      'not-a-card': () => ({ title: e.appUpdate ? 'UPDATE FOXY' : e.needsUpdate ? 'CARD NEEDS AN UPDATE' : 'NOT A FOXY CARD', reason: said }),
       'no-route': () => Object.assign({ tone: 'warn', title: opt.taken ? 'NOT PAID' : 'NO CONNECTION',
         reason: 'The mint could not be reached.' + safe }, again),
       /* A till, and the card's day has too little left for this payment: said
@@ -635,9 +633,7 @@
       'too-many': () => ({ tone: 'warn', title: 'TAKE IT IN PARTS',
         reason: (e.most > 0 ? 'This card can pay ' + this.fcSats(e.most) + ' at once. Its money is in more pieces than it signs for in one go.'
           : 'That is more pieces than the card signs for at once.') + safe }),
-      'old-card': () => ({ tone: 'warn', title: 'NOT ON THIS CARD',
-        reason: /limit on one tap/.test(said) ? 'This card’s software has no per tap limit. Its daily limit can still be set.' : said }),
-      // software 1.16: a card with no PIN has no limit for payments without one; a card that has a PIN cannot be given another
+      // a card with no PIN has no limit for payments without one; a card that has a PIN cannot be given another
       'no-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'has-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS A PIN', reason: said }),
       // a PIN is wanted where none was given (the card's word at a tap that was not a payment's)
@@ -648,9 +644,7 @@
       'no-owner': () => ({ tone: 'warn', title: 'THIS CARD HAS NO OWNER', reason: said }),
       'set-up': () => ({ tone: 'warn', title: 'THIS CARD HAS AN OWNER', reason: said }),
       'no-owner-key': () => ({ tone: 'warn', title: 'NO SEED PHRASE', reason: said }),
-      'wrong-signer': () => ({ title: 'NOT A FOXY CARD', reason: said }),
-      'no-time': () => ({ tone: 'warn', title: 'THE CARD HAS NO TIME', reason: said }),
-      'no-time-source': () => ({ tone: 'warn', title: 'NO TIME TO TELL THE CARD', reason: said }),
+      'weak-header': () => ({ tone: 'warn', title: 'THE CARD KEPT ITS CLOCK', reason: said }),
       'gone': () => Object.assign({ tone: 'warn', title: 'THE CARD LEFT TOO SOON',
         reason: 'Hold it still until the phone says to remove it.' + safe }, again),
       /* The card left part-way through signing: nothing moved, and what it did
@@ -687,7 +681,7 @@
       'misfit-kept': () => ({ tone: 'warn', title: 'KEPT FOR THE CARD', reason: said }),
       'locked': () => ({ tone: 'warn', title: 'THE CARD IS LOCKED',
         reason: opt.resetting ? said : 'Nothing more can be written to it. It can still pay.' }),
-      // RESET CARD (software 1.17): the wallet's own words, written for the person
+      // RESET CARD: the wallet's own words, written for the person
       'has-money': () => ({ tone: 'warn', title: 'MONEY ON THE CARD', reason: said }),
       'change-owed': () => Object.assign({ tone: 'warn', title: 'THE CARD IS OWED CHANGE', reason: said }, again),
       'unsettled': () => Object.assign({ tone: 'warn', title: 'MONEY ON ITS WAY', reason: said }, again),
@@ -745,6 +739,13 @@
   }
 
   fcLimitRefusal(e) {
+    /* A card whose rollover budget is spent (D20): its day does not turn by itself, so neither "in a day" nor a time is true.
+     * What it has left is all it pays until its owner's phone, online, taps it. */
+    if (e.stuck) {
+      return (e.left > 0 ? 'The card has ' + this.fcBoth(e.left) + ' left, and this payment is more than that.'
+        : 'The card has nothing left to spend.')
+        + ' Its daily limit does not renew until its owner\u2019s phone taps it with a connection.';
+    }
     if (e.turns > 0 && e.left < e.limit) {
       return 'The card can still spend ' + this.fcBoth(e.left) + ' today. Its day turns at ' + this.fcWhen(e.turns) + '.';
     }
@@ -921,7 +922,7 @@
 
   /* The CARD button: the sheet comes up and the card is tapped at once, with no PIN asked for first. A card
    * with no PIN, or one whose no PIN limit covers the payment, pays in this tap. Any other says so (the sheet
-   * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
+   * ends with "Enter the card\u2019s PIN"), and the PIN pad comes up for a
    * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
    * it with no route. */
   fcPayStart(sats, trusted, share) {
@@ -1628,7 +1629,7 @@
    * back (`change`, 08a-flashcard.js `cardOwnerChange`): fetched from the mint, and put on the card
    * in this tap when there is any, with the sheet saying so.
    *
-   * And it is the read that asks a card of software 1.20 for the mint's proofs of the pieces this phone
+   * And it is the read that asks a card for the mint's proofs of the pieces this phone
    * does not know to be real (`real`): they are checked once the card is let go (`fcReal`). */
   fcRead(open) {
     const W = this.fcW();
@@ -1664,8 +1665,8 @@
       key: card.key, balance: card.balance, count: (card.pieces || []).length,
       room: card.info.empty + card.info.spent,
       pin: card.info.pin, locked: !!card.info.locked, hasRecord: !!card.info.hasRecord,
-      /* software 1.16 and on: the PIN is optional. `setUp`: the card has its record (and, before 1.16, a PIN); `pinSet`: it has a PIN (a blocked one does);
-       * `noPinKnown`: its software can be without one and has the no PIN limit; `noPin`: that limit and what is left of it today (`known`, `set`, `limit`, `left`) */
+      /* The PIN is optional. `setUp`: the card has its record and its owner; `pinSet`: it has a PIN (a blocked one does);
+       * `noPinKnown`: it can be without one and has the no PIN limit (every 2.0 card); `noPin`: that limit and what is left of it today (`known`, `set`, `limit`, `left`) */
       setUp: !!card.info.setUp, pinSet: !!card.info.pinSet, noPinKnown: !!card.info.noPinKnown, noPin: card.noPin || null,
       limit: (card.record && card.record.limit) || 0,
       day: card.day || null,
@@ -1675,16 +1676,19 @@
       log: card.log || null,
       // its receipts, as this phone has them: { count, list, fresh }; and how far its clock is ahead of this phone's, in seconds
       receipts: card.receipts || null,
-      // (for a card before 1.15 only: a card of 1.15 and on is ahead of this phone's newest block header at most, which no screen says)
-      clockAhead: (card.info && card.info.headers) ? 0 : Math.round(Number(card.clockAhead) || 0),
-      // a card of software 1.15 and on keeps its time by Bitcoin block headers: the block its clock reads (the hash of the last it was shown, and the time in it)
-      headers: !!(card.info && card.info.headers),
-      clock: (card.info && card.info.headers) ? { hash: String(card.info.headerHash || ''), short: (W && card.info.headerHash) ? W.headerShort(card.info.headerHash) : '', time: Number(card.info.now) || 0 } : null,
+      // (the card's clock is ahead of this phone's newest block header at most, which no screen says)
+      clockAhead: 0,
+      // the card keeps its time by Bitcoin block headers: the block its clock reads (the hash of the last it was shown, and the time in it)
+      headers: true,
+      clock: card.info ? { hash: String(card.info.headerHash || ''), short: (W && card.info.headerHash) ? W.headerShort(card.info.headerHash) : '', time: Number(card.info.now) || 0 } : null,
       owner: !!(card.info && card.info.owner),
-      // software 1.17 and on: its owner can reset it (RESET CARD)
-      resetKnown: !!(card.info && card.info.resetKnown),
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
+      /* The rollover budget (D20), as the owner's read left it: `renewed` is what this tap's REFRESH undid ({ rolls, stuck }:
+       * `stuck` where the card's day had stopped turning), and `refreshMissed` why a refresh that was due did not happen
+       * ('no-header': this phone has no block header to send; 'refused': the card would not take it). */
+      renewed: card.renewed || null,
+      refreshMissed: card.refreshMissed || '',
       mint: (card.record && card.record.mint) || '',
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -1695,7 +1699,7 @@
       check: (card.bare && prior) ? prior.check : (card.pieces || []).length ? 'asking' : 'none',
       // (a card that held nothing had nothing for the mint to dispute, and what has gone on it since this phone has just made)
       checkedAt: (card.bare && prior) ? (prior.checkedAt || (prior.check === 'none' ? Date.now() : undefined)) : undefined,
-      /* A card of software 1.20 keeps the mint's proof with its pieces, and the line under the title also says whether this phone found them
+      /* A card keeps the mint's proof with its pieces, and the line under the title also says whether this phone found them
        * real (`fcReal`): 'ok', 'fake' or 'unproven', 'asking' while it is worked out. A read of the short kind lists no nonces and has nothing
        * to say of them, so what the screen said stands; a card with nothing on it has no piece to doubt. */
       proofs: !!(card.info && card.info.proofs),
@@ -1736,7 +1740,7 @@
     }, () => {});
   }
 
-  /* Whether the pieces on a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs the
+  /* Whether the pieces on a card are real, which the mint's word that they are unspent does not say: the mint's proofs the
    * card was read for are checked with the keys this phone has (08a-flashcard.js, `cardRealCheck`), once the card has been let go, and the
    * line under the title waits for it as it waits for the mint. */
   fcReal(card) {
@@ -1844,9 +1848,9 @@
   }
 
   /* ---- a new card ----------------------------------------------------------
-   * A card of software 1.16 and on is set up with no PIN and asked for none: SET UP, then one tap that writes its record and,
+   * A card is set up with no PIN and asked for none: SET UP, then one tap that writes its record and,
    * last, its owner, then the card's screen, with a line saying it is set up. A PIN is added later from that screen (ADD PIN,
-   * `fcPinAdd`), whenever its owner wants one. A card before 1.16 cannot be without a PIN, nor can one that has a PIN already (a
+   * `fcPinAdd`), whenever its owner wants one. A card that has a PIN already (a
    * set-up cut short after it): those are asked for one first, typed twice, and the one tap writes it as well. Then, while
    * FC_RECOVERABLE offers it, whether a lost card's money can come back; and nothing is read between the PIN and the tap and
    * nothing after it (a notice that this phone becomes the owner, and one that
@@ -1885,8 +1889,18 @@
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast('The card is set up.');
+        this.toast(this.fcSetUpSaid(card));
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable) }));
+  }
+
+  /* What a set-up says when it is done. The card's clock is anchored at set-up to the newest Bitcoin block this phone has kept
+   * (the 145-byte SET_OWNER, D20); with no block kept, or one the card would not take, the owner is written alone, and the
+   * card's clock waits for the first block a phone shows it. That is said, so that it is not learned from the log alone. */
+  fcSetUpSaid(card) {
+    const anchor = card && card.anchor;
+    if (anchor === 'no-header') return 'The card is set up. This phone had no Bitcoin block to set its clock by: its clock starts at its next tap online.';
+    if (anchor === 'refused') return 'The card is set up. It would not take this phone\u2019s newest Bitcoin block to set its clock by: its clock starts at its next tap online.';
+    return 'The card is set up.';
   }
 
   fcSetUpKind(pin) {
@@ -2148,20 +2162,20 @@
     fresh('');
   }
 
-  /* How many signatures the card on show asks for the first limit's worth over its limit on one tap: ten from software 1.17, seven
-   * before (`info.waitOver`, 08a-flashcard.js). Ten for a card not read yet, as the newest is. */
+  /* How many signatures the card on show asks for the first limit's worth over its limit on one payment: ten (`info.waitOver`,
+   * 08a-flashcard.js), and ten for a card not read yet. */
   fcWaitOver() {
     const c = this._fcCard;
     return Number(c && c.info && c.info.waitOver) || 10;
   }
-  /* And for each further limit's worth: four from software 1.18, three before (`info.waitMore`). Four for a card not read yet. */
+  /* And for each further limit's worth: four (`info.waitMore`), and four for a card not read yet. */
   fcWaitMore() {
     const c = this._fcCard;
     return Number(c && c.info && c.info.waitMore) || 4;
   }
   /* What the screen behind the sheet counts to by the time a payment of `askings` askings is signed, on a card held well. The
    * count runs from the card being found; measured on a phone, a payment with change took about 3.3 seconds for the read, the
-   * pieces and the change, and 0.58 seconds an asking (a card of 1.17: ten askings reached 9, thirteen 10, sixteen 12). The
+   * pieces and the change, and 0.58 seconds an asking (ten askings reached 9, thirteen 10, sixteen 12). The
    * screen shows whole seconds, so the figure is the count reached, not rounded up. What HOW TAP LIMIT WORKS and the limit's
    * confirmation say; a payment within the limit is one second, up to about four with change. */
   FC_TAP_SECS = { found: 3.3, asking: 0.58 };
@@ -2170,12 +2184,11 @@
     return Math.floor(T.found + T.asking * Math.max(0, Number(askings) || 0));
   }
 
-  /* Whether the card on show waits by the rule of software 1.13 (`cardWaitSigns`), which the words on its limit screens
-   * say: a card read as the one before it (a card that signs once, of format 4, and is not 1.13 yet: the rule of 1.12 is
-   * its words) has the old rule's words. Anything else, and a card not read yet, has the newest. */
-  fcShaped() {
+  /* The rollover budget of the card on show: how many days its daily limit starts again by itself between its owner's taps
+   * online (D20, 08a-flashcard.js `cardRolls`). Seven for a card not read yet, as for one whose owner has set none. */
+  fcRollBudget() {
     const c = this._fcCard;
-    return !(c && c.info && c.info.format === 4 && c.info.shaped === false);
+    return Number(c && c.info && c.info.budget) || 7;
   }
 
   /* ---- the daily limit ---------------------------------------------------------
@@ -2193,11 +2206,10 @@
    * were opened for them gone: `sats` is 0 for NO LIMIT.
    *
    * A card has a second limit, on ONE TAP, asked for by the same three steps
-   * in its own words (`tap`): for the card that makes its own change the first
-   * step is HOW TAP LIMIT WORKS (26g-tap-limit-explainer.js), the rule played
-   * out, and for the card of 1.12 a warning in its own words.
+   * in its own words (`tap`): the first step is HOW TAP LIMIT WORKS
+   * (26g-tap-limit-explainer.js), the rule played out.
    *
-   * A card of software 1.16 and on that has a PIN has a third, the NO PIN
+   * A card that has a PIN has a third, the NO PIN
    * LIMIT (`tap` is 'nopin'): the most it signs for in a day without its PIN,
    * asked for in the same three steps; none (NO LIMIT under the keypad) is 0,
    * and every payment then asks for the PIN. */
@@ -2206,7 +2218,7 @@
     this._fcLimitDone = done;
     this._fcLimitTap = tap === true;
     this._fcLimitNoPin = np;
-    if (tap === true && this.fcShaped()) {
+    if (tap === true) {
       this.fcTapLimitExplainer({ over: this.fcWaitOver(), more: this.fcWaitMore(), go: () => this.fcAmount('cardLimit'), cancel: () => { this._fcLimitDone = null; } });
       return;
     }
@@ -2215,14 +2227,6 @@
       reason: 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
         + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
-      shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
-    } : tap ? {
-      tone: 'warn', title: 'SET PER TAP LIMIT',
-      reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
-        + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
-        + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
-        + 'Do you wish to continue?',
       retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     } : {
@@ -2278,9 +2282,7 @@
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
-        warn: (this.fcShaped()
-          ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
-          : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
+        warn: 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats)) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
@@ -2302,8 +2304,12 @@
       amount: this.money(sats).main, amountSub: this.money(sats).sub, rows: [],
       /* The two sentences go under the amount, in this order. They are set as
        * `warn` because the shell's subtitle sits above the amount, and would read first. */
-      warn: 'This card will spend no more than this in one day. The limit starts again by itself each day. '
-        + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+      /* And what renews it: the card's rollover budget (D20). Past it the day stops turning until this phone, online, taps it,
+       * so a lost seed phrase leaves the card one more day's limit at the most, for good, and the rest stays on it. */
+      warn: 'This card will spend no more than this in one day. The limit starts again by itself each day, for up to '
+        + this.fcRollBudget() + ' days after this phone last tapped it online, and then stops until this phone taps it online again. '
+        + 'Only this phone, or a phone restored from its seed phrase, can change or remove it. Without the seed phrase the card '
+        + 'pays at most one more day\u2019s limit, and the rest stays on it.',
       secondary, cta: 'CONFIRM', ctaTone: 'go',
       go: () => this.fcLimitConfirmed(),
     };
@@ -2359,7 +2365,7 @@
     const fc = this.state.fc || {};
     const log = fc.log;
     if (!log || !log.last) return;
-    /* A card of software 1.15 and on cannot be told a false time: its clock is block headers, which no one can make for a time
+    /* A card cannot be told a false time: its clock is block headers, which no one can make for a time
      * that has not come, so nothing here speaks of one (`fc.headers`). A mark the card counted that this phone cannot find in
      * its eight taps is, for such a card, a run of refusals that has left the ring. */
     const blocks = !!fc.headers;
@@ -2368,7 +2374,7 @@
     const clock = !blocks && (log.last.some((x) => x.clock) || fc.clockAhead > 0 || counted);
     const marked = refusals || clock;
     const n = (count, one, many) => count + ' ' + (count === 1 ? one : many);
-    /* When a tap was. A card of 1.15 and on writes the time its terminal told it beside the time in the newest block header it
+    /* When a tap was. A card writes the time its terminal told it beside the time in the newest block header it
      * had: the phone's own, to the second, with the block's beside it. A card before it has the one time, its own clock. */
     const when = (x) => {
       if (!blocks) return this.fcWhen(x.time);
@@ -2433,16 +2439,10 @@
     const list = (W && W.cardReceipts) ? W.cardReceipts(fc.key) : [];
     if (!list.length) { this.toast('No receipts to copy.', true); return; }
     const iso = (secs) => new Date(secs * 1000).toISOString().replace('.000Z', 'Z');
-    /* A card of software 1.15 and on writes two times in a receipt: the one its terminal told it (the phone's own clock, a note the
-     * card trusts for nothing) and the time in the newest block header the card had (its own clock). A card before it has the one, which
-     * was told it under a signature: it goes in the first column, and the second has none. */
-    const blocks = list.some((r) => r.told !== undefined);
-    const text = (blocks
-      ? ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, as the phone that tapped it told the card), block time (UTC, the card’s clock), sats, sha256 of the message signed, first output (B_)']
-        .concat(list.map((r) => '#' + r.n + ', ' + (r.told !== undefined ? (r.told > 0 ? iso(r.told) : '-') : iso(r.time)) + ', '
-          + (r.told !== undefined ? (r.time > 0 ? 'block ' + iso(r.time) : '-') : '-') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
-      : ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, by the card’s clock), sats, sha256 of the message signed, first output (B_)']
-        .concat(list.map((r) => '#' + r.n + ', ' + iso(r.time) + ', ' + r.sats + ', ' + r.hash + ', ' + r.out)))
+    /* A card writes two times in a receipt: the one its terminal told it (the phone's own clock, a note the
+     * card trusts for nothing) and the time in the newest block header the card had (its own clock). */
+    const text = ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, as the phone that tapped it told the card), block time (UTC, the card’s clock), sats, sha256 of the message signed, first output (B_)']
+      .concat(list.map((r) => '#' + r.n + ', ' + (r.told > 0 ? iso(r.told) : '-') + ', ' + (r.time > 0 ? 'block ' + iso(r.time) : '-') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
       .join('\n');
     const copied = this.copySecret ? this.copySecret(text) : false;
     this.toast(copied ? 'Receipts copied.' : 'Could not copy the receipts.', !copied);
@@ -2459,7 +2459,7 @@
      * older one) has the one limit, and is asked for it as it always was. */
     if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
     // the question and the two, each a button: what each limit is comes on its own screen
-    // and a third for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
+    // and a third for a card that has a PIN: the no PIN limit
     const np = !!(fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked');
     this.blockedCard('fc-limit-which', Object.assign({
       tone: 'ask', title: 'CHANGE CARD LIMITS',
@@ -2474,7 +2474,7 @@
    * pieces larger than a new limit on one tap (`pin`): then its money is recut under the limit in the same tap. */
   fcLimitRun(sats, tap, usd, pin) {
     const W = this.fcW();
-    // 'nopin': the no PIN limit (software 1.16 and on), whose dollars are kept like the limit on one tap's
+    // 'nopin': the no PIN limit, whose dollars are kept like the limit on one tap's
     const np = tap === 'nopin';
     this.fcTap({}, (link, on, progress) => {
       on('writing');
@@ -2855,8 +2855,8 @@
    * repository (https://github.com/getfoxy/card), so that anybody can see which are. FL1 is the first
    * Flash design, drawn in CSS; FX1 is Foxy's, a picture; EL1 is the beaker,
    * drawn in CSS and SVG and animated (build/markup.html, the card on the
-   * FLASHCARD screen, and the face behind the sheet in 26h-tap-screen.js). From
-   * software 1.10 the card's record names its design; a card that names none
+   * FLASHCARD screen, and the face behind the sheet in 26h-tap-screen.js). The
+   * card's record names its design; a card that names none
    * is drawn as the design this phone wrote down for it when it set it up
    * (FC_SETUP_DESIGN), and FC_DESIGN where it wrote none. */
   FC_DESIGNS = {
@@ -2890,7 +2890,7 @@
     this.loadHistory();
   }
 
-  /* ---- RESET CARD (software 1.17) --------------------------------------------
+  /* ---- RESET CARD -------------------------------------------------------------
    *
    * RESET, the first of the row under the card's screen, for its owner. One warning, then one tap: the money on the card comes off to this
    * phone and the card is reset, in that tap (the wallet's `cardEmptyAndReset`; an empty card is just `cardReset`). A locked
@@ -2900,7 +2900,6 @@
   fcReset() {
     const fc = this.state.fc;
     if (!fc) return;
-    if (!fc.resetKnown) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software cannot be reset.' }); return; }
     if (!fc.owner) { this.fcFailed({ card: 'no-owner', message: 'This card has no owner, so there is nothing to reset.' }); return; }
     // a locked card is not asked whether this phone is its owner; its own word is the proof, at the tap
     if (fc.ownedHere === false && !fc.locked) { this.fcFailed({ card: 'not-owner' }); return; }
@@ -3067,7 +3066,7 @@
       const tried = marked.reduce((n, x) => n + (Number(x.refused) || 0), 0);
       // a false time: the card saw it (told twice in a tap, far apart), or this phone does (the card's clock is ahead of its own)
       // (a mark made in a tap that signed for nothing is in the card's count of marked things and in no entry: new since this phone last looked)
-      // A card of software 1.15 and on cannot be told a false time (its clock is block headers): the same mark, with no tap to show it, is a run of refusals.
+      // A card cannot be told a false time (its clock is block headers): the same mark, with no tap to show it, is a run of refusals.
       const blocks = !!fc.headers;
       const lost = !marked.length && !!log.since && log.since.tampers > 0;
       const falseTime = !blocks && (log.last.some((x) => x.clock) || fc.clockAhead > 0 || lost);
@@ -3092,7 +3091,7 @@
       tap: () => this.fcRowCard(r),
     }));
 
-    // (software 1.16 and on can be set up without a PIN: `setUp` is a record, and before 1.16 a PIN as well)
+    // (a card can be set up without a PIN: `setUp` is a record and an owner)
     const fresh = !!fc && !fc.setUp && fc.pin !== 'blocked';
     const blocked = !!fc && fc.pin === 'blocked';
     // the owner's phone is offered UNBLOCK on a blocked card, which is CHANGE PIN
@@ -3133,14 +3132,31 @@
     if (on && fc && near && !past && fc.balance > 0) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }
+    /* A card whose day has rolled its whole budget since its owner's phone last saw it online (D20): its daily limit does not
+     * renew until that phone, online, taps it, which refreshes it (the wallet's `cardRefresh`). Pressed, the line reads the card.
+     * Where this phone was online and the refresh could not be made, it says why; where this tap made it, it says what it undid
+     * (the read refreshes before the screen is drawn, so this is the one place the owner sees that the budget had run out). */
+    const stuckHere = !!fc && fc.ownedHere === true && ((limited && day.stuck) || !!(noPin && noPin.stuck));
+    if (on && stuckHere) {
+      notes.push({
+        text: fc.refreshMissed === 'no-header'
+          ? 'This card\u2019s daily limit has stopped renewing, and this phone has no Bitcoin block to renew it with yet. Press here to try again.'
+          : fc.refreshMissed === 'refused'
+            ? 'This card\u2019s daily limit has stopped renewing, and the card would not take this phone\u2019s newest Bitcoin block. Press here to try again.'
+            : 'This card\u2019s daily limit has stopped renewing. It renews again once this phone is online and taps it.',
+        tap: () => this.fcRead(true),
+      });
+    } else if (on && fc && fc.ownedHere === true && fc.renewed && fc.renewed.stuck) {
+      notes.push({ text: 'This card\u2019s daily limit had stopped renewing. This tap renewed it.', tap: () => {} });
+    }
 
-    /* RESET, for the card's owner (software 1.17 and on): a locked card is not asked whether this phone owns it, so it is offered to
+    /* RESET, for the card's owner: a locked card is not asked whether this phone owns it, so it is offered to
      * any phone that holds the card and the card's own word at the tap decides. */
-    const resettable = !!fc && fc.owner && fc.resetKnown && (fc.ownedHere === true || fc.locked);
+    const resettable = !!fc && fc.owner && (fc.ownedHere === true || fc.locked);
 
     /* The row under ADD FUNDS and WITHDRAW, drawn as the receive screen's row (NOTE, COPY, SCAN, CARD): a round button and its
-     * label. A circular arrow for RESET (software 1.17 and on), a lock for its PIN and a dial for its limit are the owner's: only
-     * the phone that holds the words the card was set up with can do any of them. A card before 1.17 has the two it can offer.
+     * label. A circular arrow for RESET, a lock for its PIN and a dial for its limit are the owner's: only
+     * the phone that holds the words the card was set up with can do any of them.
      * HISTORY, what has been done with this card on this phone, is the round button at the top left, for any card that is one. */
     const links = !(fc && fc.hasRecord) ? [] : (!resettable ? [] : [
       { label: 'RESET', tap: () => this.fcReset(),
@@ -3159,10 +3175,10 @@
      * nothing on it has nothing a mint could dispute. */
     const DIMMED = 'rgba(var(--ink-rgb),.62)';
     const nowMs = Date.now();
-    /* A card of software 1.20 keeps the mint's proof with its pieces, and for it the line says more than the mint's word: that every piece on it
+    /* A card keeps the mint's proof with its pieces, and for it the line says more than the mint's word: that every piece on it
      * is real, which the mint's word that a piece is unspent does not. Red where the mint says a piece is spent or this phone found a proof
      * false; the time where the mint was asked (or was, for these same pieces) and every piece was found real; amber otherwise, a card
-     * loaded by a build that sends no proofs among them. A card of 1.19 and before has no proofs, and its line is the mint's word alone. */
+     * loaded by a build that sends no proofs among them. */
     const proofs = !!(fc && fc.proofs);
     const sound = !proofs || !(fc.count > 0) || fc.real === 'ok';
     // (the mint's word is dated by the time of day it was had, in this phone's clock: "Verified At 11:42am")
@@ -3172,7 +3188,7 @@
       : (sound && (fc.check === 'ok' || !(fc.count > 0))) ? ['Verified At ' + this.fcAt(fc.checkedAt || nowMs), DIMMED]
       : (sound && fc.checkedAt) ? ['Verified At ' + this.fcAt(fc.checkedAt), DIMMED]
       : ['Not Verified', AMBER];
-    /* And under that, for a card whose clock is Bitcoin block headers (software 1.15 and on): the block it is at, by its height
+    /* And under that, for the card's clock, which is Bitcoin block headers: the block it is at, by its height
      * where this phone has that (`headerHeightOf`), else by the first digits of its hash, as the line this replaces said it;
      * or that it has been shown none. */
     const clockHash = (fc && fc.clock && fc.clock.hash) || '';
@@ -3182,7 +3198,7 @@
       : (fc.clock && fc.clock.short) ? 'Block ' + fc.clock.short + '\u2026'
       : 'No block yet';
 
-    /* Under the limits: the change this card made for itself that no till has handed back (software 1.12), what it comes to and
+    /* Under the limits: the change this card made for itself that no till has handed back, what it comes to and
      * where it stands, one line for each state it is in. Dollars first and the sats after, as the balance is. */
     const owes = (on && fc && fc.owes && fc.owes.parts) || [];
 
@@ -3230,12 +3246,14 @@
         : limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit) : 'NO LIMIT') + (noPinCard ? ' | NO PIN' : ''),
       // under the balance, where there is a limit: what the day has left, and when it turns
       fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
-      fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
+      // (a card whose budget is spent has no "today": what is left is all it pays until its owner's phone taps it online)
+      fcDayLeft: limited ? (day.stuck ? 'LEFT ' : 'LEFT TODAY ') + (day.left > 0 || !px ? this.fcPrice(day.left) : '$0.00') : '',
       // under it, for a card with a PIN that pays some of a day without it: how much, and what is left of it today
       fcNoPinShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && !!noPin,
-      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit) + ' \u00b7 LEFT TODAY ' + (noPin.left > 0 || !px ? this.fcPrice(noPin.left) : '$0.00') : '',
-      // a card of 1.15 and on with a limit and no block yet has a day with no start: it begins with the first block the card is shown
-      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
+      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit) + ' \u00b7 ' + (noPin.stuck ? 'LEFT ' : 'LEFT TODAY ') + (noPin.left > 0 || !px ? this.fcPrice(noPin.left) : '$0.00') : '',
+      // a card with a limit and no block yet has a day with no start: it begins with the first block the card is shown
+      fcDayTurns: limited ? (day.stuck ? 'RENEWS WHEN ITS OWNER\u2019S PHONE TAPS IT ONLINE'
+        : day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
         : day.onTrust ? 'THE DAY BEGINS WITH THE CARD\u2019S FIRST BLOCK' : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,

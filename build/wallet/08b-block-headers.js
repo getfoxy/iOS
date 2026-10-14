@@ -1,8 +1,8 @@
-  /* ---- Bitcoin block headers: the clock of a Foxy card (software 1.15 and on) --------------
+  /* ---- Bitcoin block headers: the clock of a card ---------------------------------------
    *
-   * A card has no clock of its own, and since software 1.15 nobody tells it the time under a
-   * signature. Its time is the time written in the newest Bitcoin block header it has been shown
-   * (SET_HEADER), and it believes a header for what the header would have cost to make, not for who
+   * A card has no clock of its own, and nobody tells it the time under a signature. Its time is
+   * the time written in the newest Bitcoin block header it has been shown (SET_HEADER, the owner's
+   * REFRESH, or the anchor its owner was set with), and it believes a header for what the header would have cost to make, not for who
    * brings it: it hashes the 80 bytes twice and the hash, read as a number, must be at or under the
    * target the header's own `bits` name, which is the work of ten minutes of the whole network; the
    * target must be no easier than the floor built into the card, nor easier than four times the

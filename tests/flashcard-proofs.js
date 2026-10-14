@@ -1,15 +1,15 @@
 'use strict';
-/* flashcard-proofs.js — the mint's proof, kept with each piece on a card of software 1.20, and checked by the phone that reads it.
+/* flashcard-proofs.js — the mint's proof, kept with each piece on a card, and checked by the phone that reads it.
  *
  *     node tests/flashcard-proofs.js
  *
  * A card's line "Verified At 11:42am" used to rest on the mint's word that its pieces are unspent (NUT-07) and nothing else, and a
- * made-up piece reads unspent until somebody tries to spend it: a card loaded by somebody else's modified wallet read Verified. From
- * software 1.20 the card keeps the mint's NUT-12 proof with a piece loaded with one (e, s and the blinding factor r: LOAD_PROOF with
+ * made-up piece reads unspent until somebody tries to spend it: a card loaded by somebody else's modified wallet read Verified. The
+ * card keeps the mint's NUT-12 proof with a piece loaded with one (e, s and the blinding factor r: LOAD_PROOF with
  * P1 = 1, one piece to a command; GET_DLEQ gives it back) and checks nothing; the phone does. This pins:
  *
- *   writing: a piece that has a whole proof goes onto a card of 1.20 alone, with P1 = 1, and the proof reads back as it went; a card
- *     of 1.19 is sent the commands it always was, byte for byte; a card with no room for proofs is not an error; the one line a write
+ *   writing: a piece that has a whole proof goes onto the card alone, with P1 = 1, and the proof reads back as it went; a card with
+ *     no room for proofs is not an error; the one line a write
  *     leaves in the log has its numbers and nothing secret;
  *   what this phone knows is real (`foxy.flashcard.real`): the pieces it wrote from the mint's own answers, and the ones whose proof
  *     it checked; the caps; a card's own pieces written back are not made real by it;
@@ -19,7 +19,7 @@
  *     'unproven' and never 'fake';
  *   a tap cut short in the middle of a load with proofs, and one whose answer was lost: finished at the next, nothing lost or written twice;
  *   the card's own change, finished at the second tap, with the mint's proof for it;
- *   the line under the card's title: red, the time, or amber; and for a card before 1.20 exactly what it was.
+ *   the line under the card's title: red, the time, or amber.
  *
  * The card is the model (tests/flashcard-card.js), which is held to the applet's own conversation (tests/flashcard-model.js); the mint
  * is the test mint. A made-up piece is loaded the way a modified wallet would, with the card's PIN and a command of its own.
@@ -34,7 +34,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 const THIRD = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
-const SELECT = '00a404000af0464f5859434152440100';
+const SELECT = '00a404000bf04341534855434152440100';
 const hx = (n) => ('0' + n.toString(16)).slice(-2);
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 // the commands of one instruction a card was sent
@@ -107,21 +107,13 @@ async function forge(ctx, card, o) {
 }
 
 (async () => {
-  /* ---- 1: this phone loads a card of 1.20, and one of 1.19 ---------------------------------------------------------- */
+  /* ---- 1: this phone loads a card --------------------------------------------------------------------------------- */
   {
     const H = await funded({}, 40000);
     const card = newCard(H, undefined, { format: 4 });
     await card.send(SELECT);
     const info = H.W.cardParse.info((await card.send('b001010000')).slice(0, -4));
-    const old = newCard(H, undefined, { format: 4, software: 19 });
-    await old.send(SELECT);
-    const oldInfo = H.W.cardParse.info((await old.send('b001010000')).slice(0, -4));
-    const older = newCard(H, undefined, { format: 4, software: 16 });
-    await older.send(SELECT);
-    const olderInfo = H.W.cardParse.info((await older.send('b001010000')).slice(0, -4));
-    ok(card.version === 20 && info.version === '1.20' && info.proofs === true && oldInfo.version === '1.19' && oldInfo.proofs === false && olderInfo.proofs === false
-       && olderInfo.version === '1.16',
-       'the wallet reads a card of 1.20 as one that keeps proofs, and a card of 1.19 and before as one that does not (GET_INFO is the same in every form but for the version)', info.version + ' ' + oldInfo.version);
+    ok(card.version === '0201' && info.version === '2.1' && info.proofs === true, 'the wallet reads the card as one that keeps proofs', info.version);
 
     await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
     card.tap();
@@ -139,7 +131,7 @@ async function forge(ctx, card, o) {
     const loads = sentOf(card, '30');
     const here = placed(card);
     ok(wrote.left === 0 && here.length === made && loads.length === made && loads.every((a) => a.slice(0, 10) === 'b0300100b1' && a.length === 2 * (4 + 1 + 177 + 1) && a.slice(-2) === '02'),
-       'on a card of 1.20 every piece goes alone, in a command of its own with P1 = 1: the 81 bytes of the piece, the 96 of its proof, and two bytes expected back', loads.length + ' loads for ' + here.length + ' pieces');
+       'every piece goes alone, in a command of its own with P1 = 1: the 81 bytes of the piece, the 96 of its proof, and two bytes expected back', loads.length + ' loads for ' + here.length + ' pieces');
     ok(here.every((p) => card.state.dleq[p.i] === want[p.nonce]) && here.length === Object.keys(want).length,
        'and the card holds each piece’s proof exactly as the phone made it');
     // asked by anybody, in a tap of its own, with no PIN and no grant
@@ -155,20 +147,6 @@ async function forge(ctx, card, o) {
     ok(real.length === made && here.every((p) => real.indexOf(p.nonce) >= 0),
        'every piece it wrote from the mint’s own answer is noted as real, by its nonce, once the card said it stored it', real.length + ' nonces');
 
-    // a card of 1.19: the commands it always was, byte for byte
-    const o = await loaded(H, 300, { software: 19 });
-    const oldLoads = sentOf(o.card, '30');
-    const slots = o.card.state.slots.filter((x) => x.status === 1).map((x) => x.data);
-    const chunks = [];
-    for (let at = 0; at < slots.length; at += 3) chunks.push(slots.slice(at, at + 3));
-    const today = chunks.map((some) => 'b0300000' + hx(some.length * 81) + some.join('') + hx(some.length));
-    ok(slots.length >= 4 && oldLoads.join() === today.join() && o.card.sent.every((a) => a.slice(0, 4) !== 'b01a'),
-       'a card of 1.19 is sent three pieces to a command with P1 = 0, as it always was: the commands are, byte for byte, the pieces in the order they went on', oldLoads.length + ' loads for ' + slots.length + ' pieces');
-    ok(o.card.state.dleq === null && Object.keys(o.want).length === slots.length && realOf(H, o.card).length === 0,
-       'it keeps no proof (it has no room for one), though the pieces this phone made for it had them; and nothing of it is noted in the store, which is for the cards that keep proofs');
-    const olderCard = await loaded(H, 100, { software: 16 });
-    ok(sentOf(olderCard.card, '30').every((a) => a.slice(0, 8) === 'b0300000') && olderCard.card.sent.every((a) => a.slice(0, 4) !== 'b01a') && !('dleq' in olderCard.card.state && olderCard.card.state.dleq),
-       'and so is a card of 1.16');
     await settle();
   }
 
@@ -660,26 +638,12 @@ async function forge(ctx, card, o) {
       ok(a.text === 'Not Verified' && a.ink === AMBER && a.fc.real === 'unproven', 'a phone whose mint’s keys are not the ones that signed the card’s pieces says Not Verified in amber', a.text + ' ' + a.ink);
     }
 
-    // a card before 1.20 reads as it did: the mint’s word alone
-    {
-      const old = (await loaded(O, 100, { software: 19 })).card;
-      a = await read(other, V, old);
-      ok(VERIFIED_AT.test(a.text) && a.ink === DIM && a.fc.proofs === false && a.fc.real === undefined && count(old, '1a') === 0 && count(old, '30') === 0,
-         'a card of 1.19, which keeps no proof, says the time under its title as it always did, and is asked for none', a.text);
-      const older = (await loaded(O, 100, { software: 16 })).card;
-      a = await read(other, V, older);
-      ok(VERIFIED_AT.test(a.text) && a.fc.real === undefined && count(older, '1a') === 0, 'and so does a card of 1.16');
-    }
-
     // no connection: the mint cannot be asked, and the line says when it was last
     {
       const mine = (await loaded(O, 100)).card;
-      const old = (await loaded(O, 100, { software: 19 })).card;
       a = await read(own, O, mine);
       const at = O.W.cardCheckedAt(own._fcCard);
       ok(VERIFIED_AT.test(a.text) && at > 0, 'a card verified just now has a time on file', String(at));
-      a = await read(own, O, old);
-      const oldAt = O.W.cardCheckedAt(own._fcCard);
       a = await read(other, V, noProof);
       ok(a.fc.check === 'ok' && a.fc.real === 'unproven' && a.text === 'Not Verified', 'a card whose pieces the mint calls unspent and nobody has found real is asked about online', a.text);
       O.deaf = true;
@@ -690,13 +654,7 @@ async function forge(ctx, card, o) {
       // the mint’s word was had for these same pieces, and they are not all known real: it is worth nothing here
       a = await read(other, V, noProof);
       ok(a.fc.check === 'off' && V.W.cardCheckedAt(other._fcCard) === 0 && a.text === 'Not Verified' && a.ink === AMBER,
-         'the mint’s word on file answers nought for a card of 1.20 with a piece that is not known real, and the line is amber', a.text + ' ' + a.ink);
-      // the same card before 1.20: only the mint’s word counts, with the real store empty as well
-      const store = O.storage.getItem('foxy.flashcard.real');
-      O.storage.setItem('foxy.flashcard.real', '{}');
-      a = await read(own, O, old);
-      ok(oldAt > 0 && O.W.cardCheckedAt(own._fcCard) === oldAt && a.text === 'Verified At ' + own.fcAt(oldAt), 'and a card of 1.19 keeps saying the time, with the real store empty', a.text);
-      O.storage.setItem('foxy.flashcard.real', store);
+         'the mint’s word on file answers nought for a card with a piece that is not known real, and the line is amber', a.text + ' ' + a.ink);
       O.deaf = false;
       V.deaf = false;
     }

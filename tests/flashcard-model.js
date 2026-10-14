@@ -5,25 +5,22 @@
  *
  * tests/fixtures/flashcard-transcript.json is a conversation the applet had
  * under jCardSim: every command it was sent and what it answered. It is the
- * card that signs once for a payment (format 4), has 128 places, burns a
- * payment of any number of pieces, takes its PIN sealed, makes its own change
- * (1.12), waits only over its limit and one payment a tap at full speed (1.13),
- * and counts the change it made toward that wait for what it cost, two waits
- * for every three pieces (1.14), keeps its clock in Bitcoin block headers (1.15), has an optional PIN and a no-PIN
- * allowance (1.16), can be reset by its owner (1.17), waits four askings for each further limit's worth (1.18), answers as an
- * NFC tag its owner can switch off (1.19), and keeps the mint's proof with each piece, for a phone to read and check (1.20).
- * The others are the same of the cards before it: -118 (before the tag and the proofs), -117 (before its four askings), -116 (before RESET and its ten-signature wait), -115 (whose PIN was a must), -113 (which took one wait off
- * for each piece of change), -112 (which waited four signatures to a limit's
- * worth and for change within it), -111 (before it made its own change), -110
- * (before its signing was made quicker), -19 (before the design was in its
- * record), -18 (no sealed PIN), -17 (its pieces burned inside the payment's
- * transaction), -16 (sixty-four places), and -3, which signs for each piece
- * (format 3). The model is held to every one of them. The model in
- * tests/flashcard-card.js is what the wallet's tests pay with, so a rule the
- * model gets wrong is a rule those tests prove nothing about. Each command is
- * sent to the model again and its answer compared: to the byte, except where
- * the answer is a key or a signature, which is another card's to differ in
- * and is verified instead.
+ * card of the Cashu card protocol 2.1, the cashu-javacard repository's
+ * spec/vectors/transcript.json as it is at the commit this wallet is pinned to
+ * (3876a11, 2.1): every SELECT names the whole AID, and it ends with the
+ * rollover on the wire (an anchored SET_OWNER, the thirteen-byte SET_LIMIT, a
+ * short one that leaves the budget, a payment of nothing that rolls nothing, a
+ * budget spent, REFRESH refused and taken; D20, D26). It signs once for a payment (format 4), has 128 places,
+ * burns a payment of any number of pieces, takes its PIN sealed, makes its own
+ * change and counts it toward its wait for what it cost, keeps its clock in
+ * Bitcoin block headers, has an optional PIN and a no-PIN allowance, can be
+ * reset by its owner, answers as an NFC tag its owner can switch off, and keeps
+ * the mint's proof with each piece. The model in tests/flashcard-card.js is what
+ * the wallet's tests pay with, so a rule the model gets wrong is a rule those
+ * tests prove nothing about. Each command is sent to the model again and its
+ * answer compared: to the byte, except where the answer is a key or a
+ * signature, which is another card's to differ in and is verified instead. The
+ * 1.x and 0.x cards are not played: the wallet reads none of them.
  *
  * The change the card makes for itself (SPEND_ALL_CHANGE) is made of a nonce
  * and a blinding factor the card draws. A recording that kept them has them in
@@ -40,7 +37,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { loadReal } = require('./harness');
-const { makeCard } = require('./flashcard-card');
+const { makeCard, AID, PACKAGE } = require('./flashcard-card');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -51,25 +48,17 @@ const ctx = loadReal({});
 const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
-async function replay(T, format, places, software) {
-  /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
-   * latest card (1.20) is replayed at the model's default, and each earlier recording at its own software (18, 17, 16, ...),
-   * since the model's default moves on with the card. The recording says what it is of: the card repository's
-   * spec/vectors/transcript.json at 1.20 replays here as tests/fixtures/flashcard-transcript.json, and the one it
-   * replaced is kept as flashcard-transcript-118.json (and the one before it as -117, and so on; the phone skipped a
-   * recording of its own for 1.19, whose tag the 1.20 one plays as well). A RESET at the end of a recording
-   * gives the card a new key, which the model draws for itself: what follows it is held to the model's key (a key is another card's to
-   * differ in and is verified, never compared), as everything else signed is.
-   */
-  if (software === undefined && format === 4 && places === undefined) {
-    const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
-    const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
-    if (minor > 0 && minor < 20) software = minor;
-  }
-  const card = makeCard({ window: ctx.window, format, places, software });
+async function replay(T) {
+  /* The recording says what it is of in its first SELECT, which the applet answered with its version: 02 01. A RESET at the end
+   * of a recording gives the card a new key, which the model draws for itself: what follows it is held to the model's key (a key
+   * is another card's to differ in and is verified, never compared), as everything else signed is. */
+  const chosen = T.find((x) => x.apdu && x.apdu.slice(0, 6) === '00a404');
+  ok(!!chosen && chosen.data === '0201', 'the recording is of protocol 2.1', chosen && chosen.data);
+  const format = 4;
+  const card = makeCard({ window: ctx.window });
   let exact = 0, verified = 0;
-  // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
-  const recorded = (T.find((x) => x.kind === 'key') || {}).data;
+  // the key the recording's card had: its first, and after a RESET_CARD the new one it was asked for again (a `key` entry)
+  let recorded = (T.find((x) => x.kind === 'key') || {}).data;
   // a payment being put to a one-signature card: its places and its outputs, as the commands gave them
   let pay = null;
   // what the model last gave for sealing a PIN: the recording's sixteen bytes (the model is given them) and the model's own PIN key
@@ -134,7 +123,7 @@ async function replay(T, format, places, software) {
       const key = data.substr(32, 66), sig = data.substr(98, 128);
       ok(data.length === 226 && e.data.length === 226 && /^0[23]/.test(key) && key !== card.key, e.name + ': sixteen bytes, a key that is not the card’s signing key, and a signature');
       let good = false;
-      try { good = CT.schnorrVerifyDigest(sig, ctx.window.Uint8Array.from(sha256(Buffer.concat([Buffer.from('FoxyCard/pinkey'), Buffer.from(key, 'hex')]))), card.key) === true; } catch (x) { good = false; }
+      try { good = CT.schnorrVerifyDigest(sig, ctx.window.Uint8Array.from(sha256(Buffer.concat([Buffer.from('CashuCard/pinkey'), Buffer.from(key, 'hex')]))), card.key) === true; } catch (x) { good = false; }
       ok(good, e.name + ': the card’s own key has signed the PIN key');
       card.setNonce(e.data.substr(0, 32));
       sealKey = { nonce: e.data.substr(0, 32), pub: key };
@@ -145,6 +134,7 @@ async function replay(T, format, places, software) {
       card.setNonce(e.data);
       verified += 1;
     } else if (e.kind === 'key') {
+      recorded = e.data;
       ok(data.length === 66 && /^0[23]/.test(data) && data === card.key, e.name + ': a compressed key');
     } else if (e.kind === 'sig') {
       const slot = parseInt(e.apdu.substr(4, 2), 16);
@@ -172,9 +162,9 @@ async function replay(T, format, places, software) {
       /* A page of receipts: the count, then for each when, what the pieces were worth, the hash of what was signed and
        * the first output. All of it is the recording's to the byte but the hash, which is over the card's own key. */
       ok(data.length === e.data.length && data.slice(0, 8) === e.data.slice(0, 8), e.name + ': the count of payments, and as many receipts', data.slice(0, 8) + ' / ' + e.data.slice(0, 8));
-      /* 73 bytes a receipt (the clock, the sats, the hash, the output), and from 1.15 77: the clock, the time the terminal told, the sats, the hash, the output.
+      /* 77 bytes a receipt: the clock, the time the terminal told, the sats, the hash, the output.
        * The hash is over the card's own key and is not compared; everything else is. */
-      const each = card.version >= 15 ? 154 : 146, told = card.version >= 15 ? 8 : 0;
+      const each = 154, told = 8;
       for (let at = 8; at + each <= data.length; at += each) {
         ok(data.substr(at, 16 + told) === e.data.substr(at, 16 + told) && data.substr(at + 80 + told, 66) === e.data.substr(at + 80 + told, 66), e.name + ': a receipt\u2019s clock, worth and first output');
         ok(/^[0-9a-f]{64}$/.test(data.substr(at + 16 + told, 64)) && data.substr(at + 16 + told, 64) !== '0'.repeat(64), e.name + ': and a hash');
@@ -190,7 +180,7 @@ async function replay(T, format, places, software) {
       verified += 1;
     } else if (e.kind === 'auth') {
       const reader = Buffer.from(e.apdu.slice(10, 42), 'hex');
-      const tag = sha256(Buffer.from('FoxyCard/auth'));
+      const tag = sha256(Buffer.from('CashuCard/auth'));
       const digest = sha256(Buffer.concat([tag, tag, reader, Buffer.from(data.slice(0, 32), 'hex'), Buffer.from(card.key, 'hex')]));
       ok(data.length === 160 && CT.schnorrVerifyDigest(data.slice(32), ctx.window.Uint8Array.from(digest), card.key) === true, e.name + ': a signature over both nonces and the key');
       verified += 1;
@@ -203,28 +193,13 @@ async function replay(T, format, places, software) {
 }
 
 (async () => {
-  const now = await replay(read('flashcard-transcript.json'), 4);
-  const fourMore = await replay(read('flashcard-transcript-118.json'), 4, undefined, 18);
-  const reset = await replay(read('flashcard-transcript-117.json'), 4, undefined, 17);
-  const optional = await replay(read('flashcard-transcript-116.json'), 4, undefined, 16);
-  const headers = await replay(read('flashcard-transcript-115.json'), 4, undefined, 15);
-  const costed = await replay(read('flashcard-transcript-114.json'), 4, undefined, 14);
-  const oneEach = await replay(read('flashcard-transcript-113.json'), 4, undefined, 13);
-  const fourSigns = await replay(read('flashcard-transcript-112.json'), 4, undefined, 12);
-  const quicker = await replay(read('flashcard-transcript-111.json'), 4, undefined, 11);
-  const designed = await replay(read('flashcard-transcript-110.json'), 4, undefined, 10);
-  const sealed = await replay(read('flashcard-transcript-19.json'), 4, undefined, 9);
-  // the cards before it: 1.8 (no sealed PIN), 1.7 (its pieces burned inside the payment's transaction), and 1.6 (sixty-four places)
-  const plain = await replay(read('flashcard-transcript-18.json'), 4, undefined, 8);
-  const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
-  const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
-  const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, fourMore, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  const now = await replay(read('flashcard-transcript.json'));
+  const all = [now];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras
   const c2 = makeCard({ window: ctx.window });
-  await c2.send('00a4040009f0464f58594341524400');
+  await c2.send('00a404000b' + AID + '00');
   c2.leaveAfter(1);
   await c2.send('b001000000');
   const left = await c2.send('b001000000').then(() => 'answered', () => 'gone');
@@ -232,20 +207,50 @@ async function replay(T, format, places, software) {
   c2.tap();
   ok((await c2.send('b001000000')).slice(-4) === '6999', 'and back in the field it must be selected again');
 
-  /* The cards before 1.20 are still played: they know neither GET_DLEQ nor a load with a proof, and a card before 1.19 has no NFC tag to
-   * switch (SET_TAG is 6D00 to it, and GET_INFO with P1 = 2 gives it the thirty bytes, where a card of 1.19 and 1.20 give the forty-two and
-   * the tag's state). The version is the one thing the three forms of GET_INFO differ in. */
+  /* What the recording does not cover: the old names and commands, the opener, REFRESH on a card with no owner and the
+   * rollover's bytes on a new card (D19, D20, D25). */
   {
-    const play = async (software) => { const c = makeCard({ window: ctx.window, format: 4, software }); await c.send('00a4040009f0464f58594341524400'); return c; };
-    const latest = await play(undefined), v19 = await play(19), v18 = await play(18);
-    const bytes = async (c, p1) => ((await c.send('b001' + ('0' + p1).slice(-2) + '0000')).length - 4) / 2;
-    ok((await latest.send('b01a00ff00')) === '009000' && (await v19.send('b01a00ff00')) === '6d00' && (await v18.send('b01a00ff00')) === '6d00',
-       'GET_DLEQ is the card of 1.20’s alone: a card of 1.19 and one of 1.18 answer 6D00');
-    ok((await bytes(latest, 2)) === 43 && (await bytes(v19, 2)) === 43 && (await bytes(v18, 2)) === 30 && (await bytes(latest, 1)) === 42 && (await bytes(v19, 1)) === 42 && (await bytes(latest, 0)) === 30,
-       'GET_INFO is the thirty and the forty-two bytes it was, and with P1 = 2 the forty-three of 1.19 and 1.20 and the thirty of the card before them');
-    ok((await v18.send('b05200000a08000000000000000000')) === '6d00' && (await v19.send('b05200000a08000000000000000000')) === '6a90' && (await latest.send('b05202000a08000000000000000000')) === '6b00',
-       'SET_TAG is 6D00 to a card of 1.18, and a card of 1.19 or 1.20 with no owner says so (6A90); a P1 over 1 is 6B00 before anything else');
-    ok((await latest.send('b01a80ff00')) === '6a83' && (await latest.send('b01a00ff00')) === '009000', 'and a place there is not is 6A83');
+    const c = makeCard({ window: ctx.window });
+    ok((await c.send('00a404000af0464f5859434152440100')) === '6a82' && (await c.send('00a4040007d276000085010200')) === '6a82',
+       'a 1.x applet’s name and a 0.x applet’s are no applet here: 6A82');
+    ok((await c.send('00a404000b' + AID + '00')) === '02019000', 'the whole name answers the version, 02 01');
+    ok((await c.send('b020000040')) === '6d00' && (await c.send('b035000006010203040000')) === '6d00', 'SPEND_PROOF (20) and SET_TIME (35) are 6D00');
+    ok((await c.send('b05300005100' + '00'.repeat(80))) === '6a90', 'REFRESH on a card with no owner: 6A90');
+    const info = await c.send('b001010000');
+    ok(info.slice(0, 4) === '0201' && info.length === 84 + 4, 'GET_INFO says 2.1, in forty-two bytes to P1 = 1');
+    const record = await c.send('b016000000');
+    ok(record.substr(152, 6) === '000000', 'GET_CARD bytes 76 to 78, the rollover, are zeros on a new card');
+    const chip = makeCard({ window: ctx.window, chip: true });
+    ok((await chip.send('00a404000a' + PACKAGE + '00')) === '9000', 'on a chip the package’s ten bytes reach the opener: 9000 and no version');
+    ok((await chip.send('b001010000')) === '6d00', 'and the opener answers 6D00 to what comes after');
+    ok((await chip.send('00a404000b' + AID + '00')) === '02019000' && (await chip.send('b001010000')).slice(0, 4) === '0201', 'the whole name reaches the applet on a chip too');
+  }
+
+  /* D26 (2.1) is in the recording, and the model is held to it there: a short SET_LIMIT leaves the budget, a payment of nothing
+   * (all of it back as the card's own change) rolls nothing and begins no day, a roll then spends the budget, the day stands
+   * (6A8F), REFRESH by another key is refused and by the owner's taken. A recording without those steps would hold the model to
+   * nothing of D26, so their names are asked for here. */
+  {
+    const T = read('flashcard-transcript.json');
+    const named = (re, sw) => T.some((e) => re.test(e.name || '') && (!sw || e.sw === sw));
+    ok(named(/a form without the budget's byte leaves the budget as it was \(D26\)/), 'the recording has a short SET_LIMIT that leaves the budget (D26)');
+    ok(named(/all of it back as the card's own change/, '9000') && named(/no roll spent by a payment that moves no value \(D26\)/), 'and a payment of nothing that spends no roll (D26)');
+    ok(named(/the budget is spent, the day stands/, '6a8f'), 'and a day that stands once the budget is spent (6A8F)');
+    ok(named(/^REFRESH by the old owner's key$/, '6a91') && named(/^REFRESH: the owner's phone/, '9000'), 'and REFRESH refused by another key and taken by the owner\u2019s');
+    ok(named(/SET_OWNER with an anchor that has not the work: refused/, '6a93') && named(/SET_OWNER with an anchor \(145 bytes/, '9000'), 'and an anchor refused for its work, then taken (145 bytes)');
+    ok(T.filter((e) => e.apdu && e.apdu.slice(0, 8) === '00a40400').every((e) => e.apdu.slice(8, 10) === '0b' && e.apdu.slice(10, 32) === AID),
+       'and every SELECT in it names the whole AID (eleven bytes), as a chip needs (D25)');
+  }
+  /* The model's own D26 for the PIN's form (SET_LIMIT_PIN, 33), which the recording does not send: it has no budget's byte and
+   * leaves the card's budget as it is. */
+  {
+    const c = makeCard({ window: ctx.window });
+    await c.send('00a404000b' + AID + '00');
+    ok((await c.send('b041000004' + '31323334')) === '9000' && (await c.send('b040000004' + '31323334')) === '9000', 'a new card takes a PIN, and is shown it');
+    c.state.budget = 5;
+    ok((await c.send('b033000004' + '000001f4')) === '9000' && c.state.budget === 5 && c.state.record.limit === 500,
+       'SET_LIMIT_PIN of four bytes sets the day\u2019s limit and leaves a budget of 5 as it was (D26)', String(c.state.budget));
+    ok((await c.send('b033000008' + '000001f4' + '00000064')) === '9000' && c.state.budget === 5, 'and of eight bytes too', String(c.state.budget));
   }
 
   /* What the page sends and what the phone carries are one list. The phone's

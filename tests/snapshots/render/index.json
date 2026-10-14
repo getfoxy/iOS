@@ -241,8 +241,8 @@
  },
  "fcLimitConfirm, a daily limit, to be confirmed": {
   "file": "253-fclimitconfirm-a-daily-limit-to-be-confirmed.html",
-  "markup": "fea95929e09d4b9f9cabe96153c41b1aaa799d32021e02738f42b2eff97713d0",
-  "vals": "5d8ca9ed2cb3c715e02ccfabf29e0a69dcef6cb7996ff476b5f98e5430635608"
+  "markup": "ea8d2dd43cdbf2f64778e58aee53443bb45df28b109547449d221a0c63e66c43",
+  "vals": "e3fdedcd8edebc2908448e6e2090431592c0fce4a3a028d2aebc6e1579f65cd9"
  },
  "fcLimitConfirm, no limit, to be confirmed": {
   "file": "254-fclimitconfirm-no-limit-to-be-confirmed.html",
@@ -311,68 +311,93 @@
  },
  "flashcard, a card of this phone’s, with no limit": {
   "file": "261-flashcard-a-card-of-this-phone-s-with-no-limit.html",
-  "markup": "552fe26574db1de08d0ec53b8324638a7c58f6191b90b7cc8c30d04e2f47f066",
-  "vals": "2e98d8911c5a379d731ce9a1ff8ed3bc7250612c9cf3d51b79306ed38ba5c3f8"
+  "markup": "83ad46ad45a9a2270be0655ddd04e52f39c4c1a3a2f3e86fbc73f5c7f6870bd4",
+  "vals": "361a9e9039003c00558c53c509ebeea81528f877460770554615670dc085321f"
  },
  "flashcard, a card with a daily limit, what is left and when the day turns": {
   "file": "262-flashcard-a-card-with-a-daily-limit-what-is-left-and-when-the-day-turns.html",
-  "markup": "561f12cd2087d9c7b6fd60c7b8e39150baf3599e1e856cda64536f471acc0be3",
-  "vals": "3c1f5bbd9e5ba220c5bc6de648672d1fe146af47473632c8d43c5309ded9c605"
+  "markup": "35fda8c390f3c6a7cb3ec87b737973bd66d310e59583e8b33a5151b486d4d041",
+  "vals": "5139135135a66710bef70047360f411c7606f20fecd724ae3f0a7038d5688a3f"
  },
  "flashcard, a card with a limit on one tap": {
   "file": "311-flashcard-a-card-with-a-limit-on-one-tap.html",
-  "markup": "76c8dbc5d26a27def1aaf6b2c87075f5e0b48a69b6c5dd5101e4f46b88b1242f",
-  "vals": "9ae9602f9f418f76dabaa5e0859c628a8cbecc2d50a2a494eff6effb317ef27f"
+  "markup": "7638e408a0e19f253934052f570a64639499e8b0a4f00bdb761855014bf34199",
+  "vals": "cd52ba06179a074067153d18343bdf38e80115d1116decf452797b5c1ba9af25"
  },
  "flashcard, a card with a limit on one tap and a daily limit": {
   "file": "312-flashcard-a-card-with-a-limit-on-one-tap-and-a-daily-limit.html",
-  "markup": "e4e734335784c23ade59e0c1f19a4e42075e698c55767023c99adfc76046b137",
-  "vals": "6056eaa0e18c5ba260c45882cadbd66bf7f703268d3b89cb43ffceaa352b9dbc"
+  "markup": "558d59d097ddbbc42965c165a6d9d4021969f5c0e37f19c3d24ad0ccf4403923",
+  "vals": "68e5fe00d7fa97fb6d8791198a170d06bec28b5ba96bcb5420e5da50e2df09b7"
+ },
+ "flashcard, another phone’s card whose rollover budget is spent: what is left, and that it renews at its owner’s tap": {
+  "file": "390-flashcard-another-phone-s-card-whose-rollover-budget-is-spent-what-is-left-and-that-it-renews-at-its-owner-s-tap.html",
+  "markup": "7efb41b50f6c843c1f93aac7ace28b2ef7fdfd7a46479259f429427ff21b71d2",
+  "vals": "bedb680d563146793428d2b28f18627b02922b9348b0ab4b4c211c002cd3b950"
+ },
+ "flashcard, a card whose rollover budget is spent, on its owner’s phone offline": {
+  "file": "391-flashcard-a-card-whose-rollover-budget-is-spent-on-its-owner-s-phone-offline.html",
+  "markup": "71a0639058b47a2bfeb1b695260e026e44f6255b6323497115466d1f66e0e7b3",
+  "vals": "af027742147e8c1267b84191d52a225f46c0b93957791b60932d7d0d1c81aa23"
+ },
+ "flashcard, a card whose rollover budget is spent, on its owner’s phone with no block to renew it": {
+  "file": "392-flashcard-a-card-whose-rollover-budget-is-spent-on-its-owner-s-phone-with-no-block-to-renew-it.html",
+  "markup": "5e215f2fee1b5531ac0bac11ec0d4719e982050230caf473c2aaf3d7fca141f2",
+  "vals": "ca9617562925059965601d56656c73a0a0bc8eb0f2e19e05b66a28435d88c76e"
+ },
+ "flashcard, a card whose rollover budget is spent, that would not take its owner’s block": {
+  "file": "393-flashcard-a-card-whose-rollover-budget-is-spent-that-would-not-take-its-owner-s-block.html",
+  "markup": "4b59c5d21e821fadf95ac32ccf828ef05c7eade24f804259207cf24038cd4c94",
+  "vals": "d0452d544975c1b9f36c4b101c058cfdb4a08638563f0803896b079961eb1e3f"
+ },
+ "flashcard, a card whose rollover budget was spent, renewed by its owner’s tap": {
+  "file": "394-flashcard-a-card-whose-rollover-budget-was-spent-renewed-by-its-owner-s-tap.html",
+  "markup": "8ac5172c7c00e1d47e87914ef58998b720252b3cc9a047fc1df906549bcbae85",
+  "vals": "869bd9c436c922c98204e8614b3acc6f4ab17e86bcda633fec8b1e0239ebf861"
  },
  "flashcard, a locked card with a daily limit: its badge above the limit line, on the face": {
   "file": "370-flashcard-a-locked-card-with-a-daily-limit-its-badge-above-the-limit-line-on-the-face.html",
-  "markup": "63d5797263a250e6a2f6e3a81b0383389a469caef91d4109ba1e7d4ae949038d",
-  "vals": "c543ad8564747fcb81d26de66a65e788e9c01ecd06ddc1203c121f28f0ca087c"
+  "markup": "99a4463ebc7e9a239116e4a3bd7dc0e48ad1894e32cef4fb30350cbe50fa8ac0",
+  "vals": "bb6624a75d411761614ad2c0ad99fccca414ba08a604d37e0fb578370addbd3e"
  },
  "flashcard, a card of the Foxy design with both limits on its face": {
   "file": "371-flashcard-a-card-of-the-foxy-design-with-both-limits-on-its-face.html",
-  "markup": "e38917a1a62ec12a04b62e520c1b08cfdfa7b00205068c7da308521b886cf3d5",
-  "vals": "7119841f5ad36a8da86eb2bc6ef3b1a3da5fff38fc6fd8c90d9c6243f192c772"
+  "markup": "a0cb9802d9c76507803fcd5c461f2de6d0b7fe1dd4515b31aa12293285399060",
+  "vals": "1a5fd622dd1900b823e7d200ffaad9b592eb678ad1bfd8e1fd551bfa2d475771"
  },
  "flashcard, the balance counting up after money went on": {
   "file": "372-flashcard-the-balance-counting-up-after-money-went-on.html",
-  "markup": "4f71e27cb3096b4bb87b6a9026166ee3c43a8ea953963ffc622652e3f1374416",
-  "vals": "fe66e4598e94895b5f11822ed3265abdd4a8bd72c18f95db09f1434cdcf772de"
+  "markup": "ff95053d9568e7147372daa6a45dbec53e2e5065a4a4fbf2e4a0ff33c179b656",
+  "vals": "76819d110684845e13aa76e51e43543b1196d56b07d30fd83b60d4686ed0f942"
  },
  "flashcard, a card with its own log": {
   "file": "318-flashcard-a-card-with-its-own-log.html",
-  "markup": "76c8dbc5d26a27def1aaf6b2c87075f5e0b48a69b6c5dd5101e4f46b88b1242f",
-  "vals": "9ae9602f9f418f76dabaa5e0859c628a8cbecc2d50a2a494eff6effb317ef27f"
+  "markup": "7638e408a0e19f253934052f570a64639499e8b0a4f00bdb761855014bf34199",
+  "vals": "cd52ba06179a074067153d18343bdf38e80115d1116decf452797b5c1ba9af25"
  },
  "flashcard, a card whose log has a tap marked as a tamper": {
   "file": "319-flashcard-a-card-whose-log-has-a-tap-marked-as-a-tamper.html",
-  "markup": "6ee76a534d9a41e9301285299df7a1e6ef48e551a296d451b61c91a13c9114c2",
-  "vals": "92d391c3add709697cf95c9ba8d5140a682014dafac621c8a1e38c7b16c74a40"
+  "markup": "4fa5c4aff0a73f0715004d6ed6366696c54ed6e07c8d6a04966bdf0f36ba94ab",
+  "vals": "36d45fb5f892b7cfb66d6dea0174ac53f8ed6df47343e27abf61e92517243c0d"
  },
  "flashcard, a card of software 1.15, the block its clock reads": {
   "file": "325-flashcard-a-card-of-software-1-15-the-block-its-clock-reads.html",
-  "markup": "93025d6b1a4c0ec8474fe06c7b1f05539a7fc5b300c9e0dda5bc570719decfca",
-  "vals": "6bb4cfe18143736f84e3a160bd4655c7ac321ec9d593e0f49dc8f654b8064107"
+  "markup": "c84c2b58555a05dec52b0be6d439e1567180739309668ba17be5753309686e1a",
+  "vals": "ad227db134b378f3daa317cae6515ce53a4013b6341564f96b524d3bb6f1a724"
  },
  "flashcard, a card of software 1.15 with both limits, the block its clock reads under them": {
   "file": "326-flashcard-a-card-of-software-1-15-with-both-limits-the-block-its-clock-reads-under-them.html",
-  "markup": "3ea3a06d7312670ab59d5fb19875207d5f326beb91bc2b113dd604b0497887bf",
-  "vals": "d15c6ab9acd19d3dd643d11bb837d81e89984d16f7a8bfdc02ee26ff855c1cb3"
+  "markup": "3bac91fa6c4ccd47dc0b899508972894532a072bd107296b09b212529cd93657",
+  "vals": "efefe104d633c93a7e3d922d7e6e148a20c5e13dcb3c73919ee61db904ecfc98"
  },
  "flashcard, a card of software 1.15 that has been shown no block": {
   "file": "327-flashcard-a-card-of-software-1-15-that-has-been-shown-no-block.html",
-  "markup": "7696a8624193317dda2ab13bddeae03b53ddd315bf51294057ca824f7b991627",
-  "vals": "ada5bdced1b6e62a935701bf847346130ebe10bf3a06bdf3257f57ea6640ef8d"
+  "markup": "b6029c5b8d973e79af3b2029238ed0858ead5af66838df4eb899d631db1cdeb7",
+  "vals": "3e11980c4828311b37c7933a113568f80bc3e8fd4417f58bafa1ef085eed4715"
  },
  "flashcard, a card of software 1.15 with a daily limit and no block yet: a day with no start": {
   "file": "328-flashcard-a-card-of-software-1-15-with-a-daily-limit-and-no-block-yet-a-day-with-no-start.html",
-  "markup": "229ea490734cc4e8d38b930ed860f962fd2a3456cbc289789f58ff589e83d4b4",
-  "vals": "834887ae0ec39f106622ad0976913f7eb567f63a3fbfa9c1c03eaa123952c910"
+  "markup": "388180c0f8cd9012be60ea22cff5dbffaa966f0bc6affbcba3866db19368ece0",
+  "vals": "a90eb0be05b2c6f08d800ca9b101223095d58bfc39d9a4c0c1f057f8c03cab4a"
  },
  "flashcard, a card of software 1.17, with RESET CARD, its row and its block by height": {
   "file": "348-flashcard-a-card-of-software-1-17-with-reset-card-its-row-and-its-block-by-height.html",
@@ -416,18 +441,18 @@
  },
  "flashcard, change a till never handed over, fetched and put on": {
   "file": "322-flashcard-change-a-till-never-handed-over-fetched-and-put-on.html",
-  "markup": "503acbf5d2f9b8c3f47a942a6440502f4e4374a2e9331ae220223ccec8a3766b",
-  "vals": "c36533b8dc099489164b0818fb0915f54e1c8b67b820d8fd11a84cb91ebef8d5"
+  "markup": "ae914b21f996b5b59c69534f557eb4b43ac5ca66448b0e03eb87808060f80cc7",
+  "vals": "65981b947213058b834b17ca8a3b715db0cc95a3a0b0b2b3f1f47783a584f761"
  },
  "flashcard, change the till has not made yet": {
   "file": "323-flashcard-change-the-till-has-not-made-yet.html",
-  "markup": "88f2a45f502a83e989944211e27efab6230e02e2547f76590c0cf815376c4624",
-  "vals": "351364883b792c2f18b4d091a9b69da072d9ec35b1e97220ccb66221db3a5f85"
+  "markup": "0f4f8fe957598c1b5e272bb1bfeb5179ab3b79c464a47e29f312e790f7af23fd",
+  "vals": "4c23dff47bc1e9f421e3499aa2c7dee2c1cf5f68a2bb0f31136912055060bb12"
  },
  "flashcard, change owed in two states, under the limits": {
   "file": "324-flashcard-change-owed-in-two-states-under-the-limits.html",
-  "markup": "7ef1912e7156139403430a1e21ffc7414888e4376ca40bd76d0dd0e797e3cc2b",
-  "vals": "2ccbbf2b8390f5cf5ad93242bd5f5a98f7cb57a65f6c5c0cce89d88e78a22805"
+  "markup": "103795da2809afd392626f9766ba646f0f1896a7821ce6529bb1ffe1b5ba35db",
+  "vals": "44a10fe03129be34c8c0f7ea96dbc734aad9cdcae75cff57c3700b3177a9df7d"
  },
  "flashcard, a new card": {
   "file": "263-flashcard-a-new-card.html",
@@ -436,28 +461,28 @@
  },
  "flashcard, a card with no PIN, with ADD PIN": {
   "file": "337-flashcard-a-card-with-no-pin-with-add-pin.html",
-  "markup": "9d64c9130a27381ef45967599678e4b11229b24012a6f3483428bdb28374a776",
-  "vals": "8c04bf9d0660c2ed65b10519c7268456378a93bc0b639b171cda3e2af0ccdcd8"
+  "markup": "75c30bd2d9e82c34241b95861057c83fbc77ec69b1fe6b0cc8b53c6971a8f449",
+  "vals": "0975e55e2a2e5fc52f621cb4b52746ba798e390082e65f1d81d500dc21af5b1b"
  },
  "flashcard, a card with a PIN and a limit for paying without it": {
   "file": "338-flashcard-a-card-with-a-pin-and-a-limit-for-paying-without-it.html",
-  "markup": "89d0522e6c5af8d53987606a70a21d87ff1a4b83dce9dbbdb889caf9419cc315",
-  "vals": "6bd44d5c44a71f849e5eed1b85543cd3c4694ef44575a93e1a871b711bc28a2f"
+  "markup": "da20c7e009f20071d1d63de9b4abf3f217dc945f7b42e610ade64206c0fead52",
+  "vals": "94ba443b7204bb1c2b017cd2aaac8752e1a2baffa8a07bc3e760af051ac471d9"
  },
  "flashcard, a card with a PIN and a limit for paying without it, beside the daily limit and the limit on one tap": {
   "file": "339-flashcard-a-card-with-a-pin-and-a-limit-for-paying-without-it-beside-the-daily-limit-and-the-limit-on-one-tap.html",
-  "markup": "98c7293117e2ebd1982c8472deab45f01196d32e9b855987062b8d8f13091f5d",
-  "vals": "23387721f14bb7bdb240103aecc7fcff5aaa239a6aa5c43bb9465cabedc9b12f"
+  "markup": "20efdef30e381531e72c7c02fe85cacf2ce57b6980ba249902daf95bd01e602f",
+  "vals": "e667be5c7d69a0b698c934046ae046437a15367b66771a52c0f46409af3b9e7a"
  },
  "flashcard, a card with a PIN and no limit for paying without it": {
   "file": "340-flashcard-a-card-with-a-pin-and-no-limit-for-paying-without-it.html",
-  "markup": "552fe26574db1de08d0ec53b8324638a7c58f6191b90b7cc8c30d04e2f47f066",
-  "vals": "2e98d8911c5a379d731ce9a1ff8ed3bc7250612c9cf3d51b79306ed38ba5c3f8"
+  "markup": "83ad46ad45a9a2270be0655ddd04e52f39c4c1a3a2f3e86fbc73f5c7f6870bd4",
+  "vals": "361a9e9039003c00558c53c509ebeea81528f877460770554615670dc085321f"
  },
  "flashcard, a blocked card, on its owner’s phone, with UNBLOCK": {
   "file": "264-flashcard-a-blocked-card-on-its-owner-s-phone-with-unblock.html",
-  "markup": "2ae1df0c1a17295145ceaa7b89c4548681989f14307404301608f3cdd75571ba",
-  "vals": "f766ed3b4feea600a2b2c724b51a4772eb348df40801fb561c22a4ce86a0a68b"
+  "markup": "48e9c1931523834d2df6f1d8d4c2238cb1940c0c1183641e1c44ebd22cc7ddde",
+  "vals": "73657685f7fd74bf98f3e5dcd307725a1cd62aaf8f9ec8f0a1a173a08a728173"
  },
  "flashcard, a blocked card, on another phone": {
   "file": "265-flashcard-a-blocked-card-on-another-phone.html",
@@ -466,13 +491,13 @@
  },
  "flashcard, a cash card the mint says is spent": {
   "file": "266-flashcard-a-cash-card-the-mint-says-is-spent.html",
-  "markup": "7f8a7a1062377271ce45c8fddaef33f8f5b9caf5e7672959d932ce0c2fe463f4",
-  "vals": "c33f58f0e266552f9c92776847503f074552e3c9dfd712a79286a3c7610f9fee"
+  "markup": "b3443cf4d61c3bb1dce23c6bfb712968e315520eb36a29749cdd5d0de7265369",
+  "vals": "743cc58a1387fda369d48ac67f2f321f0faad6c10e781427a498780dff47aabb"
  },
  "flashcard, somebody else’s card, past its date, no connection": {
   "file": "267-flashcard-somebody-else-s-card-past-its-date-no-connection.html",
-  "markup": "dd701cc3c0ec2bf226c193dd759bd877b4b4b2d73a3ac8781ab704860b963bd1",
-  "vals": "dd9ba3f98e90ca1f294e48ab51a82d9e41daa8dbbddc62e1db8b2e3b7f1f1081"
+  "markup": "5f98ba7b55f1565a5fb7b9492789e10103ef141b97c876bdcd1f26773562368d",
+  "vals": "3bf87077eac9e3d13bef703735cd5dc549327f4093c58730c31779fbe977fd4d"
  },
  "home, working offline": {
   "file": "217-home-working-offline.html",
@@ -1459,19 +1484,9 @@
   "markup": "4e966f35ed2fd55521ca9a23c7b282e4659ac6122239f3c83cacb8eb00270b26",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
- "card: set per tap limit on a card of 1.12, the warning": {
-  "file": "331-card-set-per-tap-limit-on-a-card-of-1-12-the-warning.html",
-  "markup": "d72db36fb08c0e9f701c26741cecd175c932e37d3b5a3cb704626e20487c96f3",
-  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
- },
  "card: how tap limit works, played out": {
   "file": "332-card-how-tap-limit-works-played-out.html",
   "markup": "8d4e9902f454f22d23d7e9e5b5a90f020646379e285ece7d55f86e79cd3bc449",
-  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
- },
- "card: how tap limit works, for a card before 1.17, played out": {
-  "file": "355-card-how-tap-limit-works-for-a-card-before-1-17-played-out.html",
-  "markup": "1fd139720c67fc949b572db9a042241c7057054f3bfed38ffcf8c1c881917209",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
  "card: reset, the warning": {
@@ -1534,11 +1549,6 @@
   "markup": "d6616c7869073e6addacf1b879f0548e74239c4236c2a1176deb2b84d01b924f",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
- "card: a per tap limit on a card whose software has none": {
-  "file": "317-card-a-per-tap-limit-on-a-card-whose-software-has-none.html",
-  "markup": "07c58ed57786b79e8a24ec04aa3632c99095c387fc54ef70a69b016579811aa0",
-  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
- },
  "card: a till, over the card’s daily limit, with what is left today": {
   "file": "274-card-a-till-over-the-card-s-daily-limit-with-what-is-left-today.html",
   "markup": "6eff4e9c68e04ad14594f52defe3c94851ba72d6bf72626e1a06779415738524",
@@ -1549,14 +1559,29 @@
   "markup": "ad5cbd6099f56b000d62f0e7abeb6b008d641f1cb8e8de01eb91392b9a13232c",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
+ "card: a till, over what is left of a card whose rollover budget is spent": {
+  "file": "395-card-a-till-over-what-is-left-of-a-card-whose-rollover-budget-is-spent.html",
+  "markup": "6636b6035f92dd8f7e3d60e1b1cde63ded9b36ce605ab4ca09b66be7ece1770c",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
+ "card: a till, a card whose rollover budget is spent and nothing is left": {
+  "file": "396-card-a-till-a-card-whose-rollover-budget-is-spent-and-nothing-is-left.html",
+  "markup": "545b9f0cd91f38d22da9637bdc98e3f2dc0f6de041edb88eb480d7f5ae9b6ad4",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
  "card: another phone’s card": {
   "file": "276-card-another-phone-s-card.html",
   "markup": "622fe66de0cec51f7f3181b707d3815061afdfdcba06dadd0f91cbc03fcbb977",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
- "card: not a Foxy card, another signer’s": {
-  "file": "277-card-not-a-foxy-card-another-signer-s.html",
-  "markup": "7589135e452147e96396fd47f31830235b28466ff8c214ec9fc57b8918a0633a",
+ "card: a card that needs an update, older than the Cashu card protocol 2.0": {
+  "file": "389-card-a-card-that-needs-an-update-older-than-the-cashu-card-protocol-2-0.html",
+  "markup": "2a948c093ffc323b5f346b28bfbf52fecb3c6e1dd23c801df0ee569d19e154e5",
+  "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
+ },
+ "card: a card of a later protocol than this app": {
+  "file": "397-card-a-card-of-a-later-protocol-than-this-app.html",
+  "markup": "e43d3bfad829739474e1b5b33dabf038582214a65013bf84071f473b6e54612c",
   "vals": "19b8f85beade41ca6c9cfc4facb64cb9d1164897a3f00d56d7c456a8209ed880"
  },
  "card: a card’s wrong PIN": {

@@ -236,7 +236,7 @@ final class NUT13Tests: XCTestCase {
         let first = try seed(of: cases[0])
         XCTAssertEqual(seedHex(first).prefix(16), "5eb00bbddcf06908")
         XCTAssertEqual(cases[0]["cardKey"] as? String, secp256k1G)
-        XCTAssertEqual(cases[0]["scalar"] as? String, "7857475d975c2a11f98b0e05512092a107ce8c9ee3d48ec3518e7407a30fa6b9")
+        XCTAssertEqual(cases[0]["scalar"] as? String, "a0bf57528b24713988d0da28e3031fb838086d9a6b7aa7e379e744004d6df85a")
     }
 
     func testTheOwnerKeyFollowsTheSeedAndTheCardsKeyAndNothingElse() throws {
@@ -307,11 +307,11 @@ final class NUT13Tests: XCTestCase {
     /// The message hashed: the tag, a zero byte, the card's key, and from counter 1 on that counter.
     func testTheHashedMessageHasACounterOnlyAfterTheFirstTry() {
         let key = bytes(secp256k1G)
-        let head = "466f7879436172642f6f776e6572" + "00" + secp256k1G   // "FoxyCard/owner", 00, the key
+        let head = "4361736875436172642f6f776e6572" + "00" + secp256k1G   // "CashuCard/owner", 00, the key
         XCTAssertEqual(NUT13.hex(CardOwner.hashInput(cardKey: key, counter: 0)), head)
         XCTAssertEqual(NUT13.hex(CardOwner.hashInput(cardKey: key, counter: 1)), head + "01")
         XCTAssertEqual(NUT13.hex(CardOwner.hashInput(cardKey: key, counter: 255)), head + "ff")
-        XCTAssertEqual(CardOwner.tag, Array("FoxyCard/owner".utf8))
+        XCTAssertEqual(CardOwner.tag, Array("CashuCard/owner".utf8))
     }
 
     func testOnlyACompressedKeyIsACardKey() {
@@ -329,28 +329,30 @@ final class NUT13Tests: XCTestCase {
 
     // MARK: What the owner key may sign
 
-    /// The six names, and nothing the card also signs or verifies: LOCK_CARD and the time are not here.
-    func testTheLabelsAreSixAndNoNameStartsAnother() {
+    /// The seven names, and nothing the card also signs or verifies: LOCK_CARD and the tag's switch are not here.
+    func testTheLabelsAreSevenAndNoNameStartsAnother() {
         let names = CardOwner.Label.allCases.map { $0.rawValue }
-        XCTAssertEqual(Set(names), ["change-pin", "set-limit", "set-owner", "set-card", "load", "reset"])
-        XCTAssertEqual(names.count, 6)
+        XCTAssertEqual(Set(names), ["change-pin", "set-limit", "set-owner", "set-card", "load", "reset", "refresh"])
+        XCTAssertEqual(names.count, 7)
         for a in names {
             for b in names where a != b {
                 XCTAssertFalse(a.hasPrefix(b), "\(a) starts with \(b), so a signature could name either")
             }
-            // what is signed never begins as a lock, a time or the card's own proof does
+            // what is signed never begins as a lock, the tag's switch or the card's own proof does, nor as a 1.x card's label
             let signed = CardOwner.message(label: CardOwner.Label(rawValue: a) ?? .load, nonce: bytes(nonceText), value: [])
-            for other in ["FoxyCard/lock", "FoxyCard/time", "FoxyCard/auth"] {
+            XCTAssertTrue(signed.starts(with: Array("CashuCard/".utf8)), "\(a) signs under the shared protocol's labels")
+            for other in ["CashuCard/lock", "CashuCard/tag", "CashuCard/auth", "FoxyCard/"] {
                 XCTAssertFalse(signed.starts(with: Array(other.utf8)), "\(a) signs as \(other)")
             }
         }
     }
 
-    /// SET_CARD's data: unit (1), refund key (33), time key (65), mint length (1), mint. `carried` is
+    /// SET_CARD's data: unit (1), refund key (33), 65 bytes the card does not read (a time key
+    /// beginning 04 as cards before 2.0 took, or zeros), mint length (1), mint. `carried` is
     /// how many bytes of mint follow, when that is not what the length byte says. `noTimeKey`: the
-    /// 65 bytes are zeros, as a card of software 1.15 and on is given (it has no time key);
-    /// `spoilTimeKey` then sets one of the 65 to 1. `design` is what follows the mint: the three
-    /// bytes of the card's design (software 1.10 and on), or whatever a test puts there.
+    /// 65 bytes are zeros, as the page writes them; `spoilTimeKey` then sets one of the 65 to 1.
+    /// `design` is what follows the mint: the three bytes of the card's design, or whatever a
+    /// test puts there.
     private func record(unit: UInt8 = 1, timeKeyFirst: UInt8 = 0x04, noTimeKey: Bool = false, spoilTimeKey: Int? = nil,
                         length: Int, carried: Int? = nil, design: [UInt8] = []) -> [UInt8] {
         var out: [UInt8] = [unit, 0x02]
@@ -372,20 +374,34 @@ final class NUT13Tests: XCTestCase {
                     [0x61, 0x62, 0x63, 0x64], [0x31, 0x32, 0x33, 0xB1]] as [[UInt8]] {
             XCTAssertFalse(CardOwner.Label.changePin.accepts(bad), "\(bad)")
         }
-        // set-limit: exactly 4 bytes (the day's limit), exactly 8 (the day's and the one tap's), or exactly 12 (and the no-PIN allowance)
+        // set-limit: exactly 4 bytes (the day's limit), exactly 8 (the day's and the one payment's), exactly 12 (and the no-PIN
+        // allowance), or exactly 13 (and the rollover budget, 1 to 30, which the page always sends)
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0xFF, 0xFF, 0xFF, 0xFF]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88, 0, 0, 0x27, 0x10]))
-        for n in [0, 1, 3, 5, 6, 7, 9, 10, 11, 13, 16] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
-        // set-owner: 65 bytes, 04 first
+        for budget: UInt8 in [1, 7, 30] {
+            XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88, 0, 0, 0x27, 0x10, budget]), "a budget of \(budget)")
+        }
+        for budget: UInt8 in [0, 31, 0xFF] {
+            XCTAssertFalse(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88, 0, 0, 0x27, 0x10, budget]), "a budget of \(budget)")
+        }
+        for n in [0, 1, 3, 5, 6, 7, 9, 10, 11, 14, 16] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
+        // set-owner: 65 bytes, 04 first, and an anchor header of 80 after them where the phone has one
         let key = [0x04] + [UInt8](repeating: 0x55, count: 64)
+        let header = [UInt8](repeating: 0x66, count: 80)
         XCTAssertTrue(CardOwner.Label.setOwner.accepts(key))
-        for first: UInt8 in [0x00, 0x02, 0x03, 0x05, 0xFF] { XCTAssertFalse(CardOwner.Label.setOwner.accepts([first] + key.dropFirst()), "starts \(first)") }
+        XCTAssertTrue(CardOwner.Label.setOwner.accepts(key + header), "the key and an anchor header")
+        for first: UInt8 in [0x00, 0x02, 0x03, 0x05, 0xFF] {
+            XCTAssertFalse(CardOwner.Label.setOwner.accepts([first] + key.dropFirst()), "starts \(first)")
+            XCTAssertFalse(CardOwner.Label.setOwner.accepts([first] + key.dropFirst() + header), "starts \(first), with a header")
+        }
         XCTAssertFalse(CardOwner.Label.setOwner.accepts(Array(key.dropLast())))
         XCTAssertFalse(CardOwner.Label.setOwner.accepts(key + [0x55]))
+        XCTAssertFalse(CardOwner.Label.setOwner.accepts(key + header.dropLast()), "a header of 79")
+        XCTAssertFalse(CardOwner.Label.setOwner.accepts(key + header + [0x66]), "a header of 81")
         XCTAssertFalse(CardOwner.Label.setOwner.accepts([]))
-        // set-card: 100 + L bytes for a mint of L, 1 to 80, the time key (index 34 on) starting 04, or all zeros (a card of software 1.15 has none)
+        // set-card: 100 + L bytes for a mint of L, 1 to 80, the 65 unread bytes (index 34 on) starting 04, or all zeros (what the page writes)
         for length in [1, 2, 24, 79, 80] { XCTAssertTrue(CardOwner.Label.setCard.accepts(record(length: length)), "mint of \(length)") }
         for length in [1, 24, 80] { XCTAssertTrue(CardOwner.Label.setCard.accepts(record(noTimeKey: true, length: length)), "no time key, mint of \(length)") }
         for at in [0, 1, 30, 63, 64] { XCTAssertFalse(CardOwner.Label.setCard.accepts(record(noTimeKey: true, spoilTimeKey: at, length: 5)), "zeros but for byte \(at) of the time key") }
@@ -404,9 +420,12 @@ final class NUT13Tests: XCTestCase {
         // load: nothing at all
         XCTAssertTrue(CardOwner.Label.load.accepts([]))
         for n in 1...3 { XCTAssertFalse(CardOwner.Label.load.accepts([UInt8](repeating: 0, count: n)), "\(n) bytes") }
+        // refresh: a block header, exactly 80 bytes
+        XCTAssertTrue(CardOwner.Label.refresh.accepts(header))
+        for n in [0, 1, 4, 79, 81, 145] { XCTAssertFalse(CardOwner.Label.refresh.accepts([UInt8](repeating: 0x66, count: n)), "\(n) bytes") }
     }
 
-    /// A card of software 1.10 and on keeps its design after its mint: a code of three characters, each a
+    /// A card keeps its design after its mint: a code of three characters, each a
     /// capital letter or a digit, or three zeros for none. A record that leaves the three bytes off clears
     /// the card's design, so the record such a card is moved with carries them, and its owner signs it.
     /// Nothing else follows a mint, and the rest of the record is held to what it was.
@@ -458,6 +477,38 @@ final class NUT13Tests: XCTestCase {
         XCTAssertFalse(setCard.accepts(record(length: 24, carried: 25, design: code("FX1"))), "a design after a mint one byte long")
     }
 
+    /// The shared protocol's own owner vectors (tests/fixtures/flashcard-owner-proofs.json is cashu-javacard's
+    /// spec/vectors/owner.json at 3876a11, protocol 2.1): every proof is over "CashuCard/", the label, the nonce and
+    /// the value, as `CardOwner.message` builds it, and verifies against the file's owner key. Every value for a label
+    /// this phone signs has the shape `CardOwner.Label` accepts (the 13-byte limit, refresh's header and the 145-byte
+    /// anchored owner among them); `lock` and `tag` are labels the card takes and this phone never signs.
+    func testTheSharedOwnerVectorsAreSignedOverTheMessageThisPhoneBuildsAndHaveItsShapes() throws {
+        let file = try fixture("flashcard-owner-proofs.json")
+        let ownerKey = try NUT13.bytes(hex: try XCTUnwrap(file["ownerKey"] as? String))
+        let key = try P256.Signing.PublicKey(x963Representation: Data(ownerKey))
+        let proofs = try XCTUnwrap(file["proofs"] as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(proofs.count, 12)
+        var seen = Set<String>()
+        for proof in proofs {
+            let full = try XCTUnwrap(proof["label"] as? String)
+            XCTAssertTrue(full.hasPrefix("CashuCard/"), full)
+            let name = String(full.dropFirst("CashuCard/".count))
+            let nonce = try NUT13.bytes(hex: try XCTUnwrap(proof["nonce"] as? String))
+            let value = try NUT13.bytes(hex: try XCTUnwrap(proof["value"] as? String))
+            let sig = try P256.Signing.ECDSASignature(derRepresentation: Data(try NUT13.bytes(hex: try XCTUnwrap(proof["signature"] as? String))))
+            let signed = Array(full.utf8) + nonce + value
+            XCTAssertTrue(key.isValidSignature(sig, for: Data(signed)), "\(full) \(value.count) bytes")
+            guard let label = CardOwner.Label(rawValue: name) else {
+                XCTAssertTrue(["lock", "tag"].contains(name), "a label this phone does not know: \(name)")
+                continue
+            }
+            seen.insert(name)
+            XCTAssertEqual(CardOwner.message(label: label, nonce: nonce, value: value), signed, full)
+            XCTAssertTrue(label.accepts(value), "\(full): \(value.count) bytes")
+        }
+        XCTAssertEqual(seen, Set(CardOwner.Label.allCases.map(\.rawValue)), "the file has a proof for every label this phone signs")
+    }
+
     private let nonceText = "000102030405060708090a0b0c0d0e0f"
 
     private func sign(_ label: Any?, _ value: Any?, key: Any? = nil, nonce: Any? = nil) -> [String: Any] {
@@ -470,11 +521,14 @@ final class NUT13Tests: XCTestCase {
     }
 
     /// {key, label, nonce, value} as the page sends them: whole and exact, or nothing.
-    func testASignRequestIsTheSixLabelsAndTheirValuesAndNothingElse() throws {
+    func testASignRequestIsTheSevenLabelsAndTheirValuesAndNothingElse() throws {
         let ok: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "000186a0"),
-                                      ("set-owner", "04" + String(repeating: "ab", count: 64)), ("load", ""), ("reset", ""),
+                                      ("set-limit", "000186a000001388000003e807"),
+                                      ("set-owner", "04" + String(repeating: "ab", count: 64)),
+                                      ("set-owner", "04" + String(repeating: "ab", count: 64) + String(repeating: "cd", count: 80)),
+                                      ("load", ""), ("reset", ""), ("refresh", String(repeating: "cd", count: 80)),
                                       ("set-card", NUT13.hex(record(length: 24))),
-                                      // with the card's design after the mint (software 1.10 and on), or three zeros for none
+                                      // with the card's design after the mint, or three zeros for none
                                       ("set-card", NUT13.hex(record(noTimeKey: true, length: 24, design: Array("FX1".utf8)))),
                                       ("set-card", NUT13.hex(record(length: 77, design: [0, 0, 0])))]
         for (label, value) in ok {
@@ -489,8 +543,9 @@ final class NUT13Tests: XCTestCase {
         let upper = try XCTUnwrap(CardOwner.signRequest(sign("set-limit", "000186A0", key: secp256k1G.uppercased(), nonce: nonceText.uppercased())))
         XCTAssertEqual(upper.value, [0, 1, 0x86, 0xA0])
         XCTAssertEqual(upper.key, bytes(secp256k1G))
-        // a label that is not one of the six, however near: LOCK_CARD and the time in particular
-        let labels: [Any] = ["lock", "time", "auth", "FoxyCard/lock", "FoxyCard/time", "FoxyCard/load", "FoxyCard/change-pin", "", " ",
+        // a label that is not one of the seven, however near: LOCK_CARD and the tag's switch in particular, and a full label of either name
+        let labels: [Any] = ["lock", "time", "auth", "tag", "CashuCard/lock", "CashuCard/load", "CashuCard/refresh", "FoxyCard/lock", "FoxyCard/time",
+                             "FoxyCard/load", "FoxyCard/change-pin", "Refresh", "refresh ", "", " ",
                              "Load", "LOAD", "Change-Pin", "change-pin ", " load", "load\n", "load\0", "change_pin", "changePin", "setLimit",
                              "set-allowance", "set-", "set", "change-pin,load", 5, true, ["load"], ["label": "load"]]
         for label in labels {
@@ -507,6 +562,10 @@ final class NUT13Tests: XCTestCase {
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "0x31323334")))
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", " 31323334")))
         XCTAssertNil(CardOwner.signRequest(sign("set-limit", "00000000ff")))
+        XCTAssertNil(CardOwner.signRequest(sign("set-limit", "000186a000001388000003e800")), "a budget of 0")
+        XCTAssertNil(CardOwner.signRequest(sign("set-limit", "000186a000001388000003e81f")), "a budget of 31")
+        XCTAssertNil(CardOwner.signRequest(sign("refresh", String(repeating: "cd", count: 79))), "a header of 79 bytes")
+        XCTAssertNil(CardOwner.signRequest(sign("refresh", "")), "refresh takes a header")
         XCTAssertNil(CardOwner.signRequest(sign("set-owner", "02" + String(repeating: "ab", count: 64))))
         XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 81)))), "181 bytes: past the longest record")
         XCTAssertNil(CardOwner.signRequest(sign("set-card", NUT13.hex(record(length: 5, carried: 6)))))
@@ -575,7 +634,7 @@ final class NUT13Tests: XCTestCase {
                 // the message is the one Node signed
                 let message = CardOwner.message(label: request.label, nonce: request.nonce, value: request.value)
                 XCTAssertEqual(NUT13.hex(message), s["message"], s["label"] ?? "")
-                XCTAssertEqual(Array(("FoxyCard/" + request.label.rawValue).utf8) + request.nonce + request.value, message)
+                XCTAssertEqual(Array(("CashuCard/" + request.label.rawValue).utf8) + request.nonce + request.value, message)
                 // Node's signature verifies here ...
                 let theirs = try P256.Signing.ECDSASignature(derRepresentation: Data(bytes(try XCTUnwrap(s["sig"]))))
                 XCTAssertTrue(pub.isValidSignature(theirs, for: Data(message)), "Node's \(s["label"] ?? "")")
@@ -589,6 +648,6 @@ final class NUT13Tests: XCTestCase {
                 checked += 1
             }
         }
-        XCTAssertEqual(checked, 18, "three seeds, each signing every label: six since the card could be reset")
+        XCTAssertEqual(checked, 21, "three seeds, each signing every label: seven with the refresh")
     }
 }

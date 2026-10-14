@@ -99,6 +99,7 @@ check "flashcard clock" 1 node tests/flashcard-clock.js
 check "flashcard no pin" 1 node tests/flashcard-nopin.js
 check "flashcard reset" 1 node tests/flashcard-reset.js
 check "flashcard change" 1 node tests/flashcard-change.js
+check "flashcard change tap" 1 node tests/flashcard-change-tap.js
 check "flashcard owed change" 1 node tests/flashcard-owed.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
 check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js

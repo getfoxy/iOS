@@ -782,23 +782,21 @@ function p2pkAt(parent, index) {
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
 }
 
-/* ---- the owner key and the time key (P-256) --------------------------------
+/* ---- the owner key (P-256) ----------------------------------------------------
  *
- * What the phone's native side does for a card, as Foxy/Keychain (CardOwner) and
- * Foxy/Flashcard/CardTime.swift do it, with Node's own crypto, and held to the
- * same fixture (tests/fixtures/card-owner-vectors.json). A card's owner key is
+ * What the phone's native side does for a card, as Foxy/Keychain (CardOwner)
+ * does it, with Node's own crypto, and held to the same fixture
+ * (tests/fixtures/card-owner-vectors.json), under the labels of the Cashu card
+ * protocol 2.0 ("CashuCard/"). A card's owner key is
  * derived per card from the seed and never leaves native; the page gets the
  * public half and signatures, and that is what these answer. */
 const P256_ORDER = BigInt('0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551');
-/* The labels native signs for, and no others (never "lock", never "time"). */
-const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load', 'reset'];
-/* INTERIM: the private half of the key a card's time is signed by. It is built into the app, so it is no secret
- * (Foxy/Flashcard/CardTime.swift holds the same value, and tests/flashcard-daily.js holds the two together). */
-const INTERIM_TIME_PRIVATE = '5d3aa8864437b69bc699905ded587014b3d1f7e0de402684e5eec162d540b2ca';
+/* The labels native signs for, and no others (never "lock", never "tag"). */
+const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load', 'reset', 'refresh'];
 
 function cardOwnerScalar(seed, cardKeyHex) {
   for (let counter = 0; ; counter++) {
-    const message = Buffer.concat([Buffer.from('FoxyCard/owner', 'utf8'), Buffer.from([0]), Buffer.from(cardKeyHex, 'hex'),
+    const message = Buffer.concat([Buffer.from('CashuCard/owner', 'utf8'), Buffer.from([0]), Buffer.from(cardKeyHex, 'hex'),
       counter ? Buffer.from([counter]) : Buffer.alloc(0)]);
     const d = BigInt('0x' + crypto.createHmac('sha256', seed).update(message).digest('hex')) % P256_ORDER;
     if (d !== 0n) return d;
@@ -849,8 +847,6 @@ function nativePhone(opts) {
     screen: null,               // the seed screen open or queued: { close }
     faceIdCancelledAt: null,
     now: () => Date.now(),
-    /* The phone's own clock, in milliseconds, which `cardTime` signs: the real one unless a test sets `clockMs`. */
-    clockMs: () => Date.now(),
     page: null,
     hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null },
     toSeed: null, generate: null, wordlist: null, derive: null, validate: null,
@@ -1152,7 +1148,7 @@ function nativePhone(opts) {
     },
     /* handleCardOwnerKey, SeedActions.cardOwnerKey: the owner PUBLIC key for a
      * card, 04 || X || Y. The private half is HMAC-SHA256 keyed with the seed over
-     * "FoxyCard/owner", a zero byte and the card's key (33 bytes), taken mod the
+     * "CashuCard/owner", a zero byte and the card's key (33 bytes), taken mod the
      * order of P-256, and it never leaves here: the key is checked before the seed
      * is read, no counter moves and no window applies. */
     cardOwnerKey(m) {
@@ -1163,9 +1159,9 @@ function nativePhone(opts) {
       return ok({ pub: p256Public(cardOwnerScalar(seedNow(), key)) });
     },
     /* handleCardOwnerSign, SeedActions.cardOwnerSign: a signature (ECDSA, SHA-256,
-     * DER) over "FoxyCard/" + label || nonce (16) || value, for one of six fixed
+     * DER) over "CashuCard/" + label || nonce (16) || value, for one of seven fixed
      * labels and the shape each takes. Every check comes before the seed is read.
-     * Nothing else is signed: not "lock", not "time". */
+     * Nothing else is signed: not "lock", not "tag". */
     cardOwnerSign(m) {
       const key = typeof m.key === 'string' ? m.key.toLowerCase() : '';
       if (!/^0[23][0-9a-f]{64}$/.test(key)) return no(SAYS.bad);
@@ -1177,29 +1173,26 @@ function nativePhone(opts) {
       const design = (d) => d.length === 3 && (d.every((b) => b === 0) || d.every((b) => (b >= 0x41 && b <= 0x5a) || (b >= 0x30 && b <= 0x39)));
       const shaped = {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
-        'set-limit': value.length === 4 || value.length === 8 || value.length === 12,
-        'set-owner': value.length === 65 && value[0] === 4,
-        // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none; and after the mint
+        // 4, 8 or 12 bytes, or 13 with a rollover budget of 1 to 30 (CardOwner.Label.setLimit)
+        'set-limit': value.length === 4 || value.length === 8 || value.length === 12 || (value.length === 13 && value[12] >= 1 && value[12] <= 30),
+        // the key, and an anchor header after it where the phone has one
+        'set-owner': (value.length === 65 || value.length === 145) && value[0] === 4,
+        // the 65 bytes from 34 the card does not read: zeros, or a key beginning 04 as 1.x cards took; and after the mint
         // there is nothing, or the card's design, whose mint is 77 bytes at the most (CardOwner.Label.setCard)
         'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1
           && ((value[99] <= 80 && value.length === 100 + value[99]) || (value[99] <= 77 && design(value.subarray(100 + value[99]))))
           && (value[34] === 4 || value.subarray(34, 99).every((b) => b === 0)),
         'load': value.length === 0,
-        // RESET (card software 1.17): the proof is over the label and a nonce alone
+        // RESET: the proof is over the label and a nonce alone
         'reset': value.length === 0,
+        // REFRESH: a block header
+        'refresh': value.length === 80,
       }[m.label];
       if (!shaped) return no(SAYS.bad);
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cardOwnerSign', 'read')) return no(SAYS.unreadable);
-      const message = Buffer.concat([Buffer.from('FoxyCard/' + m.label, 'ascii'), Buffer.from(m.nonce, 'hex'), value]);
+      const message = Buffer.concat([Buffer.from('CashuCard/' + m.label, 'ascii'), Buffer.from(m.nonce, 'hex'), value]);
       return ok({ sig: p256Sign(cardOwnerScalar(seedNow(), key), message) });
-    },
-    /* handleCardTime, CardTime.swift: the phone's own clock, signed by the INTERIM
-     * time key over "FoxyCard/time" || the time (4 bytes, big-endian). No seed. */
-    cardTime() {
-      const time = Math.floor(phone.clockMs() / 1000);
-      const message = Buffer.concat([Buffer.from('FoxyCard/time', 'ascii'), Buffer.from([time >>> 24, (time >>> 16) & 255, (time >>> 8) & 255, time & 255])]);
-      return ok({ time, sig: p256Sign(BigInt('0x' + INTERIM_TIME_PRIVATE), message) });
     },
     // handleSeedShow, SeedScreens: one screen at a time, and none within 10 s of a cancelled Face ID
     seedShow(m) {
@@ -1308,4 +1301,4 @@ function nativePhone(opts) {
 }
 
 module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
-                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, INTERIM_TIME_PRIVATE, CARD_LABELS };
+                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS };

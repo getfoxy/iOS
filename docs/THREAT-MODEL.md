@@ -64,7 +64,7 @@ The bridge exposes exactly these actions:
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
 - `shakeStart`, `shakeStop`: whether a shake of the phone presses TAP, armed only on the receive screen (TAP-TO-PAY.md)
 - a card that holds ecash, held to the phone: `cardBegin`, `cardSend`, `cardSay`, `cardAgain`, `cardEnd`
-- a card's owner key, which never leaves native code: `cardOwnerKey` (its public half) and `cardOwnerSign` (a signature for one of six labels); and `cardTime`, the time a card of software 1.14 or before is told, signed by the interim key (a card of 1.15 takes no signed time: its clock is the Bitcoin block headers the page fetches over Tor and shows it)
+- a card's owner key, which never leaves native code: `cardOwnerKey` (its public half) and `cardOwnerSign` (a signature for one of seven labels). The card takes no signed time: its clock is the Bitcoin block headers the page fetches over Tor and shows it
 
 Haptics arrive as a separate `{haptic}` message with no action. The review-era
 `open`, `vpn`, `path` and `torcheck` are gone. `open` handed https links to
@@ -158,8 +158,7 @@ answer for a third of them.
 | `cardAgain` | card session | the card left part way through: the open sheet looks for a card again, with one line of the page's text on it, under the same limits. Answers when a card is there, or why not. The applet must be chosen again before any of its instructions is carried |
 | `cardEnd` | card session | closes the sheet, with a word or with a reason; also how the page takes down a sheet still waiting for a card |
 | `cardOwnerKey` | seed queue | the owner PUBLIC key for one card, as 130 lowercase hex characters (`04`, X, Y of a P-256 key). The private half is derived from the seed and the card's public key, which the page gives as 66 hex characters starting 02 or 03; anything else is "bad request" before the seed is read. The page gives the answer to the card at set-up. No counter moves, and the same twelve words derive the same key on a new phone, so that phone is the owner of the same cards. Only the public half is ever answered |
-| `cardOwnerSign` | seed queue | an ECDSA signature (P-256, SHA-256, DER, lowercase hex) by that owner key, and nothing else, over `FoxyCard/` and a label, a 16-byte nonce and a value. Only six labels are signed: `change-pin`, `set-limit`, `set-owner`, `set-card`, `load` and `reset` (card software 1.17: the owner gives the card back to what it was in its packet, which needs no money on it and wipes the card's PIN, owner, record and key), each with the shape of value its card command takes (a PIN of 4 to 8 digits; a limit of 4 bytes, or of 8 for the day's and the one tap's together, or of 12 with the no-PIN allowance after them; a 65-byte key beginning 04; a card record of 100 + L bytes, L from 1 to 80, or of 103 + L with the card's design after the mint, L then 77 at most; nothing at all). Anything else is "bad request" before the seed is read: a lock (`lock`) and a time (`time`) cannot be asked for, and no label is the start of another. A page that had been got at can ask for any of the five for any card whose key it knows. A nonce comes only from a card held to the phone, and a signature is good for that nonce, in that tap, and no other, so it needs the card held to the phone; with that, it can do what the card's owner can, with no PIN, which includes setting the PIN, lifting the limit and so spending what is on the card. The owner key and the seed are never in an answer |
-| `cardTime` | — | `{"time", "sig"}`: the phone's clock in whole seconds since 1970 (it must fit four bytes), and a signature over `FoxyCard/time` and the time by the INTERIM time key, which a card of software 1.14 or before verifies against the time key in its record; a card of 1.15 and on has no such key, takes no signed time, and the page does not ask for one. It needs no seed, no card and no argument, and answers nothing secret. It is INTERIM: the private half of that key is built into the app, so anyone can extract it, and this is as weak as trusting the receiving phone's own clock. It bounds an honest receiver and the holder's own overspending, and not a terminal built to cheat, which can sign its own time. No server exists yet; a real signer replaces it by provisioning, not by a new applet. No screen says that the daily limit stops an attacker |
+| `cardOwnerSign` | seed queue | an ECDSA signature (P-256, SHA-256, DER, lowercase hex) by that owner key, and nothing else, over `CashuCard/` and a label, a 16-byte nonce and a value (the shared Cashu card protocol 2.0's labels). Only seven labels are signed: `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset` (the owner gives the card back to what it was in its packet, which needs no money on it and wipes the card's PIN, owner, record and key) and `refresh` (the newest block header, which fills the card's rollover budget again), each with the shape of value its card command takes (a PIN of 4 to 8 digits; a limit of 4 bytes, or of 8 for the day's and the one payment's together, or of 12 with the no-PIN allowance after them, or of 13 with the rollover budget, 1 to 30, after those; a 65-byte key beginning 04, or that key and an 80-byte anchor header; a card record of 100 + L bytes, L from 1 to 80, or of 103 + L with the card's design after the mint, L then 77 at most; nothing at all; an 80-byte block header). Anything else is "bad request" before the seed is read: a lock (`lock`) and the tag's switch (`tag`) cannot be asked for, and no label is the start of another. A page that had been got at can ask for any of the seven for any card whose key it knows. A nonce comes only from a card held to the phone, and a signature is good for that nonce, in that tap, and no other, so it needs the card held to the phone; with that, it can do what the card's owner can, with no PIN, which includes setting the PIN, lifting the limit and so spending what is on the card. The owner key and the seed are never in an answer |
 
 Two things the table does not check, and does not pretend to: each action's own
 argument checks (`FoxyTests/NativeSeedTests.swift` and `CounterRangeCheckTests`
@@ -1307,14 +1306,11 @@ Superseded from the earlier list:
   does what a card tapped on the lock screen does: the Flashcard screen and the phone's
   card sheet. Nothing is read, sent or paid by that, the sheet can be dismissed, and it is
   ignored in the middle of a payment and kept while Foxy is locked (§1).
-- **A chip card that holds ecash has limits of its own.** A terminal built to
-  cheat on a card before software 1.15, whose time key is public because its
-  time is interim (a card of 1.15 takes its clock from Bitcoin block headers,
-  which no terminal can set, and has no time key), the card's PIN typed on the
-  receiving phone (and sent to a card before software 1.9 in the clear; sealed
-  to the card's own key from 1.9), and a card payment taken on trust when the
-  till has no route are each argued in `CARD.md`, *What it does not protect
-  against*. The bridge actions that serve a card are in §1.
+- **A chip card that holds ecash has limits of its own.** The card's clock
+  (Bitcoin block headers, which no terminal can set), the card's PIN typed on
+  the receiving phone (sealed to the card's own key), and a card payment taken
+  on trust when the till has no route are each argued in `CARD.md`, *What it
+  does not protect against*. The bridge actions that serve a card are in §1.
 - **A restore's reach.** A swap now asks for up to sixty shaped outputs, and a
   refused or lost request burns the counters it reserved. The walk's gap and
   the phone's window are 1,000 counters (`RestoreWindow.beyond`,

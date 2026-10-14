@@ -1,10 +1,9 @@
 'use strict';
-/* flashcard-nopin.js — card software 1.16: the PIN is optional, and a no-PIN allowance per day.
+/* flashcard-nopin.js — the PIN is optional, and a no-PIN allowance per day.
  *
  *     node tests/flashcard-nopin.js
  *
- * Until 1.16 a card had a PIN from set-up and every payment, load and owner's flow of a card with one asked for it. From 1.16 a
- * card may have none, and it then pays without one (its limits on one tap and in a day still hold). A card with a PIN may carry a
+ * A card may have no PIN, and it then pays without one (its limits on one payment and in a day still hold). A card with a PIN may carry a
  * NO-PIN ALLOWANCE: how many sats a day it signs for without the PIN, in the day's own window, counting only what was signed for that
  * way. Over it, the card refuses the signature (6A94) and the PIN is wanted for the WHOLE payment; with the PIN the payment is as it
  * ever was. A PIN can be added later by the owner (ADD PIN), and then the allowance is nothing until the owner sets one.
@@ -12,7 +11,7 @@
  * The card here is the model (tests/flashcard-card.js), which answers as the applet does (tests/flashcard-model.js). What is checked is
  * the card's rules as the model has them, and the wallet's side: what it reads (`card.noPin`, `cardNeedsPin`), what it asks for, the
  * `pin-needed` it rejects with (before the card is asked, or at its 6A94 with nothing left pending), set-up with no PIN, ADD PIN, the
- * allowance and its dollars, the log's flag, and a card of 1.15, which must keep asking for its PIN.
+ * allowance and its dollars, and the log's flag.
  */
 const { funded, newCard, why, settle, binaryLoad, MINT, OTHER_WORDS } = require('./flashcard-kit');
 
@@ -26,7 +25,7 @@ const count = (card, ins) => card.sent.filter((a) => a.slice(0, 4) === 'b0' + in
 const swaps = (c) => JSON.parse(c.storage.getItem('foxy.flashcard.swaps') || '[]');
 const taken = (c) => JSON.parse(c.storage.getItem('foxy.flashcard.taken') || '[]');
 const DAY = 86400;
-const SEL = '00a4040009f0464f58594341524400';
+const SEL = '00a404000bf04341534855434152440100';
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
 
 /* A till (R) and a holder (H), who share a mint, and a card the holder set up: with a PIN of 1234 (`pin`), or none. 2,000 sats on it. */
@@ -45,19 +44,24 @@ async function world(pin, o) {
   /* ---- 1: what the card says, and what the wallet makes of it ------------------------------------------------------- */
   {
     const W = (await funded({}, 0)).W;
-    const longInfo = (limit, spent, now, begun, pin) => '01' + '10' + '80' + '00' + '00' + '80' + 'ff' + (pin ? '01' : '00') + '04' + '03' + '00' + '01'
+    const longInfo = (limit, spent, now, begun, pin) => '02' + '00' + '80' + '00' + '00' + '80' + 'ff' + (pin ? '01' : '00') + '04' + '03' + '00' + '01'
       + u32(0) + '01' + u32(now) + u32(begun) + u32(0) + '00' + u32(0) + u32(limit) + u32(spent);
     const info = W.cardParse.info(longInfo(500, 120, 1000, 900, true));
-    ok(info.version === '1.16' && info.noPinKnown === true && info.noPin.limit === 500 && info.noPin.spent === 120 && info.pinSet === true && info.pin === 'set' && info.setUp === true,
-       'GET_INFO of 1.16 says the allowance and what is spent of it, in bytes 34 to 41', JSON.stringify(info.noPin));
-    ok(info.tapStart === 0 && info.tapSpent === 0, 'which are where a card before it kept the tap window’s start and count, and are not read as them now');
-    const old = W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^0110/, '010f'));
-    ok(old.noPinKnown === false && old.noPin.limit === 0 && old.noPin.spent === 0 && old.pinSet === true, 'a card of 1.15 has no allowance; those bytes are what they were', JSON.stringify(old.noPin));
-    ok(W.cardParse.noPin(old).known === false && W.cardParse.noPin(old).set === false, 'and reads as one with none to set');
+    ok(info.version === '2.0' && info.noPinKnown === true && info.noPin.limit === 500 && info.noPin.spent === 120 && info.pinSet === true && info.pin === 'set' && info.setUp === true,
+       'GET_INFO says the allowance and what is spent of it, in bytes 34 to 41', JSON.stringify(info.noPin));
+    ok(info.tapStart === 0 && info.tapSpent === 0, 'which are not read as a tap window’s start and count');
+    for (const v of ['0110', '0114', '0300']) {
+      const said = (() => { try { W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^0200/, v)); return 'read'; } catch (e) { return (e && e.card) + ' ' + (e && e.message); } })();
+      const words = v === '0300' ? 'not-a-card This card is newer than this Foxy. Update the app to use it.' : 'not-a-card This card needs an update.';
+      ok(said === words, 'a GET_INFO of version ' + v + ' is not read: ' + (v === '0300' ? 'the app needs an update' : 'the card needs an update'), said);
+    }
+    // a 2.x of any minor is read: 2.0 (the v2.0.0 release) and 2.1 alike
+    ok(W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^0200/, '0201')).version === '2.1', 'and one of 2.1 is read as 2.0 is');
+    // a card of the protocol with a capability this phone needs missing is no card of it
+    const lacking = (() => { try { W.cardParse.info(longInfo(500, 120, 1000, 900, true).replace(/^(.{12})ff/, '$17f')); return 'read'; } catch (e) { return (e && e.card) + ' ' + (e && e.message); } })();
+    ok(lacking === 'not-a-card This card needs an update.', 'a GET_INFO without the sealed PIN’s capability bit is not read', lacking);
     const none = W.cardParse.info(longInfo(0, 0, 1000, 900, false));
-    ok(none.pin === 'none' && none.pinSet === false && none.hasRecord === true && none.setUp === true, 'a card of 1.16 with a record and no PIN is set up', JSON.stringify([none.pin, none.hasRecord, none.setUp]));
-    const before = W.cardParse.info(longInfo(0, 0, 1000, 900, false).replace(/^0110/, '010f'));
-    ok(before.setUp === false, 'and a card before it with a record and no PIN is not (it had a PIN before it had a record)');
+    ok(none.pin === 'none' && none.pinSet === false && none.hasRecord === true && none.setUp === true, 'a card with a record, an owner and no PIN is set up', JSON.stringify([none.pin, none.hasRecord, none.setUp]));
 
     // the allowance over the day's window, as the daily limit is read
     const day = (i) => W.cardParse.noPin(W.cardParse.info(i));
@@ -79,7 +83,6 @@ async function world(pin, o) {
     ok(W.cardNeedsPin(card({ limit: 500, spent: 120 }, true), 380) === false && W.cardNeedsPin(card({ limit: 500, spent: 120 }, true), 381) === true,
        'with an allowance it asks only when the payment is more than is left of it: the whole payment, never a part');
     ok(W.cardNeedsPin({ info: Object.assign({}, W.cardParse.info(longInfo(500, 0, 1000, 900, true)), { pin: 'blocked' }), noPin: day(longInfo(500, 0, 1000, 900, true)) }, 1) === true, 'a blocked card asks (and the card refuses the PIN: it is blocked)');
-    ok(W.cardNeedsPin({ info: W.cardParse.info(longInfo(500, 0, 1000, 900, true).replace(/^0110/, '010f')) }, 1) === true, 'a card of 1.15 asks for its PIN for everything');
   }
 
   /* ---- 2: the card's own rules, as the model has them (the bytes) ----------------------------------------------------- */
@@ -87,9 +90,7 @@ async function world(pin, o) {
     const P = await funded({}, 0);
     const c = newCard(P, undefined, { format: 4 });
     const read = async (apdu) => { const r = await c.send(apdu); return { sw: r.slice(-4), data: r.slice(0, -4) }; };
-    ok((await c.send(SEL)) === '01149000', 'the latest card says 1.20 when chosen');
-    const sixteen = newCard(P, undefined, { format: 4, software: 16 });
-    ok((await sixteen.send(SEL)) === '01109000', 'and a card of 1.16 (`software: 16`) says 1.16');
+    ok((await c.send(SEL)) === '02019000', 'the card says 2.1 when chosen');
     const fresh = await read('b001010000');
     ok(fresh.sw === '9000' && fresh.data.length === 84 && fresh.data.slice(68) === '0000000000000000' && fresh.data.substr(14, 2) === '00',
        'GET_INFO P1=1 is 42 bytes; on a new card there is no PIN (byte 7) and bytes 34 to 41 are nothing', fresh.data.slice(0, 20) + ' ... ' + fresh.data.slice(60));
@@ -97,10 +98,6 @@ async function world(pin, o) {
     c.state.noPinLimit = 5000; c.state.noPinSpent = 1234;
     const said = await read('b001010000');
     ok(said.data.slice(68, 76) === u32(5000) && said.data.slice(76, 84) === u32(1234), 'and are the allowance and the count, big-endian, to a reader that has proved nothing', said.data.slice(68));
-    const asOld = newCard(P, undefined, { format: 4, software: 15 });
-    await asOld.send(SEL);
-    asOld.state.noPinLimit = 5000;
-    ok((await asOld.send('b001010000')).slice(68, 84) === '0000000000000000', 'a card of 1.15 says nothing there');
     // ADD PIN is the owner's: refused with no grant, and with a PIN already; allowed with the grant on a card with none
     const own = newCard(P, undefined, { format: 4 });
     await own.send(SEL);
@@ -163,9 +160,6 @@ async function world(pin, o) {
     cut.state.pin = '31323334'; cut.state.pinState = 1;
     cut.tap();
     ok((await why(H.W.cardSetUp(cut, { recoverable: true }))) === 'has-pin', 'a card that already has a PIN is not set up without it');
-    // a card before 1.16 cannot be without one
-    const old = newCard(H, undefined, { format: 4, software: 15 });
-    ok((await why(H.W.cardSetUp(old, { recoverable: true }))) === 'old-card', 'a card of 1.15 cannot be set up without a PIN');
   }
 
   /* ---- 4: a card with no PIN pays with none, and its limits hold ------------------------------------------------------ */
@@ -218,13 +212,13 @@ async function world(pin, o) {
   {
     const H4 = await funded({}, 0);
     const c4 = newCard(H4, undefined, { format: 4 });
-    await c4.send('00a404000af0464f5859434152440100');
+    await c4.send('00a404000bf04341534855434152440100');
     const rec = 'b0320000' + '72' + '00' + '00'.repeat(33) + '00'.repeat(65) + '0e' + Buffer.from('https://m.test', 'latin1').toString('hex');
     ok((await c4.send(rec)).slice(-4) === '9000', 'a blank card takes a record from anyone');
     c4.tap();
     const seen = await H4.W.cardLook(c4);
     ok(seen.info.hasRecord === true && seen.info.owner === false && seen.info.setUp === false && seen.info.pinSet === false,
-       'a record and no owner is not a set-up on 1.16 and later: the card reads as new, to be set up, with its record kept', JSON.stringify({ setUp: seen.info.setUp, owner: seen.info.owner }));
+       'a record and no owner is not a set-up: the card reads as new, to be set up, with its record kept', JSON.stringify({ setUp: seen.info.setUp, owner: seen.info.owner }));
   }
 
   /* ---- 5: ADD PIN: the owner's grant, then the PIN sealed; every payment asks for it until an allowance is set ----------- */
@@ -264,11 +258,6 @@ async function world(pin, o) {
     const W2 = await world(null, { sats: 0 });
     W2.card.tap();
     ok((await why(R.W.cardAddPin(W2.card, { pin: '4321' }))) === 'not-owner' && W2.card.state.pinState === 0, 'a phone that is not the owner is refused, and the card stays as it was');
-    // and a card of 1.15 is not given one this way
-    const old = newCard(H, undefined, { format: 4, software: 15 });
-    await H.W.cardSetUp(old, { pin: '1234', recoverable: true });
-    old.tap();
-    ok((await why(H.W.cardAddPin(old, { pin: '4321' }))) === 'old-card', 'a card of 1.15 has none to add');
     await settle();
   }
 
@@ -276,12 +265,12 @@ async function world(pin, o) {
   {
     const { H, R, card } = await world('1234');
     card.tap();
-    // the owner sets an allowance of 500 sats: the twelve bytes, with the day's and the tap's as the card has them
+    // the owner sets an allowance of 500 sats: the thirteen bytes, with the day's, the one payment's and the budget as the card has them
     card.sent.length = 0;
     const set = await H.W.cardSetLimit(card, { sats: 500, noPin: true, usd: 0 });
     const cmd = card.sent.filter((a) => a.slice(0, 4) === 'b034')[0];
-    ok(set.noPin.set && set.noPin.limit === 500 && set.noPin.left === 500 && card.state.noPinLimit === 500 && cmd && (parseInt(cmd.substr(8, 2), 16) - 1 - parseInt(cmd.substr(10, 2), 16)) === 12,
-       'the owner sets an allowance of 500: one SET_LIMIT_OWNER, twelve bytes under the proof', JSON.stringify(set.noPin));
+    ok(set.noPin.set && set.noPin.limit === 500 && set.noPin.left === 500 && card.state.noPinLimit === 500 && cmd && (parseInt(cmd.substr(8, 2), 16) - 1 - parseInt(cmd.substr(10, 2), 16)) === 13,
+       'the owner sets an allowance of 500: one SET_LIMIT_OWNER, thirteen bytes under the proof', JSON.stringify(set.noPin));
     ok(card.state.record.limit === 0 && card.state.tapLimit === 0, 'with the day’s limit and the tap’s as they were');
     card.tap();
     // 300 sats with no PIN: within it
@@ -430,28 +419,6 @@ async function world(pin, o) {
     D.card.tap();
     await D.H.W.cardSetLimit(D.card, { sats: 0, noPin: true });
     ok(D.H.W.cardNoPinUsd(D.card.key) === 0 && D.H.W.cardPaceUsd(D.card.key) === 0.8, 'no allowance forgets its dollars and not the tap’s');
-    await settle();
-  }
-
-  /* ---- 10: a card of 1.15 keeps asking for its PIN, and the phone works with it -------------------------------------- */
-  {
-    const { H, R, card } = await world('1234', { card: { software: 15 } });
-    card.tap();
-    const seen = await H.W.cardLook(card, { mine: true });
-    ok(seen.info.version === '1.15' && seen.info.noPinKnown === false && seen.noPin.known === false && seen.noPin.set === false, 'a card of 1.15 says no allowance, and the wallet reads none', JSON.stringify(seen.noPin));
-    card.tap();
-    card.sent.length = 0;
-    const e = await R.W.cardPay(card, { sats: 100 }).then(() => null, (x) => x);
-    ok(e && e.card === 'pin-needed' && e.early === true && count(card, '22') === 0, 'a payment with no PIN is stopped by the read: it always needs one', e && e.card);
-    card.tap();
-    const paid = await R.W.cardPay(card, { sats: 100, pin: '1234' });
-    ok(paid.sats === 100, 'and with the PIN it pays as it did');
-    card.tap();
-    ok((await why(H.W.cardSetLimit(card, { sats: 100, noPin: true }))) === 'old-card', 'no allowance can be set on it');
-    // the card's own refusal of a payment shown no PIN is the old one, 6982
-    card.tap();
-    await card.send(SEL);
-    ok((await card.send('b0220000' + '01' + '00')).slice(-4) === '6982', 'a card of 1.15 refuses even the beginning of a payment with no PIN shown, 6982');
     await settle();
   }
 

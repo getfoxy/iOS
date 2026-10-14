@@ -26,7 +26,7 @@
 	     one name, as tools/app.plist, which every other configuration uses -->
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
-		<string>F0464F58594341524401</string>
+		<string>F043415348554341524401</string>
 	</array>
 	<!-- the same export-compliance answer as tools/app.plist, so no build asks -->
 	<key>ITSAppUsesNonExemptEncryption</key>

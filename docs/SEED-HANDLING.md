@@ -157,7 +157,7 @@ plain message.
 | `p2pkPubkeys` | `{start, count}`, count 1 to 300, no index past 20,000 | the same shape, nothing moved: the walk that finds which index a token in hand is locked to |
 | `p2pkKey` | `{index}` | `{index, privkey, pubkey}`, inside 1,000 of the last index reserved or inside a range this session's walk served; "outside the lock-key window" |
 | `cardOwnerKey` | `{key}`, a card's compressed public key: 66 hex characters, either case, starting 02 or 03 | `{"pub": "<130 lowercase hex>"}`, the owner PUBLIC key, `04` and X and Y; "bad request" before the seed is read, "no seed" |
-| `cardOwnerSign` | `{key, label, nonce, value}`: the key as above; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed" |
+| `cardOwnerSign` | `{key, label, nonce, value}`: the key as above; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`, `refresh`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`, a block header of 80 bytes for `refresh`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"CashuCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed" |
 | `seedShow` | `{verify}` | `{"verified": true}` or `{"verified": false}` once the screen closes |
 | `seedEnter` | `{}` | `{"candidate": id}`; "cancelled" |
 | `seedAdopt` | `{candidate}` | `{"adopted": true}` or `{"adopted": false, "same": true}`; "Nothing was changed.", "unknown candidate" |
@@ -300,33 +300,30 @@ or the seed.
   P-256 public key at set-up, and its owner later signs, with the private half, to
   change its PIN, set how much it may still sign for, load it with no PIN and so
   on. The phone derives the key: HMAC-SHA256 keyed with the 64-byte BIP-39 seed,
-  over `FoxyCard/owner`, a zero byte and the card's 33-byte public key, taken
+  over `CashuCard/owner`, a zero byte and the card's 33-byte public key, taken
   mod n (P-256's order; a 0 is made again with a counter byte added, which does
   not happen). The same twelve words derive the same key for the same card on a
   new phone, and a different card has a different one. **The private key never
   leaves native code, and neither does the seed.** The page can get three things:
-  the owner public key; a signature for one of a fixed list of six labels
-  (`change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`) over
-  `"FoxyCard/" + label`, the card's 16-byte nonce and a value that must have the
-  shape that label's command takes; and, from `cardTime`, a signed time (for a card of software 1.14 or before; a card of 1.15 is shown Bitcoin block headers and takes none). Any other
-  label, in particular `lock` and `time`, and any other shape, is "bad request"
+  the owner public key; and a signature for one of a fixed list of seven labels
+  (`change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`,
+  `refresh`) over `"CashuCard/" + label`, the card's 16-byte nonce and a value
+  that must have the shape that label's command takes (a `set-limit` of 4, 8, 12
+  or 13 bytes, the thirteenth a rollover budget from 1 to 30; a `set-owner` of 65
+  bytes, or 145 with the anchoring block header; a `refresh` of one 80-byte block
+  header). These are the labels of the Cashu card protocol 2.0
+  (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md). Any other
+  label, in particular `lock` and `tag`, and any other shape, is "bad request"
   before the seed is read. It moves no counter and has no window. A page that had
   been got at can ask for a signature for any card whose key it knows, but a
   nonce comes only from a card held to the phone, and a signature is good for that
   nonce, in that tap, and no other, so it needs that card held to the phone. With
   it, it can do what the card's owner can with no PIN, which includes setting the
   PIN, lifting the limit and so spending what is on the card.
-- **The card's time** (`cardTime`, `InterimCardTime` in
-  `Foxy/Flashcard/CardTime.swift`, not a seed action: no seed, no card), for a
-  card of software 1.14 or before; a card of 1.15 and on has no time key and is
-  not asked this. The
-  phone's clock and a signature over `FoxyCard/time` and the time by the INTERIM
-  time key. It is INTERIM: that key's private half is built into the app, so
-  anyone can extract it, and this is as weak as trusting the receiving phone's own
-  clock. It bounds an honest receiver and the holder's own overspending, and it
-  never bounds a terminal built to cheat, which can sign its own time. No server
-  exists yet, and a real signer replaces it by provisioning: the card verifies
-  against the time key in its record, so the applet does not change.
+- **The card's clock** needs no key in the app. A card keeps its time by
+  Bitcoin block headers, which the page fetches and shows it, and the phone's own
+  time is a note the card keeps beside its receipts. There is no bridge action
+  for it.
 - **The words are shown and typed on native screens**
   (`Foxy/Bridge/SeedScreens.swift`), in the page's wording. `seedShow` reads the
   words under the usual unlock and shows them behind TAP TO REVEAL, with VERIFY

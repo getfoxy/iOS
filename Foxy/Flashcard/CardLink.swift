@@ -268,7 +268,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
  * with a card in one hand and a phone in the other. In the simulator the same
  * commands go over a socket on the Mac's own loopback to a card that runs
  * there: the applet itself, in a JavaCard simulator (`tools/cardsim` in
- * https://github.com/getfoxy/card), listening on one of four ports. So the
+ * https://github.com/lnflash/cashu-javacard), listening on one of four ports. So the
  * real page, the real bridge, CardGate and a real mint can be driven against
  * the applet's own code before there is a card to hold.
  *
