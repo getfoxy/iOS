@@ -66,6 +66,37 @@ const N = BigInt('0x' + V.n);
       const r = await Promise.resolve(phone.answer(null, body));
       ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the six, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
     }
+    /* A card's record (set-card), as native takes it (CardOwner.Label.setCard, held to the same shapes in FoxyTests/NUT13Tests.swift):
+     * 100 bytes and the mint, and then nothing, or the design a card of software 1.10 and on keeps there, three capital letters or
+     * digits, or three zeros for none, after a mint of 77 bytes at the most. A record with no design clears the card's, so the
+     * one a card is moved with carries it, and a fake that refused it, or signed more than native does, would say nothing of a phone. */
+    {
+      const record = (mint, after, timeKey) => '01' + c.cardKey + (timeKey || '00'.repeat(65)) + ('0' + mint.toString(16)).slice(-2) + '6d'.repeat(mint) + after;
+      const code = (text) => Buffer.from(text, 'latin1').toString('hex');
+      const answer = (value) => Promise.resolve(phone.answer(null, { action: 'cardOwnerSign', key: c.cardKey, label: 'set-card', nonce: s.nonce, value }));
+      const signed = [['a design', record(24, code('FX1'))], ['a design of digits', record(24, code('007'))], ['a design after a time key', record(24, code('EL1'), '04' + '33'.repeat(64))],
+                      ['three zeros', record(24, '000000')], ['a design after a mint of 1', record(1, code('FX1'))], ['a design after a mint of 77', record(77, code('FX1'))],
+                      ['three zeros after a mint of 77', record(77, '000000')]];
+      const refused = [['one byte after the mint', record(24, code('F'))], ['two', record(24, code('FX'))], ['four', record(24, code('FX1A'))], ['one zero', record(24, '00')],
+                       ['four zeros', record(24, '00000000')], ['lower case', record(24, code('fx1'))], ['three more bytes of mint', record(24, '6d6d6d')],
+                       ['a space', record(24, code('FX '))], ['the byte before 0', record(24, code('FX/'))], ['the byte after 9', record(24, code('FX:'))],
+                       ['the byte before A', record(24, code('@X1'))], ['the byte after Z', record(24, code('F[1'))], ['a byte past 7f', record(24, '46d831')],
+                       ['a zero and two characters', record(24, '005831')], ['two characters and a zero', record(24, '465800')], ['a character between zeros', record(24, '005800')],
+                       ['a design after a mint of 78', record(78, code('FX1'))], ['three zeros after a mint of 80', record(80, '000000')], ['a design and no mint', record(0, code('FX1'))],
+                       ['a design after a time key that is not one', record(24, code('FX1'), '02' + '33'.repeat(64))], ['a design after zeros but for one byte', record(24, code('FX1'), '00'.repeat(30) + '01' + '00'.repeat(34))]];
+      const wrong = [];
+      for (const [what, value] of signed) {
+        const r = await answer(value);
+        const sig = r && !r[1] ? JSON.parse(r[0]).sig : '';
+        const message = Buffer.concat([Buffer.from('FoxyCard/set-card'), Buffer.from(s.nonce, 'hex'), Buffer.from(value, 'hex')]);
+        if (!sig || !p256Verify(c.pub, message, sig)) wrong.push('not signed: ' + what);
+      }
+      for (const [what, value] of refused) {
+        const r = await answer(value);
+        if (!(r && r[1] === 'bad request' && r[0] === null)) wrong.push('signed: ' + what);
+      }
+      ok(wrong.length === 0, 'a card’s record is signed whole with its design after the mint, or three zeros there, and with nothing else after a mint', wrong.join('; '));
+    }
   }
   console.log('\n' + (failed ? failed + ' flashcard-owner-vectors check(s) failed' : 'all flashcard-owner-vectors checks pass'));
   process.exit(failed ? 1 : 0);

@@ -168,6 +168,41 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     ok(shown - cost <= Math.ceil(ppk * 120 / 1000), 'and over it by no more than the fee on a pile of pieces', String(shown - cost));
   }
 
+  /* ---- a card that names its design -------------------------------------------- */
+  {
+    /* The cards above are of the software before a card's record named its design (1.10), and were set up with none.
+     * A card of the software since keeps the design it was set up with after its mint, and every card the app sets up
+     * is given one (FC_SETUP_DESIGN, 26f-flashcard.js). A record that names no design clears the card's, so the record
+     * such a card is moved with carries it, three bytes longer, and that is the record this phone signs as its owner. */
+    const D = await funded({ second: true }, 6000);
+    const design = appOn(D).FC_SETUP_DESIGN;
+    const full = newCard(D, undefined, { format: 4 });
+    await D.W.cardSetUp(full, { pin: '1234', design });
+    const empty = newCard(D, undefined, { format: 4 });
+    await D.W.cardSetUp(empty, { pin: '4321', design });
+    // with money on it: off the card, across, and onto it again at the second tap, which tells it its new mint first
+    full.tap();
+    await D.W.cardAdd(full, { sats: 2000, pin: '1234' });
+    full.tap();
+    const off = await D.W.cardWithdraw(full, { pin: '1234', hold: true });
+    const done = await D.W.moveRun(await D.W.cardMoveQuote(MINT, MINT2, off.sats), () => {}, { visit: true });
+    const made = await D.W.cardMoveLoad(off.card, done.sats);
+    await D.W.connect(MINT2, null, null, { remember: false });
+    full.tap();
+    const on = await D.W.cardWrite(full, { owner: true }).then((r) => r, (e) => ({ no: e }));
+    ok(!on.no && on.sats === made.sats && on.left === 0 && on.card.record.mint === MINT2 && full.balance() === made.sats && D.W.cardOwed().length === 0,
+       'a card that names its design, moved with money on it: the second tap tells it its new mint and writes the money onto it',
+       on.no ? String(on.no.message) : on.card.record.mint + ' ' + on.card.balance);
+    ok(/^[A-Z0-9]{3}$/.test(design) && full.state.record.mint === MINT2 && full.state.record.design === design && !on.no && on.card.record.design === design,
+       'and at its new mint it names the design the app set it up with: the record it was sent carried it', full.state.record.design + ' at ' + full.state.record.mint);
+    // and empty: one tap
+    empty.tap();
+    const told = await D.W.cardRepoint(empty).then((r) => r, (e) => ({ no: e }));
+    ok(!told.no && told.record.mint === MINT2 && told.balance === 0 && told.record.design === design && empty.state.record.mint === MINT2 && empty.state.record.design === design,
+       'an empty card that names its design is told its new mint in one tap, and names its design still',
+       told.no ? String(told.no.message) : told.record.mint + ' ' + told.record.design);
+  }
+
   /* ---- the screens: SWITCH MINT, as a person meets it -------------------------- */
   {
     const U = await funded({ second: true }, 6000);

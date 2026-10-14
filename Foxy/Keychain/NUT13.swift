@@ -375,7 +375,8 @@ enum CardOwner {
     static let nonceLength = 16
 
     /// The longest value any label takes: SET_CARD's data with the longest mint
-    /// (100 bytes before it and 80 for the mint).
+    /// (100 bytes before it and 80 for the mint). With a design it is no longer:
+    /// the mint is then 77 bytes at the most, and the design three.
     static let mostValueBytes = 180
 
     /// What the page may have signed: the short names of the owner's commands,
@@ -403,6 +404,10 @@ enum CardOwner {
         ///  - set-card: the card's record, unit (1), refund key (33), time key (65, the
         ///    first of them 04, or all zeros: a card of software 1.15 and on has no time
         ///    key and reads none), mint length L (1, from 1 to 80) and the mint (L bytes);
+        ///    and after the mint nothing, or the card's design (3, each a capital letter
+        ///    or a digit, or all three zero for none), which a card of software 1.10 and
+        ///    on reads there, after a mint of 77 bytes at the most. A record with no
+        ///    design clears the card's, so a card that has one is sent it again;
         ///  - load: nothing;
         ///  - reset: nothing.
         func accepts(_ value: [UInt8]) -> Bool {
@@ -416,7 +421,11 @@ enum CardOwner {
             case .setCard:
                 guard value.count >= 100, value[34] == 0x04 || value[34..<99].allSatisfy({ $0 == 0 }) else { return false }
                 let mint = Int(value[99])
-                return (1...80).contains(mint) && value.count == 100 + mint
+                if (1...80).contains(mint) && value.count == 100 + mint { return true }
+                // or with the design after the mint: three bytes more, and a mint no longer than a card that keeps a design takes
+                guard (1...77).contains(mint), value.count == 103 + mint else { return false }
+                let design = value[(100 + mint)...]
+                return design.allSatisfy { $0 == 0 } || design.allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) }
             case .load, .reset:
                 return value.isEmpty
             }

@@ -1173,12 +1173,16 @@ function nativePhone(opts) {
       if (typeof m.nonce !== 'string' || !/^[0-9a-f]{32}$/i.test(m.nonce)) return no(SAYS.bad);
       if (typeof m.value !== 'string' || !/^([0-9a-f]{2})*$/i.test(m.value)) return no(SAYS.bad);
       const value = Buffer.from(m.value, 'hex');
+      // a card's design, as a card of software 1.10 and on reads it after its mint: three bytes, each a capital letter or a digit, or all three zero for none
+      const design = (d) => d.length === 3 && (d.every((b) => b === 0) || d.every((b) => (b >= 0x41 && b <= 0x5a) || (b >= 0x30 && b <= 0x39)));
       const shaped = {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
         'set-limit': value.length === 4 || value.length === 8 || value.length === 12,
         'set-owner': value.length === 65 && value[0] === 4,
-        // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none (CardOwner.Label.setCard)
-        'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1 && value[99] <= 80 && value.length === 100 + value[99]
+        // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none; and after the mint
+        // there is nothing, or the card's design, whose mint is 77 bytes at the most (CardOwner.Label.setCard)
+        'set-card': value.length >= 101 && value.length <= 180 && value[99] >= 1
+          && ((value[99] <= 80 && value.length === 100 + value[99]) || (value[99] <= 77 && design(value.subarray(100 + value[99]))))
           && (value[34] === 4 || value.subarray(34, 99).every((b) => b === 0)),
         'load': value.length === 0,
         // RESET (card software 1.17): the proof is over the label and a nonce alone
