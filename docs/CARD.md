@@ -15,8 +15,13 @@ hands, so there is no fallback. This file does not repeat the protocol. The limi
 
 ## State of it
 
-- **The 2.x applet's install on the J3R180 is pending a hardware run.** Until it
-  has run, nothing of protocol 2.x below has been on a chip.
+- **2.1 installs and its commands run on the J3R180**
+  (https://github.com/lnflash/cashu-javacard/blob/main/docs/HARDWARE_TEST_REPORT_2026-10-14.j3r180-2.1.md):
+  the owner (anchored and refused), the PIN, SET_LIMIT's 13 bytes and the short
+  forms keeping the budget (D26), SET_HEADER, REFRESH, SET_CARD, the lock (and
+  REFRESH, SET_HEADER and VERIFY_PIN on a locked card) and RESET_CARD. Payments on
+  the chip (SPEND_ALL with change, real loads, a day rolled by a payment, a locked
+  card's clock moved by REFRESH, torn writes) are in progress.
 - **Almost nothing has run on a real card.** One phone and one card have been
   tested together: a card set up, loaded, paid from, and given its change back
   over NFC. Everything else here has been driven against a model of the card

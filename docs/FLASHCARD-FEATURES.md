@@ -1,6 +1,6 @@
 # Flashcard: what it does
 
-A Cashu ecash card and the Foxy app's screens for it. The card speaks the shared Cashu card protocol 2.x (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), which Flash's cards speak too. Foxy speaks 2.x only. The 2.x applet's install on the J3R180 is pending a hardware run. Where older docs differ from the code, this follows the code. Button and screen names are in capitals as the app shows them.
+A Cashu ecash card and the Foxy app's screens for it. The card speaks the shared Cashu card protocol 2.x (https://github.com/lnflash/cashu-javacard/blob/main/spec/NUT-XX.md), which Flash's cards speak too. Foxy speaks 2.x only. 2.1 installs and its commands run on the J3R180 (https://github.com/lnflash/cashu-javacard/blob/main/docs/HARDWARE_TEST_REPORT_2026-10-14.j3r180-2.1.md); payments on the chip are in progress. Where older docs differ from the code, this follows the code. Button and screen names are in capitals as the app shows them.
 
 **Status.** Over NFC, one card and one phone have been through set-up, loading, a payment and change. The rest has run against a model of the card, the applet in a simulator, and the chip in a contact reader. No audit has covered the card. A card is cash.
 

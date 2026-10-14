@@ -2081,8 +2081,8 @@ lines are `card: wrote …` (each write) and `card: its proofs: …` (each check
 
 #### 23g. The Cashu card protocol 2.0
 
-Needs a card with a 2.x applet on it (the shared protocol's, https://github.com/lnflash/cashu-javacard 2.1; its install on the J3R180 is pending a hardware run), the holder's phone with Tor up, a
-second phone, and if there is one a card with another version of the applet. Test money only. Nothing here has run on a real card. The
+Needs a card with a 2.x applet on it (the shared protocol's, https://github.com/lnflash/cashu-javacard 2.1, which installs and whose commands run on the J3R180: https://github.com/lnflash/cashu-javacard/blob/main/docs/HARDWARE_TEST_REPORT_2026-10-14.j3r180-2.1.md; payments on the chip are in progress), the holder's phone with Tor up, a
+second phone, and if there is one a card with another version of the applet. Test money only. Nothing here has been run with a phone on a real card. The
 protocol is `spec/NUT-XX.md` and `spec/APDU.md` there.
 
 1. **The name.** MENU, FLASHCARD, tap a 2.x card. **Pass:** it reads. The log's read line has no `not a card`, and a bank
