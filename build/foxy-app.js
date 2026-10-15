@@ -2117,7 +2117,7 @@ class Component extends DCLogic {
    * reasonable name. The table is only for the ones where capitalising the
    * first letter reads wrong. */
   MINT_NAMES = { westernbtc: 'WesternBTC', minibits: 'Minibits', coinos: 'Coinos',
-                 macadamia: 'Macadamia' };
+                 macadamia: 'Macadamia', forge: 'Forge' };
 
   mintName() {
     return this.mintNameOf(this.mintHost());
@@ -2315,10 +2315,13 @@ class Component extends DCLogic {
   DEFAULT_MINTS = [
     { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits mint',
       host: 'mint.minibits.cash', tint: '#4E7BE8' },
-    /* Coinos was here and was taken out for being unreliable. A phone that has used it still lists it, from its own
+    /* Forge issues dollars as well as bitcoin: the mint where the second
+     * balance, and the question of what to hold, first appear. */
+    { url: 'https://forge.flashapp.me', name: 'Flash Forge',
+      host: 'forge.flashapp.me', tint: '#C9822F' },
+    /* Coinos and WesternBTC were here and were taken out, Coinos for being
+     * unreliable. A phone that has used either still lists it, from its own
      * record of the mints it has connected to. */
-    { url: 'https://mint.westernbtc.com', name: 'WesternBTC',
-      host: 'mint.westernbtc.com', tint: '#C9822F' },
     { url: 'https://mint.macadamia.cash', name: 'macadamia Mint',
       host: 'mint.macadamia.cash', tint: '#8A5A2B' },
     /* Test mints. The ecash they issue is backed by nothing and is worthless
