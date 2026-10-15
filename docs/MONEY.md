@@ -910,6 +910,17 @@ same entry rather than adding a second, through a hash threaded down to
 `receiveToken`. `balanceSats` counts what is still waiting, through
 `unclaimedSats()`, because a swap that fails leaves real money there.
 
+**Arriving, for the seconds of the swap.** From the moment a payment is taken
+(PAID, with a route) until its swap lands, it is *arriving* (`arrivingHold`,
+07-request-delivery.js): counted in the balance (`balanceSats`, `balanceOf`,
+per unit) and not also as kept, set aside by the history audit together with
+its entry (`W.arriving`), and said under the balance on home ("arriving from
+the mint"). When the swap lands its pieces are in the pile and counted there
+alone; when it fails it is kept and counted as kept, as before. It is held in
+memory only: a page killed in between starts with nothing arriving and the
+payment back on the kept list. A late claim (`claimUnclaimed`) counts the same
+way while it swaps. `tests/usd-tap.js` §26, in sats and in dollars.
+
 *This widens "settled" for money coming in, and it is the incoming mirror of
 review finding 9 (THREAT-MODEL.md §12). It does not survive a mint that will
 never swap again: history and balance would both show sats that cannot be
@@ -1518,6 +1529,16 @@ transport's own timeout is its only clock.
 
 **What a look shows the mint** is in `MINT-PRIVACY.md` (N1c): the swap's inputs'
 fingerprints from other exits than the swap's.
+
+**A mint too busy to take its lock.** A Nutshell mint under load refuses a swap
+with a 400 whose detail begins "failed to acquire database lock", and one on
+SQLite with "(sqlite3.OperationalError) database is locked". Nothing was done,
+so the request layer (`nativeRequest`, `lockBusy`) sends the identical swap
+again on the same circuit after a random 0.7 to 1.5 s, at most twice, and says
+so in the log ("mint busy (lock), asked again"). The outputs are the same, so a
+retry cannot be counted twice. Any other refusal, and a third of these, is
+final as before. It is one place, so it covers every swap: a receive, a send's
+split, a card's swap and a dollar swap. `tests/mint-busy.js` D.
 
 `tests/run.js` ("a swap whose answer is lost while the mint made it is finished
 from another circuit…", "a swap whose request never reached the mint…", "a

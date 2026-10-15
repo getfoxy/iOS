@@ -400,6 +400,8 @@
       /* `circuit`: the job's Tor circuit (onCircuit); none, and the phone
        * gives the request one of its own. */
       var busyOnce = false;
+      // how many times this swap has been asked again after a mint was too busy to take its lock (`lockBusy`)
+      var lockTries = 0;
       var ask = function (circuit) { return bridgeAsk('mintRequest', {
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
@@ -441,6 +443,20 @@
         // not. Counted in 98-mint-health.js. (Not for what is not a mint: a record is kept for each address
         // asked, and a block explorer's has the block's hash in it, so every block would add one.)
         if (!o.foxyText) noteMintAnswer(o.endpoint, classifyAnswer(code, null));
+        /* A swap refused because the mint could not take its own database lock
+         * (`lockBusy`): nothing was done, so the very same request is sent
+         * again, on the same circuit, after a short random pause. Twice at
+         * most; the third refusal, and any other, is final as before. */
+        if (code === 400 && lockTries < LOCK_RETRIES && !o.foxyText && isSwapRequest(o.method, o.endpoint)
+            && parsed && lockBusy(typeof parsed.detail === 'string' ? parsed.detail : parsed.error)) {
+          lockTries += 1;
+          FoxyWallet._lockAsked = (Number(FoxyWallet._lockAsked) || 0) + 1;
+          var pause = lockPauseMs();
+          console.log('[foxy] ' + hostOf(String(o.endpoint || '')).split('/')[0] + ': mint busy (lock), asked again ('
+            + lockTries + ' of ' + LOCK_RETRIES + ', after ' + pause + ' ms; ' + FoxyWallet._lockAsked + ' in all)');
+          return new Promise(function (go) { setTimeout(go, pause); })
+            .then(function () { return ask(o.foxyCircuit ? String(o.foxyCircuit) : ''); }).then(answered);
+        }
         if (code >= 200 && code < 300) {
           /* `foxyText`: the answer as it came, for the few things asked of this road that are not a mint's JSON (a block
            * explorer's hex: build/wallet/08b-block-headers.js). Nothing of a mint's is read out of it. */

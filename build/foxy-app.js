@@ -9573,6 +9573,13 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     if (!W || !W.listen) return;
     if (this._unlisten) this._unlisten();
+    /* Money arriving: a payment taken starts, lands or falls back to kept, and
+     * the balance and its line under it are read again at once, so the pill
+     * behind PAID is never a figure from before the payment. */
+    W._onArriving = () => {
+      clearTimeout(this._arrivingT);
+      this._arrivingT = setTimeout(() => { if (this.refreshBalance) this.refreshBalance(); }, 0);
+    };
     // payments sent straight to this phone's requests, over Tor (12-receive.js)
     if (!this._requestPaidHooked && W.onRequestPaid) {
       this._requestPaidHooked = true;
@@ -10189,7 +10196,42 @@ class Component extends DCLogic {
       if (cents > 0) return this.unitFigure(cents, 'usd') + ' pending with the mint';
     }
     const back = this.recoveringSats();
-    return back > 0 ? this.stageMoney(back) + ' being recovered from the mint' : '';
+    if (back > 0) return this.stageMoney(back) + ' being recovered from the mint';
+    /* A payment taken and still being swapped in at the mint: in the balance
+     * already, and said here for the seconds until the swap lands
+     * (`W.arrivingIn`). Dollars by their own figure, at a mint with two. */
+    const arriving = this.arrivingNow ? this.arrivingNow() : { sat: 0, usd: 0 };
+    const coming = [];
+    if (arriving.usd > 0) coming.push(this.unitFigure(arriving.usd, 'usd'));
+    if (arriving.sat > 0) coming.push(this.stageMoney(arriving.sat));
+    return coming.length ? coming.join(' and ') + ' arriving from the mint' : '';
+  }
+
+  /* Money arriving at this mint, per unit: taken (PAID) and still being swapped
+   * in. { sat, usd }, each 0 when nothing is; dollars only at a mint with two. */
+  arrivingNow() {
+    const W = window.FoxyWallet;
+    const of = (u) => { try { return Math.max(0, Math.round(Number(W && W.arrivingIn && W.arrivingIn(u)) || 0)); } catch (e) { return 0; } };
+    return { sat: of('sat'), usd: this.twoUnitsOn && this.twoUnitsOn() ? of('usd') : 0 };
+  }
+
+  /* The audit's bucket for money arriving, in one unit: the hashes of the
+   * entries it belongs to, and its share of the balance. Both are set aside
+   * together, so a payment being swapped in neither counts nor reads as
+   * missing (`W.arriving`). */
+  arrivingBucket(unit) {
+    const W = window.FoxyWallet;
+    let list = [];
+    try { list = (W && W.arriving) ? (W.arriving(unit) || []) : []; } catch (e) { list = []; }
+    const byHash = new Map();
+    let amount = 0;
+    list.forEach(a => {
+      const n = Math.max(0, Math.round(Number(a && a.amount) || 0));
+      amount += n;
+      const h = String((a && a.hash) || '');
+      if (h) byHash.set(h, (byHash.get(h) || 0) + n);
+    });
+    return { byHash, amount, count: list.length };
   }
 
   /// Fees the top-up swaps have cost at this mint, which no history row shows. 0 when none.
@@ -10232,10 +10274,24 @@ class Component extends DCLogic {
     // the payments a notice on the card is about, and what to call each
     const flagged = new Map();
     const balNow = Math.round(Number(s.balSats) || 0);
+    /* Money arriving: a payment taken and still being swapped in. It is in the
+     * balance and its entry is in the list, but neither is settled yet, so
+     * both are set aside here, together: a payment that is three seconds from
+     * landing is not a payment missing (the audit read "balance 0, off by
+     * -1216" behind PAID for those seconds). */
+    const arriving = this.arrivingBucket ? this.arrivingBucket('sat') : { byHash: new Map(), amount: 0, count: 0 };
     let run = balNow, dueChange = 0, dueCount = 0, toShow = null, toShowSats = 0, toShowCount = 0;
-    const seen = { in: 0, out: 0, inSats: 0, outSats: 0, skipped: 0, skippedSats: 0 };
+    const seen = { in: 0, out: 0, inSats: 0, outSats: 0, skipped: 0, skippedSats: 0, arriving: 0, arrivingSats: 0 };
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
+      /* Its entry goes with the money, and by the money's figure: in the
+       * arriving bucket, neither counted by its own figure nor "not counted". */
+      const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
+      if (coming !== undefined) {
+        run -= coming;
+        seen.arriving += 1; seen.arrivingSats += coming;
+        return;
+      }
       /* Change that came back over the link has a row of its own, and the
        * payment it is the rest of is already shown at its net. Counting both
        * counted the change twice: a 2,366 sat payment with 1 sat of change
@@ -10285,16 +10341,19 @@ class Component extends DCLogic {
     const back = this.recoveringSats ? this.recoveringSats() : 0;
     // and the fees the top-ups cost at this mint, which no row carries
     const fees = this.topUpFeeSats ? this.topUpFeeSats() : 0;
+    // and money arriving whose entry is not written yet (it is written when it lands): in the balance, set aside
+    run -= Math.max(0, arriving.amount - seen.arrivingSats);
     const off = whole ? Math.round(run) + held + back + fees : 0;
     /* Said in the log when it changes, with what it was worked out from: a
      * card that says DOES NOT ADD UP and a diary that cannot say why is a
      * report nobody can act on. */
-    const sig = [balNow, off, dueChange, toShowCount, seen.in, seen.out, seen.skipped].join('|');
+    const sig = [balNow, off, dueChange, toShowCount, seen.in, seen.out, seen.skipped, arriving.amount].join('|');
     if (whole && sig !== this._auditSig) {
       this._auditSig = sig;
       console.log('[foxy] audit: balance ' + balNow + ', off by ' + off + '; ' + seen.in + ' in for ' + seen.inSats
         + ', ' + seen.out + ' out for ' + seen.outSats + ', ' + seen.skipped + ' not counted (' + seen.skippedSats
-        + ' sats: pending, failed, at risk, a bill, another unit); change due here ' + dueChange
+        + ' sats: pending, failed, at risk, a bill, another unit); arriving ' + arriving.amount + ' ('
+        + arriving.count + ' being swapped in, ' + seen.arriving + ' with an entry); change due here ' + dueChange
         + ', change to hand over ' + toShowSats);
       /* And when it does not add up, the rows it was worked out from, newest
        * first: which way, how much, the fee, and what kind of row. Amounts are
@@ -10313,7 +10372,7 @@ class Component extends DCLogic {
         for (let i = 0; i < rows.length; i += 20) console.log('[foxy] audit rows ' + i + ': ' + rows.slice(i, i + 20).join(' '));
       }
     }
-    return { balOf, balNow, run, whole, off, held, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
+    return { balOf, balNow, run, whole, off, held, arriving: arriving.amount, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
   }
 
   histAuditUsd() {
@@ -10321,10 +10380,14 @@ class Component extends DCLogic {
     const W0 = window.FoxyWallet;
     const balOf = new Map();
     const balNow = Math.max(0, Math.round(Number(s.balUsdCents) || 0));
-    let run = balNow;
+    // dollars arriving, set aside with their entries as in the bitcoin books (`histAudit`)
+    const arriving = this.arrivingBucket ? this.arrivingBucket('usd') : { byHash: new Map(), amount: 0, count: 0 };
+    let run = balNow, arrivingSeen = 0;
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
       if (t.unit !== 'usd') return;
+      const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
+      if (coming !== undefined) { run -= coming; arrivingSeen += coming; return; }
       /* Change that came back over the link has a row of its own, and the
        * payment it is the rest of is already shown at its net: the payment
        * carries the arithmetic, as in the bitcoin books (`histAudit`). */
@@ -10341,13 +10404,13 @@ class Component extends DCLogic {
     let held = 0, back = 0;
     try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd')) || 0); } catch (e) { held = 0; }
     try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd')) || 0); } catch (e) { back = 0; }
-    const off = whole ? Math.round(run) + held + back : 0;
-    const sig = [balNow, off].join('|');
+    const off = whole ? Math.round(run) - Math.max(0, arriving.amount - arrivingSeen) + held + back : 0;
+    const sig = [balNow, off, arriving.amount].join('|');
     if (whole && sig !== this._auditSigUsd) {
       this._auditSigUsd = sig;
-      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off);
+      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off + '; arriving ' + arriving.amount + ' cents');
     }
-    return { balOf, balNow, run, whole, off, held, back, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
+    return { balOf, balNow, run, whole, off, held, back, arriving: arriving.amount, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
       toShowCount: 0, flagged: new Map() };
   }
 

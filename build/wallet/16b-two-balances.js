@@ -81,12 +81,13 @@
       if (!u) return 0;
       var m = mint ? canonicalMint(mint) : mintUrl;
       if (!m) return 0;
-      if (u === 'sat') return Math.max(0, sumProofs(proofs(m)) + unclaimedSats(m) - changeLeavingSats(m));
+      if (u === 'sat') return Math.max(0, sumProofs(proofs(m)) + unclaimedSats(m) + arrivingGross('sat', m) - changeLeavingSats(m));
       /* The same sum in the unit: the pile, what arrived in this unit and
-       * waits to be swapped in (kept offline, locked to this phone), less
-       * change in this unit about to be handed back. No row of another unit
-       * ever adds to it. */
-      return Math.max(0, sumProofs(proofs(m, u)) + unclaimedIn(u, m) - changeLeavingIn(u, m));
+       * waits to be swapped in (kept offline, locked to this phone), what has
+       * been taken and is being swapped in now (`arrivingGross`), less change in
+       * this unit about to be handed back. No row of another unit ever adds
+       * to it. */
+      return Math.max(0, sumProofs(proofs(m, u)) + unclaimedIn(u, m) + arrivingGross(u, m) - changeLeavingIn(u, m));
     },
 
     /* Held back from a balance until the mint says what became of it: a swap

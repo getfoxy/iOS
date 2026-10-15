@@ -969,6 +969,8 @@
          * the swap's record is let go, and only the rest (the change this phone makes for the card) is filed in the pile. */
         var toPile = (holdAs && unit === 'sat') ? cardOutHold(holdAs, fresh, intoMint, Math.round(Number(opts.keptSats) || 0)) : fresh;
         addProofs(toPile, intoMint, intoWallet, unit);
+        // a payment that was arriving is in the pile now, and counted there alone (`arrivingLand`)
+        if (/^req-/.test(into)) arrivingLand(into.slice(4));
         guard.done();
         // remembered, so the same ecash offered again is said to be this phone's (`mineIfTaken`)
         try { noteTaken(tok.proofs, got); } catch (eT) {}

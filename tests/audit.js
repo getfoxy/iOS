@@ -32,7 +32,7 @@ function method(sig) {
   if (at < 0) throw new Error('missing ' + sig);
   return block(at + 3);
 }
-const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'heldNote() {', 'heldBlocks(shortBy) {'].map(method).join(',') + '}')();
+const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'heldNote() {', 'heldBlocks(shortBy) {', 'arrivingBucket(unit) {'].map(method).join(',') + '}')();
 
 global.window = { FoxyWallet: { heldSats: () => 0 } };
 const quiet = console.log;
@@ -129,6 +129,27 @@ const out = (sats, o) => Object.assign({ dir: 'out', sats, hash: 'out-' + Math.r
   const r = audit(75, [c, b, a]);
   ok(r.balOf.get(c) === 75 && r.balOf.get(b) === 70 && r.balOf.get(a) === 100,
      'each row carries the balance as it stood after it', [r.balOf.get(c), r.balOf.get(b), r.balOf.get(a)].join(', '));
+}
+
+{
+  /* Money arriving: a payment taken (PAID) and still being swapped in. In the
+   * balance and in the list, and set aside together in a bucket of its own, by
+   * the wallet's figure for it (`W.arriving`). */
+  const coming = inn(1216, { hash: 'req-ab12' });
+  global.window = { FoxyWallet: { heldSats: () => 0, arriving: (u) => (u === 'sat' ? [{ id: 'ab12', hash: 'req-ab12', amount: 1216, unit: 'sat' }] : []) } };
+  const r = audit(1316, [coming, inn(100)]);
+  ok(r.off === 0 && r.arriving === 1216, 'a payment being swapped in is in its arriving bucket, and the audit is off by 0', r.off + ' / ' + r.arriving);
+  ok(r.balOf.get(coming) === 1316, 'its row carries the balance with it in', String(r.balOf.get(coming)));
+  // the entry says what stays and the wallet a figure a sat apart (the mint's fee): the wallet's figure is the one set aside
+  const fee = audit(1316, [inn(1215, { hash: 'req-ab12' }), inn(100)]);
+  ok(fee.off === 0, 'by the figure the balance counts, whatever its entry says', String(fee.off));
+  // arriving with no entry yet (a payment announced only once the mint has it): set aside all the same
+  const bare = audit(1316, [inn(100)]);
+  ok(bare.off === 0, 'money arriving whose entry is not written yet is set aside too', String(bare.off));
+  // and nothing arriving: the same list is a payment missing, as ever
+  global.window = { FoxyWallet: { heldSats: () => 0, arriving: () => [] } };
+  ok(audit(100, [coming, inn(100)]).off === -1216, 'with nothing arriving, a payment that is not in the balance is still missing');
+  global.window = { FoxyWallet: { heldSats: () => 0 } };
 }
 
 // ---- said where a person is about to pay -----------------------------------

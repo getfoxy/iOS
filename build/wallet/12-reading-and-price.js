@@ -11,7 +11,10 @@
        * At this mint: what is waiting at another is that mint's balance. */
       /* Less change this phone is about to hand back for an over-payment:
        * the entry already says what stays, and so does this (`holdChange`). */
+      /* And a payment taken and still being swapped in (`arrivingGross`): from
+       * PAID until the swap lands it is counted here, not on the kept list. */
       return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
+                                         + arrivingGross('sat', mintUrl || '')
                                          - changeLeavingSats(mintUrl || '')));
     },
 

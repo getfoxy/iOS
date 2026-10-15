@@ -257,6 +257,8 @@ function limbo(ctx) {
   return {
     // kept rows in every unit: dollars waiting to be swapped in are money on its way too
     unclaimed: n(() => W.unclaimedSats()) + n(() => (W.keptIn ? W.keptIn('usd', '') : 0)),
+    // and a payment taken and still being swapped in, which is counted as arriving rather than kept
+    arriving: n(() => (W.arrivingIn ? W.arrivingIn('sat') + W.arrivingIn('usd') : 0)),
     recovering: n(() => W.recoveringSats()),
     melts: (stored(ctx, BOOK_KEYS.melting, []) || []).length || 0,
     move: n(() => (W.pendingMove && W.pendingMove() ? 1 : 0)),
@@ -292,7 +294,7 @@ function noBooks(ctx, why) { ctx.booksOff = why || 'not judged'; }
 function booksWrong(ctx) {
   if (ctx.booksOff || !ctx.booksFrom) return [];
   const l = limbo(ctx);
-  if (l.unclaimed || l.recovering || l.melts || l.move) return [];
+  if (l.unclaimed || l.arriving || l.recovering || l.melts || l.move) return [];
   const now = books(ctx), was = ctx.booksFrom, wrong = [];
   new Set([...Object.keys(now), ...Object.keys(was)]).forEach((mint) => {
     const a = now[mint] || { says: 0, holds: 0, off: 0 }, b = was[mint] || { says: 0, holds: 0, off: 0 };
@@ -378,6 +380,11 @@ function fakeMint(w, opts) {
   // a PENDING melt's inputs and change outputs, until `settleMelt` says how it went
   const pendingOf = {};
   let dropNext = '';
+  /* `lockRefuse(n, words)`: the next n swaps are refused as a busy Nutshell
+   * refuses them, a 400 whose detail is "failed to acquire database lock"
+   * (or `words`), before anything is looked at; the one after is answered as
+   * ever. `lockRefused()` is how many were refused that way. */
+  let lockLeft = 0, lockWords = '', lockSaid = 0;
   const quotes = {}, melts = {}, spent = new Set(), signed = new Map();
   const posted = [], change = [], spentSecrets = [];
   const witnesses = {};
@@ -620,6 +627,11 @@ function fakeMint(w, opts) {
       const seen = new Set();
       return (inputs || []).some((pr) => { const k = String(pr && pr.secret); if (seen.has(k)) return true; seen.add(k); return false; });
     };
+    if (p === '/v1/swap' && lockLeft > 0) {
+      lockLeft -= 1;
+      lockSaid += 1;
+      return '400\n' + JSON.stringify({ detail: lockWords || 'failed to acquire database lock', code: 0 });
+    }
     if ((p === '/v1/swap' || p === '/v1/melt/bolt11') && repeated(body.inputs)) return no(11007, 'Duplicate inputs provided');
     // one unit on both sides of a swap or a melt, as Nutshell insists (verification: units match)
     const unitsOfAll = (list) => new Set((list || []).map((x) => unitOfKeyset(x && x.id) || 'sat'));
@@ -780,6 +792,9 @@ function fakeMint(w, opts) {
     payQuote: (q) => { if (quotes[q] && quotes[q].state === 'UNPAID') { quotes[q].state = 'PAID'; return true; } return false; },
     // the next answer to 'mint' or 'melt' is lost after the mint has acted on it
     dropAnswerOf: (what) => { dropNext = what; },
+    // the next n swaps refused as a mint too busy to take its database lock (or with `words`)
+    lockRefuse: (count, words) => { lockLeft = Math.max(0, Math.round(Number(count) || 0)); lockWords = String(words || ''); },
+    lockRefused: () => lockSaid,
     /* A PENDING melt (o.meltPending) settles: 'paid' pays the invoice and keeps
      * the change for whoever asks; 'failed' gives the inputs back as unspent. */
     settleMelt: (quote, how) => {

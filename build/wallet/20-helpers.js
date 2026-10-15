@@ -1085,13 +1085,18 @@
           if (startedAt && where && where !== startedAt) leave();
           // the same entry the arrival wrote, finished rather than doubled
           var claim;
+          /* Arriving while it is swapped in: counted in the balance as that,
+           * not as kept, until the swap lands or fails (`arrivingHold`). */
+          var ru = recordUnit(one);
+          arrivingHold(id, { amount: amountOfRecord(one), unit: ru, mint: unclaimedMint(one) || where, hash: 'req-' + id });
           walkCalling = true;
           try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
+          catch (eSync) { arrivingLetGo(id); throw eSync; }
           finally { walkCalling = false; }
+          claim = claim.then(function (r) { arrivingLetGo(id); return r; }, function (e) { arrivingLetGo(id); throw e; });
           /* The row's unit, and its token's: a dollar row is claimed by the
            * dollar wallet into the dollar pile (`receiveToken` goes by the
            * token's unit), and every figure said of it is in cents. */
-          var ru = recordUnit(one);
           var inUnit = function (n) { return { sats: ru === 'sat' ? n : 0, unit: ru, amount: n }; };
           var said = function (n) { return ru === 'sat' ? n + ' sats' : moneyWords(n, ru); };
           return claim
@@ -1560,6 +1565,19 @@
          * for this request is right there, so it is one question to the phone;
          * and if the row has gone, the seed still knows the key. */
         var into = 'req-' + p.id;
+        /* Arriving from the moment it is taken until its swap lands: counted in
+         * the balance as that, and set aside by the audit with its entry
+         * (`arrivingHold`, 07-request-delivery.js). What the balance counts is
+         * what the swap will bring, the payment less the mint's fee on its
+         * pieces, with the change going back still in it as on a kept row. */
+        /* With a route only: with none there is no swap to wait for, and the
+         * payment is kept, counted as kept, until the next connect takes it. */
+        var arriving = false;
+        var arrive = function () {
+          if (!routeOpen()) return;
+          arriving = true;
+          arrivingHold(p.id, { amount: Math.max(0, satsOf(p.amount) - (Number(p.inFee) || 0)), unit: pu, mint: p.mint, hash: into });
+        };
         var claim = function () {
           // `keptSats`: an over-payment's change goes straight back, so the
           // entry records the payment, not the piece that carried it
@@ -1576,10 +1594,15 @@
               dropOpenRequest(p.id);
               dropUnclaimed(p.id);
               dropLockKey(p.id);
+              if (arriving) { arriving = false; arrivingLetGo(p.id); }
               console.log('[foxy] pay steps: a request was paid and is now swapped in');
               // this phone's, at their mint: written on its job before anybody is told
               if (pu === 'sat') carryPaid(p.id, kept);
               return r;
+            }, function (e) {
+              // not landed: kept again, as before (the callers below decide what else)
+              if (arriving) { arriving = false; arrivingLetGo(p.id); }
+              throw e;
             });
         };
 
@@ -1620,7 +1643,8 @@
         }
 
         if (held) {
-          // ours already: told now, swapped in the same breath
+          // ours already: told now, swapped in the same breath, and arriving until it lands
+          arrive();
           delete FoxyWallet._requestsBeingPaid[p.id];
           dropOpenRequest(p.id);
           answer(200, '');
@@ -1670,6 +1694,7 @@
           return;
         }
 
+        arrive();
         return claim().then(function (r) {
           answer(200, '');
           changeBack(p, over);
@@ -2386,6 +2411,20 @@
     keptIn: function (unit, mint) {
       var at = mint ? canonicalMint(String(mint)) : canonicalMint(String(mintUrl || ''));
       return unclaimedIn(unit, at);
+    },
+
+    /* Money arriving: payments taken (PAID shown) whose swap at the mint has
+     * not landed yet, in `unit`, at one mint or (none named) the connected
+     * one. Counted in the balance, not in `keptIn`; local and at once. The
+     * audit sets it aside, with the entries it belongs to (`arriving`). */
+    arrivingIn: function (unit, mint) {
+      var at = mint ? canonicalMint(String(mint)) : canonicalMint(String(mintUrl || ''));
+      return arrivingIn(unit || 'sat', at);
+    },
+    // the same, one row per payment: [{ id, hash, amount, unit, mint }]
+    arriving: function (unit, mint) {
+      var at = mint ? canonicalMint(String(mint)) : canonicalMint(String(mintUrl || ''));
+      return arrivingList(unit || 'sat', at);
     },
 
     trustedWaitingSats: function () {

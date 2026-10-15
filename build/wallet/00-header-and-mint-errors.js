@@ -453,6 +453,37 @@
   function noteMintBusy(u) { var k = busyKey(u); if (k) busyMints[k] = Date.now() + 60000; }
   function mintBusy(u) { var k = busyKey(u); return !!k && (busyMints[k] || 0) > Date.now(); }
 
+  /* A mint too busy to take its own database lock.
+   *
+   * Under load a Nutshell mint refuses a swap with a 400 whose detail begins
+   * "failed to acquire database lock" (Forge said it, and any Nutshell can),
+   * and one on SQLite with "(sqlite3.OperationalError) database is locked".
+   * Nothing was done: the mint gave up before it looked at the swap. So such
+   * a refusal is read as busy, not as final, and the very same swap is sent
+   * again on the same circuit after a short random pause, at most twice
+   * (`nativeRequest`). Its outputs are the same outputs, so a second try can
+   * never be counted twice: the mint signs them once or not at all. Any other
+   * refusal, and a third of these, is final as it always was. */
+  var LOCK_RETRIES = 2;
+  function lockBusy(detail) {
+    var s = String(detail || '');
+    return /^\s*failed to acquire database lock/i.test(s)
+      || /\(sqlite3\.OperationalError\)\s*database is locked/i.test(s);
+  }
+  // a swap request (POST /v1/swap), the only request that is asked again for this
+  function isSwapRequest(method, endpoint) {
+    if (String(method || '').toUpperCase() !== 'POST') return false;
+    var path = String(endpoint || '').split(/[?#]/)[0].replace(/\/+$/, '');
+    return /\/v1\/swap$/.test(path);
+  }
+  // 0.7 to 1.5 seconds, a different pause each time; the tests may shorten it (`_lockPause`)
+  function lockPauseMs() {
+    var span = /** @type {any} */ (FoxyWallet)._lockPause;
+    var lo = 700, hi = 1500;
+    if (Array.isArray(span) && span.length === 2 && span[0] >= 0 && span[1] >= span[0]) { lo = Number(span[0]); hi = Number(span[1]); }
+    return Math.round(lo + Math.random() * (hi - lo));
+  }
+
   /* One spelling per mint.
    *
    * Mint URLs are storage keys. MINT.example.com, mint.example.com:443 and

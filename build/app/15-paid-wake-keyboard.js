@@ -140,6 +140,13 @@
     const W = window.FoxyWallet;
     if (!W || !W.listen) return;
     if (this._unlisten) this._unlisten();
+    /* Money arriving: a payment taken starts, lands or falls back to kept, and
+     * the balance and its line under it are read again at once, so the pill
+     * behind PAID is never a figure from before the payment. */
+    W._onArriving = () => {
+      clearTimeout(this._arrivingT);
+      this._arrivingT = setTimeout(() => { if (this.refreshBalance) this.refreshBalance(); }, 0);
+    };
     // payments sent straight to this phone's requests, over Tor (12-receive.js)
     if (!this._requestPaidHooked && W.onRequestPaid) {
       this._requestPaidHooked = true;

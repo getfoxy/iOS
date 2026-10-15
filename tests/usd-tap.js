@@ -57,6 +57,42 @@ const dump = (c) => { const o = {}; for (let i = 0; i < c.storage.length; i++) o
 const why = async (fn) => { try { await fn(); return ''; } catch (e) { return String((e && e.message) || e); } };
 const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
+/* The history card's audit as the app does it (16-history-lists.js), lifted out of
+ * build/foxy-app.js and run against a page's own wallet: the balance as
+ * `refreshBalance` reads it, and the entries as `loadHistory` maps them. */
+const appSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'foxy-app.js'), 'utf8');
+function appMethod(sig) {
+  const at = appSrc.indexOf('\n  ' + sig);
+  if (at < 0) throw new Error('missing ' + sig);
+  let i = appSrc.indexOf('{', at), depth = 0;
+  for (; i < appSrc.length; i++) {
+    if (appSrc[i] === '{') depth++;
+    else if (appSrc[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  return appSrc.slice(at + 3, i + 1);
+}
+const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'arrivingBucket(unit) {',
+  'arrivingNow() {', 'heldPill() {'].map(appMethod).join(',') + '}')();
+async function appAudit(c) {
+  const W = c.W;
+  const items = history(c).filter((t) => !t.mint || String(t.mint).replace(/\/+$/, '') === MINT).map((t) => ({
+    dir: t.dir, sats: t.sats, fee: t.feeSats, hash: t.hash, unit: t.unit, amount: t.amount, feeAmount: t.feeAmount,
+    grossSats: t.grossSats, changeSats: t.changeSats, changeState: t.changeState, changeAmount: t.changeAmount,
+    pending: !t.settled, failed: t.state === 'failed', atRisk: !!t.trusted && !t.settled && t.state !== 'failed',
+  }));
+  const a = Object.assign({
+    state: { balSats: await W.balanceSats(), balUsdCents: W.balanceOf('usd'), history: [{ items }], historyComplete: true, fresh: false },
+    twoUnitsOn: () => true, stageMoney: (n) => '₿ ' + n, unitFigure: (n, u) => (u === 'usd' ? '$ ' + (n / 100).toFixed(2) : '₿ ' + n),
+    recoveringSats: () => Math.round(Number(W.recoveringSats()) || 0), topUpFeeSats: () => Math.round(Number(W.topUpFeeSats()) || 0),
+  }, auditMethods);
+  const had = global.window;
+  global.window = { FoxyWallet: W };
+  const quiet = console.log;
+  console.log = () => {};
+  try { return { sat: a.histAudit(), usd: a.histAuditUsd(), pill: a.heldPill() }; }
+  finally { console.log = quiet; global.window = had; }
+}
+
 /* The link between two phones, as change-leg.js has it, with the question
  * asked first (M10, `tapQuote`) and its answer (M11, `tapTerms`) as well. */
 function link() {
@@ -87,6 +123,12 @@ function page(o) {
         case 'mintRequest': {
           const url = String(m.url || '');
           if (ctx.deaf) return reply(w, m.id, null, 'The Internet connection appears to be offline');
+          // `ctx.hold` (a RegExp of a path): the request waits, unanswered and not yet at the mint, until `ctx.held` is called
+          // (`.go()` lets it reach the mint and be answered; `.refuse(text)` answers it without the mint ever seeing it)
+          if (ctx.hold && ctx.hold.test(url)) {
+            ctx.held.push({ go: () => reply(w, m.id, mint.handle(m)), refuse: (text) => reply(w, m.id, text) });
+            return null;
+          }
           if (ctx.never && ctx.never.test(url)) { ctx.never = null; mint.handle(m); return null; }
           if (ctx.lose && ctx.lose.test(url)) { ctx.lose = null; mint.handle(m); return reply(w, m.id, null, 'The network connection was lost.'); }
           // `ctx.onMint(url)`: told of each answer as it leaves the mint (a route lost just after a swap)
@@ -152,6 +194,8 @@ function page(o) {
     },
   });
   ctx.deaf = false;
+  ctx.hold = null;
+  ctx.held = [];
   ctx.lose = null;
   ctx.never = null;
   ctx.answers = [];
@@ -1039,6 +1083,170 @@ async function run() {
   // ---- 25. no bitcoin price, anywhere in this suite ----------------------------------------------
   ok(everyPage.every((c) => c.actions.indexOf('price') < 0 && !c.priceAsked.length), 'no page in this suite asked for a bitcoin price',
     everyPage.map((c, i) => (c.actions.indexOf('price') >= 0 || c.priceAsked.length ? i + ':' + c.priceAsked.join('/') : '')).filter(Boolean).join(','));
+
+  // ---- 26. money arriving: from PAID until the swap lands, in sats and in dollars -------------
+  /* A phone in testing showed a balance of nought behind PAID, and an audit a
+   * whole payment out ("balance 0, off by -1216"), for the seconds the proof
+   * check and the swap took. The swap is held here at the mint's door, so
+   * those seconds last as long as the test needs. */
+  for (const unit of ['sat', 'usd']) {
+    const say = (n) => (unit === 'usd' ? '$ ' + (n / 100).toFixed(2) : n + ' sats');
+    const balance = async (c) => (unit === 'usd' ? c.W.balanceOf('usd') : c.W.balanceSats());
+    const PILE = unit === 'usd' ? USD_PILE : SAT_PILE;
+    const amount = unit === 'usd' ? 1216 : 1216;
+    // paid, and held between PAID and the swap; then the swap lands
+    {
+      const t = await pair(unit === 'usd' ? { payerUsd: [2000] } : { payerSat: 2000 });
+      const told = [];
+      t.rx.W.onRequestPaid((ev) => told.push(ev.stage));
+      let arrivingSaid = 0;
+      t.rx.W._onArriving = () => { arrivingSaid += 1; };
+      t.rx.hold = /\/v1\/swap$/;
+      const r = pay(t, tapReq(t, t.rx.W.paymentRequest(amount, { unit, purpose: 'receive' })));
+      await until(() => told.indexOf('paid') >= 0 && t.rx.held.length > 0, 4000);
+      ok(told.indexOf('paid') >= 0 && t.rx.held.length === 1 && sum(pile(t.rx, PILE)) === 0, unit + ': PAID is shown, and the swap is at the mint\'s door',
+        JSON.stringify({ told, held: t.rx.held.length }));
+      ok(t.rx.W.arrivingIn(unit) === amount && t.rx.W.keptIn(unit) === 0, unit + ': ' + say(amount) + ' is arriving, and not counted as kept as well',
+        JSON.stringify({ arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit) }));
+      ok(await balance(t.rx) === amount, unit + ': the balance behind PAID is the payment, not nought', String(await balance(t.rx)));
+      ok((unit === 'usd' ? t.rx.W.balanceOf('sat') : t.rx.W.balanceOf('usd')) === 0, unit + ': and nothing in the other unit');
+      const mid = await appAudit(t.rx);
+      const book = unit === 'usd' ? mid.usd : mid.sat;
+      ok(book.whole && book.off === 0 && book.arriving === amount, unit + ': the audit is off by 0, with the payment in its arriving bucket', JSON.stringify({ off: book.off, arriving: book.arriving }));
+      ok(/arriving from the mint/.test(mid.pill) && mid.pill.indexOf(unit === 'usd' ? '$ 12.16' : '₿ 1216') >= 0, unit + ': home says it is arriving', mid.pill);
+      ok(arrivingSaid >= 1, unit + ': and the screens are told (the balance is read again)', String(arrivingSaid));
+      t.rx.hold = null;
+      t.rx.held.splice(0).forEach((one) => one.go());
+      await r;
+      await until(() => sum(pile(t.rx, PILE)) === amount && !Object.keys(kept(t.rx)).length);
+      ok(sum(pile(t.rx, PILE)) === amount && t.rx.W.arrivingIn(unit) === 0 && t.rx.W.keptIn(unit) === 0 && await balance(t.rx) === amount,
+        unit + ': the swap lands: in the pile, nothing arriving, nothing kept, the balance the same', JSON.stringify({ pile: sum(pile(t.rx, PILE)), arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit) }));
+      const end = await appAudit(t.rx);
+      const book2 = unit === 'usd' ? end.usd : end.sat;
+      ok(book2.off === 0 && book2.arriving === 0 && !/arriving/.test(end.pill), unit + ': and the audit is off by 0 with nothing arriving', JSON.stringify({ off: book2.off, pill: end.pill }));
+    }
+    // the swap fails: back to kept, as before, and the audit still 0
+    {
+      const t = await pair(unit === 'usd' ? { payerUsd: [2000] } : { payerSat: 2000 });
+      const told = [];
+      t.rx.W.onRequestPaid((ev) => told.push(ev.stage));
+      t.rx.hold = /\/v1\/swap$/;
+      const r = pay(t, tapReq(t, t.rx.W.paymentRequest(amount, { unit, purpose: 'receive' })));
+      await until(() => told.indexOf('paid') >= 0 && t.rx.held.length > 0, 4000);
+      await r;
+      ok(t.rx.W.arrivingIn(unit) === amount && t.rx.W.keptIn(unit) === 0, unit + ': arriving while the swap is out', String(t.rx.W.arrivingIn(unit)));
+      t.rx.hold = null;
+      t.rx.held.splice(0).forEach((one) => one.refuse('400\n' + JSON.stringify({ code: 11000, detail: 'Transaction is not valid.' })));
+      await until(() => t.rx.W.arrivingIn(unit) === 0);
+      await settle(100);
+      ok(t.rx.W.arrivingIn(unit) === 0 && t.rx.W.keptIn(unit) === amount && Object.keys(kept(t.rx)).length === 1 && sum(pile(t.rx, PILE)) === 0,
+        unit + ': the mint refuses the swap: nothing arriving, the payment kept as before', JSON.stringify({ arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit) }));
+      ok(await balance(t.rx) === amount, unit + ': and still in the balance, as kept', String(await balance(t.rx)));
+      const after = await appAudit(t.rx);
+      const book = unit === 'usd' ? after.usd : after.sat;
+      ok(book.off === 0 && book.arriving === 0 && !/arriving/.test(after.pill), unit + ': the audit is off by 0', JSON.stringify({ off: book.off, pill: after.pill }));
+      // and the next claim takes it, the same entry finished
+      await t.rx.W.claimUnclaimed();
+      ok(sum(pile(t.rx, PILE)) === amount && t.rx.W.keptIn(unit) === 0 && t.rx.W.arrivingIn(unit) === 0, unit + ': the next claim swaps it in',
+        JSON.stringify({ pile: sum(pile(t.rx, PILE)), kept: t.rx.W.keptIn(unit) }));
+      ok((await appAudit(t.rx))[unit === 'usd' ? 'usd' : 'sat'].off === 0, unit + ': and the audit is still 0');
+    }
+    // killed between PAID and the swap: nothing arriving on the next launch, the payment back in kept
+    {
+      const t = await pair(unit === 'usd' ? { payerUsd: [2000] } : { payerSat: 2000 });
+      const told = [];
+      t.rx.W.onRequestPaid((ev) => told.push(ev.stage));
+      t.rx.hold = /\/v1\/swap$/;
+      const r = pay(t, tapReq(t, t.rx.W.paymentRequest(amount, { unit, purpose: 'receive' })));
+      await until(() => told.indexOf('paid') >= 0 && t.rx.held.length > 0, 4000);
+      await r;
+      ok(t.rx.W.arrivingIn(unit) === amount, unit + ': arriving as the page is killed', String(t.rx.W.arrivingIn(unit)));
+      // what was on disk at that moment is what the next launch starts with; the killed page's request never reaches the mint
+      const disk = dump(t.rx);
+      noBooks(t.rx, 'killed with its swap out');
+      const again = page({ storage: disk, mint: t.shared, phone: t.rx.phone });
+      // opened with no route first, so what it starts with can be read before the claim on connect takes it
+      goOffline(again);
+      await again.W.connect(MINT, null, null, { remember: true });
+      await settle(200);
+      ok(again.W.arrivingIn(unit) === 0 && again.W.keptIn(unit) === amount && sum(pile(again, PILE)) === 0,
+        unit + ': on the next launch nothing is arriving, and the payment is kept', JSON.stringify({ arriving: again.W.arrivingIn(unit), kept: again.W.keptIn(unit) }));
+      ok(await balance(again) === amount, unit + ': the balance is the payment', String(await balance(again)));
+      ok((await appAudit(again))[unit === 'usd' ? 'usd' : 'sat'].off === 0, unit + ': and the audit is 0');
+      goOnline(again);
+      await again.W.claimUnclaimed();
+      // judged from here: it was opened on a payment kept, which its books do not hold as a pile
+      rebook(again);
+      ok(sum(pile(again, PILE)) === amount && again.W.keptIn(unit) === 0 && again.W.arrivingIn(unit) === 0 && await balance(again) === amount,
+        unit + ': the claim on connect swaps it in', JSON.stringify({ pile: sum(pile(again, PILE)), kept: again.W.keptIn(unit) }));
+      ok((await appAudit(again))[unit === 'usd' ? 'usd' : 'sat'].off === 0, unit + ': the audit is 0 after the swap');
+    }
+  }
+
+  // ---- 27. money arriving, met by a second claim and by a busy mint ----------------------------
+  /* Two things that can happen to a payment while it is arriving. A claim that
+   * walks the kept list (a send's syncClaim, a route coming back) can reach the
+   * same payment and swap it as well: the money is one payment however many
+   * claims are swapping it, and it lands once. And the mint can answer the swap
+   * "failed to acquire database lock": the swap is asked again, and the money is
+   * arriving the whole time, never kept and arriving at once. */
+  for (const unit of ['sat', 'usd']) {
+    const balance = async (c) => (unit === 'usd' ? c.W.balanceOf('usd') : c.W.balanceSats());
+    const PILE = unit === 'usd' ? USD_PILE : SAT_PILE;
+    const amount = 640;
+    const book = async (c) => (await appAudit(c))[unit === 'usd' ? 'usd' : 'sat'];
+    // a second claim while the first is out
+    {
+      const t = await pair(unit === 'usd' ? { payerUsd: [2000] } : { payerSat: 2000 });
+      const told = [];
+      t.rx.W.onRequestPaid((ev) => told.push(ev.stage));
+      t.rx.hold = /\/v1\/swap$/;
+      const r = pay(t, tapReq(t, t.rx.W.paymentRequest(amount, { unit, purpose: 'receive' })));
+      await until(() => told.indexOf('paid') >= 0 && t.rx.held.length > 0, 4000);
+      await r;
+      let walkDone = false;
+      const walk = t.rx.W.claimUnclaimed().then((x) => x, (e) => ({ err: String((e && e.message) || e) })).then((x) => { walkDone = true; return x; });
+      // the walk either reaches the mint's door too, or waits behind the swap already out
+      await until(() => t.rx.held.length >= 2 || walkDone, 1500);
+      const atDoor = t.rx.held.length;
+      ok(t.rx.W.arrivingIn(unit) === amount && t.rx.W.keptIn(unit) === 0 && await balance(t.rx) === amount,
+        unit + ': a second claim under way, and the payment counted once', JSON.stringify({ atDoor, arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit), balance: await balance(t.rx) }));
+      ok((await book(t.rx)).off === 0, unit + ': the audit is off by 0 with both claims under way');
+      t.rx.hold = null;
+      // the last to reach the door goes first, so the request's own swap is the one that meets its proofs spent
+      while (t.rx.held.length) t.rx.held.splice(-1)[0].go();
+      await walk;
+      await settle(300);
+      while (t.rx.held.length) t.rx.held.splice(-1)[0].go();
+      await settle(300);
+      ok(sum(pile(t.rx, PILE)) === amount && t.rx.W.arrivingIn(unit) === 0 && t.rx.W.keptIn(unit) === 0 && !Object.keys(kept(t.rx)).length
+        && await balance(t.rx) === amount, unit + ': both claims done: the payment in the pile once, nothing arriving, nothing kept',
+        JSON.stringify({ atDoor, pile: sum(pile(t.rx, PILE)), arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit), rows: Object.keys(kept(t.rx)).length }));
+      ok((await book(t.rx)).off === 0, unit + ': the audit is off by 0 at the end');
+    }
+    // the mint too busy to take its lock, while the payment arrives
+    {
+      const t = await pair(unit === 'usd' ? { payerUsd: [2000] } : { payerSat: 2000 });
+      t.rx.W._lockPause = [5, 15];
+      const told = [];
+      t.rx.W.onRequestPaid((ev) => told.push(ev.stage));
+      t.rx.hold = /\/v1\/swap$/;
+      const r = pay(t, tapReq(t, t.rx.W.paymentRequest(amount, { unit, purpose: 'receive' })));
+      await until(() => told.indexOf('paid') >= 0 && t.rx.held.length > 0, 4000);
+      await r;
+      t.rx.held.splice(0)[0].refuse('400\n' + JSON.stringify({ detail: 'failed to acquire database lock', code: 0 }));
+      await until(() => t.rx.held.length > 0, 3000);
+      ok(t.rx.held.length === 1 && t.rx.W.arrivingIn(unit) === amount && t.rx.W.keptIn(unit) === 0 && await balance(t.rx) === amount,
+        unit + ': refused as busy, asked again, and arriving all the while', JSON.stringify({ held: t.rx.held.length, arriving: t.rx.W.arrivingIn(unit), kept: t.rx.W.keptIn(unit) }));
+      ok((await book(t.rx)).off === 0, unit + ': the audit is off by 0 while it is asked again');
+      t.rx.hold = null;
+      t.rx.held.splice(0)[0].go();
+      await until(() => sum(pile(t.rx, PILE)) === amount && !Object.keys(kept(t.rx)).length);
+      ok(sum(pile(t.rx, PILE)) === amount && t.rx.W.arrivingIn(unit) === 0 && await balance(t.rx) === amount && t.rx.W._lockAsked === 1,
+        unit + ': the second asking lands it, once', JSON.stringify({ pile: sum(pile(t.rx, PILE)), arriving: t.rx.W.arrivingIn(unit), asked: t.rx.W._lockAsked }));
+      ok((await book(t.rx)).off === 0, unit + ': and the audit is off by 0');
+    }
+  }
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   if (failed) process.exitCode = 1;
