@@ -38,10 +38,13 @@
     if (s.screen === 'amount' && s.flow === 'receive') {
       return this.tapAutoArms() ? { inv: '', req: '', waiting: true } : null;
     }
-    /* A receive into the dollar balance is never on the air: taps carry
-     * bitcoin only, and a dollar invoice is paid by scanning it. */
-    if ((s.screen === 'amount' || s.screen === 'confirm') && s.flow === 'receive'
-        && this.walletNow && this.walletNow('receive') === 'usd') return null;
+    /* A receive into the dollar balance is on the air as a bitcoin one is: a
+     * request in dollars (`unit: 'usd'`, the cents typed) with the dollar
+     * invoice beside it once the mint has made one. Another Foxy at this mint
+     * pays the request in dollar ecash, with no price anywhere; a wallet at
+     * another mint pays the invoice. Offline there is no invoice, and the
+     * request alone is offered. */
+    const usdIn = !!(this.walletNow && this.walletNow('receive') === 'usd');
     // the receive invoice screen
     if (s.screen === 'confirm' && s.flow === 'receive') {
       if (s.recvRail === 'ON-CHAIN' || s.invoiceIsAddress) return null;
@@ -87,6 +90,12 @@
        * over the link that carried this (`tapOnlyRequest`). So another Foxy at
        * the same mint can be paid the moment the phones touch, and the invoice
        * joins the offer when the mint gets round to making it. */
+      if (usdIn) {
+        const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : this.centsTyped()) || 0);
+        const ureq = cents > 0 ? (this.tapOnlyRequest(cents, '', 'usd') || '') : '';
+        if (!inv && !ureq) return { inv: '', req: '', waiting: true };
+        return { inv: inv, req: ureq, waiting: false };
+      }
       const want = this.wantedSats() || W.amountOf(inv) || 0;
       const req = this.tapOnlyRequest(want) || '';
       if (!inv && !req) return { inv: '', req: '', waiting: true };
@@ -177,7 +186,11 @@
     /* Current, not merely known: `priceAgo()` is '' only while the figure on
      * screen is one this app still treats as live. */
     const mine = (W.lastPrice && W.lastPrice()) || { rate: 0 };
-    const fresh = (!this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
+    /* Not on a receive into dollars: dollars paid in dollars need no bitcoin
+     * price, so none goes on the air with them (a payer paying the dollar
+     * invoice from bitcoin is shown the mint's rate on CONFIRM PAYMENT). */
+    const usdOffer = s.flow === 'receive' && !!(this.walletNow && this.walletNow('receive') === 'usd');
+    const fresh = (!usdOffer && !this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
       ? Number(mine.rate) : 0;
     const offer = !advertise ? ''
       : waiting ? '{}'
@@ -669,9 +682,11 @@
     /* Said, not only written down. The diary had "no change came back" and
      * the person had nothing: they had been shown a payment that worked. */
     const owed = Math.round(Number(this._changeOwedSats) || 0);
+    const owedUnit = this._changeOwedUnit || '';
     this._changeOwedSats = 0;
+    this._changeOwedUnit = '';
     this.refreshBalance();               // it was counted while it was awaited
-    const money = owed > 0 && this.stageMoney ? this.stageMoney(owed) : '';
+    const money = owed > 0 && this.stageMoney ? this.stageMoney(owed, owedUnit) : '';
     this.waitingScreen('changeNeverCame', {
       title: 'You are<br>owed change', amount: money,
       body: (money ? 'You are due <strong>' + money + '</strong> in change.<br>' : '')
@@ -684,13 +699,17 @@
 
   /* Told by the send when the receiver owes change back, and cleared when it
    * arrives (onTapChange) or the wait runs out. */
+  /* A third argument, 'usd', for change owed on a payment in dollars: `sats`
+   * is then cents (kept under the old name, which every sat caller uses). */
   expectChange(sats, hash) {
+    const unit = arguments[2];
     if (!(Number(sats) > 0)) return;
     this._changeDueAt = Date.now() + this.CHANGE_WAIT_MS;
     this._changeForHash = hash || '';
     this._changeOwedSats = Number(sats) || 0;
+    this._changeOwedUnit = unit === 'usd' ? 'usd' : '';
     console.log('[foxy] tap: ' + this.group(sats)
-      + ' sats of change are owed, so the link is held open for it');
+      + (unit === 'usd' ? ' cents' : ' sats') + ' of change are owed, so the link is held open for it');
     /* And looked at again when the wait runs out, in case nothing else redraws:
      * `syncTap` only runs on a render, and a phone sitting on home has none. */
     clearTimeout(this._changeWaitT);
@@ -701,6 +720,7 @@
     if (!this._changeDueAt) return;
     this._changeDueAt = 0;
     this._changeOwedSats = 0;
+    this._changeOwedUnit = '';
     /* One transaction, with the change inside it: the payment's own entry is
      * finished rather than a second row appearing for money coming back. */
     const W = window.FoxyWallet;
@@ -1310,12 +1330,12 @@
         this.tapGaveNothing('their offer could not be read');
         return;
       }
-      // a request in dollars, with no invoice to pay instead: refused in words, before anything moves
+      // a request in a unit this phone cannot pay, with no invoice to pay instead: refused in words, before anything moves
       if (offer.notSats) {
-        console.log('[foxy] tap: their request is not in sats; not paid');
+        console.log('[foxy] tap: their request cannot be paid from here; not paid');
         this.hideConnecting();
         this.toast(offer.notSats, true);
-        this.tapGaveNothing('their request asks for dollars');
+        this.tapGaveNothing('their request is in a unit this phone cannot pay');
         return;
       }
       /* Already paid, by this phone, a moment ago.
@@ -1455,14 +1475,27 @@
   }
 
   /* Why a request read off a tap cannot be paid by one, or '' when it can.
-   * A request names its unit and its amount in that unit; only sats are paid
-   * over a tap tonight, and `sats` is null for any other (W.decodeRequest). */
+   * A request names its unit and its amount in that unit (W.decodeRequest):
+   * sats, or dollars in cents. Both are paid over a tap, each from its own
+   * balance; any other unit is refused in words. Whether this phone holds
+   * enough of the unit is asked later (`tapUnitHeld`), once the mint is known. */
+  tapUnitRule(read) {
+    if (!read) return '';
+    const unit = String(read.unit || 'sat');
+    if (unit === 'sat' && read.sats !== null) return '';
+    if (unit === 'usd') return '';
+    return 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
+  }
+
+  /* Why a crossing cannot pay a request, or '' when it can. A crossing moves
+   * sats to their mint and pays there, so it pays a request in sats and no
+   * other unit (dollar ecash is not moved between mints). */
   tapNotSats(read) {
     if (!read) return '';
     const unit = String(read.unit || 'sat');
     if (unit === 'sat' && read.sats !== null) return '';
     return unit === 'usd'
-      ? 'That request asks for dollars, which Foxy cannot pay over tap or Cashu yet.'
+      ? 'That request asks for dollars at another mint, which Foxy cannot pay by moving sats there.'
       : 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
   }
 
@@ -1481,11 +1514,11 @@
     if (!inv && !req) return null;
     let sameMint = false;
     let theirs = [];
-    /* A request in another unit (dollars) is not paid over a tap: the ecash
-     * this phone hands over is sats. With an invoice beside it the invoice is
-     * paid, as from a stranger; with none it is refused in words. */
+    /* A request in a unit Foxy does not pay is not paid over a tap. With an
+     * invoice beside it the invoice is paid, as from a stranger; with none it
+     * is refused in words. Sats and dollars are both paid (`tapUnitRule`). */
     const unitRead = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
-    const notSats = this.tapNotSats ? this.tapNotSats(unitRead) : '';
+    const notSats = this.tapUnitRule ? this.tapUnitRule(unitRead) : '';
     if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
     if (notSats) console.log('[foxy] tap: their request is not in sats; paying their invoice instead');
     if (req && !notSats && W.decodeRequest) {
@@ -1502,7 +1535,18 @@
      * agreed yet. An offer with an invoice on it is not this: the invoice
      * carries its own sat figure and paying it is one payment, not two. */
     const req0 = (req && !notSats && W.decodeRequest) ? W.decodeRequest(req) : null;
-    const asksUsd = !!(!inv && W.asksInDollars && W.asksInDollars(req0));
+    /* A request IN dollars (`unit: 'usd'`) is not this. It is paid in dollar
+     * ecash at the same mint, and no price comes into it anywhere: only a sat
+     * request carrying the old dollar figure asks for one. */
+    const usdUnit = !!(req0 && req0.unit === 'usd');
+    const asksUsd = !!(!inv && !usdUnit && W.asksInDollars && W.asksInDollars(req0));
+    /* Dollar ecash at another mint is not something Foxy moves: their invoice
+     * is paid instead, and with no invoice it is refused in words. */
+    if (usdUnit && !sameMint && !inv) {
+      return { notSats: 'That request asks for dollars at a mint you do not use, and has no invoice to pay instead.',
+               inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false,
+               theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+    }
     console.log('[foxy] tap: they offered ' + (inv ? 'an invoice' : 'no invoice')
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
       + '; mine is ' + (W.mintUrl || '?')
@@ -1512,7 +1556,7 @@
     /* A request at a mint this phone could move money to: one mint named, and
      * it is not this one. Nothing about whether it is worth doing — that is the
      * quote's answer, and the fee card's. */
-    const crossable = !sameMint && theirs.length === 1 && !!String(theirs[0] || '').trim();
+    const crossable = !usdUnit && !sameMint && theirs.length === 1 && !!String(theirs[0] || '').trim();
     /* Tri-state on purpose: true, false, and "they did not say". An older Foxy
      * says nothing, and nothing must not read as offline. */
     const theirRoute = typeof o.up === 'boolean' ? o.up : null;
@@ -1747,7 +1791,9 @@
      * nothing. Kept on state, never written into `_rate`:
      * this is a number somebody else vouched for, and the moment this phone has
      * a route again its own is the one that counts. */
-    if (offer && offer.theirRate > 0 && this.offlineNow()) {
+    // (never for a request in dollars: dollars paid in dollars need no bitcoin price)
+    const inDollars = !!(offer && offer.read && offer.read.unit === 'usd');
+    if (offer && offer.theirRate > 0 && this.offlineNow() && !inDollars) {
       this.setState({ peerRate: offer.theirRate, peerRateAt: offer.theirRateAt || Date.now() });
       console.log('[foxy] tap: they are online and their bitcoin price is $'
         + this.group(offer.theirRate) + '; showing theirs while this phone has none');
@@ -1792,6 +1838,10 @@
      * OVER LIGHTNING — is for a stranger's invoice that happens to share a
      * mint; two Foxys held together are not that, and the person should not be
      * asked a question with one right answer. */
+    /* Same mint, but in a unit this phone holds too little of: offline that
+     * needs the mint and is said so before anything moves; online it is paid
+     * from the other balance through their invoice (`tapUnitHeld`). */
+    if (offer.sameMint && this.tapUnitHeld && this.tapUnitHeld(offer, sats)) return;
     if (offer.sameMint) { this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks }); return; }
     /* Their mint is not this phone's, and this phone has a route.
      *
@@ -1840,6 +1890,127 @@
     if (offer.crossable && stuck) { this.tapStuckAtMint(offer, stuck, sats); return; }
     if (!inv) { this.tapWrongMint(offer); return; }
     if (!this.acceptTarget(inv)) return;
+  }
+
+  /* A request at this phone's mint, in a unit this phone holds too little of.
+   *
+   * A request names its unit, and it is paid in that unit or not at all
+   * offline: dollars from the dollar pile (and dollars kept offline), sats from
+   * the sats. Converting one into the other is a payment the mint makes, so
+   * with no route it cannot happen, and the person is told so before
+   * anything moves (NEEDS THE MINT). The other phone is told too, in words
+   * with none of this phone's figures in them.
+   *
+   * Online, the other balance pays their invoice by Lightning: CONFIRM PAYMENT
+   * with the mint's rate and the WALLET button, as a scanned invoice paid from
+   * the other balance is. With no invoice in the offer it waits a moment for
+   * one; a receiver with no route can make none, and that is said.
+   *
+   * At a mint with one balance a sat request is left to the offer screen as it
+   * always was (NOT ENOUGH). Answers whether the tap was taken from here. */
+  tapUnitHeld(offer, sats) {
+    const W = window.FoxyWallet;
+    const read = offer && offer.read;
+    if (!read || !W) return false;
+    const unit = read.unit === 'usd' ? 'usd' : 'sat';
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    if (unit === 'sat' && !two) return false;
+    const want = Math.round(Number(unit === 'sat' ? (read.sats || sats) : read.amount) || 0);
+    if (!(want > 0)) return false;
+    const offline = this.offlineNow();
+    let lack = null;
+    try { lack = W.sendShortfall ? W.sendShortfall(want, { unit: unit, locked: !!(read.lockTo && !offline) }) : null; }
+    catch (e) { lack = null; }
+    let held = 0;
+    try { held = Math.max(0, Math.round(Number(W.balanceOf ? W.balanceOf(unit) : 0) || 0)); } catch (e) { held = 0; }
+    if (held > 0 && !(lack && lack.short)) return false;
+    const other = unit === 'usd' ? 'sat' : 'usd';
+    const word = unit === 'usd' ? 'dollars' : 'bitcoin';
+    const otherWord = other === 'usd' ? 'dollars' : 'bitcoin';
+    if (offline) {
+      const why = held > 0 ? (lack && lack.why) || ('This needs ' + this.moneyIn(want, unit) + ' and you hold ' + this.moneyIn(held, unit) + '.')
+        : 'This request is in ' + word + '. You hold no ' + word + ' here, and paying it from ' + otherWord + ' needs the mint.';
+      console.log('[foxy] tap: offline, and this phone holds ' + (held > 0 ? 'too few' : 'no') + ' ' + word + ' for a request in ' + word + '; not paid');
+      this.tapRefuseUnit(why, held > 0 ? this.shortForReceiver()
+        : 'The payer holds no ' + word + ' here, and paying from ' + otherWord + ' needs the mint.');
+      return true;
+    }
+    // online: the other balance, if it has anything, pays their invoice; otherwise the offer screen says NOT ENOUGH
+    let otherHeld = 0;
+    try { otherHeld = two ? Math.max(0, Math.round(Number(W.balanceOf ? W.balanceOf(other) : 0) || 0)) : 0; } catch (e) { otherHeld = 0; }
+    if (!(otherHeld > 0)) return false;
+    if (offer.theirRoute === false) {
+      console.log('[foxy] tap: their phone is offline, so there is no invoice to pay from ' + otherWord + '; not paid');
+      this.tapRefuseUnit('This request is in ' + word + '. You hold no ' + word + ' here, and paying it from '
+        + otherWord + ' needs both of you online.',
+      'They hold no ' + word + ' here, and paying from ' + otherWord + ' needs both of you online.');
+      return true;
+    }
+    if (offer.inv) { this.tapConvertPay(offer.inv, other); return true; }
+    this.tapAwaitUnitInvoice(offer, other);
+    return true;
+  }
+
+  /* NEEDS THE MINT, on this phone, and the other phone told why, before
+   * anything moved. The link is kept while the words leave. */
+  tapRefuseUnit(reason, toThem) {
+    const W = window.FoxyWallet;
+    const said = W.tapQuote ? W.tapQuote(JSON.stringify({ gaveUp: toThem })) : Promise.resolve();
+    said.catch(() => {}).then(() => setTimeout(() => this.tapGaveNothing('a unit this phone holds too little of'), 1500));
+    this._tapQuietUntil = Date.now() + 15000;
+    this.hideConnecting();
+    if (this.needsMintCard) this.needsMintCard(reason);
+  }
+
+  /* Their invoice, paid from the other balance: CONFIRM PAYMENT, as for a
+   * scanned invoice, with WALLET set to the balance that pays. Not by way of
+   * `acceptTarget`, which offers USE CASHU for an invoice of this mint's own:
+   * that is the very payment this phone cannot make in their unit. */
+  tapConvertPay(inv, from) {
+    const W = window.FoxyWallet;
+    const sats = W.amountOf ? (W.amountOf(inv) || 0) : 0;
+    console.log('[foxy] tap: paying their invoice from ' + (from === 'usd' ? 'dollars' : 'bitcoin') + ', at the mint\u2019s rate');
+    this.setState(p => ({
+      wallet: from, walletAuto: true,
+      screen: 'sendConfirm', stack: p.stack.concat([p.screen]), flow: 'send',
+      asset: 'BITCOIN', network: 'LIGHTNING', recipientKind: 'invoice', recipient: inv,
+      unit: 'SATS', amount: String(sats), payFrom: 'BITCOIN',
+    }));
+  }
+
+  /* No invoice in the offer yet from a receiver that has a route: five seconds
+   * for one (it rides the answering message), and then said, with nothing sent. */
+  tapAwaitUnitInvoice(offer, from) {
+    const W = window.FoxyWallet;
+    let done = false;
+    let t = null;
+    const close = () => {
+      clearTimeout(t);
+      if (W.onTapTerms) W.onTapTerms(null);
+      if (this.hideStage) this.hideStage('invWait');
+    };
+    const finish = (inv) => {
+      if (done) return;
+      done = true;
+      close();
+      if (inv) { this.tapConvertPay(inv, from); return; }
+      console.log('[foxy] tap: no invoice came in five seconds; nothing was sent');
+      this.tapRefuseUnit('They have no invoice for this yet. Nothing was sent.', 'The payer could not pay without an invoice.');
+    };
+    if (W.onTapTerms) {
+      W.onTapTerms(text => {
+        let said = null;
+        try { said = JSON.parse(String(text || '')); } catch (e) { said = null; }
+        if (said && typeof said.inv === 'string' && /^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(said.inv)) finish(said.inv);
+      });
+    }
+    t = setTimeout(() => finish(''), 5000);
+    this.waitingScreen('invWait', {
+      art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
+      body: 'Waiting a moment for their Lightning invoice.',
+      button: 'CANCEL',
+      go: () => { if (done) return; done = true; close(); this.tapGaveNothing('cancelled'); this.back(); },
+    });
   }
 
   /* The offline payer agreeing the price it is about to pay at.

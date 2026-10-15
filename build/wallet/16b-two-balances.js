@@ -74,7 +74,7 @@
 
     /* One balance, in its own unit. Sats are what `balanceSats` says (the
      * pile, what has arrived and waits to be swapped in, less change about
-     * to be handed back); dollars are the usd pile, cents. Local and at once.
+     * to be handed back); dollars are the same in cents. Local and at once.
      * The connected mint when none is named. */
     balanceOf: function (unit, mint) {
       var u = unitOf(unit);
@@ -82,7 +82,11 @@
       var m = mint ? canonicalMint(mint) : mintUrl;
       if (!m) return 0;
       if (u === 'sat') return Math.max(0, sumProofs(proofs(m)) + unclaimedSats(m) - changeLeavingSats(m));
-      return sumProofs(proofs(m, u));
+      /* The same sum in the unit: the pile, what arrived in this unit and
+       * waits to be swapped in (kept offline, locked to this phone), less
+       * change in this unit about to be handed back. No row of another unit
+       * ever adds to it. */
+      return Math.max(0, sumProofs(proofs(m, u)) + unclaimedIn(u, m) - changeLeavingIn(u, m));
     },
 
     /* Held back from a balance until the mint says what became of it: a swap
@@ -157,10 +161,25 @@
      * connected mint's pile of that unit. Called by `sendToken` inside the
      * proof lock; not on its own.
      *
-     * Plainer than a sat send on purpose: with a route only, never locked,
-     * never covering an amount with change to come back, no change pool. The
-     * pieces that make the amount exactly go as they are; otherwise the mint
-     * cuts them (a swap, with its record on disk until the answer is in). */
+     * The same roads a sat send takes, in this unit and from this unit's
+     * pile alone, and never the sat change pool (`tidyChange` stays sats):
+     *
+     *   with a route, locked (`lockTo`): the pile is swapped into pieces
+     *     locked to the receiver on the dollar keyset, with the record a
+     *     locked send writes before it leaves (`swapGuard`, `locked`), so a
+     *     lost answer is rebuilt (`restoreLocked`, `writeLockedSend`). Change
+     *     for an over-payment goes back this way (`purpose: 'change'`).
+     *   with a route, not locked: pieces that make the amount exactly go as
+     *     they are; otherwise the mint cuts them.
+     *   with no route: pieces of the pile that make it exactly; else dollar
+     *     rows that arrived locked to this phone, signed and handed on
+     *     (`exactWithLocked`, `forwardLocked`), whole or piece by piece; else,
+     *     on a tap only (`cover`), the least that covers it, with the change
+     *     to come back locked to `changeKey` and the person's word that they
+     *     will pay over (`overpayOk`). A token for showing (no `cover`) is
+     *     made from exact pieces or rows only.
+     *
+     * Every amount is in the unit (cents for dollars). */
     _sendUnitToken: function (amount, unit, opts) {
       var o = opts || {};
       var u = unitOf(unit);
@@ -168,57 +187,206 @@
       if (no) return Promise.reject(no);
       var want = Math.round(Number(amount));
       if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
-      if ((typeof o.lockTo === 'string' && o.lockTo) || o.cover || o.changeNote || o.overpayOk || o.sigAll
-          || o.purpose === 'change' || !routeOpen()) {
-        return Promise.reject(new Error('Offline and locked payments are bitcoin only for now; nothing was sent.'));
+      // a card's one-signature pieces and cut ladders are sats only (08a-flashcard.js)
+      if (o.sigAll || (Array.isArray(o.denominations) && o.denominations.length)) {
+        return Promise.reject(new Error('Cards are bitcoin only; nothing was sent.'));
       }
+      var lockTo = typeof o.lockTo === 'string' ? o.lockTo : '';
+      var online = routeOpen();
+      if (lockTo && !online) {
+        return Promise.reject(new Error('A locked payment needs the mint, and this phone is offline. Nothing was sent.'));
+      }
+      if (o.purpose === 'change' && !lockTo) {
+        return Promise.reject(new Error('Change goes back locked to the payer, or not at all; nothing was sent.'));
+      }
+      var isChange = o.purpose === 'change';
+      var said = function (n) { return moneyWords(n, u); };
       var at = '';
       try { at = mintOf(needLocal()); } catch (e) { return Promise.reject(e); }
-      return walletIn(u).then(function (w) {
+      // with a route, the wallet on a circuit of its own; with none, the same wallet built from what is known here
+      return (online ? walletIn(u) : unitWalletLocal(u)).then(function (w) {
         var have = proofs(at, u);
         var stuck = lockedProofs(have);
         if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
         var held = sumProofs(have);
         var fee = swapFeeFor(w, have);
-        if (held < want + fee) throw new Error(notEnoughWords({ need: want + fee, have: held }, u));
+        // dollar rows that arrived locked to this phone count where they can be handed on: no route, no lock
+        var waiting = (!online && !lockTo) ? lockedPieces(u) : [];
+        var waitingAmt = waiting.reduce(function (n, r) { return n + amountOfRecord(r); }, 0);
+        if (held + waitingAmt < want + fee) {
+          throw new Error(notEnoughWords({ need: want + fee, have: held + waitingAmt }, u));
+        }
         var exact = null;
-        try { exact = exactPieces(w, have, want); } catch (e) { exact = null; }
-        if (!exactGoesAsIs(w, exact)) exact = null;
-        var made;
-        if (exact) {
+        if (!lockTo) {
+          try { exact = exactPieces(w, have, want); } catch (e) { exact = null; }
+          if (!exactGoesAsIs(w, exact)) exact = null;
+        }
+        var made, changeNoteKey = '';
+        /** @type {any} */
+        var withLocked = null;
+        /** @type {?{ picked: any[], total: number, over: number }} */
+        var cover = null;
+        if (!exact && !lockTo && !online) {
+          // whole rows first: fewer signatures for the same amount
+          withLocked = exactWithLocked(w, have, waiting, want);
+          // and piece by piece, the pile and every locked piece as one pool
+          var flat = withLocked ? [] : lockedProofsFlat(u);
+          var partsOf = function (picked) {
+            var rowOf = {};
+            flat.forEach(function (f) { rowOf[String(f.proof.secret)] = f.row; });
+            var groups = {}, pieces = [];
+            (picked || []).forEach(function (pr) {
+              var id = rowOf[String(pr.secret)];
+              if (id === undefined) { pieces.push(pr); return; }
+              (groups[id] = groups[id] || []).push(pr);
+            });
+            var rows = Object.keys(groups).map(function (id) {
+              return { id: id, amount: sumProofs(groups[id]), unit: u, part: true, token: encodeToken(at, groups[id], u) };
+            });
+            return { rows: rows, pieces: pieces };
+          };
+          if (!withLocked && flat.length) {
+            var combo = exactPieces(w, have.concat(flat.map(function (f) { return f.proof; })), want);
+            if (combo && combo.length) {
+              var parts = partsOf(combo);
+              if (parts.rows.length) withLocked = { rows: parts.rows, pieces: parts.pieces, over: 0, part: true };
+            }
+          }
+          /* Nothing makes it exactly. On a tap the least that covers it is
+           * paid and the rest comes back as change, locked to this phone;
+           * anywhere else (a token to show) nothing is made. */
+          if (!withLocked) {
+            if (!o.cover) {
+              throw new Error('This phone is offline and has no ' + balanceWord(u).replace(/s$/, '')
+                + ' pieces that make ' + said(want) + ' exactly. Nothing was sent.');
+            }
+            cover = coverPieces(w, have, want);
+            if (flat.length) {
+              var cp = coverPieces(w, have.concat(flat.map(function (f) { return f.proof; })), want);
+              if (cp && (!cover || cp.total < cover.total)) {
+                var cparts = partsOf(cp.picked);
+                if (cparts.rows.length) {
+                  withLocked = { rows: cparts.rows, pieces: cparts.pieces, over: cp.over, part: true };
+                  cover = { picked: cparts.pieces, total: cp.total, over: cp.over };
+                }
+              }
+            }
+            if (!cover) {
+              throw new Error('This phone is offline and its ' + balanceWord(u) + ' cannot make ' + said(want)
+                + '. Nothing was sent.');
+            }
+            if (cover.over > 0 && !o.overpayOk) {
+              var needs = /** @type {any} */ (new Error('This phone has no exact change for ' + said(want) + '.'));
+              needs.foxyNeedsOverpay = { asked: want, pay: cover.total, over: cover.over, unit: u };
+              throw needs;
+            }
+            if (cover.over > 0 && typeof o.changeKey === 'string' && /^0[23][0-9a-f]{64}$/i.test(o.changeKey)) {
+              changeNoteKey = o.changeKey;
+            }
+          }
+        }
+        if (withLocked) {
+          /* Signed now, and only the rows that are really going out; struck
+           * off once the token is written down (below), as `sendToken` does. */
+          var lockedOut = [];
+          var fromPile = withLocked.pieces || [];
+          var took = {};
+          fromPile.forEach(function (p) { took[p.secret] = true; });
+          console.log('[foxy] no exact ' + balanceWord(u) + ' pieces in the pile; handing on '
+            + (withLocked.part ? 'pieces of ' : '') + withLocked.rows.length + ' locked payment(s) that arrived earlier'
+            + (fromPile.length ? ' with ' + fromPile.length + ' piece(s) beside them' : ''));
+          made = withLocked.rows.reduce(function (chain, row) {
+            return chain.then(function () {
+              return FoxyWallet.forwardLocked(row.token, { defer: true }).then(function (r) {
+                (r.signed || []).forEach(function (pr) { lockedOut.push(pr); });
+              });
+            });
+          }, Promise.resolve()).then(function () {
+            return { send: fromPile.concat(lockedOut), keep: have.filter(function (p) { return !took[p.secret]; }),
+                     handedOn: lockedOut.slice(), swapped: false, over: Math.max(0, Number(withLocked.over) || 0) };
+          });
+        } else if (exact || cover) {
+          var use = exact || (cover && cover.picked) || [];
           var out = {};
-          exact.forEach(function (p) { out[p.secret] = true; });
-          made = Promise.resolve({ send: exact, keep: have.filter(function (p) { return !out[p.secret]; }), swapped: false });
+          use.forEach(function (p) { out[p.secret] = true; });
+          if (cover) {
+            console.log('[foxy] no route and no exact ' + balanceWord(u) + ' pieces: paying ' + said(cover.total)
+              + ' for ' + said(want) + ', with ' + said(cover.over) + ' of change to come back');
+          }
+          made = Promise.resolve({ send: use, keep: have.filter(function (p) { return !out[p.secret]; }),
+                                   swapped: false, over: cover ? cover.over : 0 });
         } else {
-          var guard = swapGuard(w, 'send', { inputs: have, unit: u });
+          /* The mint is asked: the swap's record is on disk before the request
+           * leaves, with the locked outputs written down as they are made, so
+           * a lost answer is rebuilt and a payment killed half way is not
+           * lost (`recoverSwaps`, `finishLockedSend`). */
+          var guard = swapGuard(w, 'send', { inputs: have, unit: u, locked: !!lockTo,
+            pay: { want: want, purpose: o.purpose || '', forHash: o.forHash || '', owed: o.owed || 0 } });
           made = guard.run('token', function () {
-            return w.send(want, have, { includeFees: true });
+            return lockTo
+              ? w.send(want, have, { includeFees: true }, { send: { type: 'p2pk', options: { pubkey: lockTo } } })
+              : w.send(want, have, { includeFees: true });
           }).catch(function (e) {
+            /* The mint never answered and it had made the payment: rebuilt
+             * from the record, it is carried on with as if the answer had
+             * come, and every piece the swap did not take goes back. */
+            if (e && e.recovered && Array.isArray(e.lockedProofs) && e.lockedProofs.length) {
+              var spentIn = {};
+              (e.spentInputs || []).forEach(function (p) { if (p && p.secret) spentIn[p.secret] = true; });
+              var untouched = have.filter(function (p) { return p && p.secret && !spentIn[p.secret]; });
+              return { send: e.lockedProofs, keep: untouched.concat(e.changeProofs || []), swapped: true, guard: guard };
+            }
             return retryWithoutSpent(w, e);
           }).then(function (split) {
-            return { send: split.send, keep: split.keep || [], swapped: true, guard: guard };
+            return { send: split.send, keep: split.keep || [], swapped: true, guard: split.guard || guard };
           });
         }
         return made.then(function (split) {
           // the rest of the pile first, then the record cleared, then the token (as `sendToken`)
           setProofs((split.keep || []).concat(stuck), at, w, u);
+          // change set aside for an over-payment leaves with its pieces (`holdChange`)
+          if (isChange && o.forHash) changeHoldOver(o.forHash);
           if (split.guard) split.guard.done();
-          var token = encodeToken(at, split.send, u);
+          var over = Number(split.over) || 0;
+          var token = encodeToken(at, split.send, u, changeNoteKey && over > 0
+            ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
           var hash = 'token-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
           var sent = sumProofs(split.send);
           var tokFee = split.swapped
-            ? Math.max(0, held - sent - sumProofs(split.keep || []))
+            ? Math.max(0, sumProofs(have) - sent - sumProofs(split.keep || []))
             : 0;
           // the string is the money now: written down before anything else
           mustSave(K.outtok, { token: token, sats: 0, unit: u, amount: sent, mint: at,
                                hash: hash, at: Date.now(), swapped: split.swapped });
-          logTx(unitRow(u, { dir: 'out', sats: sent, feeSats: tokFee, settled: true, state: 'success',
-                             memo: 'ecash', hash: hash, mint: at }));
+          // the locked pieces in it struck off, all of them, now that the token is written down
+          if (split.handedOn && split.handedOn.length) {
+            rememberHandedOn(split.handedOn);
+            takeFromUnclaimed(split.handedOn);
+            console.log('[foxy] handed on ' + said(sumProofs(split.handedOn)) + ' of locked ecash, signed here');
+          }
+          // paid over by too little to come back: it goes with the payment (`changeFor`, the receiver's sum)
+          var dust = 0;
+          if (over > 0 && !(changeFor(w, over) > 0)) {
+            dust = over;
+            over = 0;
+            console.log('[foxy] ' + said(dust) + ' over is too little to come back at this mint; it goes with the payment');
+          }
+          if (isChange) {
+            console.log('[foxy] change of ' + said(sent) + ' made; it belongs to the payment it came from, not to a row of its own');
+          } else {
+            logTx(unitRow(u, { dir: 'out', sats: sent - over, grossSats: over > 0 ? sent : undefined,
+                               changeSats: over > 0 ? over : undefined, changeState: over > 0 ? 'owed' : '',
+                               dustSats: dust || undefined, feeSats: tokFee, settled: true, state: 'success',
+                               memo: 'ecash', hash: hash, mint: at }));
+          }
           logAudit({ hash: hash, sats: 0, feeSats: 0, unit: u, amount: sent, kind: 'token',
                      inputs: (split.send || []).map(scrub), outputs: (split.keep || []).map(scrub) });
-          FoxyWallet.tag(hash, { to: 'ecash', token: token, unit: u });
+          FoxyWallet.tag(hash, isChange ? { to: 'change', change: true, token: token, unit: u }
+            : o.inflight ? { to: 'ecash', token: token, unit: u, inflight: true }
+            : { to: 'ecash', token: token, unit: u });
           return { token: token, unit: u, amount: sent, sats: 0, mint: at, hash: hash,
-                   swapped: split.swapped, lockedTo: '', fee: tokFee, over: 0, asked: want, dust: 0, changeAsked: false };
+                   swapped: split.swapped, lockedTo: lockTo || '', fee: tokFee, over: over, asked: want, dust: dust,
+                   changeAsked: !!(changeNoteKey && over > 0) };
         });
       });
     },

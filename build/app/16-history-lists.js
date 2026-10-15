@@ -224,10 +224,16 @@
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
       if (t.unit !== 'usd') return;
-      const moved = !(t.pending && t.dir === 'in') && !t.failed && !t.atRisk && !t.split;
+      /* Change that came back over the link has a row of its own, and the
+       * payment it is the rest of is already shown at its net: the payment
+       * carries the arithmetic, as in the bitcoin books (`histAudit`). */
+      const changeRow = t.dir === 'in' && (!!t.changeRow || /^(tap|req)-change-/.test(String(t.hash || '')));
+      const moved = !changeRow && !(t.pending && t.dir === 'in') && !t.failed && !t.atRisk && !t.split;
       if (!moved) return;
+      // change still owed on a payment that went out whole: out of the balance until it comes back
+      const owedBack = t.dir !== 'in' && t.changeState === 'owed' ? Math.max(0, Math.round(Number(t.changeAmount) || 0)) : 0;
       const by = t.dir === 'in' ? Math.round(Number(t.amount) || 0)
-        : Math.round(Number(t.amount) || 0) + Math.max(0, Math.round(Number(t.feeAmount) || 0));
+        : Math.round(Number(t.amount) || 0) + Math.max(0, Math.round(Number(t.feeAmount) || 0)) + owedBack;
       run += t.dir === 'in' ? -by : by;
     }));
     const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
@@ -408,6 +414,9 @@
            * match what they expected — and what they send in a report about it. Absent on every ordinary payment. */
           grossSats: Number(t.grossSats) || 0,
           changeSats: Number(t.changeSats) || 0,
+          // the same two on a row in another unit (dollars): its own names, in cents, never in the sat ones
+          grossAmount: Number(t.grossAmount) || 0,
+          changeAmount: Number(t.changeAmount) || 0,
           changeState: t.changeState || '',
           // dollars per bitcoin when this settled; its dollar figures come from this and nothing else
           rate: Number(t.rate) || 0,

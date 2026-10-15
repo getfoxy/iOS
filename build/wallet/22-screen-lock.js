@@ -239,8 +239,11 @@
     _offlineToOffline: function (on) { return offlineToOffline(on); },
 
     /* A payment taken on trust while both phones were offline turned out to have
-     * been spent by the payer: { sats, id }. The money was shown and counted and
-     * is now gone, so this is news, not bookkeeping. */
+     * been spent by the payer: { unit, amount, sats, id }, in the payment's own
+     * unit (`sats` is 0 for dollars). The money was shown and counted and is
+     * now gone, so this is news, not bookkeeping. The other events here carry
+     * `unit` and `amount` the same way: late claims, trust settled, at risk,
+     * taken back, change stuck, and the HIGH RISK card's question. */
     /** @type {?function(*): void} */
     _onTrustLost: null,
     /** @type {?function(any): void} */
@@ -265,8 +268,9 @@
     _onTakenBack: null,
     onTakenBack: function (fn) { FoxyWallet._onTakenBack = fn; },
     /* What became of ecash at risk once there was a route: { state, hash,
-     * sats } with state 'safe' (swapped for fresh pieces), 'taken' (the
-     * other phone redeemed it after refusing) or 'refunded' (it came back). */
+     * unit, amount, sats } with state 'safe' (swapped for fresh pieces),
+     * 'taken' (the other phone redeemed it after refusing) or 'refunded' (it
+     * came back). */
     /** @type {?function(any): void} */
     _onAtRisk: null,
     onAtRisk: function (fn) { FoxyWallet._onAtRisk = fn; },

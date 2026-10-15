@@ -417,8 +417,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(v.recvHeadTwo && v.recvChipsTwo && !v.recvChipsOne, 'the title between the round buttons; WALLET and NETWORK chips');
     eq([v.recvWalletWord, v.confirmNetwork], ['USD', 'LIGHTNING'], 'WALLET USD, NETWORK LIGHTNING');
     eq([v.confirmAmount, v.showSats], ['$ 5.00', false], 'the amount is the cents, with no sats line');
-    ok(v.recvTapShown === false && v.recvCardShown === false, 'no TAP and no CARD on a dollar invoice');
-    eq(A.tapOffering(), null, 'nothing goes on the air for a dollar invoice');
+    ok(v.recvTapShown === true && v.recvCardShown === false, 'TAP and no CARD on a dollar invoice (a card holds bitcoin only)');
+    eq(A.tapOffering(), { inv: W.rec.invoices[0].inv.bolt11, req: '', waiting: false },
+      'the dollar invoice goes on the air (its request in dollars beside it is tests/usd-tap-screens.js)');
     ok(v.recvClockShown && /^NEW CODE IN 0:0\d$/.test(v.recvClock), 'the code’s minute counted down under it (' + v.recvClock + ')');
     const t = textOf(w);
     ok(/RECEIVE INVOICE/.test(t) && /WALLET/.test(t) && /USD/.test(t) && !/>CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it');
@@ -428,7 +429,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     V().pickNetwork();
     const sheet = w.document.querySelector('[data-foxy-rail-sheet]');
     const sheetText = sheet ? sheet.textContent : '';
-    ok(/On chain is bitcoin only\./.test(sheetText) && /Dollar requests come later\./.test(sheetText), 'NETWORK: ON-CHAIN and CASHU greyed for dollars, saying why');
+    ok(/On chain is bitcoin only\./.test(sheetText) && !/Dollar requests come later\./.test(sheetText), 'NETWORK: ON-CHAIN greyed for dollars, saying why; CASHU (a request in dollars) open');
     if (sheet) sheet.remove();
     delete A.ocCan;
     // runs out: a new code, the old watch let go
@@ -628,12 +629,17 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(W.rec.tokens[0], { amount: 500, opts: { unit: 'usd' } }, 'MAKE ECASH from dollars: sendToken(500, {unit:\'usd\'})');
     const tk = V();
     eq([A.state.screen, tk.tokenAmount, tk.tokenShowAlt], ['tokenOut', '$ 5.00', false], 'the token screen: $ 5.00, no sats line');
-    // offline it is refused before the wallet is asked
+    // offline the wallet makes it from dollar pieces on hand (or says why not), and it is shown to be scanned
     const off = twoWallet({ choice: { hold: 'both', send: 'usd' }, online: false });
     await fresh(off);
     A.setState({ screen: 'amount', stack: ['home'], flow: 'send', tokenMode: true, unit: 'USD', amount: '5.00' });
     A.makeEcashToken();
-    eq([off.rec.tokens.length, toasts.pop()], [0, 'Offline and locked payments are bitcoin only for now; nothing was sent.'], 'offline: a dollar token is refused in words');
+    await settle(); await settle();
+    eq([off.rec.tokens.length, off.rec.tokens[0] && off.rec.tokens[0].opts, A.state.tokenOutUnit],
+      [1, { unit: 'usd' }, 'usd'], 'offline: a dollar token is asked of the wallet in dollars, and shown in dollars');
+    const stage = w.document.getElementById('foxy-stage');
+    ok(!!stage && /\$ 5\.00/.test(stage.textContent), 'offline: RECEIVER NEEDS TO SCAN, for $ 5.00', stage ? stage.textContent.slice(0, 120) : 'no stage');
+    if (A.hideStage) A.hideStage('needScan');
   }
 
   // ---- 11. history: DOLLARS / BITCOIN ---------------------------------------------------------
@@ -682,16 +688,18 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([d.txSwapShown, d.txSwapRate, d.txMint, d.txTotalAlt], [true, '₿ 1 = $ 81,786', 'forge.example.com', 'DOLLARS'], 'a swap’s detail: its rate, its own mint, DOLLARS');
   }
 
-  // ---- 12. what dollars cannot do yet, refused in words --------------------------------------
+  // ---- 12. what dollars can and cannot do, said in words --------------------------------------
   {
     const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
     await fresh(W);
     A.openRequest('creqA-usd');
-    eq(toasts.pop(), 'That request asks for dollar ecash, which Foxy cannot pay yet.', 'a NUT-18 request in dollars is refused');
-    eq(A.tapNotSats({ unit: 'usd', amount: 500, sats: null }), 'That request asks for dollars, which Foxy cannot pay over tap or Cashu yet.', 'a tap’s request in dollars is refused');
-    eq(A.tapNotSats({ unit: 'sat', amount: 500, sats: 500 }), '', 'a request in sats is paid as before');
+    eq([A.state.screen, A.state.wallet], ['reqOffer', 'usd'], 'a NUT-18 request in dollars at this mint opens its offer, paid from dollars');
+    A.setState({ screen: 'home', stack: [], req: null }); await settle();
+    eq(A.tapUnitRule({ unit: 'usd', amount: 500, sats: null }), '', 'a tap’s request in dollars is paid');
+    eq(A.tapUnitRule({ unit: 'sat', amount: 500, sats: 500 }), '', 'a request in sats is paid as before');
+    eq(A.tapUnitRule({ unit: 'eur', amount: 500, sats: null }), 'That request asks for EUR, which Foxy cannot pay over tap.', 'any other unit is refused in words');
     const offer = A.tapOfferOf(JSON.stringify({ v: 2, req: 'creqA-usd' }));
-    ok(!!(offer && offer.notSats), 'a tap offering only a dollar request is refused before anything is paid');
+    ok(!!(offer && !offer.notSats && offer.sameMint && !offer.asksUsd), 'a tap offering a dollar request at this mint is paid in dollars, with no price asked');
     A.setState({ screen: 'confirm', flow: 'receive', recvUnit: 'usd', wallet: 'usd', invoice: 'lnbcusd9' });
     A.payByCard();
     eq(toasts.pop(), 'The card holds bitcoin; this asks for dollars.', 'CARD on a dollar invoice is refused');
@@ -820,8 +828,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ['5', '0', '0'].forEach((k) => A.press(k));
     toasts = [];
     V().next(); await settle();
-    ok(A.state.screen === 'amount' && toasts.pop() === 'Receiving dollars needs the mint.' && W.rec.invoices.length === 0,
-      'offline: NEXT on a dollar receive says it needs the mint, and asks for nothing');
+    ok(A.state.screen === 'confirm' && A.state.recvRail === 'CASHU' && A.state.recvUnit === 'usd' && W.rec.invoices.length === 0,
+      'offline: NEXT on a dollar receive opens it on CASHU (a request in dollars), and asks the mint for nothing');
+    eq([V().confirmNetwork, V().recvClockShown, V().recvTapShown], ['CASHU', false, true], 'offline: NETWORK CASHU, no clock, TAP armed');
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
   {

@@ -196,12 +196,15 @@
       return Math.max(0, sum - fee);
     },
 
-    checkChange: function (token, owed) {
-      return checkChange(String(token || ''), Number(owed) || 0);
+    /* `unit`: the unit of the payment the change is for ('sat' when not
+     * named); change in any other unit is refused ("it is not dollars"). */
+    checkChange: function (token, owed, unit) {
+      return checkChange(String(token || ''), Number(owed) || 0, unit || 'sat');
     },
 
-    keepChange: function (token, sats, forId) {
-      return keepChange(String(token || ''), Number(sats) || 0, forId || '');
+    // `amount` in the token's own unit, which the kept row takes from the token
+    keepChange: function (token, amount, forId) {
+      return keepChange(String(token || ''), Number(amount) || 0, forId || '');
     },
 
     tapChange: function (token) {
@@ -244,7 +247,9 @@
       try { said = JSON.parse(String(text || '')); } catch (e0) { said = null; }
       if (said && typeof said === 'object' && said.intend && typeof said.intend === 'object') {
         var answer = answerIntent(said.intend);
-        console.log('[foxy] tap: asked first about ' + (Math.round(Number(said.intend.sats)) || 0) + ' sats — '
+        var iu = unitOf(said.intend.unit) || 'sat';
+        var ia = Math.round(satsOf(said.intend.amount != null ? said.intend.amount : said.intend.sats));
+        console.log('[foxy] tap: asked first about ' + (iu === 'sat' ? ia + ' sats' : moneyWords(ia, iu)) + ' — '
           + (answer.go ? 'go' : 'no: ' + answer.why));
         FoxyWallet.tapTerms(JSON.stringify(answer)).catch(function (e) {
           console.warn('[foxy] tap: the answer to their question could not be sent:', e && e.message);
@@ -323,12 +328,24 @@
      * will be made, when that is not where this phone is now (a crossing asks
      * before it moves anything). Six seconds, and no answer is a no — nothing
      * has been made, so nothing is lost by stopping. */
+    /* The intent names the payment's unit and its amount in that unit, and
+     * the keyset of that unit it will be made on (the receiver checks it
+     * offline against the keys it keeps). `sats` rides as well on a sat
+     * payment, for a receiver from before units were named. */
     askFirst: function (req, how) {
       var id = String((req && req.id) || '');
-      var intent = { id: id, sats: Math.round(Number(req && req.sats) || 0),
+      var u = unitOf((req && req.unit) || 'sat') || 'sat';
+      var amount = Math.round(Number(u === 'sat' ? (req && req.sats != null ? req.sats : req && req.amount) : req && req.amount) || 0);
+      var intent = /** @type {any} */ ({ id: id, unit: u, amount: amount,
                      mint: String((how && how.mint) || mintUrl || '').replace(/\/+$/, ''),
-                     locked: !!(how && how.locked) };
-      try { if (wallet && wallet.keysetId && !(how && how.mint)) intent.keyset = String(wallet.keysetId); } catch (e) {}
+                     locked: !!(how && how.locked) });
+      if (u === 'sat') intent.sats = amount;
+      try {
+        if (wallet && !(how && how.mint)) {
+          var ks = u === 'sat' ? String(wallet.keysetId || '') : unitKeysetId(u, mintOf(wallet), wallet);
+          if (ks) intent.keyset = ks;
+        }
+      } catch (e) {}
       return new Promise(function (resolve) {
         var done = false;
         var t = null;
@@ -359,9 +376,13 @@
      * yet swapped: [{ hash, sats, at, why }], and the total at this mint. In
      * the balance, spendable, and what the home screen rings red for. */
     atRisk: function () {
-      return atRiskGroups().map(function (g) { return { hash: g.hash, sats: g.sats, at: g.at, why: g.why, mint: g.mint }; });
+      return atRiskGroups().map(function (g) {
+        return { hash: g.hash, sats: g.sats, unit: g.unit, amount: g.amount, at: g.at, why: g.why, mint: g.mint };
+      });
     },
     atRiskSats: function () { return atRiskSats(); },
+    // the same, in one unit at the connected mint: dollars are counted on their own
+    atRiskIn: function (unit) { return atRiskIn(unit); },
 
     tapPayStop: function () {
       return bridgeAsk('tapPayStop', {}, 5000).catch(function () {});

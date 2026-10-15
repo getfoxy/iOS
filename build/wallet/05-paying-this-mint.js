@@ -108,7 +108,8 @@
     var best = null;
     var consider = function (chosen) {
       var fromRows = 0;
-      chosen.forEach(function (r) { fromRows += Number(r.sats) || 0; });
+      // in the rows' own unit: `amount`, or `sats` on a row from before amounts were written
+      chosen.forEach(function (r) { fromRows += amountOfRecord(r); });
       if (fromRows > want) return;
       var left = want - fromRows;
       /* What the pile adds is what the rows leave, and the receiver's fee on

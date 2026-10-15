@@ -372,16 +372,21 @@
        * this is where the arithmetic lives: what moved, what came back, what it
        * came to. Kept on the entry, so somebody reporting a payment that looked
        * wrong can send these three numbers rather than describe them. Nothing shows on an ordinary payment. */
-      txHasChange: Number(tx.changeSats) > 0,
+      /* A row in dollars has the same three figures under its own names, in
+       * cents (`grossAmount`, `changeAmount`, `amount`), said as dollars. */
+      txHasChange: (tx.unit === 'usd' ? Number(tx.changeAmount) : Number(tx.changeSats)) > 0,
       txGross: (tx.dir === 'in' ? 'Received ' : 'Paid ')
-        + this.money(Number(tx.grossSats) || 0, this.txFiat(tx, Number(tx.grossSats) || 0)).main,
-      txChange: this.money(Number(tx.changeSats) || 0, this.txFiat(tx, Number(tx.changeSats) || 0)).main
+        + (tx.unit === 'usd' ? this.moneyIn(tx.grossAmount, 'usd')
+          : this.money(Number(tx.grossSats) || 0, this.txFiat(tx, Number(tx.grossSats) || 0)).main),
+      txChange: (tx.unit === 'usd' ? this.moneyIn(tx.changeAmount, 'usd')
+        : this.money(Number(tx.changeSats) || 0, this.txFiat(tx, Number(tx.changeSats) || 0)).main)
         + (tx.changeState === 'never came' || tx.changeState === 'never sent' ? ' expected'
            : tx.changeState === 'not handed' ? ' owed to them'
            : tx.changeState === 'owed' || tx.changeState === 'making' ? ' due'
            : tx.changeState === 'collected' ? ' collected later'
            : tx.dir === 'in' ? ' given back' : ' back'),
-      txChangeNet: (tx.dir === 'in' ? '+' : '\u2212') + this.money(tx.sats, this.txFiat(tx, tx.sats)).main,
+      txChangeNet: (tx.dir === 'in' ? '+' : '\u2212')
+        + (tx.unit === 'usd' ? this.moneyIn(tx.amount, 'usd') : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
       txChangeState: tx.changeState === 'never came' ? 'The change never arrived.'
         : tx.changeState === 'never sent' ? 'The change could not be sent, so it was all kept.'
         : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))

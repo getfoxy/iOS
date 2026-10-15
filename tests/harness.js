@@ -214,14 +214,18 @@ function books(ctx) {
   (Array.isArray(rows) ? rows : []).forEach((e) => {
     if (!e) return;
     if (e.state === 'failed' || e.failed || e.atRisk) return;
+    /* Change that came back is the tail of the payment it belongs to, whose
+     * entry already says what came back, in any unit: never counted twice. */
+    if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
     // a row in another unit: its own books, by its own figures (cents for usd)
     if (e.unit && e.unit !== 'sat') {
       const at = bookMint(e.mint) + '@' + e.unit;
       if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(says, at, Number(e.amount) || 0); return; }
-      add(says, at, -((Number(e.amount) || 0) + Math.max(0, Number(e.feeAmount) || 0)));
+      // and change still owed on a payment out left with it, as the sat sum below says (`changeAmount`)
+      const owedU = e.changeState === 'owed' ? (Number(e.changeAmount) || 0) : 0;
+      add(says, at, -((Number(e.amount) || 0) + Math.max(0, Number(e.feeAmount) || 0) + owedU));
       return;
     }
-    if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
     if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(says, e.mint, Number(e.sats) || 0); return; }
     const owedBack = e.changeState === 'owed' ? (Number(e.changeSats) || 0) : 0;
     add(says, e.mint, -((Number(e.sats) || 0) + Math.max(0, Number(e.feeSats) || 0) + owedBack));
@@ -251,7 +255,8 @@ function books(ctx) {
 function limbo(ctx) {
   const W = ctx.W, n = (f) => { try { return Math.round(Number(f()) || 0); } catch (e) { return 0; } };
   return {
-    unclaimed: n(() => W.unclaimedSats()),
+    // kept rows in every unit: dollars waiting to be swapped in are money on its way too
+    unclaimed: n(() => W.unclaimedSats()) + n(() => (W.keptIn ? W.keptIn('usd', '') : 0)),
     recovering: n(() => W.recoveringSats()),
     melts: (stored(ctx, BOOK_KEYS.melting, []) || []).length || 0,
     move: n(() => (W.pendingMove && W.pendingMove() ? 1 : 0)),
@@ -624,7 +629,12 @@ function fakeMint(w, opts) {
     }
     if (p === '/v1/swap') {
       // a mint that charges per piece keeps the fee: inputs minus fee is what comes out
-      const swapFee = Math.ceil(((body.inputs || []).length * (Number(o.feePpk) || 0)) / 1000);
+      /* By each input's own keyset when the dollar keyset names a fee of its own
+       * (o.usdFeePpk), as a mint may set one per keyset; otherwise one fee for
+       * every piece, as it always was here. */
+      const ppkOf = (pr) => (o.usdFeePpk !== undefined && unitOfKeyset(pr && pr.id) === 'usd'
+        ? Number(o.usdFeePpk) || 0 : Number(o.feePpk) || 0);
+      const swapFee = Math.ceil((body.inputs || []).reduce((n, pr) => n + ppkOf(pr), 0) / 1000);
       if (sum(body.inputs) - swapFee !== sum(body.outputs)) return no(11002, 'inputs and outputs do not balance');
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
       if (counterfeit(body.inputs)) return no(10003, 'Proof could not be verified.');

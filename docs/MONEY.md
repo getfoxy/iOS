@@ -1605,14 +1605,13 @@ that did not go is a usd row of its own (`meltBackFee`), since the store of
 fees no row carries is sats.
 
 **Tokens.** `sendToken(amount, { unit: 'usd' })` at a mint with a usd keyset
-(`_sendUnitToken`): with a route only, never locked, never covering with change
-to come back, and no change pool; exact pieces as they are, otherwise a swap
-with its record on disk. Anything else in dollars is refused with "Offline and
-locked payments are bitcoin only for now; nothing was sent." `reclaimToken`
-takes a usd token back into the usd pile. `exportProofs` and `importProofs`
-stay sats; dollars come back with the recovery words. A usd payment request
-(NUT-18) is read in cents with `sats: null` (`decodeRequest`) and refused:
-"That request asks for dollar ecash, which Foxy cannot pay yet."
+(`_sendUnitToken`): exact pieces as they are, otherwise a swap with its record
+on disk, and no change pool. Locked to a request's key with a route; offline,
+from dollar pieces on hand or dollar rows this phone was paid locked (below).
+`reclaimToken` takes a usd token back into the usd pile. `exportProofs` and
+`importProofs` stay sats; dollars come back with the recovery words. A usd
+payment request (NUT-18, `unit: 'usd'`, the amount in cents) is paid from the
+dollar balance at the mint that issues it; see "Dollars by tap" below.
 
 **Swap between the two (`swapQuote`, `swapRun`).** No mint swaps one unit for
 another in one request, so a swap is two Lightning legs at the same mint: a
@@ -1670,16 +1669,54 @@ backends up.
   its payment was held (the hold is written before the melt is sent, so its
   payment never left), or one whose two legs have landed. Before, home's held
   pill said "pending with the mint" for it for good.
-- Offline, a token in dollars is refused, and so is a token that says sat but
-  holds pieces of another unit's keyset. Kept on trust, its cents were counted
-  in the sat balance and written on a sat row. A payment posted to a request
-  is refused the same way, by its keysets, whatever its `unit` says.
+- A token that says sat but holds pieces of another unit's keyset is refused,
+  and so is the mirror. A payment posted to a request is refused the same way,
+  by its keysets, whatever its `unit` says. (Offline dollar tokens were
+  refused outright at first; the kept store is now per unit, see below.)
 - `tokensNotClaimed` rows carry `unit` and `amount`, so a dollar token nobody
   has claimed is named in cents before history forgets it.
 
-Out of scope for now, and refused where a unit cannot go: cards and taps
-(sats), on chain (sats; Forge has none), split bills and transfers between
-mints (sats), NUT-18 in dollars.
+**Dollars by tap, and kept offline.** Two Foxys at one mint with dollar
+balances pay each other in dollar ecash, by tap or by a scanned request, with
+no bitcoin price anywhere. The rules are the sat rules (§11, §12, TAP-SPEC.md
+§2), in the request's unit:
+
+- A request names its unit. A receive into the dollar balance makes a request
+  in dollars (`paymentRequest(cents, { unit: 'usd' })`) and puts it on the air
+  beside the dollar invoice; offline there is no invoice, so the request is the
+  code on screen (NETWORK CASHU, no minute counted down) and TAP is armed as on
+  any receive. The next receive starts in the unit last paid in.
+- The payer pays in the request's unit or not at all. Offline, a request in
+  dollars is paid from dollar pieces on hand, or dollars this phone was paid
+  locked and has not swapped yet (`forwardLocked`), or covered with the change
+  coming back locked to the payer; with no dollars, or too few, it is refused
+  before anything moves: NEEDS THE MINT, "This request is in dollars. You hold
+  no dollars here, and paying it from bitcoin needs the mint." (and the mirror
+  for a request in sats at a mint with two balances). The other phone is told
+  in words with no figures. Online, a payer short in the request's unit pays
+  the receiver's invoice from the other balance, through CONFIRM PAYMENT with
+  the mint's rate; with the receiver offline there is no invoice, and it is
+  refused ("…needs both of you online").
+- One of the two phones must be online, as for sats. Both offline over a tap
+  is refused in the same words; a scanned dollar token is the same HIGH RISK
+  card, in dollars ("Amount $ 2.00", no sats and no price under it).
+- What an offline receiver keeps is counted in its unit: `balanceOf('usd')`
+  is the usd pile plus dollars kept (`keptIn('usd')`) less dollar change on its
+  way out. A kept dollar row never adds to sats, and the sweep (`claimUnclaimed`)
+  swaps it into the usd pile when the mint is back. YOUR MONEY IS SAFE names
+  dollars and sats separately.
+- Every card and screen says the payment's own unit: the offer (SENDING
+  $ 2.00, FROM DOLLARS, NOT ENOUGH on the wallet's sentence), SENT and PAID
+  (FROM DOLLARS, ADDED TO DOLLARS), the over-pay card, the change owed, the
+  refusal cards ("Your $ 2.00 came back, locked to this phone"), and RECEIVER
+  NEEDS TO SCAN.
+
+The simulators' stand-in tap link and pretend airplane mode (tools/sim)
+carry the request as the page wrote it, so nothing in them names a unit.
+
+Out of scope for now, and refused where a unit cannot go: cards (sats), on
+chain (sats; Forge has none), split bills and transfers between mints (sats),
+dollar ecash at a mint this phone is not on.
 
 ## Paths that move proofs and have no section above
 

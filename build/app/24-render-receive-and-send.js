@@ -8,8 +8,10 @@
     const cashu = s.recvRail === 'CASHU';
     const onchain = s.recvRail === 'ON-CHAIN';
     // the same screen test as renderVals: no request unless this screen is up
+    // (a dollar receive's request is in dollars, the one `cashuRequest` makes and the QR shows)
+    const usdReq = !!(this.twoUnitsOn && this.twoUnitsOn() && this.walletNow('receive') === 'usd');
     const creq = () => (sc === 'confirm'
-      ? this.railRequest(s.invoiceIsAddress ? 0 : window.FoxyWallet.amountOf(s.invoice)) : '');
+      ? (usdReq ? this.cashuRequest() : this.railRequest(s.invoiceIsAddress ? 0 : window.FoxyWallet.amountOf(s.invoice))) : '');
     /* On chain the code is an address, with the amount only as a hint: it can
      * be paid with anything, and under the mint's floor it is lost. */
     const ocSats = () => (s.invoiceIsAddress ? 0 : (window.FoxyWallet.amountOf(s.invoice) || 0));
@@ -21,8 +23,11 @@
     const recvReady = () => !!(s.recvVia === 'wire' || s.network === 'BANK WIRE'
       || (onchain ? ocCode() : cashu ? creq() : s.invoice));
     /* At a mint with two balances: the title between the round buttons, the
-     * WALLET chip beside NETWORK, and for dollars the cents asked for, no tap
-     * and no card (bitcoin only), and the minute the code lives counted down. */
+     * WALLET chip beside NETWORK, and for dollars the cents asked for, TAP (a
+     * request in dollars goes on the air beside the invoice), no card (a card
+     * holds bitcoin only), and on Lightning the minute the code lives counted
+     * down. A request in dollars (CASHU, and every dollar receive offline)
+     * does not run out, so it has no clock. */
     const two = !!(this.twoUnitsOn && this.twoUnitsOn());
     const usdIn = two && this.walletNow('receive') === 'usd';
     const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
@@ -34,13 +39,11 @@
       recvChipsOne: !two,
       recvChipsTwo: two,
       recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
-      pickRecvWallet: () => {
-        if (this.offlineNow()) { this.offlineNo('Choosing a balance'); return; }
-        this.pickRecvWallet();
-      },
-      recvTapShown: !usdIn,
+      // offline too: only the request changes, and that needs no mint
+      pickRecvWallet: () => this.pickRecvWallet(),
+      recvTapShown: true,
       recvCardShown: !usdIn,
-      recvClockShown: usdIn && !!s.invoice && !!s.recvExpiresAt,
+      recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
        * something real behind its QR — the invoice, the request, the address —
@@ -770,10 +773,18 @@
      * ECASH TOKEN and that it would arrive WHEN THEY TAKE IT, while showing the
      * four-digit code of the phone it was about to be handed straight to. It
      * sends; it should say send. */
-    const d = req && req.sats > 0
+    /* A request in dollars is drawn in dollars: the cents it asks for, from
+     * the dollar balance (FROM DOLLARS), the fee and the shortfall in dollars,
+     * and no price anywhere. Sats held back with the mint are not why a
+     * dollar payment is short, so they are not named on it. `sats` is then the cents, so the screen below is
+     * the one it always was; `fig` says each figure in the request's unit. */
+    const usdReq = !!(req && req.unit === 'usd');
+    const amt = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
+    const fig = (n) => (usdReq ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
+    const d = req && amt > 0
       ? (req.delivery || (req.viaTap ? { kind: 'tap' } : null)) : null;
     const onion = !!(d && d.kind === 'onion');
-    const sats = req ? req.sats : 0;
+    const sats = req ? amt : 0;
     const mint = req && req.mints[0] ? String(req.mints[0]).replace(/^https?:\/\//, '') : 'any mint';
     /* Paid by tap: the phone it goes to is the one being held against this
      * one, and the four digits are what says so. They are the thing to check
@@ -782,8 +793,9 @@
     const byTap = !!(req && req.viaTap && s.tapCode);
     const W = window.FoxyWallet;
     // locked exactly when the send will be (makeTokenForRequest): a key named, and a route
+    const lockedNow = !!(req && req.lockTo && !(this.offlineNow && this.offlineNow()));
     const lack = (sats > 0 && W && W.sendShortfall)
-      ? W.sendShortfall(sats, { locked: !!(req && req.lockTo && !(this.offlineNow && this.offlineNow())) }) : null;
+      ? (usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow })) : null;
     /* Waiting on a connection that is on its way.
      *
      * A request that names somewhere to be paid, or a lock to be made, or
@@ -807,8 +819,9 @@
       // two orange things is one too many to look at
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
-      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? this.money(lack.fee).main : this.px() ? '$ 0.00' : '\u20bf 0', { half: true }),
-    ]).concat(this.peerRateRow());
+      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? fig(lack.fee).main
+        : (usdReq || this.px()) ? '$ 0.00' : '\u20bf 0', { half: true }),
+    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -825,19 +838,20 @@
     if (lack && lack.short && this.requestHere(req)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(lack.need - lack.have) || lack.why,
+        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        warn: this.heldBlocks(usdReq ? 0 : lack.need - lack.have) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
-    const shortBy = lack && lack.short ? lack.need - lack.have : Math.max(0, sats - (s.balSats || 0));
+    const shortBy = lack && lack.short ? lack.need - lack.have
+      : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(shortBy)
-          || 'More than your balance \u2014 short by ' + this.money(shortBy).main
+        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        warn: this.heldBlocks(usdReq ? 0 : shortBy)
+          || 'More than your balance \u2014 short by ' + fig(shortBy).main
              + (lack && lack.fee > 0 ? ' with the fee' : ''),
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null }),
       };
@@ -846,8 +860,8 @@
       title: 'CONFIRMATION',
       code: byTap ? s.tapCode : '',
       amountLabel: 'SENDING',
-      amount: sats ? this.money(sats).main : 'ANY AMOUNT',
-      amountSub: sats ? this.money(sats).sub : '',
+      amount: sats ? fig(sats).main : 'ANY AMOUNT',
+      amountSub: sats ? fig(sats).sub : '',
       rows: rows,
       /* The same pair the Lightning confirmation has: the note where the
        * second button goes, and the X at the top to back out. */
@@ -869,7 +883,7 @@
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
       cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
-        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + this.money(sats).main
+        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + fig(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
       ctaBusy: held || !!s.reqBusy,

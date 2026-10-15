@@ -663,15 +663,17 @@
     });
   }
 
-  /* A dollar token: the cents typed, from the dollar balance, made by the
-   * mint. Offline the wallet refuses it ("Offline and locked payments are
-   * bitcoin only for now"), and so does this, first. */
+  /* A dollar token: the cents typed, from the dollar balance. With a route
+   * the mint makes it; offline it is made from dollar pieces on hand that make
+   * the amount exactly (or dollars this phone was paid offline), and where they
+   * cannot the wallet says so in words and nothing is sent. Offline the token
+   * is shown as a code for the other phone to scan. */
   makeUsdToken() {
     const W = window.FoxyWallet;
     const cents = this.centsTyped();
     if (!(cents > 0)) { this.toast('Enter an amount first', true); return; }
     if (this.state.makeBusy) return;
-    if (this.offlineNow()) { this.toast('Offline and locked payments are bitcoin only for now; nothing was sent.', true); return; }
+    const off = !!this.offlineNow();
     this.setState({ makeBusy: true });
     this.showMelt('Making the token\u2026');
     this._preSettle = this.balNow();
@@ -689,6 +691,7 @@
         tokenOutFee: Math.max(0, cents - got),
         screen: 'tokenOut', stack: [],
       });
+      if (off) this.needScanStage(Object.assign({}, r, { unit: 'usd', amount: got }));
       this.refreshBalance();
     }).catch(e => {
       this.hideMelt();
@@ -734,13 +737,18 @@
      * wallet at this point, so it is false by definition. */
     this.setState({ reqBusy: false });
     if (!req) { this.toast('That request could not be read.', true); return; }
+    /* A request in dollars is paid in dollar ecash, from the dollar balance,
+     * at the mint that issues it, with no price anywhere. Only at the mint this
+     * phone is on, and only where that mint holds dollars: dollar ecash is not
+     * moved between mints. */
     if (req.unit === 'usd') {
-      // a request in dollar ecash is for a later build: refused before anything is shown or paid
-      this.toast('That request asks for dollar ecash, which Foxy cannot pay yet.', true);
-      return;
+      if (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req)) {
+        this.toast('That request asks for dollar ecash at a mint where you hold no dollars.', true);
+        return;
+      }
     }
-    if (req.unit && req.unit !== 'sat') {
-      this.toast('That request asks for ' + this.unitLabel(req.unit) + ' ecash. Foxy can only send sats as ecash.', true);
+    if (req.unit && req.unit !== 'sat' && req.unit !== 'usd') {
+      this.toast('That request asks for ' + this.unitLabel(req.unit) + ' ecash. Foxy sends only sats and dollars as ecash.', true);
       return;
     }
     /* A request that asks in dollars, scanned rather than tapped.
@@ -754,7 +762,7 @@
      * This phone's price makes the sats, and the screen shows both figures
      * before anything is paid. The receiver sees what arrived when they take
      * the token, which is where a scanned payment has always been agreed. */
-    if (W.asksInDollars && W.asksInDollars(req)) {
+    if (req.unit !== 'usd' && W.asksInDollars && W.asksInDollars(req)) {
       const q = W.quoteFor ? W.quoteFor(req) : null;
       if (!q) {
         console.log('[foxy] request: asks in dollars and this phone has no price to work it out with');
@@ -775,12 +783,15 @@
       const u = String(m).replace(/\/+$/, '');
       return W.balanceAt(u) > 0 || waitingAt(u) > 0;
     };
-    if (req.mints.length && !req.mints.some(holdsAt)) {
+    if (req.unit !== 'usd' && req.mints.length && !req.mints.some(holdsAt)) {
       this.toast('That request wants a mint you hold nothing at.', true);
     }
-    this.setState(p => ({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
+    /* The balance that pays is the request's unit: dollars for a request in
+     * dollars, bitcoin for sats. For this payment only; home lets it go. */
+    const unitPick = (this.twoUnitsOn && this.twoUnitsOn()) ? { wallet: req.unit === 'usd' ? 'usd' : 'sat', walletAuto: false } : {};
+    this.setState(p => Object.assign({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
-      note: '', noteDraft: '' }));
+      note: '', noteDraft: '' }, unitPick));
     // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
     this.tellPayerShort(req);
   }
@@ -811,14 +822,17 @@
    * (`sendShortfall`), once for each request. */
   tellPayerShort(req) {
     const W = window.FoxyWallet;
-    if (!req || !req.viaTap || !(req.sats > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
+    const amount = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
+    if (!req || !req.viaTap || !(amount > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
     if (!this.requestHere(req)) return;
     let lack = null;
     try {
-      lack = W.sendShortfall(req.sats, { locked: !!(req.lockTo && !(this.offlineNow && this.offlineNow())) });
+      const locked = !!(req.lockTo && !(this.offlineNow && this.offlineNow()));
+      lack = req.unit === 'usd' ? W.sendShortfall(amount, { unit: 'usd', locked: locked })
+        : W.sendShortfall(amount, { locked: locked });
     } catch (e) { lack = null; }
     if (!lack || !lack.short) return;
-    const told = String(req.id || req.sats);
+    const told = String(req.id || amount);
     if (this._shortTold === told) return;
     this._shortTold = told;
     console.log('[foxy] tap: this phone cannot cover the payment; telling the receiver before it promises anything');
@@ -886,14 +900,17 @@
     if (!this.stageScreen || !made || !made.token) return;
     const W = window.FoxyWallet;
     const due = !!(made.changeAsked && Number(made.over) > 0);
+    // in the token's own unit: a dollar token's figure is its cents, never a number of sats
+    const mUnit = made.unit === 'usd' ? 'usd' : '';
+    const mAmt = mUnit ? made.amount : made.sats;
     this.stageScreen('needScan', {
       title: 'Receiver<br>needs to scan', qr: made.token,
       /* What is being paid, not what it is being paid with; and where the
        * rest is coming back, how to collect it. */
-      amount: this.stageMoney(Math.max(0, Number(made.sats) - (Number(made.over) || 0))),
+      amount: this.stageMoney(Math.max(0, Number(mAmt) - (Number(made.over) || 0)), mUnit),
       body: (made.changeAsked && Number(made.over) > 0)
         ? 'Ask the receiver to scan this QR code. Their phone will then show a code for your <strong>'
-          + this.stageMoney(made.over) + '</strong> change: scan it to collect.'
+          + this.stageMoney(made.over, mUnit) + '</strong> change: scan it to collect.'
         : 'Ask the receiver to scan this QR code to finalize the payment.',
       above: 'SHARE',
       aboveGo: () => {
@@ -905,7 +922,7 @@
         this.setState(p => ({
           screen: due ? 'sendScan' : 'home', stack: [], flow: due ? 'send' : p.flow,
           tokenOut: '', tokenCopied: false, tokenForPayee: false,
-          scanWhy: due ? 'SCAN FOR YOUR ' + this.stageMoney(made.over).toUpperCase() + ' CHANGE' : '',
+          scanWhy: due ? 'SCAN FOR YOUR ' + this.stageMoney(made.over, mUnit).toUpperCase() + ' CHANGE' : '',
         }));
         if (this.claimWatchTick) setTimeout(() => this.claimWatchTick(), 0);
       },
@@ -974,7 +991,10 @@
      * scan. The tap is a link, not a route,
      * and still delivers. */
     const reachable = req.viaTap || (req.delivery && !(this.offlineNow && this.offlineNow()));
-    const direct = !!(reachable && req.sats > 0);
+    // in the request's own unit: cents for dollars, sats for sats
+    const usdReq = req.unit === 'usd';
+    const amt = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
+    const direct = !!(reachable && amt > 0);
     /* A payment going out looks like a payment going out.
      *
      * Paying a request had the gold melting overlay, which is the wallet
@@ -988,9 +1008,15 @@
      * that would send it looking for an amount inside a recipient there is
      * none of. */
     if (direct) {
+      /* What the sending screen says came from where: this payment, in its
+       * unit, and not the last Lightning payment's figures (`renderSent`). */
+      this._lastPay = null;
+      this._paying = (this.twoUnitsOn && this.twoUnitsOn())
+        ? { unit: usdReq ? 'usd' : 'sat', amount: amt, fee: 0, asked: 0 } : null;
       this.setState(p => ({
         screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in',
-        flow: 'send', recipientKind: 'ecash', amount: String(req.sats), unit: 'SATS',
+        flow: 'send', recipientKind: 'ecash',
+        amount: usdReq ? (amt / 100).toFixed(2) : String(req.sats), unit: usdReq ? 'USD' : 'SATS',
         /* Who this one goes to, not who the last one went to: the address of
          * an earlier send was still in state, so a tap said it was sending to
          * it. A tap goes to the code on both screens. */
@@ -1017,7 +1043,7 @@
        * cannot make exactly is covered and the difference is change, which is
        * the person's to agree to first. It used to fall through to a swap and
        * say "this needs a connection" about a payment that needed none. */
-      : W.sendToken(req.sats, (req.lockTo && !(this.offlineNow && this.offlineNow()))
+      : W.sendToken(amt, (req.lockTo && !(this.offlineNow && this.offlineNow()))
           ? { unit: req.unit || 'sat', lockTo: req.lockTo }
           : ((this.offlineNow && this.offlineNow())
             ? { unit: req.unit || 'sat', cover: true, overpayOk: !!(go && go.overpayOk) }
@@ -1041,6 +1067,18 @@
         this.crossComeHome();
         return;
       }
+      if (usdReq) {
+        // a dollar token: its cents on the token screen, never a number of sats
+        const got = Math.round(Number(r.amount != null ? r.amount : amt) || 0);
+        this.setState({
+          reqBusy: false, req: null, tokenCopied: false,
+          tokenOut: r.token, tokenOutSats: 0, tokenOutHash: r.hash, tokenOutUnit: 'usd', tokenOutAmount: got,
+          tokenOutFee: 0, tokenForPayee: true, screen: 'tokenOut', stack: [],
+        });
+        this.needScanStage(Object.assign({}, r, { unit: 'usd', amount: got }));
+        this.refreshBalance();
+        return;
+      }
       this.setState({
         reqBusy: false, req: null, tokenCopied: false,
         tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: true,
@@ -1056,6 +1094,22 @@
       this.setState({ reqBusy: false, sendPhase: null });
       // stopped by the person before it was made: nothing to report, and they are home already
       if (e && e.foxyStopped) return;
+      /* Offline, in a unit this phone holds none (or too little) of here: it
+       * needs the mint, and nothing was made (`unitHeldRefusal`). Said on a
+       * card, and to the phone being paid in words with no figures. */
+      if (e && e.foxyNeedsMint) {
+        this.setState(p0 => ({ req: null, sendPhase: null, screen: p0.screen === 'sendDone' ? 'home' : p0.screen, stack: [] }));
+        if (req && req.viaTap && W.tapQuote) {
+          const word = usdReq ? 'dollars' : 'bitcoin';
+          const said = /you hold no/i.test(W.reason(e))
+            ? 'The payer holds no ' + word + ' here, and paying from ' + (usdReq ? 'bitcoin' : 'dollars') + ' needs the mint.'
+            : this.shortForReceiver();
+          W.tapQuote(JSON.stringify({ gaveUp: said })).catch(() => {});
+        }
+        console.warn('[foxy] the payment was not made: it needs the mint:', W.reason(e));
+        if (this.needsMintCard) this.needsMintCard(W.reason(e));
+        return;
+      }
       /* No exact change: ask, and go again with the answer. Nothing has been
        * made at this point — `sendToken` refuses before it touches a proof —
        * so a cancel leaves the pile exactly as it was. */
@@ -1078,7 +1132,7 @@
           this.makeTokenForRequest({ overpayOk: true });
           return;
         }
-        this.overpayCard(Object.assign({}, e.foxyNeedsOverpay,
+        this.overpayCard(Object.assign({ unit: usdReq ? 'usd' : '' }, e.foxyNeedsOverpay,
                                        { changeComesBack: false })).then((yes) => {
           if (!yes) { this.setState({ req: null, sendPhase: null, screen: 'home', stack: [] }); return; }
           this.makeTokenForRequest({ overpayOk: true });
@@ -1101,12 +1155,28 @@
             tone: 'warn',
             title: 'THEY CANNOT TAKE IT',
             reason: W.reason(e),
-            chip: 'Nothing was sent. Your sats are where they were.',
+            chip: usdReq ? 'Nothing was sent. Your dollars are where they were.' : 'Nothing was sent. Your sats are where they were.',
           });
           return;
         }
         if (e.foxyRefunded) {
           const back = e.foxyRefunded;
+          /* In the payment's unit: dollars come back as dollars. The sat
+           * sentences are as they always were. */
+          if (back.unit === 'usd') {
+            const m = (n) => this.moneyIn(n, 'usd');
+            const got = Math.round(Number(back.amount) || 0);
+            const paid = Math.round(Number(back.paidAmount != null ? back.paidAmount : back.paid) || 0);
+            this.blockedCard('theyRefused', back.short ? {
+              tone: 'warn', title: 'THEY DID NOT TAKE IT',
+              reason: W.reason(e) + ' They sent back ' + m(got) + ' of the ' + m(paid) + '.',
+              chip: m(paid - got) + ' was not returned.',
+            } : {
+              tone: 'warn', title: 'THEY DID NOT TAKE IT', reason: W.reason(e),
+              chip: 'Your ' + m(got) + ' came back, locked to this phone. Nothing is at risk.',
+            });
+            return;
+          }
           this.blockedCard('theyRefused', back.short ? {
             tone: 'warn',
             title: 'THEY DID NOT TAKE IT',
@@ -1120,6 +1190,9 @@
           });
           return;
         }
+        // what was at risk, in its own unit ("$ 2.00" or "2,000 sats")
+        const risk = e.foxyAtRisk || {};
+        const riskSaid = risk.unit === 'usd' ? this.moneyIn(risk.amount, 'usd') : this.group(risk.sats) + ' sats';
         /* With a route the wallet has already dealt with it (`afterRefusal`):
          * the pieces are swapped, or the phone that said no had redeemed
          * them first. Neither is a risk still standing. */
@@ -1128,7 +1201,7 @@
             tone: 'warn',
             title: 'THEY DID NOT TAKE IT',
             reason: 'They refused this payment and sent nothing back. Foxy has swapped your ecash for new pieces, so the copy they saw is worth nothing.',
-            chip: 'Your ' + this.group(e.foxyAtRisk.sats) + ' sats are in your wallet. Nothing is at risk. They said: ' + W.reason(e),
+            chip: 'Your ' + riskSaid + (risk.unit === 'usd' ? ' is' : ' are') + ' in your wallet. Nothing is at risk. They said: ' + W.reason(e),
           });
           return;
         }
@@ -1136,7 +1209,7 @@
           this.blockedCard('theyRefused', {
             tone: 'warn',
             title: 'THEY TOOK THE PAYMENT',
-            reason: 'They said no, and your ecash has been redeemed all the same: ' + this.group(e.foxyAtRisk.sats) + ' sats. Its entry in your history says paid.',
+            reason: 'They said no, and your ecash has been redeemed all the same: ' + riskSaid + '. Its entry in your history says paid.',
             chip: 'Do not pay again. If they are sending it back, they will show you a code to scan. They said: ' + W.reason(e),
           });
           return;
@@ -1146,7 +1219,7 @@
           title: 'HIGH RISK',
           reason: 'They refused this payment and did not send it back locked to you. They have seen your ecash and can still redeem it. '
             + 'Do not pay again until you are online.',
-          chip: this.group(e.foxyAtRisk.sats) + ' sats are in your wallet again, at risk until Foxy has a connection. They said: ' + W.reason(e),
+          chip: riskSaid + (risk.unit === 'usd' ? ' is' : ' are') + ' in your wallet again, at risk until Foxy has a connection. They said: ' + W.reason(e),
         });
         return;
       }
@@ -1191,6 +1264,10 @@
          * missing unless somebody says so (26d-tap.js, `tapCrossMint`). */
         const movedTo = this._crossMovedTo;
         this._crossMovedTo = null;
+        // the token's own figure: dollars as dollars, sats as sats
+        const madeUsd = made.unit === 'usd' || usdReq;
+        const madeSaid = madeUsd ? 'dollars (' + this.moneyIn(made.amount != null ? made.amount : amt, 'usd') + ')'
+          : this.group(made.sats) + ' sats';
         /* And home, whichever way it ended. It stayed at their mint "on
          * purpose" after a failure, showing a balance the person had never
          * seen at a mint they had not chosen; the card below says where the
@@ -1205,14 +1282,18 @@
            * back that does not exist. It is theirs to take, and the token
            * is how they take it. */
           chip: made.lockedTo
-            ? 'HIGH RISK: these ' + this.group(made.sats) + ' sats are locked to them, so only they can take them and you cannot take them back. Show them the token to finish.'
+            ? 'HIGH RISK: these ' + madeSaid + ' are locked to them, so only they can take them and you cannot take them back. Show them the token to finish.'
             : (e.foxyAtRisk && e.foxyAtRisk.onEntry)
-            ? 'HIGH RISK: they have seen these ' + this.group(made.sats) + ' sats and can still redeem them. Foxy takes them back when it has a connection.'
-            : 'Your ' + this.group(made.sats) + ' sats are still yours'
+            ? 'HIGH RISK: they have seen these ' + madeSaid + ' and can still redeem them. Foxy takes them back when it has a connection.'
+            : 'Your ' + madeSaid + ' are still yours'
               + (movedTo ? ', and they are now at ' + (this.mintNameOf(movedTo)
                   || String(movedTo).replace(/^https?:\/\//, '')) + '.' : '.'),
           retry: 'SHOW THEM A TOKEN',
-          go: () => this.setState({
+          go: () => this.setState(madeUsd ? {
+            tokenCopied: false, tokenOut: made.token, tokenOutSats: 0, tokenOutUnit: 'usd',
+            tokenOutAmount: Math.round(Number(made.amount != null ? made.amount : amt) || 0), tokenOutFee: 0,
+            tokenOutHash: made.hash, tokenForPayee: true, screen: 'tokenOut', stack: [],
+          } : {
             tokenCopied: false, tokenOut: made.token, tokenOutSats: made.sats,
             tokenOutHash: made.hash, tokenForPayee: true, screen: 'tokenOut', stack: [],
           }),
@@ -1224,6 +1305,18 @@
       try { if (W.tag) W.tag(made.hash, { inflight: false }); } catch (x) {}
       this._seenTx = this._seenTx || {};
       this._seenTx[made.hash] = true;
+      if (made.unit === 'usd' || usdReq) {
+        const got = Math.round(Number(made.amount != null ? made.amount : amt) || 0);
+        this.setState({
+          req: null, tokenCopied: false, tokenOut: made.token, tokenOutSats: 0, tokenOutUnit: 'usd',
+          tokenOutAmount: got, tokenOutFee: 0, tokenOutHash: made.hash, tokenForPayee: true,
+          screen: 'tokenOut', stack: [],
+        });
+        this.needScanStage(Object.assign({}, made, { unit: 'usd', amount: got }));
+        this.refreshBalance();
+        this.toast('It did not reach them (' + W.reason(e) + '). Show them this token instead.', true);
+        return;
+      }
       this.setState({
         req: null, tokenCopied: false,
         tokenOut: made.token, tokenOutSats: made.sats, tokenOutHash: made.hash, tokenForPayee: true,
@@ -1320,7 +1413,9 @@
      * swap at the mint to make it, which takes seconds — and the payer was
      * letting the link go the moment the person got back to home, one second
      * before the change was ready. */
-    if (r && Number(r.over) > 0) this.expectChange(Number(r.over), r.hash);
+    // in the payment's unit: a dollar payment's change is dollars
+    const rUnit = (r && r.unit === 'usd') || (req && req.unit === 'usd') ? 'usd' : '';
+    if (r && Number(r.over) > 0) this.expectChange(Number(r.over), r.hash, rUnit);
     // a payment they are carrying home: the entry a refund would settle
     if (this._carriedPay && !this._carriedPay.hash && r && r.hash) this._carriedPay.hash = r.hash;
     /* A locked payment is done when it leaves, because the payer cannot ever
@@ -1359,12 +1454,22 @@
         console.log('[foxy] a locked payment was handed over and nobody confirmed it;'
           + ' settled anyway, because it is not this phone\u2019s to take back');
       }
-    } else {
+    } else if (!rUnit) {
       this.watchToken(r.sats, r.hash, false);
     }
     this.refreshBalance();
     this.loadHistory();
     this.tidyChangeLater();
+    if (rUnit) {
+      // dollars paid: the figure in cents, from the dollar balance, with no fee
+      const cents = Math.round(Number(r.amount != null ? r.amount : (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0)) || 0);
+      const paidCents = Math.max(0, cents - (Number(r.over) || 0));
+      this._paying = null;
+      this._lastPay = { unit: 'usd', amount: paidCents, fee: 0, asked: 0 };
+      this.announcePayment({ dir: 'out', sats: 0, unit: 'usd', amount: paidCents, hash: 'request-' + r.hash, to: 'ecash', tokenHash: r.hash });
+      return;
+    }
+    if (this._paying && this._paying.unit === 'sat') { this._lastPay = { unit: 'sat', amount: Number(r.sats) || 0, fee: 0, asked: 0 }; this._paying = null; }
     /* What was paid, not the piece it was paid with.
      *
      * With no exact pieces the payer covers the amount and the receiver hands
@@ -1458,8 +1563,11 @@
     this._seenTx = this._seenTx || {};
     if (r.hash) this._seenTx[r.hash] = true;
     this.loadHistory();
-    this.announcePayment({ dir: 'in', sats: r.sats, force: true, to: 'ecash',
-                           hash: r.hash || ('kept-' + Date.now()) });
+    // dollars kept are announced as dollars: ADDED TO DOLLARS, the cents
+    const usdKept = r.unit === 'usd';
+    this.announcePayment(Object.assign({ dir: 'in', sats: usdKept ? 0 : r.sats, force: true, to: 'ecash',
+                           hash: r.hash || ('kept-' + Date.now()) },
+                         usdKept ? { unit: 'usd', amount: Math.round(Number(r.amount) || 0) } : {}));
   }
 
   /* PAYMENT RECEIVED for a token the person scanned or pasted themselves.
@@ -1480,7 +1588,8 @@
   }
 
   tookToken(r) {
-    if (!r || !r.unit || r.unit === 'sat') return;
+    // (dollars kept offline have their own confirmation: `keptOfflineSaid`)
+    if (!r || !r.unit || r.unit === 'sat' || r.kept) return;
     this.toast('Received ' + this.unitMoney(r.amount, r.unit) + ' in ' + this.unitLabel(r.unit)
       + ' ecash at ' + r.host);
   }

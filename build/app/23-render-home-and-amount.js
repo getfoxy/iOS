@@ -433,13 +433,16 @@
       /* And, when the amount is over the balance only because part of it is
        * held back with the mint, that — the block's own words (heldBlocks).
        * It goes first: it is why this payment cannot go. */
+      /* Not for the dollar balance, typed in dollars exactly: nothing is
+       * converted, so no price is in it (`usdKeypad`). */
       priceWarn: sendHeld ? sendHeld
+        : (this.usdKeypad && this.usdKeypad()) ? ''
         : (this.offlineNow() && s.unit === 'USD' && this.satUsd())
         ? 'WARNING: This is based on the price of Bitcoin '
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld
-        || (this.offlineNow() && s.unit === 'USD' && this.satUsd())) ? '1' : '0',
+        || (this.offlineNow() && s.unit === 'USD' && this.satUsd() && !(this.usdKeypad && this.usdKeypad()))) ? '1' : '0',
       amountTitle: 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
         ? 'How much to send on chain?'
@@ -498,11 +501,8 @@
           if (this.keypadWallet) this.keypadWallet();
           this.setState(p => ({ payFrom: 'BITCOIN', screen: 'sendConfirm', stack: p.stack.concat([p.screen]) }));
         } else {
-          // a dollar code needs the mint: there is nothing to ask for offline
-          if (this.walletNow && this.walletNow('receive') === 'usd' && this.offlineNow()) {
-            this.toast('Receiving dollars needs the mint.', true);
-            return;
-          }
+          /* Dollars offline are asked for by a request in dollars, this
+           * phone's own: no invoice and no mint (`openUsdReceive`). */
           this.setState({ asset: 'BITCOIN' });
           this.renderVals().pickLightning();
         }

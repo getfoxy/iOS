@@ -176,7 +176,12 @@
            * gone over to `satsOf` with the wallet's, and it warned on the
            * first change to arrive in every session. `sats` is null for a
            * token that is not sats, which is 0 here and refused below. */
-          const sats = bits ? Math.round(Number(bits.sats) || 0) : 0;
+          /* Change on a payment in dollars is dollar ecash, and its figure is
+           * the token's own amount in cents; the wallet checks it against the
+           * payment's unit (W.checkChange). `sats` keeps its name for the sat
+           * case, which is every other change. */
+          const unitOf = bits && bits.unit && bits.unit !== 'sat' ? String(bits.unit) : '';
+          const sats = bits ? (unitOf ? Math.round(Number(bits.amount) || 0) : Math.round(Number(bits.sats) || 0)) : 0;
           /* Checked before it is believed: owed, no more than owed, this mint,
            * and locked to a key this phone asked for (W.checkChange). M7 is
            * the other phone's word, and it used to be kept as it came. A
@@ -187,9 +192,14 @@
           const carried = this._carriedPay && Date.now() < this._carriedPay.until ? this._carriedPay : null;
           const refund = !(Number(this._changeOwedSats) > 0) && !!carried;
           const owed = Math.round(Number(this._changeOwedSats) || (carried ? carried.sats : 0) || 0);
-          const chk = W.checkChange ? W.checkChange(token, owed) : { ok: true, signed: true };
+          /* In the unit of the payment it is change for: dollars for a payment in
+           * dollars (`expectChange` was told so). Asked without it, the wallet
+           * checks for sats and refuses dollar change as "it is not sats". A
+           * refund of a carried payment is sats, as a crossing always is. */
+          const owedIn = !refund && this._changeOwedUnit === 'usd' ? 'usd' : 'sat';
+          const chk = W.checkChange ? W.checkChange(token, owed, owedIn) : { ok: true, signed: true };
           if (!chk.ok) {
-            console.warn('[foxy] change refused: ' + chk.why + ' (' + sats + ' sats arrived, ' + owed + ' owed)');
+            console.warn('[foxy] change refused: ' + chk.why + ' (' + sats + (unitOf ? ' ' + unitOf : ' sats') + ' arrived, ' + owed + ' owed)');
             W.tapChangeKept(false);
             return;
           }
@@ -243,7 +253,7 @@
             /* Not announced. The payment said what it cost; change coming back
              * is that payment finishing, and a toast about it is a second
              * event for the person to make sense of. */
-            console.log('[foxy] change kept: ' + sats + ' sats' + how);
+            console.log('[foxy] change kept: ' + sats + (unitOf ? ' ' + unitOf : ' sats') + how);
             this.refreshBalance();
             this.loadHistory();
             return told;

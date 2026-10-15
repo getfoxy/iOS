@@ -598,10 +598,31 @@
      * and it is scanned here. With no amount the payer chooses it. `purpose`
      * is told back when it is paid ('receive', or a split's 'split:<n>').
      * '' when it cannot be made. */
+    /* `opts.unit`: 'sat' (as it always was) or 'usd', and `amount` is then
+     * in that unit (sats, or cents). '' when the mint does not issue the
+     * unit, read from what this phone knows of it, so it answers the same
+     * with no route. A dollar request carries no dollar marker: its amount
+     * is the dollars, and no price is asked for anywhere. */
     paymentRequest: function (sats, opts) {
       try {
         var CT = window.CashuTS;
         if (!CT || !CT.PaymentRequest || !mintUrl) return '';
+        var unit = unitOf((opts && opts.unit) || 'sat');
+        if (!unit || (unit !== 'sat' && unit !== 'usd')) {
+          console.warn('[foxy] a payment request in ' + String((opts && opts.unit) || '').slice(0, 16) + ' was not made: Foxy asks only in sats or dollars');
+          return '';
+        }
+        var unitNo = unitRefusal(unit);
+        if (unitNo) { console.warn('[foxy] a payment request was not made: ' + unitNo.message); return ''; }
+        if (unit !== 'sat' && unitsOf(mintUrl).indexOf(unit) < 0) {
+          console.warn('[foxy] a payment request in ' + unit + ' was not made: nothing here says ' + hostOf(mintUrl) + ' issues it');
+          return '';
+        }
+        // one amount per request: the dollar marker is for a sat request priced in dollars, never for a dollar one
+        if (unit !== 'sat' && opts && Number(opts.usd) > 0) {
+          console.warn('[foxy] a dollar request with a dollar marker as well was not made: one amount per request');
+          return '';
+        }
         /* None while a late claim has the wallet at another mint: it would
          * name that mint, and ask to be paid there (`claimAway`). This cannot
          * wait, being called in the middle of a render, so it answers as it
@@ -690,7 +711,7 @@
         var lock;
         if (o.lock !== false && canLock) {
           try {
-            var pub = takeLockKey(hexOf(id));
+            var pub = takeLockKey(hexOf(id), { unit: unit, amount: n > 0 ? n : 0 });
             if (/^0[23][0-9a-f]{64}$/i.test(pub)) lock = { kind: 'P2PK', data: pub, tags: [] };
             else console.warn('[foxy] no lock key was primed for this request, so it goes out unlocked');
           } catch (e) {
@@ -714,7 +735,7 @@
          * lets the payer choose an amount, which is honest, and Foxy reads the
          * rest. A request with a sat amount carries none of this. */
         var says = '';
-        if (Number(o.usd) > 0 && !(n > 0)) {
+        if (unit === 'sat' && Number(o.usd) > 0 && !(n > 0)) {
           says = '$' + (Number(o.usd) / 100).toFixed(2)
             + ' \u00b7 foxy1 usd=' + Math.round(Number(o.usd));
           /* The asking phone's own price goes only if the caller offers it, and
@@ -727,9 +748,9 @@
             says += ' rate=' + Math.round(Number(o.rate)) + ' at=' + Math.round(Number(o.rateAt) / 1000);
           }
         }
-        var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, 'sat',
+        var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, unit,
           [mint], says || undefined, true, lock).toEncodedRequest();
-        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose);
+        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit);
         return text;
       } catch (e) {
         return '';
@@ -1045,7 +1066,7 @@
                  * two pieces, written as 1, with its 2 handed on and its 1
                  * let go, left the books a sat out for good. */
                 if (one.whole > 0) {
-                  try { amendTx('req-' + id, { sats: Math.max(0, one.whole - worth) }); } catch (xD) {}
+                  try { amendTx('req-' + id, amountFields(recordUnit(one), Math.max(0, one.whole - worth))); } catch (xD) {}
                 }
                 dropUnclaimed(id);
                 dropLockKey(id);
@@ -1067,35 +1088,42 @@
           walkCalling = true;
           try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
           finally { walkCalling = false; }
+          /* The row's unit, and its token's: a dollar row is claimed by the
+           * dollar wallet into the dollar pile (`receiveToken` goes by the
+           * token's unit), and every figure said of it is in cents. */
+          var ru = recordUnit(one);
+          var inUnit = function (n) { return { sats: ru === 'sat' ? n : 0, unit: ru, amount: n }; };
+          var said = function (n) { return ru === 'sat' ? n + ' sats' : moneyWords(n, ru); };
           return claim
             .then(function (r) {
-              took += (r && r.sats) || 0;
+              var got = Math.max(0, Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats))));
+              if (ru === 'sat') took += (r && r.sats) || 0;
               // one taken to be carried home is this phone's now, at their mint: its job says so
-              if (carryPaid(id, (r && r.sats) || 0)) carried = true;
+              if (carryPaid(id, ru === 'sat' ? ((r && r.sats) || 0) : 0)) carried = true;
               /* A payment that was spent from before it was claimed is still
                * the payment that arrived: its entry says what it was worth
                * whole, less only what the swap itself cost. The pieces that
                * went are payments of their own in the list. */
-              if (one.whole > 0 && r && r.sats > 0) {
-                var cost = Math.max(0, (Number(one.sats) || 0) - r.sats);
-                try { amendTx('req-' + id, { sats: Math.max(r.sats, one.whole - cost) }); } catch (x) {}
+              if (one.whole > 0 && got > 0) {
+                var cost = Math.max(0, amountOfRecord(one) - got);
+                try { amendTx('req-' + id, amountFields(ru, Math.max(got, one.whole - cost))); } catch (x) {}
               }
               dropUnclaimed(id);
               dropLockKey(id);
-              console.log('[foxy] a payment for a request was claimed late:', (r && r.sats) || 0, 'sats');
+              console.log('[foxy] a payment for a request was claimed late: ' + said(got));
               /* Every one of them is said, so the screen can add them up:
                * what was waiting is now this phone's and nobody else's. */
               if (typeof FoxyWallet._onLateClaim === 'function') {
-                try { FoxyWallet._onLateClaim({ sats: (r && r.sats) || 0, trusted: !!one.trusted, id: id }); }
+                try { FoxyWallet._onLateClaim(Object.assign(inUnit(got), { trusted: !!one.trusted, id: id })); }
                 catch (x) { console.warn('[foxy] late-claim watcher:', x && x.message); }
               }
               /* One taken on trust has stopped being at risk, and the person
                * who took that risk is told so: it was the one payment they
                * were left wondering about. */
               if (one.trusted) {
-                console.log('[foxy] a payment taken on trust is settled:', (r && r.sats) || 0, 'sats');
+                console.log('[foxy] a payment taken on trust is settled: ' + said(got));
                 if (typeof FoxyWallet._onTrustSettled === 'function') {
-                  try { FoxyWallet._onTrustSettled({ sats: (r && r.sats) || one.sats, id: id, hash: 'req-' + id }); }
+                  try { FoxyWallet._onTrustSettled(Object.assign(inUnit(got || amountOfRecord(one)), { id: id, hash: 'req-' + id })); }
                   catch (x) { console.warn('[foxy] trust-settled watcher:', x && x.message); }
                 }
               }
@@ -1128,12 +1156,11 @@
                 console.log('[foxy] a payment taken on trust was already swapped in by this phone; nothing was taken back');
               }
               if (gone && one.trusted && !mineBefore) {
-                console.warn('[foxy] a payment taken on trust while offline was spent by the payer:',
-                             one.sats, 'sats');
-                logTx({ dir: 'in', sats: one.sats, feeSats: 0, settled: false, state: 'failed',
-                        memo: 'ecash, offline \u2014 taken back', hash: 'req-' + id }, 'req-' + id);
+                console.warn('[foxy] a payment taken on trust while offline was spent by the payer: ' + said(amountOfRecord(one)));
+                logTx(unitRow(ru, { dir: 'in', sats: amountOfRecord(one), feeSats: 0, settled: false, state: 'failed',
+                        memo: 'ecash, offline \u2014 taken back', hash: 'req-' + id }), 'req-' + id);
                 if (typeof FoxyWallet._onTrustLost === 'function') {
-                  try { FoxyWallet._onTrustLost({ sats: one.sats, id: id }); }
+                  try { FoxyWallet._onTrustLost(Object.assign(inUnit(amountOfRecord(one)), { id: id })); }
                   catch (x) { console.warn('[foxy] trust-lost watcher:', x && x.message); }
                 }
               }
@@ -1207,18 +1234,25 @@
          * ninety seconds, and the next three presses of TAP were read as
          * dismissing a card. */
         FoxyWallet._requestPaidListeners.forEach(function (fn) {
-          try { fn({ stage: 'failed', sats: 0, id: '', purpose: '', refused: e.message }); }
+          try { fn({ stage: 'failed', sats: 0, amount: 0, unit: '', id: '', purpose: '', refused: e.message }); }
           catch (x) { console.warn('[foxy] request paid listener:', x && x.message); }
         });
         // and where the ecash is good and there is a route, it goes back locked to the payer
         if (over === 'tap') refundRefused(body, e);
         return;
       }
+      /* The payment's unit, which `readPayment` has held to the request's:
+       * every figure below is in it (sats, or cents), and `sats` is said only
+       * of a sat payment. A dollar payment is 0 sats. */
+      var pu = unitOf(p.unit) || 'sat';
+      var said = function (n) { return pu === 'sat' ? n + ' sats' : moneyWords(n, pu); };
+      // the wallet whose key chain checks this unit's signatures: the unit's own when it has been built
+      var dw = pu === 'sat' ? wallet : (unitWalletNow(pu) || wallet);
       if (FoxyWallet._requestsBeingPaid[p.id]) { answer(409, 'That request is being paid already.'); return; }
       FoxyWallet._requestsBeingPaid[p.id] = true;
       var token;
       try {
-        token = encodeToken(p.mint, p.proofs, 'sat');
+        token = encodeToken(p.mint, p.proofs, pu);
       } catch (e) {
         delete FoxyWallet._requestsBeingPaid[p.id];
         answer(422, 'That payment would not make a token.');
@@ -1253,7 +1287,7 @@
           + (heldAs ? 'this phone already holds that ecash' : 'that request has already been paid here'));
         answer(heldAs ? 409 : 422, twice);
         FoxyWallet._requestPaidListeners.forEach(function (fn) {
-          try { fn({ stage: 'failed', sats: 0, id: p.id, purpose: p.purpose, refused: twice }); }
+          try { fn({ stage: 'failed', sats: 0, amount: 0, unit: pu, id: p.id, purpose: p.purpose, refused: twice }); }
           catch (x) { console.warn('[foxy] request paid listener:', x && x.message); }
         });
         return;
@@ -1263,7 +1297,7 @@
        * over an onion, which is the opposite of what the next decision turns
        * on. */
       console.log('[foxy] a request was paid over ' + (over === 'tap' ? 'bluetooth' : 'Tor')
-        + ':', p.sats, 'sats; redeeming');
+        + ': ' + said(p.amount) + '; redeeming');
       /* What this phone is actually keeping. An over-payment whose change goes
        * straight back is not money kept, and showing the gross told the person
        * they had been paid 4 sats for a 3-sat sale — on both phones, and then a
@@ -1278,14 +1312,17 @@
        * so a request for 8 sats arrives as 9, and the confirmation said 9
        * under the dollars for the seconds before the swap wrote 8.
        * What stays is what is said, from the start. */
-      var kept = Math.max(0, Number(p.sats) - giveBack - (Number(p.inFee) || 0));
+      var kept = Math.max(0, satsOf(p.amount) - giveBack - (Number(p.inFee) || 0));
       if (giveBack > 0) {
-        console.log('[foxy] of ' + p.sats + ' sats, ' + kept + ' is the payment and '
-          + giveBack + ' goes back as change');
+        console.log('[foxy] of ' + said(p.amount) + ', ' + said(kept) + ' is the payment and '
+          + said(giveBack) + ' goes back as change');
       }
+      /* Told in the payment's unit: `amount` and `unit`, and `sats` as it
+       * always was for a sat payment (0 for a dollar one). */
       var tell = function (stage, r) {
+        var n = pu === 'sat' ? ((r && r.sats) || kept) : ((r && r.amount) || kept);
         FoxyWallet._requestPaidListeners.forEach(function (fn) {
-          try { fn({ stage: stage, sats: (r && r.sats) || kept, id: p.id, purpose: p.purpose, asked: p.asked, result: r }); }
+          try { fn({ stage: stage, unit: pu, amount: n, sats: pu === 'sat' ? n : 0, id: p.id, purpose: p.purpose, asked: p.asked, result: r }); }
           catch (e) { console.warn('[foxy] request paid listener:', e && e.message); }
         });
       };
@@ -1310,7 +1347,7 @@
       /* And signed by the mint, or it is not money at all (mintSigned). The
        * lock alone used to decide this, and a payment nobody had signed was
        * answered 200 and shown as paid. */
-      var forged = dleqAudit(wallet, p.proofs).invalid;
+      var forged = dleqAudit(dw, p.proofs).invalid;
       if (forged) {
         console.error('[foxy] a payment for a request carries ' + forged
           + ' piece(s) this mint did not sign; refusing it');
@@ -1319,7 +1356,10 @@
         answer(422, 'That ecash\u2019s signatures do not match the keys this mint publishes, so it was not taken.');
         return;
       }
-      var held = lockedToUs && mintSigned(wallet, p.proofs);
+      /* Against the keys of the payment's own keyset: a dollar payment's
+       * DLEQ is checked against the dollar keyset this phone keeps for the
+       * mint, and a keyset it does not hold is a no, never a pass. */
+      var held = lockedToUs && mintSigned(dw, p.proofs);
       if (lockedToUs && !held) {
         console.warn('[foxy] a payment is locked to this phone but its signatures cannot be checked here;'
           + ' it is announced only once the mint has taken it');
@@ -1413,16 +1453,16 @@
        * worst a false one can do is make this phone keep money it was sent. The
        * card the payer answered is the protection, and it is on their side
        * because they are the one giving something up. */
-      if (bothOffline && p.overpaid && Number(p.asked) > 0 && Number(p.sats) > Number(p.asked)) {
+      if (bothOffline && p.overpaid && Number(p.asked) > 0 && satsOf(p.amount) > Number(p.asked)) {
         console.log('[foxy] both phones are offline and they over-paid by '
-          + (Number(p.sats) - Number(p.asked)) + ' sats on purpose; no change is owed');
-      } else if (bothOffline && Number(p.asked) > 0 && Number(p.sats) > Number(p.asked)) {
+          + said(satsOf(p.amount) - Number(p.asked)) + ' on purpose; no change is owed');
+      } else if (bothOffline && Number(p.asked) > 0 && satsOf(p.amount) > Number(p.asked)) {
         console.warn('[foxy] both phones are offline and they overpaid by '
-          + (Number(p.sats) - Number(p.asked)) + ' sats; refusing it — no change can be made offline');
+          + said(satsOf(p.amount) - Number(p.asked)) + '; refusing it — no change can be made offline');
         delete FoxyWallet._requestsBeingPaid[p.id];
         tell('failed');
         answer(422, 'You are both offline, so this phone cannot give change. Send exactly '
-          + Number(p.asked) + ' sats, or one of you get online.');
+          + said(Number(p.asked)) + ', or one of you get online.');
         return;
       }
 
@@ -1455,7 +1495,7 @@
          * own words, not `mustSave`'s: that message says nothing is lost and it
          * is on record, and the record is the thing that failed. */
         try {
-          keepUnclaimed(p.id, token, p.sats, trusted, /^carry:/.test(String(p.purpose || '')));
+          keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu);
         } catch (e) {
           console.error('[foxy] a payment arrived and could not be written down; refusing it:',
                         (e && e.message) || e);
@@ -1468,7 +1508,7 @@
          * the balance never shows the piece the payment came in (`holdChange`).
          * `giveBack` is only ever more than nothing with a route and a key to
          * lock the change to: when change is going to be made. */
-        if (giveBack > 0) holdChange('req-' + p.id, giveBack, p.mint);
+        if (giveBack > 0) holdChange('req-' + p.id, giveBack, p.mint, pu);
         /* And the request's lock is marked taken, as a scan marks it: other
          * ecash scanned for the same request is then told it has been paid.
          * A refusal to write is only logged; the payment itself is down. */
@@ -1523,10 +1563,14 @@
         var claim = function () {
           // `keptSats`: an over-payment's change goes straight back, so the
           // entry records the payment, not the piece that carried it
-          return FoxyWallet.receiveToken(token, { hash: into, keptSats: kept,
-                                                  grossSats: p.sats, changeSats: giveBack,
-                                                  // only passing through this mint: not cut into small change
-                                                  plain: /^carry:/.test(String(p.purpose || '')) })
+          return FoxyWallet.receiveToken(token, pu === 'sat'
+            ? { hash: into, keptSats: kept,
+                grossSats: p.sats, changeSats: giveBack,
+                // only passing through this mint: not cut into small change
+                plain: /^carry:/.test(String(p.purpose || '')) }
+            // in another unit, the same in that unit's names
+            : { hash: into, keptAmount: kept, grossAmount: p.amount, changeAmount: giveBack,
+                plain: /^carry:/.test(String(p.purpose || '')) })
             .then(function (r) {
               delete FoxyWallet._requestsBeingPaid[p.id];
               dropOpenRequest(p.id);
@@ -1534,7 +1578,7 @@
               dropLockKey(p.id);
               console.log('[foxy] pay steps: a request was paid and is now swapped in');
               // this phone's, at their mint: written on its job before anybody is told
-              carryPaid(p.id, kept);
+              if (pu === 'sat') carryPaid(p.id, kept);
               return r;
             });
         };
@@ -1558,10 +1602,10 @@
           dropOpenRequest(p.id);
           answer(200, '');
           console.log('[foxy] both phones are offline and the person accepted the risk: '
-            + p.sats + ' sats taken on trust, to be swapped when there is a route');
-          logTx({
+            + said(p.amount) + ' taken on trust, to be swapped when there is a route');
+          logTx(unitRow(pu, {
             dir: 'in', sats: kept, feeSats: 0, settled: false, state: 'pending',
-            grossSats: p.sats, changeSats: giveBack,
+            grossSats: p.amount, changeSats: giveBack,
             /* `trusted` is on the history entry as well as on the unclaimed row,
              * because the two answer different questions. The row is what the
              * claim reads; this is what the person reads. A pending row that is
@@ -1570,8 +1614,8 @@
             trusted: true, memo: 'ecash, offline', hash: into,
             // the mint the request named and the payment is at (`readPayment`), wherever the phone is by now
             mint: p.mint,
-          });
-          tell('paid', { sats: kept, trusted: true });
+          }));
+          tell('paid', { sats: pu === 'sat' ? kept : 0, unit: pu, amount: kept, trusted: true });
           return;
         }
 
@@ -1593,7 +1637,7 @@
            * payer cannot take it back, and balanceSats already counts it. The
            * swap is bookkeeping and finishes this entry rather than adding
            * another. */
-          logTx({
+          logTx(unitRow(pu, {
             dir: 'in', sats: kept, feeSats: 0, settled: true, state: 'success',
             /* One entry, with the breakdown inside it. An over-payment and the
              * change going back are two halves of one sale, and filing them as
@@ -1601,13 +1645,13 @@
              * withdrawal of 2 for a 2-sat sale. The list shows the
              * net; the detail screen shows all three figures, and keeps them, so
              * a report about a payment has the numbers in it. */
-            grossSats: p.sats, changeSats: giveBack,
+            grossSats: p.amount, changeSats: giveBack,
             changeState: giveBack > 0 ? 'making' : '',
             memo: 'ecash', hash: into,
             // the mint the request named and the payment is at (`readPayment`), wherever the phone is by now
             mint: p.mint,
-          });
-          tell('paid', { sats: kept });
+          }));
+          tell('paid', { sats: pu === 'sat' ? kept : 0, unit: pu, amount: kept });
           claim().catch(function (e) {
             /* Beaten to it, which is not an error.
              *
@@ -1631,7 +1675,7 @@
           changeBack(p, over);
           /* `r.sats` is what the swap took in, which is the gross. What the
            * person was paid is what stays after the change goes back. */
-          tell('paid', { sats: kept, result: r });
+          tell('paid', { sats: pu === 'sat' ? kept : 0, unit: pu, amount: kept, result: r });
         }, function (e) {
           delete FoxyWallet._requestsBeingPaid[p.id];
           // nothing was taken, so no change is going back for it
@@ -1713,11 +1757,13 @@
      * payment that would have to over-pay is refused with the figures attached
      * (`foxyNeedsOverpay`) rather than made. */
     payRequest: function (req, onStep, opts) {
-      /* The unit first: a usd request's amount is cents and its `sats` is
-       * null (`decodeRequest`). NUT-18 in dollars is not built yet, so it is
-       * refused in words before anything reads an amount or waits for a route. */
-      var reqUnit = unitOf(req && req.unit) || String((req && req.unit) || '');
-      if (reqUnit === 'usd') return Promise.reject(new Error('That request asks for dollar ecash, which Foxy cannot pay yet.'));
+      /* The unit first: a request names its unit, and it is paid in that
+       * unit or not at all. A usd request's amount is cents and its `sats`
+       * is null (`decodeRequest`); everything below reads `want`, in the
+       * request's unit. A request that names none is in sats. */
+      var reqUnit = unitOf((req && req.unit) || 'sat') || String((req && req.unit) || '');
+      if (reqUnit !== 'sat' && reqUnit !== 'usd') return Promise.reject(new Error('That request is not for sats or dollars.'));
+      var want = Math.round(Number(reqUnit === 'sat' ? (req.sats != null ? req.sats : req.amount) : req.amount) || 0);
       /* Whether the lock the request asked for can be made is decided by the
        * route, once, a few lines down. A route two seconds off is waited for
        * rather than paid around: without it the payment goes unlocked from
@@ -1745,8 +1791,7 @@
       var d = req && req.delivery;
       if (!d && req && req.viaTap) d = { kind: 'tap', target: '' };
       if (!d) return Promise.reject(new Error('That request names no way Foxy can deliver to.'));
-      if (!(req.sats > 0)) return Promise.reject(new Error('That request names no amount.'));
-      if ((reqUnit || 'sat') !== 'sat') return Promise.reject(new Error('That request is not for sats.'));
+      if (!(want > 0)) return Promise.reject(new Error('That request names no amount.'));
       /* Timed, in three parts, because "the ecash way feels slower than the
        * Lightning way" could be any of them and guessing which is how time
        * gets spent on the wrong one. Making is a swap at the mint over Tor;
@@ -1817,6 +1862,15 @@
         console.warn('[foxy] the payment was not made:', refusal);
         return Promise.reject(new Error(refusal));
       }
+      /* With no route, the request is paid from what this phone holds in its
+       * unit, or not at all: dollars from dollars, sats from sats. Paying
+       * one from the other is a swap between units, and that needs the mint.
+       * Before a proof is touched (`unitHeldRefusal`). */
+      var noUnit = unitHeldRefusal(reqUnit, want);
+      if (noUnit) {
+        console.warn('[foxy] the payment was not made:', noUnit.message);
+        return Promise.reject(noUnit);
+      }
       /* Can this phone cover it, before anything is said to the other one?
        *
        * The question asked first (`askFirst`) is the promise: the receiver
@@ -1828,7 +1882,7 @@
        * the payment tells a receiver on the link that it was not made
        * (`makeTokenForRequest`), as it does whenever one is not. Nothing was
        * made, and nothing was asked of the receiver. */
-      var lack = FoxyWallet.sendShortfall(req.sats, { locked: !!lockTo });
+      var lack = FoxyWallet.sendShortfall(want, { locked: !!lockTo, unit: reqUnit });
       if (lack && lack.short) {
         console.warn('[foxy] the payment was not made:', lack.why);
         return Promise.reject(new Error(lack.why));
@@ -1864,7 +1918,7 @@
        * to, so an amount this phone cannot make exactly is refused rather than
        * over-paid into thin air. */
       // the key this payment's change is locked to, made before the token so the token can name it
-      var changeKeyEarly = (req.viaTap && req.id) ? (changeKeyFor(req.id) || '') : '';
+      var changeKeyEarly = (req.viaTap && req.id) ? (changeKeyFor(req.id, reqUnit) || '') : '';
       /* Asked first, where the other phone says it can be (`req.asks`, from
        * its tap offer): what is about to be sent, before any of it is made.
        * A no costs nothing — no swap, no fee, no ecash another phone has
@@ -1879,10 +1933,10 @@
           console.warn('[foxy] pay steps: asked first, and ' + (eNo.foxySilent ? 'no answer came' : 'they said no') + ': ' + eNo.message);
           throw eNo;
         }
-        return FoxyWallet.sendToken(req.sats, lockTo ? { unit: 'sat', lockTo: lockTo, inflight: true }
-                                                     : { unit: 'sat', cover: !!req.viaTap,
-                                                         inflight: true, changeKey: changeKeyEarly,
-                                                         overpayOk: !!(opts && opts.overpayOk) });
+        return FoxyWallet.sendToken(want, lockTo ? { unit: reqUnit, lockTo: lockTo, inflight: true }
+                                                 : { unit: reqUnit, cover: !!req.viaTap,
+                                                     inflight: true, changeKey: changeKeyEarly,
+                                                     overpayOk: !!(opts && opts.overpayOk) });
       })
         .then(function (made) {
         madeAt = Date.now();
@@ -1890,7 +1944,7 @@
         if (!info || !info.proofs || !info.proofs.length) {
           throw carryToken(new Error('The payment could not be read back.'), made);
         }
-        var payment = { mint: String(info.mint || '').replace(/\/+$/, ''), unit: 'sat',
+        var payment = { mint: String(info.mint || '').replace(/\/+$/, ''), unit: reqUnit,
           proofs: info.proofs.map(function (pr) {
             var out = { id: pr.id, amount: pr.amount, secret: pr.secret, C: pr.C };
             if (pr.dleq) out.dleq = pr.dleq;
@@ -1914,7 +1968,7 @@
          * step. A phone paid with `no key to lock change to` twenty
          * minutes after the same phone had taken change back fine, because by
          * then the pool had been used up. */
-        var changeKey = req.id ? changeKeyFor(req.id) : '';
+        var changeKey = req.id ? changeKeyFor(req.id, reqUnit) : '';
         if (changeKey) {
           payment.changeTo = changeKey;
         } else if (req.id) {
@@ -2047,9 +2101,13 @@
       if (!info) return Promise.reject(new Error('That is not a Cashu token.'));
       if (!lockedProofs(info.proofs || []).length) return FoxyWallet.reclaimToken(text);
       var at = hostOf(String(info.mint || ''));
+      var infoUnit = info.unit;
       return FoxyWallet.receiveToken(text, { hash: 'reclaim-' + Date.now(), memo: 'reclaimed' }).then(function (r) {
-        console.log('[foxy] took back', (r && r.sats) || 0, 'sats, some of it ecash locked to this phone');
-        return { sats: (r && r.sats) || 0, host: (r && r.host) || at };
+        // in the token's unit: a dollar token comes back into the dollar pile, `sats` 0
+        var u = unitOf((r && r.unit) || infoUnit) || 'sat';
+        var n = Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats)));
+        console.log('[foxy] took back ' + (u === 'sat' ? n + ' sats' : moneyWords(n, u)) + ', some of it ecash locked to this phone');
+        return { sats: u === 'sat' ? n : 0, unit: u, amount: n, host: (r && r.host) || at };
       });
     },
 
@@ -2086,15 +2144,17 @@
           if (!info || canonicalMint(String(info.mint || '')) !== here) return null;
           return FoxyWallet.takeBackToken(text).then(function (r) {
             back += (r && r.sats) || 0;
+            var tu = unitOf(info && info.unit) || 'sat';
+            var ta = Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats)));
             FoxyWallet.tag(h, { refused: false, takenBack: true });
             /* And no longer at risk. The entry kept `highRisk`, which is all
              * the history reads, so a payment whose pieces were safely back
              * went on saying HIGH RISK, refused, not returned, with a button
              * to make it safe. `settleAtRisk` clears it for the same event. */
             try { amendTx(h, { highRisk: false, takenBack: true }); } catch (x) {}
-            console.log('[foxy] a payment they did not take is back in the wallet:', (r && r.sats) || 0, 'sats');
+            console.log('[foxy] a payment they did not take is back in the wallet: ' + (tu === 'sat' ? ta + ' sats' : moneyWords(ta, tu)));
             if (typeof FoxyWallet._onTakenBack === 'function') {
-              try { FoxyWallet._onTakenBack({ sats: (r && r.sats) || 0, hash: h }); } catch (x) {}
+              try { FoxyWallet._onTakenBack({ sats: tu === 'sat' ? ta : 0, unit: tu, amount: ta, hash: h }); } catch (x) {}
             }
           }, function (e) {
             /* Locked to a key that is not this phone's: nothing here can take
@@ -2172,6 +2232,11 @@
       return groups.reduce(function (chain, g) {
         return chain.then(function () {
           var cw = onCircuit(w, 'atrisk:' + g.hash);
+          /* In the group's unit: its pieces are in that unit's pile, the swap
+           * is made by that unit's wallet, and what is said of it is in that
+           * unit (`sats` 0 for any other). */
+          var gu = g.unit || 'sat';
+          var inUnit = function (n) { return { sats: gu === 'sat' ? n : 0, unit: gu, amount: n }; };
           return statesOf(cw, g.pieces).then(function (states) {
             var spent = g.pieces.filter(function (pr, i) { return states[i] === 'SPENT'; });
             var live = g.pieces.filter(function (pr, i) { return states[i] === 'UNSPENT'; });
@@ -2192,7 +2257,8 @@
             var entomb = function (took) {
               var all = atRiskAll();
               var was = all[g.hash] || {};
-              all[g.hash] = { taken: true, req: was.req || g.req || '', mint: here, at: Date.now(), sats: took, secrets: [], why: was.why || '' };
+              all[g.hash] = { taken: true, req: was.req || g.req || '', mint: here, at: Date.now(), unit: gu, amount: took,
+                              sats: gu === 'sat' ? took : 0, secrets: [], why: was.why || '' };
               save(K.atRisk, all);
               try { FoxyWallet.tag(g.hash, { atRisk: false }); } catch (x) {}
             };
@@ -2201,7 +2267,7 @@
                * the payment it turned out to be. */
               var gone = {};
               spent.forEach(function (pr) { gone[pr.secret] = true; });
-              setProofs(proofs(here).filter(function (pr) { return !(pr && gone[pr.secret]); }), here, w);
+              setProofs(proofs(here, gu).filter(function (pr) { return !(pr && gone[pr.secret]); }), here, w, gu);
               var took = sumProofs(spent);
               try {
                 /* And change it was owed is not coming. The entry went on
@@ -2212,30 +2278,34 @@
                 var owedOn = (load(K.log, []) || []).some(function (e) {
                   return e && e.hash === g.hash && e.changeState === 'owed' && Number(e.changeSats) > 0;
                 });
-                amendTx(g.hash, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true, sats: took,
+                amendTx(g.hash, amountFields(gu, took, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true,
                                                 memo: 'ecash, taken after a refusal' },
-                                              owedOn ? { changeState: 'never came' } : {}));
+                                              owedOn ? { changeState: 'never came' } : {})));
               } catch (x) {}
-              console.warn('[foxy] ecash a phone refused has since been redeemed: ' + took + ' sats; its entry says paid');
-              out.push({ state: 'taken', hash: g.hash, sats: took });
+              console.warn('[foxy] ecash a phone refused has since been redeemed: ' + (gu === 'sat' ? took + ' sats' : moneyWords(took, gu)) + '; its entry says paid');
+              out.push(Object.assign({ state: 'taken', hash: g.hash }, inUnit(took)));
               if (!live.length) { entomb(took); return null; }
             }
             /* Unspent: swapped for fresh pieces, as a split of this phone's
              * own pile is, so a lost answer is restored by the same record
              * and no entry is written for money that never left. */
-            var token = encodeToken(here, live, 'sat');
-            var guard = swapGuard(cw, 'split', { inputs: live });
-            return guard.run('receive', function () { return cw.receive(token); }).then(function (fresh) {
+            var token = encodeToken(here, live, gu);
+            return unitWalletOn(cw, gu).then(function (uw) {
+            var guard = swapGuard(uw, 'split', { inputs: live, unit: gu });
+            return guard.run('receive', function () { return uw.receive(token); }).then(function (fresh) {
               var old = {};
               live.forEach(function (pr) { old[pr.secret] = true; });
-              setProofs(proofs(here).filter(function (pr) { return !(pr && old[pr.secret]); }).concat(fresh || []), here, w);
+              setProofs(proofs(here, gu).filter(function (pr) { return !(pr && old[pr.secret]); }).concat(fresh || []), here, uw, gu);
               guard.done();
               var fee = Math.max(0, sumProofs(live) - sumProofs(fresh || []));
-              if (fee > 0) chargeUnsentFee(here, fee);
+              // a fee in sats where it always went; one in another unit on a row of its own (`meltBackFee`)
+              if (fee > 0) meltBackFee(here, gu, fee);
               if (spent.length) entomb(sumProofs(spent)); else forget();
               try { amendTx(g.hash, { highRisk: false, takenBack: true }); } catch (x) {}
-              console.log('[foxy] ecash at risk is safe again: ' + sumProofs(fresh || []) + ' sats swapped for pieces nobody has seen');
-              if (!spent.length) out.push({ state: 'safe', hash: g.hash, sats: sumProofs(fresh || []) });
+              console.log('[foxy] ecash at risk is safe again: ' + (gu === 'sat' ? sumProofs(fresh || []) + ' sats' : moneyWords(sumProofs(fresh || []), gu))
+                + ' swapped for pieces nobody has seen');
+              if (!spent.length) out.push(Object.assign({ state: 'safe', hash: g.hash }, inUnit(sumProofs(fresh || []))));
+            });
             });
           }).catch(function (e) {
             console.warn('[foxy] ecash at risk could not be settled yet:', FoxyWallet.reason ? FoxyWallet.reason(e) : (e && e.message));
@@ -2287,12 +2357,14 @@
      * Local and synchronous, like `watchedTokens`: a render reads it. */
     trustedWaiting: function () {
       var all = unclaimed();
-      /** @type {Array<{ id: string, sats: number, at: number }>} */
+      /** @type {Array<{ id: string, sats: number, unit: string, amount: number, at: number }>} */
       var out = [];
       Object.keys(all).forEach(function (id) {
         var one = all[id] || {};
         if (!one.trusted) return;
-        out.push({ id: id, sats: Number(one.sats) || 0, at: Number(one.at) || 0 });
+        // in the row's unit: `sats` is 0 on a dollar row, which `trustedWaitingSats` then never counts
+        var ru = recordUnit(one);
+        out.push({ id: id, sats: ru === 'sat' ? amountOfRecord(one) : 0, unit: ru, amount: amountOfRecord(one), at: Number(one.at) || 0 });
       });
       return out.sort(function (a, b) { return b.at - a.at; });
     },
@@ -2303,8 +2375,17 @@
     // change set aside for over-payments and not yet gone, at this mint (`holdChange`); for the suites
     _changeLeavingSats: function () { return changeLeavingSats(mintUrl || ''); },
 
+    // sats only: kept dollars are `keptIn('usd')`
     unclaimedSats: function (at) {
       return unclaimedSats(at);
+    },
+
+    /* What has arrived in `unit` and waits to be swapped in, in that unit:
+     * the kept rows (`foxy.req.unclaimed`), at one mint or (with none named)
+     * at the connected one. Local and at once; the balance counts it. */
+    keptIn: function (unit, mint) {
+      var at = mint ? canonicalMint(String(mint)) : canonicalMint(String(mintUrl || ''));
+      return unclaimedIn(unit, at);
     },
 
     trustedWaitingSats: function () {

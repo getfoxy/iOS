@@ -395,7 +395,10 @@
    * because offline it can be hours old and a stale figure presented as current
    * is its own small lie. Sats are the amount; dollars are the gloss. */
   offlineRiskCard(info) {
-    const sats = Number(info && info.sats) || 0;
+    /* Dollars are said as dollars, and nothing else: no sats under them and no
+     * price, because nothing is being converted. */
+    const usdIn = !!(info && info.unit === 'usd');
+    const sats = usdIn ? 0 : (Number(info && info.sats) || 0);
     const rate = this.satUsd ? this.satUsd() : 0;
     const W0 = window.FoxyWallet;
     const at = (W0 && Number(W0._rateAt)) || 0;
@@ -403,7 +406,8 @@
     const worth = rate > 0 ? '$ ' + this.usd(sats * rate) : '';
     /* Three lines, dollars first: the amount, the sats
      * under it, and how old the price is that turned one into the other. */
-    const chip = worth
+    const chip = usdIn ? 'Amount ' + this.moneyIn(info.amount, 'usd')
+      : worth
       ? 'Amount ' + worth + '\n\u20bf ' + this.group(sats) + (age ? '\nPrice ' + age : '')
       : 'Amount \u20bf ' + this.group(sats);
     /* Nothing over it. A scanned token raises VERIFYING ECASH before anything
@@ -468,10 +472,12 @@
   }
 
   changeStuckCard(info) {
-    const sats = Math.round(Number(info && info.sats) || 0);
+    // in the payment's own unit: cents for dollars (the wallet's `amount`), sats otherwise
+    const unit = info && info.unit === 'usd' ? 'usd' : '';
+    const sats = Math.round(Number(info && (unit ? info.amount : info.sats)) || 0);
     const token = String((info && info.token) || '');
     if (!(sats > 0) || !token) return;
-    console.log('[foxy] change: ' + sats + ' sats could not be handed back; asking this phone to show it');
+    console.log('[foxy] change: ' + sats + (unit ? ' cents' : ' sats') + ' could not be handed back; asking this phone to show it');
     if (!this.stageScreen) { this.releaseHeldConfirm('no stage screen'); this.showTokenCode(token, (info && info.hash) || ''); return; }
     /* The screen: the three amounts, the code, and one thing to do. It is also
      * on the payment's entry in history, so DONE loses nothing. The
@@ -483,7 +489,7 @@
       clearTimeout(this._holdConfirmT);
       this.stageScreen('changeStuck', {
         title: 'Not received.<br>Send it back', qr: token,
-        rows: [{ label: 'GOING BACK', value: this.stageMoney(sats) }],
+        rows: [{ label: 'GOING BACK', value: this.stageMoney(sats, unit) }],
         body: 'The payment could not be brought to your mint, so it was not received. Ask the payer to scan this to take it back.',
         button: 'DONE',
         go: () => this.releaseHeldConfirm('the refund card was dismissed'),
@@ -492,9 +498,9 @@
     }
     const paid = Math.round(Number(info && info.paid) || 0);
     const asked = Math.round(Number(info && info.asked) || (paid > sats ? paid - sats : 0));
-    const rows = [{ label: 'CHANGE DUE', value: this.stageMoney(sats) }];
-    if (asked > 0) rows.push({ label: 'AMOUNT CHARGED', value: this.stageMoney(asked) });
-    if (paid > 0) rows.push({ label: 'AMOUNT RECEIVED', value: this.stageMoney(paid) });
+    const rows = [{ label: 'CHANGE DUE', value: this.stageMoney(sats, unit) }];
+    if (asked > 0) rows.push({ label: 'AMOUNT CHARGED', value: this.stageMoney(asked, unit) });
+    if (paid > 0) rows.push({ label: 'AMOUNT RECEIVED', value: this.stageMoney(paid, unit) });
     clearTimeout(this._holdConfirmT);
     this.stageScreen('changeStuck', {
       title: 'You owe the<br>payer change', qr: token, rows: rows,
@@ -703,6 +709,8 @@
     const pay = Number(info && info.pay) || 0;
     const over = Number(info && info.over) || 0;
     const back = !!(info && info.changeComesBack);
+    // the same card in dollars: the figures in dollars, and nothing converted
+    if (info && info.unit === 'usd') return this.overpayCardUsd(info, asked, pay, over, back);
     return new Promise((resolve) => {
       let done = false;
       const say = (yes) => { if (done) return; done = true; resolve(yes); };
@@ -749,7 +757,9 @@
    * a reconnect changing screens under it cannot take it away. The total
    * grows while it is up and starts again once it has been dismissed. */
   moneyIsSafe(info) {
-    const sats = Math.round(Number(info && info.sats) || 0);
+    // in its own unit: cents for dollars, never added to sats
+    const unit = info && info.unit === 'usd' ? 'usd' : 'sat';
+    const sats = Math.round(Number(info && (unit === 'usd' ? info.amount : info.sats)) || 0);
     if (!(sats > 0)) return;
     /* Only what was at risk. Change, and payments locked to this phone, were
      * never anybody else's to spend: saying they are safe now says they were
@@ -759,10 +769,11 @@
       this.loadHistory();
       return;
     }
-    this._safeTotal = (this._safeTotal || 0) + sats;
+    if (unit === 'usd') this._safeUsd = (this._safeUsd || 0) + sats;
+    else this._safeTotal = (this._safeTotal || 0) + sats;
     this._safeCount = (this._safeCount || 0) + 1;
-    console.log('[foxy] money is safe: ' + this._safeTotal + ' sats that were at risk are claimed, in '
-      + this._safeCount + ' payment(s)');
+    console.log('[foxy] money is safe: ' + (this._safeTotal || 0) + ' sats and ' + (this._safeUsd || 0)
+      + ' cents that were at risk are claimed, in ' + this._safeCount + ' payment(s)');
     this.refreshBalance();
     this.loadHistory();
     if (!this.stageScreen) return;
@@ -770,7 +781,7 @@
   }
 
   moneyIsSafeShow() {
-    if (!(this._safeTotal > 0)) return;
+    if (!(this._safeTotal > 0) && !(this._safeUsd > 0)) return;
     /* Not over another of these screens: a code somebody is scanning, or a
      * wait with the four digits on it, is not this one's to replace. It
      * waits its turn. */
@@ -780,15 +791,23 @@
       this._safeT = setTimeout(() => this.moneyIsSafeShow(), 2000);
       return;
     }
-    const money = this.stageMoney(this._safeTotal);
+    /* Each unit as itself: dollars first, then sats, never one figure added
+     * across the two. */
+    const usdC = Math.round(this._safeUsd || 0);
+    const satN = Math.round(this._safeTotal || 0);
+    const parts = [];
+    if (usdC > 0) parts.push(this.stageMoney(usdC, 'usd'));
+    if (satN > 0) parts.push('\u20bf ' + this.group(satN));
+    const money = usdC > 0 && !(satN > 0) ? this.stageMoney(usdC, 'usd')
+      : satN > 0 && !(usdC > 0) ? this.stageMoney(satN) : parts.join(' and ');
     this.stageScreen('moneySafe', {
       title: 'Your money<br>is safe', amount: money,
       body: (this._safeCount === 1 ? 'The payment you accepted at risk has'
         : 'The ' + this._safeCount + ' payments you accepted at risk have')
-        + ' been claimed.<br><strong>\u20bf ' + this.group(this._safeTotal)
+        + ' been claimed.<br><strong>' + parts.join('</strong> and <strong>')
         + '</strong> is now yours and nobody else can spend it.',
       button: 'DONE',
-      go: () => { this._safeTotal = 0; this._safeCount = 0; },
+      go: () => { this._safeTotal = 0; this._safeUsd = 0; this._safeCount = 0; },
     });
   }
 
@@ -849,15 +868,89 @@
     });
   }
 
+  /* Ecash another phone refused and did not send back, settled now that there
+   * is a route: safe again, sent back, or found redeemed (W.onAtRisk). Said in
+   * the payment's own unit: dollars as "$ 2.00", sats as they always were. */
+  atRiskSettled(info) {
+    this.refreshBalance();
+    if (this.loadHistory) this.loadHistory();
+    const usdIn = !!(info && info.unit === 'usd');
+    const said = usdIn ? this.moneyIn(info.amount, 'usd') : this.group(Math.round(Number(info && info.sats) || 0)) + ' sats';
+    const are = usdIn ? ' is' : ' are';
+    if (info && info.state === 'taken') {
+      this.blockedCard('atRiskTaken', {
+        tone: 'warn',
+        title: 'THEY TOOK THE PAYMENT',
+        reason: 'A payment they refused was redeemed afterwards: ' + said + '. Its entry in your history now says paid.',
+        chip: 'If they are sending it back, they will show you a code to scan. If they were paid a second time for it, that is theirs to give back.',
+      });
+    } else if (info && info.state === 'refunded') {
+      this.toast('The ' + said + ' they refused came back, locked to this phone.');
+    } else if (info && info.state === 'safe') {
+      this.toast('The ' + said + ' they refused' + are + ' safe again.');
+    }
+  }
+
+  /* A payment somebody refused, swapped back into the wallet by itself
+   * (W.onTakenBack), in its own unit. */
+  takenBackSaid(info) {
+    this.refreshBalance();
+    if (this.loadHistory) this.loadHistory();
+    const usdIn = !!(info && info.unit === 'usd');
+    const said = usdIn ? this.moneyIn(info.amount, 'usd') : this.group(Math.round(Number(info && info.sats) || 0)) + ' sats';
+    this.toast('The ' + said + ' they did not take' + (usdIn ? ' is' : ' are') + ' back in your wallet.');
+  }
+
   trustLostCard(info) {
-    const sats = Number(info && info.sats) || 0;
+    const unit = info && info.unit === 'usd' ? 'usd' : 'sat';
+    const n = Number(info && (unit === 'usd' ? info.amount : info.sats)) || 0;
     this.blockedCard('trustLost', {
       tone: 'bad',
       title: 'THEY TOOK THAT PAYMENT BACK',
-      reason: 'The ' + this.group(sats) + ' sats you accepted while you were both offline had '
+      reason: 'The ' + this.moneyIn(n, unit) + ' you accepted while you were both offline had '
         + 'already been spent by the time this phone could check. The mint would not honour them, '
         + 'so they have come off your balance and the payment is marked failed in your history. '
         + 'Nothing else of yours is affected.',
+    });
+  }
+
+  /* YOU DON'T HAVE EXACT CHANGE, for a payment in dollars. */
+  overpayCardUsd(info, asked, pay, over, back) {
+    const m = (n) => this.moneyIn(n, 'usd');
+    return new Promise((resolve) => {
+      let done = false;
+      const say = (yes) => { if (done) return; done = true; resolve(yes); };
+      this.blockedCard('overpay', {
+        tone: 'warn',
+        title: 'YOU DON\u2019T HAVE EXACT CHANGE',
+        reason: 'The smallest you can make is ' + m(pay) + ' for a ' + m(asked) + ' payment. '
+          + (back ? 'They are online, so the extra ' + m(over) + ' comes straight back to you as change.'
+            : (info && info.says) ? info.says
+            : 'You are both offline, so they cannot give you the extra ' + m(over) + ' back \u2014 they keep it.'),
+        chip: m(asked) + ' owed  \u00b7  ' + m(over) + ' over',
+        retry: 'YES, SEND ' + m(pay), go: () => say(true),
+        shut: { label: 'NO, CANCEL', tap: () => say(false) },
+        onClose: () => setTimeout(() => say(false), 0),
+      });
+      if (!this._blockedEl && !(this._cardQueue || []).some((c) => c.kind === 'overpay')) say(false);
+    });
+  }
+
+  /* An amount in words, in its own unit: "$ 2.00" for cents, "2,000 sats" for
+   * sats. For the sentences on cards; never converted. */
+  moneyIn(n, unit) {
+    const v = Math.round(Number(n) || 0);
+    return unit === 'usd' ? '$ ' + this.usd(v / 100) : this.group(v) + ' sats';
+  }
+
+  /* NEEDS THE MINT: a payment this phone cannot make offline, because it is in
+   * a unit this phone holds none (or too little) of here. Nothing was sent. */
+  needsMintCard(reason) {
+    this.blockedCard('needsMint', {
+      tone: 'warn',
+      title: 'NEEDS THE MINT',
+      reason: String(reason || ''),
+      chip: 'Nothing was sent.',
     });
   }
 

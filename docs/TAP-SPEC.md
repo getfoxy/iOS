@@ -24,6 +24,12 @@ is already known to be weak. The long form, with the reasons, is
 | online | offline | ecash over the link, locked | no payment |
 | offline | offline | no payment | no payment |
 
+The table holds in each unit. A request names its unit (sats, or dollars in
+cents) and is paid in that unit: dollars from dollars, sats from sats, with no
+bitcoin price in a payment between two dollar balances. Offline it is that
+unit or nothing; online, a payer short in the request's unit may pay the
+receiver's invoice from its other balance over Lightning.
+
 Three rules give that table.
 
 1. **One of the two must be online.** Somebody has to swap. An online receiver
@@ -109,7 +115,8 @@ is sealed twice.
 
 ## 5. The request and its key
 
-The request is plain NUT-18: an id, an amount in sats, one mint, single use.
+The request is plain NUT-18: an id, a unit (`sat`, or `usd` with the amount
+in cents), an amount in that unit, one mint, single use.
 Its `nut10` field names a P2PK key when two things hold: the receiver's mint
 supports NUT-11, and the receiver has a key ready. Otherwise the request goes
 out with no key, and an offline payment to it is not possible.
@@ -138,9 +145,17 @@ the NUT-11 questions; Foxy does not parse the tags itself.
 ## 7. What the receiver does with a payment
 
 Before anything else it checks: the request is one it has open; the mint is
-the request's mint and its own; the unit is sats; 1 to 500 proofs, none
-repeated; the sum, less the input fees it will pay to swap (NUT-02), covers
-the amount; no proof carries a DLEQ that fails.
+the request's mint and its own; the unit is the request's unit, and every proof
+is of a keyset of that unit, whatever the payment's label says; 1 to 500
+proofs, none repeated; the sum, less the input fees it will pay to swap
+(NUT-02, that unit's keyset fee), covers the amount; no proof carries a DLEQ
+that fails, checked against the cached keyset of that unit.
+
+The question asked first (M10) names the unit and the amount in it. A unit
+that differs from the request's is a no ("That payment would be in bitcoin;
+the request is for dollars."), and so is an amount short in the unit ("That
+payment would be $ 1.50; the request is for $ 2.00."). What an offline
+receiver keeps is kept in its unit and counted only in that unit's balance.
 
 Then:
 

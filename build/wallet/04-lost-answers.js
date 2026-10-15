@@ -530,10 +530,15 @@
       console.warn('[foxy] a payment could not be brought home, and the payer sent no key to send it back to; it stays at their mint');
       return Promise.resolve(stuck((why ? why + ' ' : '') + 'The payer\u2019s phone sent nothing to send it back to.'));
     }
+    /* In the job's unit (sats when it names none): a dollar payment that is
+     * refused goes back in dollars, from the dollar pile. */
+    var ju = unitOf(job.unit) || 'sat';
+    var said = function (n) { return ju === 'sat' ? n + ' sats' : moneyWords(n, ju); };
     return carryVisit(job.from).then(function () {
-      var w = wallet;
+      return ju === 'sat' ? wallet : unitWalletLocal(ju);
+    }).then(function (w) {
       var owed = Math.max(0, (Number(job.kept) || 0) - (Number(job.lost) || 0));
-      var back = changeFromPile(w, owed);
+      var back = changeFromPile(w, owed, ju);
       if (!(back > 0)) return stuck(why);
       /* The entry first, then the swap, so a phone killed between them wakes
        * to an entry the recovered token finishes (`writeLockedSend` settles
@@ -544,25 +549,27 @@
        * same entry when it is the newest at the mint (`chargeTopUpFee`) and
        * to the mint's own tally when it is not: either way the entry keeps
        * whatever it said beyond what is owed, and no fee is counted twice. */
-      job.state = 'refunding'; job.was = was ? Number(was.sats) || 0 : 0;
+      job.state = 'refunding'; job.was = was ? amountOfRecord(was) : 0;
       putCarryJob(job);
       try {
-        amendTx(hash, { sats: Math.max(0, job.was - owed), changeSats: owed, changeState: 'making',
-                        refund: true, memo: 'ecash, sent back' });
+        amendTx(hash, amountFields(ju, job.was - owed, ju === 'sat'
+          ? { changeSats: owed, changeState: 'making', refund: true, memo: 'ecash, sent back' }
+          : { changeAmount: owed, changeState: 'making', refund: true, memo: 'ecash, sent back' }));
       } catch (x) {}
       console.log('[foxy] a payment could not be brought home (' + (why || 'the person chose to send it back')
-        + '); sending ' + back + ' sats back to the payer');
-      return FoxyWallet.sendToken(back, { unit: 'sat', lockTo: job.payerKey, purpose: 'change',
+        + '); sending ' + said(back) + ' back to the payer');
+      return FoxyWallet.sendToken(back, { unit: ju, lockTo: job.payerKey, purpose: 'change',
                                           forHash: hash, owed: owed }).then(function (made) {
         try { FoxyWallet.tag(hash, { changeToken: String(made.token || ''), refund: true }); } catch (x) {}
-        settleChangeMade(hash, owed, { sats: made.sats, fee: made.fee, back: back });
+        settleChangeMade(hash, owed, { sats: amountOfRecord(made), fee: made.fee, back: back });
         dropCarryJob(job.id);
-        var out = { state: 'refunded', sats: back, token: made.token, hash: hash, why: why, job: job, handed: false };
+        var out = { state: 'refunded', sats: ju === 'sat' ? back : 0, unit: ju, amount: back, token: made.token,
+                    hash: hash, why: why, job: job, handed: false };
         var stuck = function (e) {
           owedChangeOnEntry(hash, made.token);
           try {
             if (typeof FoxyWallet._onChangeStuck === 'function') {
-              FoxyWallet._onChangeStuck({ sats: back, token: made.token, hash: hash, refund: true,
+              FoxyWallet._onChangeStuck({ sats: ju === 'sat' ? back : 0, unit: ju, amount: back, token: made.token, hash: hash, refund: true,
                                           why: String((e && e.message) || ''), paid: owed, asked: 0 });
             }
           } catch (x) { console.warn('[foxy] the refund card could not be raised:', x && x.message); }
@@ -576,7 +583,10 @@
         }, stuck);
       }, function (e) {
         // not made: the entry says what it said, and the job is as it was
-        try { amendTx(hash, { sats: job.was, changeSats: 0, changeState: '', refund: false, memo: 'ecash' }); } catch (x) {}
+        try {
+          amendTx(hash, amountFields(ju, job.was, ju === 'sat' ? { changeSats: 0, changeState: '', refund: false, memo: 'ecash' }
+            : { changeAmount: 0, changeState: '', refund: false, memo: 'ecash' }));
+        } catch (x) {}
         job.state = 'paid'; putCarryJob(job);
         console.warn('[foxy] the payment could not be sent back either:', e && e.message);
         if (mintRefused(e)) return stuck(carryWhy(e));
@@ -719,18 +729,22 @@
    * `held` is all of that; `need` the amount and the fee; `why` is the
    * sentence (`notEnoughWords`, and a note of ecash taken at risk, which
    * cannot be spent) when `held` falls short, and empty when it does not. */
-  function sendCover(w, want, lockTo) {
-    var have = proofs(mintOf(w));
+  /* `unit`: the pile it is sent from (sats when not named), and the kept
+   * rows of that unit only. `waitingSats` is what those rows come to, in
+   * that unit, whatever its name says. */
+  function sendCover(w, want, lockTo, unit) {
+    var u = unitOf(unit) || 'sat';
+    var have = proofs(mintOf(w), u);
     var stuck = lockedProofs(have);
     if (stuck.length) have = have.filter(function (p) { return stuck.indexOf(p) < 0; });
     var fee = swapFeeFor(w, have);
-    var waiting = (!lockTo && !routeOpen()) ? lockedPieces() : [];
-    var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(r.sats) || 0); }, 0);
+    var waiting = (!lockTo && !routeOpen()) ? lockedPieces(u) : [];
+    var waitingSats = waiting.reduce(function (n, r) { return n + (Math.round(amountOfRecord(r)) || 0); }, 0);
     var held = sumProofs(have) + waitingSats;
     var need = want + fee;
     return { have: have, stuck: stuck, fee: fee, waiting: waiting, waitingSats: waitingSats,
              held: held, need: need, short: held < need,
-             why: held < need ? notEnoughWords({ need: need, have: held }) + FoxyWallet._atRiskNote() : '' };
+             why: held < need ? notEnoughWords({ need: need, have: held }, u) + (u === 'sat' ? FoxyWallet._atRiskNote() : '') : '' };
   }
 
   function dropQuoteRecord(found) {
@@ -1139,16 +1153,19 @@
     try {
       var row = load(K.log, []).filter(function (e) { return e && e.hash === hash; })[0];
       if (!row) return;
-      var fields = { changeCost: Math.max(0, Math.round(Number(owed) || 0) - Math.round(Number(made && made.back) || 0)) };
+      // in the entry's own unit: `sats` and `feeSats` on a sat entry, `amount` and `feeAmount` on any other
+      var ru = recordUnit(row);
+      var amtKey = ru === 'sat' ? 'sats' : 'amount', feeKey = ru === 'sat' ? 'feeSats' : 'feeAmount';
+      var fields = /** @type {any} */ ({ changeCost: Math.max(0, Math.round(Number(owed) || 0) - Math.round(Number(made && made.back) || 0)) });
       if (left < 0) {
-        fields.feeSats = (Number(row.feeSats) || 0) - left;
+        fields[feeKey] = (Number(row[feeKey]) || 0) - left;
         fields.changeFee = (Number(row.changeFee) || 0) - left;
-        fields.sats = Math.max(0, Math.round(Number(row.sats)) + left);
-        console.log('[foxy] making that change cost ' + (-left) + ' sat(s) more than was allowed for, on the payment it belongs to');
+        fields[amtKey] = Math.max(0, Math.round(Number(row[amtKey])) + left);
+        console.log('[foxy] making that change cost ' + (-left) + ' ' + (ru === 'sat' ? 'sat(s)' : ru + ' unit(s)') + ' more than was allowed for, on the payment it belongs to');
       } else if (left > 0) {
         fields.changeDust = (Number(row.changeDust) || 0) + left;
-        fields.sats = Math.round(Number(row.sats)) + left;
-        console.log('[foxy] making that change cost ' + left + ' sat(s) less than was allowed for; they stay with the payment');
+        fields[amtKey] = Math.round(Number(row[amtKey])) + left;
+        console.log('[foxy] making that change cost ' + left + ' ' + (ru === 'sat' ? 'sat(s)' : ru + ' unit(s)') + ' less than was allowed for; they stay with the payment');
       }
       amendTx(hash, fields);
     } catch (e) { console.warn('[foxy] the change could not be settled on its entry:', e && e.message); }
@@ -1258,16 +1275,21 @@
       owedChangeOnEntry(pay.forHash, token);
       try { FoxyWallet.tag(pay.forHash, { changeToken: token }); } catch (e) {}
       settleChangeMade(pay.forHash, Math.round(Number(pay.owed) || 0) || (sats + fee), { sats: sats, fee: fee });
-      console.log('[foxy] change of ' + sats + ' sats that was being made when Foxy closed is on its payment\u2019s entry, to be shown');
+      console.log('[foxy] change of ' + (unit === 'sat' ? sats + ' sats' : moneyWords(sats, unit)) + ' that was being made when Foxy closed is on its payment\u2019s entry, to be shown');
     } else {
       var hash = 'token-' + String(rec.id).replace(/^send-/, '');
-      mustSave(K.outtok, { token: token, sats: sats, unit: unit, mint: at, hash: hash, at: Date.now(), swapped: true });
-      logTx({ dir: 'out', sats: sats, grossSats: sats, changeSats: 0, changeState: '', feeSats: fee,
-              settled: true, state: 'success', memo: 'ecash', hash: hash, mint: canonicalMint(at) }, hash);
-      logAudit({ hash: hash, sats: sats, feeSats: fee, kind: 'token',
-                 inputs: (rec.inputs || []).slice(), outputs: (change || []).map(scrub) });
+      // in the send's own unit: a dollar payment rebuilt is a dollar entry, in cents
+      mustSave(K.outtok, unit === 'sat'
+        ? { token: token, sats: sats, unit: unit, mint: at, hash: hash, at: Date.now(), swapped: true }
+        : { token: token, sats: 0, unit: unit, amount: sats, mint: at, hash: hash, at: Date.now(), swapped: true });
+      logTx(unitRow(unit, { dir: 'out', sats: sats, grossSats: sats, changeSats: 0, changeState: '', feeSats: fee,
+              settled: true, state: 'success', memo: 'ecash', hash: hash, mint: canonicalMint(at) }), hash);
+      logAudit(unit === 'sat' ? { hash: hash, sats: sats, feeSats: fee, kind: 'token',
+                                  inputs: (rec.inputs || []).slice(), outputs: (change || []).map(scrub) }
+        : { hash: hash, sats: 0, feeSats: 0, unit: unit, amount: sats, kind: 'token',
+            inputs: (rec.inputs || []).slice(), outputs: (change || []).map(scrub) });
       try { FoxyWallet.tag(hash, { to: 'ecash', token: token, interrupted: true }); } catch (e2) {}
-      console.log('[foxy] a locked payment of ' + sats + ' sats that was being made when Foxy closed is rebuilt;'
+      console.log('[foxy] a locked payment of ' + (unit === 'sat' ? sats + ' sats' : moneyWords(sats, unit)) + ' that was being made when Foxy closed is rebuilt;'
         + ' it is on its own entry, to be handed over');
     }
     dropSwap(rec.id);

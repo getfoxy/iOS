@@ -183,7 +183,28 @@
     out.feeAmount = Math.round(Number(row.feeAmount != null ? row.feeAmount : row.feeSats) || 0);
     out.sats = 0;
     out.feeSats = 0;
+    /* An over-payment's breakdown, in the row's unit too: what arrived or
+     * left whole, the change, and what was too little to come back. The sat
+     * names are not kept on such a row, so nothing that reads sats finds
+     * cents there. */
+    [['grossSats', 'grossAmount'], ['changeSats', 'changeAmount'], ['dustSats', 'dustAmount']].forEach(function (pair) {
+      if (!(pair[0] in out)) return;
+      var v = out[pair[0]];
+      delete out[pair[0]];
+      if (v === undefined || v === null) return;
+      if (out[pair[1]] === undefined) out[pair[1]] = Math.round(Number(v) || 0);
+    });
     return out;
+  }
+
+  /* The fields that amend an entry's amount, in its own unit: `sats` on a
+   * sat entry, `amount` on any other. */
+  function amountFields(unit, n, extra) {
+    var u = unitOf(unit) || 'sat';
+    var f = /** @type {any} */ (Object.assign({}, extra || {}));
+    var v = Math.max(0, Math.round(Number(n) || 0));
+    if (u === 'sat') f.sats = v; else f.amount = v;
+    return f;
   }
 
   /* A row that is one leg of a swap between units says so, with the swap's
@@ -277,6 +298,67 @@
     var hit = unitWallets[u];
     var base = wallet ? (wallet.foxyBase || wallet) : null;
     return hit && base && hit.base === base ? hit.ready : null;
+  }
+
+  /* The connected mint's wallet for `unit`, built from what this phone
+   * already knows about the mint and asking it nothing: for a phone with no
+   * route that is taking or making a payment in dollars. The sat wallet for
+   * 'sat'. It is the same wallet `walletIn` puts on a circuit, made without
+   * one (`unitWallet` builds it from the keys the connected wallet already
+   * holds, so it works offline once the mint has been seen). Rejects when
+   * the mint issues no such unit, which is a refusal and never a guess. */
+  function unitWalletLocal(unit) {
+    var u = unitOf(unit) || 'sat';
+    if (u === 'sat') {
+      try { return Promise.resolve(needLocal()); } catch (e) { return Promise.reject(e); }
+    }
+    var no = unitRefusal(u);
+    if (no) return Promise.reject(no);
+    if (!wallet) return Promise.reject(new Error('No mint connected yet. Call FoxyWallet.connect() first.'));
+    return unitWalletBase(u);
+  }
+
+  /* The id of the active keyset `mint` issues `unit` on, or '' when this phone
+   * does not know one. */
+  function unitKeysetId(unit, mint, w) {
+    var u = unitOf(unit) || 'sat';
+    var found = keysetsOf(mint || mintUrl, w);
+    if (!found) return '';
+    var sets = found;
+    var ids = Object.keys(sets).filter(function (id) { return sets[id].unit === u && sets[id].active; });
+    return ids[0] || '';
+  }
+
+  /* A wallet to work out fees in `unit` with, at once and with no route.
+   *
+   * The fee sums (`feeForInputs`, `tokenFeeFor`, `changeFor`) read the fee of
+   * the wallet's own keyset, and the sat wallet's keyset is the sat one. The
+   * unit wallet answers in its unit when it has been built; until then the
+   * connected wallet is asked about the unit's keyset by its id, which its
+   * key chain holds (cashu-ts keeps every keyset of every unit there). Null
+   * when the unit's keyset is not known here. */
+  function feeWalletFor(unit, w) {
+    var u = unitOf(unit) || 'sat';
+    var base = w || wallet;
+    if (u === 'sat' || !base) return base;
+    var built = unitWalletNow(u);
+    if (built) return built;
+    var id = unitKeysetId(u, mintOf(base), base);
+    if (!id) return null;
+    return {
+      keysetId: id,
+      keyChain: base.keyChain,
+      getFeesForKeyset: function (n, k) { return base.getFeesForKeyset(n, k || id); },
+      getFeesForProofs: function (l) { return base.getFeesForProofs(l); },
+    };
+  }
+
+  /* The amount on a record in its own unit: `amount` where it is written,
+   * and `sats` on a sat record from before amounts were (hard rule 3). */
+  function amountOfRecord(rec) {
+    if (!rec) return 0;
+    var n = rec.amount != null ? satsOf(rec.amount) : satsOf(rec.sats);
+    return isFinite(n) && n > 0 ? Math.round(n) : 0;
   }
 
   /* ---- the dollar price a mint is quoting ----

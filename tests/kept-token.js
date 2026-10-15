@@ -173,17 +173,18 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
 {
   const req = read('build/wallet/07-request-delivery.js');
   const split = read('build/wallet/19-bill-split.js');
-  ok(/var back = changeFromPile\(wallet, owed\);\n    if \(!\(back > 0\)\) \{/.test(req)
-     && /function changeFromPile\(w, owed\) \{\n    var most = changeFor\(w, owed\);/.test(req)
-     && /FoxyWallet\.sendToken\(back, \{ unit: 'sat', lockTo: p\.changeTo, purpose: 'change',\n\s+forHash: 'req-' \+ p\.id, owed: owed \}\)/.test(req)
-     && /settleChangeMade\('req-' \+ p\.id, owed, \{ sats: made\.sats, fee: made\.fee, back: back \}\);/.test(req),
+  // in the payment's unit (`u`): sats, or cents from the dollar pile (tests/usd-tap.js)
+  ok(/var back = changeFromPile\(uw, owed, u\);\n    if \(!\(back > 0\)\) \{/.test(req)
+     && /function changeFromPile\(w, owed, unit\) \{\n    var most = changeFor\(w, owed\);/.test(req)
+     && /FoxyWallet\.sendToken\(back, \{ unit: u, lockTo: p\.changeTo, purpose: 'change',\n\s+forHash: 'req-' \+ p\.id, owed: owed \}\)/.test(req)
+     && /settleChangeMade\('req-' \+ p\.id, owed, \{ sats: amountOfRecord\(made\), fee: made\.fee, back: back \}\);/.test(req),
      'change over the link is what was paid over less its cost, and is settled against what was paid over');
   ok(/var back = changeFromPile\(wallet, owed\);\n      if \(!\(back > 0\)\) return Promise\.resolve\(null\);/.test(split)
      && /if \(hash\) settleChangeMade\(hash, owed, \{ sats: made\.sats, fee: made\.fee, back: back \}\);/.test(split),
      'and so is change for a scanned token');
   ok(/if \(Number\(split\.over\) > 0 && !\(changeFor\(w, Number\(split\.over\)\) > 0\)\) \{\n          dust = Number\(split\.over\);\n          split\.over = 0;/.test(split),
      'a payer that paid over by too little to come back does not wait for change');
-  ok(/var kept = Math\.max\(0, Number\(p\.sats\) - giveBack - \(Number\(p\.inFee\) \|\| 0\)\);/.test(read('build/wallet/20-helpers.js'))
+  ok(/var kept = Math\.max\(0, satsOf\(p\.amount\) - giveBack - \(Number\(p\.inFee\) \|\| 0\)\);/.test(read('build/wallet/20-helpers.js'))
      && /fee: tokFee,/.test(split)
      && /var charged = prior \? \(Number\(prior\.changeFee\) \|\| 0\) \+ \(Number\(prior\.topUpFee\) \|\| 0\) : 0;/.test(split)
      && /if \(prior && Number\(prior\.changeDust\) > 0\) entry\.sats \+= Number\(prior\.changeDust\);/.test(split),
@@ -235,7 +236,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
 // Locked pieces signed into a token are struck off once that token is written
 // down, never one signature at a time before it exists.
 ok(/hash: hash, at: Date\.now\(\), swapped: split\.swapped \}\);\n[\s\S]{0,200}if \(split\.handedOn && split\.handedOn\.length\) \{\n\s+rememberHandedOn\(split\.handedOn\);\n\s+takeFromUnclaimed\(split\.handedOn\);/.test(read('build/wallet/19-bill-split.js'))
-   && /if \(opts && opts\.defer\) \{\n\s+return \{ token: out, sats: sumProofs\(signed\), signed: signed \};/.test(read('build/wallet/19-bill-split.js')),
+   && /if \(opts && opts\.defer\) \{\n\s+return \{ token: out, sats: fu === 'sat' \? sumProofs\(signed\) : 0, unit: fu, amount: sumProofs\(signed\), signed: signed \};/.test(read('build/wallet/19-bill-split.js')),
    'locked pieces paid out of are struck off after the token is saved, all together');
 
 // A visit to another mint is never saved as the phone's own, and a launch
@@ -310,7 +311,7 @@ ok(/function changeAllowance\(owed\) \{/.test(read('build/wallet/07-request-deli
    'change a fee over what is owed is kept, on arrival and when matched to its payment later');
 ok(/if Date\(\)\.timeIntervalSince\(bootEventAt\) >= 25, nudgedEventAt != bootEventAt \{/.test(read('Foxy/Tor/TorService.swift')),
    'a direct bootstrap that reports nothing for 25 seconds has its connections started again, once per step');
-ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n    \/\/ too little to be worth sending back stays, and the entry says what stayed\n    return changeFor\(wallet, owed\) > 0 \? owed : 0;/.test(read('build/wallet/07-request-delivery.js'))
+ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n    \/\/ too little to be worth sending back stays, and the entry says what stayed\n    return changeFor\(feeWalletFor\(p\.unit\), owed\) > 0 \? owed : 0;/.test(read('build/wallet/07-request-delivery.js'))
    && /inFee: inFee, purpose: open\.purpose/.test(read('build/wallet/07-request-delivery.js')),
    'the fee a payer adds for the receiver is fee, not change');
 ok(/topUpFees: 'foxy\.cashu\.topupfees'/.test(read('build/wallet/00-header-and-mint-errors.js'))

@@ -226,8 +226,11 @@
 
   /* An amount for a heading: dollars where this phone has a price to say them
    * at, the sats where it has not. */
-  stageMoney(sats) {
+  /* `unit` 'usd' is cents, said as dollars exactly, with no price in it: dollars
+   * paid in dollars convert nothing. Sats (no unit) are as they always were. */
+  stageMoney(sats, unit) {
     const n = Math.round(Number(sats) || 0);
+    if (unit === 'usd') return '$ ' + this.usd(n / 100);
     const px = this.px ? this.px() : 0;
     // under half a cent, the sats: "$ 0.00" of change owed is a wrong number (one sat)
     if (px && n > 0 && (n / 1e8) * px < 0.005) return '₿ ' + this.group(n);

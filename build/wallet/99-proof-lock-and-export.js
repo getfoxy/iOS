@@ -110,9 +110,12 @@
       try { refundOf = name === 'receiveToken' ? atRiskRefundOf(text) : ''; } catch (e0) { refundOf = ''; }
       return locked.apply(this, arguments).then(function (r) {
         if (refundOf) {
-          atRiskRefunded(refundOf, (r && r.sats) || 0, 'row').then(function () {
+          // in the refund's own unit: a dollar refund says its cents as `amount`, and 0 sats
+          var ru = unitOf((r && r.unit) || 'sat') || 'sat';
+          var rn = Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats))) || 0;
+          atRiskRefunded(refundOf, rn, 'row').then(function () {
             if (typeof FoxyWallet._onAtRisk === 'function') {
-              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: (r && r.sats) || 0 }); } catch (x) {}
+              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: ru === 'sat' ? rn : 0, unit: ru, amount: rn }); } catch (x) {}
             }
           }, function () {});
         }

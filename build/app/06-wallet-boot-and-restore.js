@@ -164,29 +164,9 @@
         });
         /* Ecash another phone refused and did not send back, settled now
          * that there is a route: safe again, or found redeemed. */
-        if (W.onAtRisk) W.onAtRisk((info) => {
-          this.refreshBalance();
-          if (this.loadHistory) this.loadHistory();
-          const sats = this.group(Math.round(Number(info && info.sats) || 0));
-          if (info && info.state === 'taken') {
-            this.blockedCard('atRiskTaken', {
-              tone: 'warn',
-              title: 'THEY TOOK THE PAYMENT',
-              reason: 'A payment they refused was redeemed afterwards: ' + sats + ' sats. Its entry in your history now says paid.',
-              chip: 'If they are sending it back, they will show you a code to scan. If they were paid a second time for it, that is theirs to give back.',
-            });
-          } else if (info && info.state === 'refunded') {
-            this.toast('The ' + sats + ' sats they refused came back, locked to this phone.');
-          } else if (info && info.state === 'safe') {
-            this.toast('The ' + sats + ' sats they refused are safe again.');
-          }
-        });
+        if (W.onAtRisk) W.onAtRisk((info) => this.atRiskSettled(info));
         // a payment somebody refused, swapped back into the wallet by itself
-        if (W.onTakenBack) W.onTakenBack((info) => {
-          this.refreshBalance();
-          if (this.loadHistory) this.loadHistory();
-          this.toast('The ' + this.group(Math.round(Number(info && info.sats) || 0)) + ' sats they did not take are back in your wallet.');
-        });
+        if (W.onTakenBack) W.onTakenBack((info) => this.takenBackSaid(info));
         // back on a network and caught up: fill the small-change pool again
         W._putAway = (on) => this.putAway(on);
         /* The lock at boot (18-lifecycle-and-chart.js) runs before the wallet

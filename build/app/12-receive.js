@@ -52,12 +52,21 @@
    * names dollars and leaves the conversion to the phone that has a current
    * price (`dollarsOnly`, `asksInDollars`). The two are alternatives — a
    * request carries one amount — so the cache key holds both. */
+  /* A fourth argument, 'usd', asks in dollars as the request's own unit: `sats` is then the
+   * cents asked for, exactly, and the request names `unit: 'usd'`. That is not
+   * the dollar figure above (`usdCents`), which rides a sat request for a
+   * phone with no price; the two never go together. */
   railRequest(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    const unit = arguments[3];             // 'usd' for a request in dollars (above)
     const why = purpose || 'receive';
-    const cents = Math.round(Number(usdCents) || 0);
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + cents;
+    const inUsd = unit === 'usd';
+    const cents = inUsd ? 0 : Math.round(Number(usdCents) || 0);
+    /* The key a request is kept under: a request in dollars has its unit on
+     * the end, so 500 cents and 500 sats are never the same row. A sat
+     * request's key is what it always was. */
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (why) + '|$' + Math.round(Number(cents) || 0) + (unit === 'usd' ? '|usd' : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.making) return '';
@@ -68,8 +77,10 @@
     this._creqs[key] = { making: true };
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
-      const text = W.paymentRequest(cents > 0 ? 0 : sats,
-        { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0 });
+      const text = inUsd
+        ? W.paymentRequest(Math.round(Number(sats) || 0), { deliverTo: ways, purpose: why, unit: 'usd' })
+        : W.paymentRequest(cents > 0 ? 0 : sats,
+          { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0 });
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -129,11 +140,11 @@
    */
   railRequestReady(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
-    const now = this.railRequest(sats, purpose, usdCents);
+    const unit = arguments[3];
+    const now = this.railRequest(sats, purpose, usdCents, unit);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
-      + '|$' + Math.round(Number(usdCents) || 0);
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
     /* No row and no promise: `railRequest` refused it outright. */
@@ -157,12 +168,15 @@
    * Kept per amount, like `railRequest`, so the id does not change with every
    * render; cleared with the rest when the screen goes.
    */
+  /* A third argument, 'usd': a request in dollars, `sats` then being the cents. */
   tapOnlyRequest(sats, purpose) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    const unit = arguments[2];
     const n = Math.max(0, Math.round(Number(sats) || 0));
+    const inUsd = unit === 'usd';
     // a share of a split names itself, which is how `forgetRequests` tells them apart
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '');
+    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
@@ -170,7 +184,8 @@
      * unlocked is what every request was before requests were locked, and
      * waiting for a key here would put back the delay this exists to remove. */
     if (W.primeLocks) { try { W.primeLocks(); } catch (e) {} }
-    const text = W.paymentRequest(n, { purpose: purpose || 'receive' });
+    const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd' })
+      : W.paymentRequest(n, { purpose: purpose || 'receive' });
     if (!text) return '';
     this._creqs[key] = { text: text };
     return text;
@@ -183,8 +198,8 @@
   railRequestPending(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return false;
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
-      + '|$' + Math.round(Number(usdCents) || 0);
+    const unit = arguments[3];
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     return !!(have && have.making);
   }
@@ -207,6 +222,14 @@
     if (!W) return '';
     const s = this.state;
     if (s.invoiceIsAddress) return this.railRequest(0);
+    /* A receive into the dollar balance asks in dollars, as the request's own
+     * unit: the cents typed, exactly, with no price anywhere. Nothing is shown
+     * until there is an amount (a dollar request for any amount is not one
+     * Foxy offers). */
+    if (this.walletNow && this.walletNow('receive') === 'usd') {
+      const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : this.centsTyped()) || 0);
+      return cents > 0 ? this.railRequest(cents, 'receive', 0, 'usd') : '';
+    }
     /* Offline, the amount typed is dollars and stays dollars all the way into
      * the request. Converting it here at a price hours old is the one thing
      * this whole leg exists to avoid. */
@@ -349,7 +372,8 @@
       clearTimeout(this._recvProgT);
       if (this._recvProg && !onIt) this.hideMelt();
       this._recvProg = false;
-      if (onIt) this.showMelt('Receiving ecash\u2026', 0, { sats: ev && ev.sats });
+      // the figure in sats only for sats: dollars arriving are not a number of sats
+      if (onIt) this.showMelt('Receiving ecash\u2026', 0, { sats: ev && ev.unit === 'usd' ? 0 : ev && ev.sats });
       /* A payment has landed on this screen: it does not go back on the air.
        * It did — the request was let go and a fresh one armed while the claim
        * was still at the mint — and the payer, home again, linked to it a
@@ -393,6 +417,11 @@
      * Marked seen before the history pass runs, because that pass is what
      * queues them and it is one line below. */
     if (split && ev.id) this.txIsNew('req-' + ev.id);
+    /* Paid in dollars or in sats, the next receive starts in that balance, as
+     * a dollar invoice paid does (`usdInvoiceUp`). */
+    if (!split && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
+      this.rememberWallet('receive', ev.unit);
+    }
     /* Nor one that is still to be carried home: it is announced when it has
      * landed at this phone's own mint, and not before (`carryHomeNow`). */
     const carrying = /^carry:/.test(String(ev.purpose || '')) && !!this.carryHomeNow;
@@ -558,11 +587,10 @@
       const sats = this.state.invoiceIsAddress ? 0
         : (window.FoxyWallet.amountOf(this.state.invoice) || 0);
       const barred = o.rail === 'ON-CHAIN' && this.ocReceiveBlocked(sats);
-      /* A dollar invoice has one network: Lightning. On chain is bitcoin's
-       * own, and a Cashu request in dollars comes later. */
+      /* Dollars go by Lightning (the dollar invoice) or Cashu (a request in
+       * dollars). On chain is bitcoin's own. */
       const usd = !!(this.walletNow && this.walletNow('receive') === 'usd');
-      const notDollars = usd && o.rail !== 'LIGHTNING'
-        ? (o.rail === 'ON-CHAIN' ? 'On chain is bitcoin only.' : 'Dollar requests come later.') : '';
+      const notDollars = usd && o.rail === 'ON-CHAIN' ? 'On chain is bitcoin only.' : '';
       const row = {
         label: o.rail, sub: o.sub, on: o.rail === current,
         off: barred, offWhy: barred ? this.ocFloorShort() : '',
@@ -766,16 +794,21 @@
    * sweep. What it answers is announced in its unit ("ADDED TO DOLLARS"), and
    * the balance it went into is remembered for the next receive.
    *
-   * No Cashu request and no tap: this screen offers Lightning only. Offline
-   * there is no code to give, and SET AMOUNT has already said so. */
+   * Beside it, on the air, a Cashu request in dollars (`unit: 'usd'`, the
+   * cents): another Foxy at this mint pays it in dollar ecash by a tap, with
+   * no price anywhere (`tapOffering`).
+   *
+   * Offline there is no invoice: the mint makes those. The request is this
+   * phone's own, so it is the code (NETWORK CASHU), with no minute to count
+   * down — a request does not run out — and TAP armed as on any receive. */
   openUsdReceive(cents) {
     const W = window.FoxyWallet;
-    this.setState({ recvRail: 'LIGHTNING', invoiceIsAddress: false, recvUnit: 'usd', recvAmount: cents, recvExpiresAt: null });
+    const off = this.offlineNow();
+    this.setState({ recvRail: off ? 'CASHU' : 'LIGHTNING', invoiceIsAddress: false, recvUnit: 'usd', recvAmount: cents, recvExpiresAt: null });
     if (!(cents > 0)) { this.toast('Ask for an amount above zero.', true); this.back(); return; }
-    if (this.offlineNow()) {
+    if (off) {
       this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
-      this.toast('Receiving dollars needs the mint.', true);
-      this.back();
+      console.log('[foxy] receive: offline, so a Cashu request in dollars and no invoice');
       return;
     }
     const memo = (this.state.note || '').trim();
@@ -916,6 +949,9 @@
     this.stopReceive();
     this.setState(Object.assign(patch, { invoice: '', invoiceHash: '', recvExpiresAt: null,
       recvUnit: unit, asset: 'BITCOIN', recvRail: 'LIGHTNING' }));
+    /* Offline only the request changes, which needs no mint: made here, at
+     * once, rather than by way of the gate's wait for Tor. */
+    if (this.offlineNow()) { this.openReceiveNow(); return; }
     this.openReceive();
   }
 

@@ -258,10 +258,14 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     ok(r && r.unit === 'usd' && r.amount === 500 && r.sats === null, 'a usd request is read in cents, with sats null', JSON.stringify(r && { unit: r.unit, amount: r.amount, sats: r.sats }));
     const sat = c.W.decodeRequest(new CT.PaymentRequest([], 'ab12ce', 21, 'sat', [MINT], '', true).toEncodedRequest());
     ok(sat && sat.unit === 'sat' && sat.amount === 21 && sat.sats === 21, 'a sat request is as it was, with amount beside sats');
+    /* Payable now (tests/usd-tap.js pays them): a dollar request is paid in
+     * dollars, so with none it is refused in the dollar sum, before anything
+     * is asked or made. */
     const said = await why(() => c.W.payRequest(r, () => {}));
-    ok(said === 'That request asks for dollar ecash, which Foxy cannot pay yet.', 'paying it is refused in words', said);
+    ok(said === 'That request names no way Foxy can deliver to.', 'one with nowhere Foxy can deliver is refused as any request is', said);
     const said2 = await why(() => c.W.payRequest(Object.assign({}, r, { delivery: null, viaTap: true }), () => {}));
-    ok(said2 === said, 'over a tap as well, before anything else is asked', said2);
+    ok(said2 === 'Your balance isn\'t enough to cover the payment and its fee: this needs $ 5.00 and you hold $ 0.00.',
+      'over a tap, a phone with no dollars is told so in dollars, before anything else is asked', said2);
   }
 
   // ---- 6, 7. a usd invoice, watched and claimed ------------------------------
@@ -432,7 +436,8 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
 
   // ---- 12. a usd token -----------------------------------------------------------
   {
-    const a = await connected();
+    // a mint that does spending conditions (NUT-11), for the locked token below
+    const a = await connected({ mintOpts: { units: ['sat', 'usd'], p2pk: true } });
     await fund(a, 700, 'usd');
     await fund(a, 300, 'sat');
     const from = books(a);
@@ -456,14 +461,18 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     const sent2 = await a.W.sendToken(100, { unit: 'usd' });
     const back = await a.W.reclaimToken(sent2.token);
     ok(back.unit === 'usd' && back.amount === 100 && back.sats === 0 && a.W.balanceOf('usd') === 450, 'a usd token not taken comes back to the usd pile', JSON.stringify(back));
-    const words = 'Offline and locked payments are bitcoin only for now; nothing was sent.';
-    ok(await why(() => a.W.sendToken(10, { unit: 'usd', lockTo: '02' + 'a'.repeat(64) })) === words, 'a locked usd token is refused in words');
-    ok(await why(() => a.W.sendToken(10, { unit: 'usd', cover: true })) === words, 'and one that covers with change to come back');
+    // a locked usd token: a swap into pieces only that key opens, in cents (tests/usd-tap.js pays requests this way)
+    const lockKey = a.W._lockPubOf('1'.repeat(64));
+    const locked = await a.W.sendToken(10, { unit: 'usd', lockTo: lockKey });
+    const lbits = a.W.tokenInfo(locked.token);
+    ok(locked.unit === 'usd' && locked.amount === 10 && lbits.unit === 'usd'
+      && lbits.proofs.every((x) => String(x.secret).charAt(0) === '['), 'a usd token locked to a key is made, in cents', JSON.stringify({ unit: locked.unit, amount: locked.amount }));
+    const usdNow = a.W.balanceOf('usd');
     a.W._privacy({ tor: 'connecting', progress: 0, everUp: false, unprotected: false, transport: 'direct', network: 'none' });
     a.W.setOffline(true);
-    ok(await why(() => a.W.sendToken(10, { unit: 'usd' })) === words, 'and one with no route');
+    ok(/needs the mint/.test(await why(() => a.W.sendToken(10, { unit: 'usd', lockTo: lockKey }))), 'a locked one with no route is refused in words');
     ok(/only send sats/.test(await why(() => a.W.sendToken(10, { unit: 'eur' }))), 'another unit is refused as it always was');
-    ok(a.W.balanceOf('usd') === 450, 'none of them moved anything');
+    ok(a.W.balanceOf('usd') === usdNow, 'neither moved anything');
   }
 
   // ---- the swap -----------------------------------------------------------------
@@ -716,10 +725,15 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     c.W._privacy({ tor: 'connecting', progress: 0, everUp: false, unprotected: false, transport: 'direct', network: 'none' });
     c.W.setOffline(true);
     const satBefore = c.W.balanceOf('sat');
-    const said = await why(() => c.W.receiveToken(tok.token));
+    let took = null;
+    const said = await why(async () => { took = await c.W.receiveToken(tok.token); });
     ok(c.W.balanceOf('sat') === satBefore, 'dollar ecash taken offline never counts as sats', c.W.balanceOf('sat') + ' sats, was ' + satBefore + ' / ' + said);
     ok(!rows(c).some((x) => x.dir === 'in' && (!x.unit || x.unit === 'sat') && x.sats === 300), 'and is on no sat row');
-    ok(/^This phone is offline, and dollars can only be taken with a connection\./.test(said), 'it is refused in words, and stays the giver’s', said);
+    /* Taken as dollars now, on the same card sats are (the HIGH RISK card,
+     * answered yes here): kept in dollars until there is a connection. */
+    ok(took && took.unit === 'usd' && took.amount === 300 && took.sats === 0 && took.trusted === true
+      && c.W.keptIn('usd') === 300 && c.W.balanceOf('usd') === 300 && c.W.unclaimedSats() === 0,
+      'it is kept in dollars on trust, counted in the dollar balance alone', JSON.stringify({ said, took, kept: c.W.keptIn('usd') }));
     // dollar pieces in a token that says sat: refused offline too, never counted as sats
     const liar = giver.window.CashuTS.getEncodedToken({ mint: MINT, unit: 'sat', proofs: giver.W.tokenInfo(tok.token).proofs });
     const said2 = await why(() => c.W.receiveToken(liar));

@@ -31,9 +31,12 @@ const ok = (good, name, detail) => {
 /* The answers this phone gives a payer are what the test is about, so the
  * bridge records every one of them. */
 const answers = [];
-function page() {
-  const phone = nativePhone({ words: PHONE_WORDS });
-  let mint = null;
+/* `o.mintOpts` for a mint with dollars as well (fakeMint `units`), `o.mint`
+ * to share one, `o.words` for another phone's seed. */
+function page(o) {
+  const opts = o || {};
+  const phone = nativePhone({ words: opts.words || PHONE_WORDS });
+  let mint = opts.mint || null;
   const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
   const ctx = loadReal({
     bridge: (w, m) => {
@@ -46,9 +49,10 @@ function page() {
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
     },
-    before: (w) => { phone.attach(w); mint = fakeMint(w, { p2pk: true }); },
+    before: (w) => { phone.attach(w); if (!mint) mint = fakeMint(w, Object.assign({ p2pk: true }, opts.mintOpts || {})); },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
+  ctx.mint = mint;
   return ctx;
 }
 
@@ -320,6 +324,45 @@ async function run() {
       'a second token to a request already paid offline is refused, in words', JSON.stringify(second).slice(0, 140));
     ok((await W.balanceSats()) === had2 + 61, 'and only the first is counted', String(await W.balanceSats()) + ' vs ' + (had2 + 61));
     online(W);
+  }
+
+  /* ---- the same rule in dollars, at a mint that issues them -----------------
+   *
+   * What is kept with no route is kept in its own unit: a dollar payment
+   * locked to a dollar request is kept as dollars, counted in the dollar
+   * balance and never in sats; dollars locked to a sat request are refused,
+   * and so is unlocked dollar ecash (tests/usd-tap.js has the tap). */
+  {
+    const rx = page({ mintOpts: { units: ['sat', 'usd'] } });
+    await rx.W.connect(MINT, { remember: true });
+    await rx.W.primeLocks();
+    const payer = page({ mint: rx.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' });
+    await payer.W.connect(MINT, { remember: true });
+    const inv = await payer.W.invoice(900, '', { unit: 'usd' });
+    await payer.W.claim(inv.hash);
+    const usdAsk = rx.W.decodeRequest(rx.W.paymentRequest(250, { unit: 'usd', purpose: 'receive' })) || {};
+    const satAsk = rx.W.decodeRequest(rx.W.paymentRequest(70, { unit: 'sat', purpose: 'receive' })) || {};
+    const toUsd = await payer.W.sendToken(250, { unit: 'usd', lockTo: usdAsk.lockTo });
+    const toSat = await payer.W.sendToken(70, { unit: 'usd', lockTo: satAsk.lockTo });
+    const plain = await payer.W.sendToken(30, { unit: 'usd' });
+    offline(rx.W);
+    const mark = answers.length;
+    rx.W._requestPaid(JSON.stringify({ id: usdAsk.id, mint: MINT, unit: 'usd',
+      proofs: rx.W.tokenInfo(toUsd.token).proofs }), 'inbox-usd');
+    await settle();
+    ok(answers.slice(mark).some((a) => a.status === 200) && rx.W.keptIn('usd') === 250 && rx.W.unclaimedSats() === 0,
+      'dollars locked to a dollar request are kept with no route, in dollars and never as sats',
+      JSON.stringify({ kept: rx.W.keptIn('usd'), sats: rx.W.unclaimedSats() }));
+    ok(rx.W.balanceOf('usd') === 250 && rx.W.balanceOf('sat') === 0, 'and counted in the dollar balance alone');
+    const wrong = await rx.W.receiveToken(toSat.token).then((r) => r, (e) => ({ why: e && e.message }));
+    ok(!wrong.kept && wrong.why === 'That ecash is in dollars and the request was for bitcoin, so it was not taken. It is still theirs.',
+      'dollars locked to a sat request are refused with no route, in words', JSON.stringify(wrong));
+    const loose = await rx.W.receiveToken(plain.token).then((r) => r, (e) => ({ why: e && e.message }));
+    ok(!loose.kept && /only take ecash locked to it/.test(String(loose.why)), 'and so are dollars locked to nobody', JSON.stringify(loose));
+    online(rx.W);
+    await rx.W.claimUnclaimed();
+    ok(rx.W.keptIn('usd') === 0 && rx.W.balanceOf('usd') === 250, 'with a route the dollars are swapped into the dollar pile');
+    require('./harness').noBooks(payer, 'tokens it made were left with a phone that would not take them');
   }
 
   console.log('\n' + (failed ? failed + ' offline-accept check(s) failed'
