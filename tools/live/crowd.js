@@ -428,20 +428,21 @@ function senderFor(p) {
     const key = m.method + ' ' + m.url + ' ' + (m.body || '');
     // the page asking once more after a 429: on a fresh circuit, and the person stays there
     const after429 = p.refused.has(key);
-    if (after429) { p.refused.delete(key); p.circuit = label(); S.retry429++; }
+    const fresh = (code) => { if (code === 7 || p.fresh >= 3) return; p.fresh++; p.circuit = label(); };
+    if (after429) { p.refused.delete(key); fresh(0); S.retry429++; }
     const end = Date.now() + BUDGET_MS;
     let r = await curl(m, p.circuit, BUDGET_MS);
     if (r.err) {
       const safe = BEFORE_IT_LEFT.has(r.code) || (m.method === 'GET' && LOST_ON_THE_WAY.has(r.code));
       bump(sub(S.failed, group), r.code === 28 ? 'timeout' : 'curl ' + r.code);
-      p.circuit = label();
-      if (safe && end - Date.now() >= 10000) {
+      fresh(r.code);
+      if (safe && r.code !== 7 && end - Date.now() >= 10000) {
         S.retryNet++;
         r = await curl(m, p.circuit, end - Date.now());
         if (r.err) {
           S.retryNetFailed++;
           bump(sub(S.failed, group), r.code === 28 ? 'timeout' : 'curl ' + r.code);
-          p.circuit = label();
+          fresh(r.code);
         } else if (r.status !== 429 && r.status < 500) S.retryNetOk++;
         else S.retryNetFailed++;
       }
@@ -473,7 +474,7 @@ async function ask(url, p) {
     if (!r.err && r.status === 200) return JSON.parse(r.text);
     last = r.err ? 'curl ' + r.code + ': ' + r.why : 'HTTP ' + r.status + ' from ' + url;
     bump(sub(S.failed, 'same-mint'), r.err ? (r.code === 28 ? 'timeout' : 'curl ' + r.code) : 'http ' + r.status);
-    if (p) p.circuit = label();
+    if (p && r.code !== 7 && p.fresh < 3) { p.fresh++; p.circuit = label(); }
   }
   throw new Error(last);
 }
@@ -482,7 +483,7 @@ async function ask(url, p) {
 const people = [];
 function person(n) {
   const home = TWO && n % 2 === 1 ? 'B' : 'A';
-  const p = { n, name: 'person ' + n, home, circuit: label(), refused: new Set(), seen429: 0, doing: '', group: 'same-mint',
+  const p = { n, name: 'person ' + n, home, circuit: label(), fresh: 0, refused: new Set(), seen429: 0, doing: '', group: 'same-mint',
               exit: '', b: null, W: null, feesAt: { A: 0, B: 0 }, crossFees: 0, sent: 0, got: 0 };
   const way = senderFor(p);
   // o.via in both cases: with real money too, a fake-money host the page names goes by curl, never fetch
