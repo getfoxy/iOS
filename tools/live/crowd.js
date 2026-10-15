@@ -134,6 +134,8 @@ const TOKEN_FILE = opt('token', '');
 const CROSS_ARG = opt('cross', null);
 const BURST = String(opt('burst', '')).split(',').map((x) => Math.round(Number(x))).filter((n) => n >= 1);
 const REPEAT = Math.round(Number(opt('repeat', 1)));
+const BATCH = Math.round(Number(opt('batch', 8)));     // people brought up at once: a Tor on a phone cannot build 100 circuits in one go
+const SPREAD = Math.round(Number(opt('spread', 20)));  // ms between a burst's starts: real at the mint, kind to the one SOCKS port
 const LOCAL = flag('local');
 /* A mint's URL as the wallet keys it (canonicalMint in Web/foxy-wallet.js):
  * scheme and host in lower case, no default port, no trailing slash. */
@@ -153,10 +155,17 @@ const URL_OF = { A: MINT, B: MINT_B };
 const LETTERS = TWO ? ['A', 'B'] : ['A'];
 const CROSS = TWO ? (CROSS_ARG == null ? 0.5 : Number(CROSS_ARG)) : 0;
 const usage = 'usage: node tools/live/crowd.js [--people 20] [--rounds 10] [--fund 100] [--socks 53114] '
-  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--burst 1,2,4,8 --repeat 1] [--local] <mint A> [<mint B>]';
+  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--burst 1,2,4,8 --repeat 1 --spread 20] [--batch 8] [--local] <mint A> [<mint B>]';
 if (!MINT || !/^https:\/\//.test(MINT) || (TWO && !/^https:\/\//.test(MINT_B)) || argv.length > 2) { console.log(usage); process.exit(1); }
 if (BURST.length && TWO) { console.log('FAIL  --burst is for one mint'); process.exit(1); }
-if (!(REPEAT >= 1)) { console.log(usage); process.exit(1); }
+if (!(REPEAT >= 1) || !(BATCH >= 1) || !(SPREAD >= 0)) { console.log(usage); process.exit(1); }
+/* At most BATCH of fn in flight over the list: bringing a crowd up is not a burst. */
+const batched = async (list, fn) => {
+  const out = new Array(list.length); let next = 0;
+  const worker = async () => { while (next < list.length) { const i = next++; out[i] = await fn(list[i], i); } };
+  await Promise.all(Array.from({ length: Math.min(BATCH, list.length) }, worker));
+  return out;
+};
 /* In burst mode the share-out and the sweep go one at a time, so the only
  * bursts at the mint are the measured ones. */
 const allOf = async (list, fn) => {
@@ -732,7 +741,7 @@ function saveState() {
 }
 
 /* ---- the end ------------------------------------------------------------ */
-const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, bursts: BURST.length ? BURST : null, repeat: REPEAT, fund: FUND,
+const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, bursts: BURST.length ? BURST : null, repeat: REPEAT, spread: SPREAD, batch: BATCH, fund: FUND,
             min: MIN, max: MAX, stagger: STAGGER, cross: CROSS, socks: LOCAL ? null : SOCKS, mints: {} };
 let finished = false;
 function finish(code) {
@@ -910,15 +919,19 @@ async function fundByInvoice(p, want, what) {
   // the people, each on a circuit of their own, each connected to the mint it banks at
   for (let i = 0; i < PEOPLE; i++) people.push(person(i));
   if (!LOCAL) {
-    await Promise.all(people.map(async (p) => {
+    await batched(people, async (p) => {
       try { p.exit = String((await ask('https://check.torproject.org/api/ip', p)).IP || ''); } catch (e) {}
-    }));
+    });
     const exits = new Set(people.map((p) => p.exit).filter(Boolean));
     ok(exits.size >= Math.min(PEOPLE, 2), PEOPLE + ' people on ' + exits.size + ' Tor exits', [...exits].length > 6 ? '' : [...exits].join(', '));
   }
-  const conn = await Promise.all(people.map(async (p) => {
-    try { await p.W.seedReady(); await p.W.connect(URL_OF[p.home]); return true; } catch (e) { return String(e.message || e).slice(0, 100); }
-  }));
+  // BATCH at a time, and a second try for a person whose first connection timed out on the way up
+  const conn = await batched(people, async (p) => {
+    for (let tries = 0; ; tries++) {
+      try { await p.W.seedReady(); await p.W.connect(URL_OF[p.home]); return true; }
+      catch (e) { if (tries >= 1) return String(e.message || e).slice(0, 100); await sleep(1000); }
+    }
+  });
   const notIn = conn.filter((c) => c !== true);
   if (!ok(!notIn.length, 'every person connected' + (TWO ? ' to the mint they bank at (' + atHome('A').length + ' at A, ' + atHome('B').length + ' at B)' : '')
     + ', each with a seed on its own phone', notIn.length ? notIn.join('; ') : '')) return finish(1);
@@ -934,10 +947,15 @@ async function fundByInvoice(p, want, what) {
   const crossHead = TWO ? Math.max(10, Math.ceil(groupB.length * FUND * 0.02)) + 3 * groupB.length : 0;
   let fundedA = 0, fundedB = 0;
   if (TOKEN_FILE) {
-    const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-    const r = await step(F, 'receive', () => F.W.receiveToken(t));
-    if (!ok(r.ok, 'the funder took the token in ' + TOKEN_FILE, r.ok ? r.v.sats + ' sats' : r.why)) return finish(1);
-    fundedA = Number(r.v.sats) || 0;
+    // one token, or one per line: a run's sweep and the tokens it never took can fund the next
+    const toks = fs.readFileSync(TOKEN_FILE, 'utf8').split('\n').map((x) => x.trim()).filter((x) => /^cashu[AB]/.test(x));
+    if (!ok(toks.length > 0, 'the token file holds a token', TOKEN_FILE)) return finish(1);
+    let tookN = 0; const whyNot = [];
+    for (const t of toks) {
+      const r = await step(F, 'receive', () => F.W.receiveToken(t));
+      if (r.ok) { fundedA += Number(r.v.sats) || 0; tookN++; } else whyNot.push(r.why);
+    }
+    if (!ok(tookN === toks.length, 'the funder took the token' + (toks.length > 1 ? 's' : '') + ' in ' + TOKEN_FILE, tookN + ' of ' + toks.length + ', ' + fmt(fundedA) + ' sats' + (whyNot.length ? '; ' + whyNot.slice(0, 3).join('; ') : ''))) return finish(1);
   } else {
     const want = PEOPLE * FUND + headroom + crossHead;
     fundedA = await fundByInvoice(F, want, PEOPLE + ' x ' + FUND + ' + ' + headroom + ' for fees'
@@ -1069,7 +1087,8 @@ async function fundByInvoice(p, want, what) {
         // the burst: every take at the same instant
         const t0 = Date.now();
         const starts = [];
-        const res = await Promise.all(tokens.map(async (t) => {
+        const res = await Promise.all(tokens.map(async (t, i) => {
+          if (SPREAD && i) await sleep(SPREAD * i);
           const st = Date.now(); starts.push(st);
           const g = await take(people[t.to], t);
           return { ok: g.ok, why: g.why || '', ms: Date.now() - st, t };
