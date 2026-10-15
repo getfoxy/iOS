@@ -47,6 +47,21 @@
     return null;
   }
 
+  /* Does an exact set from `exactPieces` go into the token as it is, or is it
+   * swapped first? The one rule, asked by the send (`sendToken`) and by the
+   * check ahead of it (`sendShortfall`), so the two cannot disagree.
+   *
+   * With a route, a set of more than 24 pieces is swapped for a handful: a
+   * wallet kept deep in small change paid with 123 pieces, a token of 39,000
+   * characters that would not go over the link at all. With no route there is
+   * no swap, and it goes as it is. Nor past what the mint takes in one
+   * request: a swap of 35 inputs at a mint that takes 25 is refused outright
+   * (the live array-cap suite), so above the cap the pieces go as they are. */
+  function exactGoesAsIs(w, exact) {
+    if (!(exact && exact.length)) return false;
+    return !(exact.length > 24 && exact.length <= mintArrayCap(w) && routeOpen());
+  }
+
   /* Pieces that cover an amount this wallet cannot make exactly, with the least
    * over-payment it can manage.
    *

@@ -119,6 +119,14 @@ up and quotes the fee by itself, Tor giving up says the card, no network
 at all is as it was; and then it mounts the real page and reads the button off
 the DOM, because only the page makes the route coming up an update.
 
+**`long-exact-set.js`** holds `sendShortfall` and `sendToken` to one rule for
+pieces on hand that make the amount exactly (`exactGoesAsIs`). With a route, a
+set of more than 24 is swapped for a handful, and at a mint that charges the
+swap's fees may not fit; the check used to offer such a send and the send then
+refused it. It builds the pile and asks both: refused together at 100 ppk with
+30 pieces and with 25, and both yes when a larger piece lets the swap make it,
+with 24, past the mint's cap, with no route, and at a mint with no fee.
+
 The same rule is held where the other screens ask it. A payment request is
 judged by the wallet's `sendShortfall` (which is `sendToken`'s own sum) in the
 first, and in the second at a mint that charges for what it swaps: the offer's

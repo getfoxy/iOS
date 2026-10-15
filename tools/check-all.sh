@@ -76,6 +76,7 @@ check "change recovery" 1 node tests/change-recovery.js
 check "audit"          1 node tests/audit.js
 check "waiting screens" 1 node tests/waiting-screens.js
 check "send fee check" 1 node tests/send-fee-check.js
+check "long exact set" 1 node tests/long-exact-set.js
 check "held swap"      1 node tests/held-swap.js
 check "kept token"     1 node tests/kept-token.js
 check "price terms"    1 node tests/price-terms.js

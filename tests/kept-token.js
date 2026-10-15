@@ -286,7 +286,8 @@ ok(/var shaped = \(isFinite\(expect\) && expect > 0 && !\(opts && opts\.plain\)\
      && /self\.onText\(UIPasteboard\.general\.string \?\? ""\)/.test(host),
      'a paste-control tap that pastes nothing reads the pasteboard directly after 1.5 s, once, while Foxy is active');
 }
-ok(/exact\.length > 24 && exact\.length <= mintArrayCap\(w\) && routeOpen\(\)/.test(read('build/wallet/19-bill-split.js'))
+ok(/exact\.length > 24 && exact\.length <= mintArrayCap\(w\) && routeOpen\(\)/.test(read('build/wallet/05-paying-this-mint.js'))
+   && /if \(!exactGoesAsIs\(w, exact\)\) exact = null;/.test(read('build/wallet/19-bill-split.js'))
    && /shapeOutputs\(proofs\(intoMint, unit\), expect, mintArrayCap\(w\) - 16\)/.test(read('build/wallet/19-bill-split.js')),
    'a swap never asks a mint for more inputs or outputs than it takes in one request');
 ok(/if \(px && n > 0 && \(n \/ 1e8\) \* px < 0\.005\) return /.test(read('build/app/26e-loaders.js')),

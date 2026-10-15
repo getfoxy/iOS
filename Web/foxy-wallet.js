@@ -5905,6 +5905,21 @@
     return null;
   }
 
+  /* Does an exact set from `exactPieces` go into the token as it is, or is it
+   * swapped first? The one rule, asked by the send (`sendToken`) and by the
+   * check ahead of it (`sendShortfall`), so the two cannot disagree.
+   *
+   * With a route, a set of more than 24 pieces is swapped for a handful: a
+   * wallet kept deep in small change paid with 123 pieces, a token of 39,000
+   * characters that would not go over the link at all. With no route there is
+   * no swap, and it goes as it is. Nor past what the mint takes in one
+   * request: a swap of 35 inputs at a mint that takes 25 is refused outright
+   * (the live array-cap suite), so above the cap the pieces go as they are. */
+  function exactGoesAsIs(w, exact) {
+    if (!(exact && exact.length)) return false;
+    return !(exact.length > 24 && exact.length <= mintArrayCap(w) && routeOpen());
+  }
+
   /* Pieces that cover an amount this wallet cannot make exactly, with the least
    * over-payment it can manage.
    *
@@ -20878,12 +20893,20 @@
        * So the question is put to the same selection the swap
        * makes. Only with a route, where a swap is what happens; and not where
        * pieces on hand make the amount exactly and no lock is asked for, which
-       * goes as it is and asks the mint nothing. */
+       * goes as it is and asks the mint nothing.
+       *
+       * Unless that exact set is more than 24 pieces, which the send swaps
+       * for a handful (`exactGoesAsIs`). This said yes to it all the same,
+       * and the swap's fees did not fit in a set that covers only the amount:
+       * at a mint that charges, the confirmation offered a send and cashu-ts
+       * refused it with the same words as the 26 sats. So the send's own rule
+       * is asked here, and a set it would swap is put to the swap's selection
+       * like any other. */
       if (!short && routeOpen()) {
         var locked = !!(opts && opts.locked);
         var exact = null;
         try { exact = locked ? null : exactPieces(w, have, want); } catch (e0) { exact = null; }
-        if (!(exact && exact.length)) {
+        if (!exactGoesAsIs(w, exact)) {
           /* What leaves is the amount and the receiver's fee on the pieces
            * the amount is cut into (includeFees). How many pieces is
            * cashu-ts's to decide, so the count is one per set bit and four
@@ -20987,15 +21010,11 @@
       // pieces already held carry no lock, so locking means a swap, always
       var exact = lockTo ? null : exactPieces(w, have, want);
       /* With a route, an exact set of dozens of small pieces is swapped for a
-       * handful: a wallet kept deep in small change paid with 123
-       * pieces, a token of 39,000 characters that would not go over the link
-       * at all. The swap asks the mint once and the
-       * token is a dozen pieces. With no route there is no swap, and it goes
-       * as it is — the link carries that now. */
-      /* Not past what the mint takes in one request: a swap of 35 inputs at a
-       * mint that takes 25 is refused outright (the live array-cap suite),
-       * so above the cap the pieces go as they are. */
-      if (exact && exact.length > 24 && exact.length <= mintArrayCap(w) && routeOpen()) exact = null;
+       * handful: the swap asks the mint once and the token is a dozen pieces.
+       * With no route there is no swap, and it goes as it is — the link
+       * carries that now. The rule is `exactGoesAsIs`, which `sendShortfall`
+       * asks as well, so what the confirmation offers is what is sent. */
+      if (!exactGoesAsIs(w, exact)) exact = null;
       /* Nothing in the pile makes it, and no route to swap for it — but ecash
        * locked to this phone might.
        *
