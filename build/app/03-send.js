@@ -408,9 +408,14 @@
     });
   }
 
-  startSendNow(to) {
+  /* `o`: a payment from a card (26f-flashcard.js, `fcOutPay`): `held`, the card's pieces held for it, which are what it is paid
+   * with and nothing else; `card`, the card; and the invoice (`found`, for an address) and the fee quote the card was charged
+   * for. Any way it is not made, with the pieces still held, they go back to the card (`fcOutBack`) and there is no TRY AGAIN:
+   * the card has been charged, and paying again is NEXT again, a new tap. */
+  startSendNow(to, o) {
     const W = window.FoxyWallet;
     const P = window.FoxyProgress;
+    const card = (o && o.held) ? o : null;
     // an invoice already held in a payment is not paid a second time
     const inv = String(to || '').trim().replace(/^lightning:/i, '');
     const want = inv.toLowerCase();
@@ -419,6 +424,7 @@
     if (W && W.pendingMelts && W.pendingMelts().some(m => m && (
       (m.bolt11 && m.bolt11.toLowerCase() === want) || (m.payee && m.payee === want)))) {
       this.showPayPending();
+      if (card) this.fcOutBack(card, null);
       return;
     }
     /* One send at a time. The 150-second backstop below ends the wait, not
@@ -426,6 +432,7 @@
      * then queued behind it and paid again. */
     if (this._sendRun) {
       this.showPayPending();
+      if (card) this.fcOutBack(card, null);
       return;
     }
     console.log('[foxy] overlay module:', P ? (P.complete ? 'has complete()' : 'OLD - no complete()') : 'NOT LOADED');
@@ -450,21 +457,33 @@
      * are fresh (`payLnurl`); an address the screen could not look up, or one
      * it was not asked about, is looked up here, as it was before. */
     const asked = this.sendAsk();
-    const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
+    const found = card ? (card.found || null) : (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
       ? this._found : null;
-    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    const kept = card ? (card.quote || null) : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
      * paid with the same invoice again the next time this address and amount
      * are chosen, and one that fails is asked about afresh when the person is
      * back on the confirmation. */
     if (found) { this._found = null; this._quotedFor = null; }
+    // from a card: its held pieces, by name, and the card (an entry that says it was paid from the card)
+    const fromCard = card ? { held: card.held, card: card.card } : {};
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
+      ? W.payLnurl(to, card ? (found ? found.sats : typed) : typed, '', onStage,
+                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard) : undefined)
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
+                                         card ? (kept ? { quote: kept } : {})
+                                           : (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {},
+                                         fromCard));
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
+    /* From a card, and the wait below given up on as pending: a payment that then fails after all, with the card's pieces still
+     * held, puts them back to the card as one that failed at once does. */
+    if (card) {
+      run.then(null, (e) => {
+        if (card.pendingShown && !card.done && !(e && e.pending) && this.fcOutStillHeld(card)) this.fcOutBack(card, e);
+      });
+    }
     const job = Promise.race([
       run,
       // pending, not failed: the payment may still be going, so no TRY AGAIN
@@ -478,6 +497,7 @@
     job.then(r => {
       if (r && r.pending) {
         console.log('[foxy] send pending');
+        if (card) card.pendingShown = true;
         if (P) P.end();
         W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
         this.showPayPending();
@@ -485,6 +505,8 @@
       }
       console.log('[foxy] send complete');
       W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
+      // from a card: what is left of the card's flow (change it is still owed) once the payment is made
+      if (card) this.fcOutSettled(card, true);
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
 
@@ -541,10 +563,18 @@
       const m = String((e && e.message) || '');
       console.error('[foxy] send failed:', e);
       if (P) P.end();
+      /* From a card: unless the payment may still be going (its melt is held, and is settled as any is), the card's pieces are
+       * still held for it, and they go back to the card, said as NOT PAID; never TRY AGAIN. */
+      if (card && !(e && e.pending) && this.fcOutStillHeld(card)) {
+        if (this.state.screen === 'sendDone' || this.state.sendPhase) this.toConfirm();
+        this.fcOutBack(card, e);
+        return;
+      }
+      if (card) this.fcOutSettled(card, false);
       // stopped by the person before it was made: they are home already
       if (e && e.foxyStopped) return;
       // held, not failed: the pending card, never TRY AGAIN
-      if (e && e.pending) { this.showPayPending(); return; }
+      if (e && e.pending) { if (card) card.pendingShown = true; this.showPayPending(); return; }
       // before the classification below, which would call "invalid" a refusal and offer TRY AGAIN
       if (this.isBadSignatures(e)) {
         this.badSignatureCard(null, 'pay', () => {
@@ -592,7 +622,9 @@
       }
 
       // not enough money needs a different amount, not another attempt
-      const again = (kind === 'sendFail') ? null : () => this.startSend();
+      /* From a card, another attempt is NEXT again, a new tap of the card (`fcOutNext`): never `startSend`, which pays from
+       * this phone's own balance under a confirmation that says FROM FLASHCARD. */
+      const again = (kind === 'sendFail') ? null : card ? () => this.fcOutNext() : () => this.startSend();
 
       /* CLOSE must not strand you on the sending screen.
        *
@@ -606,8 +638,9 @@
        * exactly this, NOT ENOUGH), so the card, whichever way it is closed,
        * goes to the amount screen. It has no TRY AGAIN; its one button names
        * where it goes, and the closing does it (`toAmount`). */
-      this.blockedCard(kind, {
-        title: kind === 'mintRefused' ? 'THE MINT SAID NO' : undefined,
+      /* The title only where this card has its own: a title of undefined here wiped the kind's own (`blockedCard` lays this
+       * over it), and a card with no title is not shown at all, so every failure but the mint's refusal said nothing. */
+      this.blockedCard(kind, Object.assign(kind === 'mintRefused' ? { title: 'THE MINT SAID NO' } : {}, {
         reason: W.reason(e),
         retry: again ? 'TRY AGAIN' : 'CHANGE AMOUNT',
         back: again ? '' : 'amount',
@@ -625,6 +658,6 @@
             this.toConfirm();
           }
         },
-      });
+      }));
     });
   }

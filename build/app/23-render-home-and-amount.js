@@ -14,14 +14,15 @@
       goSend: () => this.setState(p => ({
         screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
-        note: '', noteDraft: '',
+        // home's SEND pays from this phone, never from a card (26f-flashcard.js, `fcOutMode`)
+        note: '', noteDraft: '', sendFrom: '',
       })),
       // home's SCAN: straight to the scanner, which is how a payment request,
       // an invoice or a token gets in
       goScan: () => this.setState(p => ({
         screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
-        note: '', noteDraft: '',
+        note: '', noteDraft: '', sendFrom: '',
       })),
       goReceive: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'receive',
@@ -453,8 +454,8 @@
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
-      // withdrawing from a card, the ceiling is the card's and the line says so
-      ...(s.flow === 'cardWd' ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
+      // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
+      ...((s.flow === 'cardWd' || (s.flow === 'send' && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
     };

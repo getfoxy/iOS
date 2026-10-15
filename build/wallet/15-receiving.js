@@ -983,6 +983,12 @@
               });
           });
         }, Promise.resolve(settled || []));
+      }).then(function (settled) {
+        /* A card's pieces a melt gave back to their hold (`cardOutReturn`) go back to the card now, as the connect's sweep
+         * would (`cardOutsLeft`): the pending payment's own sweeps (03-send.js) are often the only ones before the next
+         * connection, which can be days off. */
+        if (!FoxyWallet.cardOutHeld().length) return settled;
+        return FoxyWallet.cardOutsLeft().then(function () { return settled; }, function () { return settled; });
       });
       sweeping = answer;
       var free = function () { sweeping = null; };
@@ -1070,7 +1076,9 @@
                   feeSats: meltFee(sumProofs(entry.proofs || []) + (Number(entry.splitFee) || 0), entry.amount, change),
                   settled: true,
                   state: 'success',
-                  memo: '',
+                  // paid with a card's pieces (SEND from the card's screen), as pay's own entry says it
+                  memo: entry.cardOut ? 'paid from card' : '',
+                  fromCard: entry.cardOut ? (entry.card || undefined) : undefined,
                   hash: entry.quote,
                   bolt11: entry.bolt11 || '',
                   // the proof that this invoice was paid, as the mint now gives it (`preimageOf`)
@@ -1079,6 +1087,7 @@
                   mint: here,
                 });
                 dropMelt(entry.quote);
+                if (entry.cardOut) FoxyWallet.cardOutDone(entry.cardOut);
                 settled.push({ quote: entry.quote, paid: true });
                 console.log('[foxy] held melt', entry.quote, 'settled as paid');
               });
@@ -1108,7 +1117,10 @@
                * PAID branch above was fixed for, reached from the other side.
                * `restored` because these are this wallet's own proofs coming
                * home, not ecash from anywhere else. */
-              addOwnProofs(entry.proofs || [], here, mw, undefined, true);
+              /* A card's pieces go back to the hold they came from, for the card (08a-flashcard.js, `cardOutsLeft` takes them
+               * there at once), and not into this phone's pile. */
+              if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs || [], here, entry.cardHold || { card: entry.card || '' }, 0);
+              else addOwnProofs(entry.proofs || [], here, mw, undefined, true);
               /* Charged only when the hold really went: a drop that was refused
                * leaves it for the next sweep, which would charge it again. */
               dropMelt(entry.quote);
@@ -1127,8 +1139,9 @@
                   console.log('[foxy] held melt', entry.quote, 'still PENDING, inputs', states.join(','));
                   return;
                 }
-                // idempotent, like the UNPAID/FAILED branch above
-                addOwnProofs(entry.proofs, here, mw, undefined, true);
+                // idempotent, like the UNPAID/FAILED branch above (and a card's pieces back to their hold, as there)
+                if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs, here, entry.cardHold || { card: entry.card || '' }, 0);
+                else addOwnProofs(entry.proofs, here, mw, undefined, true);
                 dropMelt(entry.quote);
                 if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
                 settled.push({ quote: entry.quote, paid: false });

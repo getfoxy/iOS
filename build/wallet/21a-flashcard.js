@@ -797,7 +797,21 @@
      * `opts.on(step)` is told 'reading', 'signing', 'checking' (the card has been
      * let go), 'making' (the change), 'done' for the screen; with `hold`, 'mint'
      * and 'change' for the same. Resolves { sats, hash, change: { sats, written } }. */
+    /* `opts.holdFor` and `opts.only`: the card paying out of this phone (SEND from its own screen, 26f-flashcard.js). The tap is a
+     * till's in every way, and the pieces the swap gives for the price are held for the payment (`cardOutHold`): the result
+     * names the hold (`held`, `heldSats`) for `pay` to melt. `only` is the key of the card on the screen, and any other card is
+     * refused (`wrong-card`) before anything is asked of it. */
     cardPay: function (link, opts) { return cardTake(link, opts || {}, 'card'); },
+    // paying out of this phone from a card: what it costs, the way back, the ones left behind, and a payment done with its hold
+    cardOutTotal: function (amount, reserve) { return cardOutTotal(amount, reserve); },
+    cardOutBack: function (id) { return cardOutBack(id); },
+    cardOutsLeft: function () { return cardOutsLeft(); },
+    cardOutDone: function (id) { cardOutDone(id); },
+    cardOutHeld: function () {
+      var all = load(K.held, {});
+      return Object.keys(all).filter(function (id) { return all[id] && all[id].kind === 'card out'; })
+        .map(function (id) { return { id: id, card: all[id].card, sats: sumProofs(all[id].proofs || []), at: Number(all[id].at) || 0 }; });
+    },
     /* A withdrawal that holds the card (`opts.hold`) ends by reading it once
      * more, for its holder's screen (`card` on the result). Only this one: a
      * till being paid learns no more of a card than it needs. A card that has
@@ -958,13 +972,16 @@
           return cardSwapTaken(row, true).then(function (r) {
             var w = null;
             try { w = need(); } catch (x) { w = null; }
-            var owe = w ? cardOweBack(row, w, null, null, r) : Promise.resolve({ sats: 0 });
+            /* A card paying out of this phone (`row.send`) whose answer came late: the payment it was for was never made, so
+             * none of it is this phone's. All of it goes back to the card, as a refund does. */
+            var owing = row.send ? Object.assign({}, row, { refund: true }) : row;
+            var owe = w ? cardOweBack(owing, w, null, null, r) : Promise.resolve({ sats: 0 });
             // the change the card made for itself (1.12) is owed to it already, and goes back with any made here
             var itself = function () { return row.all ? 0 : cardBlindOwed(row.id).sats; };
             return owe.then(function (o) {
-              out.push({ id: row.id, state: 'paid', sats: r.sats, change: ((o && o.sats) || 0) + itself(), refund: !!row.refund });
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: ((o && o.sats) || 0) + itself(), refund: !!(row.refund || row.send), send: !!row.send });
             }, function () {
-              out.push({ id: row.id, state: 'paid', sats: r.sats, change: itself(), refund: !!row.refund });
+              out.push({ id: row.id, state: 'paid', sats: r.sats, change: itself(), refund: !!(row.refund || row.send), send: !!row.send });
             });
           },
             function (e) {

@@ -11,22 +11,48 @@
  *
  * `appOn(ctx, start, { split: true })` adds the split bill's own parts (17-split-bill-and-copy.js, 20-split-values.js), for
  * the suites that press CARD on a payer's share: the bill's invoices, its ledger, and the screens that tick a share are then
- * the app's own, and what the screen draws for a share is `splitVals`'. */
+ * the app's own, and what the screen draws for a share is `splitVals`'.
+ *
+ * `appOn(ctx, start, { send: true })` adds the app's own SEND MONEY flow, lifted out of its files by each method's first line:
+ * the send screen's values (`renderSend`), what a scan or a paste is taken as (`acceptTarget`), the confirmation
+ * (`confirmSpec`, the fee asked of the mint, `quoteSendFee`), the payment itself (`startSend`, `startSendNow`), the keypad's
+ * ceiling (`renderContext`) and the camera (`syncPreview`), for the suites that pay from a card (tests/flashcard-send.js). */
 const fs = require('fs');
 const path = require('path');
 
 const read = (files) => files.map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
 const PARTS = read(['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js']);
 const SPLIT_PARTS = read(['17-split-bill-and-copy.js', '20-split-values.js']);
+/* One of the app's methods, out of the text of its file, by its first line: from there to the brace that closes it. */
+const liftFrom = (src, sig) => {
+  const at = src.indexOf('\n  ' + sig);
+  if (at < 0) throw new Error('flashcard-ui-kit: no method ' + sig);
+  let i = src.indexOf('{', at + 3 + sig.length - 1), depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  return src.slice(at + 3, i + 1);
+};
+const SEND_SIGS = {
+  '01-ui-basics.js': ['confirmSpec() {', 'cfRow(label, value, opt) {', 'sendToText() {', 'sendAmountText() {'],
+  '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'syncSend() {',
+                 'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'startSend() {', 'showPayPending() {', 'checkSendPrice() {', 'startSendNow(to, o) {'],
+  '12-receive.js': ['acceptTarget(text) {', 'offlineInvoiceCard() {'],
+  '15-paid-wake-keyboard.js': ['syncPreview() {', 'pasteUncovered(el, box) {'],
+  '21-render-values.js': ['renderContext() {'],
+  '24-render-receive-and-send.js': ['renderSend(c) {'],
+};
+const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n');
 
 /* The parts as a class over this page's window, and an app of it with
  * the rest of the app class stood in for: state, navigation, and the few
  * helpers the parts call. */
 function appOn(ctx, start, o) {
-  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '');
+  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '');
   // (the split values keep a React ref in a field of the class: nothing here draws with it)
-  const Parts = new Function('window', 'document', 'localStorage', 'React', 'return class {\n' + body + '\n};')(
-    ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) });
+  const Parts = new Function('window', 'document', 'localStorage', 'React', 'navigator', 'CTA_INK', 'return class {\n' + body + '\n};')(
+    ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) }, ctx.window.navigator, () => '#fff');
   const a = new Parts();
   a.state = Object.assign({ screen: 'home', stack: [], fc: null, invoice: '', invoiceIsAddress: false }, start || {});
   a.setState = (x) => { Object.assign(a.state, typeof x === 'function' ? x(a.state) : x); };
@@ -93,6 +119,28 @@ function appOn(ctx, start, o) {
     return a.px() ? Math.round(val / a.px() * 1e8) : 0;
   };
   a.back = () => { const st = a.state.stack; a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1); };
+  if (o && o.send) {
+    // the app's own row, and not the short one above: the confirmation's rows are read as the app makes them
+    delete a.cfRow;
+    // the keypad's amount, for a payment typed on it (the app's own reads the same figure, 12-receive.js)
+    const cardWanted = a.wantedSats;
+    a.wantedSats = () => {
+      if (a.state.flow === 'send') {
+        const val = parseFloat(a.state.amount) || 0;
+        if (a.state.unit === 'SATS') return Math.round(val);
+        return a.px() ? Math.round(val / a.px() * 1e8) : 0;
+      }
+      return cardWanted();
+    };
+    a.connecting = () => !!a.comingRoute;
+    a.heldBlocks = () => '';
+    a.satUsd = () => (a.px() || 0) / 1e8;
+    // (the app's own refreshes the screen; here the figures are asked for when a test wants them)
+    a.balNow = () => ({ sats: a.have || 0 });
+    // the progress overlay over the sending screen, and the burst at its end, are the page's: none here
+    a.settleAnimate = () => {};
+    a.editSendNote = () => {};
+  }
   return a;
 }
 

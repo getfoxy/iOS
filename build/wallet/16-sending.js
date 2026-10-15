@@ -75,11 +75,21 @@
        * of the payment. An invoice with no amount is always quoted anew: the
        * confirmation quotes without one. */
       var kept = opts && opts.quote;
+      /* Paid from a card's pieces held for it (`opts.held`, 08a-flashcard.js `cardOutHold`): the card was charged for this
+       * quote's amount and fee, so it is the one paid with while the mint still honours it (its own expiry half a minute off,
+       * however long the card took to read), on the circuit kept ready. A PIN and a second tap can be more than a minute. */
+      var heldId = (opts && typeof opts.held === 'string') ? opts.held : '';
+      var unsent = function (message) {
+        var e = /** @type {any} */ (new Error(message));
+        e.unsent = true;
+        if (heldId) e.held = heldId;
+        return e;
+      };
       var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv
-        && (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000)
+        && (heldId || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000))
         && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + 30000));
       if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
-      var quoted = reuse ? Promise.resolve({ got: kept.quote, w: kept.w })
+      var quoted = reuse ? Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w })
         : withTimeout(askedAgain(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
       return quoted
         .then(function (won) {
@@ -88,7 +98,18 @@
         stage('quote');
         var owed = satsOf(quote.amount) + satsOf(quote.fee_reserve);
         var at = mintOf(w);
-        var have = proofs(at);
+        /* A card's pieces, held for this payment: they are what is melted, every one, with no split of the pile and nothing
+         * of the pile's added. Short of the quote (the fee rose while the card was read) or not there at all, nothing is sent
+         * and the hold is left as it is, for the card. What they come to over the quote comes back as the melt's change. */
+        var hold = heldId ? load(K.held, {})[heldId] : null;
+        var cardHold = hold ? { card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '' } : null;
+        if (heldId) {
+          if (!hold || hold.kind !== 'card out' || !(hold.proofs || []).length) throw unsent('The card\u2019s pieces for this payment are not here any more. Nothing was paid.');
+          if (canonicalMint(hold.mint) !== canonicalMint(at)) throw unsent('The card\u2019s pieces are at another mint than this payment. Nothing was paid.');
+          var heldWorth = sumProofs(hold.proofs) - feeForInputs(w, hold.proofs.length);
+          if (heldWorth < owed) throw unsent('The fee went up while the card was read, so the card\u2019s ' + sumProofs(hold.proofs) + ' sats do not cover it. Nothing was paid.');
+        }
+        var have = heldId ? hold.proofs.slice() : proofs(at);
         // the split itself costs this mint's input fee, on top of the melt
         /* Said with the figure it is refused on. It named the invoice and the
          * reserve and left this mint's fee out, so a refusal read "needs 1020
@@ -100,18 +121,19 @@
          * what it refuses a payment on and what this refuses it on cannot
          * differ; the reserve can still move between that quote and this
          * one, which is when this is the one that says it. */
-        var mn = meltNeed(w, have, owed);
+        var mn = heldId ? { ok: true } : meltNeed(w, have, owed);
         if (!mn.ok) throw new Error(notEnoughWords(mn));
 
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
-        var splitGuard = swapGuard(w, 'split', { inputs: have });
-        return splitGuard.run('payment split', function () {
+        var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have });
+        var splitting = heldId ? Promise.resolve({ send: have, keep: null }) : splitGuard.run('payment split', function () {
           return w.send(owed, have, { includeFees: true });
         }).catch(function (e) {
           // some of that ecash was spent elsewhere: out of the pile, and made again
           return retryWithoutSpent(w, e);
-        }).then(function (split) {
+        });
+        return splitting.then(function (split) {
           /* The pile and the hold are written before the split's record is
            * cleared. The record used to go first, so a pile that could not be
            * written (storage full) left the split's outputs nowhere; now the
@@ -120,9 +142,10 @@
            * the hold adds nothing to a later restore: every output is then held
            * in the pile or the hold, and a restore adds only what is held
            * nowhere. */
-          setProofs(split.keep || [], at, w);
+          // (a card's held pieces were never in the pile, and the pile is not touched)
+          if (!heldId) setProofs(split.keep || [], at, w);
           // the split's own input fee: what left the pile and did not go to the melt
-          var splitFee = Math.max(0, sumProofs(have) - sumProofs(split.keep || []) - sumProofs(split.send || []));
+          var splitFee = heldId ? 0 : Math.max(0, sumProofs(have) - sumProofs(split.keep || []) - sumProofs(split.send || []));
 
           /* Held before the melt, not after it.
            *
@@ -137,11 +160,20 @@
            * mint what became of it. */
           var meltOutputs = [];      // the change outputs the melt reserves, as cashu-ts reports them
           try {
-            holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee);
+            holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee,
+                     heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold } : undefined);
+            /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
+             * that cannot be let go is a melt that is not sent: the pieces stay where they were. */
+            if (heldId) {
+              var heldAll = load(K.held, {});
+              delete heldAll[heldId];
+              try { mustSave(K.held, heldAll); } catch (eH) { dropMelt(quote.quote); throw eH; }
+            }
           } catch (e) {
             // no hold on disk, so no melt: the proofs go back, and a pile that
             // cannot take them either keeps the split's record for recoverSwaps
-            addProofs(split.send || [], at, w);
+            // (a card's pieces are still in their own hold, and stay there)
+            if (!heldId) addProofs(split.send || [], at, w);
             splitGuard.done();
             var unheld = /** @type {any} */ (new Error('Foxy could not write to this phone’s storage (it may be full), ' +
               'so the payment was not sent. Your ecash is still here. Free up space, then try again.'));
@@ -187,13 +219,16 @@
              * reserve less the change, which left out the melt inputs' own fee
              * (NUT-02) and the split's — about 2 sats low on a live mint. */
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
+            if (heldId) FoxyWallet.cardOutDone(heldId);
             logTx({
               dir: 'out',
               sats: satsOf(quote.amount),
               feeSats: Math.max(0, feeSats),
               settled: true,
               state: 'success',
-              memo: '',
+              // paid with a card's pieces (SEND from the card's screen): said so on the entry, with the card
+              memo: heldId ? 'paid from card' : '',
+              fromCard: heldId ? ((opts && opts.card) || (cardHold && cardHold.card) || undefined) : undefined,
               hash: quote.quote,
               bolt11: inv,
               // the proof that this invoice was paid, when the mint gave one (`preimageOf`)
@@ -218,12 +253,15 @@
              * them keeps the hold (W6) — and added the deduplicating way, so a
              * dropMelt whose write was refused cannot have sweepMelts put the
              * same proofs back a second time. */
-            addOwnProofs(split.send || [], at, w, undefined, true);
+            // a card's pieces go back to their hold, for the card, and not into the pile
+            if (heldId) cardOutReturn(heldId, split.send || [], at, cardHold || {});
+            else addOwnProofs(split.send || [], at, w, undefined, true);
             dropMelt(quote.quote);
             // the split before it was made and paid for, whatever became of the melt
             if (meltGone(quote.quote)) chargeUnsentFee(at, splitFee);
             var e = /** @type {any} */ (new Error(message || 'That payment could not be routed. Nothing was sent.'));
             e.definite = true;
+            if (heldId) e.held = heldId;
             return e;
           }
 
@@ -537,8 +575,10 @@
       var a = String(addr || '').trim().replace(/^lightning:/i, '');
       var amount = Math.round(Number(sats));
       var kept = opts && opts.found;
+      /* Paid from a card's pieces held for it (`opts.held`): the card was charged for this very invoice's fee, so it is the
+       * invoice paid however long the card took to read; the mint says if it has expired, and the pieces go back. */
       var fresh = !!(kept && kept.pr && amount > 0 && kept.addr === a && kept.sats === amount
-        && (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._lookReuseMs) > 0 ? Number(FoxyWallet._lookReuseMs) : 60000));
+        && ((opts && opts.held) || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._lookReuseMs) > 0 ? Number(FoxyWallet._lookReuseMs) : 60000)));
       var looked;
       if (fresh) {
         console.log('[foxy] the address was looked up a moment ago; paying the invoice it gave');
@@ -548,7 +588,8 @@
         looked = FoxyWallet.lookupLnurl(addr, sats, comment, onStage);
       }
       return looked.then(function (found) {
-        return FoxyWallet.pay(found.pr, onStage, { payee: a, quote: opts && opts.quote });
+        return FoxyWallet.pay(found.pr, onStage, { payee: a, quote: opts && opts.quote,
+                                                    held: (opts && opts.held) || undefined, card: (opts && opts.card) || undefined });
       });
     },
 

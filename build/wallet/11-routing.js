@@ -342,6 +342,8 @@
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })
           // and change due to a card that could not be made when it paid
           .then(function () { return FoxyWallet.cardDue().length ? FoxyWallet.cardDueRetry() : null; })
+          // and a card's payment out of this phone that never went: what it paid goes back to it (08a-flashcard.js, `cardOutsLeft`)
+          .then(function () { return FoxyWallet.cardOutHeld().length ? FoxyWallet.cardOutsLeft() : null; })
           .catch(function () {})
           /* And what was left between two mints: a crossing paid and not
            * claimed, a payment taken at a payer's mint and not yet home, a

@@ -256,9 +256,15 @@ class Component extends DCLogic {
      * told so. */
     const asks = s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email');
     const held = asks && (this.connecting() || !!s.quotingFee || this.sendToAsk());
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): the same confirmation, with the card it is paid from
+     * in a row of its own after NETWORK, held to what the card holds and not to this phone's balance, and NEXT, which reads
+     * the payment off the card (`fcOutNext`). */
+    const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
+    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
-      this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
+      // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
+      out ? null : this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
       this.cfRow('NETWORK', s.recipientKind === 'address' ? 'ON-CHAIN' : 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', s.recipientKind === 'address' ? '~10 MINUTES' : 'INSTANTLY',
         { ink: s.recipientKind === 'address' ? 'var(--btc-ink)' : 'var(--acc)', half: true }),
@@ -278,7 +284,8 @@ class Component extends DCLogic {
         ? 'UP TO ' + this.money(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
         { half: true, sub: s.quotedFee != null ? this.money(s.quotedFee).sub : '' }),
-    ];
+    ].filter(Boolean);
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
@@ -290,7 +297,7 @@ class Component extends DCLogic {
     const shortOf = (() => {
       if (s.recipientKind !== 'invoice' || !s.recipient || !W || !W.amountOf) return 0;
       const need = W.amountOf(s.recipient) || 0;
-      const have = s.balSats || 0;
+      const have = out ? cardHas : (s.balSats || 0);
       return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
@@ -299,7 +306,8 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main,
+        // (what this phone holds with the mint is no part of what a card holds: nothing is held back from a card)
+        warn: this.heldBlocks(out ? 0 : shortOf) || (out ? 'More than the card holds \u2014 short by ' : 'More than your balance \u2014 short by ') + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
       };
     }
@@ -330,8 +338,17 @@ class Component extends DCLogic {
      * failing to say, and then SEND is there as it was: `pay` refuses. */
     let covers = null;
     try {
-      covers = (s.quotedFee != null && asks && W && W.payNeed)
-        ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+      /* From a card, the card pays: the amount and the fee, with the mint's fee on the pieces they are cut into, against what
+       * the card holds (`cardOutTotal`, the very figure NEXT reads off it). */
+      if (out && s.quotedFee != null && asks && W && W.cardOutTotal) {
+        const total = W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
+        covers = total > cardHas
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          : { ok: true };
+      } else {
+        covers = (s.quotedFee != null && asks && W && W.payNeed)
+          ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+      }
     } catch (e) { covers = null; }
     if (covers && !covers.ok) {
       return {
@@ -339,11 +356,11 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
-    return {
+    const spec = {
       title: 'CONFIRMATION', amountLabel: 'SENDING',
       amount: this.sendAmountText(),
       // the converted figure sits under the primary one
@@ -374,6 +391,9 @@ class Component extends DCLogic {
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
     };
+    // from a card, NEXT, which reads the payment off the card (`fcOutNext`) before anything is paid
+    if (out && !held) Object.assign(spec, { cta: 'NEXT', go: () => this.fcOutNext() });
+    return spec;
   }
 
   /* Which of your mints issued this invoice, if any, and what you hold there.
@@ -823,9 +843,14 @@ class Component extends DCLogic {
     });
   }
 
-  startSendNow(to) {
+  /* `o`: a payment from a card (26f-flashcard.js, `fcOutPay`): `held`, the card's pieces held for it, which are what it is paid
+   * with and nothing else; `card`, the card; and the invoice (`found`, for an address) and the fee quote the card was charged
+   * for. Any way it is not made, with the pieces still held, they go back to the card (`fcOutBack`) and there is no TRY AGAIN:
+   * the card has been charged, and paying again is NEXT again, a new tap. */
+  startSendNow(to, o) {
     const W = window.FoxyWallet;
     const P = window.FoxyProgress;
+    const card = (o && o.held) ? o : null;
     // an invoice already held in a payment is not paid a second time
     const inv = String(to || '').trim().replace(/^lightning:/i, '');
     const want = inv.toLowerCase();
@@ -834,6 +859,7 @@ class Component extends DCLogic {
     if (W && W.pendingMelts && W.pendingMelts().some(m => m && (
       (m.bolt11 && m.bolt11.toLowerCase() === want) || (m.payee && m.payee === want)))) {
       this.showPayPending();
+      if (card) this.fcOutBack(card, null);
       return;
     }
     /* One send at a time. The 150-second backstop below ends the wait, not
@@ -841,6 +867,7 @@ class Component extends DCLogic {
      * then queued behind it and paid again. */
     if (this._sendRun) {
       this.showPayPending();
+      if (card) this.fcOutBack(card, null);
       return;
     }
     console.log('[foxy] overlay module:', P ? (P.complete ? 'has complete()' : 'OLD - no complete()') : 'NOT LOADED');
@@ -865,21 +892,33 @@ class Component extends DCLogic {
      * are fresh (`payLnurl`); an address the screen could not look up, or one
      * it was not asked about, is looked up here, as it was before. */
     const asked = this.sendAsk();
-    const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
+    const found = card ? (card.found || null) : (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
       ? this._found : null;
-    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    const kept = card ? (card.quote || null) : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
      * paid with the same invoice again the next time this address and amount
      * are chosen, and one that fails is asked about afresh when the person is
      * back on the confirmation. */
     if (found) { this._found = null; this._quotedFor = null; }
+    // from a card: its held pieces, by name, and the card (an entry that says it was paid from the card)
+    const fromCard = card ? { held: card.held, card: card.card } : {};
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
+      ? W.payLnurl(to, card ? (found ? found.sats : typed) : typed, '', onStage,
+                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard) : undefined)
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
+                                         card ? (kept ? { quote: kept } : {})
+                                           : (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {},
+                                         fromCard));
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
+    /* From a card, and the wait below given up on as pending: a payment that then fails after all, with the card's pieces still
+     * held, puts them back to the card as one that failed at once does. */
+    if (card) {
+      run.then(null, (e) => {
+        if (card.pendingShown && !card.done && !(e && e.pending) && this.fcOutStillHeld(card)) this.fcOutBack(card, e);
+      });
+    }
     const job = Promise.race([
       run,
       // pending, not failed: the payment may still be going, so no TRY AGAIN
@@ -893,6 +932,7 @@ class Component extends DCLogic {
     job.then(r => {
       if (r && r.pending) {
         console.log('[foxy] send pending');
+        if (card) card.pendingShown = true;
         if (P) P.end();
         W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
         this.showPayPending();
@@ -900,6 +940,8 @@ class Component extends DCLogic {
       }
       console.log('[foxy] send complete');
       W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
+      // from a card: what is left of the card's flow (change it is still owed) once the payment is made
+      if (card) this.fcOutSettled(card, true);
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
 
@@ -956,10 +998,18 @@ class Component extends DCLogic {
       const m = String((e && e.message) || '');
       console.error('[foxy] send failed:', e);
       if (P) P.end();
+      /* From a card: unless the payment may still be going (its melt is held, and is settled as any is), the card's pieces are
+       * still held for it, and they go back to the card, said as NOT PAID; never TRY AGAIN. */
+      if (card && !(e && e.pending) && this.fcOutStillHeld(card)) {
+        if (this.state.screen === 'sendDone' || this.state.sendPhase) this.toConfirm();
+        this.fcOutBack(card, e);
+        return;
+      }
+      if (card) this.fcOutSettled(card, false);
       // stopped by the person before it was made: they are home already
       if (e && e.foxyStopped) return;
       // held, not failed: the pending card, never TRY AGAIN
-      if (e && e.pending) { this.showPayPending(); return; }
+      if (e && e.pending) { if (card) card.pendingShown = true; this.showPayPending(); return; }
       // before the classification below, which would call "invalid" a refusal and offer TRY AGAIN
       if (this.isBadSignatures(e)) {
         this.badSignatureCard(null, 'pay', () => {
@@ -1007,7 +1057,9 @@ class Component extends DCLogic {
       }
 
       // not enough money needs a different amount, not another attempt
-      const again = (kind === 'sendFail') ? null : () => this.startSend();
+      /* From a card, another attempt is NEXT again, a new tap of the card (`fcOutNext`): never `startSend`, which pays from
+       * this phone's own balance under a confirmation that says FROM FLASHCARD. */
+      const again = (kind === 'sendFail') ? null : card ? () => this.fcOutNext() : () => this.startSend();
 
       /* CLOSE must not strand you on the sending screen.
        *
@@ -1021,8 +1073,9 @@ class Component extends DCLogic {
        * exactly this, NOT ENOUGH), so the card, whichever way it is closed,
        * goes to the amount screen. It has no TRY AGAIN; its one button names
        * where it goes, and the closing does it (`toAmount`). */
-      this.blockedCard(kind, {
-        title: kind === 'mintRefused' ? 'THE MINT SAID NO' : undefined,
+      /* The title only where this card has its own: a title of undefined here wiped the kind's own (`blockedCard` lays this
+       * over it), and a card with no title is not shown at all, so every failure but the mint's refusal said nothing. */
+      this.blockedCard(kind, Object.assign(kind === 'mintRefused' ? { title: 'THE MINT SAID NO' } : {}, {
         reason: W.reason(e),
         retry: again ? 'TRY AGAIN' : 'CHANGE AMOUNT',
         back: again ? '' : 'amount',
@@ -1040,7 +1093,7 @@ class Component extends DCLogic {
             this.toConfirm();
           }
         },
-      });
+      }));
     });
   }
 
@@ -1304,7 +1357,7 @@ class Component extends DCLogic {
      * that meant "get ready to tap" now goes. */
     if (target === 'nfc') { go({ screen: 'home' }); return done(); }
     if (target === 'home') { go({ screen: 'home' }); return done(); }
-    if (target === 'send') { go({ screen: 'sendHow', flow: 'send' }); return done(); }
+    if (target === 'send') { go({ screen: 'sendHow', flow: 'send', sendFrom: '' }); return done(); }
 
     if (target === 'receive') {
       const unit = unitOr('USD');
@@ -7672,6 +7725,20 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address. A
+     * bitcoin address and a Cashu payment request are said no to here, before anything moves, and the person is left where
+     * they were. */
+    const cardOut = !!(this.fcOutMode && this.fcOutMode());
+    if (cardOut && (kind === 'address' || kind === 'request')) {
+      this.blockedCard('fcOutNot', {
+        tone: 'warn', title: 'THAT WON\u2019T WORK',
+        reason: kind === 'address'
+          ? 'A Flashcard pays Lightning invoices and addresses, not bitcoin addresses: a payment on chain takes many minutes to settle, and the card\u2019s money cannot wait that long. WITHDRAW it to this phone, then pay from there.'
+          : 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        chip: 'Nothing was taken from the card.',
+      });
+      return false;
+    }
 
     if (kind === 'lnurl') {
       W.remember(t);                       // LNbits will not recall this later
@@ -7722,6 +7789,16 @@ class Component extends DCLogic {
     }
 
     const sats = W.amountOf(t);
+    /* An invoice that names no amount, from a card: the card is charged the amount and the fee before the payment is made,
+     * and the mint will not say the fee on such an invoice until it is paid. Said no to, as a bitcoin address is. */
+    if (!sats && cardOut) {
+      this.blockedCard('fcOutNot', {
+        tone: 'warn', title: 'THAT WON\u2019T WORK',
+        reason: 'This invoice names no amount. A Flashcard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
+        chip: 'Nothing was taken from the card.',
+      });
+      return false;
+    }
     if (!sats) {
       /* An invoice that names no amount: ask for one, the way an LNURL does.
        *
@@ -7763,6 +7840,14 @@ class Component extends DCLogic {
      * and then SEND. A connection that does not come says the card then
      * (`syncSend`). */
     const off = !!(this.offlineNow && this.offlineNow());
+    /* A card is paid from with a route, and only with one: there is no token of the card's to make offline. With one on its
+     * way, to the confirmation, which holds NEXT for it as it holds SEND. */
+    if (off && cardOut) {
+      if (!this.connecting()) { this.offlineNo('Paying from the card'); return true; }
+      this.setState(p => ({ screen: 'sendConfirm', stack: p.stack.concat([p.screen]), flow: 'send', asset: 'BITCOIN', network: 'LIGHTNING',
+                            recipientKind: 'invoice', recipient: t, unit: 'SATS', amount: String(sats), payFrom: 'BITCOIN' }));
+      return true;
+    }
     if (off && W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
       console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
       this.payThisMintWithToken(sats);
@@ -7805,7 +7890,8 @@ class Component extends DCLogic {
         shut: { label: 'CONTINUE OVER LIGHTNING', tap: overLightning },
       });
     };
-    if (!W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
+    /* From a card, Lightning it is: the Cashu way (USE CASHU) is paid out of this phone's own pile, not the card. */
+    if (cardOut || !W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
     if (W.invoiceFromThisMint(t)) { offer(); return true; }
     /* The mint's node not known yet (no invoice from it on this phone, and the
      * check after connecting not done): asked now, so the answer does not
@@ -9325,7 +9411,7 @@ class Component extends DCLogic {
     catch (e) { return ((h % 12) || 12) + ':' + mm + (h < 12 ? ' AM' : ' PM'); }
   }
 
-  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed' };
+  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card' };
 
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
@@ -9402,6 +9488,8 @@ class Component extends DCLogic {
           hash: t.hash,
           // the card an entry is for (26f-flashcard.js), so one card's entries can be shown on their own
           card: t.card || '',
+          // a payment made from a card (SEND on the card's screen): which card, for the line that says so
+          fromCard: t.fromCard || '',
           // and what the wallet called it, which is what a card's own list names it by
           memo: t.memo || '',
           dir: t.dir,
@@ -11319,6 +11407,8 @@ class Component extends DCLogic {
      * it needs the moment the route is up, and tells of one that does not
      * come (`syncSend`). */
     this.syncSend();
+    // and a payment from a card is that only while its flow is on screen (26f-flashcard.js, `syncCardOut`)
+    this.syncCardOut();
     this.syncUnit();
     this.syncQueue();
     this.syncSlide();
@@ -12655,8 +12745,10 @@ class Component extends DCLogic {
      * card holds. FLASHCARD on the send screen is out of this phone's balance
      * as adding to a card is. */
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
+    // paying from a card (SEND on its screen, `fcOutMode`): out of what the card holds, and not this phone's balance
+    const cardOut = s.flow === 'send' && !!(this.fcOutMode && this.fcOutMode());
     const sendCapUsd = !capped ? 0
-      : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
       : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
@@ -12693,7 +12785,7 @@ class Component extends DCLogic {
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd' && !cardOut) ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }
 
@@ -12767,14 +12859,15 @@ class Component extends DCLogic {
       goSend: () => this.setState(p => ({
         screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
-        note: '', noteDraft: '',
+        // home's SEND pays from this phone, never from a card (26f-flashcard.js, `fcOutMode`)
+        note: '', noteDraft: '', sendFrom: '',
       })),
       // home's SCAN: straight to the scanner, which is how a payment request,
       // an invoice or a token gets in
       goScan: () => this.setState(p => ({
         screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
-        note: '', noteDraft: '',
+        note: '', noteDraft: '', sendFrom: '',
       })),
       goReceive: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'receive',
@@ -13206,8 +13299,8 @@ class Component extends DCLogic {
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
-      // withdrawing from a card, the ceiling is the card's and the line says so
-      ...(s.flow === 'cardWd' ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
+      // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
+      ...((s.flow === 'cardWd' || (s.flow === 'send' && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
     };
@@ -13452,8 +13545,15 @@ class Component extends DCLogic {
      * hunting for a feature they used yesterday, and the row of four is a shape
      * people learn. Dimmed, still tappable, and it says why. */
     const off = this.offlineNow();
+    /* Paying from a card (SEND on the card's own screen, 26f-flashcard.js `fcOutOpen`): the same screen and camera, with the
+     * card's WITHDRAW at the top of the rows, and SEND ECASH and FLASHCARD gone (neither is a payment from the card).
+     * PASTE, CONTACTS and TYPE read what they read as ever; what they lead to is paid from the card (`fcOutNext`). */
+    const cardOut = !!(this.fcOutMode && this.fcOutMode());
     return {
       isSendHow: sc === 'sendHow', isSendType: sc === 'sendType', isSendScan: sc === 'sendScan',
+      clWdOn: cardOut,
+      clEcashOn: !cardOut,
+      goWithdraw: () => this.fcOutWithdraw(),
       pickType: () => {
         if (off) { this.offlineNo('Typing an address'); return; }
         this.setState(p => ({
@@ -13499,7 +13599,7 @@ class Component extends DCLogic {
       clContactsDim: off ? '0.38' : '1',
       /* FLASHCARD, last: money onto a card held to this phone (26f-flashcard.js, `fcSendCard`). The card is written to
        * through the mint, so it is dimmed offline too, and says why when pressed. */
-      clCardOn: true,
+      clCardOn: !cardOut,
       clCardDim: off ? '0.38' : '1',
       goSendCard: () => this.fcSendCard(),
       goMakeEcash: () => this.setState(p => ({
@@ -13590,7 +13690,8 @@ class Component extends DCLogic {
         setTimeout(() => {
           this.settleAnimate('btc');
           this.setState({
-            screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD',
+            // (a payment from a card ends here too: home is out of its flow)
+            screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', sendFrom: '',
             flow: 'receive', recipient: '', emailDraft: '', sendPhase: null, sendExit: false,
           });
         }, 380);
@@ -14189,6 +14290,8 @@ class Component extends DCLogic {
         cardSpin: A.flagged.has(t) ? 'foxyEdge 1.6s linear infinite' : 'none',
         metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
           : t.failed ? 'Failed' : t.atRisk ? 'AT RISK \u00b7 not settled'
+          // paid from a card (SEND on the card's screen), not from this phone's balance
+          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Flashcard'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */
@@ -15687,8 +15790,10 @@ class Component extends DCLogic {
       this.setState({ tapArmed: true, tapCardOff: true, tapAutoFresh: true });
       return;
     }
+    /* Not while paying from a card (SEND on the card's screen, `fcOutMode`): a phone-to-phone offer is paid out of this
+     * phone's own pile, and that is not what the person is doing. */
     const listening = (s.screen === 'home' || s.screen === 'sendHow')
-      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp;
+      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode());
     /* And the marks are cleared only when there is no tap to protect.
      *
      * `_tapKeep` is what stops `syncTap` searching again under a live link —
@@ -19501,6 +19606,20 @@ class Component extends DCLogic {
       'too-soon': () => ({ tone: 'warn', title: 'NOT YET',
         reason: e.date ? 'This card can be taken back after ' + this.fcDay(e.date) + '.' : said }),
       'nothing': () => ({ tone: 'warn', title: 'NOTHING WAS LEFT ON IT', reason: said }),
+      // paying out of this phone from a card's screen, and another card was held to it (08a-flashcard.js, `o.only`)
+      'wrong-card': () => ({ tone: 'warn', title: 'A DIFFERENT CARD', reason: said }),
+      /* Paying out of this phone from a card, and the payment was not made after the card had paid this phone for it: what it
+       * paid goes back on it, as a till's refusal does, at its next tap (`fcOutBack`). With no route yet, once there is one. */
+      'not-paid-out': () => (e.made ? {
+        tone: 'warn', title: 'NOT PAID',
+        reason: said + ' ' + this.fcSats(e.sats) + ' goes back on the card: tap it to put it back.',
+        chip: 'No PIN is needed.',
+        retry: 'TAP CARD', go: () => this.fcOutWrite(), shut: { label: 'LATER' },
+      } : {
+        tone: 'warn', title: 'NOT PAID',
+        reason: said + ' ' + this.fcSats(e.sats) + ' goes back on the card once this phone reaches the mint, and the card\u2019s next tap here puts it back.',
+        shut: { label: 'OK' },
+      }),
     };
     const spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
     this.haptic && this.haptic('error');
@@ -19580,6 +19699,13 @@ class Component extends DCLogic {
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
+      /* Paying out of this phone: the mint's answer came too late, and the payment it was for was never made. The wallet has
+       * owed all of it back to the card (21a-flashcard.js, `cardSettle`), and its next tap puts it back. */
+      if (how === 'paid' && opt.send) {
+        const owed = this.fcOwed().filter((x) => x.key === opt.send.key).reduce((n, x) => n + x.sats, 0);
+        this.fcFailed({ card: 'not-paid-out', message: 'The mint answered too late, so nothing was paid.', sats: owed || (row && row.change) || 0, made: owed > 0 }, opt);
+        return;
+      }
       if (how === 'paid') {
         if (opt.share) this.fcShareMoved(opt.share, id);
         this.fcMoved(opt);
@@ -19731,18 +19857,18 @@ class Component extends DCLogic {
    * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
    * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
    * it with no route. */
-  fcPayStart(sats, trusted, share) {
-    this.fcPayRun(sats, '', trusted, false, share);
+  fcPayStart(sats, trusted, share, send) {
+    this.fcPayRun(sats, '', trusted, false, share, send);
   }
 
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. */
-  fcPayAsk(sats, trusted, resuming, share) {
+  fcPayAsk(sats, trusted, resuming, share, send) {
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
       cta: 'TAP AGAIN',
-    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share));
+    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share, send));
   }
 
   /* A card payment is two taps, and is said as two every time, so a person
@@ -19753,18 +19879,21 @@ class Component extends DCLogic {
    * with no route, it is one tap: only an exact set is taken then. */
   /* `resuming`: the same payment, taken up again after the card left part way
    * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). `share`: the share of a split bill
-   * this payment is for (`payShareByCard`), or none. */
-  fcPayRun(sats, pin, trusted, resuming, share) {
+   * this payment is for (`payShareByCard`), or none. `send`: the card paying out of this phone (SEND on the card's own
+   * screen, `fcOutNext`): the tap is a till's in every way, and what the card pays is held for that payment (`fcOutPay`)
+   * and is not this phone's; { to, key, inv | found, quote }. */
+  fcPayRun(sats, pin, trusted, resuming, share, send) {
     const W = this.fcW();
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
-    const opt = { paying: true, taken: true, share: share || null,
-                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share) : this.fcPayStart(sats, trusted, share)) };
+    const opt = { paying: true, taken: true, share: share || null, send: send || null,
+                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share, send) : this.fcPayStart(sats, trusted, share, send)) };
     /* A new payment: a confirmation still held for the one before (its change
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
+    // (paying out of this phone, nobody here is being paid: no PAYMENT RECEIVED is held for it)
     this.fcTap({ amount: this.fcPrice(sats), lost: !!resuming,
-                 sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: true,
+                 sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: !send,
                  /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                  again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
                    : (e && e.card === 'gone') ? 'Tap behind the phone.' : '' },
@@ -19782,10 +19911,13 @@ class Component extends DCLogic {
                    if (share && info && info.hash && (step === 'checking' || step === 'mint')) this.fcShareNote(share, info.hash);
                    on(step, info);
                  };
-                 return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
+                 return W.cardPay(link, Object.assign({ sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted },
+                                                      send ? { holdFor: true, only: send.key } : {}))
                    .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
+        // paying out of this phone: the card has paid this phone, and the payment it is for is made now
+        if (send) { this.fcOutPay(r, send, sats); return; }
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
          * nothing here says paid; it settles when this phone is online. A share of a bill has the entry noted on its
@@ -19819,19 +19951,19 @@ class Component extends DCLogic {
         this.fcDropConfirm();
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share); return; }
+        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share, send); return; }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
          * sheet comes up by itself instead, once iOS has taken the last down. */
         if (e && e.card === 'interrupted' && e.resumable) {
-          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share); else this.fcResumeNow(sats, pin, trusted, share);
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share, send); else this.fcResumeNow(sats, pin, trusted, share, send);
           return;
         }
         // taken up, and the card could not make the rest: what it signed goes back, and why is said
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
-        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share); return; }
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share, send); return; }
         this.fcFailed(e, opt);
       });
   }
@@ -19841,11 +19973,11 @@ class Component extends DCLogic {
    * payment is used again, as it is for every tap of the one payment. And a
    * settling once the hold could be stale, so one nobody came back for goes
    * back to the card even with Foxy left open. */
-  fcResumeNow(sats, pin, trusted, share) {
+  fcResumeNow(sats, pin, trusted, share, send) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share), 2500);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share, send), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
-    this._fcTapO = { amount: this.fcPrice(sats), paying: true, lost: true };
+    this._fcTapO = { amount: this.fcPrice(sats), paying: !send, lost: true };
     this.fcStage('reading');
     this.fcHeldClock();
   }
@@ -19874,13 +20006,13 @@ class Component extends DCLogic {
 
   /* Held, and the tap to finish read no card: said, with the tap again, and
    * CANCEL, which gives back what the card signed (`fcLetGo`). */
-  fcHeldCard(sats, pin, trusted, share) {
+  fcHeldCard(sats, pin, trusted, share, send) {
     this.fcHeldClock();
     this.blockedCard('fc-held', {
       tone: 'warn', title: 'NOT PAID YET',
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
-      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share),
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share, send),
       shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
     });
   }
@@ -21842,6 +21974,158 @@ class Component extends DCLogic {
       });
   }
 
+  /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
+   *
+   * SEND on a card's screen opens the app's own SEND MONEY screen in card mode: the camera as ever, PASTE, CONTACTS and
+   * TYPE, and the card's WITHDRAW at the top; SEND ECASH and FLASHCARD are not there. What is read goes to the same
+   * confirmation, with the card in a FROM row and NEXT for PAY. NEXT reads the payment's total (the amount and the fee the
+   * confirmation showed) off the card exactly as a till reads a card that pays it (`fcPayRun`, with `send`): the PIN,
+   * the per tap limit's wait, the card's own change, a tap taken up again. The pieces the card pays this phone are held
+   * for the payment and nothing else (08a-flashcard.js, `cardOutHold`), and the app's own payment (`startSendNow`) is
+   * made with them. Made: PAYMENT SENT as ever. Not made: they go back on the card at its next tap, as a till's refusal
+   * does, and the screen says NOT PAID.
+   *
+   * Card mode is `sendFrom: 'card'` in the state, set by SEND and by nothing else, and true only while the card's screen
+   * is under the flow (`fcOutMode`). Leaving the flow by any way (back past SEND MONEY, home, another screen) ends it
+   * (`syncCardOut`). A bitcoin address and a Cashu request are said no to (12-receive.js, `acceptTarget`). */
+  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone'];
+
+  fcOutMode() {
+    const s = this.state;
+    return s.sendFrom === 'card' && !!s.fc && !!this._fcCard && (s.stack || []).indexOf('flashcard') >= 0;
+  }
+
+  // card mode is put down as soon as the flow is not on screen, so it cannot come back with a later SEND
+  syncCardOut() {
+    const s = this.state;
+    if (s.sendFrom !== 'card') return;
+    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && s.flow === 'send'));
+    if (!on) this.setState({ sendFrom: '' });
+  }
+
+  // SEND, the tile on the card's screen
+  fcOutOpen() {
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = this.state.fc;
+    if (!(fc.balance > 0)) { this.toast('There is nothing on this card.', true); return; }
+    this.setState(p => ({
+      screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: 'card', tokenMode: false,
+      amount: '', asset: '', unit: 'USD', recipient: '', recipientKind: '', emailDraft: '', note: '', noteDraft: '',
+    }));
+  }
+
+  /* WITHDRAW, the row on SEND MONEY in card mode: back to the card's screen, out of card mode, and the withdrawal as the
+   * card's own tile always began it (`fcWithdraw`), so that it ends on the card's screen as it always did. */
+  fcOutWithdraw() {
+    this.setState(p => {
+      const stack = (p.stack || []).slice();
+      const to = stack.length ? stack.pop() : 'flashcard';
+      return { screen: to, stack, sendFrom: '', flow: 'receive', amount: '', unit: 'USD', recipient: '', recipientKind: '' };
+    });
+    this.fcWithdraw();
+  }
+
+  /* NEXT on the confirmation in card mode. Everything that can be said before the card is touched is said here: no route,
+   * another mint, a payment of this already going, a fee not known yet, a card that does not hold the total. Then the tap. */
+  fcOutNext() {
+    const W = this.fcW();
+    const s = this.state;
+    if (!W || !this.fcOutMode()) { this.back(); return; }
+    if (!W.connected) { this.offlineNo('Paying from the card'); return; }
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = s.fc;
+    const to = String(s.recipient || '').trim().replace(/^lightning:/i, '');
+    const want = to.toLowerCase();
+    if ((W.pendingMelts && W.pendingMelts().some(m => m && ((m.bolt11 && m.bolt11.toLowerCase() === want) || (m.payee && m.payee === want))))
+        || this._sendRun) { this.showPayPending(); return; }
+    // the fee the confirmation showed, on the very invoice that is paid: never a tap for a total that is not known
+    const ask = this.sendAsk();
+    const q = this._feeQuote;
+    let send = null;
+    if (ask && ask.inv && q && q.bolt11 === ask.inv) send = { to, key: fc.key, quote: q };
+    else if (ask && ask.addr && q && this._found && this._found.addr === ask.addr && this._found.sats === ask.sats && q.bolt11 === this._found.pr) {
+      send = { to, key: fc.key, quote: q, found: this._found };
+    }
+    if (!send) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
+    const total = W.cardOutTotal ? W.cardOutTotal(q.amount, q.feeReserve) : q.amount + q.feeReserve;
+    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance }, { taken: true }); return; }
+    // Tor can drop while the confirmation sits open: given a moment to come back, as a payment from this phone is (`startSend`)
+    const G = window.FoxyGate;
+    const fresh = (G && G.recheck) ? G.recheck() : null;
+    Promise.resolve(fresh).then((ok) => {
+      if (fresh && !ok) { this.offlineNo('Paying from the card'); return; }
+      this.fcPayRun(total, '', false, false, null, send);
+    });
+  }
+
+  /* The card has paid this phone the total, and its pieces for it are held: the payment is made with them, on the screen a
+   * payment from this phone is made on. Change the card is still owed (its sheet was closed before it went on) is asked for
+   * once the payment is over (`fcOutSettled`). */
+  fcOutPay(r, send, sats) {
+    // the money that came off the card is the holder's own move, said by this flow and not announced
+    if (r && r.hash) this.txIsNew(r.hash);
+    const ch = r && r.change;
+    const o = Object.assign({}, send, {
+      held: (r && r.held) || '', card: send.key, sats,
+      change: (ch && !ch.written && !ch.unmade && ch.sats > 0) ? ch.sats : 0,
+      changeLater: (ch && ch.unmade && ch.sats > 0) ? ch.sats : 0,
+    });
+    this.refreshBalance();
+    this.loadHistory();
+    if (!o.held) {
+      // (not to be: the pieces were not held, and are in this phone's own balance)
+      this.blockedCard('fc-out-lost', {
+        tone: 'warn', title: 'NOT PAID',
+        reason: this.fcSats(sats) + ' came off the card into this phone, and could not be kept for this payment. Nothing was paid.',
+      });
+      return;
+    }
+    clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
+    this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
+    this.startSendNow(send.to, o);
+  }
+
+  // whether the card's pieces for this payment are still held, and so not in a melt
+  fcOutStillHeld(o) {
+    const W = this.fcW();
+    return !!(W && W.cardOutHeld && o && o.held && W.cardOutHeld().some((h) => h.id === o.held));
+  }
+
+  /* The payment was not made, and the card's pieces are still held for it: they go back to the card (made into pieces for it
+   * and owed to it), and NOT PAID says so, with TAP CARD to put them on. Once only, however many ways it ended. */
+  fcOutBack(o, e) {
+    const W = this.fcW();
+    if (!W || !o || o.done) return;
+    o.done = true;
+    const said = e ? String(W.reason ? W.reason(e) : (e.message || '')) : 'The payment could not be started.';
+    console.log('[foxy] card: a payment from the card was not made; what it paid goes back to it');
+    const tell = (r) => {
+      this.refreshBalance();
+      this.loadHistory();
+      const sats = Math.round(Number(r && r.sats) || 0) || Math.round(Number(o.sats) || 0);
+      this.fcFailed({ card: 'not-paid-out', message: said, sats, made: !!(r && r.made) }, { paying: true });
+    };
+    W.cardOutBack(o.held).then(tell, () => tell(null));
+  }
+
+  /* TAP CARD on NOT PAID: the card's own phone writes with its own proof and no PIN; any other, as a till writes change. */
+  fcOutWrite() {
+    const fc = this.state.fc;
+    if (fc && fc.ownedHere) { this.fcWriteRun('', { owner: true }); return; }
+    this.fcWriteAsk({});
+  }
+
+  // a payment from the card is over: made (`paid`), or pending; change the card is still owed is asked for once it is made
+  fcOutSettled(o, paid) {
+    if (!o || o.done) return;
+    o.done = true;
+    const W = this.fcW();
+    if (W && W.cardOutDone) W.cardOutDone(o.held);
+    if (!paid) return;
+    if (o.change > 0 && this.fcOwedAfterPaying()) this.fcChangeWaiting(o.change);
+    else if (o.changeLater > 0) this.fcChangeLater(o.changeLater, 0);
+  }
+
   /* flashcard: the card that was tapped, or the invitation to tap one. */
   /** @param {RenderContext} c */
   renderFlashcard(c) {
@@ -22078,6 +22362,8 @@ class Component extends DCLogic {
       fcLinks: links,
       fcTap: () => this.fcRead(),
       fcAdd: () => this.fcAdd(),
+      // SEND: a payment from the card, on the send screen (`fcOutOpen`); the card's WITHDRAW is a row there
+      fcSend: () => this.fcOutOpen(),
       fcWithdraw: () => this.fcWithdraw(),
       fcSetUp: () => this.fcSetUp(),
     };

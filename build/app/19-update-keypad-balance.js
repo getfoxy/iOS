@@ -124,6 +124,8 @@
      * it needs the moment the route is up, and tells of one that does not
      * come (`syncSend`). */
     this.syncSend();
+    // and a payment from a card is that only while its flow is on screen (26f-flashcard.js, `syncCardOut`)
+    this.syncCardOut();
     this.syncUnit();
     this.syncQueue();
     this.syncSlide();

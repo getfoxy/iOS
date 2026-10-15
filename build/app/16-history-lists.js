@@ -233,7 +233,7 @@
     catch (e) { return ((h % 12) || 12) + ':' + mm + (h < 12 ? ' AM' : ' PM'); }
   }
 
-  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed' };
+  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card' };
 
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
@@ -310,6 +310,8 @@
           hash: t.hash,
           // the card an entry is for (26f-flashcard.js), so one card's entries can be shown on their own
           card: t.card || '',
+          // a payment made from a card (SEND on the card's screen): which card, for the line that says so
+          fromCard: t.fromCard || '',
           // and what the wallet called it, which is what a card's own list names it by
           memo: t.memo || '',
           dir: t.dir,

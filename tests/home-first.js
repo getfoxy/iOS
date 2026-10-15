@@ -447,7 +447,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     'syncSend() {', 'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'confirmSpec() {', 'requestSpec() {', 'cfRow(label, value, opt) {',
     'sendToText() {', 'shortId(v) {', 'sendAmountText() {', 'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {', 'satUsd() {',
     'px() {', 'peerRate() {', 'peerRateLabel() {', 'peerRateRow() {', 'heldBlocks(shortBy) {', 'heldNote() {',
-    'unitLabel(unit) {', 'startSend() {', 'startSendNow(to) {', 'torBannerVals() {'];
+    'unitLabel(unit) {', 'startSend() {', 'startSendNow(to, o) {', 'torBannerVals() {'];
   const AMOUNTLESS = 'lnbc1p4ttszqpp5c6utwdk6cmla7kmz4nf89avnlyrzqrkhz0jx06hsltwmw9afwheqdqqcqzzs'
     + 'xqrrs0fppq9eka5xeg7p7sezkmmkc02cpffc2ekcdssp5hcpux550uxjsc3nj3qhvqa7rmz7hsp7yel3eveh3'
     + 'vg8awmve4fds9qxpqysgqtsd5g8er8mhnst3eres2455nxxm4kd44c4uwa3fvu8ueqsgf4vd5ft94jk8u54ahh'

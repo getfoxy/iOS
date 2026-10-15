@@ -694,6 +694,20 @@
       'too-soon': () => ({ tone: 'warn', title: 'NOT YET',
         reason: e.date ? 'This card can be taken back after ' + this.fcDay(e.date) + '.' : said }),
       'nothing': () => ({ tone: 'warn', title: 'NOTHING WAS LEFT ON IT', reason: said }),
+      // paying out of this phone from a card's screen, and another card was held to it (08a-flashcard.js, `o.only`)
+      'wrong-card': () => ({ tone: 'warn', title: 'A DIFFERENT CARD', reason: said }),
+      /* Paying out of this phone from a card, and the payment was not made after the card had paid this phone for it: what it
+       * paid goes back on it, as a till's refusal does, at its next tap (`fcOutBack`). With no route yet, once there is one. */
+      'not-paid-out': () => (e.made ? {
+        tone: 'warn', title: 'NOT PAID',
+        reason: said + ' ' + this.fcSats(e.sats) + ' goes back on the card: tap it to put it back.',
+        chip: 'No PIN is needed.',
+        retry: 'TAP CARD', go: () => this.fcOutWrite(), shut: { label: 'LATER' },
+      } : {
+        tone: 'warn', title: 'NOT PAID',
+        reason: said + ' ' + this.fcSats(e.sats) + ' goes back on the card once this phone reaches the mint, and the card\u2019s next tap here puts it back.',
+        shut: { label: 'OK' },
+      }),
     };
     const spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
     this.haptic && this.haptic('error');
@@ -773,6 +787,13 @@
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
+      /* Paying out of this phone: the mint's answer came too late, and the payment it was for was never made. The wallet has
+       * owed all of it back to the card (21a-flashcard.js, `cardSettle`), and its next tap puts it back. */
+      if (how === 'paid' && opt.send) {
+        const owed = this.fcOwed().filter((x) => x.key === opt.send.key).reduce((n, x) => n + x.sats, 0);
+        this.fcFailed({ card: 'not-paid-out', message: 'The mint answered too late, so nothing was paid.', sats: owed || (row && row.change) || 0, made: owed > 0 }, opt);
+        return;
+      }
       if (how === 'paid') {
         if (opt.share) this.fcShareMoved(opt.share, id);
         this.fcMoved(opt);
@@ -924,18 +945,18 @@
    * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
    * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
    * it with no route. */
-  fcPayStart(sats, trusted, share) {
-    this.fcPayRun(sats, '', trusted, false, share);
+  fcPayStart(sats, trusted, share, send) {
+    this.fcPayRun(sats, '', trusted, false, share, send);
   }
 
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. */
-  fcPayAsk(sats, trusted, resuming, share) {
+  fcPayAsk(sats, trusted, resuming, share, send) {
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
       cta: 'TAP AGAIN',
-    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share));
+    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share, send));
   }
 
   /* A card payment is two taps, and is said as two every time, so a person
@@ -946,18 +967,21 @@
    * with no route, it is one tap: only an exact set is taken then. */
   /* `resuming`: the same payment, taken up again after the card left part way
    * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). `share`: the share of a split bill
-   * this payment is for (`payShareByCard`), or none. */
-  fcPayRun(sats, pin, trusted, resuming, share) {
+   * this payment is for (`payShareByCard`), or none. `send`: the card paying out of this phone (SEND on the card's own
+   * screen, `fcOutNext`): the tap is a till's in every way, and what the card pays is held for that payment (`fcOutPay`)
+   * and is not this phone's; { to, key, inv | found, quote }. */
+  fcPayRun(sats, pin, trusted, resuming, share, send) {
     const W = this.fcW();
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
-    const opt = { paying: true, taken: true, share: share || null,
-                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share) : this.fcPayStart(sats, trusted, share)) };
+    const opt = { paying: true, taken: true, share: share || null, send: send || null,
+                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share, send) : this.fcPayStart(sats, trusted, share, send)) };
     /* A new payment: a confirmation still held for the one before (its change
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
+    // (paying out of this phone, nobody here is being paid: no PAYMENT RECEIVED is held for it)
     this.fcTap({ amount: this.fcPrice(sats), lost: !!resuming,
-                 sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: true,
+                 sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: !send,
                  /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                  again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
                    : (e && e.card === 'gone') ? 'Tap behind the phone.' : '' },
@@ -975,10 +999,13 @@
                    if (share && info && info.hash && (step === 'checking' || step === 'mint')) this.fcShareNote(share, info.hash);
                    on(step, info);
                  };
-                 return W.cardPay(link, { sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted })
+                 return W.cardPay(link, Object.assign({ sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted },
+                                                      send ? { holdFor: true, only: send.key } : {}))
                    .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
+        // paying out of this phone: the card has paid this phone, and the payment it is for is made now
+        if (send) { this.fcOutPay(r, send, sats); return; }
         this.haptic && this.haptic('success');
         /* Taken on trust: kept, and not paid. The mint has not been asked, so
          * nothing here says paid; it settles when this phone is online. A share of a bill has the entry noted on its
@@ -1012,19 +1039,19 @@
         this.fcDropConfirm();
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share); return; }
+        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share, send); return; }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
          * sheet comes up by itself instead, once iOS has taken the last down. */
         if (e && e.card === 'interrupted' && e.resumable) {
-          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share); else this.fcResumeNow(sats, pin, trusted, share);
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share, send); else this.fcResumeNow(sats, pin, trusted, share, send);
           return;
         }
         // taken up, and the card could not make the rest: what it signed goes back, and why is said
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
-        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share); return; }
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share, send); return; }
         this.fcFailed(e, opt);
       });
   }
@@ -1034,11 +1061,11 @@
    * payment is used again, as it is for every tap of the one payment. And a
    * settling once the hold could be stale, so one nobody came back for goes
    * back to the card even with Foxy left open. */
-  fcResumeNow(sats, pin, trusted, share) {
+  fcResumeNow(sats, pin, trusted, share, send) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share), 2500);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share, send), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
-    this._fcTapO = { amount: this.fcPrice(sats), paying: true, lost: true };
+    this._fcTapO = { amount: this.fcPrice(sats), paying: !send, lost: true };
     this.fcStage('reading');
     this.fcHeldClock();
   }
@@ -1067,13 +1094,13 @@
 
   /* Held, and the tap to finish read no card: said, with the tap again, and
    * CANCEL, which gives back what the card signed (`fcLetGo`). */
-  fcHeldCard(sats, pin, trusted, share) {
+  fcHeldCard(sats, pin, trusted, share, send) {
     this.fcHeldClock();
     this.blockedCard('fc-held', {
       tone: 'warn', title: 'NOT PAID YET',
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
-      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share),
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share, send),
       shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
     });
   }
@@ -3035,6 +3062,158 @@
       });
   }
 
+  /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
+   *
+   * SEND on a card's screen opens the app's own SEND MONEY screen in card mode: the camera as ever, PASTE, CONTACTS and
+   * TYPE, and the card's WITHDRAW at the top; SEND ECASH and FLASHCARD are not there. What is read goes to the same
+   * confirmation, with the card in a FROM row and NEXT for PAY. NEXT reads the payment's total (the amount and the fee the
+   * confirmation showed) off the card exactly as a till reads a card that pays it (`fcPayRun`, with `send`): the PIN,
+   * the per tap limit's wait, the card's own change, a tap taken up again. The pieces the card pays this phone are held
+   * for the payment and nothing else (08a-flashcard.js, `cardOutHold`), and the app's own payment (`startSendNow`) is
+   * made with them. Made: PAYMENT SENT as ever. Not made: they go back on the card at its next tap, as a till's refusal
+   * does, and the screen says NOT PAID.
+   *
+   * Card mode is `sendFrom: 'card'` in the state, set by SEND and by nothing else, and true only while the card's screen
+   * is under the flow (`fcOutMode`). Leaving the flow by any way (back past SEND MONEY, home, another screen) ends it
+   * (`syncCardOut`). A bitcoin address and a Cashu request are said no to (12-receive.js, `acceptTarget`). */
+  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone'];
+
+  fcOutMode() {
+    const s = this.state;
+    return s.sendFrom === 'card' && !!s.fc && !!this._fcCard && (s.stack || []).indexOf('flashcard') >= 0;
+  }
+
+  // card mode is put down as soon as the flow is not on screen, so it cannot come back with a later SEND
+  syncCardOut() {
+    const s = this.state;
+    if (s.sendFrom !== 'card') return;
+    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && s.flow === 'send'));
+    if (!on) this.setState({ sendFrom: '' });
+  }
+
+  // SEND, the tile on the card's screen
+  fcOutOpen() {
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = this.state.fc;
+    if (!(fc.balance > 0)) { this.toast('There is nothing on this card.', true); return; }
+    this.setState(p => ({
+      screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: 'card', tokenMode: false,
+      amount: '', asset: '', unit: 'USD', recipient: '', recipientKind: '', emailDraft: '', note: '', noteDraft: '',
+    }));
+  }
+
+  /* WITHDRAW, the row on SEND MONEY in card mode: back to the card's screen, out of card mode, and the withdrawal as the
+   * card's own tile always began it (`fcWithdraw`), so that it ends on the card's screen as it always did. */
+  fcOutWithdraw() {
+    this.setState(p => {
+      const stack = (p.stack || []).slice();
+      const to = stack.length ? stack.pop() : 'flashcard';
+      return { screen: to, stack, sendFrom: '', flow: 'receive', amount: '', unit: 'USD', recipient: '', recipientKind: '' };
+    });
+    this.fcWithdraw();
+  }
+
+  /* NEXT on the confirmation in card mode. Everything that can be said before the card is touched is said here: no route,
+   * another mint, a payment of this already going, a fee not known yet, a card that does not hold the total. Then the tap. */
+  fcOutNext() {
+    const W = this.fcW();
+    const s = this.state;
+    if (!W || !this.fcOutMode()) { this.back(); return; }
+    if (!W.connected) { this.offlineNo('Paying from the card'); return; }
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = s.fc;
+    const to = String(s.recipient || '').trim().replace(/^lightning:/i, '');
+    const want = to.toLowerCase();
+    if ((W.pendingMelts && W.pendingMelts().some(m => m && ((m.bolt11 && m.bolt11.toLowerCase() === want) || (m.payee && m.payee === want))))
+        || this._sendRun) { this.showPayPending(); return; }
+    // the fee the confirmation showed, on the very invoice that is paid: never a tap for a total that is not known
+    const ask = this.sendAsk();
+    const q = this._feeQuote;
+    let send = null;
+    if (ask && ask.inv && q && q.bolt11 === ask.inv) send = { to, key: fc.key, quote: q };
+    else if (ask && ask.addr && q && this._found && this._found.addr === ask.addr && this._found.sats === ask.sats && q.bolt11 === this._found.pr) {
+      send = { to, key: fc.key, quote: q, found: this._found };
+    }
+    if (!send) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
+    const total = W.cardOutTotal ? W.cardOutTotal(q.amount, q.feeReserve) : q.amount + q.feeReserve;
+    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance }, { taken: true }); return; }
+    // Tor can drop while the confirmation sits open: given a moment to come back, as a payment from this phone is (`startSend`)
+    const G = window.FoxyGate;
+    const fresh = (G && G.recheck) ? G.recheck() : null;
+    Promise.resolve(fresh).then((ok) => {
+      if (fresh && !ok) { this.offlineNo('Paying from the card'); return; }
+      this.fcPayRun(total, '', false, false, null, send);
+    });
+  }
+
+  /* The card has paid this phone the total, and its pieces for it are held: the payment is made with them, on the screen a
+   * payment from this phone is made on. Change the card is still owed (its sheet was closed before it went on) is asked for
+   * once the payment is over (`fcOutSettled`). */
+  fcOutPay(r, send, sats) {
+    // the money that came off the card is the holder's own move, said by this flow and not announced
+    if (r && r.hash) this.txIsNew(r.hash);
+    const ch = r && r.change;
+    const o = Object.assign({}, send, {
+      held: (r && r.held) || '', card: send.key, sats,
+      change: (ch && !ch.written && !ch.unmade && ch.sats > 0) ? ch.sats : 0,
+      changeLater: (ch && ch.unmade && ch.sats > 0) ? ch.sats : 0,
+    });
+    this.refreshBalance();
+    this.loadHistory();
+    if (!o.held) {
+      // (not to be: the pieces were not held, and are in this phone's own balance)
+      this.blockedCard('fc-out-lost', {
+        tone: 'warn', title: 'NOT PAID',
+        reason: this.fcSats(sats) + ' came off the card into this phone, and could not be kept for this payment. Nothing was paid.',
+      });
+      return;
+    }
+    clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
+    this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
+    this.startSendNow(send.to, o);
+  }
+
+  // whether the card's pieces for this payment are still held, and so not in a melt
+  fcOutStillHeld(o) {
+    const W = this.fcW();
+    return !!(W && W.cardOutHeld && o && o.held && W.cardOutHeld().some((h) => h.id === o.held));
+  }
+
+  /* The payment was not made, and the card's pieces are still held for it: they go back to the card (made into pieces for it
+   * and owed to it), and NOT PAID says so, with TAP CARD to put them on. Once only, however many ways it ended. */
+  fcOutBack(o, e) {
+    const W = this.fcW();
+    if (!W || !o || o.done) return;
+    o.done = true;
+    const said = e ? String(W.reason ? W.reason(e) : (e.message || '')) : 'The payment could not be started.';
+    console.log('[foxy] card: a payment from the card was not made; what it paid goes back to it');
+    const tell = (r) => {
+      this.refreshBalance();
+      this.loadHistory();
+      const sats = Math.round(Number(r && r.sats) || 0) || Math.round(Number(o.sats) || 0);
+      this.fcFailed({ card: 'not-paid-out', message: said, sats, made: !!(r && r.made) }, { paying: true });
+    };
+    W.cardOutBack(o.held).then(tell, () => tell(null));
+  }
+
+  /* TAP CARD on NOT PAID: the card's own phone writes with its own proof and no PIN; any other, as a till writes change. */
+  fcOutWrite() {
+    const fc = this.state.fc;
+    if (fc && fc.ownedHere) { this.fcWriteRun('', { owner: true }); return; }
+    this.fcWriteAsk({});
+  }
+
+  // a payment from the card is over: made (`paid`), or pending; change the card is still owed is asked for once it is made
+  fcOutSettled(o, paid) {
+    if (!o || o.done) return;
+    o.done = true;
+    const W = this.fcW();
+    if (W && W.cardOutDone) W.cardOutDone(o.held);
+    if (!paid) return;
+    if (o.change > 0 && this.fcOwedAfterPaying()) this.fcChangeWaiting(o.change);
+    else if (o.changeLater > 0) this.fcChangeLater(o.changeLater, 0);
+  }
+
   /* flashcard: the card that was tapped, or the invitation to tap one. */
   /** @param {RenderContext} c */
   renderFlashcard(c) {
@@ -3271,6 +3450,8 @@
       fcLinks: links,
       fcTap: () => this.fcRead(),
       fcAdd: () => this.fcAdd(),
+      // SEND: a payment from the card, on the send screen (`fcOutOpen`); the card's WITHDRAW is a row there
+      fcSend: () => this.fcOutOpen(),
       fcWithdraw: () => this.fcWithdraw(),
       fcSetUp: () => this.fcSetUp(),
     };

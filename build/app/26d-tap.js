@@ -409,8 +409,10 @@
       this.setState({ tapArmed: true, tapCardOff: true, tapAutoFresh: true });
       return;
     }
+    /* Not while paying from a card (SEND on the card's screen, `fcOutMode`): a phone-to-phone offer is paid out of this
+     * phone's own pile, and that is not what the person is doing. */
     const listening = (s.screen === 'home' || s.screen === 'sendHow')
-      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp;
+      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode());
     /* And the marks are cleared only when there is no tap to protect.
      *
      * `_tapKeep` is what stops `syncTap` searching again under a live link —

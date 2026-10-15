@@ -3817,6 +3817,17 @@
        * library adds for the rest; none, where even a few are too many. */
       var pile = proofs(mintOf(w), 'sat'), shape = [];
       var ones = function (n) { var c = 0; while (n > 0) { c += n % 2; n = Math.floor(n / 2); } return c; };
+      /* A card paying out of this phone (SEND from the card's screen, `o.exact`): the pieces that come in are about to be
+       * melted, every one of the price and none more, so they are cut as the price in powers of two and the rest after it.
+       * Then the price is always an exact set of them, and what is over stays in this phone for the card's change. */
+      /* Only where the mint takes that many outputs in one request: a swap it refuses after the card has signed for it can
+       * be made with no other outputs, and the pieces would be lost. Otherwise cut as ever, and the payment holds all of
+       * what comes in (`cardOutHold`), the melt giving back what it does not use. */
+      var top = cardMaxPiece(w);
+      var exact = (o.exact && o.want > 0 && own >= o.want) ? cardBinary(o.want, top).concat(cardBinary(own - o.want, top)) : [];
+      if (exact.length && exact.length + change.length <= mintArrayCap(w)) {
+        return w.prepareSwapToReceive(token, { onCountersReserved: saw }, { type: 'deterministic', counter: 0, denominations: exact.concat(change) });
+      }
       [CARD_OUTPUTS_MOST, 8, 4, 0].some(function (most) {
         shape = most ? shapeOutputs(pile, own, Math.min(mintArrayCap(w) - 16, most)) : [];
         var sum = shape.reduce(function (a, b) { return a + (Number(b) || 0); }, 0);
@@ -4260,7 +4271,8 @@
     var wantN = Math.round(Number(note && note.want) || 0);
     var split = (note && note.own && !plain && !note.all && wantN > 0)
       ? function (back) { return cardOwnChangeCut(w, card, group, back); } : null;
-    return cardSwapPlan(w, group, split ? { want: wantN, split: split } : undefined).then(function (plan) {
+    var exact = !!(note && note.exact && !note.all && wantN > 0);
+    return cardSwapPlan(w, group, split ? { want: wantN, split: split, exact: exact } : (exact ? { want: wantN, exact: true } : undefined)).then(function (plan) {
       mark('set out');
       var slots = plan.inputs.map(function (p) { return slotOf[p.secret]; });
       var first0 = cardSecretParts(plan.inputs[0].secret);
@@ -4678,8 +4690,13 @@
    *   `bad-pieces` the mint never signed them: nothing to put back;
    *   `waiting`  no answer, or one that settles nothing: the swap record and the
    *              row stay, and the wallet's own recovery settles it. */
+  /* A card paying out of this phone (`row.send`): on the first asking the pieces this phone is given for the price are not put
+   * in its pile but held to one side for the payment (`holdAs`, 19-bill-split.js), and the entry is the holder's own move
+   * (`to: 'card'`), never announced as money received. A later asking (`again`: the answer was lost, and the payment never
+   * made) puts them in the pile as any swap does, and the settling owes them all back to the card (`cardSettle`). */
   function cardSwapTaken(row, again) {
-    return FoxyWallet.receiveToken(row.token, { hash: row.id, memo: row.memo || 'card',
+    var holdAs = (row.send && !again) ? { id: 'cardout-' + row.id, card: row.card, forHash: row.id, token: row.token } : undefined;
+    return FoxyWallet.receiveToken(row.token, { hash: row.id, memo: row.memo || 'card', holdAs: holdAs,
                                                 keptSats: row.all ? undefined : row.sats,
                                                 changeSats: row.all ? undefined : (row.over > 0 ? row.over : undefined),
                                                 grossSats: row.all ? undefined : row.worth,
@@ -4689,7 +4706,7 @@
       .then(function (r) {
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
         // 'card' is a move the screens say themselves; 'card payment' is announced like any other (16-history-lists.js)
-        try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund) ? 'card' : 'card payment' }); } catch (x) {}
+        try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || row.send) ? 'card' : 'card payment' }); } catch (x) {}
         // and names the card, as a load's entry does: the card's own history is read from that (26f-flashcard.js)
         try { amendTx(row.id, { card: row.card }); } catch (x1) {}
         return cardChangeKept(row).then(function () { return { sats: (r && r.sats) || 0 }; });
@@ -4714,7 +4731,7 @@
          * phone's own swap spent them. That is the payment, made. */
         if (again && spent && !(e && e.foxyMine) && FoxyWallet.txSeen(row.id)) {
           mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
-          try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund) ? 'card' : 'card payment' }); } catch (x2) {}
+          try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || row.send) ? 'card' : 'card payment' }); } catch (x2) {}
           try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x3) {}
           // what this phone has of it: the card's own change (1.12) was never in its pile
           return cardChangeKept(row).then(function () { return { sats: Math.max(0, (Number(row.worth) || 0) - (Number(row.cardChange) || 0)) }; });
@@ -4904,6 +4921,11 @@
     try { pin = (o.pin === undefined || o.pin === null || o.pin === '') ? '' : cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
     var want = o.all ? 0 : Math.round(Number(o.sats));
     if (!o.all && !(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
+    /* `o.holdFor`: the card is paying out of this phone (SEND from the card's own screen, 26f-flashcard.js), and what it pays
+     * is not this phone's to keep. It is read as a till reads it, and the pieces the swap gives this phone are kept to one side
+     * (`cardOutHold`) for the payment they are about to make, and for nothing else. Only a payment, with a route to the mint:
+     * never all of a card, its owner's lifting of the limit, a tap held for a write after, or a payment taken on trust. */
+    if (o.holdFor && (o.all || o.lift || o.hold || o.trusted)) return Promise.reject(cardError('bad-amount', 'A card pays out of this phone only as a payment.'));
     var w;
     /* No route: refused, as it always was, unless this is a payment the person
      * has said yes to taking on trust (`cardKeepOnTrust`). */
@@ -4942,6 +4964,9 @@
      * (`card.proved`); what it signs for is, as it always was. */
     return cardLook(link, { mine: !!o.lift, noAuth: true, brief: !o.lift && !o.all }).then(function (c) {
       card = c;
+      /* `o.only`: the card the screen is for, by its key. Another card held to the phone is said to be another card here, before
+       * any PIN or signature is asked of it (paying out of this phone from a card's screen pays from that card and no other). */
+      if (o.only && card.key !== o.only) throw cardError('wrong-card', 'That is not the card on the screen. Nothing was taken from it.');
       var no = cardUnusable(card, w);
       if (no) throw no;
       all4 = cardIsAll(card);
@@ -5204,9 +5229,11 @@
                      // `over`: what this phone makes of the change after the swap; `cardChange`: what the card made of it itself (1.12)
                      sats: o.all ? plan.net : want, worth: plan.net, over: o.all ? 0 : plan.net - want - plan.cardChange, cardChange: o.all ? 0 : plan.cardChange,
                      all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
+        // paying out of this phone: what the swap gives is held for the payment (`cardSwapTaken`), and a late answer goes back to the card (`cardSettle`)
+        if (o.holdFor) kept.send = true;
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([kept]));
         return kept;
-      }, { want: want, all: !!o.all, memo: memo, own: ownChange },
+      }, { want: want, all: !!o.all, memo: memo, own: ownChange, exact: !!o.holdFor },
       (cheaper && !o.all) ? { group: cheaper, fill: function () { return cardFill(t, card, cheaper, w); } } : null);
     }).then(function (answer) {
       // when the card had signed, to say in the log how long after it its sheet was told to go
@@ -5234,7 +5261,9 @@
         var spec0 = cardSwapFor(signed);
         var cc0 = (spec0 && spec0.change && Array.isArray(spec0.change.outs)) ? spec0.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
         row = { id: 'card-' + piecesFingerprint(signed), token: token, sats: want, worth: worth - fee, over: Math.max(0, worth - fee - want - cc0), cardChange: cc0,
-                all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
+                all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited),
+                // paying out of this phone (`o.holdFor`): what the swap gives is held for the payment (`cardSwapTaken`)
+                send: !!o.holdFor };
         // written down before the card is let go: from here this row is the only copy of the right to spend the pieces (and the held one is part of it)
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([row]));
       }
@@ -5355,6 +5384,13 @@
       if (offline) { if (letGoAfter) cardHeldRelease(letGoAfter, null); return got; }
       result = /** @type {any} */ ({ sats: want, hash: row.id, change: null, torn: tornSats });
       if (afterCard) result.card = afterCard;
+      /* Paying out of this phone: the pieces the swap gave for the payment, held to one side (`cardOutHold`), by the name the
+       * payment asks for them by (`pay`, `opts.held`). Marked as being in hand, so the sweep for ones left behind leaves them. */
+      if (row.send) {
+        var heldId = 'cardout-' + row.id;
+        var heldNow = load(K.held, {})[heldId];
+        if (heldNow) { result.held = heldId; result.heldSats = sumProofs(heldNow.proofs || []); cardOutBusy[heldId] = Date.now(); }
+      }
       /* Change: what the card paid over, less what it costs to make and for the
        * card to spend again (`changeFromPile`), locked to the card again with
        * the date of what it paid with, cut to fill the gaps in its drawer, and
@@ -5480,10 +5516,14 @@
       if (viaCard > 0) cardChangeNote(row, viaCard);
       return Promise.resolve({ sats: 0, owed: 0, kept: false });
     }
-    var already = cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === row.id; });
+    /* `row.outBack`: the price of a payment a card was to make out of this phone, which was not made, going back to the card
+     * whole (`cardOutBack`). Its entry has said what the card made of its own change already, which is no reason to keep this:
+     * only a put-back already filed for it is. */
+    var outBack = !!row.outBack;
+    var already = cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === row.id && (!outBack || r.outBack); });
     var entry = null;
     try { entry = (load(K.log, []) || []).filter(function (e) { return e && e.hash === row.id; })[0] || null; } catch (x0) { entry = null; }
-    var settledState = entry && /^(not handed|given back|never came|never sent|came back)$/.test(String(entry.changeState || ''));
+    var settledState = !outBack && entry && /^(not handed|given back|never came|never sent|came back)$/.test(String(entry.changeState || ''));
     // a retry (`opts.retry`) is of change that was never sent, and is made now (the card's own change, owed beside it, has said 'not handed' already)
     if (settledState && o.retry && (entry.changeState === 'never sent' || viaCard > 0)) settledState = false;
     if (already || settledState) return Promise.resolve({ sats: 0, owed: owed, kept: false });
@@ -5510,7 +5550,11 @@
      * wrote it first: the tap's own receive does, but the wallet's own recovery
      * of a lost answer writes a plain receive of the gross. */
     try {
-      amendTx(row.id, refundRow ? { memo: 'card, not completed', changeState: 'making', changeSats: owed + viaCard, grossSats: owed + viaCard, sats: 0 }
+      /* Paying out of this phone, put back: the entry had the price come off the card into this phone, and the price goes
+       * back now, so it is taken off what the entry says stayed (and the card's own list says it is going back on). */
+      if (outBack) amendTx(row.id, { memo: 'card, not completed', changeState: 'making', changeSats: owed, grossSats: owed,
+                                     sats: Math.max(0, Math.round(Number(entry && entry.sats) || 0) - owed) });
+      else amendTx(row.id, refundRow ? { memo: 'card, not completed', changeState: 'making', changeSats: owed + viaCard, grossSats: owed + viaCard, sats: 0 }
                                 : { changeState: 'making', sats: Math.max(0, Math.round(Number(row.sats) || 0)),
                                     grossSats: Math.max(0, Math.round(Number(row.worth) || 0)), changeSats: owed + viaCard });
     } catch (x1) {}
@@ -5523,7 +5567,8 @@
         settleChangeMade(row.id, owed, { sats: made.sats, fee: made.fee, back: back });
         if (card) cardPiecesOf(made.token, card);
         mustSave(CARD_OWED, cardStore(CARD_OWED).concat([{ id: made.hash, card: key, token: made.token, sats: made.sats,
-                                                           kind: refundRow ? 'refund' : 'change', forHash: row.id, at: Date.now() }]));
+                                                           kind: refundRow ? 'refund' : 'change', forHash: row.id, at: Date.now(),
+                                                           outBack: outBack || undefined }]));
         try { amendTx(row.id, { changeState: 'not handed' }); } catch (x3) {}
         return { sats: made.sats, owed: owed, kept: false, made: made };
       }, function (e) {
@@ -5557,9 +5602,10 @@
    * phone could not make; it is asked for (`cardChangeOwe`), and the two are noted apart, for a payment may owe both. */
   function cardDueNote(row, owed, blind) {
     var due = cardStore(CARD_DUE);
-    if (due.some(function (d) { return d && d.forHash === row.id && !!d.blind === !!blind; })) return;
+    if (due.some(function (d) { return d && d.forHash === row.id && !!d.blind === !!blind && !!d.outBack === !!(!blind && row.outBack); })) return;
     mustSave(CARD_DUE, due.concat([{ forHash: row.id, card: row.card, token: row.token, sats: row.sats, worth: row.worth,
                                      owed: blind ? Math.round(Number(row.cardChange) || 0) : owed, refund: !!row.refund,
+                                     outBack: (!blind && row.outBack) || undefined,
                                      blind: !!blind, cardChange: Math.round(Number(row.cardChange) || 0), at: Date.now() }]));
   }
 
@@ -5581,7 +5627,7 @@
     return due.reduce(function (chain, d) {
       return chain.then(function () {
         if (!d || !d.forHash) return null;
-        var drop = function () { mustSave(CARD_DUE, cardStore(CARD_DUE).filter(function (x) { return !(x && x.forHash === d.forHash && !!x.blind === !!d.blind); })); };
+        var drop = function () { mustSave(CARD_DUE, cardStore(CARD_DUE).filter(function (x) { return !(x && x.forHash === d.forHash && !!x.blind === !!d.blind && !!x.outBack === !!d.outBack); })); };
         // the card's own change, which the mint signed and this phone did not hear: asked of the mint by the blinded messages
         if (d.blind) {
           if (cardStore(CARD_OWED).some(function (r) { return r && r.blind && r.forHash === d.forHash; })) { drop(); return null; }
@@ -5596,7 +5642,7 @@
             out.push({ forHash: d.forHash, state: made ? 'made' : 'kept', sats: made ? made.sats : 0 });
           }, function () { out.push({ forHash: d.forHash, state: 'waiting', sats: 0 }); });
         }
-        if (cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === d.forHash; })) { drop(); return null; }
+        if (cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === d.forHash && (!d.outBack || r.outBack); })) { drop(); return null; }
         var tags = {};
         try { tags = FoxyWallet.tagsFor(d.forHash) || {}; } catch (x) { tags = {}; }
         // the recovery puts the change it found on the payment's entry, as a code to hand over (`owedChangeOnEntry`)
@@ -5626,7 +5672,7 @@
           return null;
         }
         var row = { id: d.forHash, token: d.token, sats: d.sats, worth: d.worth, over: d.owed, all: false, card: d.card, refund: !!d.refund,
-                    cardChange: Math.round(Number(d.cardChange) || 0) };
+                    cardChange: Math.round(Number(d.cardChange) || 0), outBack: !!d.outBack };
         return cardOweBack(row, w, null, null, d.refund ? { sats: d.owed } : null, { retry: true }).then(function (r) {
           if (r && r.made) { drop(); out.push({ forHash: d.forHash, state: 'made', sats: r.sats }); return; }
           // too small to make after all: the payment keeps it, as a tap's would
@@ -5635,5 +5681,140 @@
         });
       });
     }, Promise.resolve()).then(function () { return out; });
+  }
+
+  /* ---- a card paying out of this phone (SEND from the card's screen) ------------------------------------------------------
+   *
+   * The card pays this phone exactly as it pays a till (`cardTake`, `o.holdFor`), and what the swap gives this phone for the
+   * price is held to one side, out of the pile, under the name 'cardout-' and the payment's row (K.held, the store a lost
+   * swap's inputs wait in: written with mustSave, counted by the books and by `heldSats`, and touched by nothing else that
+   * does not ask for it by name). The payment then melts those pieces and no others (`pay`, `opts.held`). Every way it can
+   * end leaves them somewhere:
+   *
+   *   paid                    spent at the mint; what the fee reserve did not use comes back to this phone as melt change;
+   *   refused, or never tried the payment puts them back in the hold, and `cardOutBack` makes them into pieces for the card,
+   *                           owed to it, and its next tap puts them back on (no PIN, as after any payment);
+   *   left behind             Foxy closed between the swap and the melt, or the melt's answer lost and then UNPAID: the
+   *                           connect's sweep (`cardOutsLeft`) does the same once nothing is using them. */
+  var CARD_OUT_STALE_MS = 120000;
+  // the holds a payment is using now, by name, and since when: the sweep leaves them alone for ten minutes
+  var cardOutBusy = {};
+  function cardOutInUse(id) {
+    var at = Number(cardOutBusy[id]) || 0;
+    return at > 0 && Date.now() - at < 600000;
+  }
+  // a payment has finished with its hold, however it went
+  function cardOutDone(id) { delete cardOutBusy[id]; }
+
+  /* What a card pays out of this phone for an invoice of `amount` the mint quoted `reserve` of fee for: the two, and the
+   * mint's own fee for spending the pieces they are cut into (one piece to a binary place of the total, which is how
+   * `cardSwapPlan` cuts them). Nothing more at a mint that charges no fee. */
+  function cardOutTotal(amount, reserve) {
+    var base = Math.max(0, Math.round(Number(amount) || 0)) + Math.max(0, Math.round(Number(reserve) || 0));
+    var w;
+    try { w = need(); } catch (e) { return base; }
+    var total = base;
+    for (var i = 0; i < 6; i++) {
+      var next = base + feeForInputs(w, piecesFor(total));
+      if (next === total) break;
+      total = Math.max(total, next);
+    }
+    return total;
+  }
+
+  /* The hold of a payment that was not made, back to the card: into the pile (under the proof lock, as anything that writes
+   * the pile is), then made into pieces locked to the card with the dates of what it paid with and owed to it, the way a
+   * refund of a till's is (`cardOweBack`, `outBack`). Resolves { sats, made }: `made` false where there is no route to make
+   * them (the hold stays, and the connect's sweep does it), or the making failed (owed later, `cardDueRetry`). */
+  function cardOutBack(id) {
+    var h = load(K.held, {})[id];
+    if (!h || h.kind !== 'card out') return Promise.resolve({ sats: 0, made: false });
+    var sats = sumProofs(h.proofs || []);
+    var w;
+    /* Not made now (no wallet, no route, or this phone on another mint): the payment is over with its hold all the same, so
+     * it is no longer in use, and is aged as one left behind, for the next sweep (`cardOutsLeft`) to give back at once rather
+     * than in ten minutes. */
+    var later = function () {
+      cardOutDone(id);
+      try {
+        var all = load(K.held, {});
+        if (all[id]) { all[id].at = 0; save(K.held, all); }
+      } catch (e) { /* the sweep still takes it once it is old enough */ }
+      return Promise.resolve({ sats: sats, made: false });
+    };
+    try { w = need(); } catch (e) { return later(); }
+    if (!routeOpen() || canonicalMint(mintOf(w)) !== canonicalMint(h.mint)) return later();
+    cardOutBusy[id] = Date.now();
+    var released = false;
+    return withProofs('cardOutBack', function () {
+      if (!load(K.held, {})[id]) return;
+      releaseHeld(id, true);
+      released = true;
+    }).then(function () {
+      if (!released) return { sats: 0, made: false };
+      console.log('[foxy] card: a payment out of this phone was not made; ' + sats + ' sats go back to the card');
+      var row = { id: h.forHash, token: h.token, card: h.card, refund: true, outBack: true, worth: sats, sats: 0, over: sats, all: false, cardChange: 0 };
+      return cardOweBack(row, w, null, null, { sats: sats }).then(function (r) {
+        return { sats: (r && r.made) ? r.sats : sats, made: !!(r && r.made) };
+      });
+    }).then(function (r) { cardOutDone(id); return r; }, function (e) { cardOutDone(id); throw e; });
+  }
+
+  /* Holds left behind: older than CARD_OUT_STALE_MS, not in a payment now, and not the pieces of a melt that is still being
+   * asked about (K.melting names its hold). Each goes back to its card. Asked when the wallet connects. */
+  function cardOutsLeft() {
+    var all = load(K.held, {});
+    var melting = load(K.melting, []) || [];
+    var ids = Object.keys(all).filter(function (id) {
+      var h = all[id];
+      if (!h || h.kind !== 'card out' || cardOutInUse(id)) return false;
+      if (Date.now() - (Number(h.at) || 0) < CARD_OUT_STALE_MS) return false;
+      return !melting.some(function (m) { return m && m.cardOut === id; });
+    });
+    var out = [];
+    return ids.reduce(function (chain, id) {
+      return chain.then(function () {
+        return cardOutBack(id).then(function (r) { out.push({ id: id, sats: r.sats, made: r.made }); }, function () { out.push({ id: id, sats: 0, made: false }); });
+      });
+    }, Promise.resolve()).then(function () { return out; });
+  }
+
+  /* What a card's swap gave this phone, as it lands (`receiveToken`, `opts.holdAs`): the pieces that make `keep` (the price, an
+   * exact set, which the swap was cut to have) are held for the payment under `holdAs.id`, and the rest is answered, for the
+   * pile. With no exact set (a card that does not sign once for a payment, cut otherwise) all of it is held, and the melt gives
+   * back what it did not use. Written with mustSave: a hold that cannot be written fails the swap's landing, and its record
+   * puts the pieces back by the ordinary recovery. */
+  function cardOutHold(holdAs, fresh, mint, keep) {
+    var sorted = (fresh || []).slice().sort(function (a, b) { return satsOf(b.amount) - satsOf(a.amount); });
+    var left = Math.max(0, Math.round(Number(keep) || 0)), pick = [], rest = [];
+    sorted.forEach(function (p) {
+      var a = satsOf(p.amount);
+      if (left > 0 && a <= left) { pick.push(p); left -= a; } else rest.push(p);
+    });
+    if (left !== 0 || !pick.length) { pick = (fresh || []).slice(); rest = []; }
+    var all = load(K.held, {});
+    all[holdAs.id] = { mint: mint, unit: 'sat', proofs: pick, kind: 'card out', card: holdAs.card || '', forHash: holdAs.forHash || '',
+                       token: holdAs.token || '', at: Date.now() };
+    mustSave(K.held, all);
+    cardOutBusy[holdAs.id] = Date.now();
+    console.log('[foxy] card: ' + sumProofs(pick) + ' sats it paid are held for its payment out of this phone' + (rest.length ? '; ' + sumProofs(rest) + ' to this phone\u2019s pile' : ''));
+    return rest;
+  }
+
+  /* Pieces of a payment's melt that did not go, back into the hold they came from rather than the pile (`pay`, `sweepMelts`):
+   * the card is owed them, and only `cardOutBack` gives them to it. Each piece once. */
+  /* `when`: the time the hold is to have, and so how soon the sweep takes it (the sweep's own gives 0: it goes back at once). */
+  function cardOutReturn(id, list, mint, extra, when) {
+    var all = load(K.held, {});
+    var h = all[id] || Object.assign({ mint: mint, unit: 'sat', proofs: [], kind: 'card out', at: Date.now() }, extra || {});
+    var have = {};
+    (h.proofs || []).forEach(function (p) { if (p && p.secret) have[p.secret] = true; });
+    (list || []).forEach(function (p) { if (p && p.secret && !have[p.secret]) { have[p.secret] = true; h.proofs.push(p); } });
+    // a hold given back by a payment is a fresh one: the sweep leaves it for CARD_OUT_STALE_MS, for the screen that is putting it back now
+    h.at = when === undefined ? Date.now() : when;
+    all[id] = h;
+    mustSave(K.held, all);
+    // given back by the sweep, it is nobody's payment any more: the next sweep for ones left behind takes it
+    if (when !== undefined) cardOutDone(id);
   }
 

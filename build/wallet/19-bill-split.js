@@ -513,6 +513,8 @@
        * the payer's (_requestPaid). Without this the swap wrote a second entry
        * and the same sats appeared twice. Named, it amends the first. */
       var into = opts && typeof opts.hash === 'string' ? opts.hash : '';
+      // the pieces this swap gives for the amount kept are held for a card's payment out of this phone (08a-flashcard.js, `cardOutHold`)
+      var holdAs = (opts && opts.holdAs && opts.holdAs.id) ? opts.holdAs : null;
       var info = FoxyWallet.tokenInfo(text);
       if (!info) return Promise.reject(new Error('That is not a Cashu token.'));
       var tok = info;           // not null, in the callbacks below as well
@@ -908,6 +910,15 @@
              * had allowed 6, and the way home was refused for want of three
              * (tools/live/tap-scenarios.js 6). `opts.plain`
              * leaves the split to cashu-ts, which makes the fewest pieces. */
+            /* Held for a payment out of this phone (`opts.holdAs`): cut as the amount kept in powers of two and the rest after
+             * it, so the amount is always an exact set of what comes in (`cardOutHold`, below). */
+            var keepN = Math.round(Number(opts && opts.keptSats) || 0);
+            var cut = (holdAs && isFinite(expect) && keepN > 0 && expect >= keepN)
+              ? cardBinary(keepN, cardMaxPiece(w)).concat(cardBinary(expect - keepN, cardMaxPiece(w))) : [];
+            // (within what the mint takes in one request; otherwise shaped as ever, and all of it is held)
+            if (cut.length && cut.length <= mintArrayCap(w)) {
+              return w.receive(FoxyWallet.unwrap(text), unlockWith ? { privkey: unlockWith } : undefined, { type: 'deterministic', counter: 0, denominations: cut });
+            }
             var shaped = (isFinite(expect) && expect > 0 && !(opts && opts.plain))
               /* within what the mint takes in one request, less the powers of two the
                * remainder may need (a 60-piece shape at a 25-cap mint was refused, the
@@ -923,7 +934,10 @@
         // kept with no route: no proofs were swapped, so there is nothing to file
         if (fresh && fresh.kept) return fresh;
         var got = sumProofs(fresh);
-        addProofs(fresh, intoMint, intoWallet, unit);
+        /* Held for a payment out of this phone: the pieces that make the amount kept go to one side, out of the pile, before
+         * the swap's record is let go, and only the rest (the change this phone makes for the card) is filed in the pile. */
+        var toPile = (holdAs && unit === 'sat') ? cardOutHold(holdAs, fresh, intoMint, Math.round(Number(opts.keptSats) || 0)) : fresh;
+        addProofs(toPile, intoMint, intoWallet, unit);
         guard.done();
         // remembered, so the same ecash offered again is said to be this phone's (`mineIfTaken`)
         try { noteTaken(tok.proofs, got); } catch (eT) {}

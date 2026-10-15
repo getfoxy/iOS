@@ -221,7 +221,7 @@
      * that meant "get ready to tap" now goes. */
     if (target === 'nfc') { go({ screen: 'home' }); return done(); }
     if (target === 'home') { go({ screen: 'home' }); return done(); }
-    if (target === 'send') { go({ screen: 'sendHow', flow: 'send' }); return done(); }
+    if (target === 'send') { go({ screen: 'sendHow', flow: 'send', sendFrom: '' }); return done(); }
 
     if (target === 'receive') {
       const unit = unitOr('USD');

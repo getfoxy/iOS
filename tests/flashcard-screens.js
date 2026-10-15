@@ -156,7 +156,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS' && v.fcRowShown === true && v.fcHistoryVis === 'visible' && v.fcResetVis === undefined && v.fcReset === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcHistory === 'function' && !hasReset(holder),
-     'with ADD FUNDS and WITHDRAW, HISTORY at the top left, and a row of CHANGE PIN and LIMITS under them: RESET is in the row for a card of 1.17 and not for this older one');
+     'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY at the top left, and a row of CHANGE PIN and LIMITS under them: RESET is in the row for a card of 1.17 and not for this older one');
   ok(v.fcFaceLines === true && v.fcLimitShown === true, 'and the limit line is drawn on the card’s own face (it has the card’s badge above it only where there is one)');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),

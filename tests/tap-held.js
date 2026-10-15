@@ -163,8 +163,10 @@ const TALKING = { _tapTalking: true };
    * nothing down that a payer is waiting on. `syncSend` keeps the send
    * confirmation up with the route (it asks the fee, holds the button, tells
    * of a connection that does not come); it reads `screen` only to forget a
-   * wait once the confirmation has gone, and touches no link. */
-  const known = ['syncAccent', 'syncAwake', 'syncShake', 'syncFlip', 'syncClaim', 'syncHaptics', 'syncInbox',
+   * wait once the confirmation has gone, and touches no link. `syncCardOut`
+   * reads it only to put down a payment from a card (26f-flashcard.js) once
+   * that flow is off the screen, and touches no link either. */
+  const known = ['syncAccent', 'syncAwake', 'syncCardOut', 'syncShake', 'syncFlip', 'syncClaim', 'syncHaptics', 'syncInbox',
                  'syncPreview', 'syncQueue', 'syncReqQr', 'syncSend', 'syncSlide', 'syncSnow',
                  'syncTap', 'syncTokenQr', 'syncUnit'].sort();
   ok('the passes that run on every update are the ones this file knows about',

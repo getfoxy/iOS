@@ -127,6 +127,8 @@
         cardSpin: A.flagged.has(t) ? 'foxyEdge 1.6s linear infinite' : 'none',
         metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
           : t.failed ? 'Failed' : t.atRisk ? 'AT RISK \u00b7 not settled'
+          // paid from a card (SEND on the card's screen), not from this phone's balance
+          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Flashcard'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */

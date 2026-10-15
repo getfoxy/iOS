@@ -188,6 +188,8 @@
       ((m && m.proofs) || []).forEach(function (p) { if (p && p.secret) out[p.secret] = true; });
     });
     quarantineEntries().forEach(function (q) { out[q.proof.secret] = true; });
+    // and a card's pieces held for its payment out of this phone: a restore filed them as balance as well as held
+    cardOutProofs().forEach(function (p) { if (p && p.secret) out[p.secret] = true; });
     FoxyWallet._sentTokens().forEach(function (e) {
       var info = null;
       try { info = FoxyWallet.tokenInfo(e.token); } catch (x) {}

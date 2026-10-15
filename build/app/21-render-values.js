@@ -481,8 +481,10 @@
      * card holds. FLASHCARD on the send screen is out of this phone's balance
      * as adding to a card is. */
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
+    // paying from a card (SEND on its screen, `fcOutMode`): out of what the card holds, and not this phone's balance
+    const cardOut = s.flow === 'send' && !!(this.fcOutMode && this.fcOutMode());
     const sendCapUsd = !capped ? 0
-      : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
       : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
@@ -519,6 +521,6 @@
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd' && !cardOut) ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }

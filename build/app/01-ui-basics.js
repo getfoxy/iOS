@@ -254,9 +254,15 @@ class Component extends DCLogic {
      * told so. */
     const asks = s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email');
     const held = asks && (this.connecting() || !!s.quotingFee || this.sendToAsk());
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): the same confirmation, with the card it is paid from
+     * in a row of its own after NETWORK, held to what the card holds and not to this phone's balance, and NEXT, which reads
+     * the payment off the card (`fcOutNext`). */
+    const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
+    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
-      this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
+      // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
+      out ? null : this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
       this.cfRow('NETWORK', s.recipientKind === 'address' ? 'ON-CHAIN' : 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', s.recipientKind === 'address' ? '~10 MINUTES' : 'INSTANTLY',
         { ink: s.recipientKind === 'address' ? 'var(--btc-ink)' : 'var(--acc)', half: true }),
@@ -276,7 +282,8 @@ class Component extends DCLogic {
         ? 'UP TO ' + this.money(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
         { half: true, sub: s.quotedFee != null ? this.money(s.quotedFee).sub : '' }),
-    ];
+    ].filter(Boolean);
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
@@ -288,7 +295,7 @@ class Component extends DCLogic {
     const shortOf = (() => {
       if (s.recipientKind !== 'invoice' || !s.recipient || !W || !W.amountOf) return 0;
       const need = W.amountOf(s.recipient) || 0;
-      const have = s.balSats || 0;
+      const have = out ? cardHas : (s.balSats || 0);
       return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
@@ -297,7 +304,8 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(shortOf) || 'More than your balance \u2014 short by ' + this.money(shortOf).main,
+        // (what this phone holds with the mint is no part of what a card holds: nothing is held back from a card)
+        warn: this.heldBlocks(out ? 0 : shortOf) || (out ? 'More than the card holds \u2014 short by ' : 'More than your balance \u2014 short by ') + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
       };
     }
@@ -328,8 +336,17 @@ class Component extends DCLogic {
      * failing to say, and then SEND is there as it was: `pay` refuses. */
     let covers = null;
     try {
-      covers = (s.quotedFee != null && asks && W && W.payNeed)
-        ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+      /* From a card, the card pays: the amount and the fee, with the mint's fee on the pieces they are cut into, against what
+       * the card holds (`cardOutTotal`, the very figure NEXT reads off it). */
+      if (out && s.quotedFee != null && asks && W && W.cardOutTotal) {
+        const total = W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
+        covers = total > cardHas
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          : { ok: true };
+      } else {
+        covers = (s.quotedFee != null && asks && W && W.payNeed)
+          ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
+      }
     } catch (e) { covers = null; }
     if (covers && !covers.ok) {
       return {
@@ -337,11 +354,11 @@ class Component extends DCLogic {
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
-        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
-    return {
+    const spec = {
       title: 'CONFIRMATION', amountLabel: 'SENDING',
       amount: this.sendAmountText(),
       // the converted figure sits under the primary one
@@ -372,6 +389,9 @@ class Component extends DCLogic {
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
     };
+    // from a card, NEXT, which reads the payment off the card (`fcOutNext`) before anything is paid
+    if (out && !held) Object.assign(spec, { cta: 'NEXT', go: () => this.fcOutNext() });
+    return spec;
   }
 
   /* Which of your mints issued this invoice, if any, and what you hold there.

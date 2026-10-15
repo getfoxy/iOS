@@ -223,9 +223,12 @@
    * They are neither spent nor ours until the mint says which. Keeping them
    * here means the balance does not count them — the payment may go through —
    * and the sweep can give them back if it does not. */
-  function holdMelt(quote, sent, bolt11, at, payee, splitFee) {
+  /* `extra`: more for the hold to carry. A card's payment out of this phone names the card's hold its pieces came from
+   * (`cardOut`, `card`, `cardHold`: 08a-flashcard.js), so that a melt that did not go gives them back there, for the card,
+   * and one that did says on its entry that it was paid from the card. */
+  function holdMelt(quote, sent, bolt11, at, payee, splitFee, extra) {
     var list = load(K.melting, []).filter(function (e) { return e.quote !== quote.quote; });
-    list.push({
+    list.push(Object.assign({
       quote: quote.quote,
       amount: satsOf(quote.amount) || 0,
       feeReserve: satsOf(quote.fee_reserve) || 0,
@@ -241,7 +244,7 @@
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],
-    });
+    }, extra || {}));
     /* A hold that could not be written throws, and the melt is not sent: a
      * payment in flight with no hold on disk is money a killed app forgets
      * (audit W6). pay gives the proofs back to the pile. */
@@ -513,6 +516,19 @@
     // an on-chain payout keeps its proofs on its own record (16a-onchain.js)
     load(K.onchainOut, []).forEach(function (m) { out = out.concat((m && m.proofs) || []); });
     quarantineEntries().forEach(function (q) { out.push(q.proof); });
+    // a card's pieces held for its payment out of this phone (08a-flashcard.js, `cardOutHold`): the card's, and not to be filed again
+    cardOutProofs().forEach(function (p) { out.push(p); });
+    return out;
+  }
+
+  /* The pieces held for a card's payments out of this phone ('card out' in K.held, 08a-flashcard.js). Unspent at the mint
+   * and from this phone's seed, so a restore or a lost answer's recovery finds them; they are the card's, held for it. */
+  function cardOutProofs() {
+    var all = load(K.held, {}) || {}, out = [];
+    Object.keys(all).forEach(function (id) {
+      var h = all[id];
+      if (h && h.kind === 'card out') out = out.concat(h.proofs || []);
+    });
     return out;
   }
 

@@ -238,8 +238,15 @@
      * hunting for a feature they used yesterday, and the row of four is a shape
      * people learn. Dimmed, still tappable, and it says why. */
     const off = this.offlineNow();
+    /* Paying from a card (SEND on the card's own screen, 26f-flashcard.js `fcOutOpen`): the same screen and camera, with the
+     * card's WITHDRAW at the top of the rows, and SEND ECASH and FLASHCARD gone (neither is a payment from the card).
+     * PASTE, CONTACTS and TYPE read what they read as ever; what they lead to is paid from the card (`fcOutNext`). */
+    const cardOut = !!(this.fcOutMode && this.fcOutMode());
     return {
       isSendHow: sc === 'sendHow', isSendType: sc === 'sendType', isSendScan: sc === 'sendScan',
+      clWdOn: cardOut,
+      clEcashOn: !cardOut,
+      goWithdraw: () => this.fcOutWithdraw(),
       pickType: () => {
         if (off) { this.offlineNo('Typing an address'); return; }
         this.setState(p => ({
@@ -285,7 +292,7 @@
       clContactsDim: off ? '0.38' : '1',
       /* FLASHCARD, last: money onto a card held to this phone (26f-flashcard.js, `fcSendCard`). The card is written to
        * through the mint, so it is dimmed offline too, and says why when pressed. */
-      clCardOn: true,
+      clCardOn: !cardOut,
       clCardDim: off ? '0.38' : '1',
       goSendCard: () => this.fcSendCard(),
       goMakeEcash: () => this.setState(p => ({
@@ -376,7 +383,8 @@
         setTimeout(() => {
           this.settleAnimate('btc');
           this.setState({
-            screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD',
+            // (a payment from a card ends here too: home is out of its flow)
+            screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', sendFrom: '',
             flow: 'receive', recipient: '', emailDraft: '', sendPhase: null, sendExit: false,
           });
         }, 380);

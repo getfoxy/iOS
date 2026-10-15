@@ -108,6 +108,7 @@ check "flashcard one signature" 1 node tests/flashcard-sigall.js
 check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
+check "flashcard send" 1 node tests/flashcard-send.js
 check "flashcard long ids" 1 node tests/flashcard-long-ids.js
 check "flashcard switch" 1 node tests/flashcard-switch.js
 check "flashcard fewer" 1 node tests/flashcard-fewer.js

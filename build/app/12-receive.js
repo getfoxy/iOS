@@ -752,6 +752,20 @@
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address. A
+     * bitcoin address and a Cashu payment request are said no to here, before anything moves, and the person is left where
+     * they were. */
+    const cardOut = !!(this.fcOutMode && this.fcOutMode());
+    if (cardOut && (kind === 'address' || kind === 'request')) {
+      this.blockedCard('fcOutNot', {
+        tone: 'warn', title: 'THAT WON\u2019T WORK',
+        reason: kind === 'address'
+          ? 'A Flashcard pays Lightning invoices and addresses, not bitcoin addresses: a payment on chain takes many minutes to settle, and the card\u2019s money cannot wait that long. WITHDRAW it to this phone, then pay from there.'
+          : 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        chip: 'Nothing was taken from the card.',
+      });
+      return false;
+    }
 
     if (kind === 'lnurl') {
       W.remember(t);                       // LNbits will not recall this later
@@ -802,6 +816,16 @@
     }
 
     const sats = W.amountOf(t);
+    /* An invoice that names no amount, from a card: the card is charged the amount and the fee before the payment is made,
+     * and the mint will not say the fee on such an invoice until it is paid. Said no to, as a bitcoin address is. */
+    if (!sats && cardOut) {
+      this.blockedCard('fcOutNot', {
+        tone: 'warn', title: 'THAT WON\u2019T WORK',
+        reason: 'This invoice names no amount. A Flashcard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
+        chip: 'Nothing was taken from the card.',
+      });
+      return false;
+    }
     if (!sats) {
       /* An invoice that names no amount: ask for one, the way an LNURL does.
        *
@@ -843,6 +867,14 @@
      * and then SEND. A connection that does not come says the card then
      * (`syncSend`). */
     const off = !!(this.offlineNow && this.offlineNow());
+    /* A card is paid from with a route, and only with one: there is no token of the card's to make offline. With one on its
+     * way, to the confirmation, which holds NEXT for it as it holds SEND. */
+    if (off && cardOut) {
+      if (!this.connecting()) { this.offlineNo('Paying from the card'); return true; }
+      this.setState(p => ({ screen: 'sendConfirm', stack: p.stack.concat([p.screen]), flow: 'send', asset: 'BITCOIN', network: 'LIGHTNING',
+                            recipientKind: 'invoice', recipient: t, unit: 'SATS', amount: String(sats), payFrom: 'BITCOIN' }));
+      return true;
+    }
     if (off && W.invoiceFromThisMint && W.invoiceFromThisMint(t)) {
       console.log('[foxy] offline, and the invoice is from this mint: paying it with a token');
       this.payThisMintWithToken(sats);
@@ -885,7 +917,8 @@
         shut: { label: 'CONTINUE OVER LIGHTNING', tap: overLightning },
       });
     };
-    if (!W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
+    /* From a card, Lightning it is: the Cashu way (USE CASHU) is paid out of this phone's own pile, not the card. */
+    if (cardOut || !W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
     if (W.invoiceFromThisMint(t)) { offer(); return true; }
     /* The mint's node not known yet (no invoice from it on this phone, and the
      * check after connecting not done): asked now, so the answer does not

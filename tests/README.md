@@ -141,6 +141,18 @@ question asked first, with nothing crossing the link; and **`amount-entry.js`**,
 the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
 check; the line under the figure; NEXT).
 
+**`flashcard-send.js`** holds SEND on a card's own screen: the card's tiles
+RECEIVE and SEND, SEND MONEY in card mode (WITHDRAW, PASTE, CONTACTS and TYPE,
+the camera as ever, and card mode gone however the flow is left), the
+confirmation's FROM / FLASHCARD row and NEXT, and NEXT reading the payment's
+total off the model card as a till reads it (the PIN, the per tap limit's
+wait, another card refused) before the app's own payment melts the pieces the
+card paid, held to one side for it (`cardOutHold`). A melt the mint refuses,
+a quote that ran out, a melt with no answer that later reads UNPAID, and a
+hold left behind all put the card's money back on it at its next tap; the
+card, the mint and the books are asked each time. It lifts the send flow's
+methods out of their files (`appOn(ctx, start, { send: true })`).
+
 **`deep-links.js`** holds what a link from outside Foxy may do. The first half is the
 Debug-only `foxy://` hashes. The second is the one link a Release build takes, a
 card's address (`https://getfoxy.io/card`, raised by a card's tag and handed over by
