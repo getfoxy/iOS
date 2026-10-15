@@ -337,12 +337,22 @@
         if (!W.tokensNotClaimed) { clear(false); return; }
         W.tokensNotClaimed().then(list => {
           if (!list.length) { clear(true); return; }
-          const sats = list.reduce((a, t) => a + (Number(t.sats) || 0), 0);
+          /* Each unit summed on its own, never added together: '1,200 sats
+           * and $ 3.00'. A dollar token's `sats` is null; its cents are in
+           * `amount` under unit 'usd'. */
+          const by = {};
+          list.forEach(t => {
+            const u = String((t && t.unit) || 'sat');
+            const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
+            by[u] = (by[u] || 0) + n;
+          });
+          const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
+            .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
           this.blockedCard('unclaimedTokens', {
             tone: 'warn',
             title: 'UNCLAIMED ECASH',
             reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
-              + this.group(sats) + ' sats, ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
+              + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
               + 'Clearing history forgets ' + (list.length === 1 ? 'it' : 'them') + ' on this phone.',
             chip: 'Your twelve words can still restore unclaimed ecash.',
             retry: 'CLEAR ANYWAY',

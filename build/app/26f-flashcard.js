@@ -874,9 +874,15 @@
   /* ---- being paid by a card (the receive screen's CARD button) -------------- */
 
   payByCard() {
+    const s = this.state;
+    /* A card holds bitcoin. A receive into the dollar balance hides CARD, and
+     * this holds if anything else reaches it. */
+    if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') {
+      this.toast('The card holds bitcoin; this asks for dollars.', true);
+      return;
+    }
     const W = this.fcW();
     if (!W) return;
-    const s = this.state;
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
     this.fcPayBegin(sats);

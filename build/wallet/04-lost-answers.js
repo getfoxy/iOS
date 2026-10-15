@@ -694,7 +694,13 @@
    * place, for the confirmation that says it before SEND (`payNeed`) and for
    * the payment that refuses it (`pay`), so the two are never in different
    * words or at different figures. */
-  function notEnoughWords(mn) {
+  function notEnoughWords(mn, unit) {
+    var u = unitOf(unit) || 'sat';
+    // in the unit being paid from: dollars are said as dollars, never as a number of sats
+    if (u !== 'sat') {
+      return 'Your balance isn\'t enough to cover the payment and its fee: this needs '
+        + moneyWords(mn.need, u) + ' and you hold ' + moneyWords(mn.have, u) + '.';
+    }
     return 'Your balance isn\'t enough to cover the payment and its fee: this needs '
       + mn.need + ' sats and you hold ' + mn.have + '.';
   }
@@ -887,16 +893,25 @@
     try { return !!load(K.held, {})[id]; } catch (e) { return false; }
   }
 
+  /* The pile first, then the record: a pile that will not take them (full,
+   * or pieces of another unit: `unitGuard`) throws with the record still
+   * here, for the next pass. Only what the pile does not hold already goes
+   * in, so a record whose drop was refused cannot put them back twice. */
   function releaseHeld(id, back) {
     var all = load(K.held, {});
     var h = all[id];
     if (!h) return;
-    delete all[id];
-    mustSave(K.held, all);
     if (back && h.proofs && h.proofs.length) {
-      setProofs(proofs(h.mint, h.unit).concat(h.proofs), h.mint, null, h.unit);
+      var pile = proofs(h.mint, h.unit);
+      var have = {};
+      pile.forEach(function (p) { if (p && p.secret) have[p.secret] = true; });
+      var add = h.proofs.filter(function (p) { return p && p.secret && !have[p.secret]; });
+      if (add.length) setProofs(pile.concat(add), h.mint, null, h.unit);
       console.log('[foxy] ' + formatAmount(sumProofs(h.proofs), h.unit || 'sat') + ' held back for a swap the mint never made is in the pile again');
     }
+    all = load(K.held, {});
+    delete all[id];
+    mustSave(K.held, all);
   }
 
   function dropSwap(id) {
@@ -1233,7 +1248,7 @@
     if (change && change.length) addProofs(change, at, w, unit);
     dropInputsOf(rec);
     releaseHeld(rec.id, false);
-    var token = window.CashuTS.getEncodedToken({ mint: at, proofs: send, unit: 'sat' });
+    var token = encodeToken(at, send, unit);
     var sats = sumProofs(send);
     var fee = swapFeeFor(w, rec.inputs || []);
     var pay = rec.pay || {};
@@ -1244,7 +1259,7 @@
       console.log('[foxy] change of ' + sats + ' sats that was being made when Foxy closed is on its payment\u2019s entry, to be shown');
     } else {
       var hash = 'token-' + String(rec.id).replace(/^send-/, '');
-      mustSave(K.outtok, { token: token, sats: sats, mint: at, hash: hash, at: Date.now(), swapped: true });
+      mustSave(K.outtok, { token: token, sats: sats, unit: unit, mint: at, hash: hash, at: Date.now(), swapped: true });
       logTx({ dir: 'out', sats: sats, grossSats: sats, changeSats: 0, changeState: '', feeSats: fee,
               settled: true, state: 'success', memo: 'ecash', hash: hash, mint: canonicalMint(at) }, hash);
       logAudit({ hash: hash, sats: sats, feeSats: fee, kind: 'token',
@@ -1319,11 +1334,14 @@
     var ask = (sent || []).filter(function (p) { return p && p.secret; });
     if (!w || !ask.length) return Promise.resolve(0);
     var at = mintOf(w);
+    // the pile of the unit the payment was in: the wallet's own (08c-units.js)
+    var unit = 'sat';
+    try { unit = unitOf(w.unit) || 'sat'; } catch (e) { unit = 'sat'; }
     return statesOf(w, ask).then(function (states) {
       var dead = {};
       ask.forEach(function (p, k) { if (states[k] === 'SPENT') dead[p.secret] = true; });
       var imported = importedSet();
-      var pile = proofs(at);
+      var pile = proofs(at, unit);
       var gone = 0, setAside = [];
       var keep = pile.filter(function (p) {
         if (!p || !dead[p.secret]) return true;
@@ -1336,15 +1354,20 @@
         var pen = load(K.quarantine, []);
         var known = {};
         quarantineEntries().forEach(function (q) { known[q.proof.secret] = true; });
-        setAside.forEach(function (p) { if (!known[p.secret]) pen.push({ mint: at, proof: p }); });
+        setAside.forEach(function (p) {
+          if (known[p.secret]) return;
+          var row = /** @type {any} */ ({ mint: at, proof: p });
+          if (unit !== 'sat') row.unit = unit;
+          pen.push(row);
+        });
         // before the pile, and throws if it does not land (W6)
         mustSave(K.quarantine, pen);
       }
-      setProofs(keep, at, w);
-      console.warn('[foxy] a payment found', gone, 'sats of this wallet\u2019s ecash already spent at', hostOf(at),
+      setProofs(keep, at, w, unit);
+      console.warn('[foxy] a payment found', formatAmount(gone, unit), 'of this wallet\u2019s ecash already spent at', hostOf(at),
         '\u2014 removed' + (setAside.length ? ', ' + setAside.length + ' proof(s) set aside' : ''));
       if (typeof FoxyWallet._onSpentElsewhere === 'function') {
-        try { FoxyWallet._onSpentElsewhere({ sats: gone, mint: at }); } catch (x) {}
+        try { FoxyWallet._onSpentElsewhere({ sats: unit === 'sat' ? gone : 0, unit: unit, amount: gone, mint: at }); } catch (x) {}
       }
       return gone;
     });

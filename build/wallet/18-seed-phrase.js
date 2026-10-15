@@ -131,10 +131,18 @@
        * reader handed it on as it was (tests/fuzz-parsers.js,
        * seeds 1–5: id -21, unit -16, description -14132). */
       var str = function (v) { return typeof v === 'string' ? v : ''; };
+      /* The amount is in the request's unit, read the way tokenInfo reads a
+       * token: `amount` always, `sats` only when the unit is sats. A usd
+       * request's 500 is five dollars, and it used to come back as 500 sats
+       * — about forty cents. A caller that reads `sats` gets null for usd
+       * and must refuse (or read `unit` first). */
+      var reqUnit = (unitOf(str(r.unit)) || str(r.unit)) || 'sat';
+      var amount = isFinite(sats) ? sats : 0;
       return {
         id: str(r.id),
-        sats: isFinite(sats) ? sats : 0,
-        unit: str(r.unit) || 'sat',
+        unit: reqUnit,
+        amount: amount,
+        sats: reqUnit === 'sat' ? amount : null,
         /* The key the payer must lock its ecash to, if this request asks for
          * one. Checked for shape here so nothing downstream has to wonder: a
          * compressed secp256k1 point and nothing else. */
@@ -187,8 +195,11 @@
       var info = FoxyWallet.tokenInfo(text);
       if (!info) return Promise.reject(new Error('That is not a Cashu token.'));
       var tok = info;           // not null, in the callbacks below as well
-      // Foxy only ever sends sats, so a token in another unit is not one of ours
-      if (tok.unit !== 'sat') {
+      /* Foxy sends sats, and usd at a mint that issues it. A token in any
+       * other unit is not one of ours. A usd one is taken back by the usd
+       * wallet into the usd pile, like any usd token received. */
+      var unit = unitOf(tok.unit) || '';
+      if (unit !== 'sat' && unit !== 'usd') {
         return Promise.reject(new Error('That token holds ' + unitName(tok.unit) +
           ' ecash, which Foxy never sends, so there is nothing to take back. Receive it as a token instead.'));
       }
@@ -200,7 +211,8 @@
 
       var intoMint, intoWallet, guard;
       return ready.then(function () {
-        var w = need();
+        return unitWalletOn(need(), unit);
+      }).then(function (w) {
         intoWallet = w;
         intoMint = mintOf(w);
         var decoded = null;
@@ -213,7 +225,7 @@
           // its outputs on disk until the answer is in (swapGuard), with what they add up to:
           // the token less the mint's input fee on it, as cashu-ts asks the mint to sign
           // (a sat token, so its amount is its sats)
-          guard = swapGuard(w, 'reclaim', { amount: tok.amount,
+          guard = swapGuard(w, 'reclaim', { amount: tok.amount, unit: unit,
             expect: incoming.length ? sumProofs(incoming) - swapFeeFor(w, incoming) : undefined });
           return guard.run('receive', function () {
             return w.receive(FoxyWallet.unwrap(text));
@@ -221,9 +233,9 @@
         });
       }).then(function (fresh) {
         var got = sumProofs(fresh);
-        addProofs(fresh, intoMint, intoWallet);
+        addProofs(fresh, intoMint, intoWallet, unit);
         guard.done();
-        logTx({
+        logTx(unitRow(unit, {
           dir: 'in',
           sats: got,
           feeSats: Math.max(0, tok.amount - got),
@@ -232,9 +244,9 @@
           memo: 'reclaimed',
           hash: 'reclaim-' + Date.now(),
           mint: intoMint,
-        });
-        console.log('[foxy] reclaimed', got, 'sats at', hostOf(tok.mint));
-        return { sats: got, host: hostOf(tok.mint) };
+        }));
+        console.log('[foxy] reclaimed', formatAmount(got, unit), 'at', hostOf(tok.mint));
+        return { sats: unit === 'sat' ? got : 0, unit: unit, amount: got, host: hostOf(tok.mint) };
       });
     },
 

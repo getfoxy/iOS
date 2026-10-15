@@ -424,7 +424,8 @@
   function keepUnclaimed(id, token, sats, trusted, plain) {
     if (!id || !token) return;
     var all = unclaimed();
-    all[id] = { token: token, at: Date.now(), sats: Number(sats) || 0 };
+    // sats: a payment to a request is sat ecash (hard rule 3 names the unit all the same)
+    all[id] = { token: token, at: Date.now(), sats: Number(sats) || 0, unit: 'sat' };
     // which mint it is at, for the balance of that mint and no other (`unclaimedSats`)
     var at = unclaimedMint({ token: token });
     if (at) all[id].mint = at;
@@ -575,7 +576,7 @@
       changed = true;
       if (!keep.length) { delete all[id]; return; }
       if (!(row.whole > 0)) row.whole = Number(row.sats) || 0;
-      row.token = window.CashuTS.getEncodedToken({ mint: tok.mint, proofs: keep, unit: 'sat' });
+      row.token = encodeToken(tok.mint, keep, tok.unit || 'sat');
       row.sats = sumProofs(keep);
     });
     if (changed && !save(UNCLAIMED, all)) {
@@ -595,7 +596,7 @@
     var keep = tok.proofs.filter(function (pr) { return !handedOn(pr.secret); });
     if (keep.length === tok.proofs.length) return String(text || '');
     if (!keep.length) return '';
-    return window.CashuTS.getEncodedToken({ mint: tok.mint, proofs: keep, unit: 'sat' });
+    return encodeToken(tok.mint, keep, tok.unit || 'sat');
   }
 
   /* The mint a waiting payment is at: written on the row, and read from the
@@ -1484,7 +1485,7 @@
       });
       if (!list.length || list.length > 500 || lockedProofs(list).length) return false;
       if (dleqAudit(wallet, list).invalid) return false;
-      var token = window.CashuTS.getEncodedToken({ mint: at, unit: 'sat', proofs: list });
+      var token = encodeToken(at, list, 'sat');
       var id = typeof j.id === 'string' ? j.id.slice(0, 64) : '';
       var hash = 'req-refused-' + (id || Date.now().toString(36)) + '-' + Date.now().toString(36);
       console.log('[foxy] a payment this phone will not keep is being sent back to the payer, locked to them');
@@ -1989,7 +1990,8 @@
     Object.keys(openRequests).forEach(function (k) {
       if (now - openRequests[k].at > OPEN_REQUEST_MS) delete openRequests[k];
     });
-    openRequests[id] = { sats: sats, mint: mint, at: now, purpose: purpose || 'receive' };
+    // a request Foxy makes is in sats (NUT-18 in dollars is not built yet)
+    openRequests[id] = { sats: sats, unit: 'sat', mint: mint, at: now, purpose: purpose || 'receive' };
     saveOpenRequests();
   }
 
@@ -2110,6 +2112,12 @@
     }
     if ((j.unit || 'sat') !== 'sat') throw paymentRefused(422, 'That payment is not in sats.');
     var proofs = Array.isArray(j.proofs) ? j.proofs : [];
+    /* And its pieces sats in fact, by their keysets: pieces of the mint's
+     * dollar keyset sent as "sat" are cents, which would be counted (and,
+     * offline, kept) as that many sats. */
+    if (wallet && wrongUnitPieces(proofs.filter(function (x) { return x && typeof x === 'object'; }), mint, 'sat', wallet).length) {
+      throw paymentRefused(422, 'That payment is not in sats.');
+    }
     if (!proofs.length || proofs.length > 500) throw paymentRefused(422, 'That payment holds no usable proofs.');
     // each piece once, or the sum below counts ecash that is not there (`repeatedProof`)
     if (repeatedProof(proofs)) throw refundable(paymentRefused(422, 'That payment names the same ecash more than once.'));

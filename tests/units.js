@@ -333,27 +333,66 @@ const usdProof = (amount) => ({ ...proof(amount), id: USD_ID });
     return eq(entry.sats, 72, 'history sats');
   });
 
-  await test('sending another unit is refused before anything is touched', async () => {
-    const ctx = await wallet({ storage: { [USD_PILE]: JSON.stringify([usdProof(500)]) } });
-    let msg = '';
-    try { await ctx.W.sendToken(100, { unit: 'usd' }); } catch (e) { msg = e.message; }
-    if (!/only send sats/.test(msg)) return 'usd send: ' + (msg || 'not refused');
+  /* Dollars are sent now, at a mint with a usd keyset (16b-two-balances.js,
+   * `_sendUnitToken`); every other unit is refused before anything is touched,
+   * as all of them used to be. */
+  await test('usd sends from the usd pile; another unit is refused before anything is touched', async () => {
+    const ctx = await wallet({ storage: { [USD_PILE]: JSON.stringify([usdProof(500)]), [SAT_PILE]: JSON.stringify([proof(64)]) } });
+    const sent = await ctx.W.sendToken(500, { unit: 'usd' });
+    if (sent.unit !== 'usd' || sent.amount !== 500 || sent.sats !== 0) return 'usd send: ' + JSON.stringify(sent);
+    const d = decode(sent.token);
+    if (d.unit !== 'usd' || sumOf(d.proofs) !== 500) return 'the token: ' + JSON.stringify(d);
+    if (sumOf(pile(ctx.storage, USD_PILE)) !== 0) return 'usd pile after the send: ' + sumOf(pile(ctx.storage, USD_PILE));
+    if (sumOf(pile(ctx.storage, SAT_PILE)) !== 64) return 'the sat pile moved';
+    const row = (await ctx.W.transactions(1))[0];
+    if (!row || row.unit !== 'usd' || row.amount !== 500 || row.sats !== 0) return 'history: ' + JSON.stringify(row);
+    let eur = '';
+    try { await ctx.W.sendToken(100, { unit: 'eur' }); } catch (e) { eur = e.message; }
+    if (!/only send sats/.test(eur)) return 'eur send: ' + (eur || 'not refused');
     let satMsg = '';
     try { await ctx.W.sendToken(100, { unit: 'sat' }); } catch (e) { satMsg = e.message; }
     if (/only send sats/.test(satMsg)) return 'a sat send was refused as another unit';
+    return null;
+  });
+
+  await test('a usd send at a mint with no usd keyset is refused, and nothing moves', async () => {
+    const ctx = await wallet({ keysets: [{ id: SAT_ID, unit: 'sat', active: true }],
+                               storage: { [USD_PILE]: JSON.stringify([usdProof(500)]) } });
+    let msg = '';
+    try { await ctx.W.sendToken(500, { unit: 'usd' }); } catch (e) { msg = e.message; }
+    if (msg !== 'm.test does not issue USD ecash.') return 'message: ' + (msg || 'not refused');
     return eq(sumOf(pile(ctx.storage, USD_PILE)), 500, 'usd pile after the refusal');
   });
 
-  await test('reclaiming or importing a usd token is refused', async () => {
+  await test('a usd token is taken back into the usd pile; importing one is refused', async () => {
     const ctx = await wallet({});
     const t = tok([usdProof(100)], 'usd');
-    let reclaim = '';
-    try { await ctx.W.reclaimToken(t); } catch (e) { reclaim = e.message; }
-    if (!/USD ecash/.test(reclaim)) return 'reclaim: ' + (reclaim || 'not refused');
+    const back = await ctx.W.reclaimToken(t);
+    if (back.unit !== 'usd' || back.amount !== 100 || back.sats !== 0) return 'reclaim: ' + JSON.stringify(back);
+    if (ctx.log.received[0].unit !== 'usd') return 'taken back by a ' + ctx.log.received[0].unit + ' wallet';
+    if (sumOf(pile(ctx.storage, USD_PILE)) !== 100 || pile(ctx.storage, SAT_PILE).length) return 'piles after the reclaim';
     let imp = '';
     try { await ctx.W.importProofs(t); } catch (e) { imp = e.message; }
     if (!/USD ecash/.test(imp)) return 'import: ' + (imp || 'not refused');
-    return ctx.log.received.length ? 'the mint was asked to swap' : null;
+    let eur = '';
+    try { await ctx.W.reclaimToken(tok([usdProof(5)], 'eur')); } catch (e) { eur = e.message; }
+    return /which Foxy never sends/.test(eur) ? null : 'eur reclaim: ' + (eur || 'not refused');
+  });
+
+  await test('the units a mint issues: active keysets of sat and usd, sat first, never auth', async () => {
+    const ctx = await wallet({});
+    if (JSON.stringify(ctx.W.mintUnits()) !== '["sat","usd"]' || !ctx.W.twoUnits()) return 'units: ' + JSON.stringify(ctx.W.mintUnits());
+    const old = await wallet({ keysets: [{ id: SAT_ID, unit: 'sat', active: true }, { id: USD_OLD, unit: 'usd', active: false },
+                                         { id: AUTH_ID, unit: 'auth', active: true }] });
+    if (JSON.stringify(old.W.mintUnits()) !== '["sat"]' || old.W.twoUnits()) return 'an inactive usd keyset counted: ' + JSON.stringify(old.W.mintUnits());
+    return null;
+  });
+
+  await test('a backup with only dollars held says where the dollars are', async () => {
+    const ctx = await wallet({ storage: { [USD_PILE]: JSON.stringify([usdProof(500)]) } });
+    let msg = '';
+    try { ctx.W.exportProofs(); } catch (e) { msg = e.message; }
+    return eq(msg, 'Nothing to back up yet. Dollars come back with your recovery words.', 'the words');
   });
 
   // ---- balances ---------------------------------------------------------------

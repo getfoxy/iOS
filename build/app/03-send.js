@@ -171,10 +171,15 @@
      * first one's fee — a same-mint payment costing 0, followed by a
      * cross-mint one that actually cost 29, still displayed 0. A stale number
      * stated confidently is worse than UNKNOWN. */
+    /* At a mint with two balances both are quoted, in parallel (a melt
+     * quote is free), so the confirmation can say what each would cost and
+     * pay from the one that covers it (`autoWallet`). */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth);
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
-      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, more));
+      if (two) this._feeQuotes = null;
+      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, two ? { feeQ: null } : {}, more));
     };
     if (!ask) {
       this._quotedFor = target;
@@ -197,9 +202,10 @@
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
-      return W.quoteFee(found.pr);
+      return two ? W.quoteFeeBoth(found.pr) : W.quoteFee(found.pr);
     }).then(q => {
       if (stale()) return;
+      if (two) { this.feeQuotesIn(q || {}); return; }
       // kept whole for SEND: a fresh quote for this invoice is not asked for twice (`pay`, opts.quote)
       this._feeQuote = q && q.quote ? q : null;
       this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null, quotedAmt: q ? q.amount : null });
@@ -208,6 +214,22 @@
       console.warn('[foxy] the send confirmation could not ask what the payment costs:', W.reason ? W.reason(e) : e);
       this.setState({ quotingFee: false });
     });
+  }
+
+  /* Both balances' quotes for this payment, kept: whole for SEND (`pay`
+   * reuses the quote of the balance that pays), and in state without the
+   * wallet object for the screen (`feeQ`). The sat one is also what the
+   * confirmation's sat sums read, as at a mint with one balance. Then the
+   * balance that pays is switched if the remembered one cannot cover it. */
+  feeQuotesIn(both) {
+    const slim = (q, unit) => (q ? { unit: q.unit || unit, amount: q.amount, feeReserve: q.feeReserve,
+      rate: q.rate || null, bolt11: q.bolt11 || '' } : null);
+    this._feeQuotes = { sat: both.sat || null, usd: both.usd || null };
+    const sat = both.sat || null;
+    this._feeQuote = sat && sat.quote ? sat : null;
+    this.setState({ quotingFee: false, quotedFee: sat ? sat.feeReserve : null, quotedAmt: sat ? sat.amount : null,
+      feeQ: { sat: slim(both.sat, 'sat'), usd: slim(both.usd, 'usd') } });
+    this.autoWallet(u => this.quoteFits(u));
   }
 
   /* The send confirmation, kept up with the route. Called on every update
@@ -226,6 +248,9 @@
    * for: working offline puts the keypad in sats (`syncUnit`), so a payment
    * reaches this screen in dollars only with a route. */
   syncSend() {
+    /* First, at a mint with two balances: the CURRENCY screen before a flow's
+     * first amount or confirmation, when none is remembered (01-ui-basics.js). */
+    if (this.syncWalletAsk) this.syncWalletAsk();
     const s = this.state;
     if (s.screen !== 'sendConfirm') {
       this._sendWaited = null;
@@ -445,6 +470,17 @@
      * pair if the invoice does carry an amount, so this is never a way to send
      * something other than what the payee asked for. */
     const typed = this.typedSats();
+    /* Which balance pays, at a mint with two: the one on the confirmation's
+     * WALLET button. Its own quote is reused (never the other's), and the
+     * figures of the payment are kept for the sending screen. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const unit = two ? (this.walletNow('send') || 'sat') : 'sat';
+    const quotes = this._feeQuotes || {};
+    const unitQuote = (bolt11) => (two && quotes[unit] && quotes[unit].bolt11 === bolt11 ? quotes[unit] : null);
+    const askedSats = (W.amountOf && W.amountOf(to)) || typed;
+    const sq = two ? (this.state.feeQ || {})[unit] : null;
+    this._lastPay = null;
+    this._paying = two ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
     /* And what the confirmation has asked already. For an address that is the
      * invoice it gave and the fee quote on it, paid as they stand while they
      * are fresh (`payLnurl`); an address the screen could not look up, or one
@@ -452,16 +488,19 @@
     const asked = this.sendAsk();
     const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
       ? this._found : null;
-    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    const kept = two ? (found ? unitQuote(found.pr) : null)
+      : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
      * paid with the same invoice again the next time this address and amount
      * are chosen, and one that fails is asked about afresh when the person is
      * back on the confirmation. */
     if (found) { this._found = null; this._quotedFor = null; }
+    const inUnit = two ? { unit: unit } : {};
+    const invQuote = two ? unitQuote(to) : ((this._feeQuote && this._feeQuote.bolt11 === to) ? this._feeQuote : null);
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
+      ? W.payLnurl(to, typed, '', onStage, found ? Object.assign({ found: found, quote: kept }, inUnit) : (two ? inUnit : undefined))
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
+                                         invQuote ? { quote: invQuote } : {}, inUnit));
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
@@ -487,6 +526,14 @@
       W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
+      /* Which balance paid, in its own unit, for the sending screen; and,
+       * unless Foxy picked it for the person, remembered for the next send. */
+      if (two) {
+        const paidIn = (r && r.unit) || unit;
+        this._lastPay = { unit: paidIn, amount: r.amount != null ? r.amount : askedSats, fee: r.fee != null ? r.fee : (r.feeSats || 0),
+          asked: paidIn === 'usd' ? askedSats : 0 };
+        if (!this.state.walletAuto) this.rememberWallet('send', paidIn);
+      }
 
       const showDone = () => {
         console.log('[foxy] showDone: switching to the confirmation');
@@ -538,6 +585,19 @@
         this._sendA = setTimeout(() => { showDone(); settleUp(); }, 400);
       }
     }).catch(e => {
+      /* The mint's price for a dollar payment moved past the one confirmed.
+       * The wallet stopped before anything moved (`pay`, e.repriced), so
+       * this is not a failure: back to CONFIRM PAYMENT, which asks the mint
+       * again and shows the new TOTAL to be confirmed. */
+      if (e && e.repriced) {
+        console.warn('[foxy] send: the price moved, asking again:', W.reason ? W.reason(e) : e);
+        if (P) P.end();
+        this.toConfirm();
+        this._quotedFor = null;
+        this.toast('The price moved. Check the new total.', true);
+        this.quoteSendFee();
+        return;
+      }
       const m = String((e && e.message) || '');
       console.error('[foxy] send failed:', e);
       if (P) P.end();

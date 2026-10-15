@@ -296,6 +296,11 @@
       }
     } catch (e) {}
     checkIssued(list, 'store', w);
+    /* And only pieces of this pile's unit (hard rule 1, 08c-units.js): a
+     * usd piece in the sat pile is cents counted as sats. Refused before the
+     * write, so the record that would bring them back stays where it is. */
+    var at = url === undefined ? mintUrl : url;
+    if (at) unitGuard(list || [], at, unitOf(unit), w, load(key, []));
     mustSave(key, list || []);
   }
 

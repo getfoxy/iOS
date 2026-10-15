@@ -602,6 +602,66 @@ function representative(logic) {
   add('note sheet, a note', at('confirm', { noteOpen: true, note: 'for the pizza', invoice: 'lnbc2100n1stub' }));
   add('backup ask', at('home', { bkAskOpen: true }));
   add('settings groups open', at('home', { gPaid: true, gPrefs: true, gAdv: true, gComm: true }));
+  /* Two balances at one mint: dollars and bitcoin (build/app/01-ui-basics.js, the owner's design). The stand-in
+   * wallet answers the two-balance calls; every view above it has none of them, and draws as it always did. */
+  const TWO = (over) => Object.assign({
+    mintUnits: () => ['sat', 'usd'], twoUnits: () => true,
+    walletChoice: () => ({ hold: 'both', recv: '', send: '' }), setWalletChoice() {},
+    balanceOf: (u) => (u === 'usd' ? 4205 : 250000), heldIn: () => 0, recoveringIn: () => 0,
+    payNeed: (a, r, o) => ({ ok: !(o && o.unit === 'usd'), need: a + r, have: o && o.unit === 'usd' ? 200 : 250000, fee: r,
+      unit: (o && o.unit) || 'sat', why: o && o.unit === 'usd' ? 'This payment needs $ 1.66 with its fee, and you hold $ 2.00.' : '' }),
+    quoteFeeBoth: () => new Promise(() => {}),
+  }, over || {});
+  const TWO_LIVE = { balUsdCents: 4205 };
+  const FEEQ = { sat: { unit: 'sat', amount: 2100, feeReserve: 12, rate: null, bolt11: INVOICE_THIS_MINT },
+    usd: { unit: 'usd', amount: 162, feeReserve: 2, rate: { usdPerBtc: 76900 }, bolt11: INVOICE_THIS_MINT } };
+  const asked = (l) => { l._quotedFor = INVOICE_THIS_MINT; };
+  add('two balances: home, both pills', at('home', Object.assign({ series: SERIES, range: '1D' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: home, holding dollars', at('home', Object.assign({ balSats: 0 }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
+  add('two balances: home, the menu with SWAP', at('home', Object.assign({ balSats: 0, open0: true }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
+  add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: RECEIVE INVOICE in dollars', at('confirm', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00',
+    recvUnit: 'usd', recvAmount: 500, recvRail: 'LIGHTNING', invoice: 'lnbcusdexample', asset: 'BITCOIN' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: RECEIVE INVOICE in bitcoin', at('confirm', Object.assign({ flow: 'receive', wallet: 'sat', unit: 'USD', amount: '5.00',
+    recvUnit: 'sat', recvRail: 'LIGHTNING', invoice: INVOICE_THIS_MINT, asset: 'BITCOIN' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: CONFIRM PAYMENT from bitcoin', at('sendConfirm', Object.assign({ flow: 'send', wallet: 'sat', walletTapped: true,
+    recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
+  add('two balances: CONFIRM PAYMENT from dollars, short', at('sendConfirm', Object.assign({ flow: 'send', wallet: 'usd', walletTapped: true,
+    recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
+  add('two balances: WALLET, dollars short', at('walletPick', Object.assign({ flow: 'send', wallet: 'sat', walletAuto: true,
+    recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
+  add('two balances: paid, ADDED TO DOLLARS', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 500, recvResolved: true,
+    recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: sent FROM DOLLARS', at('sendDone', Object.assign({ sendPhase: 'settled', recipientKind: 'invoice',
+    recipient: INVOICE_THIS_MINT }, TWO_LIVE), { wallet: TWO(), before: (l) => { l._lastPay = { unit: 'usd', amount: 162, fee: 1, asked: 2100 }; } }));
+  const SWAP_OUT = { name: 'Swap', dir: 'out', time: '09:10', unit: 'usd', amount: 1000, feeAmount: 0, sats: 0, kind: 'swap', swap: 'sw1', hash: 'sw1-out', mintRate: { usdPerBtc: 81786 } };
+  const SWAP_IN = { name: 'Swap', dir: 'in', time: '09:10', unit: '', sats: 12230, fee: 0, kind: 'swap', swap: 'sw1', hash: 'sw1-in' };
+  const TWO_HIST = [{ label: 'TODAY', items: [SWAP_OUT, SWAP_IN, Object.assign({}, TX_USD, { amount: 5205, feeAmount: 0 }), TX_IN] }];
+  add('two balances: history, DOLLARS', at('history', Object.assign({ history: TWO_HIST, historyComplete: true, histUnit: 'usd' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: history, BITCOIN', at('history', Object.assign({ history: TWO_HIST, historyComplete: true, histUnit: 'sat' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: a swap in detail', at('txDetail', Object.assign({ tx: Object.assign({ mint: 'https://forge.example.com' }, SWAP_OUT) }, TWO_LIVE), { wallet: TWO() }));
+  /* SWAP (build/app/26i-swap.js): which way, how much, the rate with the time it is held for, and SWAPPED. The
+   * quote's expiry is read at render time, so the countdown always says 0:52. */
+  const SWAP_Q = (over) => Object.assign({ id: 'uswap-1', mint: 'https://forge.example.com', from: 'usd', to: 'sat',
+    total: 1000, amount: 998, fee: 2, get: 1221, rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000,
+    spread: 0.0223, spreadWarn: true, state: 'quoted', get expiresAt() { return Date.now() + 67500; } }, over || {});
+  add('two balances: SWAP, from dollars', at('swap', Object.assign({ swapFrom: 'usd', swapTo: 'sat' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SET AMOUNT, a swap from bitcoin', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
+    unit: 'SATS', amount: '12230' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
+  add('two balances: SWAP confirm, the market price far off', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
+    swapAmount: 1000, swapQuote: SWAP_Q() }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SWAP confirm, a new rate', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
+    swapAmount: 1000, swapNewRate: true, swapQuote: SWAP_Q({ spreadWarn: false, spread: 0.01 }) }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SWAP confirm, asking the rate', at('swapConfirm', Object.assign({ swapFrom: 'sat', swapTo: 'usd',
+    swapAmount: 12230, swapQuoting: true }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SWAPPED', at('swapDone', Object.assign({ swapResult: { id: 'uswap-1', state: 'done', from: { unit: 'usd', amount: 1000 },
+    to: { unit: 'sat', amount: 1221 }, fee: 1, rate: { usdPerBtc: 81786, by: 'forge.example.com' } } }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: home, a swap still going through', at('home', Object.assign({}, TWO_LIVE),
+    { wallet: TWO({ unitSwapsPending: () => [{ id: 'uswap-1', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1221 } }] }) }));
   return v;
 }
 
@@ -793,7 +853,9 @@ function cards() {
 const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
   '_meltEl', '_fcTapO', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
   // what the send confirmation has asked, and whether it waited (03-send.js `quoteSendFee`, `syncSend`)
-  '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited'];
+  '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited',
+  // which balance paid, and the quotes of both, at a mint with two (03-send.js)
+  '_lastPay', '_paying', '_feeQuotes'];
 
 (async () => {
   const { w, errors } = mount();

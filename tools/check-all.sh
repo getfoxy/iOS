@@ -53,6 +53,7 @@ check "app types"      1 node node_modules/typescript/bin/tsc -p tests/types/tsc
 check "type-check finds" 1 node tests/type-check-finds.js
 check "wallet tests"   1 node tests/run.js
 check "other units"    1 node tests/units.js
+check "two balances"   1 node tests/two-balances.js
 check "interleavings"  1 node tests/interleave.js
 check "bridge matrix"  1 node tests/bridge-matrix.js
 check "gate scenarios" 1 node tests/gate-scenarios.js
@@ -154,6 +155,8 @@ check "onion fallback" 1 node tests/onion-fallback.js
 check "amountless"     1 node tests/amountless-invoice.js
 check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
+check "two balances, screens" 1 node tests/two-balances-screens.js
+check "two balances, swap" 1 node tests/two-balances-swap.js
 check "seed on the phone, screens" 1 node tests/native-seed-app.js
 check "NUT-13 vectors" 1 node tests/nut13-vectors.js
 check "spec vectors"   1 node tests/nut-vectors.js

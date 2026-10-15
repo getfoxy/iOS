@@ -13,6 +13,8 @@
        * asks that mint about quotes it has never seen — a 400 per row, on
        * every launch. */
       if (obj && !obj.mint) obj.mint = String(mintUrl || '').replace(/\/+$/, '');
+      // a bill is collected in sats (hard rule 3: the record says so)
+      if (obj && !obj.unit) obj.unit = 'sat';
       save(K.split, obj || null);
       return obj;
     },
@@ -387,7 +389,7 @@
         /* Written down before the token exists, and `mustSave`, for the same
          * reason the unclaimed store is: a note that does not land would let the
          * same proofs go out twice. */
-        var out = window.CashuTS.getEncodedToken({ mint: at, proofs: signed, unit: 'sat' });
+        var out = encodeToken(at, signed, 'sat');
         /* `defer`: signed and nothing written. A payment out of several
          * locked payments signs them one after another, each a trip to the
          * keychain, and each used to be struck off as it was signed — before
@@ -669,6 +671,18 @@
         if (into) {
           throw new Error('This phone is offline, so the ecash cannot be swapped in yet.'
             + ' It is written down and will be taken when there is a connection.');
+        }
+        /* Sats only. What is kept offline is counted in the sat balance
+         * (`unclaimedSats`) and written on a sat row until the next connect
+         * swaps it in, so dollars kept this way were their cents counted as
+         * sats. Refused: the giver still holds them. */
+        if (unit !== 'sat') {
+          throw new Error('This phone is offline, and ' + (unit === 'usd' ? 'dollars' : unitName(unit) + ' ecash')
+            + ' can only be taken with a connection. Ask them to send it again when either of you is online.');
+        }
+        // and sats in fact: a token that says sat and holds another unit's pieces is refused, whatever it says
+        if (wrongUnitPieces(tok.proofs, tok.mint || mintUrl, 'sat', wallet).length) {
+          throw new Error('That token says sats but holds another unit’s ecash, so it was not taken. It is still theirs.');
         }
         var mine = key ? FoxyWallet._lockPubOf(key) : '';
         var oursAlone = !!mine && !!locked.length && locked.length === tok.proofs.length
@@ -1115,6 +1129,10 @@
        * fee and the pile would all need their unit, and a mistake here sends
        * cents as sats or sats as cents. Refused before anything is touched. */
       var askedUnit = opts && opts.unit !== undefined ? unitOf(opts.unit) : 'sat';
+      /* Dollars, at a mint that issues them: a send of its own, plainer than
+       * this one (16b-two-balances.js, `_sendUnitToken`). Every other unit is
+       * refused as before. */
+      if (askedUnit === 'usd') return FoxyWallet._sendUnitToken(sats, askedUnit, opts);
       if (askedUnit !== 'sat') {
         return Promise.reject(new Error('Foxy can only send sats as ecash. Sending ' +
           (askedUnit ? unitName(askedUnit) : 'that unit\u2019s') + ' ecash is not supported yet; nothing was sent.'));
@@ -1234,7 +1252,7 @@
         var at = String(mintUrl || '').replace(/\/+$/, '');
         var rows = Object.keys(groups).map(function (id) {
           return { id: id, sats: sumProofs(groups[id]), part: true,
-                   token: window.CashuTS.getEncodedToken({ mint: at, proofs: groups[id], unit: 'sat' }) };
+                   token: encodeToken(at, groups[id], 'sat') };
         });
         return { rows: rows, pieces: pieces };
       };
@@ -1516,10 +1534,8 @@
          * caller hearing of it the balance would be short by the change. */
         if (opts && opts.purpose === 'change' && opts.forHash) changeHoldOver(opts.forHash);
         if (split.guard) split.guard.done();
-        var token = window.CashuTS.getEncodedToken(changeNoteKey && Number(split.over) > 0
-          ? { mint: at, proofs: split.send, unit: 'sat',
-              memo: CHANGE_NOTE + changeNoteKey + ':' + want }
-          : { mint: at, proofs: split.send, unit: 'sat' });
+        var token = encodeToken(at, split.send, 'sat', changeNoteKey && Number(split.over) > 0
+          ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
         /* Unique, not only the millisecond: a token made from pieces already held
          * asks the mint nothing, so two can be made in the same millisecond, and
          * a shared name lost one of them from the books (tests/interleave.js). */
@@ -1535,7 +1551,7 @@
          * recoverable only by a seed restore that nothing would have prompted.
          * `save` returns false on a refusal and this ignored it, which is
          * exactly what the comment above claimed could not happen. */
-        mustSave(K.outtok, { token: token, sats: sumProofs(split.send), mint: at,
+        mustSave(K.outtok, { token: token, sats: sumProofs(split.send), unit: 'sat', mint: at,
                              hash: hash, at: Date.now(), swapped: split.swapped });
         /* The token exists and is written down: now the locked pieces in it
          * are struck off, all of them, in the same breath. */
@@ -1786,9 +1802,12 @@
 
     exportProofs: function () {
       var have = proofs();
-      if (!have.length) throw new Error('Nothing to back up yet.');
+      /* A backup is sats. Dollars are not in it: they come back with the
+       * recovery words, as every piece this wallet made does. */
+      var dollars = mintUrl ? sumProofs(proofs(mintUrl, 'usd')) : 0;
+      if (!have.length) throw new Error(dollars > 0 ? 'Nothing to back up yet. Dollars come back with your recovery words.' : 'Nothing to back up yet.');
       if (!mintUrl) throw new Error('No mint connected yet.');
-      return window.CashuTS.getEncodedToken({ mint: mintUrl, proofs: have, unit: 'sat' });
+      return encodeToken(mintUrl, have, 'sat');
     },
 
     /* Accepts a token, or the JSON the older builds produced. */

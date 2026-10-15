@@ -486,7 +486,7 @@ const pseudoJson = t => JSON.parse(t.replace(/h'([0-9a-f]+)'/g, '"$1"').replace(
     });
     attempt('NUT-18 ' + title + ' (Foxy\'s reader)', () => {
       const f = W.decodeRequest(e);
-      const ok = f && f.id === want.i && f.sats === Number(want.a || 0) && f.unit === want.u
+      const ok = f && f.id === want.i && f.amount === Number(want.a || 0) && f.sats === (f.unit === 'sat' ? Number(want.a || 0) : null) && f.unit === want.u
         && JSON.stringify(f.mints) === JSON.stringify(want.m) && f.description === (want.d || '')
         && JSON.stringify(f.transports) === JSON.stringify((want.t || []).map(t => t.t));
       check('NUT-18 ' + title + ' (Foxy\'s reader)', ok, JSON.stringify(f));
@@ -569,7 +569,7 @@ const pseudoJson = t => JSON.parse(t.replace(/h'([0-9a-f]+)'/g, '"$1"').replace(
     });
     attempt('NUT-26 ' + title + ' (Foxy\'s reader)', () => {
       const f = W.decodeRequest(e);
-      const ok = f && f.id === want.i && f.sats === Number(want.a || 0) && f.unit === want.u
+      const ok = f && f.id === want.i && f.amount === Number(want.a || 0) && f.sats === (f.unit === 'sat' ? Number(want.a || 0) : null) && f.unit === want.u
         && JSON.stringify(f.mints) === JSON.stringify(want.m) && f.description === (want.d || '')
         && JSON.stringify(f.transports) === JSON.stringify((want.t || []).map(t => t.t));
       check('NUT-26 ' + title + ' (Foxy\'s reader)', ok, JSON.stringify(f));

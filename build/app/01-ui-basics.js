@@ -7,7 +7,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -82,6 +82,11 @@ class Component extends DCLogic {
     amount: '',
     network: '',
     unit: 'USD',
+    /* Two balances at one mint (dollars and bitcoin). `wallet` is the money
+     * unit of the flow on screen, 'sat' or 'usd', and '' until the flow has
+     * one; `unit` above is only the keypad's display. The dollars held are
+     * `balUsdCents`, never `balUsd`, which is the sats' worth in dollars. */
+    wallet: '', walletAuto: false, balUsdCents: null, histUnit: '',
     theme: 'dark',
     hidden: false, range: '1D', rangeOpen: false, open: { contact: true, account: false, login: false },
     priceCollapsed: false,
@@ -188,6 +193,11 @@ class Component extends DCLogic {
       ink: o.ink || 'var(--ink)',
       sub: o.sub || '',
       subH: o.sub ? '24px' : '0px',
+      subInk: o.subInk || 'rgba(var(--ink-rgb),.45)',
+      // a second line under the first, in its own ink (a swap's market price, in red)
+      sub2: o.sub2 || '',
+      sub2Shown: !!o.sub2,
+      sub2Ink: o.sub2Ink || 'rgba(var(--ink-rgb),.45)',
       minH: o.reserve ? '69px' : '0px',
       shown: o.hidden ? '0' : '1',
       cursor: o.tap ? 'pointer' : 'default',
@@ -216,6 +226,7 @@ class Component extends DCLogic {
    *    amount?: string, amountInk?: string, amountSub?: string, rows?: any[], warn?: string,
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
+   *    titleUp?: boolean, wallet?: { word: string, go: () => void },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -236,8 +247,13 @@ class Component extends DCLogic {
     if (s.screen === 'fcMoveConfirm') return this.fcMoveSpec();
     // a card's limit, before it is set (26f-flashcard.js)
     if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
+    // dollars into bitcoin or back, at this mint (26i-swap.js)
+    if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm
     const W = window.FoxyWallet;
+    // at a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button
+    if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
+        && this.twoUnitsOn && this.twoUnitsOn()) return this.confirmTwoSpec();
     /* Waiting on the connection, or on what it is for.
      *
      * A Lightning payment cannot be made, and its fee cannot be known, until
@@ -410,4 +426,255 @@ class Component extends DCLogic {
     const out = (W && W.lastToken && W.lastToken()) || {};
     if (!out.hash || !W || !W.tagsFor) return '';
     return (W.tagsFor(out.hash) || {}).note || '';
+  }
+
+  /* ---- two balances: dollars and bitcoin at one mint -----------------------
+   *
+   * A mint may issue dollar ecash beside bitcoin. The wallet keeps each in its
+   * own pile and never adds one to the other: an amount is sats, or cents for
+   * dollars, and always says which. These are the screens' half of it: which
+   * pills the home shows, which balance a flow pays from or into, and the
+   * words for them.
+   *
+   * At a mint that issues only bitcoin, and with a wallet that knows nothing
+   * of two balances, `twoUnitsOn` is false and nothing below changes a screen.
+   * Every caller asks it the guarded way, because suites lift single methods
+   * out of the app and run them on a stand-in that has none of these. */
+
+  /* Does the mint this phone is on issue both? Read from memory every render,
+   * and a render must not fail on it. */
+  twoUnitsOn() {
+    const W = window.FoxyWallet;
+    try { return !!(W && W.twoUnits && W.twoUnits()); } catch (e) { return false; }
+  }
+
+  /* What the person chose to hold, and the two remembered defaults (the last
+   * balance a receive used, and the last a send used): '' for any never set. */
+  walletChoiceNow() {
+    const W = window.FoxyWallet;
+    let c = null;
+    try { c = (W && W.walletChoice) ? W.walletChoice() : null; } catch (e) { c = null; }
+    const unit = (u) => ((u === 'usd' || u === 'sat') ? u : '');
+    return { hold: String((c && c.hold) || ''), recv: unit(c && c.recv), send: unit(c && c.send) };
+  }
+
+  /* The balance a flow uses: the one picked for this payment, else the one
+   * remembered for its kind, else '' (and the CURRENCY screen asks). Always
+   * 'sat' at a mint with one balance. `flow` is 'receive' or 'send'. */
+  walletNow(flow) {
+    if (!this.twoUnitsOn()) return 'sat';
+    const s = this.state;
+    if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
+    const c = this.walletChoiceNow();
+    return flow === 'receive' ? c.recv : c.send;
+  }
+
+  /* Remember the balance a flow used, for the next one of its kind. */
+  rememberWallet(flow, unit) {
+    const W = window.FoxyWallet;
+    if (!this.twoUnitsOn() || !W || !W.setWalletChoice || (unit !== 'usd' && unit !== 'sat')) return;
+    try { W.setWalletChoice(flow === 'receive' ? { recv: unit } : { send: unit }); }
+    catch (e) { console.warn('[foxy] the balance chosen could not be remembered:', e && e.message); }
+  }
+
+  /* A balance's name: DOLLARS or BITCOIN, never "Cash Balance". */
+  unitWord(unit) { return unit === 'usd' ? 'DOLLARS' : 'BITCOIN'; }
+
+  /* What a WALLET chip or button reads for a balance. */
+  walletLabel(unit) { return unit === 'usd' ? 'USD' : 'BITCOIN'; }
+
+  /* An amount in its own unit, as the screens write money: '$ 42.05' for
+   * cents, '₿ 51,418' for sats. Never converted. */
+  unitFigure(amount, unit) {
+    const n = Math.round(Number(amount) || 0);
+    const sign = n < 0 ? '−' : '';
+    if (unit === 'usd') return sign + '$ ' + this.usd(Math.abs(n) / 100);
+    return sign + '₿ ' + this.group(Math.abs(n));
+  }
+
+  /* What a balance holds at this mint, as the home shows it: cents for
+   * dollars, sats for bitcoin. */
+  unitBalance(unit) {
+    if (unit === 'usd') return Math.max(0, Math.round(Number(this.state.balUsdCents) || 0));
+    return Math.max(0, Math.round(Number(this.balNow().sats) || 0));
+  }
+
+  /* The keypad's dollars in cents, exact, for a dollar balance: '5.00' is 500.
+   * No price comes into it. */
+  centsTyped() {
+    const v = parseFloat(this.state.amount) || 0;
+    return v > 0 ? Math.round(v * 100) : 0;
+  }
+
+  /* The pills on home, top to bottom: dollars over bitcoin, or one of them.
+   *
+   * One at a mint with one balance. With two, what the person chose to hold
+   * decides: Dollars or Bitcoin is one pill, Both (or not asked yet) is two,
+   * and two stay even at nought so the screen never jumps. Money is never
+   * hidden: a balance with something in it keeps its pill whatever was chosen. */
+  homePills() {
+    if (!this.twoUnitsOn()) return ['sat'];
+    const hold = this.walletChoiceNow().hold;
+    const usd = (Number(this.state.balUsdCents) || 0) > 0;
+    const sat = (Number(this.state.balSats) || 0) > 0;
+    if (hold === 'dollars') return sat ? ['usd', 'sat'] : ['usd'];
+    if (hold === 'bitcoin') return usd ? ['usd', 'sat'] : ['sat'];
+    return ['usd', 'sat'];
+  }
+
+  /* The CURRENCY screen, once per kind of flow.
+   *
+   * Called on every update. A receive's SET AMOUNT, or a send's SET AMOUNT or
+   * CONFIRM PAYMENT, at a mint with two balances and no balance remembered for
+   * that kind of flow, is put behind CURRENCY ("What do you want to receive?").
+   * The pick is remembered (`currencyPick`), so it is asked once; Dollars or
+   * Bitcoin answered at the hold question sets both and it is never asked. */
+  syncWalletAsk() {
+    const s = this.state;
+    const receiving = s.flow === 'receive' && s.screen === 'amount';
+    const sending = s.flow === 'send' && (s.screen === 'amount'
+      || (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')));
+    if (!receiving && !sending) return;
+    if (!this.twoUnitsOn() || this.walletNow(receiving ? 'receive' : 'send')) return;
+    console.log('[foxy] two balances: asking which one, before ' + s.screen);
+    this.setState(p => ({ screen: 'currency', currencyFlow: receiving ? 'receive' : 'send', currencyNext: p.screen }));
+  }
+
+  /* A card on CURRENCY: the balance for this flow, remembered for the next. */
+  currencyPick(unit) {
+    const s = this.state;
+    const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
+    this.rememberWallet(flow, unit);
+    const patch = { wallet: unit, walletAuto: false, walletTapped: false,
+      screen: s.currencyNext || (flow === 'receive' ? 'amount' : 'sendConfirm') };
+    // a dollar balance is typed in dollars, exactly
+    if (unit === 'usd' && s.unit !== 'USD') Object.assign(patch, { unit: 'USD', amount: '' });
+    this.setState(patch);
+  }
+
+  /* WALLET on CONFIRM PAYMENT: the two balances, with the one that cannot
+   * cover this payment greyed (renderCurrency). */
+  openWalletPick() { this.go('walletPick'); }
+
+  /* A balance picked on WALLET: this payment's, and remembered for the next.
+   * Picked by hand, so it is not switched for the person again. */
+  walletPickChoose(unit, why) {
+    if (why) { this.toast(why, true); return; }
+    this.setState({ wallet: unit, walletAuto: false, walletTapped: true });
+    this.rememberWallet('send', unit);
+    this.back();
+  }
+
+  /* The other balance, when the one in use cannot cover the payment and the
+   * other can: "Bitcoin was chosen for you". Once, and not remembered: only a
+   * tap changes what is remembered. Not after a pick by hand. */
+  autoWallet(fits) {
+    const s = this.state;
+    if (!this.twoUnitsOn() || s.walletTapped) return;
+    const pick = this.walletNow('send') || 'sat';
+    const other = pick === 'usd' ? 'sat' : 'usd';
+    const mine = fits(pick), alt = fits(other);
+    if (mine === false && alt === true) {
+      console.log('[foxy] two balances: ' + this.unitWord(pick).toLowerCase() + ' cannot cover this, so '
+        + this.unitWord(other).toLowerCase() + ' pays it');
+      this.setState({ wallet: other, walletAuto: true });
+      this.toast(other === 'sat' ? 'Bitcoin was chosen for you' : 'Dollars were chosen for you');
+    }
+  }
+
+  /* Does a balance cover what the confirmation has been quoted, on the
+   * wallet's own sum (`payNeed`)? true, false, or null where nothing is known. */
+  quoteFits(unit) {
+    const W = window.FoxyWallet;
+    const q = (this.state.feeQ || {})[unit];
+    if (!q || !W || !W.payNeed) return null;
+    try { const r = W.payNeed(q.amount, q.feeReserve, { unit: unit }); return r ? !!r.ok : null; }
+    catch (e) { return null; }
+  }
+
+  /* CONFIRM PAYMENT at a mint with two balances, as the owner drew it.
+   *
+   * TOTAL on top, the fee in it, in the balance that pays. Then plain rows: TO,
+   * AMOUNT, FEE INCLUDED, NETWORK, and RATE when dollars pay a bitcoin invoice
+   * (the mint's own rate, from its quote). The WALLET button is last: it says
+   * which balance pays and opens the choice. Waiting and refusing are as in
+   * `confirmSpec`: CHECKING while the fee is asked, NOT ENOUGH on the wallet's
+   * own sum, the two price sources for an amount typed in dollars. */
+  confirmTwoSpec() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    const wallet = this.walletNow('send') || 'sat';
+    const other = wallet === 'usd' ? 'sat' : 'usd';
+    const held = this.connecting() || !!s.quotingFee || this.sendToAsk();
+    const q = (s.feeQ || {})[wallet] || null;
+    // the sats the payee is paid: the invoice's own, or what was agreed for an address
+    const asked = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf)
+      ? (W.amountOf(String(s.recipient)) || 0) : this.typedSats();
+    const bracket = (t) => (t ? '(' + t + ')' : '');
+    const fig = (n) => (wallet === 'usd' ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
+    const total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    const rows = [
+      this.cfRow('TO', this.sendToText()),
+      this.cfRow('AMOUNT', q ? fig(q.amount).main : this.sendAmountText(), {
+        // dollars paying bitcoin: what the payee is paid, in sats, under it
+        sub: wallet === 'usd' ? (asked ? bracket('₿ ' + this.group(asked)) : '') : bracket(q ? fig(q.amount).sub : ''),
+      }),
+      this.cfRow('FEE INCLUDED', q ? fig(q.feeReserve).main : held ? 'CHECKING…' : 'UNKNOWN',
+        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '' }),
+      this.cfRow('NETWORK', 'LIGHTNING'),
+    ];
+    const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
+    if (wallet === 'usd' && rate > 0) {
+      const who = String(this.mintName() || 'the mint');
+      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(rate) + ' · '
+        + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
+    }
+    if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    const base = {
+      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
+      close: () => this.setState({ screen: 'home', stack: [] }),
+      // the figure in ink, as drawn; red only when it cannot be paid
+      amountInk: 'var(--ink)',
+    };
+    /* Typed in dollars to an address: the address is asked in sats, so two
+     * price sources agree on them first (checkSendPrice), whichever balance
+     * then pays. */
+    if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
+      const failed = s.sendPriceCheck === 'failed';
+      const val = parseFloat(s.amount) || 0;
+      return Object.assign(base, {
+        amount: '$ ' + this.usd(val),
+        amountSub: failed ? '' : 'Checking the price with two sources…',
+        warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
+        cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE…', ctaTone: failed ? 'warn' : 'go',
+        go: failed ? () => this.checkSendPrice() : () => {},
+      });
+    }
+    const fits = this.quoteFits(wallet);
+    if (fits === false) {
+      const both = this.quoteFits(other) !== true;
+      const W2 = window.FoxyWallet;
+      let why = '';
+      try { why = (W2 && W2.payNeed && q) ? String((W2.payNeed(q.amount, q.feeReserve, { unit: wallet }) || {}).why || '') : ''; } catch (e) { why = ''; }
+      return Object.assign(base, {
+        amount: total != null ? fig(total).main : this.sendAmountText(),
+        amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
+        amountInk: '#FF5C5C',
+        warn: both
+          ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
+            + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
+          : (wallet === 'sat' && this.heldBlocks && q ? this.heldBlocks(total - this.unitBalance('sat')) : '') || why
+            || 'More than your ' + this.unitWord(wallet).toLowerCase() + '.',
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
+      });
+    }
+    return Object.assign(base, {
+      amount: total != null ? fig(total).main : this.sendAmountText(),
+      amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
+      cta: held ? 'CHECKING…' : 'PAY',
+      ctaBusy: held,
+      ctaTone: 'go',
+      go: held ? () => {} : () => this.startSend(),
+    });
   }

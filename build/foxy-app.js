@@ -9,7 +9,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -84,6 +84,11 @@ class Component extends DCLogic {
     amount: '',
     network: '',
     unit: 'USD',
+    /* Two balances at one mint (dollars and bitcoin). `wallet` is the money
+     * unit of the flow on screen, 'sat' or 'usd', and '' until the flow has
+     * one; `unit` above is only the keypad's display. The dollars held are
+     * `balUsdCents`, never `balUsd`, which is the sats' worth in dollars. */
+    wallet: '', walletAuto: false, balUsdCents: null, histUnit: '',
     theme: 'dark',
     hidden: false, range: '1D', rangeOpen: false, open: { contact: true, account: false, login: false },
     priceCollapsed: false,
@@ -190,6 +195,11 @@ class Component extends DCLogic {
       ink: o.ink || 'var(--ink)',
       sub: o.sub || '',
       subH: o.sub ? '24px' : '0px',
+      subInk: o.subInk || 'rgba(var(--ink-rgb),.45)',
+      // a second line under the first, in its own ink (a swap's market price, in red)
+      sub2: o.sub2 || '',
+      sub2Shown: !!o.sub2,
+      sub2Ink: o.sub2Ink || 'rgba(var(--ink-rgb),.45)',
       minH: o.reserve ? '69px' : '0px',
       shown: o.hidden ? '0' : '1',
       cursor: o.tap ? 'pointer' : 'default',
@@ -218,6 +228,7 @@ class Component extends DCLogic {
    *    amount?: string, amountInk?: string, amountSub?: string, rows?: any[], warn?: string,
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
+   *    titleUp?: boolean, wallet?: { word: string, go: () => void },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -238,8 +249,13 @@ class Component extends DCLogic {
     if (s.screen === 'fcMoveConfirm') return this.fcMoveSpec();
     // a card's limit, before it is set (26f-flashcard.js)
     if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
+    // dollars into bitcoin or back, at this mint (26i-swap.js)
+    if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm
     const W = window.FoxyWallet;
+    // at a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button
+    if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
+        && this.twoUnitsOn && this.twoUnitsOn()) return this.confirmTwoSpec();
     /* Waiting on the connection, or on what it is for.
      *
      * A Lightning payment cannot be made, and its fee cannot be known, until
@@ -414,6 +430,257 @@ class Component extends DCLogic {
     return (W.tagsFor(out.hash) || {}).note || '';
   }
 
+  /* ---- two balances: dollars and bitcoin at one mint -----------------------
+   *
+   * A mint may issue dollar ecash beside bitcoin. The wallet keeps each in its
+   * own pile and never adds one to the other: an amount is sats, or cents for
+   * dollars, and always says which. These are the screens' half of it: which
+   * pills the home shows, which balance a flow pays from or into, and the
+   * words for them.
+   *
+   * At a mint that issues only bitcoin, and with a wallet that knows nothing
+   * of two balances, `twoUnitsOn` is false and nothing below changes a screen.
+   * Every caller asks it the guarded way, because suites lift single methods
+   * out of the app and run them on a stand-in that has none of these. */
+
+  /* Does the mint this phone is on issue both? Read from memory every render,
+   * and a render must not fail on it. */
+  twoUnitsOn() {
+    const W = window.FoxyWallet;
+    try { return !!(W && W.twoUnits && W.twoUnits()); } catch (e) { return false; }
+  }
+
+  /* What the person chose to hold, and the two remembered defaults (the last
+   * balance a receive used, and the last a send used): '' for any never set. */
+  walletChoiceNow() {
+    const W = window.FoxyWallet;
+    let c = null;
+    try { c = (W && W.walletChoice) ? W.walletChoice() : null; } catch (e) { c = null; }
+    const unit = (u) => ((u === 'usd' || u === 'sat') ? u : '');
+    return { hold: String((c && c.hold) || ''), recv: unit(c && c.recv), send: unit(c && c.send) };
+  }
+
+  /* The balance a flow uses: the one picked for this payment, else the one
+   * remembered for its kind, else '' (and the CURRENCY screen asks). Always
+   * 'sat' at a mint with one balance. `flow` is 'receive' or 'send'. */
+  walletNow(flow) {
+    if (!this.twoUnitsOn()) return 'sat';
+    const s = this.state;
+    if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
+    const c = this.walletChoiceNow();
+    return flow === 'receive' ? c.recv : c.send;
+  }
+
+  /* Remember the balance a flow used, for the next one of its kind. */
+  rememberWallet(flow, unit) {
+    const W = window.FoxyWallet;
+    if (!this.twoUnitsOn() || !W || !W.setWalletChoice || (unit !== 'usd' && unit !== 'sat')) return;
+    try { W.setWalletChoice(flow === 'receive' ? { recv: unit } : { send: unit }); }
+    catch (e) { console.warn('[foxy] the balance chosen could not be remembered:', e && e.message); }
+  }
+
+  /* A balance's name: DOLLARS or BITCOIN, never "Cash Balance". */
+  unitWord(unit) { return unit === 'usd' ? 'DOLLARS' : 'BITCOIN'; }
+
+  /* What a WALLET chip or button reads for a balance. */
+  walletLabel(unit) { return unit === 'usd' ? 'USD' : 'BITCOIN'; }
+
+  /* An amount in its own unit, as the screens write money: '$ 42.05' for
+   * cents, '₿ 51,418' for sats. Never converted. */
+  unitFigure(amount, unit) {
+    const n = Math.round(Number(amount) || 0);
+    const sign = n < 0 ? '−' : '';
+    if (unit === 'usd') return sign + '$ ' + this.usd(Math.abs(n) / 100);
+    return sign + '₿ ' + this.group(Math.abs(n));
+  }
+
+  /* What a balance holds at this mint, as the home shows it: cents for
+   * dollars, sats for bitcoin. */
+  unitBalance(unit) {
+    if (unit === 'usd') return Math.max(0, Math.round(Number(this.state.balUsdCents) || 0));
+    return Math.max(0, Math.round(Number(this.balNow().sats) || 0));
+  }
+
+  /* The keypad's dollars in cents, exact, for a dollar balance: '5.00' is 500.
+   * No price comes into it. */
+  centsTyped() {
+    const v = parseFloat(this.state.amount) || 0;
+    return v > 0 ? Math.round(v * 100) : 0;
+  }
+
+  /* The pills on home, top to bottom: dollars over bitcoin, or one of them.
+   *
+   * One at a mint with one balance. With two, what the person chose to hold
+   * decides: Dollars or Bitcoin is one pill, Both (or not asked yet) is two,
+   * and two stay even at nought so the screen never jumps. Money is never
+   * hidden: a balance with something in it keeps its pill whatever was chosen. */
+  homePills() {
+    if (!this.twoUnitsOn()) return ['sat'];
+    const hold = this.walletChoiceNow().hold;
+    const usd = (Number(this.state.balUsdCents) || 0) > 0;
+    const sat = (Number(this.state.balSats) || 0) > 0;
+    if (hold === 'dollars') return sat ? ['usd', 'sat'] : ['usd'];
+    if (hold === 'bitcoin') return usd ? ['usd', 'sat'] : ['sat'];
+    return ['usd', 'sat'];
+  }
+
+  /* The CURRENCY screen, once per kind of flow.
+   *
+   * Called on every update. A receive's SET AMOUNT, or a send's SET AMOUNT or
+   * CONFIRM PAYMENT, at a mint with two balances and no balance remembered for
+   * that kind of flow, is put behind CURRENCY ("What do you want to receive?").
+   * The pick is remembered (`currencyPick`), so it is asked once; Dollars or
+   * Bitcoin answered at the hold question sets both and it is never asked. */
+  syncWalletAsk() {
+    const s = this.state;
+    const receiving = s.flow === 'receive' && s.screen === 'amount';
+    const sending = s.flow === 'send' && (s.screen === 'amount'
+      || (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')));
+    if (!receiving && !sending) return;
+    if (!this.twoUnitsOn() || this.walletNow(receiving ? 'receive' : 'send')) return;
+    console.log('[foxy] two balances: asking which one, before ' + s.screen);
+    this.setState(p => ({ screen: 'currency', currencyFlow: receiving ? 'receive' : 'send', currencyNext: p.screen }));
+  }
+
+  /* A card on CURRENCY: the balance for this flow, remembered for the next. */
+  currencyPick(unit) {
+    const s = this.state;
+    const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
+    this.rememberWallet(flow, unit);
+    const patch = { wallet: unit, walletAuto: false, walletTapped: false,
+      screen: s.currencyNext || (flow === 'receive' ? 'amount' : 'sendConfirm') };
+    // a dollar balance is typed in dollars, exactly
+    if (unit === 'usd' && s.unit !== 'USD') Object.assign(patch, { unit: 'USD', amount: '' });
+    this.setState(patch);
+  }
+
+  /* WALLET on CONFIRM PAYMENT: the two balances, with the one that cannot
+   * cover this payment greyed (renderCurrency). */
+  openWalletPick() { this.go('walletPick'); }
+
+  /* A balance picked on WALLET: this payment's, and remembered for the next.
+   * Picked by hand, so it is not switched for the person again. */
+  walletPickChoose(unit, why) {
+    if (why) { this.toast(why, true); return; }
+    this.setState({ wallet: unit, walletAuto: false, walletTapped: true });
+    this.rememberWallet('send', unit);
+    this.back();
+  }
+
+  /* The other balance, when the one in use cannot cover the payment and the
+   * other can: "Bitcoin was chosen for you". Once, and not remembered: only a
+   * tap changes what is remembered. Not after a pick by hand. */
+  autoWallet(fits) {
+    const s = this.state;
+    if (!this.twoUnitsOn() || s.walletTapped) return;
+    const pick = this.walletNow('send') || 'sat';
+    const other = pick === 'usd' ? 'sat' : 'usd';
+    const mine = fits(pick), alt = fits(other);
+    if (mine === false && alt === true) {
+      console.log('[foxy] two balances: ' + this.unitWord(pick).toLowerCase() + ' cannot cover this, so '
+        + this.unitWord(other).toLowerCase() + ' pays it');
+      this.setState({ wallet: other, walletAuto: true });
+      this.toast(other === 'sat' ? 'Bitcoin was chosen for you' : 'Dollars were chosen for you');
+    }
+  }
+
+  /* Does a balance cover what the confirmation has been quoted, on the
+   * wallet's own sum (`payNeed`)? true, false, or null where nothing is known. */
+  quoteFits(unit) {
+    const W = window.FoxyWallet;
+    const q = (this.state.feeQ || {})[unit];
+    if (!q || !W || !W.payNeed) return null;
+    try { const r = W.payNeed(q.amount, q.feeReserve, { unit: unit }); return r ? !!r.ok : null; }
+    catch (e) { return null; }
+  }
+
+  /* CONFIRM PAYMENT at a mint with two balances, as the owner drew it.
+   *
+   * TOTAL on top, the fee in it, in the balance that pays. Then plain rows: TO,
+   * AMOUNT, FEE INCLUDED, NETWORK, and RATE when dollars pay a bitcoin invoice
+   * (the mint's own rate, from its quote). The WALLET button is last: it says
+   * which balance pays and opens the choice. Waiting and refusing are as in
+   * `confirmSpec`: CHECKING while the fee is asked, NOT ENOUGH on the wallet's
+   * own sum, the two price sources for an amount typed in dollars. */
+  confirmTwoSpec() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    const wallet = this.walletNow('send') || 'sat';
+    const other = wallet === 'usd' ? 'sat' : 'usd';
+    const held = this.connecting() || !!s.quotingFee || this.sendToAsk();
+    const q = (s.feeQ || {})[wallet] || null;
+    // the sats the payee is paid: the invoice's own, or what was agreed for an address
+    const asked = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf)
+      ? (W.amountOf(String(s.recipient)) || 0) : this.typedSats();
+    const bracket = (t) => (t ? '(' + t + ')' : '');
+    const fig = (n) => (wallet === 'usd' ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
+    const total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    const rows = [
+      this.cfRow('TO', this.sendToText()),
+      this.cfRow('AMOUNT', q ? fig(q.amount).main : this.sendAmountText(), {
+        // dollars paying bitcoin: what the payee is paid, in sats, under it
+        sub: wallet === 'usd' ? (asked ? bracket('₿ ' + this.group(asked)) : '') : bracket(q ? fig(q.amount).sub : ''),
+      }),
+      this.cfRow('FEE INCLUDED', q ? fig(q.feeReserve).main : held ? 'CHECKING…' : 'UNKNOWN',
+        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '' }),
+      this.cfRow('NETWORK', 'LIGHTNING'),
+    ];
+    const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
+    if (wallet === 'usd' && rate > 0) {
+      const who = String(this.mintName() || 'the mint');
+      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(rate) + ' · '
+        + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
+    }
+    if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    const base = {
+      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
+      close: () => this.setState({ screen: 'home', stack: [] }),
+      // the figure in ink, as drawn; red only when it cannot be paid
+      amountInk: 'var(--ink)',
+    };
+    /* Typed in dollars to an address: the address is asked in sats, so two
+     * price sources agree on them first (checkSendPrice), whichever balance
+     * then pays. */
+    if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
+      const failed = s.sendPriceCheck === 'failed';
+      const val = parseFloat(s.amount) || 0;
+      return Object.assign(base, {
+        amount: '$ ' + this.usd(val),
+        amountSub: failed ? '' : 'Checking the price with two sources…',
+        warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
+        cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE…', ctaTone: failed ? 'warn' : 'go',
+        go: failed ? () => this.checkSendPrice() : () => {},
+      });
+    }
+    const fits = this.quoteFits(wallet);
+    if (fits === false) {
+      const both = this.quoteFits(other) !== true;
+      const W2 = window.FoxyWallet;
+      let why = '';
+      try { why = (W2 && W2.payNeed && q) ? String((W2.payNeed(q.amount, q.feeReserve, { unit: wallet }) || {}).why || '') : ''; } catch (e) { why = ''; }
+      return Object.assign(base, {
+        amount: total != null ? fig(total).main : this.sendAmountText(),
+        amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
+        amountInk: '#FF5C5C',
+        warn: both
+          ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
+            + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
+          : (wallet === 'sat' && this.heldBlocks && q ? this.heldBlocks(total - this.unitBalance('sat')) : '') || why
+            || 'More than your ' + this.unitWord(wallet).toLowerCase() + '.',
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
+      });
+    }
+    return Object.assign(base, {
+      amount: total != null ? fig(total).main : this.sendAmountText(),
+      amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
+      cta: held ? 'CHECKING…' : 'PAY',
+      ctaBusy: held,
+      ctaTone: 'go',
+      go: held ? () => {} : () => this.startSend(),
+    });
+  }
+
   // ---- account levels ----
 
 
@@ -586,10 +853,15 @@ class Component extends DCLogic {
      * first one's fee — a same-mint payment costing 0, followed by a
      * cross-mint one that actually cost 29, still displayed 0. A stale number
      * stated confidently is worse than UNKNOWN. */
+    /* At a mint with two balances both are quoted, in parallel (a melt
+     * quote is free), so the confirmation can say what each would cost and
+     * pay from the one that covers it (`autoWallet`). */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth);
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
-      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, more));
+      if (two) this._feeQuotes = null;
+      this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, two ? { feeQ: null } : {}, more));
     };
     if (!ask) {
       this._quotedFor = target;
@@ -612,9 +884,10 @@ class Component extends DCLogic {
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
-      return W.quoteFee(found.pr);
+      return two ? W.quoteFeeBoth(found.pr) : W.quoteFee(found.pr);
     }).then(q => {
       if (stale()) return;
+      if (two) { this.feeQuotesIn(q || {}); return; }
       // kept whole for SEND: a fresh quote for this invoice is not asked for twice (`pay`, opts.quote)
       this._feeQuote = q && q.quote ? q : null;
       this.setState({ quotingFee: false, quotedFee: q ? q.feeReserve : null, quotedAmt: q ? q.amount : null });
@@ -623,6 +896,22 @@ class Component extends DCLogic {
       console.warn('[foxy] the send confirmation could not ask what the payment costs:', W.reason ? W.reason(e) : e);
       this.setState({ quotingFee: false });
     });
+  }
+
+  /* Both balances' quotes for this payment, kept: whole for SEND (`pay`
+   * reuses the quote of the balance that pays), and in state without the
+   * wallet object for the screen (`feeQ`). The sat one is also what the
+   * confirmation's sat sums read, as at a mint with one balance. Then the
+   * balance that pays is switched if the remembered one cannot cover it. */
+  feeQuotesIn(both) {
+    const slim = (q, unit) => (q ? { unit: q.unit || unit, amount: q.amount, feeReserve: q.feeReserve,
+      rate: q.rate || null, bolt11: q.bolt11 || '' } : null);
+    this._feeQuotes = { sat: both.sat || null, usd: both.usd || null };
+    const sat = both.sat || null;
+    this._feeQuote = sat && sat.quote ? sat : null;
+    this.setState({ quotingFee: false, quotedFee: sat ? sat.feeReserve : null, quotedAmt: sat ? sat.amount : null,
+      feeQ: { sat: slim(both.sat, 'sat'), usd: slim(both.usd, 'usd') } });
+    this.autoWallet(u => this.quoteFits(u));
   }
 
   /* The send confirmation, kept up with the route. Called on every update
@@ -641,6 +930,9 @@ class Component extends DCLogic {
    * for: working offline puts the keypad in sats (`syncUnit`), so a payment
    * reaches this screen in dollars only with a route. */
   syncSend() {
+    /* First, at a mint with two balances: the CURRENCY screen before a flow's
+     * first amount or confirmation, when none is remembered (01-ui-basics.js). */
+    if (this.syncWalletAsk) this.syncWalletAsk();
     const s = this.state;
     if (s.screen !== 'sendConfirm') {
       this._sendWaited = null;
@@ -860,6 +1152,17 @@ class Component extends DCLogic {
      * pair if the invoice does carry an amount, so this is never a way to send
      * something other than what the payee asked for. */
     const typed = this.typedSats();
+    /* Which balance pays, at a mint with two: the one on the confirmation's
+     * WALLET button. Its own quote is reused (never the other's), and the
+     * figures of the payment are kept for the sending screen. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const unit = two ? (this.walletNow('send') || 'sat') : 'sat';
+    const quotes = this._feeQuotes || {};
+    const unitQuote = (bolt11) => (two && quotes[unit] && quotes[unit].bolt11 === bolt11 ? quotes[unit] : null);
+    const askedSats = (W.amountOf && W.amountOf(to)) || typed;
+    const sq = two ? (this.state.feeQ || {})[unit] : null;
+    this._lastPay = null;
+    this._paying = two ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
     /* And what the confirmation has asked already. For an address that is the
      * invoice it gave and the fee quote on it, paid as they stand while they
      * are fresh (`payLnurl`); an address the screen could not look up, or one
@@ -867,16 +1170,19 @@ class Component extends DCLogic {
     const asked = this.sendAsk();
     const found = (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
       ? this._found : null;
-    const kept = (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
+    const kept = two ? (found ? unitQuote(found.pr) : null)
+      : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
      * paid with the same invoice again the next time this address and amount
      * are chosen, and one that fails is asked about afresh when the person is
      * back on the confirmation. */
     if (found) { this._found = null; this._quotedFor = null; }
+    const inUnit = two ? { unit: unit } : {};
+    const invQuote = two ? unitQuote(to) : ((this._feeQuote && this._feeQuote.bolt11 === to) ? this._feeQuote : null);
     const run = W.classify(to) === 'lnurl'
-      ? W.payLnurl(to, typed, '', onStage, found ? { found: found, quote: kept } : undefined)
+      ? W.payLnurl(to, typed, '', onStage, found ? Object.assign({ found: found, quote: kept }, inUnit) : (two ? inUnit : undefined))
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         (this._feeQuote && this._feeQuote.bolt11 === to) ? { quote: this._feeQuote } : {}));
+                                         invQuote ? { quote: invQuote } : {}, inUnit));
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
@@ -902,6 +1208,14 @@ class Component extends DCLogic {
       W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
+      /* Which balance paid, in its own unit, for the sending screen; and,
+       * unless Foxy picked it for the person, remembered for the next send. */
+      if (two) {
+        const paidIn = (r && r.unit) || unit;
+        this._lastPay = { unit: paidIn, amount: r.amount != null ? r.amount : askedSats, fee: r.fee != null ? r.fee : (r.feeSats || 0),
+          asked: paidIn === 'usd' ? askedSats : 0 };
+        if (!this.state.walletAuto) this.rememberWallet('send', paidIn);
+      }
 
       const showDone = () => {
         console.log('[foxy] showDone: switching to the confirmation');
@@ -953,6 +1267,19 @@ class Component extends DCLogic {
         this._sendA = setTimeout(() => { showDone(); settleUp(); }, 400);
       }
     }).catch(e => {
+      /* The mint's price for a dollar payment moved past the one confirmed.
+       * The wallet stopped before anything moved (`pay`, e.repriced), so
+       * this is not a failure: back to CONFIRM PAYMENT, which asks the mint
+       * again and shows the new TOTAL to be confirmed. */
+      if (e && e.repriced) {
+        console.warn('[foxy] send: the price moved, asking again:', W.reason ? W.reason(e) : e);
+        if (P) P.end();
+        this.toConfirm();
+        this._quotedFor = null;
+        this.toast('The price moved. Check the new total.', true);
+        this.quoteSendFee();
+        return;
+      }
       const m = String((e && e.message) || '');
       console.error('[foxy] send failed:', e);
       if (P) P.end();
@@ -1261,7 +1588,9 @@ class Component extends DCLogic {
     if (!m) return false;
     const target = m[1].toLowerCase();
     const W = window.FoxyWallet;
-    const go = (patch) => this.setState(Object.assign({ stack: [] }, patch));
+    /* A link starts a flow afresh: at a mint with two balances, from the
+     * remembered balance, not the one a flow left on screen picked. */
+    const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null }, patch));
     const done = () => {
       try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
       return true;
@@ -2715,6 +3044,12 @@ class Component extends DCLogic {
   payThisMintWithToken(sats, go) {
     const W = window.FoxyWallet;
     if (!(sats > 0) || this.state.makeBusy) return;
+    /* A bitcoin token, from the bitcoin balance. Dollars cannot become one
+     * without the mint, so a phone paying from dollars is told so. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && this.walletNow('send') === 'usd') {
+      this.toast('Dollars need the mint. Pick BITCOIN to pay this with no connection.', true);
+      return;
+    }
     this.setState({ makeBusy: true });
     this.showMelt('Making the token\u2026', 0, { sats: sats });
     this._preSettle = this.balNow();
@@ -2727,7 +3062,7 @@ class Component extends DCLogic {
       this._seenTx[r.hash] = true;
       this.setState({
         makeBusy: false, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: true,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: true,
         tokenOutFee: Math.max(0, sats - r.sats),
         screen: 'tokenOut', stack: [],
       });
@@ -2785,6 +3120,13 @@ class Component extends DCLogic {
    * the token screen shows it as a QR and a string. */
   makeEcashToken() {
     const W = window.FoxyWallet;
+    /* From the balance that pays, at a mint with two: the remembered one, or
+     * the other where it cannot cover the amount (`keypadWallet`). A dollar
+     * token is its cents, exactly; it cannot be made offline or locked. */
+    if (this.twoUnitsOn && this.twoUnitsOn()) {
+      if (this.keypadWallet) this.keypadWallet();
+      if (this.walletNow('send') === 'usd') { this.makeUsdToken(); return; }
+    }
     const sats = this.amountInSats();
     if (!(sats > 0)) {
       this.toast('Enter an amount first', true);
@@ -2805,13 +3147,48 @@ class Component extends DCLogic {
       this._seenTx[r.hash] = true;
       this.setState({
         makeBusy: false, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: false,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: false,
         tokenOutFee: Math.max(0, sats - r.sats),
         screen: 'tokenOut', stack: [],
       });
       this.refreshBalance();
       this.watchToken(r.sats, r.hash, r.swapped === false);
       this.tidyChangeLater();
+    }).catch(e => {
+      this.hideMelt();
+      this.setState({ makeBusy: false });
+      if (this.isBadSignatures(e)) { this.badSignatureCard(null, 'swap'); return; }
+      this.toast(W.reason(e), true);
+    });
+  }
+
+  /* A dollar token: the cents typed, from the dollar balance, made by the
+   * mint. Offline the wallet refuses it ("Offline and locked payments are
+   * bitcoin only for now"), and so does this, first. */
+  makeUsdToken() {
+    const W = window.FoxyWallet;
+    const cents = this.centsTyped();
+    if (!(cents > 0)) { this.toast('Enter an amount first', true); return; }
+    if (this.state.makeBusy) return;
+    if (this.offlineNow()) { this.toast('Offline and locked payments are bitcoin only for now; nothing was sent.', true); return; }
+    this.setState({ makeBusy: true });
+    this.showMelt('Making the token\u2026');
+    this._preSettle = this.balNow();
+    W.sendToken(cents, { unit: 'usd' }).then(r => {
+      this.hideMelt();
+      this._seenTx = this._seenTx || {};
+      this._seenTx[r.hash] = true;
+      // what is remembered is the balance that made it, unless Foxy picked it
+      if (!this.state.walletAuto) this.rememberWallet('send', 'usd');
+      const got = Math.round(Number(r.amount != null ? r.amount : cents) || 0);
+      this.setState({
+        makeBusy: false, tokenCopied: false,
+        tokenOut: r.token, tokenOutSats: 0, tokenOutHash: r.hash, tokenForPayee: false,
+        tokenOutUnit: 'usd', tokenOutAmount: got,
+        tokenOutFee: Math.max(0, cents - got),
+        screen: 'tokenOut', stack: [],
+      });
+      this.refreshBalance();
     }).catch(e => {
       this.hideMelt();
       this.setState({ makeBusy: false });
@@ -2856,6 +3233,11 @@ class Component extends DCLogic {
      * wallet at this point, so it is false by definition. */
     this.setState({ reqBusy: false });
     if (!req) { this.toast('That request could not be read.', true); return; }
+    if (req.unit === 'usd') {
+      // a request in dollar ecash is for a later build: refused before anything is shown or paid
+      this.toast('That request asks for dollar ecash, which Foxy cannot pay yet.', true);
+      return;
+    }
     if (req.unit && req.unit !== 'sat') {
       this.toast('That request asks for ' + this.unitLabel(req.unit) + ' ecash. Foxy can only send sats as ecash.', true);
       return;
@@ -3160,7 +3542,7 @@ class Component extends DCLogic {
       }
       this.setState({
         reqBusy: false, req: null, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: true,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: true,
         screen: 'tokenOut', stack: [],
       });
       this.needScanStage(r);
@@ -4722,7 +5104,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy);
+      || this.state.nmBusy || this.state.reqBusy || this._swapRun);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own
@@ -4744,7 +5126,7 @@ class Component extends DCLogic {
   moneyMoving() {
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
-      || this._sendRun || this._chasingChange);
+      || this._sendRun || this._chasingChange || this._swapRun);
   }
 
   /* Which of them it was, for the diary. `moneyBusy` is six questions and the
@@ -4761,6 +5143,7 @@ class Component extends DCLogic {
     if (this._chasingChange) why.push('change is being chased');
     if (this.state.nmBusy) why.push('a new mint is being set up');
     if (this.state.reqBusy) why.push('a request is being paid');
+    if (this._swapRun) why.push('a swap between balances is running');
     return why.join('; ') || 'nothing';
   }
 
@@ -4996,6 +5379,8 @@ class Component extends DCLogic {
     setTimeout(() => this.custodyNotice(), 900);
     // and, where there is no passcode, that nothing but an alert guards the seed
     setTimeout(() => this.passcodeNotice(), 1000);
+    // and last, at a mint with two balances, what to hold (10-pin.js)
+    setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
     // the concentration nudge waits past those, for a later refresh
     this._readyAt = Date.now();
     // A mint switch that paid but died before claiming leaves the money at the
@@ -5095,6 +5480,8 @@ class Component extends DCLogic {
       this.setState({ balSats: all });
       return all;
     });
+    // and the dollars, at a mint that issues them: their own figure, in cents, never added to the sats
+    if (this.refreshUsd) this.refreshUsd();
     /* Both halves, and the launch waits for both.
      *
      * For a time it waited only for the sats, because the price sources were
@@ -5160,6 +5547,21 @@ class Component extends DCLogic {
       this.spreadNudge();
     }).catch(() => {});
     return this._priced;
+  }
+
+  /* The dollar balance at this mint, in cents (`balUsdCents`), read from the
+   * wallet's own pile. It needs no price: a dollar is a dollar. Cleared at a
+   * mint with no dollars, so a switch does not carry one mint's dollars to
+   * another's home screen. */
+  refreshUsd() {
+    const W = window.FoxyWallet;
+    if (!(this.twoUnitsOn && this.twoUnitsOn()) || !W || !W.balanceOf) {
+      if (this.state.balUsdCents != null) this.setState({ balUsdCents: null });
+      return;
+    }
+    let cents = 0;
+    try { cents = Math.max(0, Math.round(Number(W.balanceOf('usd')) || 0)); } catch (e) { return; }
+    if (cents !== this.state.balUsdCents) this.setState({ balUsdCents: cents });
   }
 
   /* How long ago the price on screen was fetched, or '' while it is current.
@@ -5241,6 +5643,24 @@ class Component extends DCLogic {
   }
 
   syncUnit() {
+    /* A dollar balance is typed in dollars, exactly, online or not and with a
+     * price or without one: there is nothing to convert. */
+    const s0 = this.state;
+    /* And a swap in the balance it leaves: dollars in dollars, bitcoin in
+     * sats, whatever the price is doing (26i-swap.js). */
+    if (s0.flow === 'swap' && s0.screen === 'amount') {
+      const want = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
+      if (s0.unit !== want) this.setState({ unit: want, amount: '' });
+      return;
+    }
+    /* Not a payment to an address: that is asked in sats, so dollars typed
+     * there convert, and its ⇅ works as it always did (`usdKeypad`). */
+    if ((s0.flow === 'receive' || s0.flow === 'send') && (s0.screen === 'amount' || s0.screen === 'confirm')
+        && !(s0.flow === 'send' && s0.recipientKind === 'email')
+        && this.walletNow && this.walletNow(s0.flow === 'receive' ? 'receive' : 'send') === 'usd') {
+      if (s0.unit !== 'USD') this.setState({ unit: 'USD', amount: '' });
+      return;
+    }
     if (this.dollarsOnly() && this.state.unit !== 'USD') {
       console.log('[foxy] offline and asking to be paid, so the keypad is in dollars');
       /* The figure is converted, not relabelled. Switching the unit under a
@@ -5384,6 +5804,57 @@ class Component extends DCLogic {
     });
   }
 
+  /* ---- WHAT DO YOU WANT TO HOLD? ------------------------------------------
+   *
+   * The last first step, at a mint that issues dollars and bitcoin: after the
+   * Tor gate, after the custody and passcode cards, after SECURE FOXY, and
+   * before the home is used. Dollars or Bitcoin sets both remembered balances
+   * and gives a home with one pill; Both gives two pills and leaves each kind
+   * of flow to ask once (the CURRENCY screen). A mint with one balance never
+   * asks. Asked once: the answer is kept by the wallet (`setWalletChoice`), and
+   * MENU › WHAT YOU HOLD asks it again. */
+  holdDue() {
+    const W = window.FoxyWallet;
+    if (!this.twoUnitsOn() || !W || !W.setWalletChoice) return false;
+    return !this.walletChoiceNow().hold && !this._holdLater;
+  }
+
+  /* Up when it is due and nothing else is: a card, the PIN pad, or a flow the
+   * person is in. Tried again a moment later while something is up, a few
+   * times, and then left for the next launch. */
+  offerHoldChoice(tries) {
+    const n = Number(tries) || 0;
+    if (!this.holdDue()) return;
+    const busy = !!(this._blockedEl && this._blockedEl.parentNode) || !!(this._pinEl && this._pinEl.parentNode)
+      || this.state.screen !== 'home' || !!this.state.open0;
+    if (busy) {
+      clearTimeout(this._holdT);
+      if (n < 40) this._holdT = setTimeout(() => this.offerHoldChoice(n + 1), 1500);
+      return;
+    }
+    console.log('[foxy] two balances: asking what to hold');
+    this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]), holdPick: '' }));
+  }
+
+  /* Back from the question: not answered, so it is asked again next launch. */
+  holdLater() {
+    this._holdLater = true;
+    this.setState({ screen: 'home', stack: [], holdPick: '' });
+  }
+
+  holdDone() {
+    const W = window.FoxyWallet;
+    const hold = this.state.holdPick;
+    if (!hold) { this.toast('Pick one first.', true); return; }
+    try { W.setWalletChoice({ hold: hold }); } catch (e) {
+      this.toast((W && W.reason) ? W.reason(e) : 'That could not be kept.', true);
+      return;
+    }
+    console.log('[foxy] two balances: holding ' + hold);
+    this.setState({ screen: 'home', stack: [], holdPick: '' });
+    this.refreshBalance();
+  }
+
   /* Never on one tap: this is the one choice that takes a guard off. */
   /* Reached from the SECURE FOXY card and from MENU > STOP FACE ID, so it says
    * what it costs rather than what to pick. */
@@ -5410,6 +5881,8 @@ class Component extends DCLogic {
        * locks the screen as well as the seed. */
       this.toast(mode === 'none' ? 'Foxy is not protected.' : 'Face ID now locks Foxy.');
       this.forceUpdate();
+      // and then, at a mint with two balances, what to hold, if it has not been asked
+      if (this.offerHoldChoice) this.offerHoldChoice();
     }, e => {
       this.toast(W.reason ? W.reason(e) : 'That could not be changed.', true);
     });
@@ -6929,6 +7402,14 @@ class Component extends DCLogic {
     return Math.round(val / px * 1e8);
   }
 
+  /* What this receive asks for, in the balance it goes into: cents for
+   * dollars, typed exactly and needing no price, or sats as `wantedSats`
+   * works them out. */
+  wantedAmount() {
+    if (this.walletNow && this.walletNow('receive') === 'usd') return { unit: 'usd', amount: this.centsTyped() };
+    return { unit: 'sat', amount: this.wantedSats() };
+  }
+
   // real invoice for the receive screen, then wait for it to be paid
   openReceive() {
     const W = window.FoxyWallet;
@@ -7470,7 +7951,12 @@ class Component extends DCLogic {
       const sats = this.state.invoiceIsAddress ? 0
         : (window.FoxyWallet.amountOf(this.state.invoice) || 0);
       const barred = o.rail === 'ON-CHAIN' && this.ocReceiveBlocked(sats);
-      return {
+      /* A dollar invoice has one network: Lightning. On chain is bitcoin's
+       * own, and a Cashu request in dollars comes later. */
+      const usd = !!(this.walletNow && this.walletNow('receive') === 'usd');
+      const notDollars = usd && o.rail !== 'LIGHTNING'
+        ? (o.rail === 'ON-CHAIN' ? 'On chain is bitcoin only.' : 'Dollar requests come later.') : '';
+      const row = {
         label: o.rail, sub: o.sub, on: o.rail === current,
         off: barred, offWhy: barred ? this.ocFloorShort() : '',
         isDefault: !!(W && W.defaultRail && W.defaultRail() === o.rail),
@@ -7481,11 +7967,20 @@ class Component extends DCLogic {
         } : null,
         tap: () => pick(o.rail),
       };
+      // nor one dollars cannot use, said the same way
+      if (notDollars) Object.assign(row, { off: true, offWhy: notDollars, makeDefault: null });
+      return row;
     }));
   }
 
   openReceiveNow() {
     const W = window.FoxyWallet;
+    /* A dollar balance asks in cents, exactly, by a mint quote in dollars: one
+     * network (Lightning), no tap and no card, and a code that lives a minute
+     * (`recvClock`). */
+    const want = this.wantedAmount ? this.wantedAmount() : { unit: 'sat', amount: this.wantedSats() };
+    const usd = want.unit === 'usd';
+    if (usd) return this.openUsdReceive(want.amount);
     const sats = this.wantedSats();
     /* The network this person asked every receive to start on, which used to
      * be Lightning whatever they chose (FoxyWallet.defaultRail). On-chain is
@@ -7504,7 +7999,7 @@ class Component extends DCLogic {
      * is exactly right here — the payer is an inch away and the offer crosses
      * Bluetooth, not an onion. */
     if (this.offlineNow()) rail = 'CASHU';
-    this.setState({ recvRail: rail });
+    this.setState({ recvRail: rail, recvUnit: 'sat', recvExpiresAt: null });
     if (sats < 1) {
       /* SKIP on the amount screen: show the address so they choose the amount.
        * Not reachable while the keypad hides SKIP (`hideSkip`, home screen
@@ -7603,6 +8098,9 @@ class Component extends DCLogic {
       this._stopWatch = W.watch(inv.hash, paid => {
         if (mine !== this._invoiceRun) return;
         this._watching = false;
+        // what arrived, in its own unit: the paid screen reads it first
+        this.setState({ paidUnit: (paid && paid.unit) || 'sat', paidAmount: paid && paid.amount != null ? paid.amount : (paid && paid.sats) });
+        if (this.twoUnitsOn && this.twoUnitsOn()) this.rememberWallet('receive', (paid && paid.unit) || 'sat');
         // the payer said so first, and the mint has now agreed (tapPaidNotice)
         this._tapPaidNote = 0;
         if (this.hideStage) this.hideStage('paidCheck');
@@ -7648,6 +8146,170 @@ class Component extends DCLogic {
   stopReceive() {
     if (this._stopWatch) { this._stopWatch(); this._stopWatch = null; }
     this._watching = false;
+    clearInterval(this._recvClockT);
+    this._recvClockT = null;
+  }
+
+  /* A receive into the dollar balance.
+   *
+   * The invoice is a mint quote in dollars, for the cents typed. Its life is
+   * the mint's (a minute at Forge), so the screen counts it down under the
+   * code (`recvClock`) and asks for a new one when it runs out: the old one's
+   * watch goes when the new one is up, and its record stays for the wallet's
+   * sweep. What it answers is announced in its unit ("ADDED TO DOLLARS"), and
+   * the balance it went into is remembered for the next receive.
+   *
+   * No Cashu request and no tap: this screen offers Lightning only. Offline
+   * there is no code to give, and SET AMOUNT has already said so. */
+  openUsdReceive(cents) {
+    const W = window.FoxyWallet;
+    this.setState({ recvRail: 'LIGHTNING', invoiceIsAddress: false, recvUnit: 'usd', recvAmount: cents, recvExpiresAt: null });
+    if (!(cents > 0)) { this.toast('Ask for an amount above zero.', true); this.back(); return; }
+    if (this.offlineNow()) {
+      this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
+      this.toast('Receiving dollars needs the mint.', true);
+      this.back();
+      return;
+    }
+    const memo = (this.state.note || '').trim();
+    this._recvMemo = memo;
+    const mine = (this._invoiceRun = (this._invoiceRun || 0) + 1);
+    const G = window.FoxyGate;
+    const attempt = (n, waits) => W.invoice(cents, memo, { unit: 'usd' }).catch(e => {
+      const closed = !!(W.neverSent && W.neverSent(e));
+      if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
+      if (n >= 3) throw e;
+      console.warn('[foxy] dollar invoice attempt', n, 'failed \u2014', W.reason(e), '\u2014 retrying');
+      return new Promise(ok => setTimeout(ok, n * 1500)).then(() => attempt(n + 1, waits));
+    });
+    attempt(1, 0).then(inv => {
+      if (mine !== this._invoiceRun) { console.log('[foxy] dollar invoice: an older request answered late; letting it go'); return; }
+      if (W.tag) W.tag(inv.hash, { note: memo });
+      this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash, note: '', noteDraft: '' });
+      this.usdInvoiceUp(inv, mine);
+    }).catch(e => {
+      if (mine !== this._invoiceRun) return;
+      console.error('[foxy] dollar invoice failed after 3 tries:', e);
+      this.setState(p => ({
+        invoiceErr: W.reason(e), blockedWhy: W.reason(e),
+        screen: (p.stack && p.stack.length) ? p.stack[p.stack.length - 1] : 'home',
+        stack: (p.stack && p.stack.length) ? p.stack.slice(0, -1) : [],
+      }));
+      this.toast(W.reason(e), true);
+    });
+  }
+
+  /* A dollar invoice on screen: watched, and its minute counted down. */
+  usdInvoiceUp(inv, mine) {
+    const W = window.FoxyWallet;
+    const life = Number(inv.expiresIn) > 0 ? Number(inv.expiresIn) : 60;
+    const ends = Number(inv.expiresAt) > 0 ? Number(inv.expiresAt) : Date.now() + life * 1000;
+    this.stopReceive();
+    this.setState({ recvExpiresAt: ends, recvAmount: inv.amount != null ? inv.amount : this.state.recvAmount });
+    this._watching = true;
+    const hash = inv.hash;
+    this._stopWatch = W.watch(hash, paid => {
+      if (mine !== this._invoiceRun) return;
+      // the code on screen, or the one it replaced a moment ago: either is this receive
+      this._watching = false;
+      clearInterval(this._recvClockT);
+      this._recvClockT = null;
+      this._tapPaidNote = 0;
+      if (this.hideStage) this.hideStage('paidCheck');
+      this.haptic && this.haptic('success');
+      const unit = (paid && paid.unit) || 'usd';
+      this.rememberWallet('receive', unit);
+      this.setState(p => ({
+        screen: 'paid', stack: p.stack.concat([p.screen]), recvResolved: true,
+        paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount,
+        recvExpiresAt: null,
+        recv: Object.assign({}, p.recv, { live: 'in' }),
+      }));
+      this.noteReceived();
+      this._seenTx = this._seenTx || {};
+      this._seenTx[hash] = true;
+      if (this._preSettle == null) this._preSettle = this.balNow();
+      this.refreshBalance();
+    }, {
+      // past its minute, the sweep has it; a new code is asked for on the screen
+      timeoutMs: (life + 15) * 1000,
+      onExpired: () => { if (this.state.invoiceHash === hash) this._watching = false; },
+    });
+    clearInterval(this._recvClockT);
+    this._recvClockT = setInterval(() => this.recvClockTick(mine), 1000);
+  }
+
+  /* Once a second while a dollar code is up: the screen redrawn with what is
+   * left of it, and a new code asked for when it runs out. */
+  recvClockTick(mine) {
+    const s = this.state;
+    if (mine !== this._invoiceRun || s.screen !== 'confirm' || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
+      clearInterval(this._recvClockT);
+      this._recvClockT = null;
+      return;
+    }
+    if (Date.now() >= s.recvExpiresAt) { this.recvRequote(mine); return; }
+    this.setState({ recvTick: Date.now() });
+  }
+
+  /* The dollar code ran out unpaid: a new one for the same amount, in place.
+   * The old one's watch is let go when the new one is up, and not before, so
+   * a payment that lands in between is still seen. */
+  recvRequote(mine) {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    if (this._requoting || mine !== this._invoiceRun) return;
+    if (this.offlineNow()) { this.setState({ recvExpiresAt: null }); return; }
+    this._requoting = true;
+    console.log('[foxy] receive: the dollar code ran out; asking for a new one');
+    W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
+      this._requoting = false;
+      if (mine !== this._invoiceRun || this.state.screen !== 'confirm' || this.state.recvUnit !== 'usd') return;
+      if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
+      this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash });
+      this.usdInvoiceUp(inv, mine);
+    }, e => {
+      this._requoting = false;
+      console.warn('[foxy] receive: no new dollar code yet:', W.reason ? W.reason(e) : e);
+      // asked again in a few seconds; the old code is still watched meanwhile
+      if (mine === this._invoiceRun) this.setState({ recvExpiresAt: Date.now() + 5000 });
+    });
+  }
+
+  /* WALLET on the invoice: which balance this receive goes into. The choice
+   * is remembered for the next receive, and a new code is made in it, for the
+   * same amount. */
+  pickRecvWallet() {
+    const now = this.walletNow('receive') || 'sat';
+    this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
+      label: this.unitWord(u),
+      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + (u === 'usd'
+        ? '. Asked in dollars, exactly.' : '. Asked in bitcoin.'),
+      on: u === now,
+      tap: () => this.recvSwitchWallet(u),
+    })));
+  }
+
+  recvSwitchWallet(unit) {
+    const s = this.state;
+    if (unit === (this.walletNow('receive') || 'sat')) return;
+    const patch = { wallet: unit, walletTapped: true };
+    if (unit === 'usd' && s.unit === 'SATS') {
+      // sats on the keypad become their worth in dollars, at the price on screen
+      const px = this.px();
+      if (!px) { this.toast('No bitcoin price yet, so the amount cannot be put in dollars.', true); return; }
+      const v = parseFloat(s.amount) || 0;
+      Object.assign(patch, { unit: 'USD', amount: v ? (v / 1e8 * px).toFixed(2) : '' });
+    }
+    if (unit === 'sat' && s.unit !== 'SATS' && !this.px()) {
+      this.toast('No bitcoin price yet, so the amount cannot be asked in bitcoin.', true);
+      return;
+    }
+    this.rememberWallet('receive', unit);
+    this.stopReceive();
+    this.setState(Object.assign(patch, { invoice: '', invoiceHash: '', recvExpiresAt: null,
+      recvUnit: unit, asset: 'BITCOIN', recvRail: 'LIGHTNING' }));
+    this.openReceive();
   }
 
   // A page loaded from a file is not a secure context, so navigator.clipboard
@@ -7936,11 +8598,14 @@ class Component extends DCLogic {
       recvResolved: true,
       // its own heading, where the ordinary one would say the wrong thing
       paidSays: ev.says || '',
+      // what arrived or left in its own unit, read first by the paid screen: cents for dollars
+      paidUnit: ev.unit || 'sat',
+      paidAmount: ev.amount != null ? ev.amount : ev.sats,
       payOut: out,
       paidTo: ev.to || (out ? p.recipient : ''),
       asset: 'BITCOIN',
       unit: 'SATS',
-      amount: String(ev.sats),
+      amount: String(ev.unit && ev.unit !== 'sat' ? 0 : ev.sats),
       recv: Object.assign({}, p.recv, { live: 'in' }),
     }));
   }
@@ -8411,12 +9076,22 @@ class Component extends DCLogic {
         if (!W.tokensNotClaimed) { clear(false); return; }
         W.tokensNotClaimed().then(list => {
           if (!list.length) { clear(true); return; }
-          const sats = list.reduce((a, t) => a + (Number(t.sats) || 0), 0);
+          /* Each unit summed on its own, never added together: '1,200 sats
+           * and $ 3.00'. A dollar token's `sats` is null; its cents are in
+           * `amount` under unit 'usd'. */
+          const by = {};
+          list.forEach(t => {
+            const u = String((t && t.unit) || 'sat');
+            const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
+            by[u] = (by[u] || 0) + n;
+          });
+          const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
+            .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
           this.blockedCard('unclaimedTokens', {
             tone: 'warn',
             title: 'UNCLAIMED ECASH',
             reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
-              + this.group(sats) + ' sats, ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
+              + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
               + 'Clearing history forgets ' + (list.length === 1 ? 'it' : 'them') + ' on this phone.',
             chip: 'Your twelve words can still restore unclaimed ecash.',
             retry: 'CLEAR ANYWAY',
@@ -8533,7 +9208,7 @@ class Component extends DCLogic {
     // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
     this.announcePayment(Object.assign({}, next.ev || {}, {
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
-    }));
+    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {}));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
@@ -8893,14 +9568,18 @@ class Component extends DCLogic {
     const start = from || this.balNow();
     Promise.all([W.balanceSats(), W.rate().catch(() => null)]).then(([sats, rate]) => {
       const px = rate || this.px();
-      this.setState({
+      /* And the dollar balance, at a mint with two: its own figure, counted up
+       * on its own pill when the money landed there (`lane` 'usd'). */
+      let cents = null;
+      try { cents = (this.twoUnitsOn && this.twoUnitsOn() && W.balanceOf) ? Math.max(0, Math.round(Number(W.balanceOf('usd')) || 0)) : null; } catch (e) { cents = null; }
+      this.setState(Object.assign({
         balSats: sats,
         balUsd: (sats / 1e8) * px,
         satUsd: px / 1e8,
         animFrom: start,
         animT: 0,
         animLane: lane || 'btc',
-      });
+      }, cents != null ? { balUsdCents: cents } : {}));
       this.runBalanceAnim();
     }).catch(() => {});
     return true;
@@ -9114,6 +9793,8 @@ class Component extends DCLogic {
         payFrom: 'BITCOIN',
         amount: '',
         unit: 'USD',
+        // the remembered balance pays, until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
     }));
   }
@@ -9159,6 +9840,24 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const held = Math.round(Number(W && W.heldSats && W.heldSats()) || 0);
     if (held > 0) return this.stageMoney(held) + ' pending with the mint';
+    /* A swap between balances the mint has not finished: what it took, in the
+     * balance it came from ("$ 10.00 pending with the mint"), until the wallet
+     * finishes it (26i-swap.js). Read first, so a dollar leg is not named twice. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && W && W.unitSwapsPending) {
+      let swaps = [];
+      try { swaps = W.unitSwapsPending() || []; } catch (e) { swaps = []; }
+      const sum = { usd: 0, sat: 0 };
+      swaps.forEach(r => { const u = r && r.from && r.from.unit === 'sat' ? 'sat' : 'usd'; sum[u] += Math.max(0, Math.round(Number(r && r.from && r.from.amount) || 0)); });
+      const parts = ['usd', 'sat'].filter(u => sum[u] > 0).map(u => this.unitFigure(sum[u], u));
+      if (parts.length) return parts.join(' and ') + ' pending with the mint';
+    }
+    /* Dollars held the same way, at a mint with two balances: a swap the mint
+     * has not finished, named in dollars. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && W && W.heldIn) {
+      let cents = 0;
+      try { cents = Math.round(Number(W.heldIn('usd')) || 0); } catch (e) { cents = 0; }
+      if (cents > 0) return this.unitFigure(cents, 'usd') + ' pending with the mint';
+    }
     const back = this.recoveringSats();
     return back > 0 ? this.stageMoney(back) + ' being recovered from the mint' : '';
   }
@@ -9185,6 +9884,16 @@ class Component extends DCLogic {
     const held = Math.round(Number(W && W.heldSats && W.heldSats()) || 0);
     const short = Math.round(Number(shortBy) || 0);
     return (held > 0 && short > 0 && short <= held) ? this.heldNote() : '';
+  }
+
+  /* The books of one balance: `histAudit` for bitcoin, as it always was, and
+   * `histAuditUsd` for dollars. At a mint with two balances each adds up on its
+   * own, in its own unit: dollars walked back from the dollar balance in cents
+   * with the rows' own `amount` and `feeAmount`, bitcoin from the sats with
+   * `sats` and the fee. A row of the other unit carries the balance through
+   * untouched. */
+  histAuditIn(unit) {
+    return unit === 'usd' ? this.histAuditUsd() : this.histAudit();
   }
 
   histAudit() {
@@ -9275,6 +9984,35 @@ class Component extends DCLogic {
       }
     }
     return { balOf, balNow, run, whole, off, held, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
+  }
+
+  histAuditUsd() {
+    const s = this.state;
+    const W0 = window.FoxyWallet;
+    const balOf = new Map();
+    const balNow = Math.max(0, Math.round(Number(s.balUsdCents) || 0));
+    let run = balNow;
+    (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
+      balOf.set(t, run);
+      if (t.unit !== 'usd') return;
+      const moved = !(t.pending && t.dir === 'in') && !t.failed && !t.atRisk && !t.split;
+      if (!moved) return;
+      const by = t.dir === 'in' ? Math.round(Number(t.amount) || 0)
+        : Math.round(Number(t.amount) || 0) + Math.max(0, Math.round(Number(t.feeAmount) || 0));
+      run += t.dir === 'in' ? -by : by;
+    }));
+    const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
+    let held = 0, back = 0;
+    try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd')) || 0); } catch (e) { held = 0; }
+    try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd')) || 0); } catch (e) { back = 0; }
+    const off = whole ? Math.round(run) + held + back : 0;
+    const sig = [balNow, off].join('|');
+    if (whole && sig !== this._auditSigUsd) {
+      this._auditSigUsd = sig;
+      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off);
+    }
+    return { balOf, balNow, run, whole, off, held, back, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
+      toShowCount: 0, flagged: new Map() };
   }
 
   txTotalOut(t) {
@@ -9411,6 +10149,11 @@ class Component extends DCLogic {
           unit: t.unit && t.unit !== 'sat' ? t.unit : '',
           amount: t.amount,
           feeAmount: t.feeAmount,
+          // the mint it was at, and for one leg of a swap between balances: the swap, and the mint's rate then
+          mint: t.mint || '',
+          kind: t.kind || '',
+          swap: t.swap || '',
+          mintRate: t.mintRate || null,
           rail: 'Lightning',
           time: this.txLabel(d, now),
           // the same moment with its date, for the detail screen
@@ -9593,8 +10336,13 @@ class Component extends DCLogic {
          * still reading a card. `requestDelivered` clears
          * the mark and announces it at the moment it is true. */
         if (tags.inflight) return;
-        // another unit's receive is confirmed where it was taken; this screen counts sats
-        if (this.txIsNew(t.hash) && !(t.unit && t.unit !== 'sat')) fresh.push(t);
+        /* Another unit's receive is confirmed where it was taken; this screen
+         * counts sats. Except dollars at a mint with two balances, which this
+         * screen shows as dollars; and never a leg of a swap between them,
+         * which its own screen reports. */
+        const usdHere = t.unit === 'usd' && !!(this.twoUnitsOn && this.twoUnitsOn());
+        if (t.kind === 'swap') { this.txIsNew(t.hash); return; }
+        if (this.txIsNew(t.hash) && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
       });
       this._seenSeeded = true;
 
@@ -11278,6 +12026,10 @@ class Component extends DCLogic {
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
+      // home ends a flow: the next one starts from the remembered balance, not this one's
+      if (this.state.screen === 'home' && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+        this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
+      }
       // a code somebody was asked to scan goes with the token it belonged to
       if (prevState.screen === 'tokenOut' && this.hideStage) this.hideStage('needScan');
       // a receive's amount screen: the road to the mint is opened while the amount is typed
@@ -11393,6 +12145,18 @@ class Component extends DCLogic {
       this.toast('Offline, Foxy asks in dollars \u2014 the paying phone works out the sats.', true);
       return;
     }
+    /* A dollar balance is typed in dollars: there are no sats to swap to. The
+     * control is not on screen either (`usdKeypad`). */
+    if (this.usdKeypad && this.usdKeypad()) {
+      this.toast('Dollars are typed in dollars.', true);
+      return;
+    }
+    /* A swap is typed in the balance it leaves, cents or sats, exactly. The
+     * control is not on screen for one either (`renderAmount`). */
+    if (this.state.flow === 'swap' && this.state.screen === 'amount') {
+      this.toast('A swap is typed in the balance it leaves.', true);
+      return;
+    }
     const px = this.px();
     if (!px) { this.toast('No bitcoin price yet \u2014 amounts stay in ' + this.state.unit + '.', true); return; }
     this.setState(p => {
@@ -11413,14 +12177,20 @@ class Component extends DCLogic {
   // from animFrom → committed, so an interrupted animation still ends on the right number.
   balNow() {
     const s = this.state;
-    const to = { usd: s.balUsd, sats: s.balSats };
+    /* `cents` is the dollar balance at a mint with two (`balUsdCents`), its
+     * own lane: it counts up on its own pill, from its own figure, and is
+     * never mixed with `usd`, which is the sats' worth in dollars. */
+    const to = { usd: s.balUsd, sats: s.balSats, cents: s.balUsdCents };
     if (to.sats == null) return to;
     if (!s.animFrom) return to;
     const t = s.animT || 0;
     const e = 1 - Math.pow(1 - t, 3);
+    const fromCents = s.animFrom.cents;
     return {
       usd: s.animFrom.usd + (to.usd - s.animFrom.usd) * e,
       sats: Math.round(s.animFrom.sats + (to.sats - s.animFrom.sats) * e),
+      cents: (fromCents == null || to.cents == null) ? to.cents
+        : Math.round(fromCents + (to.cents - fromCents) * e),
     };
   }
 
@@ -12191,7 +12961,7 @@ class Component extends DCLogic {
     const v = /** @type {ReturnType<Component["renderValsBase"]> & {
       clearHistory: () => void, clearContacts: () => void, open0: boolean, rot0: string,
       toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
-      mintHostLabel: string, qrSrc: string, pageHash: string,
+      mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
       histRingInk: string, histRingInk2: string, histRing: string,
     }} */ (this.renderValsBase());
@@ -12228,6 +12998,8 @@ class Component extends DCLogic {
       logs: 'M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11.5h6M9 14.5h6M9 17.5h3',
       // a payment card: its outline, the stripe across it, a short line of print
       card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
+      // two arrows, one each way: one balance into the other
+      swap: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
       // three coins of different sizes: the pieces themselves, not a wallet
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
@@ -12266,12 +13038,22 @@ class Component extends DCLogic {
       { label: 'SCAN', path: MENU_ICON.scan, tap: v.goScan, spin: 'rotate(180deg)' },
       { label: 'PASTE', path: MENU_ICON.paste, tap: v.pickPaste, pasteHere: '1' },
     ].map(b => Object.assign({ pasteHere: '', spin: 'none' }, b));
+    /* At a mint with two balances the row has a third button, SWAP, when both
+     * pills are up; with one pill SWAP is a row in the menu instead. Dimmed
+     * offline, where a tap says it needs the mint. */
+    const twoHere = this.twoUnitsOn();
+    const twoPills = twoHere && this.homePills().length === 2;
+    v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b)).concat(twoPills ? [
+      { label: 'SWAP', path: MENU_ICON.swap, tap: () => this.swapStart(), spin: 'none', pasteHere: '',
+        dim: this.offlineNow() ? '0.38' : '1' },
+    ] : []);
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
      * SCAN, PASTE or HISTORY. */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
+    // a balance in either unit: dollars are lost with the words as surely as sats
     const unbacked = !!(window.FoxyWallet && window.FoxyWallet.backedUp
-      && !window.FoxyWallet.backedUp() && (this.state.balSats || 0) > 0);
+      && !window.FoxyWallet.backedUp() && ((this.state.balSats || 0) > 0 || (this.state.balUsdCents || 0) > 0));
     v.menuAlert = unbacked ? 'alertGlow 10.4s ease-in-out infinite' : 'none';
     /* A red ring turning on the menu button, and on BACKUP inside it: words
      * that hold money and have never been written down and checked. The glow
@@ -12324,12 +13106,14 @@ class Component extends DCLogic {
      * and red too while change is waiting to be scanned or shown. The card is on
      * the history screen; this is what says to go and look. */
     const AU = this.histAudit ? this.histAudit() : { whole: false, off: 0, dueChange: 0, toShowCount: 0 };
+    // and the dollars' own books, at a mint with two balances: each adds up in its own unit
+    const AUusd = (twoHere && this.histAuditUsd) ? this.histAuditUsd() : { whole: false, off: 0 };
     /* Not at the first sign of it. The balance is read a moment before the
      * payment's row is — twelve seconds apart on an older phone after a tap
      * that fell back to a code — and for that long the two disagree about a payment
      * both are about to agree on. History is read again at once, and the ring
      * turns red only if they still disagree four seconds on. */
-    if (AU.whole && AU.off !== 0) {
+    if ((AU.whole && AU.off !== 0) || (AUusd.whole && AUusd.off !== 0)) {
       if (!this._offSince) {
         this._offSince = Date.now();
         clearTimeout(this._offT);
@@ -12384,6 +13168,11 @@ class Component extends DCLogic {
        * will do, so it reads the same whichever way round it is. */
       { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE',
         path: MENU_ICON.hide, tap: shut(v.toggleHide) },
+      /* SWAP, on a home with one pill at a mint with two balances: home's
+       * button does it when both pills are up. */
+    ]).concat(twoHere && !twoPills ? [
+      { label: 'SWAP', path: MENU_ICON.swap, tap: shut(() => this.swapStart()) },
+    ] : []).concat([
       { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
     ]).concat(mintsWithMoney > 1 ? [
@@ -12391,6 +13180,12 @@ class Component extends DCLogic {
     ] : []).concat([
       { label: 'SWITCH', path: MENU_ICON.switch,
         tap: shut(() => this.goSwitchMint()) },
+    ]).concat(!twoHere ? [] : [
+      /* What to hold, asked again: the onboarding's last question, from here. */
+      { label: 'WHAT YOU HOLD', path: MENU_ICON.dollars,
+        tap: shut(() => this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]),
+          holdPick: this.walletChoiceNow().hold }))) },
+    ]).concat([
       /* What the pool actually holds, which decides whether this phone can pay an
        * exact amount at all — the one question an offline payer has and no other
        * screen answers. */
@@ -12551,6 +13346,8 @@ class Component extends DCLogic {
       ...this.renderSent(c),
       ...this.renderToken(c),
       ...this.renderConfirmShell(c),
+      ...this.renderCurrency(c),
+      ...this.renderSwap(c),
       ...this.renderBlocked(c),
       ...this.renderHistory(c),
       ...this.renderTxDetail(c),
@@ -12655,8 +13452,17 @@ class Component extends DCLogic {
      * card holds. FLASHCARD on the send screen is out of this phone's balance
      * as adding to a card is. */
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
+    /* At a mint with two balances a send is capped by the balance that pays,
+     * when one was picked by hand, and otherwise by the larger: a payment the
+     * remembered balance cannot cover goes from the other (`keypadWallet`), so
+     * MORE THAN YOUR BALANCE means neither covers it. Dollars are their own
+     * figure, in cents, and need no price. */
+    const twoSend = s.flow === 'send' && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usdCapUsd = (Number(s.balUsdCents) || 0) / 100;
     const sendCapUsd = !capped ? 0
       : s.flow === 'cardWd' ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : twoSend ? (s.walletTapped ? (this.walletNow('send') === 'usd' ? usdCapUsd : btcAvailUsd)
+        : Math.max(usdCapUsd, btcAvailUsd || 0))
       : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
@@ -12673,7 +13479,10 @@ class Component extends DCLogic {
     const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
       ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
-    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver);
+    /* A swap's amount is typed in the balance it leaves, and capped by it:
+     * cents against cents, or sats against sats, with no price in it. */
+    const swapOver = s.flow === 'swap' && sc === 'amount' && this.swapTyped() > this.unitBalance(this.swapUnits().from);
+    const sendOver = (capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver)) || swapOver;
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;
     // live series or nothing: a canned curve next to a real price is a lie
@@ -12693,7 +13502,7 @@ class Component extends DCLogic {
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd') ? this.heldBlocks(overBySats) : '';
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd' && s.flow !== 'swap') ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }
 
@@ -12768,6 +13577,8 @@ class Component extends DCLogic {
         screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         note: '', noteDraft: '',
+        // which balance pays is the remembered one until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       // home's SCAN: straight to the scanner, which is how a payment request,
       // an invoice or a token gets in
@@ -12775,6 +13586,8 @@ class Component extends DCLogic {
         screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         note: '', noteDraft: '',
+        // which balance pays is the remembered one until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       goReceive: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'receive',
@@ -12783,6 +13596,8 @@ class Component extends DCLogic {
         // these belong to sending; left set, they decide what the receive
         // invoice screen displays instead of the amount just typed
         recipient: '', recipientKind: '',
+        // the balance it goes into is the remembered one until the WALLET chip says otherwise
+        wallet: '', walletAuto: false, walletTapped: false,
       })),
       bkBadge: false,
       bkAskAgain: (e) => { e.stopPropagation(); this.setState({ bkAsk: true }); },
@@ -12913,6 +13728,7 @@ class Component extends DCLogic {
         if (x > 100) this.go('history'); else this.goSwitchMint();
       },
       priceCollapsed: !!s.priceCollapsed, priceExpanded: !s.priceCollapsed,
+      ...this.renderHomeTwo(c),
       /* The banner is the one thing on the home screen that says how Foxy
        * reaches the world, and it says it in a few words: one, "Tor", when
        * Tor is carrying everything. Tapping it says the rest.
@@ -12951,10 +13767,108 @@ class Component extends DCLogic {
       toggleCollapse: () => this.setState(p => ({ priceCollapsed: !p.priceCollapsed })),
       chevronRot: s.priceCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
       priceFlex: s.priceCollapsed ? '0 0 auto' : '1 1 0%',
-      priceTopPad: s.priceCollapsed ? 2 : 4,
+      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the owner's design)
+      priceTopPad: s.priceCollapsed ? 2 : (this.twoUnitsOn && this.twoUnitsOn()) ? 8 : 4,
       moneyFlex: (s.priceCollapsed || s.priceRemoved) ? '1 1 0%' : '0 0 auto',
       showPriceSection: !s.priceRemoved,
     };
+  }
+
+  /* The home at a mint with two balances, as the owner drew it.
+   *
+   * The sheet is headed by the mint's own name and MINT under it, and the tap
+   * opens SWITCH MINT. Then the pills: dollars over bitcoin, or the one the
+   * person holds (`homePills`). The dollar pill is frost with dark ink, its
+   * figure the cents held, and their worth in sats under it at the market
+   * price (the owner's change: the mirror of the bitcoin pill). The bitcoin
+   * pill is fox fur with white ink, the sats on the big line and their worth in
+   * dollars under, when there is a price. Money landing lights its own pill.
+   * A tap on a pill opens history on that balance. At a mint with one balance
+   * none of this is drawn and the home is as it always was. */
+  /** @param {RenderContext} c */
+  renderHomeTwo(c) {
+    const { s } = c;
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    if (!two) return { homeOneMint: true, homeTwo: false, homeMintName: '', homePillRows: [], goMintHeading: () => this.goSwitchMint() };
+    const bal = this.balNow();
+    const crediting = s.animFrom ? s.animLane : null;
+    const REST = '0 10px 24px rgba(0,0,0,.3)';
+    const cents = bal.cents != null ? bal.cents : s.balUsdCents;
+    const pill = (u) => (u === 'usd' ? {
+      label: 'Dollars', sym: '$', ink: '#10161B', inkRgb: '16,22,27', blend: 'normal',
+      bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.06) 0 1px,transparent 1px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+      big: s.hidden ? '••••••' : cents == null ? '···' : this.usd(Math.max(0, cents) / 100),
+      /* The dollars' worth in sats under them, at the same market price the
+       * bitcoin pill's dollar line uses, so the sats can be seen to move with
+       * the price; nothing under them where there is no price. */
+      small: s.hidden ? '' : cents == null ? 'Loading balance…'
+        : this.satUsd() ? '₿ ' + this.group(Math.round(Math.max(0, cents) / 100 / this.satUsd())) : '',
+      glow: (crediting === 'usd' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(207,224,236,.8)' : REST,
+      tap: () => this.goHistoryIn('usd'),
+    } : {
+      label: 'Bitcoin', sym: '₿', ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal',
+      bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+        + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+      big: s.hidden ? '••••••' : bal.sats == null ? '···' : this.group(bal.sats),
+      // the sats' worth in dollars under them, only where there is a price to say it at
+      small: s.hidden ? '' : bal.sats == null ? 'Loading balance…'
+        : this.satUsd() ? '$' + this.usd(bal.sats * this.satUsd()) + ' USD' : '',
+      glow: (crediting === 'btc' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(247,147,26,.85)' : REST,
+      tap: () => this.goHistoryIn('sat'),
+    });
+    return {
+      homeOneMint: false,
+      homeTwo: true,
+      homeMintName: String(this.mintName() || 'MINT').toUpperCase(),
+      goMintHeading: () => this.goSwitchMint(),
+      homePillRows: this.homePills().map(pill),
+    };
+  }
+
+  /* History, opened on one balance's tab (a tap on its pill). */
+  goHistoryIn(unit) {
+    this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]), histUnit: unit }));
+  }
+
+  /* SWAP, from home's button or the menu's row: dollars into bitcoin or back,
+   * at this mint. It needs the mint, so offline it only says so. */
+  swapStart() {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    const go = /** @type {any} */ (this).goSwap;
+    if (typeof go === 'function') { go.call(this); return; }
+    const first = this.homePills()[0] === 'sat' && this.unitBalance('sat') > 0 ? 'sat' : 'usd';
+    this.setState(p => ({ screen: 'swap', stack: p.stack.concat([p.screen]),
+      swapFrom: first, swapTo: first === 'usd' ? 'sat' : 'usd', swapQuote: null, swapNewRate: false }));
+  }
+
+  /* Is the keypad typing a dollar balance's own amount: cents, exactly, with
+   * no ₿ toggle and no second figure? A dollar receive, and a dollar send of
+   * ecash or of an invoice's own amount. Not a dollar balance paying an
+   * address, which is asked in sats and converts. */
+  usdKeypad() {
+    const s = this.state;
+    if (s.screen !== 'amount' || (s.flow !== 'receive' && s.flow !== 'send')) return false;
+    if (!(this.twoUnitsOn && this.twoUnitsOn())) return false;
+    if (this.walletNow(s.flow === 'receive' ? 'receive' : 'send') !== 'usd') return false;
+    return !(s.flow === 'send' && s.recipientKind === 'email');
+  }
+
+  /* SET AMOUNT's NEXT on a send at a mint with two balances: the remembered
+   * balance cannot cover what was typed and the other can, so the other pays
+   * (once, said in a toast, and not remembered). Not after a pick by hand. */
+  keypadWallet() {
+    const s = this.state;
+    if (!(this.twoUnitsOn && this.twoUnitsOn()) || s.walletTapped) return;
+    const pick = this.walletNow('send') || 'sat';
+    const other = pick === 'usd' ? 'sat' : 'usd';
+    const typedUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * (this.satUsd() || 0) : (parseFloat(s.amount) || 0);
+    const capUsd = (u) => (u === 'usd' ? this.unitBalance('usd') / 100 : this.unitBalance('sat') * (this.satUsd() || 0));
+    if (!(typedUsd > 0) || typedUsd <= capUsd(pick) + 0.005 || typedUsd > capUsd(other) + 0.005) return;
+    const patch = { wallet: other, walletAuto: true };
+    // dollars are typed in dollars: sats on the keypad become their worth
+    if (other === 'usd' && s.unit === 'SATS') Object.assign(patch, { unit: 'USD', amount: typedUsd.toFixed(2) });
+    this.setState(patch);
+    this.toast(other === 'sat' ? 'Bitcoin was chosen for you' : 'Dollars were chosen for you');
   }
 
   /* The home banner's three states, from the route as it is right now.
@@ -13099,22 +14013,28 @@ class Component extends DCLogic {
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         : s.flow === 'receive' ? 'How much to receive?'
+        : s.flow === 'swap' ? 'How much to swap?'
         : 'How much to send?',
       hideSkip: true,
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
+      /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
-        : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
+        : s.flow === 'cardLimit' ? 'NO LIMIT'
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
+        else if (this.state.flow === 'swap') this.swapNext(true);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
         if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
+        // a swap's amount, in the balance it leaves (26i-swap.js)
+        if (this.state.flow === 'swap') { if (!sendOver) this.swapNext(false); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }
         /* Over the balance already has its own line under the amount
          * (sendOverLabel), so the refusal is explained on screen and a toast
@@ -13134,8 +14054,15 @@ class Component extends DCLogic {
          * screen's NETWORK chip is what chooses Cashu or on chain from there
          * (finding 19). The same two paths, said plainly. */
         if (this.state.flow === 'send') {
+          // the other balance, where the remembered one cannot cover this and the other can
+          if (this.keypadWallet) this.keypadWallet();
           this.setState(p => ({ payFrom: 'BITCOIN', screen: 'sendConfirm', stack: p.stack.concat([p.screen]) }));
         } else {
+          // a dollar code needs the mint: there is nothing to ask for offline
+          if (this.walletNow && this.walletNow('receive') === 'usd' && this.offlineNow()) {
+            this.toast('Receiving dollars needs the mint.', true);
+            return;
+          }
           this.setState({ asset: 'BITCOIN' });
           this.renderVals().pickLightning();
         }
@@ -13155,6 +14082,13 @@ class Component extends DCLogic {
          * what the amount makes and this phone agrees to it or does not
          * (`dollarsOnly`). */
         if (this.dollarsOnly()) return '';
+        /* A swap converts, so the other balance's figure is under it: about
+         * what the mint's last rate would give (26i-swap.js). */
+        if (s.flow === 'swap') return this.swapEstimate();
+        /* A dollar balance: dollars, exactly, and no second figure, because
+         * nothing is converted. Only a payment to an address converts (it is
+         * asked in sats), and that one keeps its line. */
+        if (this.usdKeypad && this.usdKeypad()) return '';
         const px = this.satUsd();
         if (!px) return '';
         const sats = this.wantedSats() || 0;
@@ -13167,6 +14101,10 @@ class Component extends DCLogic {
        * same reason PASTE ECASH is hidden rather than dropped. */
       swapVis: this.dollarsOnly() ? 'hidden' : 'visible',
       swapPE: this.dollarsOnly() ? 'none' : 'auto',
+      // and for a dollar balance, typed in dollars exactly: hidden the same way (`usdKeypad`)
+      ...((this.usdKeypad && this.usdKeypad()) ? { swapVis: 'hidden', swapPE: 'none' } : {}),
+      // and for a swap, typed in the balance it leaves: there is nothing to toggle to
+      ...(s.flow === 'swap' ? { swapVis: 'hidden', swapPE: 'none' } : {}),
       toggleUnit: () => this.toggleUnit(),
       // a token carries its own amount, so the two are alternatives
       // gone entirely once there is an amount, back when the field is cleared:
@@ -13210,6 +14148,8 @@ class Component extends DCLogic {
       ...(s.flow === 'cardWd' ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
+      // a swap is out of one balance, and the line names it
+      ...(s.flow === 'swap' ? { sendOverLabel: 'MORE THAN YOUR ' + this.unitWord(this.swapUnits().from) } : {}),
     };
   }
 
@@ -13234,8 +14174,28 @@ class Component extends DCLogic {
     };
     const recvReady = () => !!(s.recvVia === 'wire' || s.network === 'BANK WIRE'
       || (onchain ? ocCode() : cashu ? creq() : s.invoice));
+    /* At a mint with two balances: the title between the round buttons, the
+     * WALLET chip beside NETWORK, and for dollars the cents asked for, no tap
+     * and no card (bitcoin only), and the minute the code lives counted down. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usdIn = two && this.walletNow('receive') === 'usd';
+    const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
+    const usdCents = usdIn ? (s.recvAmount != null ? s.recvAmount : this.centsTyped()) : 0;
     return {
       isConfirm: sc === 'confirm',
+      recvHeadOne: !two,
+      recvHeadTwo: two,
+      recvChipsOne: !two,
+      recvChipsTwo: two,
+      recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
+      pickRecvWallet: () => {
+        if (this.offlineNow()) { this.offlineNo('Choosing a balance'); return; }
+        this.pickRecvWallet();
+      },
+      recvTapShown: !usdIn,
+      recvCardShown: !usdIn,
+      recvClockShown: usdIn && !!s.invoice && !!s.recvExpiresAt,
+      recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
        * something real behind its QR — the invoice, the request, the address —
        * there is nothing to copy or share, and they are greyed and do nothing. */
@@ -13273,11 +14233,13 @@ class Component extends DCLogic {
        * a wrong one: the sats are whatever the paying phone's current price
        * makes of the amount, which is the number this phone is then asked to
        * agree to (`dollarsOnly`, `priceTermsCard`). */
-      confirmAmount: val <= 0 ? 'ANY AMOUNT'
+      // dollars asked for in dollars: the cents exactly, and no second figure, as nothing converts
+      confirmAmount: usdIn ? (usdCents > 0 ? this.unitFigure(usdCents, 'usd') : 'ANY AMOUNT')
+        : val <= 0 ? 'ANY AMOUNT'
         : this.dollarsOnly() ? '$ ' + this.usd(val)
         : s.asset === 'BITCOIN' ? this.money(sats).main : '$ ' + this.usd(usd),
-      confirmAlt: this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
-      showSats: s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly(),
+      confirmAlt: usdIn ? '' : this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
+      showSats: !usdIn && s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly(),
       confirmTitle: onchain ? 'RECEIVE ON CHAIN' : 'RECEIVE INVOICE',
       confirmNetwork: onchain ? 'ON-CHAIN' : cashu ? 'CASHU' : (s.network || 'LIGHTNING'),
       // the middle of the QR says which it is: the bolt, ecash, or a coin
@@ -13383,6 +14345,32 @@ class Component extends DCLogic {
   /** @param {RenderContext} c */
   renderPaid(c) {
     const { s, sc, sats } = c;
+    /* Dollars arrived (or left): the figure in cents, as it is, with no sats
+     * under it and no coins, and the words name the dollar balance. */
+    const usdPaid = s.paidUnit === 'usd';
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    if (usdPaid) {
+      const cents = Math.round(Number(s.paidAmount) || 0);
+      const fee = s.payOut ? Math.round(Number(this._lastPay && this._lastPay.fee) || 0) : 0;
+      return Object.assign(this.renderPaidBase(c), {
+        paidHeadline: this.unitFigure(cents + fee, 'usd'),
+        paidHeadlineSub: '',
+        paidBreakdown: !!s.payOut && fee > 0,
+        paidSentAmt: this.unitFigure(cents, 'usd'),
+        paidFeeAmt: this.unitFigure(fee, 'usd'),
+        paidAddedTo: s.payOut ? this.paidTargetLabel() : 'DOLLARS',
+        paidStack: '',
+      });
+    }
+    const base = this.renderPaidBase(c);
+    // bitcoin at a mint with two balances is named as the balance it went into
+    if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    return base;
+  }
+
+  /** @param {RenderContext} c */
+  renderPaidBase(c) {
+    const { s, sc, sats } = c;
     return {
       isPaid: sc === 'paid',
       /* Outgoing shows what left the wallet; incoming shows what arrived.
@@ -13414,9 +14402,10 @@ class Component extends DCLogic {
       paidLive: (s.recv && s.recv.live) !== 'gone',
       dismissPaid: () => {
         this.setState(p => ({ recv: Object.assign({}, p.recv, { live: 'out' }) }));
+        const lane = this.state.paidUnit === 'usd' ? 'usd' : 'btc';
         setTimeout(() => {
-          // counts to whatever the wallet holds now, in either direction
-          this.settleAnimate('btc');
+          // counts to whatever the wallet holds now, in either direction, on the pill it landed on
+          this.settleAnimate(lane);
           // back to whatever the confirmation interrupted, when it interrupted
           // something. Cleared either way so it cannot leak into the next one.
           const back = this._returnTo;
@@ -13425,7 +14414,7 @@ class Component extends DCLogic {
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -13517,6 +14506,38 @@ class Component extends DCLogic {
   renderSent(c) {
     const { s, sc, sats } = c;
     const sendPhase = s.sendPhase || 'in';
+    /* At a mint with two balances the screen says which paid: FROM DOLLARS or
+     * FROM BITCOIN. Dollars that paid are shown as dollars, the fee in them,
+     * and what the payee was paid in sats under it: that is the conversion. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const paying = this._paying || null;
+    const lastPay = this._lastPay || null;
+    const unitOut = (lastPay && lastPay.unit) || (paying && paying.unit) || 'sat';
+    const usdOut = two && unitOut === 'usd';
+    const usdVals = !usdOut ? {} : (() => {
+      const done = !!lastPay;
+      const amount = done ? Math.round(Number(lastPay.amount) || 0) : Math.round(Number(paying && paying.amount) || 0);
+      const fee = done ? Math.round(Number(lastPay.fee) || 0) : Math.round(Number(paying && paying.fee) || 0);
+      const asked = Math.round(Number((lastPay && lastPay.asked) || (paying && paying.asked)) || 0);
+      return {
+        sentHeadline: this.unitFigure(amount + fee, 'usd'),
+        sentHeadlineSub: asked ? '\u20bf ' + this.group(asked) + ' delivered' : '',
+        sentBreakdown: fee > 0,
+        sentSentAmt: this.unitFigure(amount, 'usd'),
+        sentFeeAmt: this.unitFigure(fee, 'usd'),
+        sentStack: '',
+      };
+    })();
+    return Object.assign(this.renderSentBase(c), {
+      sentFromShown: two && sc === 'sendDone' && (sendPhase === 'done' || sendPhase === 'settled'),
+      sentFrom: 'FROM ' + this.unitWord(unitOut),
+    }, usdVals);
+  }
+
+  /** @param {RenderContext} c */
+  renderSentBase(c) {
+    const { s, sc, sats } = c;
+    const sendPhase = s.sendPhase || 'in';
     return {
       isSendDone: sc === 'sendDone',
       // eight seconds in and still sending: say so, and offer the way off
@@ -13587,8 +14608,9 @@ class Component extends DCLogic {
       sentHome: () => {
         if (s.sendExit) return;
         this.setState({ sendExit: true });
+        const lane = (this._lastPay && this._lastPay.unit === 'usd') ? 'usd' : 'btc';
         setTimeout(() => {
-          this.settleAnimate('btc');
+          this.settleAnimate(lane);
           this.setState({
             screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD',
             flow: 'receive', recipient: '', emailDraft: '', sendPhase: null, sendExit: false,
@@ -13601,6 +14623,22 @@ class Component extends DCLogic {
   /* tokenOut: a generated ecash token. */
   /** @param {RenderContext} c */
   renderToken(c) {
+    const { s, sc } = c;
+    const base = this.renderTokenBase(c);
+    /* A dollar token: its cents, as they are, and no sats line. */
+    if (s.tokenOutUnit === 'usd') {
+      return Object.assign(base, {
+        tokenAmount: this.unitFigure(s.tokenOutAmount, 'usd'),
+        tokenAlt: '',
+        tokenShowAlt: false,
+        tokenFee: this.unitFigure(s.tokenOutFee || 0, 'usd'),
+      });
+    }
+    return base;
+  }
+
+  /** @param {RenderContext} c */
+  renderTokenBase(c) {
     const { s, sc } = c;
     return {
       isTokenOut: sc === 'tokenOut',
@@ -13654,11 +14692,12 @@ class Component extends DCLogic {
         if (!ok) this.toast('Could not copy.', true);
       },
       tokenOutDone: () => {
+        const lane = this.state.tokenOutUnit === 'usd' ? 'usd' : 'btc';
         window.FoxyWallet.clearLastToken();
-        this.setState({ screen: 'home', stack: [], tokenOut: '', tokenCopied: false, tokenForPayee: false });
+        this.setState({ screen: 'home', stack: [], tokenOut: '', tokenCopied: false, tokenForPayee: false, tokenOutUnit: '' });
         // a watch not kept ends with its screen; a kept one goes on elsewhere
         setTimeout(() => this.claimWatchTick(), 0);
-        this.settleAnimate('btc');
+        this.settleAnimate(lane);
       },
     };
   }
@@ -13993,6 +15032,14 @@ class Component extends DCLogic {
       isConfirmShell: CONFIRM_SCREENS.indexOf(sc) >= 0,
       cfTitle: cf.title || '',
       cfTitleInk: cf.titleInk || 'var(--ink)',
+      /* The title between the round buttons, level with them (CONFIRM PAYMENT
+       * at a mint with two balances), or under them as everywhere else. */
+      cfTitleUp: !!cf.titleUp,
+      cfTitleDown: !cf.titleUp,
+      // the WALLET button, last under the rows: which balance pays, and the way to change it
+      cfWalletShown: !!cf.wallet,
+      cfWalletWord: (cf.wallet || {}).word || '',
+      cfWalletGo: (cf.wallet || {}).go || (() => {}),
       cfSubtitle: cf.subtitle || '',
       cfSubShown: cf.subtitle ? '1' : '0',
       /* The four digits the two people compare, above the amount and the same
@@ -14032,9 +15079,11 @@ class Component extends DCLogic {
       cfCtaLabel: cf.cta || '',
       // a quote being asked for, or a payment underway: the button says so
       cfCtaBusy: !!cf.ctaBusy,
-      cfCtaBg: cf.ctaTone === 'warn' ? '#F7931A' : 'var(--acc)',
-      cfCtaInk: cf.ctaTone === 'warn' ? '#2b1e05' : CTA_INK(s),
-      cfCtaGlow: cf.ctaTone === 'warn' ? 'rgba(247,147,26,.3)' : 'rgba(var(--acc-rgb),.32)',
+      /* 'money' is the owner's green, whatever the accent: money moves when it
+       * is pressed (SWAP, 26i-swap.js). */
+      cfCtaBg: cf.ctaTone === 'warn' ? '#F7931A' : cf.ctaTone === 'money' ? '#3AB54A' : 'var(--acc)',
+      cfCtaInk: cf.ctaTone === 'warn' ? '#2b1e05' : cf.ctaTone === 'money' ? '#0B1A0E' : CTA_INK(s),
+      cfCtaGlow: cf.ctaTone === 'warn' ? 'rgba(247,147,26,.3)' : cf.ctaTone === 'money' ? 'rgba(58,181,74,.32)' : 'rgba(var(--acc-rgb),.32)',
       cfGo: cf.go || (() => {}),
     };
   }
@@ -14061,6 +15110,109 @@ class Component extends DCLogic {
     };
   }
 
+  /* CURRENCY, WALLET, and the last step of setting up: the screens that say
+   * which of two balances, at a mint that issues dollars and bitcoin.
+   *
+   *   currency    "What do you want to receive?" (or send): two big cards with
+   *               what each balance holds. Asked once for each kind of flow.
+   *   walletPick  "Pay $ 10.00 from": the same cards from CONFIRM PAYMENT's
+   *               WALLET button, a balance that cannot cover it greyed and
+   *               saying so.
+   *   holdChoice  "WHAT DO YOU WANT TO HOLD?": Dollars, Bitcoin or Both, once,
+   *               after every other first step.
+   *
+   * Frost is dollars, fur is bitcoin, slate is both: the home's own pills. */
+  /** @param {RenderContext} c */
+  renderCurrency(c) {
+    const { s, sc } = c;
+    const pick = sc === 'walletPick';
+    const SHADOW = 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -4px 0 rgba(0,0,0,.18),0 10px 24px rgba(0,0,0,.3)';
+    const LOOK = {
+      usd: { bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.07) 0 1.2px,transparent 1.2px),'
+        + 'radial-gradient(circle at 62% 70%,rgba(255,255,255,.06) 0 1.2px,transparent 1.2px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+        ink: '#10161B', inkRgb: '16,22,27', blend: 'normal', edge: 'rgba(255,255,255,.22)', badgeBg: '#FFFFFF', badgeInk: '#10161B', sym: '$' },
+      sat: { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+        + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+        ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal', edge: 'rgba(255,255,255,.22)', badgeBg: '#FFF6EE', badgeInk: '#E8622A', sym: '₿' },
+      grey: { bg: 'linear-gradient(160deg,#2A3034,#1C2124)', ink: 'rgba(255,255,255,.55)', inkRgb: '255,255,255',
+        blend: 'normal', edge: 'rgba(255,255,255,.1)', badgeBg: 'rgba(255,255,255,.14)', badgeInk: 'rgba(255,255,255,.55)' },
+    };
+    const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
+    const current = pick ? (this.walletNow('send') || 'sat') : '';
+    const off = this.offlineNow();
+    // on WALLET, a balance that cannot cover this payment is greyed, and says so
+    const whyNot = (u) => {
+      if (!pick) return '';
+      if (off && u !== current) return 'NEEDS A CONNECTION';
+      return this.quoteFits(u) === false ? 'NOT ENOUGH FOR ' + this.sendAmountText() : '';
+    };
+    const balanceText = (u) => {
+      const n = this.unitBalance(u);
+      if (u === 'usd') return this.unitFigure(n, 'usd');
+      // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
+      return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
+    };
+    const cards = (sc === 'currency' || pick) ? ['usd', 'sat'].map(u => {
+      const tag = whyNot(u);
+      const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
+      const chosen = pick && u === current && !tag;
+      return Object.assign(look, {
+        sym: LOOK[u].sym,
+        name: this.unitWord(u),
+        balance: balanceText(u),
+        tag: tag, tagShown: !!tag,
+        shadow: tag ? 'none' : SHADOW,
+        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
+        cursor: tag ? 'default' : 'pointer',
+        tap: () => (pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
+          ? 'Your ' + this.unitWord(u).toLowerCase() + ' need a connection to pay this.'
+          : 'Your ' + this.unitWord(u).toLowerCase() + ' cannot cover this payment.') : '') : this.currencyPick(u)),
+      });
+    }) : [];
+    const neither = pick && this.quoteFits('usd') === false && this.quoteFits('sat') === false;
+    const holding = s.holdPick || '';
+    const HOLD = [
+      { key: 'dollars', name: 'DOLLARS', sub: 'Steady. For spending.', look: LOOK.usd },
+      { key: 'bitcoin', name: 'BITCOIN', sub: 'For saving.', look: LOOK.sat },
+      { key: 'both', name: 'BOTH', sub: 'Two balances, one wallet.',
+        look: { bg: 'linear-gradient(160deg,var(--slate-a),var(--slate-b))', ink: '#FFFFFF', inkRgb: '255,255,255',
+          blend: 'normal', edge: 'var(--slate-edge)', sym: '$ ₿' } },
+    ];
+    const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
+      + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
+    return {
+      isCurrency: sc === 'currency' || pick,
+      curTitle: pick ? 'WALLET' : 'CURRENCY',
+      curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+        : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
+      curCards: cards,
+      curFoot: pick
+        ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
+            + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
+          : s.walletAuto ? this.unitWord(current).charAt(0) + this.unitWord(current).slice(1).toLowerCase()
+            + ' was chosen for you: your ' + this.unitWord(current === 'usd' ? 'sat' : 'usd').toLowerCase()
+            + ' cannot cover this one.'
+          : 'The one you pick is remembered for your next payment.')
+        : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
+        : 'Asked once. After this, change it with the WALLET button before you pay.',
+      curBack: () => this.back(),
+      curClose: () => this.setState({ screen: 'home', stack: [] }),
+      isHoldChoice: sc === 'holdChoice',
+      holdSub: 'Your mint keeps both. You can change this any time from the menu.',
+      holdRows: HOLD.map(h => Object.assign({}, h.look, {
+        name: h.name, sub: h.sub,
+        outline: holding === h.key ? '3px solid rgba(255,255,255,.9)' : 'none',
+        tap: () => this.setState({ holdPick: h.key }),
+      })),
+      holdBack: () => this.holdLater(),
+      holdDone: () => this.holdDone(),
+      holdDoneBg: holding ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      holdDoneFur: holding ? FUR_CTA : 'none,none,none',
+      holdDoneInk: holding ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      holdDoneSh: holding ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
+    };
+  }
+
   /* history: the transaction list and its filters. */
   /** @param {RenderContext} c */
   renderHistory(c) {
@@ -14078,7 +15230,13 @@ class Component extends DCLogic {
      * still being collected, another unit's ecash — carry the balance through
      * unchanged. So that a person can see the numbers add up, or where they
      * stop doing so ("$121.69 is wrong"). */
-    const A = this.histAudit();
+    /* At a mint with two balances: a tab at the foot, DOLLARS or BITCOIN.
+     * The list, the running balance on each row and the card at the top all
+     * follow it, each in its own unit. A swap between them is two rows, one
+     * in each tab, each with the other leg's figure under it. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard;
+    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : 'sat';
+    const A = (two && this.histAuditIn) ? this.histAuditIn(tab) : this.histAudit();
     const balOf = A.balOf, balNow = A.balNow, run = A.run;
     const dueChange = A.dueChange, dueCount = A.dueCount;
     /* The audit. Walked back through every entry, the balance before the
@@ -14093,7 +15251,7 @@ class Component extends DCLogic {
     const held = Math.round(Number(W1 && W1.heldSats && W1.heldSats()) || 0);
     const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
     const off = A.off;
-    const money = (n) => this.stageMoney(Math.abs(n));
+    const money = (n) => (tab === 'usd' ? this.unitFigure(Math.abs(n), 'usd') : this.stageMoney(Math.abs(n)));
     let auditTitle = '', auditBody = '';
     if (whole && off !== 0) {
       auditTitle = 'DOES NOT ADD UP';
@@ -14102,21 +15260,23 @@ class Component extends DCLogic {
         + ' they explain. A restore from your words, or a swap whose record was lost, can do this.';
     } else if (whole) {
       auditTitle = 'ADDS UP';
-      auditBody = 'Every sat of your ' + money(balNow) + ' is accounted for by the payments below.';
+      auditBody = 'Every ' + (tab === 'usd' ? 'cent' : 'sat') + ' of your ' + money(balNow) + ' is accounted for by the payments below.';
     } else if (!s.fresh && (s.history || []).length) {
       auditTitle = 'LAST 500 PAYMENTS';
       auditBody = 'Only the latest five hundred are kept, so the balance cannot be checked back to the start.';
     }
-    if (held > 0) {
-      auditBody += (auditBody ? ' ' : '') + money(held)
+    // held back in this tab's own unit: the dollar books name dollars held for a swap
+    const heldHere = tab === 'usd' ? Math.round(Number(A.held) || 0) : held;
+    if (heldHere > 0) {
+      auditBody += (auditBody ? ' ' : '') + money(heldHere)
         + ' is held back for a swap the mint has not answered; it is not in the balance until it does.';
     }
-    const fees = this.topUpFeeSats ? this.topUpFeeSats() : 0;
+    const fees = tab === 'usd' ? 0 : (this.topUpFeeSats ? this.topUpFeeSats() : 0);
     if (fees > 0 && whole) {
       auditBody += (auditBody ? ' ' : '') + money(fees)
         + ' went to the mint in fees for making small change, or for a payment that did not go through.';
     }
-    const back = this.recoveringSats ? this.recoveringSats() : 0;
+    const back = tab === 'usd' ? Math.round(Number(A.back) || 0) : (this.recoveringSats ? this.recoveringSats() : 0);
     if (back > 0) {
       auditBody += (auditBody ? ' ' : '') + money(back)
         + ' is being recovered from the mint: it took that piece for a swap after Foxy was put away, and the new pieces are collected the next time Foxy is online.';
@@ -14158,9 +15318,20 @@ class Component extends DCLogic {
       if (t.dir === 'in' && t.changeState === 'not handed' && t.changeSats > 0) return 'Change to go back on the card';
       return '';
     };
+    // the other leg of a swap, by the swap they share: its figure goes under this one
+    const unitOf = (t) => (t.unit === 'usd' ? 'usd' : 'sat');
+    const legOf = new Map();
+    if (two) (s.history || []).forEach(g => g.items.forEach(t => { if (t.kind === 'swap' && t.swap) legOf.set(t.swap + '|' + unitOf(t), t); }));
+    const legFigure = (t) => {
+      const u = unitOf(t) === 'usd' ? 'sat' : 'usd';
+      const o = legOf.get(t.swap + '|' + u);
+      if (!o) return '';
+      return this.unitFigure(u === 'usd' ? o.amount : o.sats, u);
+    };
+    const inTab = (t) => !two || unitOf(t) === tab;
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => ({
+      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => Object.assign({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
@@ -14220,13 +15391,22 @@ class Component extends DCLogic {
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      })).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
         line2Weight: r.metaRail ? '600' : '500',
       })),
     })).filter(g => g.items.length);
+    const tabLook = (u) => (u === tab
+      ? (u === 'usd'
+        ? { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
+            shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' }
+        : { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+              + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+            blend: 'normal,soft-light,normal', ink: '#fff',
+            shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' })
+      : { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' });
     return {
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
@@ -14250,6 +15430,11 @@ class Component extends DCLogic {
       filterIn: () => this.setState({ histFilter: 'in' }),
       filterOut: () => this.setState({ histFilter: 'out' }),
       historyGroups: histGroups,
+      histTabsShown: two,
+      histTabs: two ? ['usd', 'sat'].map(u => Object.assign(tabLook(u), {
+        label: this.unitWord(u), sym: u === 'usd' ? '$' : '\u20bf',
+        tap: () => this.setState({ histUnit: u }),
+      })) : [],
       historyEmpty: histGroups.length === 0,
       histAuditShown: !!auditTitle && hf === 'all' && !ofCard,
       histAuditTitle: auditTitle,
@@ -14267,6 +15452,7 @@ class Component extends DCLogic {
   /** @param {RenderContext} c */
   renderTxDetail(c) {
     const { s, sc, tx } = c;
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
     // the proofs this payment consumed and produced, if the record is still kept
     const audit = (window.FoxyWallet && window.FoxyWallet.auditTrail && tx.hash)
       ? window.FoxyWallet.auditTrail(tx.hash) : [];
@@ -14279,11 +15465,20 @@ class Component extends DCLogic {
       txSentLabel: tx.dir === 'in' ? 'RECEIVED' : 'SENT',
       txSent: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
       txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
-      txTotalAlt: tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
+      txTotalAlt: (tx.unit === 'usd' && two) ? 'DOLLARS'
+        : tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
       /* Which mint carried this. The screen said LIGHTNING and never said
-       * whose — and the mint is the party that held the money. */
-      txMint: (window.FoxyWallet && window.FoxyWallet.mintHost
+       * whose — and the mint is the party that held the money. At a mint with
+       * two balances, the row's own mint, which a swap or a payment names. */
+      txMint: (two && tx.mint) ? String(tx.mint).replace(/^https?:\/\//, '')
+        : (window.FoxyWallet && window.FoxyWallet.mintHost
         && window.FoxyWallet.mintHost()) || 'unknown',
+      // a swap between balances: the rate the mint gave, kept on the row
+      txSwapShown: two && tx.kind === 'swap',
+      /* The wallet keeps the rate on the row as a plain number (dollars per
+       * bitcoin); an object with usdPerBtc is read the same way. */
+      txSwapRate: (two && tx.kind === 'swap' && this.swapRateOf(tx.mintRate) > 0)
+        ? '\u20bf 1 = $ ' + this.group(Math.round(this.swapRateOf(tx.mintRate))) : 'The mint\u2019s rate',
       txPaymentId: tx.hash || '',
       txHasPaymentId: !!tx.hash,
       /* The one identifier on this screen an explorer can find.
@@ -14520,6 +15715,35 @@ class Component extends DCLogic {
     };
   }
 
+  /* One row of history at a mint with two balances, as the owner drew it:
+   * the figure in the row's own unit (sats big on the bitcoin tab, cents on
+   * the dollar tab), the running balance in that unit, and for a swap the
+   * other leg's figure under it with the words that say so. */
+  histRowTwo(t, tab, balOf, legFigure) {
+    if (!t) return {};
+    const usd = t.unit === 'usd';
+    const sign = t.dir === 'in' ? '+ ' : '- ';
+    const amount = usd ? Math.round(Number(t.amount) || 0) + (t.dir === 'in' ? 0 : Math.max(0, Math.round(Number(t.feeAmount) || 0)))
+      : this.txTotalOut(t);
+    const swap = t.kind === 'swap';
+    const out = {
+      amtText: sign + this.unitFigure(amount, usd ? 'usd' : 'sat'),
+      amtSub: swap ? legFigure(t)
+        : usd ? '' : (this.money(amount, this.txFiat(t, amount)).usd != null ? '$ ' + this.usd(this.money(amount, this.txFiat(t, amount)).usd) : ''),
+      balText: 'BAL ' + this.unitFigure(Math.max(0, balOf.get(t) || 0), tab === 'usd' ? 'usd' : 'sat'),
+    };
+    if (swap) {
+      return Object.assign(out, {
+        name: 'Swap', initial: 'S',
+        metaRail: (usd ? (t.dir === 'in' ? 'Bitcoin \u2192 dollars' : 'Dollars \u2192 bitcoin')
+          : (t.dir === 'in' ? 'Dollars \u2192 bitcoin' : 'Bitcoin \u2192 dollars')),
+        metaTime: 'At the mint\u2019s rate \u00b7 ' + t.time,
+        metaColor: 'rgba(var(--ink-rgb),.6)',
+      });
+    }
+    return out;
+  }
+
   /* contacts: saved handles, and the search over them. */
   /** @param {RenderContext} c */
   renderContacts(c) {
@@ -14578,6 +15802,7 @@ class Component extends DCLogic {
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
       payContact: () => this.setState(p => {
+        const fresh = { wallet: '', walletAuto: false, walletTapped: false, feeQ: null };
         const qq = (p.ctQuery || '').trim().toLowerCase();
         const hit = (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)[0];
         return {
@@ -14585,6 +15810,7 @@ class Component extends DCLogic {
           recipient: qq ? ((hit && hit.handle) || qq) : '',
           recipientKind: 'email', ctSearch: false,
           amount: '', unit: 'USD', asset: '',
+          ...fresh,
         };
       }),
     };
@@ -15316,6 +16542,10 @@ class Component extends DCLogic {
     if (s.screen === 'amount' && s.flow === 'receive') {
       return this.tapAutoArms() ? { inv: '', req: '', waiting: true } : null;
     }
+    /* A receive into the dollar balance is never on the air: taps carry
+     * bitcoin only, and a dollar invoice is paid by scanning it. */
+    if ((s.screen === 'amount' || s.screen === 'confirm') && s.flow === 'receive'
+        && this.walletNow && this.walletNow('receive') === 'usd') return null;
     // the receive invoice screen
     if (s.screen === 'confirm' && s.flow === 'receive') {
       if (s.recvRail === 'ON-CHAIN' || s.invoiceIsAddress) return null;
@@ -16582,6 +17812,14 @@ class Component extends DCLogic {
         this.tapGaveNothing('their offer could not be read');
         return;
       }
+      // a request in dollars, with no invoice to pay instead: refused in words, before anything moves
+      if (offer.notSats) {
+        console.log('[foxy] tap: their request is not in sats; not paid');
+        this.hideConnecting();
+        this.toast(offer.notSats, true);
+        this.tapGaveNothing('their request asks for dollars');
+        return;
+      }
       /* Already paid, by this phone, a moment ago.
        *
        * A payment over Lightning crosses no link, so the receiver learns of
@@ -16718,6 +17956,18 @@ class Component extends DCLogic {
     });
   }
 
+  /* Why a request read off a tap cannot be paid by one, or '' when it can.
+   * A request names its unit and its amount in that unit; only sats are paid
+   * over a tap tonight, and `sats` is null for any other (W.decodeRequest). */
+  tapNotSats(read) {
+    if (!read) return '';
+    const unit = String(read.unit || 'sat');
+    if (unit === 'sat' && read.sats !== null) return '';
+    return unit === 'usd'
+      ? 'That request asks for dollars, which Foxy cannot pay over tap or Cashu yet.'
+      : 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
+  }
+
   /* What the other phone offered, and whether ecash can pay it.
    *
    * `sameMint` is this wallet's own mint being named by their request — the
@@ -16733,7 +17983,14 @@ class Component extends DCLogic {
     if (!inv && !req) return null;
     let sameMint = false;
     let theirs = [];
-    if (req && W.decodeRequest) {
+    /* A request in another unit (dollars) is not paid over a tap: the ecash
+     * this phone hands over is sats. With an invoice beside it the invoice is
+     * paid, as from a stranger; with none it is refused in words. */
+    const unitRead = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
+    const notSats = this.tapNotSats ? this.tapNotSats(unitRead) : '';
+    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+    if (notSats) console.log('[foxy] tap: their request is not in sats; paying their invoice instead');
+    if (req && !notSats && W.decodeRequest) {
       const r = W.decodeRequest(req);
       theirs = (r && r.mints) || [];
       const mine = String(W.mintUrl || '').replace(/\/+$/, '');
@@ -16746,7 +18003,7 @@ class Component extends DCLogic {
      * amount is — you cannot quote a routing fee for an amount nobody has
      * agreed yet. An offer with an invoice on it is not this: the invoice
      * carries its own sat figure and paying it is one payment, not two. */
-    const req0 = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
+    const req0 = (req && !notSats && W.decodeRequest) ? W.decodeRequest(req) : null;
     const asksUsd = !!(!inv && W.asksInDollars && W.asksInDollars(req0));
     console.log('[foxy] tap: they offered ' + (inv ? 'an invoice' : 'no invoice')
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
@@ -17362,6 +18619,7 @@ class Component extends DCLogic {
         this.refreshBalance();
         const read = W.decodeRequest(offer.req);
         if (!read) throw new Error('Their request could not be read.');
+        if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
         read.viaTap = true;
         if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
         if (offer.asks) read.asks = true;
@@ -17430,6 +18688,7 @@ class Component extends DCLogic {
      * payment asks again when it is made; this is the one that saves the fee. */
     if (offer.asks && W.askFirst && !this._crossAsked) {
       const read0 = W.decodeRequest(offer.req);
+      if (read0 && this.tapNotSats && this.tapNotSats(read0)) return Promise.reject(new Error(this.tapNotSats(read0)));
       if (read0) {
         this._crossAsked = true;
         // their request names an amount and their mint; the payment will be locked when they have no route
@@ -17482,6 +18741,7 @@ class Component extends DCLogic {
        * agreed on is this payment's confirmation. */
       const read = W.decodeRequest(offer.req);
       if (!read) throw new Error('Their request could not be read.');
+      if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
       read.viaTap = true;
       if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
         if (offer.asks) read.asks = true;
@@ -19681,9 +20941,15 @@ class Component extends DCLogic {
   /* ---- being paid by a card (the receive screen's CARD button) -------------- */
 
   payByCard() {
+    const s = this.state;
+    /* A card holds bitcoin. A receive into the dollar balance hides CARD, and
+     * this holds if anything else reaches it. */
+    if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') {
+      this.toast('The card holds bitcoin; this asks for dollars.', true);
+      return;
+    }
     const W = this.fcW();
     if (!W) return;
-    const s = this.state;
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
     this.fcPayBegin(sats);
@@ -22634,6 +23900,415 @@ class Component extends DCLogic {
     this.fcTapTitle(root, { key: 'keep' });
   }
 
+  /* ---- SWAP: dollars into bitcoin, or bitcoin into dollars, at this mint ----
+   *
+   * Four screens, the way a payment goes:
+   *
+   *   swap         which way: the FROM pill over the TO pill, with a round ⇅
+   *                on the seam that turns them round, and NEXT
+   *   amount       SET AMOUNT with flow 'swap': "How much to swap?", typed in
+   *                the FROM balance's own unit (cents, or sats), and ALL OF IT
+   *   swapConfirm  the CONFIRM PAYMENT layout: TOTAL, then FROM, YOU GET, RATE
+   *                with how long the mint holds it, FEE INCLUDED, and SWAP
+   *   swapDone     SWAPPED: what left and what arrived, each in its own colour
+   *
+   * The wallet does the money (16b-two-balances.js): `swapQuote` asks the mint
+   * for its rate (an invoice in the TO unit, and what paying it from the FROM
+   * unit costs), and `swapRun` pays one with the other. Nothing moves until
+   * SWAP. A quote lives a minute at most, so the confirmation counts down and
+   * asks again when it runs out, and the button then reads CONFIRM NEW RATE so
+   * a tap meant for the old rate is not taken for the new one.
+   *
+   * A swap the mint has not finished is not lost: the wallet holds what it
+   * spent until the mint says, and finishes it on the next connection. The
+   * card SWAP STILL GOING THROUGH says so, and home's held pill names the
+   * amount until it is done.
+   *
+   * At a mint with one balance none of this is reachable: home has no SWAP
+   * button and the menu no SWAP row. */
+
+  /* How long before the mint's own expiry the rate stops being offered. The
+   * wallet refuses to run a quote with under fifteen seconds left (the mint
+   * has to answer two requests in that time), so the countdown on screen is
+   * the time left to tap, not the time left on the mint's clock. */
+  SWAP_MARGIN_MS = 15000;
+
+  /* New rates asked for by themselves while the confirmation sits untouched.
+   * After that it waits for a tap: a screen left open on a table must not ask
+   * the mint for a rate every minute for ever. */
+  SWAP_REQUOTES = 3;
+
+  /* SWAP, from home's button or the menu's row (swapStart). Starts from the
+   * balance that has something in it: dollars when both do, as drawn. */
+  goSwap() {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
+    const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
+    console.log('[foxy] swap: opened, from ' + this.unitWord(from).toLowerCase());
+    this.setState(p => ({
+      screen: 'swap', stack: p.stack.concat([p.screen]),
+      swapFrom: from, swapTo: from === 'usd' ? 'sat' : 'usd',
+      swapQuote: null, swapNewRate: false, swapAmount: 0, swapAll: false,
+      swapErr: '', swapErrAmount: false, swapQuoting: false, swapBusy: false, swapResult: null,
+      swapRequotes: 0, swapLapsed: false,
+    }));
+  }
+
+  /* The ⇅ on the seam: the other way round. */
+  swapFlip() {
+    this.setState(p => ({ swapFrom: p.swapTo === 'sat' ? 'sat' : 'usd', swapTo: p.swapFrom === 'sat' ? 'sat' : 'usd' }));
+  }
+
+  /* The swap's two units, as they stand: never the same one. */
+  swapUnits() {
+    const from = this.state.swapFrom === 'sat' ? 'sat' : 'usd';
+    return { from: from, to: from === 'usd' ? 'sat' : 'usd' };
+  }
+
+  /* NEXT on the swap screen: SET AMOUNT, typed in the balance that leaves. */
+  swapToAmount() {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    const { from } = this.swapUnits();
+    if (!(this.unitBalance(from) > 0)) {
+      this.toast('You have no ' + this.unitWord(from).toLowerCase() + ' to swap.', true);
+      return;
+    }
+    this.setState(p => ({
+      screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'swap',
+      unit: from === 'usd' ? 'USD' : 'SATS', amount: '', asset: '',
+      note: '', noteDraft: '', recipient: '', recipientKind: '',
+    }));
+  }
+
+  /* What is typed on SET AMOUNT for a swap, in the FROM unit: cents exactly
+   * for dollars, sats for bitcoin. */
+  swapTyped() {
+    const { from } = this.swapUnits();
+    if (from === 'usd') return this.centsTyped();
+    const v = parseFloat(this.state.amount) || 0;
+    return v > 0 ? Math.round(v) : 0;
+  }
+
+  /* NEXT on SET AMOUNT (or ALL OF IT): the confirmation, and the rate asked. */
+  swapNext(all) {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    const { from } = this.swapUnits();
+    const have = this.unitBalance(from);
+    const amount = all ? have : this.swapTyped();
+    if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
+    if (amount > have) {
+      this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ': you hold '
+        + this.unitFigure(have, from) + '.', true);
+      return;
+    }
+    this.setState(p => ({
+      screen: 'swapConfirm', stack: p.stack.concat([p.screen]),
+      swapAmount: amount, swapAll: !!all, swapQuote: null, swapNewRate: false,
+      swapErr: '', swapErrAmount: false, swapRequotes: 0, swapLapsed: false,
+    }));
+    // the amount handed over, not read back from state the same moment it was set
+    this.swapAsk(false, amount, !!all);
+  }
+
+  /* The mint's rate for this swap. `again` is a rate asked for because the
+   * last one ran out: the rows change under the person, so the button says
+   * CONFIRM NEW RATE until it is pressed. Nothing moves by asking. */
+  swapAsk(again, amountGiven, allGiven) {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    // a swap being run is not asked about again; a newer question replaces an older one (`run`)
+    if (!W || !W.swapQuote || s.swapBusy || this._swapRun) return;
+    const { from, to } = this.swapUnits();
+    const amount = amountGiven != null ? amountGiven : (s.swapAmount || 0);
+    const all = allGiven != null ? allGiven : !!s.swapAll;
+    const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
+    this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
+    W.swapQuote(from, to, amount, all ? { all: true } : {}).then(q => {
+      // an answer for an older question is dropped; one for a screen that has gone only ends the wait
+      if (run !== this._swapAskRun) return;
+      if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
+      console.log('[foxy] swap: quoted ' + this.unitFigure(q.total, from) + ' for ' + this.unitFigure(q.get, to)
+        + (again ? ' (a new rate)' : ''));
+      this._swapQuotedAt = Date.now();
+      this.setState({ swapQuoting: false, swapQuote: q, swapNewRate: !!again });
+      this.swapClock();
+    }).catch(e => {
+      if (run !== this._swapAskRun) return;
+      const why = W.reason ? W.reason(e) : String((e && e.message) || e);
+      console.warn('[foxy] swap: no rate:', why);
+      // an amount the mint will not swap is changed on the keypad; anything else is asked again
+      const amountWrong = /too little|more than your|above zero/i.test(why);
+      this.setState({ swapQuoting: false, swapQuote: null, swapErr: why, swapErrAmount: amountWrong });
+    });
+  }
+
+  /* Seconds the rate on screen can still be taken, or 0. */
+  swapLeft() {
+    const q = this.state.swapQuote;
+    if (!q || !(Number(q.expiresAt) > 0)) return 0;
+    return Math.max(0, Math.floor((Number(q.expiresAt) - this.SWAP_MARGIN_MS - Date.now()) / 1000));
+  }
+
+  /* The countdown under RATE, ticking once a second while the confirmation is
+   * up, and a new rate when it runs out. It stops by itself as soon as the
+   * screen has gone: no clock outlives the screen it is for. */
+  swapClock() {
+    if (this._swapClockT) return;
+    this._swapClockT = setInterval(() => {
+      const s = this.state;
+      if (s.screen !== 'swapConfirm') {
+        clearInterval(this._swapClockT);
+        this._swapClockT = null;
+        return;
+      }
+      if (!s.swapQuote || s.swapQuoting || s.swapBusy) return;
+      if (this.swapLeft() > 0) { this.setState({ swapTick: Date.now() }); return; }
+      if ((s.swapRequotes || 0) >= this.SWAP_REQUOTES) {
+        // left alone too long: wait for a tap rather than keep asking
+        if (!s.swapLapsed) {
+          console.log('[foxy] swap: the rate ran out with nobody looking; waiting for a tap');
+          this.setState({ swapLapsed: true, swapQuote: null });
+        }
+        return;
+      }
+      console.log('[foxy] swap: the rate ran out, so a new one is asked for');
+      this.setState({ swapRequotes: (s.swapRequotes || 0) + 1 });
+      this.swapAsk(true);
+    }, 1000);
+  }
+
+  /* SWAP (or CONFIRM NEW RATE): the swap, at the rate on screen. */
+  swapGo() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const q = s.swapQuote;
+    if (!q || s.swapBusy || s.swapQuoting || this._swapRun) return;
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    /* A new rate has only just replaced the old one: a tap in that moment was
+     * meant for the old rate, so it is not taken for the new one. */
+    if (s.swapNewRate && Date.now() - (this._swapQuotedAt || 0) < 1500) return;
+    if (this.swapLeft() <= 0) { this.swapAsk(true); return; }
+    // and the same question every payment asks: nothing else is moving money
+    if (this.moneyBusy()) {
+      this.toast('Something else is moving money right now. Try again in a moment.', true);
+      return;
+    }
+    const { from, to } = this.swapUnits();
+    // the balances before, for the count-up on home once the screen is dismissed
+    this._preSettle = this.balNow();
+    this.setState({ swapBusy: true, swapNewRate: false, swapErr: '', swapErrAmount: false });
+    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
+    this._swapRun = W.swapRun(q, (stage) => console.log('[foxy] swap: ' + stage)).then(r => {
+      this._swapRun = null;
+      this.hideMelt();
+      this.refreshBalance();
+      this.loadHistory();
+      if (r && r.state === 'done') {
+        this.setState({ swapBusy: false, swapResult: r, screen: 'swapDone', stack: [] });
+        return;
+      }
+      if (r && r.state === 'pending') { this.swapStillGoing(r); return; }
+      // the mint would not take the payment: it is back in the balance, and nothing moved
+      this._preSettle = null;
+      this.setState({ swapBusy: false, swapQuote: null,
+        swapErr: 'The mint did not make this swap. Nothing moved, and your ' + this.unitWord(from).toLowerCase()
+          + ' are where they were.' });
+    }).catch(e => {
+      this._swapRun = null;
+      this.hideMelt();
+      this._preSettle = null;
+      const why = W.reason ? W.reason(e) : String((e && e.message) || e);
+      console.warn('[foxy] swap: did not run:', why);
+      this.refreshBalance();
+      if (e && e.expired) {
+        // the rate ran out between the screen and the mint: a new one, said as one
+        this.setState({ swapBusy: false, swapQuote: null });
+        this.swapAsk(true);
+        return;
+      }
+      if (e && e.offline) {
+        this.setState({ swapBusy: false });
+        this.toast('Swapping needs the mint.', true);
+        return;
+      }
+      this.setState({ swapBusy: false, swapQuote: null, swapErr: why });
+    });
+  }
+
+  /* One half paid and the other not answered yet: the card, and home, where
+   * the held pill names what is with the mint until the wallet finishes it. */
+  swapStillGoing(r) {
+    const from = (r && r.from) || {};
+    const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
+    this._preSettle = null;
+    this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
+    this.blockedCard('swapPending', {
+      tone: 'warn',
+      title: 'SWAP STILL GOING THROUGH',
+      reason: 'The mint has your ' + fig + ' and has not finished the swap yet. Foxy finishes it by itself '
+        + 'the next time the mint answers.',
+      chip: 'Nothing is lost. Your balance shows it as pending with the mint until then.',
+    });
+  }
+
+  /* SWAPPED, dismissed: home, and both pills count to their new figures. */
+  swapDoneClose() {
+    this.setState({ screen: 'home', stack: [], swapResult: null, swapQuote: null });
+    this.settleAnimate('both');
+  }
+
+  /* The wallet keeps a swap's rate as dollars per bitcoin; a row may carry it
+   * as a number or as { usdPerBtc }. */
+  swapRateOf(r) {
+    const n = (r && typeof r === 'object') ? Number(r.usdPerBtc) : Number(r);
+    return n > 0 ? n : 0;
+  }
+
+  /* "₿ 1 = $ 81,786", the way the rows say a rate. */
+  swapRateText(n) { return '₿ 1 = $ ' + this.group(Math.round(n)); }
+
+  /* "Forge's rate": whose rate it is, by the mint's own name. */
+  swapRateWho() {
+    const who = String(this.mintName() || 'the mint');
+    return who + (/s$/i.test(who) ? '’' : '’s') + ' rate';
+  }
+
+  /* The ink a balance's figure is drawn in on a dark screen: frost for
+   * dollars, fur for bitcoin. */
+  swapInk(unit) { return unit === 'usd' ? '#D6EEF7' : '#F2742B'; }
+
+  /* What a swap of what is typed would give, roughly, at the mint's last rate
+   * (or the market's): the line under the keypad's figure. '' with no rate. */
+  swapEstimate() {
+    const W = window.FoxyWallet;
+    const { from, to } = this.swapUnits();
+    const n = this.swapTyped();
+    if (!(n > 0)) return '';
+    let rate = 0;
+    try { rate = this.swapRateOf(W && W.mintRate ? W.mintRate() : null); } catch (e) { rate = 0; }
+    if (!(rate > 0) && this.satUsd()) rate = this.satUsd() * 1e8;
+    if (!(rate > 0)) return '';
+    const got = from === 'usd' ? Math.floor(n / 100 / rate * 1e8) : Math.floor(n * rate / 1e8 * 100);
+    return '≈ ' + this.unitFigure(got, to);
+  }
+
+  /* The confirmation's contents (confirmSpec): the owner's CONFIRM PAYMENT
+   * layout with the swap's rows, and no NETWORK row, since a swap never
+   * leaves the mint. */
+  /** @returns {ConfirmSpec} */
+  swapSpec() {
+    const s = this.state;
+    const { from, to } = this.swapUnits();
+    const q = s.swapQuote;
+    const fig = (n, u) => this.unitFigure(n, u);
+    const base = {
+      title: 'SWAP', titleUp: true, amountLabel: 'TOTAL', amountInk: 'var(--ink)',
+      close: () => this.setState({ screen: 'home', stack: [] }),
+    };
+    if (!q) {
+      const typed = fig(s.swapAmount || 0, from);
+      const rows = [
+        this.cfRow('FROM ' + this.unitWord(from), typed),
+        this.cfRow('YOU GET', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN', { ink: this.swapInk(to) }),
+        this.cfRow('RATE', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN'),
+        this.cfRow('FEE INCLUDED', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN'),
+      ];
+      if (s.swapQuoting) {
+        return Object.assign(base, { amount: typed, rows: rows,
+          cta: 'CHECKING THE RATE…', ctaBusy: true, ctaTone: 'go', go: () => {} });
+      }
+      if (s.swapLapsed) {
+        return Object.assign(base, { amount: typed, rows: rows,
+          chip: 'The rate ran out. Nothing moved.',
+          cta: 'GET A NEW RATE', ctaTone: 'go',
+          go: () => { this.setState({ swapRequotes: 0 }); this.swapAsk(true); } });
+      }
+      return Object.assign(base, { amount: typed, amountInk: '#FF5C5C', rows: rows,
+        warn: s.swapErr || 'The mint has not given a rate yet.',
+        cta: s.swapErrAmount ? 'CHANGE AMOUNT' : 'TRY AGAIN', ctaTone: 'warn',
+        go: () => { if (s.swapErrAmount) this.back(); else this.swapAsk(false); } });
+    }
+    const rate = this.swapRateOf(q.rate);
+    const left = this.swapLeft();
+    const clock = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    const market = this.swapRateOf(q.market);
+    const rows = [
+      this.cfRow('FROM ' + this.unitWord(from), fig(q.amount, from)),
+      this.cfRow('YOU GET', fig(q.get, to), { ink: this.swapInk(to) }),
+      this.cfRow('RATE', rate > 0 ? this.swapRateText(rate) + ' · ' + this.swapRateWho() : this.swapRateWho(), {
+        sub: 'Rate held for ' + clock,
+        // far from the market price: the market's, in red, under the mint's
+        sub2: (q.spreadWarn && market > 0) ? 'Market ' + this.swapRateText(market) : '',
+        sub2Ink: '#FF5C5C',
+      }),
+      this.cfRow('FEE INCLUDED', fig(q.fee, from)),
+    ];
+    return Object.assign(base, {
+      amount: fig(q.total, from),
+      rows: rows,
+      warn: s.swapErr || '',
+      cta: s.swapBusy ? 'SWAPPING…' : s.swapNewRate ? 'CONFIRM NEW RATE' : 'SWAP',
+      ctaBusy: !!s.swapBusy,
+      // green, as PAY is drawn: money moves when it is pressed
+      ctaTone: 'money',
+      go: () => this.swapGo(),
+    });
+  }
+
+  /* The SWAP screen and SWAPPED, for the template. */
+  /** @param {RenderContext} c */
+  renderSwap(c) {
+    const { s, sc } = c;
+    const LOOK = {
+      usd: { bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.07) 0 1.2px,transparent 1.2px),'
+        + 'radial-gradient(circle at 62% 70%,rgba(255,255,255,.06) 0 1.2px,transparent 1.2px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+        ink: '#10161B', inkRgb: '16,22,27', blend: 'normal', sym: '$' },
+      sat: { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+        + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+        ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal', sym: '₿' },
+    };
+    const on = sc === 'swap' || sc === 'swapDone';
+    const { from, to } = this.swapUnits();
+    const pill = (label, u, text) => Object.assign({}, LOOK[u], {
+      label: label, name: this.unitWord(u), text: text,
+    });
+    const rows = sc === 'swap' ? [
+      pill('FROM', from, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(from), from)),
+      pill('TO', to, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(to), to)),
+    ] : [];
+    const r = s.swapResult || null;
+    const done = (sc === 'swapDone' && r) ? [
+      pill('FROM', r.from && r.from.unit === 'sat' ? 'sat' : 'usd',
+        '−' + this.unitFigure(Math.abs(Number(r.from && r.from.amount) || 0), r.from && r.from.unit === 'sat' ? 'sat' : 'usd')),
+      pill('TO', r.to && r.to.unit === 'sat' ? 'sat' : 'usd',
+        '+' + this.unitFigure(Math.abs(Number(r.to && r.to.amount) || 0), r.to && r.to.unit === 'sat' ? 'sat' : 'usd')),
+    ] : [];
+    const rate = r ? this.swapRateOf(r.rate) : 0;
+    const feeUnit = r && r.from && r.from.unit === 'sat' ? 'sat' : 'usd';
+    const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
+      + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
+    const canGo = sc === 'swap' && !this.offlineNow() && this.unitBalance(from) > 0;
+    return {
+      isSwap: sc === 'swap',
+      swapRows: rows,
+      swapFlipGo: () => this.swapFlip(),
+      swapBackGo: () => this.back(),
+      swapCloseGo: () => this.setState({ screen: 'home', stack: [] }),
+      swapNextGo: () => this.swapToAmount(),
+      swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.'
+        : 'At ' + this.swapRateWho() + '. You see the rate and the fee before anything moves.',
+      swapNextBg: canGo ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      swapNextFur: canGo ? FUR_CTA : 'none,none,none',
+      swapNextInk: canGo ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      swapNextSh: canGo ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
+      isSwapDone: sc === 'swapDone',
+      swapDoneRows: done,
+      swapDoneNote: !r ? '' : 'Fee ' + this.unitFigure(Math.max(0, Number(r.fee) || 0), feeUnit)
+        + (rate > 0 ? ' · ' + this.swapRateText(rate) : ''),
+      swapDoneGo: () => this.swapDoneClose(),
+    };
+  }
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */

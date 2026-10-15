@@ -223,10 +223,15 @@
    * They are neither spent nor ours until the mint says which. Keeping them
    * here means the balance does not count them — the payment may go through —
    * and the sweep can give them back if it does not. */
-  function holdMelt(quote, sent, bolt11, at, payee, splitFee) {
+  /* `unit`: the unit the melt is paid in, which is the unit of its pieces,
+   * its amount, its reserve and its change (hard rule 3: a usd melt cut off
+   * mid-flight must come back into the usd pile, never the sat one). `extra`
+   * carries what a swap between units writes beside it: { swap, mintRate }. */
+  function holdMelt(quote, sent, bolt11, at, payee, splitFee, unit, extra) {
     var list = load(K.melting, []).filter(function (e) { return e.quote !== quote.quote; });
-    list.push({
+    var held = {
       quote: quote.quote,
+      unit: unitOf(unit) || 'sat',
       amount: satsOf(quote.amount) || 0,
       feeReserve: satsOf(quote.fee_reserve) || 0,
       proofs: sent || [],
@@ -241,12 +246,14 @@
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],
-    });
+    };
+    if (extra && extra.swap) { held.swap = String(extra.swap); held.mintRate = Number(extra.mintRate) || undefined; }
+    list.push(held);
     /* A hold that could not be written throws, and the melt is not sent: a
      * payment in flight with no hold on disk is money a killed app forgets
      * (audit W6). pay gives the proofs back to the pile. */
     mustSave(K.melting, list, true);
-    console.log('[foxy] holding', sumProofs(sent || []), 'sats against melt', quote.quote);
+    console.log('[foxy] holding', formatAmount(sumProofs(sent || []), held.unit), 'against melt', quote.quote);
   }
 
   /* Counter reservations as cashu-ts reports them ({ keysetId, start, count }),
@@ -578,7 +585,7 @@
       for (var b = 0; b < live.length; b += 100) batches.push(live.slice(b, b + 100));
       return batches.reduce(function (chain, batch) {
         return chain.then(function () {
-          var token = window.CashuTS.getEncodedToken({ mint: at, proofs: batch, unit: 'sat' });
+          var token = encodeToken(at, batch, 'sat');
           // its outputs on disk until the answer is in (swapGuard), and what they add up to
           var guard = swapGuard(w, 'import', { amount: sumProofs(batch), expect: sumProofs(batch) - swapFeeFor(w, batch) });
           return guard.run('import', function () {

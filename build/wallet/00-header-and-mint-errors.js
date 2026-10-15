@@ -131,6 +131,14 @@
     mintCache: 'foxy.cashu.mint.cache',   // each mint's keysets and info, so a phone with no route can still hold a wallet
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
     line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
+    /* Two balances at one mint (sat and usd). What the person said they want
+     * to hold ('dollars', 'bitcoin', 'both'), and the unit a receive and a
+     * send start in ('sat', 'usd', or '' when the screen should ask). Choices,
+     * not money: a wipe of the seed removes them with every other foxy. key. */
+    hold: 'foxy.wallet.hold',
+    recv: 'foxy.wallet.recv',
+    send: 'foxy.wallet.send',
+    unitSwap: 'foxy.cashu.unitswap',      // swaps between the two units at one mint, until both legs have landed
   };
 
   /* The price line kept for a launch with no route (`_keepLine`, `keptLine`).
@@ -1082,8 +1090,17 @@
     return (lock
       ? w.createLockedMintQuote(amount, lock.pubkey, memo || undefined)
       : w.createMintQuoteBolt11(amount, memo)).then(function (q) {
-      // the invoice names the mint's node (05-paying-this-mint.js)
-      try { learnMintNode(mintOf(w), q && q.request); } catch (e) {}
+      /* The invoice names the mint's node (05-paying-this-mint.js) — but only
+       * a sat invoice. A mint with a dollar balance can have its dollar
+       * invoices made by somebody else's node (Forge's come from Flash's node,
+       * its sat invoices from its own), and a dollar invoice taken for the
+       * mint's own would have the offline path pay a dollar invoice with sat
+       * ecash. */
+      var unit = 'sat';
+      try { unit = unitOf(w && w.unit) || 'sat'; } catch (e) {}
+      try { learnMintNode(mintOf(w), q && q.request, unit); } catch (e) {}
+      // the dollar price this mint is quoting, held in memory for the screens (`mintRate`)
+      if (unit === 'usd') { try { noteMintRate(mintOf(w), q && q.request, amount); } catch (e) {} }
       return q;
     });
   }

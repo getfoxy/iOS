@@ -2,9 +2,16 @@
 
     /* Ask the mint for a quote. Returns the same shape the screens expect, so
      * `hash` here is the quote id rather than a payment hash. */
-    invoice: function (sats, memo) {
+    invoice: function (sats, memo, opts) {
       var amount = Math.round(Number(sats));
       if (!(amount > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
+      /* In a unit: 'sat' (the default, as every call before units) or 'usd',
+       * in cents. The invoice is a mint quote in that unit (NUT-04), asked by
+       * the wallet of that unit, and its record says the unit, so whatever
+       * claims it later claims it into that unit's pile. */
+      var unit = unitOf(opts && opts.unit);
+      var refused = unitRefusal(opts && opts.unit);
+      if (refused) return Promise.reject(refused);
       // not at a mint a late claim is visiting: asked once the phone is home (`claimAway`)
       if (claimAway) {
         var self = this, args = arguments;
@@ -13,68 +20,37 @@
       var w;
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
+      var at = mintOf(w);
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
       /* Asked again on another circuit after five seconds of nothing
-       * (`askedAgain`), each asking with a one-time key of its own, so the two
-       * quotes share nothing the mint could join them by. The first to answer
-       * is the invoice, and it is its key that is kept. The other, if it
-       * comes, is a quote nobody was shown. */
-      return askedAgain(w, 'the mint\u2019s invoice', function (via) {
-        var key = quoteLock(via);
-        if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
-        return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });
-      }).then(function (won) {
-        var q = won.got.q, lock = won.got.lock;
-        var pending = load(K.quotes, []);
-        pending.unshift({
-          quote: q.quote, amount: amount, memo: memo || '', at: Date.now(),
-          expiry: Number(q.expiry) || null,
-          // which mint issued it: asking another mint about this quote is a
-          // 400 on every launch, forever
-          mint: mintOf(w),
-          // NUT-20: the key the mint will want a signature from, in this same write
-          pubkey: lock ? lock.pubkey : undefined,
-          privkey: lock ? lock.privkey : undefined,
-          /* The invoice's payment hash. A payer's proof that they paid is a
-           * preimage that hashes to this, and the invoice itself is not kept
-           * once it is paid, so without this there was nothing here to hold
-           * such a proof against. */
-          payHash: invoicePaymentHash(q.request) || undefined,
-        });
-        /* The cap stays — an unbounded list is worse — but it used to drop the
-         * oldest invoice in silence. If that one is paid later the sweep never
-         * looks for it and a manual claim is refused as "not on this device",
-         * so the sats sit at the mint with nothing pointing at them. */
-        /* Past the cap an invoice moves to an archive the sweep still checks,
-         * rather than being forgotten: one paid later used to sit at the mint
-         * with nothing pointing at it, and a manual claim was refused. */
-        /* Archive first, then truncate, and both must land.
-         *
-         * The quote carries its NUT-20 key, and the invoice is handed to the
-         * screen on the next line: a quote whose key was lost is money the
-         * mint will not release. `save` reports a refusal by returning false
-         * and neither of these was reading it, so a full store could hand out
-         * a payable invoice this device had no record of. Archiving after the
-         * truncation had the same shape — a refused archive write silently
-         * dropped the overflow. */
-        if (pending.length > 50) {
-          var older = pending.slice(50);
-          mustSave(K.quotesOld, older.concat(load(K.quotesOld, [])).slice(0, 500));
-          console.warn('[foxy] the unpaid invoice list is full \u2014 archived', older.length, 'older one(s)');
-        }
-        mustSave(K.quotes, pending.slice(0, 50));
-
+       * (`askedAgain`, in `makeQuote`), each asking with a one-time key of
+       * its own, so the two quotes share nothing the mint could join them
+       * by. The first to answer is the invoice, and it is its key that is
+       * kept. The other, if it comes, is a quote nobody was shown. The
+       * record is written in the same step (`keepQuote`). */
+      return unitWalletOn(w, unit).then(function (via) {
+        return makeQuote(via, amount, memo || '', unit);
+      }).then(function (made) {
+        var q = made.q;
+        var expiry = Number(q.expiry) || 0;
         return {
           bolt11: q.request,
           hash: q.quote,
-          sats: amount,
+          unit: unit,
+          amount: amount,
+          // sats only for a sat invoice: a usd invoice's amount is cents
+          sats: unit === 'sat' ? amount : 0,
           /* The mint that issued it, for whoever files it (a bill's rows are
            * quote ids: `splitSave`). The wallet may be somewhere else by the
            * time this is read. */
-          mint: mintOf(w),
+          mint: at,
           // the mint sets the window, not us — often minutes, not hours
-          expiresIn: q.expiry ? Math.max(60, q.expiry - Math.floor(Date.now() / 1000)) : 900,
+          expiresIn: expiry ? Math.max(60, expiry - Math.floor(Date.now() / 1000)) : 900,
+          /* When the mint says the quote ends, in ms, or null. A usd quote at
+           * Forge lives sixty seconds: the screen counts it down and asks
+           * for a new one when it lapses. */
+          expiresAt: expiry ? expiry * 1000 : null,
           qr: FoxyWallet.qr(q.request),
         };
       });
@@ -118,10 +94,18 @@
        * minute in testing, while it waited on that same mint for a fee quote
        * that then timed out). */
       var madeAt = '';
+      /* And its unit, said to the screen with the amount: a usd invoice's
+       * amount is cents, and the screen reads `unit` before anything else. */
+      var unitQ = 'sat';
       try {
         var mineQ = load(K.quotes, []).filter(function (e) { return e && e.quote === quoteId; })[0];
         madeAt = canonicalMint(String((mineQ && mineQ.mint) || mintUrl || ''));
+        unitQ = recordUnit(mineQ);
       } catch (e) { madeAt = canonicalMint(String(mintUrl || '')); }
+      var paidSay = function (got, more) {
+        var n = Math.round(Number(got) || 0);
+        return Object.assign({ hash: quoteId, unit: unitQ, amount: n, sats: unitQ === 'sat' ? n : 0 }, more || {});
+      };
 
       function stop() {
         if (timer) { clearTimeout(timer); timer = null; }
@@ -163,6 +147,10 @@
         if (mintBusy(mintUrl)) return 5000;
         if (Date.now() < fastUntil) return 1000;
         var age = Date.now() - started;
+        /* A usd quote lives a minute, and a mint with no socket for mint
+         * quotes (Forge) tells nobody when it is paid: asked every two
+         * seconds for its whole life, so the claim comes while it can. */
+        if (unitQ !== 'sat' && age < 70000) return 2000;
         // Only back off once the socket has actually DELIVERED something.
         // Registering a subscription is not evidence it works — over Tor or a
         // VPN the handshake can succeed and no message ever arrive, and the
@@ -216,8 +204,8 @@
         done = true;
         stop();
         // two handlers, not then().catch(): only the mint's failure is the mint's failure
-        FoxyWallet.claim(quoteId).then(function (sats) {
-          tell(onPaid, { hash: quoteId, sats: sats });
+        FoxyWallet.claim(quoteId).then(function (got) {
+          tell(onPaid, paidSay(got));
         }, function (e) {
           noteClaimTrouble(quoteId, e);
           // invalid signatures: not asked again, so no more polling for it
@@ -248,7 +236,11 @@
           if (!w || !routeOpen()) { again(); return; }
           // away at another mint: it is asked when the phone is back (`madeAt`)
           if (madeAt && canonicalMint(String(mintUrl || '')) !== madeAt) { again(); return; }
-          asked = w.checkMintQuoteBolt11(quoteId);
+          /* By the wallet of the invoice's unit: cashu-ts reads a quote's
+           * amount in its wallet's unit, and a sat wallet asked about a usd
+           * quote finds the invoice "does not match" its cents. */
+          asked = unitQ === 'sat' ? w.checkMintQuoteBolt11(quoteId)
+            : unitWalletOn(w, unitQ).then(function (uw) { return uw.checkMintQuoteBolt11(quoteId); });
         } catch (e) {
           /* A throw on the way to the mint, rather than an answer from it: a
            * wallet object the switch left half-built, a keyset cashu-ts will
@@ -270,8 +262,8 @@
              * after the mint issued. The second used to be taken for the
              * first. recoverIssued restores the claim's recorded outputs and
              * adds only what is not already held. */
-            FoxyWallet.recoverIssued(quoteId).then(function (sats) {
-              if (sats > 0) tell(onPaid, { hash: quoteId, sats: sats, recovered: true });
+            FoxyWallet.recoverIssued(quoteId).then(function (got) {
+              if (got > 0) tell(onPaid, paidSay(got, { recovered: true }));
             }, function () {});
             return;
           }
@@ -377,6 +369,11 @@
         return Promise.reject(new Error('This mint sent invalid signatures for that invoice, so Foxy will not ask it again.'));
       }
 
+      /* In the invoice's own unit, by that unit's wallet (hard rule 3): a usd
+       * quote claimed by the sat wallet is refused by the mint, and its cents
+       * would never be sats anyway. */
+      var unit = recordUnit(entry);
+      return unitWalletOn(w, unit).then(function (w) {
       /* The counter ranges this claim reserves go on the invoice's record as
        * they are reserved, before the request leaves. If the mint issues and
        * the answer is lost, the quote reads ISSUED and recoverIssued restores
@@ -388,7 +385,7 @@
         return rec.attempt(function () { return mintQuoteProofs(w, entry.amount, quoteId, entry); });
       }, quoteStillPaid(w, quoteId)).then(function (fresh) {
         // the record goes in this same tick (below), so its ranges are never restored as well
-        addProofs(fresh, mintOf(w), w);
+        addProofs(fresh, mintOf(w), w, unit);
         /* Read the list again, not the copy taken before the mint answered.
          * `invoice` is not in the proof lock: an invoice made while this claim
          * waited was written after that copy, and saving the copy erased it —
@@ -398,7 +395,7 @@
         // so a sweep or a reconcile arriving a moment later is not told the
         // money is missing (claimedMomentsAgo)
         noteClaimed(quoteId, sumProofs(fresh));
-        logTx({
+        logTx(unitRow(unit, swapMarks(entry, {
           dir: 'in',
           sats: sumProofs(fresh),
           feeSats: 0,
@@ -410,8 +407,11 @@
           payHash: entry.payHash || undefined,
           // where it was claimed, which is not always where the phone is by now (`logTx`)
           mint: mintOf(w),
-        });
+        })));
+        // the second leg of a swap between units, landed (`swapRun`)
+        if (entry.swap) unitSwapLanded(entry.swap, 'mint');
         return sumProofs(fresh);
+      });
       });
     },
 
@@ -471,14 +471,21 @@
            * moment Foxy is back, before Tor is. Seen on a phone.
            * The rest wait for the next sweep. */
           if (!routeOpen()) return;
-          // each invoice on its own circuit: asked together, they were one wallet's list
-          return onCircuit(w, 'quote:' + entry.quote).checkMintQuoteBolt11(entry.quote).then(function (q) {
+          // each invoice on its own circuit: asked together, they were one wallet's list;
+          // and by the wallet of its unit, which is the only one that reads its amount right
+          return unitWalletOn(onCircuit(w, 'quote:' + entry.quote), recordUnit(entry)).then(function (qw) {
+            return qw.checkMintQuoteBolt11(entry.quote);
+          }).then(function (q) {
             /* ISSUED is claimed, but not necessarily by an answer that arrived.
              * It used to be dropped here in silence, and a claim whose answer
              * was lost left its sats reachable only by a full seed restore. */
+            var u = recordUnit(entry);
+            var said = function (got, more) {
+              return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 }, more || {});
+            };
             if (q.state === 'ISSUED') {
-              return FoxyWallet.recoverIssued(entry.quote).then(function (sats) {
-                if (sats > 0) claimed.push({ quote: entry.quote, sats: sats, recovered: true });
+              return FoxyWallet.recoverIssued(entry.quote).then(function (got) {
+                if (got > 0) claimed.push(said(got, { recovered: true }));
               });
             }
             if (q.state !== 'PAID') {
@@ -489,15 +496,24 @@
                * invoice made at such a mint was asked about on every launch
                * for good (mint survey). */
               var expires = Number(q.expiry) || Number(entry.expiry) || 0;
-              if (expires && expires < nowS && q.state === 'UNPAID') {
+              /* Five minutes past it, not at once: a payment on its way when
+               * the invoice ran out is still settled by the mint (a usd
+               * invoice at Forge lives one minute), and a record dropped
+               * first is money the mint would not release to anyone. Not
+               * longer: each record left is a question to the mint on every
+               * sweep, and a usd receive screen makes one a minute. And
+               * never while the swap it is the second leg of still has its
+               * payment with the mint (`swapRun`). */
+              var legHeld = !!entry.swap && load(K.melting, []).some(function (m) { return m && m.swap === entry.swap; });
+              if (expires && expires + 300 < nowS && q.state === 'UNPAID' && !legHeld) {
                 var gone = function (p) { return p.quote !== entry.quote; };
                 save(K.quotes, load(K.quotes, []).filter(gone));
                 save(K.quotesOld, load(K.quotesOld, []).filter(gone));
               }
               return;
             }
-            return FoxyWallet.claim(entry.quote).then(function (sats) {
-              claimed.push({ quote: entry.quote, sats: sats });
+            return FoxyWallet.claim(entry.quote).then(function (got) {
+              claimed.push(said(got));
             }, function (e) {
               // only a claim that failed is "paid, not collected" — not an offline check
               noteClaimTrouble(entry.quote, e);
@@ -566,16 +582,24 @@
       if (!first) return Promise.resolve(0);
       var at = canonicalMint(first.entry.outputsMint || first.entry.mint || first.entry.to || here);
       if (at !== here) return Promise.resolve(0);
-      return withTimeout(w.checkMintQuoteBolt11(quoteId), 20000, 'the invoice’s state').then(function (q) {
+      // asked by the wallet of the invoice's unit (`watch`)
+      return unitWalletOn(w, recordUnit(first.entry)).then(function (qw) {
+        return withTimeout(qw.checkMintQuoteBolt11(quoteId), 20000, 'the invoice’s state');
+      }).then(function (q) {
         if (String((q && q.state) || '').toUpperCase() !== 'ISSUED') return 0;
         var found = quoteRecord(quoteId);
         if (!found) return 0;
+        var rec0 = found;
         var entry = found.entry;
-        var memo = found.key === K.move ? 'mint switch' : (entry.memo || '');
+        var foundKey = found.key;
+        // restored by the wallet of the invoice's unit, into that unit's pile (hard rule 3)
+        var unit = recordUnit(entry);
+        return unitWalletOn(w, unit).then(function (w) {
+        var memo = foundKey === K.move ? 'mint switch' : (entry.memo || '');
         if (!Array.isArray(entry.outputs) || !entry.outputs.length) {
           console.log('[foxy] invoice', short, 'is ISSUED with no claim outputs on record; dropped. ' +
             'If its claim answer was lost, a seed restore finds it.');
-          dropQuoteRecord(found);
+          dropQuoteRecord(rec0);
           return 0;
         }
         var amount = satsOf(entry.amount) || 0;
@@ -585,7 +609,7 @@
             console.warn('[foxy] invoice', short, 'is ISSUED but its recorded outputs hold',
               JSON.stringify(rows.map(function (r) { return sumProofs(r.proofs); })), 'not', amount,
               '— dropped; a seed restore finds it');
-            dropQuoteRecord(found);
+            dropQuoteRecord(rec0);
             return 0;
           }
           var signed = [];
@@ -594,12 +618,12 @@
             /* The pile, then the record. The record went first, so a pile that
              * could not be written lost the claim's only way back (W6); now the
              * write throws and the record stays for the next sweep. */
-            if (live.length) addProofs(live, here, w);
+            if (live.length) addProofs(live, here, w, unit);
             var again = quoteRecord(quoteId);
             if (again) dropQuoteRecord(again);
             if (!live.length) return 0;
             var got = sumProofs(live);
-            logTx({
+            logTx(unitRow(unit, swapMarks(entry, {
               dir: 'in',
               sats: got,
               feeSats: 0,
@@ -609,10 +633,13 @@
               hash: quoteId,
               mint: here,
               payHash: entry.payHash || undefined,
-            });
-            console.log('[foxy] invoice', short, 'was issued but its answer was lost — restored', got, 'sats from its counters');
+            })));
+            if (entry.swap) unitSwapLanded(entry.swap, 'mint');
+            console.log('[foxy] invoice', short, 'was issued but its answer was lost — restored',
+              formatAmount(got, unit), 'from its counters');
             return got;
           });
+        });
         });
       }).catch(function (e) {
         console.warn('[foxy] could not recover issued invoice', short, '—', FoxyWallet.reason(e));
@@ -1017,8 +1044,9 @@
       var chain = Promise.resolve();
       mine.forEach(function (entry) {
         chain = chain.then(function () {
-          // each held melt on its own circuit
-          var mw = onCircuit(w, 'melt:' + entry.quote);
+          // each held melt on its own circuit, by the wallet of its unit (hard rule 3)
+          var unit = recordUnit(entry);
+          return unitWalletOn(onCircuit(w, 'melt:' + entry.quote), unit).then(function (mw) {
           return mw.checkMeltQuoteBolt11(entry.quote).then(function (q) {
             var state = String((q && q.state) || '').toUpperCase();
             if (state === 'PAID') {
@@ -1062,24 +1090,25 @@
                  * change restored from this seed's counters is not: spent later,
                  * reconcile set it aside as if no restore could bring it back,
                  * where it removes this wallet's own spent proofs. */
-                if (change.length) addOwnProofs(change, here, mw, undefined, restored);
-                logTx({
+                if (change.length) addOwnProofs(change, here, mw, unit, restored);
+                logTx(unitRow(unit, swapMarks(entry, {
                   dir: 'out',
                   sats: satsOf(entry.amount) || 0,
                   // what it cost beyond the amount, as pay's landed() logs it (meltFee)
                   feeSats: meltFee(sumProofs(entry.proofs || []) + (Number(entry.splitFee) || 0), entry.amount, change),
                   settled: true,
                   state: 'success',
-                  memo: '',
+                  memo: entry.swap ? 'swap' : '',
                   hash: entry.quote,
                   bolt11: entry.bolt11 || '',
                   // the proof that this invoice was paid, as the mint now gives it (`preimageOf`)
                   preimage: preimageOf(q) || undefined,
                   // where it was made, which is not always where the phone is now
                   mint: here,
-                });
+                })));
                 dropMelt(entry.quote);
-                settled.push({ quote: entry.quote, paid: true });
+                if (entry.swap) unitSwapLanded(entry.swap, 'melt');
+                settled.push({ quote: entry.quote, paid: true, unit: unit });
                 console.log('[foxy] held melt', entry.quote, 'settled as paid');
               });
             }
@@ -1108,14 +1137,16 @@
                * PAID branch above was fixed for, reached from the other side.
                * `restored` because these are this wallet's own proofs coming
                * home, not ecash from anywhere else. */
-              addOwnProofs(entry.proofs || [], here, mw, undefined, true);
+              addOwnProofs(entry.proofs || [], here, mw, unit, true);
               /* Charged only when the hold really went: a drop that was refused
                * leaves it for the next sweep, which would charge it again. */
               dropMelt(entry.quote);
-              if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
-              settled.push({ quote: entry.quote, paid: false });
+              if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
+              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+              if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
+              settled.push({ quote: entry.quote, paid: false, unit: unit });
               console.log('[foxy] held melt', entry.quote,
-                'did not go \u2014 returned', sumProofs(entry.proofs || []), 'sats');
+                'did not go \u2014 returned', formatAmount(sumProofs(entry.proofs || []), unit));
               return;
             }
             /* PENDING with every input UNSPENT, two minutes on: the mint is not
@@ -1128,15 +1159,18 @@
                   return;
                 }
                 // idempotent, like the UNPAID/FAILED branch above
-                addOwnProofs(entry.proofs, here, mw, undefined, true);
+                addOwnProofs(entry.proofs, here, mw, unit, true);
                 dropMelt(entry.quote);
-                if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
-                settled.push({ quote: entry.quote, paid: false });
+                if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
+              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+                if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
+                settled.push({ quote: entry.quote, paid: false, unit: unit });
                 console.log('[foxy] held melt', entry.quote, 'left PENDING by the mint but never spent \u2014 returned',
-                  sumProofs(entry.proofs), 'sats');
+                  formatAmount(sumProofs(entry.proofs), unit));
               });
             }
             console.log('[foxy] held melt', entry.quote, 'still', state || 'unknown');
+          });
           }).catch(function (e) {
             console.warn('[foxy] could not check held melt', entry.quote,
               '\u2014', FoxyWallet.reason(e));
