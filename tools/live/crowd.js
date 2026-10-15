@@ -954,6 +954,7 @@ async function fundByInvoice(p, want, what) {
     if (!ok(toks.length > 0, 'the token file holds a token', TOKEN_FILE)) return finish(1);
     let tookN = 0; const whyNot = [];
     for (const t of toks) {
+      if (tookN) { F.circuit = label(); await sleep(PACE); }   // each token from another exit, paced
       const r = await step(F, 'receive', () => F.W.receiveToken(t));
       if (r.ok) { fundedA += Number(r.v.sats) || 0; tookN++; } else whyNot.push(r.why);
     }
@@ -1039,6 +1040,7 @@ async function fundByInvoice(p, want, what) {
   }
   const t0f = Date.now();
   const sharesOut = await allOf(groupA.slice(1), async (q) => {
+    if (BURST.length) F.circuit = label();   // the funder's hundred sends, each from another exit
     const s = await sendTo(F, share);
     if (s.ok) inFlight.push(Object.assign(s, { from: 0, to: q.n }));
     else say(F.name + ' could not send ' + share + ' sats' + (TWO ? ' at A' : '') + ' to ' + q.name + ': ' + s.why);
@@ -1268,6 +1270,8 @@ async function fundByInvoice(p, want, what) {
   const backTokens = [].concat(...back);
   let backIn = 0;
   for (const t of backTokens) {
+    F.circuit = label();   // the funder takes everyone's balance back, each from another exit
+    if (BURST.length) await sleep(PACE);
     const r = await take(F, t);
     if (r.ok) backIn++;
     else sweepWhy.push('the funder could not take ' + t.sats + ' sats from person ' + t.from + ' (the token is in the state file): ' + r.why);
