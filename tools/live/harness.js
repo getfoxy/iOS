@@ -12,6 +12,15 @@
  * secrets come from the bundled bip39 and cashu-ts. Fake-money mints only:
  * 127.0.0.1/localhost with FOXY_LIVE_LOCAL=1, or testnut.
  *
+ * o.via, a way to a fake-money mint other than fetch from this machine: a
+ * function (m) => Promise<{ status, text }> that carries one mint request
+ * itself, as `o.real.send` does for a real one — crowd.js passes curl through
+ * Tor's SOCKS port, so testnut is reached the way the app reaches a mint. It
+ * is used only after fakeMoneyOnly has passed the host, so it never opens a
+ * way to real money; without it every script behaves as before. netStats
+ * counts, over every page, the mint requests that went by fetch, by o.via and
+ * by o.real, so a script that must never use fetch can show it did not.
+ *
  *   const H = require('./harness');
  *   const { w, W, keychain, phone, rec } = H.boot({ keychain: { words: '' } });
  *
@@ -37,6 +46,8 @@ function fakeMoneyOnly(url) {
 }
 
 const nativeStats = { requests: 0, secrets: 0, refused: 0, tooFarAhead: 0, wordsAsked: 0, pageSeedDerivations: 0 };
+// mint requests by the way they went (o.via above): fetch from this Mac, o.via, o.real.send
+const netStats = { fetch: 0, via: 0, real: 0 };
 /* The same mock the wallet tests run on, with native's rules in one table
  * (NATIVE_RULES, NATIVE_SAYS): index-shared 00 counters, counter moves capped at
  * 100 past next or a served restore range, one import, candidates kept after
@@ -125,6 +136,8 @@ function boot(opts) {
       const real = (o.real && process.env.FOXY_LIVE_REAL === '1' && typeof o.real.send === 'function'
         && (o.real.hosts || []).indexOf(new URL(m.url).hostname) >= 0) ? o.real : null;
       if (!real) { try { fakeMoneyOnly(m.url); } catch (e) { return reply(m.id, null, 'blocked host'); } }
+      // a fake-money host by the test's own way there (o.via), once fakeMoneyOnly has passed it
+      const via = (!real && typeof o.via === 'function') ? o.via : null;
       const p = new URL(m.url).pathname.replace(/\/[0-9a-f-]{20,}$/i, '/:id');
       const key = m.method + ' ' + p;
       rec.hits[key] = (rec.hits[key] || 0) + 1;
@@ -145,10 +158,11 @@ function boot(opts) {
       // 'refuse': the mint is never asked and the page hears a refusal, as a mint that will not do this would give
       if (fate === 'refuse') return reply(m.id, '400\n' + JSON.stringify({ detail: 'This mint is not taking swaps.', code: 11000 }));
       try {
-        const r = real ? await real.send(m)
+        netStats[real ? 'real' : via ? 'via' : 'fetch']++;
+        const r = real ? await real.send(m) : via ? await via(m)
           : await fetch(m.url, { method: m.method, headers: { 'content-type': 'application/json' },
               body: m.method === 'GET' ? undefined : m.body });
-        const text = real ? String(r.text) : await r.text();
+        const text = (real || via) ? String(r.text) : await r.text();
         // what a lost answer was: the test's to read, never the page's
         if (fate !== 'ok') rec.lost.push({ path: p, status: r.status, text: text.slice(0, 160) });
         if (fate === 'after') return reply(m.id, null, 'The network connection was lost.');
@@ -363,4 +377,4 @@ function phoneReport() {
 }
 
 module.exports = { ROOT, boot, counters, setCounters, pile, feeFor, sleep, mintAndClaim, waitFor, rawInvoice, CDK_PENDING, MINTS, mintNames, other,
-  nutshellCli, cliBalance, reporter, fakeMoneyOnly, nativeStats, restoreWords, scanFresh, phoneReport };
+  nutshellCli, cliBalance, reporter, fakeMoneyOnly, nativeStats, netStats, restoreWords, scanFresh, phoneReport };
