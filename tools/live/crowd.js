@@ -136,6 +136,7 @@ const BURST = String(opt('burst', '')).split(',').map((x) => Math.round(Number(x
 const REPEAT = Math.round(Number(opt('repeat', 1)));
 const BATCH = Math.round(Number(opt('batch', 8)));     // people brought up at once: a Tor on a phone cannot build 100 circuits in one go
 const SPREAD = Math.round(Number(opt('spread', 20)));  // ms between a burst's starts: real at the mint, kind to the one SOCKS port
+const PACE = Math.round(Number(opt('pace', 1500)));    // burst mode: ms between the share-out's and the sweep's one-at-a-time steps, under a mint's per-address limit
 const LOCAL = flag('local');
 /* A mint's URL as the wallet keys it (canonicalMint in Web/foxy-wallet.js):
  * scheme and host in lower case, no default port, no trailing slash. */
@@ -155,10 +156,10 @@ const URL_OF = { A: MINT, B: MINT_B };
 const LETTERS = TWO ? ['A', 'B'] : ['A'];
 const CROSS = TWO ? (CROSS_ARG == null ? 0.5 : Number(CROSS_ARG)) : 0;
 const usage = 'usage: node tools/live/crowd.js [--people 20] [--rounds 10] [--fund 100] [--socks 53114] '
-  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--burst 1,2,4,8 --repeat 1 --spread 20] [--batch 8] [--local] <mint A> [<mint B>]';
+  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--burst 1,2,4,8 --repeat 1 --spread 20 --pace 1500] [--batch 8] [--local] <mint A> [<mint B>]';
 if (!MINT || !/^https:\/\//.test(MINT) || (TWO && !/^https:\/\//.test(MINT_B)) || argv.length > 2) { console.log(usage); process.exit(1); }
 if (BURST.length && TWO) { console.log('FAIL  --burst is for one mint'); process.exit(1); }
-if (!(REPEAT >= 1) || !(BATCH >= 1) || !(SPREAD >= 0)) { console.log(usage); process.exit(1); }
+if (!(REPEAT >= 1) || !(BATCH >= 1) || !(SPREAD >= 0) || !(PACE >= 0)) { console.log(usage); process.exit(1); }
 /* At most BATCH of fn in flight over the list: bringing a crowd up is not a burst. */
 const batched = async (list, fn) => {
   const out = new Array(list.length); let next = 0;
@@ -171,7 +172,7 @@ const batched = async (list, fn) => {
 const allOf = async (list, fn) => {
   if (!BURST.length) return Promise.all(list.map(fn));
   const out = [];
-  for (let i = 0; i < list.length; i++) out.push(await fn(list[i], i));
+  for (let i = 0; i < list.length; i++) { if (PACE && i) await sleep(PACE); out.push(await fn(list[i], i)); }
   return out;
 };
 if (!(PEOPLE >= 2) || !(ROUNDS >= 0) || !(FUND >= 1) || !(MIN >= 1) || !(MAX >= MIN) || !(STAGGER >= 0) || !/^\d+$/.test(SOCKS)
@@ -742,7 +743,7 @@ function saveState() {
 }
 
 /* ---- the end ------------------------------------------------------------ */
-const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, bursts: BURST.length ? BURST : null, repeat: REPEAT, spread: SPREAD, batch: BATCH, fund: FUND,
+const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, bursts: BURST.length ? BURST : null, repeat: REPEAT, spread: SPREAD, pace: PACE, batch: BATCH, fund: FUND,
             min: MIN, max: MAX, stagger: STAGGER, cross: CROSS, socks: LOCAL ? null : SOCKS, mints: {} };
 let finished = false;
 function finish(code) {
