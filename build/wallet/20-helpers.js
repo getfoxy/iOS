@@ -417,7 +417,7 @@
 
     /* Sent tokens the mint does not report as claimed — or that cannot be asked
      * about from here (another mint, no connection). Resolves
-     * [{ hash, sats, mint }]. Used to warn before forgetting them. */
+     * [{ hash, sats, unit, amount, mint }]. Used to warn before forgetting them. */
     tokensNotClaimed: function () {
       var list = FoxyWallet._sentTokens();
       if (!list.length) return Promise.resolve([]);
@@ -427,14 +427,15 @@
         return chain.then(function (acc) {
           var info = FoxyWallet.tokenInfo(e.token);
           if (!info || !info.proofs.length) return acc;
-          var row = { hash: e.hash, sats: info.sats, mint: info.mint };
+          // in the token's own unit as well: a dollar token's sats are null, and its cents are money all the same
+          var row = { hash: e.hash, sats: info.sats, unit: unitOf(info.unit) || 'sat', amount: satsOf(info.amount) || 0, mint: info.mint };
           if (!w || !routeOpen() || String(info.mint || '').replace(/\/+$/, '') !== here) return acc.concat([row]);
           // each token on its own circuit, as the token screen asks
           return statesOf(onCircuit(w, e.hash ? 'token:' + e.hash : null), info.proofs).then(function (states) {
             return states.every(function (st) { return st === 'SPENT'; }) ? acc : acc.concat([row]);
           }, function () { return acc.concat([row]); });
         });
-      }, Promise.resolve(/** @type {Array<{hash: *, sats: ?number, mint: string}>} */ ([])));
+      }, Promise.resolve(/** @type {Array<{hash: *, sats: ?number, unit: string, amount: number, mint: string}>} */ ([])));
     },
 
     /* A sent token the mint has reported claimed: its text goes.
@@ -1217,7 +1218,7 @@
       FoxyWallet._requestsBeingPaid[p.id] = true;
       var token;
       try {
-        token = window.CashuTS.getEncodedToken({ mint: p.mint, unit: 'sat', proofs: p.proofs });
+        token = encodeToken(p.mint, p.proofs, 'sat');
       } catch (e) {
         delete FoxyWallet._requestsBeingPaid[p.id];
         answer(422, 'That payment would not make a token.');
@@ -1712,6 +1713,11 @@
      * payment that would have to over-pay is refused with the figures attached
      * (`foxyNeedsOverpay`) rather than made. */
     payRequest: function (req, onStep, opts) {
+      /* The unit first: a usd request's amount is cents and its `sats` is
+       * null (`decodeRequest`). NUT-18 in dollars is not built yet, so it is
+       * refused in words before anything reads an amount or waits for a route. */
+      var reqUnit = unitOf(req && req.unit) || String((req && req.unit) || '');
+      if (reqUnit === 'usd') return Promise.reject(new Error('That request asks for dollar ecash, which Foxy cannot pay yet.'));
       /* Whether the lock the request asked for can be made is decided by the
        * route, once, a few lines down. A route two seconds off is waited for
        * rather than paid around: without it the payment goes unlocked from
@@ -1740,7 +1746,7 @@
       if (!d && req && req.viaTap) d = { kind: 'tap', target: '' };
       if (!d) return Promise.reject(new Error('That request names no way Foxy can deliver to.'));
       if (!(req.sats > 0)) return Promise.reject(new Error('That request names no amount.'));
-      if ((req.unit || 'sat') !== 'sat') return Promise.reject(new Error('That request is not for sats.'));
+      if ((reqUnit || 'sat') !== 'sat') return Promise.reject(new Error('That request is not for sats.'));
       /* Timed, in three parts, because "the ecash way feels slower than the
        * Lightning way" could be any of them and guessing which is how time
        * gets spent on the wrong one. Making is a swap at the mint over Tor;
@@ -2217,7 +2223,7 @@
             /* Unspent: swapped for fresh pieces, as a split of this phone's
              * own pile is, so a lost answer is restored by the same record
              * and no entry is written for money that never left. */
-            var token = window.CashuTS.getEncodedToken({ mint: here, proofs: live, unit: 'sat' });
+            var token = encodeToken(here, live, 'sat');
             var guard = swapGuard(cw, 'split', { inputs: live });
             return guard.run('receive', function () { return cw.receive(token); }).then(function (fresh) {
               var old = {};
@@ -2261,7 +2267,9 @@
       var info = text ? FoxyWallet.tokenInfo(text) : null;
       if (!ys || !info || !info.mint) return false;
       var list = tokenWatches().filter(function (r) { return r.hash !== hash; });
+      // in the token's own unit: a usd token's sats are null, its amount cents
       list.push({ hash: hash, mint: canonicalMint(info.mint), ys: ys, sats: Number(info.sats) || 0,
+                  unit: unitOf(info.unit) || 'sat', amount: satsOf(info.amount) || 0,
                   persist: !!(opts && opts.persist), quick: !!(opts && opts.quick),
                   since: Date.now(), until: Date.now() + TOKEN_WATCH_MS });
       save(K.tokenWatch, list.slice(-10));
@@ -2305,7 +2313,8 @@
 
     watchedTokens: function () {
       return tokenWatches().map(function (r) {
-        return { hash: r.hash, mint: r.mint, sats: r.sats, persist: !!r.persist, quick: !!r.quick, since: r.since || 0 };
+        return { hash: r.hash, mint: r.mint, sats: r.sats, unit: recordUnit(r), amount: satsOf(r.amount != null ? r.amount : r.sats) || 0,
+                 persist: !!r.persist, quick: !!r.quick, since: r.since || 0 };
       });
     },
 

@@ -545,6 +545,12 @@
   payThisMintWithToken(sats, go) {
     const W = window.FoxyWallet;
     if (!(sats > 0) || this.state.makeBusy) return;
+    /* A bitcoin token, from the bitcoin balance. Dollars cannot become one
+     * without the mint, so a phone paying from dollars is told so. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && this.walletNow('send') === 'usd') {
+      this.toast('Dollars need the mint. Pick BITCOIN to pay this with no connection.', true);
+      return;
+    }
     this.setState({ makeBusy: true });
     this.showMelt('Making the token\u2026', 0, { sats: sats });
     this._preSettle = this.balNow();
@@ -557,7 +563,7 @@
       this._seenTx[r.hash] = true;
       this.setState({
         makeBusy: false, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: true,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: true,
         tokenOutFee: Math.max(0, sats - r.sats),
         screen: 'tokenOut', stack: [],
       });
@@ -615,6 +621,13 @@
    * the token screen shows it as a QR and a string. */
   makeEcashToken() {
     const W = window.FoxyWallet;
+    /* From the balance that pays, at a mint with two: the remembered one, or
+     * the other where it cannot cover the amount (`keypadWallet`). A dollar
+     * token is its cents, exactly; it cannot be made offline or locked. */
+    if (this.twoUnitsOn && this.twoUnitsOn()) {
+      if (this.keypadWallet) this.keypadWallet();
+      if (this.walletNow('send') === 'usd') { this.makeUsdToken(); return; }
+    }
     const sats = this.amountInSats();
     if (!(sats > 0)) {
       this.toast('Enter an amount first', true);
@@ -635,13 +648,48 @@
       this._seenTx[r.hash] = true;
       this.setState({
         makeBusy: false, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: false,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: false,
         tokenOutFee: Math.max(0, sats - r.sats),
         screen: 'tokenOut', stack: [],
       });
       this.refreshBalance();
       this.watchToken(r.sats, r.hash, r.swapped === false);
       this.tidyChangeLater();
+    }).catch(e => {
+      this.hideMelt();
+      this.setState({ makeBusy: false });
+      if (this.isBadSignatures(e)) { this.badSignatureCard(null, 'swap'); return; }
+      this.toast(W.reason(e), true);
+    });
+  }
+
+  /* A dollar token: the cents typed, from the dollar balance, made by the
+   * mint. Offline the wallet refuses it ("Offline and locked payments are
+   * bitcoin only for now"), and so does this, first. */
+  makeUsdToken() {
+    const W = window.FoxyWallet;
+    const cents = this.centsTyped();
+    if (!(cents > 0)) { this.toast('Enter an amount first', true); return; }
+    if (this.state.makeBusy) return;
+    if (this.offlineNow()) { this.toast('Offline and locked payments are bitcoin only for now; nothing was sent.', true); return; }
+    this.setState({ makeBusy: true });
+    this.showMelt('Making the token\u2026');
+    this._preSettle = this.balNow();
+    W.sendToken(cents, { unit: 'usd' }).then(r => {
+      this.hideMelt();
+      this._seenTx = this._seenTx || {};
+      this._seenTx[r.hash] = true;
+      // what is remembered is the balance that made it, unless Foxy picked it
+      if (!this.state.walletAuto) this.rememberWallet('send', 'usd');
+      const got = Math.round(Number(r.amount != null ? r.amount : cents) || 0);
+      this.setState({
+        makeBusy: false, tokenCopied: false,
+        tokenOut: r.token, tokenOutSats: 0, tokenOutHash: r.hash, tokenForPayee: false,
+        tokenOutUnit: 'usd', tokenOutAmount: got,
+        tokenOutFee: Math.max(0, cents - got),
+        screen: 'tokenOut', stack: [],
+      });
+      this.refreshBalance();
     }).catch(e => {
       this.hideMelt();
       this.setState({ makeBusy: false });
@@ -686,6 +734,11 @@
      * wallet at this point, so it is false by definition. */
     this.setState({ reqBusy: false });
     if (!req) { this.toast('That request could not be read.', true); return; }
+    if (req.unit === 'usd') {
+      // a request in dollar ecash is for a later build: refused before anything is shown or paid
+      this.toast('That request asks for dollar ecash, which Foxy cannot pay yet.', true);
+      return;
+    }
     if (req.unit && req.unit !== 'sat') {
       this.toast('That request asks for ' + this.unitLabel(req.unit) + ' ecash. Foxy can only send sats as ecash.', true);
       return;
@@ -990,7 +1043,7 @@
       }
       this.setState({
         reqBusy: false, req: null, tokenCopied: false,
-        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenForPayee: true,
+        tokenOut: r.token, tokenOutSats: r.sats, tokenOutHash: r.hash, tokenOutUnit: '', tokenForPayee: true,
         screen: 'tokenOut', stack: [],
       });
       this.needScanStage(r);

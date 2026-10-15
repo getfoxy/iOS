@@ -16,7 +16,13 @@
      * still being collected, another unit's ecash — carry the balance through
      * unchanged. So that a person can see the numbers add up, or where they
      * stop doing so ("$121.69 is wrong"). */
-    const A = this.histAudit();
+    /* At a mint with two balances: a tab at the foot, DOLLARS or BITCOIN.
+     * The list, the running balance on each row and the card at the top all
+     * follow it, each in its own unit. A swap between them is two rows, one
+     * in each tab, each with the other leg's figure under it. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard;
+    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : 'sat';
+    const A = (two && this.histAuditIn) ? this.histAuditIn(tab) : this.histAudit();
     const balOf = A.balOf, balNow = A.balNow, run = A.run;
     const dueChange = A.dueChange, dueCount = A.dueCount;
     /* The audit. Walked back through every entry, the balance before the
@@ -31,7 +37,7 @@
     const held = Math.round(Number(W1 && W1.heldSats && W1.heldSats()) || 0);
     const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
     const off = A.off;
-    const money = (n) => this.stageMoney(Math.abs(n));
+    const money = (n) => (tab === 'usd' ? this.unitFigure(Math.abs(n), 'usd') : this.stageMoney(Math.abs(n)));
     let auditTitle = '', auditBody = '';
     if (whole && off !== 0) {
       auditTitle = 'DOES NOT ADD UP';
@@ -40,21 +46,23 @@
         + ' they explain. A restore from your words, or a swap whose record was lost, can do this.';
     } else if (whole) {
       auditTitle = 'ADDS UP';
-      auditBody = 'Every sat of your ' + money(balNow) + ' is accounted for by the payments below.';
+      auditBody = 'Every ' + (tab === 'usd' ? 'cent' : 'sat') + ' of your ' + money(balNow) + ' is accounted for by the payments below.';
     } else if (!s.fresh && (s.history || []).length) {
       auditTitle = 'LAST 500 PAYMENTS';
       auditBody = 'Only the latest five hundred are kept, so the balance cannot be checked back to the start.';
     }
-    if (held > 0) {
-      auditBody += (auditBody ? ' ' : '') + money(held)
+    // held back in this tab's own unit: the dollar books name dollars held for a swap
+    const heldHere = tab === 'usd' ? Math.round(Number(A.held) || 0) : held;
+    if (heldHere > 0) {
+      auditBody += (auditBody ? ' ' : '') + money(heldHere)
         + ' is held back for a swap the mint has not answered; it is not in the balance until it does.';
     }
-    const fees = this.topUpFeeSats ? this.topUpFeeSats() : 0;
+    const fees = tab === 'usd' ? 0 : (this.topUpFeeSats ? this.topUpFeeSats() : 0);
     if (fees > 0 && whole) {
       auditBody += (auditBody ? ' ' : '') + money(fees)
         + ' went to the mint in fees for making small change, or for a payment that did not go through.';
     }
-    const back = this.recoveringSats ? this.recoveringSats() : 0;
+    const back = tab === 'usd' ? Math.round(Number(A.back) || 0) : (this.recoveringSats ? this.recoveringSats() : 0);
     if (back > 0) {
       auditBody += (auditBody ? ' ' : '') + money(back)
         + ' is being recovered from the mint: it took that piece for a swap after Foxy was put away, and the new pieces are collected the next time Foxy is online.';
@@ -96,9 +104,20 @@
       if (t.dir === 'in' && t.changeState === 'not handed' && t.changeSats > 0) return 'Change to go back on the card';
       return '';
     };
+    // the other leg of a swap, by the swap they share: its figure goes under this one
+    const unitOf = (t) => (t.unit === 'usd' ? 'usd' : 'sat');
+    const legOf = new Map();
+    if (two) (s.history || []).forEach(g => g.items.forEach(t => { if (t.kind === 'swap' && t.swap) legOf.set(t.swap + '|' + unitOf(t), t); }));
+    const legFigure = (t) => {
+      const u = unitOf(t) === 'usd' ? 'sat' : 'usd';
+      const o = legOf.get(t.swap + '|' + u);
+      if (!o) return '';
+      return this.unitFigure(u === 'usd' ? o.amount : o.sats, u);
+    };
+    const inTab = (t) => !two || unitOf(t) === tab;
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => ({
+      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => Object.assign({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
@@ -160,13 +179,22 @@
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      })).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
         line2Weight: r.metaRail ? '600' : '500',
       })),
     })).filter(g => g.items.length);
+    const tabLook = (u) => (u === tab
+      ? (u === 'usd'
+        ? { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
+            shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' }
+        : { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+              + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+            blend: 'normal,soft-light,normal', ink: '#fff',
+            shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' })
+      : { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' });
     return {
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
@@ -190,6 +218,11 @@
       filterIn: () => this.setState({ histFilter: 'in' }),
       filterOut: () => this.setState({ histFilter: 'out' }),
       historyGroups: histGroups,
+      histTabsShown: two,
+      histTabs: two ? ['usd', 'sat'].map(u => Object.assign(tabLook(u), {
+        label: this.unitWord(u), sym: u === 'usd' ? '$' : '\u20bf',
+        tap: () => this.setState({ histUnit: u }),
+      })) : [],
       historyEmpty: histGroups.length === 0,
       histAuditShown: !!auditTitle && hf === 'all' && !ofCard,
       histAuditTitle: auditTitle,
@@ -207,6 +240,7 @@
   /** @param {RenderContext} c */
   renderTxDetail(c) {
     const { s, sc, tx } = c;
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
     // the proofs this payment consumed and produced, if the record is still kept
     const audit = (window.FoxyWallet && window.FoxyWallet.auditTrail && tx.hash)
       ? window.FoxyWallet.auditTrail(tx.hash) : [];
@@ -219,11 +253,20 @@
       txSentLabel: tx.dir === 'in' ? 'RECEIVED' : 'SENT',
       txSent: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
       txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
-      txTotalAlt: tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
+      txTotalAlt: (tx.unit === 'usd' && two) ? 'DOLLARS'
+        : tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
       /* Which mint carried this. The screen said LIGHTNING and never said
-       * whose — and the mint is the party that held the money. */
-      txMint: (window.FoxyWallet && window.FoxyWallet.mintHost
+       * whose — and the mint is the party that held the money. At a mint with
+       * two balances, the row's own mint, which a swap or a payment names. */
+      txMint: (two && tx.mint) ? String(tx.mint).replace(/^https?:\/\//, '')
+        : (window.FoxyWallet && window.FoxyWallet.mintHost
         && window.FoxyWallet.mintHost()) || 'unknown',
+      // a swap between balances: the rate the mint gave, kept on the row
+      txSwapShown: two && tx.kind === 'swap',
+      /* The wallet keeps the rate on the row as a plain number (dollars per
+       * bitcoin); an object with usdPerBtc is read the same way. */
+      txSwapRate: (two && tx.kind === 'swap' && this.swapRateOf(tx.mintRate) > 0)
+        ? '\u20bf 1 = $ ' + this.group(Math.round(this.swapRateOf(tx.mintRate))) : 'The mint\u2019s rate',
       txPaymentId: tx.hash || '',
       txHasPaymentId: !!tx.hash,
       /* The one identifier on this screen an explorer can find.
@@ -460,6 +503,35 @@
     };
   }
 
+  /* One row of history at a mint with two balances, as the owner drew it:
+   * the figure in the row's own unit (sats big on the bitcoin tab, cents on
+   * the dollar tab), the running balance in that unit, and for a swap the
+   * other leg's figure under it with the words that say so. */
+  histRowTwo(t, tab, balOf, legFigure) {
+    if (!t) return {};
+    const usd = t.unit === 'usd';
+    const sign = t.dir === 'in' ? '+ ' : '- ';
+    const amount = usd ? Math.round(Number(t.amount) || 0) + (t.dir === 'in' ? 0 : Math.max(0, Math.round(Number(t.feeAmount) || 0)))
+      : this.txTotalOut(t);
+    const swap = t.kind === 'swap';
+    const out = {
+      amtText: sign + this.unitFigure(amount, usd ? 'usd' : 'sat'),
+      amtSub: swap ? legFigure(t)
+        : usd ? '' : (this.money(amount, this.txFiat(t, amount)).usd != null ? '$ ' + this.usd(this.money(amount, this.txFiat(t, amount)).usd) : ''),
+      balText: 'BAL ' + this.unitFigure(Math.max(0, balOf.get(t) || 0), tab === 'usd' ? 'usd' : 'sat'),
+    };
+    if (swap) {
+      return Object.assign(out, {
+        name: 'Swap', initial: 'S',
+        metaRail: (usd ? (t.dir === 'in' ? 'Bitcoin \u2192 dollars' : 'Dollars \u2192 bitcoin')
+          : (t.dir === 'in' ? 'Dollars \u2192 bitcoin' : 'Bitcoin \u2192 dollars')),
+        metaTime: 'At the mint\u2019s rate \u00b7 ' + t.time,
+        metaColor: 'rgba(var(--ink-rgb),.6)',
+      });
+    }
+    return out;
+  }
+
   /* contacts: saved handles, and the search over them. */
   /** @param {RenderContext} c */
   renderContacts(c) {
@@ -518,6 +590,7 @@
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
       payContact: () => this.setState(p => {
+        const fresh = { wallet: '', walletAuto: false, walletTapped: false, feeQ: null };
         const qq = (p.ctQuery || '').trim().toLowerCase();
         const hit = (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)[0];
         return {
@@ -525,6 +598,7 @@
           recipient: qq ? ((hit && hit.handle) || qq) : '',
           recipientKind: 'email', ctSearch: false,
           amount: '', unit: 'USD', asset: '',
+          ...fresh,
         };
       }),
     };

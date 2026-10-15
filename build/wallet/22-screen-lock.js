@@ -19,26 +19,50 @@
      *
      * The reserve is a ceiling. Whatever routing does not use comes back as
      * change, so the real cost is usually lower and never higher. */
-    quoteFee: function (bolt11) {
+    quoteFee: function (bolt11, opts) {
       // a quote from the mint a late claim is visiting is a quote for the wrong pile (`claimAway`)
-      if (claimAway) return homeFirst(function () { return FoxyWallet.quoteFee(bolt11); });
+      if (claimAway) return homeFirst(function () { return FoxyWallet.quoteFee(bolt11, opts); });
       assertRoute();
       if (!wallet || !bolt11) return Promise.resolve(null);
+      /* In the unit it would be paid from: a usd melt quote names the
+       * invoice in cents and its reserve in cents (NUT-05 in usd), and the
+       * mint's price is read off it (`rate`). */
+      var unit = unitOf(opts && opts.unit);
+      if (!unit) return Promise.resolve(null);
+      var refused = unitRefusal(unit);
+      if (refused) return Promise.resolve(null);
       // on the circuit kept ready, when there is one
-      var w = viewNow(wallet);
-      // asked again on another circuit every five seconds of nothing (`askedAgain`)
-      return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
-        return via.createMeltQuoteBolt11(String(bolt11));
-      }), 20000, 'the mint\u2019s fee quote')
+      var inv = String(bolt11);
+      var msat = 0;
+      try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e) { msat = 0; }
+      return unitWalletOn(viewNow(wallet), unit).then(function (w) {
+        // asked again on another circuit every five seconds of nothing (`askedAgain`)
+        return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
+          return via.createMeltQuoteBolt11(String(bolt11));
+        }), 20000, 'the mint\u2019s fee quote');
+      })
         .then(function (won) {
           var q = won.got;
+          var amount = satsOf(q.amount) || 0;
+          var rate = null;
+          if (unit === 'usd') {
+            var r = rateFrom(amount, msat);
+            if (r > 0) {
+              rate = { usdPerBtc: r };
+              mintRates[canonicalMint(mintOf(won.w))] = { usdPerBtc: r, at: Date.now(), mint: canonicalMint(mintOf(won.w)) };
+            }
+          }
           /* The whole quote, the circuit it answered on and when, beside the
            * two figures the screen shows: `pay` takes it (`opts.quote`) while
-           * it is fresh, rather than asking the mint the same thing again. */
+           * it is fresh and in the same unit, rather than asking the mint the
+           * same thing again. */
           return {
-            amount: satsOf(q.amount) || 0,
+            unit: unit,
+            amount: amount,
             feeReserve: satsOf(q.fee_reserve) || 0,
-            quote: q, w: won.w, bolt11: String(bolt11), at: Date.now(),
+            msat: msat || null,
+            rate: rate,
+            quote: q, w: won.w, bolt11: inv, at: Date.now(),
           };
         })
         .catch(function (e) {
@@ -57,15 +81,23 @@
      * mint's own fee for the split and its fee again on the pieces the melt
      * spends), against the same pile and in the same words (`notEnoughWords`),
      * so the screen and the payment cannot disagree. Answers
-     * { ok, need, have, fee, why } with `why` empty when it fits, and null
-     * when there is no wallet or nothing to pay. Local, and at once. */
-    payNeed: function (sats, reserve) {
+     * { ok, need, have, fee, why, unit } with `why` empty when it fits, and
+     * null when there is no wallet or nothing to pay. Local, and at once.
+     *
+     * `opts.unit` is the pile it is paid from; amounts are in that unit (a
+     * usd quote's cents). Before the usd wallet has been built once, the fee
+     * on the pieces is left to the plain sum: Forge charges none. */
+    payNeed: function (sats, reserve, opts) {
       var w;
       try { w = needLocal(); } catch (e) { return null; }
+      var unit = unitOf(opts && opts.unit);
+      if (!unit) return null;
       var owed = Math.round(Number(sats) || 0) + Math.round(Number(reserve) || 0);
       if (!(owed > 0)) return null;
-      var mn = meltNeed(w, proofs(mintOf(w)), owed);
-      return { ok: !!mn.ok, need: mn.need, have: mn.have, fee: mn.fee, why: mn.ok ? '' : notEnoughWords(mn) };
+      var at = mintOf(w);
+      var uw = unit === 'sat' ? w : unitWalletNow(unit);
+      var mn = meltNeed(uw || null, proofs(at, unit), owed);
+      return { ok: !!mn.ok, need: mn.need, have: mn.have, fee: mn.fee, why: mn.ok ? '' : notEnoughWords(mn, unit), unit: unit };
     },
 
     /* Resolves once the phone has said it has a seed, and an older install

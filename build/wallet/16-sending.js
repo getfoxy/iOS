@@ -13,6 +13,14 @@
       if (!/^ln(bc|tb|bcrt)/i.test(inv)) {
         return Promise.reject(new Error('That is not a Lightning invoice.'));
       }
+      /* From a unit: 'sat' (the default, as every call before units) or
+       * 'usd'. A usd payment melts usd ecash (NUT-05 in usd): the mint quotes
+       * the invoice in cents, takes cents, and gives change in cents. The
+       * invoice itself is in bitcoin as every invoice is; the mint converts
+       * at its rate. */
+      var unit = unitOf(opts && opts.unit);
+      var refused = unitRefusal(opts && opts.unit);
+      if (refused) return Promise.reject(refused);
       var w;
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
@@ -34,6 +42,12 @@
        * anyway: the invoice is what the payee signed. */
       var asked = Math.round(Number((opts && opts.sats) || 0));
       var carries = FoxyWallet.msatOf(inv);
+      /* Dollars pay only an invoice that names its amount: the amount typed
+       * for one that names none is sats, which a dollar balance does not
+       * have, and Forge pays no amountless invoice in any unit. */
+      if (!carries && unit !== 'sat') {
+        return Promise.reject(new Error('Paying an invoice with no amount from dollars is not possible. Ask for one with the amount on it.'));
+      }
       if (!carries && !(asked > 0)) {
         return Promise.reject(new Error('That invoice names no amount, so Foxy needs one to send.'));
       }
@@ -48,7 +62,7 @@
         var info = null;
         try { info = via.getMintInfo ? via.getMintInfo() : null; } catch (e) { info = null; }
         var can = false;
-        try { can = !!(info && info.supportsAmountless && info.supportsAmountless('bolt11', 'sat')); }
+        try { can = !!(info && info.supportsAmountless && info.supportsAmountless('bolt11', unit)); }
         catch (e) { can = false; }
         if (!can) {
           throw new Error(hostOf(mintOf(via)) + ' does not pay invoices that name no amount. '
@@ -75,6 +89,11 @@
        * of the payment. An invoice with no amount is always quoted anew: the
        * confirmation quotes without one. */
       var kept = opts && opts.quote;
+      /* And only a quote in the unit being paid from: a sat quote says sats,
+       * and paying it from dollars would melt cents against a figure in sats. */
+      var keptUnit = kept ? (kept.unit === undefined ? 'sat' : unitOf(kept.unit)) : '';
+      // a swap between units (`swapRun`) has already refused a rate with less than fifteen seconds left
+      var swapId = opts && opts.swap ? String(opts.swap) : '';
       /* Paid from a card's pieces held for it (`opts.held`, 08a-flashcard.js `cardOutHold`): the card was charged for this
        * quote's amount and fee, so it is the one paid with while the mint still honours it (its own expiry half a minute off,
        * however long the card took to read), on the circuit kept ready. A PIN and a second tap can be more than a minute. */
@@ -85,19 +104,49 @@
         if (heldId) e.held = heldId;
         return e;
       };
-      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv
+      // a card holds bitcoin only: its pieces never pay from another unit's pile
+      if (heldId && unit !== 'sat') return Promise.reject(unsent('A card holds bitcoin only, so it pays in bitcoin. Nothing was paid.'));
+      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv && keptUnit === unit
         && (heldId || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000))
-        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + 30000));
+        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + (swapId ? 10000 : 30000)));
       if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      /* A swap pays the melt whose price it showed, or nothing: asked again,
+       * the mint names a new price for the same invoice, and the person said
+       * SWAP to the old one. Refused before anything moves; the screen asks
+       * for a new rate (`e.expired`). */
+      if (swapId && !reuse) {
+        var late = /** @type {any} */ (new Error('The rate has run out. Confirm the new rate.'));
+        late.expired = true;
+        return Promise.reject(late);
+      }
+      /* A payment from dollars costs what the mint's price says at the
+       * moment it is quoted, and the confirmation showed one such price. Asked
+       * again (the shown quote went stale), the new one may be dearer: then it
+       * is refused before anything moves, in dollars, and the person confirms
+       * the new figure. Sats are as they were: the invoice fixes their amount. */
+      var shownMost = (kept && kept.quote && keptUnit === unit && unit !== 'sat' && kept.bolt11 === inv)
+        ? satsOf(kept.quote.amount) + satsOf(kept.quote.fee_reserve) : 0;
       var quoted = reuse ? Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w })
-        : withTimeout(askedAgain(w, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
+        : unitWalletOn(w, unit).then(function (uw) {
+          return withTimeout(askedAgain(uw, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
+        });
       return quoted
         .then(function (won) {
         var quote = won.got;
         w = won.w;
         stage('quote');
         var owed = satsOf(quote.amount) + satsOf(quote.fee_reserve);
+        if (!reuse && shownMost > 0 && owed > shownMost) {
+          var dearer = /** @type {any} */ (new Error('The mint’s price moved: this payment now needs ' + moneyWords(owed, unit)
+            + ' with its fee, not the ' + moneyWords(shownMost, unit) + ' you confirmed. Nothing was sent.'));
+          dearer.definite = true;
+          dearer.repriced = true;
+          throw dearer;
+        }
         var at = mintOf(w);
+        // the mint's dollar price in this quote, for the screens (`mintRate`)
+        var rateHere = unit === 'usd' ? rateFrom(satsOf(quote.amount), carries || 0) : 0;
+        if (rateHere > 0) mintRates[canonicalMint(at)] = { usdPerBtc: rateHere, at: Date.now(), mint: canonicalMint(at) };
         /* A card's pieces, held for this payment: they are what is melted, every one, with no split of the pile and nothing
          * of the pile's added. Short of the quote (the fee rose while the card was read) or not there at all, nothing is sent
          * and the hold is left as it is, for the card. What they come to over the quote comes back as the melt's change. */
@@ -109,7 +158,7 @@
           var heldWorth = sumProofs(hold.proofs) - feeForInputs(w, hold.proofs.length);
           if (heldWorth < owed) throw unsent('The fee went up while the card was read, so the card\u2019s ' + sumProofs(hold.proofs) + ' sats do not cover it. Nothing was paid.');
         }
-        var have = heldId ? hold.proofs.slice() : proofs(at);
+        var have = heldId ? hold.proofs.slice() : proofs(at, unit);
         // the split itself costs this mint's input fee, on top of the melt
         /* Said with the figure it is refused on. It named the invoice and the
          * reserve and left this mint's fee out, so a refusal read "needs 1020
@@ -122,11 +171,11 @@
          * differ; the reserve can still move between that quote and this
          * one, which is when this is the one that says it. */
         var mn = heldId ? { ok: true } : meltNeed(w, have, owed);
-        if (!mn.ok) throw new Error(notEnoughWords(mn));
+        if (!mn.ok) throw new Error(notEnoughWords(mn, unit));
 
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
-        var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have });
+        var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
         var splitting = heldId ? Promise.resolve({ send: have, keep: null }) : splitGuard.run('payment split', function () {
           return w.send(owed, have, { includeFees: true });
         }).catch(function (e) {
@@ -143,7 +192,7 @@
            * in the pile or the hold, and a restore adds only what is held
            * nowhere. */
           // (a card's held pieces were never in the pile, and the pile is not touched)
-          if (!heldId) setProofs(split.keep || [], at, w);
+          if (!heldId) setProofs(split.keep || [], at, w, unit);
           // the split's own input fee: what left the pile and did not go to the melt
           var splitFee = heldId ? 0 : Math.max(0, sumProofs(have) - sumProofs(split.keep || []) - sumProofs(split.send || []));
 
@@ -160,8 +209,9 @@
            * mint what became of it. */
           var meltOutputs = [];      // the change outputs the melt reserves, as cashu-ts reports them
           try {
-            holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee,
-                     heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold } : undefined);
+            holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee, unit,
+                     heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold }
+                       : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null);
             /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
              * that cannot be let go is a melt that is not sent: the pieces stay where they were. */
             if (heldId) {
@@ -173,7 +223,7 @@
             // no hold on disk, so no melt: the proofs go back, and a pile that
             // cannot take them either keeps the split's record for recoverSwaps
             // (a card's pieces are still in their own hold, and stay there)
-            if (!heldId) addProofs(split.send || [], at, w);
+            if (!heldId) addProofs(split.send || [], at, w, unit);
             splitGuard.done();
             var unheld = /** @type {any} */ (new Error('Foxy could not write to this phone’s storage (it may be full), ' +
               'so the payment was not sent. Your ecash is still here. Free up space, then try again.'));
@@ -212,7 +262,7 @@
              * in the answer or was restored after the answer was lost. Marked
              * imported, spending it elsewhere later had reconcile set it aside
              * instead of removing it. */
-            addOwnProofs(change || [], at, w, undefined, restored);
+            addOwnProofs(change || [], at, w, unit, restored);
             dropMelt(quote.quote);
             /* Everything the payment cost beyond its amount: the proofs it spent,
              * and the split's fee, less the change kept. This was the fee
@@ -220,14 +270,15 @@
              * (NUT-02) and the split's — about 2 sats low on a live mint. */
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
             if (heldId) FoxyWallet.cardOutDone(heldId);
-            logTx({
+            // in the unit paid from (hard rule 4): a usd row is cents, with sats at 0
+            logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null, {
               dir: 'out',
               sats: satsOf(quote.amount),
               feeSats: Math.max(0, feeSats),
               settled: true,
               state: 'success',
               // paid with a card's pieces (SEND from the card's screen): said so on the entry, with the card
-              memo: heldId ? 'paid from card' : '',
+              memo: heldId ? 'paid from card' : swapId ? 'swap' : '',
               fromCard: heldId ? ((opts && opts.card) || (cardHold && cardHold.card) || undefined) : undefined,
               hash: quote.quote,
               bolt11: inv,
@@ -235,16 +286,22 @@
               preimage: preimage || undefined,
               // where it was paid from, which is not always where the phone is by now (`logTx`)
               mint: at,
-            });
+              // the mint's price in this payment, when it converted dollars
+              mintRate: rateHere > 0 ? rateHere : undefined,
+            })));
             logAudit({
               hash: quote.quote,
-              sats: satsOf(quote.amount),
-              feeSats: Math.max(0, feeSats),
+              sats: unit === 'sat' ? satsOf(quote.amount) : 0,
+              feeSats: unit === 'sat' ? Math.max(0, feeSats) : 0,
+              unit: unit === 'sat' ? undefined : unit,
+              amount: unit === 'sat' ? undefined : satsOf(quote.amount),
               kind: 'melt',
               inputs: (split.send || []).map(scrub),
               outputs: (change || []).map(scrub),
             });
-            return { hash: quote.quote, feeSats: Math.max(0, feeSats) };
+            if (swapId) unitSwapLanded(swapId, 'melt');
+            return { hash: quote.quote, unit: unit, amount: satsOf(quote.amount), fee: Math.max(0, feeSats),
+                     feeSats: unit === 'sat' ? Math.max(0, feeSats) : 0 };
           }
 
           /* It did not go: drop the hold and take the proofs back. */
@@ -255,10 +312,12 @@
              * same proofs back a second time. */
             // a card's pieces go back to their hold, for the card, and not into the pile
             if (heldId) cardOutReturn(heldId, split.send || [], at, cardHold || {});
-            else addOwnProofs(split.send || [], at, w, undefined, true);
+            else addOwnProofs(split.send || [], at, w, unit, true);
             dropMelt(quote.quote);
             // the split before it was made and paid for, whatever became of the melt
-            if (meltGone(quote.quote)) chargeUnsentFee(at, splitFee);
+            if (unit !== 'sat') { if (meltGone(quote.quote)) meltBackFee(at, unit, splitFee); }
+            else if (meltGone(quote.quote)) chargeUnsentFee(at, splitFee);
+            if (swapId) unitSwapLanded(swapId, 'melt', 'back');
             var e = /** @type {any} */ (new Error(message || 'That payment could not be routed. Nothing was sent.'));
             e.definite = true;
             if (heldId) e.held = heldId;
@@ -307,12 +366,12 @@
             if (state === 'UNKNOWN') {
               // held; the sweep asks the mint on the next resume
               console.warn('[foxy] the mint answered without a state \u2014 proofs stay held');
-              return { hash: quote.quote, feeSats: 0, pending: true };
+              return { hash: quote.quote, unit: unit, amount: satsOf(quote.amount), fee: 0, feeSats: 0, pending: true };
             }
 
             if (state === 'PENDING') {
               // already held, from before the request went out
-              return { hash: quote.quote, feeSats: 0, pending: true };
+              return { hash: quote.quote, unit: unit, amount: satsOf(quote.amount), fee: 0, feeSats: 0, pending: true };
             }
 
             if (state === 'UNPAID' || state === 'FAILED') throw notSent();
@@ -588,7 +647,10 @@
         looked = FoxyWallet.lookupLnurl(addr, sats, comment, onStage);
       }
       return looked.then(function (found) {
-        return FoxyWallet.pay(found.pr, onStage, { payee: a, quote: opts && opts.quote,
+        /* Asked in sats, always: a Lightning address names msat. Paid from
+         * the unit the person chose; from dollars the mint's quote says what
+         * that costs in cents. From a card's held pieces, in sats. */
+        return FoxyWallet.pay(found.pr, onStage, { payee: a, quote: opts && opts.quote, unit: opts && opts.unit,
                                                     held: (opts && opts.held) || undefined, card: (opts && opts.card) || undefined });
       });
     },

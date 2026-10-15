@@ -3810,7 +3810,7 @@
     var off = watchReserved(w, saw);
     return Promise.resolve().then(function () {
       // a token gathers the pieces of one keyset together: read back from one, they are in the order the swap will have them
-      var token = CT.getEncodedToken({ mint: mintOf(w), proofs: bare, unit: 'sat' });
+      var token = encodeToken(mintOf(w), bare, 'sat');
       // shaped as any receipt is, to fill this phone's own pile (`receiveToken`)
       /* As many of the pool's missing pieces as leave the whole swap at
        * CARD_OUTPUTS_MOST outputs or fewer, counting the powers of two the
@@ -4780,8 +4780,8 @@
         throw cardError('spent', 'The mint says this card’s money was already spent.');
       }
       var sats = sumProofs(good);
-      var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), unit: 'sat',
-        proofs: good.map(function (p) { return { id: p.id, amount: p.amount, secret: p.secret, C: p.C }; }) });
+      var token = encodeToken(mintOf(w),
+        good.map(function (p) { return { id: p.id, amount: p.amount, secret: p.secret, C: p.C }; }), 'sat');
       // owed first, then struck off: never in neither
       mustSave(CARD_OWED, cardStore(CARD_OWED).filter(function (r) { return !(r && r.id === 'back-' + row.id); })
         .concat([{ id: 'back-' + row.id, card: row.card, token: token, sats: sats, kind: 'putback', forHash: row.id, at: Date.now() }]));
@@ -4985,7 +4985,7 @@
           var cost = swapFeeFor(w, f.signed);
           if (!isFinite(cost) || cost < 0) cost = 0;
           if (!cardStore(CARD_TAKEN).some(function (r) { return r && r.id === id; })) {
-            var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: f.signed, unit: 'sat' });
+            var token = encodeToken(mintOf(w), f.signed, 'sat');
             // the change the card made for itself in that swap (software 1.12), which is not this phone's to give back and not a fee
             var madeBy = f.spec.change && Array.isArray(f.spec.change.outs) ? f.spec.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
             var kept = a.all
@@ -5224,7 +5224,7 @@
        * asked for the next: the row, with the outputs it was signed for
        * (CARD_SWAPS), is the only copy of the right to spend those pieces. */
       return cardSignAll(t, card, w, groups, pin, lift, o.progress, function (signedNow, plan) {
-        var kept = { id: 'card-' + plan.id, token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signedNow, unit: 'sat' }),
+        var kept = { id: 'card-' + plan.id, token: encodeToken(mintOf(w), signedNow, 'sat'),
                      // what was signed for, which is the cheaper set where the card would have waited for the other
                      // `over`: what this phone makes of the change after the swap; `cardChange`: what the card made of it itself (1.12)
                      sats: o.all ? plan.net : want, worth: plan.net, over: o.all ? 0 : plan.net - want - plan.cardChange, cardChange: o.all ? 0 : plan.cardChange,
@@ -5256,7 +5256,7 @@
         row = made[0];
         moreRows = moreRows.concat(made.slice(1));
       } else {
-        var token = window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' });
+        var token = encodeToken(mintOf(w), signed, 'sat');
         // a payment taken up that was signed with the card's own change in it: that part of the change is not this phone's to make
         var spec0 = cardSwapFor(signed);
         var cc0 = (spec0 && spec0.change && Array.isArray(spec0.change.outs)) ? spec0.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
@@ -5330,7 +5330,7 @@
         var torn = ((held && held.resume && held.resume.torn) || []).slice();
         if (flightParts && flightParts.nonce) torn.push({ nonce: flightParts.nonce, amount: satsOf(inFlight.amount) });
         var keep = { id: 'card-' + piecesFingerprint(holding),
-                     token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: holding, unit: 'sat' }),
+                     token: encodeToken(mintOf(w), holding, 'sat'),
                      sats: 0, worth: sumProofs(holding), over: sumProofs(holding), all: false, card: card.key,
                      memo: 'card, not completed', at: Date.now(), refund: true, resume: { want: want, torn: torn } };
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([keep]));
@@ -5352,7 +5352,7 @@
         var partNet = sumProofs(some) - (function () { var f = swapFeeFor(w, some); return (isFinite(f) && f > 0) ? f : 0; })();
         partNet = Math.max(0, partNet);
         var partKeep = o.all ? partNet : Math.min(want, partNet);
-        var part = { id: 'card-' + piecesFingerprint(some), token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: some, unit: 'sat' }),
+        var part = { id: 'card-' + piecesFingerprint(some), token: encodeToken(mintOf(w), some, 'sat'),
                      sats: partKeep, worth: partNet, over: partNet - partKeep, all: !!o.all, card: card.key, memo: memo, at: Date.now(),
                      limited: !!(card.day && card.day.limited), partial: true };
         var partNonces = some.map(function (pr) { var parts = cardSecretParts(pr.secret); return parts ? parts.nonce : ''; });
@@ -5367,7 +5367,7 @@
             + ' sats came off it into this phone; tap it again for the rest.', { sats: partKeep, left: rest, hash: part.id });
         });
       }
-      var back = { id: 'card-' + piecesFingerprint(some), token: window.CashuTS.getEncodedToken({ mint: mintOf(w), proofs: some, unit: 'sat' }),
+      var back = { id: 'card-' + piecesFingerprint(some), token: encodeToken(mintOf(w), some, 'sat'),
                    sats: 0, worth: sumProofs(some), over: sumProofs(some), all: false, card: card.key, memo: 'card, not completed', at: Date.now(),
                    refund: true };
       mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([back]));

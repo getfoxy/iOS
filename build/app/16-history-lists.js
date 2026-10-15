@@ -22,6 +22,8 @@
         payFrom: 'BITCOIN',
         amount: '',
         unit: 'USD',
+        // the remembered balance pays, until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
     }));
   }
@@ -67,6 +69,24 @@
     const W = window.FoxyWallet;
     const held = Math.round(Number(W && W.heldSats && W.heldSats()) || 0);
     if (held > 0) return this.stageMoney(held) + ' pending with the mint';
+    /* A swap between balances the mint has not finished: what it took, in the
+     * balance it came from ("$ 10.00 pending with the mint"), until the wallet
+     * finishes it (26i-swap.js). Read first, so a dollar leg is not named twice. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && W && W.unitSwapsPending) {
+      let swaps = [];
+      try { swaps = W.unitSwapsPending() || []; } catch (e) { swaps = []; }
+      const sum = { usd: 0, sat: 0 };
+      swaps.forEach(r => { const u = r && r.from && r.from.unit === 'sat' ? 'sat' : 'usd'; sum[u] += Math.max(0, Math.round(Number(r && r.from && r.from.amount) || 0)); });
+      const parts = ['usd', 'sat'].filter(u => sum[u] > 0).map(u => this.unitFigure(sum[u], u));
+      if (parts.length) return parts.join(' and ') + ' pending with the mint';
+    }
+    /* Dollars held the same way, at a mint with two balances: a swap the mint
+     * has not finished, named in dollars. */
+    if (this.twoUnitsOn && this.twoUnitsOn() && W && W.heldIn) {
+      let cents = 0;
+      try { cents = Math.round(Number(W.heldIn('usd')) || 0); } catch (e) { cents = 0; }
+      if (cents > 0) return this.unitFigure(cents, 'usd') + ' pending with the mint';
+    }
     const back = this.recoveringSats();
     return back > 0 ? this.stageMoney(back) + ' being recovered from the mint' : '';
   }
@@ -93,6 +113,16 @@
     const held = Math.round(Number(W && W.heldSats && W.heldSats()) || 0);
     const short = Math.round(Number(shortBy) || 0);
     return (held > 0 && short > 0 && short <= held) ? this.heldNote() : '';
+  }
+
+  /* The books of one balance: `histAudit` for bitcoin, as it always was, and
+   * `histAuditUsd` for dollars. At a mint with two balances each adds up on its
+   * own, in its own unit: dollars walked back from the dollar balance in cents
+   * with the rows' own `amount` and `feeAmount`, bitcoin from the sats with
+   * `sats` and the fee. A row of the other unit carries the balance through
+   * untouched. */
+  histAuditIn(unit) {
+    return unit === 'usd' ? this.histAuditUsd() : this.histAudit();
   }
 
   histAudit() {
@@ -183,6 +213,35 @@
       }
     }
     return { balOf, balNow, run, whole, off, held, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
+  }
+
+  histAuditUsd() {
+    const s = this.state;
+    const W0 = window.FoxyWallet;
+    const balOf = new Map();
+    const balNow = Math.max(0, Math.round(Number(s.balUsdCents) || 0));
+    let run = balNow;
+    (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
+      balOf.set(t, run);
+      if (t.unit !== 'usd') return;
+      const moved = !(t.pending && t.dir === 'in') && !t.failed && !t.atRisk && !t.split;
+      if (!moved) return;
+      const by = t.dir === 'in' ? Math.round(Number(t.amount) || 0)
+        : Math.round(Number(t.amount) || 0) + Math.max(0, Math.round(Number(t.feeAmount) || 0));
+      run += t.dir === 'in' ? -by : by;
+    }));
+    const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
+    let held = 0, back = 0;
+    try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd')) || 0); } catch (e) { held = 0; }
+    try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd')) || 0); } catch (e) { back = 0; }
+    const off = whole ? Math.round(run) + held + back : 0;
+    const sig = [balNow, off].join('|');
+    if (whole && sig !== this._auditSigUsd) {
+      this._auditSigUsd = sig;
+      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off);
+    }
+    return { balOf, balNow, run, whole, off, held, back, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
+      toShowCount: 0, flagged: new Map() };
   }
 
   txTotalOut(t) {
@@ -321,6 +380,11 @@
           unit: t.unit && t.unit !== 'sat' ? t.unit : '',
           amount: t.amount,
           feeAmount: t.feeAmount,
+          // the mint it was at, and for one leg of a swap between balances: the swap, and the mint's rate then
+          mint: t.mint || '',
+          kind: t.kind || '',
+          swap: t.swap || '',
+          mintRate: t.mintRate || null,
           rail: 'Lightning',
           time: this.txLabel(d, now),
           // the same moment with its date, for the detail screen
@@ -503,8 +567,13 @@
          * still reading a card. `requestDelivered` clears
          * the mark and announces it at the moment it is true. */
         if (tags.inflight) return;
-        // another unit's receive is confirmed where it was taken; this screen counts sats
-        if (this.txIsNew(t.hash) && !(t.unit && t.unit !== 'sat')) fresh.push(t);
+        /* Another unit's receive is confirmed where it was taken; this screen
+         * counts sats. Except dollars at a mint with two balances, which this
+         * screen shows as dollars; and never a leg of a swap between them,
+         * which its own screen reports. */
+        const usdHere = t.unit === 'usd' && !!(this.twoUnitsOn && this.twoUnitsOn());
+        if (t.kind === 'swap') { this.txIsNew(t.hash); return; }
+        if (this.txIsNew(t.hash) && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
       });
       this._seenSeeded = true;
 

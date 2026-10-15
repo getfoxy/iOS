@@ -223,13 +223,19 @@
    * They are neither spent nor ours until the mint says which. Keeping them
    * here means the balance does not count them — the payment may go through —
    * and the sweep can give them back if it does not. */
-  /* `extra`: more for the hold to carry. A card's payment out of this phone names the card's hold its pieces came from
-   * (`cardOut`, `card`, `cardHold`: 08a-flashcard.js), so that a melt that did not go gives them back there, for the card,
-   * and one that did says on its entry that it was paid from the card. */
-  function holdMelt(quote, sent, bolt11, at, payee, splitFee, extra) {
+  /* `unit`: the unit the melt is paid in, which is the unit of its pieces,
+   * its amount, its reserve and its change (hard rule 3: a usd melt cut off
+   * mid-flight must come back into the usd pile, never the sat one). `extra`:
+   * more for the hold to carry. A swap between units writes { swap, mintRate }
+   * beside it. A card's payment out of this phone names the card's hold its
+   * pieces came from (`cardOut`, `card`, `cardHold`: 08a-flashcard.js), so that
+   * a melt that did not go gives them back there, for the card, and one that
+   * did says on its entry that it was paid from the card. */
+  function holdMelt(quote, sent, bolt11, at, payee, splitFee, unit, extra) {
     var list = load(K.melting, []).filter(function (e) { return e.quote !== quote.quote; });
-    list.push(Object.assign({
+    var held = {
       quote: quote.quote,
+      unit: unitOf(unit) || 'sat',
       amount: satsOf(quote.amount) || 0,
       feeReserve: satsOf(quote.fee_reserve) || 0,
       proofs: sent || [],
@@ -244,12 +250,18 @@
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],
-    }, extra || {}));
+    };
+    var more = Object.assign({}, extra || {});
+    if (more.swap) { held.swap = String(more.swap); held.mintRate = Number(more.mintRate) || undefined; }
+    delete more.swap; delete more.mintRate;
+    // what a card's payment carries (cardOut, card, cardHold), as it came; the fields above are not overwritten
+    Object.keys(more).forEach(function (k) { if (!(k in held)) held[k] = more[k]; });
+    list.push(held);
     /* A hold that could not be written throws, and the melt is not sent: a
      * payment in flight with no hold on disk is money a killed app forgets
      * (audit W6). pay gives the proofs back to the pile. */
     mustSave(K.melting, list, true);
-    console.log('[foxy] holding', sumProofs(sent || []), 'sats against melt', quote.quote);
+    console.log('[foxy] holding', formatAmount(sumProofs(sent || []), held.unit), 'against melt', quote.quote);
   }
 
   /* Counter reservations as cashu-ts reports them ({ keysetId, start, count }),
@@ -594,7 +606,7 @@
       for (var b = 0; b < live.length; b += 100) batches.push(live.slice(b, b + 100));
       return batches.reduce(function (chain, batch) {
         return chain.then(function () {
-          var token = window.CashuTS.getEncodedToken({ mint: at, proofs: batch, unit: 'sat' });
+          var token = encodeToken(at, batch, 'sat');
           // its outputs on disk until the answer is in (swapGuard), and what they add up to
           var guard = swapGuard(w, 'import', { amount: sumProofs(batch), expect: sumProofs(batch) - swapFeeFor(w, batch) });
           return guard.run('import', function () {

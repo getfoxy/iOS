@@ -20,8 +20,28 @@
     };
     const recvReady = () => !!(s.recvVia === 'wire' || s.network === 'BANK WIRE'
       || (onchain ? ocCode() : cashu ? creq() : s.invoice));
+    /* At a mint with two balances: the title between the round buttons, the
+     * WALLET chip beside NETWORK, and for dollars the cents asked for, no tap
+     * and no card (bitcoin only), and the minute the code lives counted down. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usdIn = two && this.walletNow('receive') === 'usd';
+    const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
+    const usdCents = usdIn ? (s.recvAmount != null ? s.recvAmount : this.centsTyped()) : 0;
     return {
       isConfirm: sc === 'confirm',
+      recvHeadOne: !two,
+      recvHeadTwo: two,
+      recvChipsOne: !two,
+      recvChipsTwo: two,
+      recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
+      pickRecvWallet: () => {
+        if (this.offlineNow()) { this.offlineNo('Choosing a balance'); return; }
+        this.pickRecvWallet();
+      },
+      recvTapShown: !usdIn,
+      recvCardShown: !usdIn,
+      recvClockShown: usdIn && !!s.invoice && !!s.recvExpiresAt,
+      recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
        * something real behind its QR — the invoice, the request, the address —
        * there is nothing to copy or share, and they are greyed and do nothing. */
@@ -59,11 +79,13 @@
        * a wrong one: the sats are whatever the paying phone's current price
        * makes of the amount, which is the number this phone is then asked to
        * agree to (`dollarsOnly`, `priceTermsCard`). */
-      confirmAmount: val <= 0 ? 'ANY AMOUNT'
+      // dollars asked for in dollars: the cents exactly, and no second figure, as nothing converts
+      confirmAmount: usdIn ? (usdCents > 0 ? this.unitFigure(usdCents, 'usd') : 'ANY AMOUNT')
+        : val <= 0 ? 'ANY AMOUNT'
         : this.dollarsOnly() ? '$ ' + this.usd(val)
         : s.asset === 'BITCOIN' ? this.money(sats).main : '$ ' + this.usd(usd),
-      confirmAlt: this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
-      showSats: s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly(),
+      confirmAlt: usdIn ? '' : this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
+      showSats: !usdIn && s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly(),
       confirmTitle: onchain ? 'RECEIVE ON CHAIN' : 'RECEIVE INVOICE',
       confirmNetwork: onchain ? 'ON-CHAIN' : cashu ? 'CASHU' : (s.network || 'LIGHTNING'),
       // the middle of the QR says which it is: the bolt, ecash, or a coin
@@ -169,6 +191,32 @@
   /** @param {RenderContext} c */
   renderPaid(c) {
     const { s, sc, sats } = c;
+    /* Dollars arrived (or left): the figure in cents, as it is, with no sats
+     * under it and no coins, and the words name the dollar balance. */
+    const usdPaid = s.paidUnit === 'usd';
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    if (usdPaid) {
+      const cents = Math.round(Number(s.paidAmount) || 0);
+      const fee = s.payOut ? Math.round(Number(this._lastPay && this._lastPay.fee) || 0) : 0;
+      return Object.assign(this.renderPaidBase(c), {
+        paidHeadline: this.unitFigure(cents + fee, 'usd'),
+        paidHeadlineSub: '',
+        paidBreakdown: !!s.payOut && fee > 0,
+        paidSentAmt: this.unitFigure(cents, 'usd'),
+        paidFeeAmt: this.unitFigure(fee, 'usd'),
+        paidAddedTo: s.payOut ? this.paidTargetLabel() : 'DOLLARS',
+        paidStack: '',
+      });
+    }
+    const base = this.renderPaidBase(c);
+    // bitcoin at a mint with two balances is named as the balance it went into
+    if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    return base;
+  }
+
+  /** @param {RenderContext} c */
+  renderPaidBase(c) {
+    const { s, sc, sats } = c;
     return {
       isPaid: sc === 'paid',
       /* Outgoing shows what left the wallet; incoming shows what arrived.
@@ -200,9 +248,10 @@
       paidLive: (s.recv && s.recv.live) !== 'gone',
       dismissPaid: () => {
         this.setState(p => ({ recv: Object.assign({}, p.recv, { live: 'out' }) }));
+        const lane = this.state.paidUnit === 'usd' ? 'usd' : 'btc';
         setTimeout(() => {
-          // counts to whatever the wallet holds now, in either direction
-          this.settleAnimate('btc');
+          // counts to whatever the wallet holds now, in either direction, on the pill it landed on
+          this.settleAnimate(lane);
           // back to whatever the confirmation interrupted, when it interrupted
           // something. Cleared either way so it cannot leak into the next one.
           const back = this._returnTo;
@@ -211,7 +260,7 @@
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -310,6 +359,39 @@
   renderSent(c) {
     const { s, sc, sats } = c;
     const sendPhase = s.sendPhase || 'in';
+    /* At a mint with two balances the screen says which paid: FROM DOLLARS or
+     * FROM BITCOIN. Dollars that paid are shown as dollars, the fee in them,
+     * and what the payee was paid in sats under it: that is the conversion. */
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    const paying = this._paying || null;
+    const lastPay = this._lastPay || null;
+    const unitOut = (lastPay && lastPay.unit) || (paying && paying.unit) || 'sat';
+    const usdOut = two && unitOut === 'usd';
+    const usdVals = !usdOut ? {} : (() => {
+      const done = !!lastPay;
+      const amount = done ? Math.round(Number(lastPay.amount) || 0) : Math.round(Number(paying && paying.amount) || 0);
+      const fee = done ? Math.round(Number(lastPay.fee) || 0) : Math.round(Number(paying && paying.fee) || 0);
+      const asked = Math.round(Number((lastPay && lastPay.asked) || (paying && paying.asked)) || 0);
+      return {
+        sentHeadline: this.unitFigure(amount + fee, 'usd'),
+        sentHeadlineSub: asked ? '\u20bf ' + this.group(asked) + ' delivered' : '',
+        sentBreakdown: fee > 0,
+        sentSentAmt: this.unitFigure(amount, 'usd'),
+        sentFeeAmt: this.unitFigure(fee, 'usd'),
+        sentStack: '',
+      };
+    })();
+    return Object.assign(this.renderSentBase(c), {
+      // (not from a card: FROM BITCOIN would name this phone's balance, which did not pay)
+      sentFromShown: two && sc === 'sendDone' && (sendPhase === 'done' || sendPhase === 'settled') && !(this.cardSendNow && this.cardSendNow()),
+      sentFrom: 'FROM ' + this.unitWord(unitOut),
+    }, usdVals);
+  }
+
+  /** @param {RenderContext} c */
+  renderSentBase(c) {
+    const { s, sc, sats } = c;
+    const sendPhase = s.sendPhase || 'in';
     return {
       isSendDone: sc === 'sendDone',
       // eight seconds in and still sending: say so, and offer the way off
@@ -380,8 +462,9 @@
       sentHome: () => {
         if (s.sendExit) return;
         this.setState({ sendExit: true });
+        const lane = (this._lastPay && this._lastPay.unit === 'usd') ? 'usd' : 'btc';
         setTimeout(() => {
-          this.settleAnimate('btc');
+          this.settleAnimate(lane);
           this.setState({
             // (a payment from a card ends here too: home is out of its flow)
             screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', sendFrom: '',
@@ -395,6 +478,22 @@
   /* tokenOut: a generated ecash token. */
   /** @param {RenderContext} c */
   renderToken(c) {
+    const { s, sc } = c;
+    const base = this.renderTokenBase(c);
+    /* A dollar token: its cents, as they are, and no sats line. */
+    if (s.tokenOutUnit === 'usd') {
+      return Object.assign(base, {
+        tokenAmount: this.unitFigure(s.tokenOutAmount, 'usd'),
+        tokenAlt: '',
+        tokenShowAlt: false,
+        tokenFee: this.unitFigure(s.tokenOutFee || 0, 'usd'),
+      });
+    }
+    return base;
+  }
+
+  /** @param {RenderContext} c */
+  renderTokenBase(c) {
     const { s, sc } = c;
     return {
       isTokenOut: sc === 'tokenOut',
@@ -448,11 +547,12 @@
         if (!ok) this.toast('Could not copy.', true);
       },
       tokenOutDone: () => {
+        const lane = this.state.tokenOutUnit === 'usd' ? 'usd' : 'btc';
         window.FoxyWallet.clearLastToken();
-        this.setState({ screen: 'home', stack: [], tokenOut: '', tokenCopied: false, tokenForPayee: false });
+        this.setState({ screen: 'home', stack: [], tokenOut: '', tokenCopied: false, tokenForPayee: false, tokenOutUnit: '' });
         // a watch not kept ends with its screen; a kept one goes on elsewhere
         setTimeout(() => this.claimWatchTick(), 0);
-        this.settleAnimate('btc');
+        this.settleAnimate(lane);
       },
     };
   }

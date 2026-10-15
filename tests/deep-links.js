@@ -409,7 +409,11 @@ const FREE_SCREENS = ['change', 'contacts', 'fieldLog', 'flashcard', 'history', 
 const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfirm', 'fcLimitConfirm', 'fcMoveConfirm', 'feeTooLow',
   'importSeed', 'newMint', 'ocConfirm', 'paid', 'priceConfirm', 'reqOffer', 'rsConfirm', 'sendConfirm', 'sendDone', 'sendFail',
   'sendHow', 'sendScan', 'sendType', 'spAllPaid', 'spAmount', 'spAssign', 'spPayer', 'spShares', 'spWaiting', 'spWays', 'tokenOut',
-  'trConfirm'];
+  'trConfirm',
+  // two balances at one mint: what to hold, CURRENCY, WALLET, and SWAP are choices in progress
+  'currency', 'holdChoice', 'swap', 'walletPick',
+  // and SWAP's confirmation and SWAPPED: a swap being decided, and one just made
+  'swapConfirm', 'swapDone'];
 
 /* What the page logs for a card tap (one line per outcome), taken off the console as it goes. */
 const cardLines = [];

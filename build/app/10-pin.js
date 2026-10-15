@@ -69,6 +69,57 @@
     });
   }
 
+  /* ---- WHAT DO YOU WANT TO HOLD? ------------------------------------------
+   *
+   * The last first step, at a mint that issues dollars and bitcoin: after the
+   * Tor gate, after the custody and passcode cards, after SECURE FOXY, and
+   * before the home is used. Dollars or Bitcoin sets both remembered balances
+   * and gives a home with one pill; Both gives two pills and leaves each kind
+   * of flow to ask once (the CURRENCY screen). A mint with one balance never
+   * asks. Asked once: the answer is kept by the wallet (`setWalletChoice`), and
+   * MENU › WHAT YOU HOLD asks it again. */
+  holdDue() {
+    const W = window.FoxyWallet;
+    if (!this.twoUnitsOn() || !W || !W.setWalletChoice) return false;
+    return !this.walletChoiceNow().hold && !this._holdLater;
+  }
+
+  /* Up when it is due and nothing else is: a card, the PIN pad, or a flow the
+   * person is in. Tried again a moment later while something is up, a few
+   * times, and then left for the next launch. */
+  offerHoldChoice(tries) {
+    const n = Number(tries) || 0;
+    if (!this.holdDue()) return;
+    const busy = !!(this._blockedEl && this._blockedEl.parentNode) || !!(this._pinEl && this._pinEl.parentNode)
+      || this.state.screen !== 'home' || !!this.state.open0;
+    if (busy) {
+      clearTimeout(this._holdT);
+      if (n < 40) this._holdT = setTimeout(() => this.offerHoldChoice(n + 1), 1500);
+      return;
+    }
+    console.log('[foxy] two balances: asking what to hold');
+    this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]), holdPick: '' }));
+  }
+
+  /* Back from the question: not answered, so it is asked again next launch. */
+  holdLater() {
+    this._holdLater = true;
+    this.setState({ screen: 'home', stack: [], holdPick: '' });
+  }
+
+  holdDone() {
+    const W = window.FoxyWallet;
+    const hold = this.state.holdPick;
+    if (!hold) { this.toast('Pick one first.', true); return; }
+    try { W.setWalletChoice({ hold: hold }); } catch (e) {
+      this.toast((W && W.reason) ? W.reason(e) : 'That could not be kept.', true);
+      return;
+    }
+    console.log('[foxy] two balances: holding ' + hold);
+    this.setState({ screen: 'home', stack: [], holdPick: '' });
+    this.refreshBalance();
+  }
+
   /* Never on one tap: this is the one choice that takes a guard off. */
   /* Reached from the SECURE FOXY card and from MENU > STOP FACE ID, so it says
    * what it costs rather than what to pick. */
@@ -95,6 +146,8 @@
        * locks the screen as well as the seed. */
       this.toast(mode === 'none' ? 'Foxy is not protected.' : 'Face ID now locks Foxy.');
       this.forceUpdate();
+      // and then, at a mint with two balances, what to hold, if it has not been asked
+      if (this.offerHoldChoice) this.offerHoldChoice();
     }, e => {
       this.toast(W.reason ? W.reason(e) : 'That could not be changed.', true);
     });

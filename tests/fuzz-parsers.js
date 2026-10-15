@@ -238,7 +238,9 @@ reader('decodeRequest', fromCorpus(REQUESTS), {
     if (r === null) return null;
     if (typeof r !== 'object') return 'returned ' + typeof r;
     if (typeof r.id !== 'string' || typeof r.unit !== 'string' || typeof r.description !== 'string') return 'fields of the wrong type: ' + JSON.stringify(r).slice(0, 160);
-    if (!Number.isFinite(r.sats) || r.sats < 0) return 'sats ' + r.sats;
+    if (!Number.isFinite(r.amount) || r.amount < 0) return 'amount ' + r.amount;
+    // the amount is in the request's unit; `sats` is that amount for sats and null for any other unit
+    if (r.unit === 'sat' ? r.sats !== r.amount : r.sats !== null) return 'sats ' + r.sats + ' for unit ' + r.unit;
     if (!Array.isArray(r.mints) || r.mints.some((m) => typeof m !== 'string')) return 'mints ' + JSON.stringify(r.mints).slice(0, 120);
     if (!Array.isArray(r.transports)) return 'transports not a list';
     return null;

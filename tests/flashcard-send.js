@@ -751,6 +751,82 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(books().length === 0, 'the books add up', books().join(' / '));
   }
 
+  /* ---- 22: at a mint with two balances (dollars and bitcoin): a card pays in bitcoin, and card mode alone changes ----
+   * The mint issues sat and usd (fakeMint `units`), this phone holds dollars as well as bitcoin, and its sends have no
+   * balance remembered yet. In card mode the confirmation is the card's: FROM FLASHCARD and NEXT, with no CURRENCY question
+   * first, no WALLET button and no RATE row, and the card's sats pay. The dollars are not touched. Out of card mode the same
+   * invoice gets the two-balance CONFIRM PAYMENT again, with its WALLET button. */
+  {
+    const T = await funded({ units: ['sat', 'usd'] }, 6000);
+    T.fate = addressServer;
+    await T.W.claim((await T.W.invoice(500, '', { unit: 'usd' })).hash);
+    const two = appOn(T, {}, { send: true });
+    await two.refreshBalance();
+    const k = newCard(T, undefined, { format: 4 });
+    await T.W.cardSetUp(k, {});
+    k.tap();
+    await T.W.cardAdd(k, { sats: 1500, owner: true });
+    await two.refreshBalance();
+    const upd = () => { two.syncCardOut(); two.syncSend(); };
+    const usdBefore = T.W.balanceOf('usd');
+    ok(two.twoUnitsOn() && usdBefore === 500 && T.W.walletChoice().send === '',
+       'a mint with two balances: this phone holds $5.00 beside its bitcoin, and no balance is remembered for sends', JSON.stringify({ usd: usdBefore, choice: T.W.walletChoice() }));
+    // the card's screen, then SEND, then an invoice pasted
+    two.setState({ screen: 'home', stack: [], sendFrom: '' });
+    T.nfc = k;
+    two.goFlashcard();
+    await until('the card to be read', () => !!two.state.fc && two.state.fc.key === k.key && two.state.fc.check !== 'asking');
+    await settle();
+    const before = k.balance();
+    vals(two).fcSend();
+    upd();
+    two._quotedFor = null;
+    two.acceptTarget(invoice(400));
+    upd();
+    await until('the fee to be quoted', () => two.state.quotedFee != null || !two.state.quotingFee && two.state.screen !== 'sendConfirm');
+    upd();
+    ok(two.state.screen === 'sendConfirm' && two.state.sendFrom === 'card' && two.cardSendNow() && two.walletNow('send') === 'sat',
+       'in card mode the invoice goes straight to its confirmation: no CURRENCY question, and the card pays in bitcoin', two.state.screen + ' | ' + two.walletNow('send'));
+    const sp = two.confirmSpec();
+    const labels = sp.rows.map((r) => r.label);
+    ok(!sp.wallet && labels.indexOf('RATE') < 0 && labels.indexOf('PAYING FROM') < 0 && sp.cta === 'NEXT'
+       && sp.rows.some((r) => r.label === 'FROM' && r.value === 'FLASHCARD'),
+       'SEND from the card at a two-unit mint: FROM FLASHCARD and NEXT, with no WALLET button and no RATE row', labels.join() + ' | ' + sp.cta);
+    ok(!two.state.feeQ && !!two._feeQuote && (two._feeQuote.unit === undefined || two._feeQuote.unit === 'sat'),
+       'and its fee was asked once, in sats: no quote of both balances', JSON.stringify(two._feeQuote && { unit: two._feeQuote.unit, fee: two._feeQuote.feeReserve }));
+    sp.go();
+    await until('the payment to be made', () => two.state.screen === 'sendDone' && two.state.sendPhase === 'settled');
+    await until('the tap to be over', () => !(two._fcTaps > 0));
+    await settle();
+    const out = history(T).find((e) => e.dir === 'out' && e.memo === 'paid from card');
+    ok(before - k.balance() === 410 && !!out && out.sats === 400 && (out.unit === undefined || out.unit === 'sat') && out.fromCard === k.key,
+       'NEXT pays in sats from the card: 410 off it, and the entry is a bitcoin one, paid from the card', JSON.stringify(out && { sats: out.sats, unit: out.unit }));
+    ok(T.W.balanceOf('usd') === usdBefore && T.W.walletChoice().send === '',
+       'the dollar pill is untouched by the card’s payment, and nothing is remembered from it for the next send', String(T.W.balanceOf('usd')));
+    ok(booksWrong(T).length === 0, 'the books add up, per unit', booksWrong(T).join(' / '));
+    // out of card mode: home's SEND, the same kind of invoice, from this phone, with dollars remembered for sends
+    two.setState({ screen: 'home', stack: [], sendPhase: null });
+    upd();
+    T.W.setWalletChoice({ send: 'usd' });
+    two.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '',
+      wallet: '', walletAuto: false, walletTapped: false, feeQ: null }));
+    upd();
+    two._quotedFor = null;
+    two.acceptTarget(invoice(400));
+    // (from this phone the invoice is first asked whether this mint made it, so the confirmation comes a moment later)
+    await until('the confirmation', () => two.state.screen === 'sendConfirm');
+    upd();
+    await until('both balances to be quoted', () => !!two.state.feeQ && !!two.state.feeQ.usd);
+    upd();
+    const sp2 = two.confirmSpec();
+    const labels2 = sp2.rows.map((r) => r.label);
+    ok(!two.cardSendNow() && sp2.title === 'CONFIRM PAYMENT' && !!sp2.wallet && sp2.wallet.word === 'USD' && labels2.indexOf('RATE') >= 0
+       && labels2.indexOf('FROM') < 0 && sp2.cta === 'PAY',
+       'leaving card mode restores the two-unit confirmation: CONFIRM PAYMENT, the WALLET button on USD, the RATE row, PAY', labels2.join() + ' | ' + sp2.cta);
+    two.setState({ screen: 'home', stack: [] });
+    upd();
+  }
+
   ok(!stage(H), 'no card screen is left up');
   console.log(failed || until.failed ? '\n' + (failed + until.failed) + ' FAILED' : '\nall flashcard-send checks pass');
   process.exit(failed || until.failed ? 1 : 0);

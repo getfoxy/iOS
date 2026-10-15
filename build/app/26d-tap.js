@@ -38,6 +38,10 @@
     if (s.screen === 'amount' && s.flow === 'receive') {
       return this.tapAutoArms() ? { inv: '', req: '', waiting: true } : null;
     }
+    /* A receive into the dollar balance is never on the air: taps carry
+     * bitcoin only, and a dollar invoice is paid by scanning it. */
+    if ((s.screen === 'amount' || s.screen === 'confirm') && s.flow === 'receive'
+        && this.walletNow && this.walletNow('receive') === 'usd') return null;
     // the receive invoice screen
     if (s.screen === 'confirm' && s.flow === 'receive') {
       if (s.recvRail === 'ON-CHAIN' || s.invoiceIsAddress) return null;
@@ -1306,6 +1310,14 @@
         this.tapGaveNothing('their offer could not be read');
         return;
       }
+      // a request in dollars, with no invoice to pay instead: refused in words, before anything moves
+      if (offer.notSats) {
+        console.log('[foxy] tap: their request is not in sats; not paid');
+        this.hideConnecting();
+        this.toast(offer.notSats, true);
+        this.tapGaveNothing('their request asks for dollars');
+        return;
+      }
       /* Already paid, by this phone, a moment ago.
        *
        * A payment over Lightning crosses no link, so the receiver learns of
@@ -1442,6 +1454,18 @@
     });
   }
 
+  /* Why a request read off a tap cannot be paid by one, or '' when it can.
+   * A request names its unit and its amount in that unit; only sats are paid
+   * over a tap tonight, and `sats` is null for any other (W.decodeRequest). */
+  tapNotSats(read) {
+    if (!read) return '';
+    const unit = String(read.unit || 'sat');
+    if (unit === 'sat' && read.sats !== null) return '';
+    return unit === 'usd'
+      ? 'That request asks for dollars, which Foxy cannot pay over tap or Cashu yet.'
+      : 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
+  }
+
   /* What the other phone offered, and whether ecash can pay it.
    *
    * `sameMint` is this wallet's own mint being named by their request — the
@@ -1457,7 +1481,14 @@
     if (!inv && !req) return null;
     let sameMint = false;
     let theirs = [];
-    if (req && W.decodeRequest) {
+    /* A request in another unit (dollars) is not paid over a tap: the ecash
+     * this phone hands over is sats. With an invoice beside it the invoice is
+     * paid, as from a stranger; with none it is refused in words. */
+    const unitRead = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
+    const notSats = this.tapNotSats ? this.tapNotSats(unitRead) : '';
+    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+    if (notSats) console.log('[foxy] tap: their request is not in sats; paying their invoice instead');
+    if (req && !notSats && W.decodeRequest) {
       const r = W.decodeRequest(req);
       theirs = (r && r.mints) || [];
       const mine = String(W.mintUrl || '').replace(/\/+$/, '');
@@ -1470,7 +1501,7 @@
      * amount is — you cannot quote a routing fee for an amount nobody has
      * agreed yet. An offer with an invoice on it is not this: the invoice
      * carries its own sat figure and paying it is one payment, not two. */
-    const req0 = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
+    const req0 = (req && !notSats && W.decodeRequest) ? W.decodeRequest(req) : null;
     const asksUsd = !!(!inv && W.asksInDollars && W.asksInDollars(req0));
     console.log('[foxy] tap: they offered ' + (inv ? 'an invoice' : 'no invoice')
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
@@ -2086,6 +2117,7 @@
         this.refreshBalance();
         const read = W.decodeRequest(offer.req);
         if (!read) throw new Error('Their request could not be read.');
+        if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
         read.viaTap = true;
         if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
         if (offer.asks) read.asks = true;
@@ -2154,6 +2186,7 @@
      * payment asks again when it is made; this is the one that saves the fee. */
     if (offer.asks && W.askFirst && !this._crossAsked) {
       const read0 = W.decodeRequest(offer.req);
+      if (read0 && this.tapNotSats && this.tapNotSats(read0)) return Promise.reject(new Error(this.tapNotSats(read0)));
       if (read0) {
         this._crossAsked = true;
         // their request names an amount and their mint; the payment will be locked when they have no route
@@ -2206,6 +2239,7 @@
        * agreed on is this payment's confirmation. */
       const read = W.decodeRequest(offer.req);
       if (!read) throw new Error('Their request could not be read.');
+      if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
       read.viaTap = true;
       if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
         if (offer.asks) read.asks = true;

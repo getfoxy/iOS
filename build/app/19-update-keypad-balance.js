@@ -83,6 +83,10 @@
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
+      // home ends a flow: the next one starts from the remembered balance, not this one's
+      if (this.state.screen === 'home' && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+        this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
+      }
       // a code somebody was asked to scan goes with the token it belonged to
       if (prevState.screen === 'tokenOut' && this.hideStage) this.hideStage('needScan');
       // a receive's amount screen: the road to the mint is opened while the amount is typed
@@ -200,6 +204,18 @@
       this.toast('Offline, Foxy asks in dollars \u2014 the paying phone works out the sats.', true);
       return;
     }
+    /* A dollar balance is typed in dollars: there are no sats to swap to. The
+     * control is not on screen either (`usdKeypad`). */
+    if (this.usdKeypad && this.usdKeypad()) {
+      this.toast('Dollars are typed in dollars.', true);
+      return;
+    }
+    /* A swap is typed in the balance it leaves, cents or sats, exactly. The
+     * control is not on screen for one either (`renderAmount`). */
+    if (this.state.flow === 'swap' && this.state.screen === 'amount') {
+      this.toast('A swap is typed in the balance it leaves.', true);
+      return;
+    }
     const px = this.px();
     if (!px) { this.toast('No bitcoin price yet \u2014 amounts stay in ' + this.state.unit + '.', true); return; }
     this.setState(p => {
@@ -220,14 +236,20 @@
   // from animFrom → committed, so an interrupted animation still ends on the right number.
   balNow() {
     const s = this.state;
-    const to = { usd: s.balUsd, sats: s.balSats };
+    /* `cents` is the dollar balance at a mint with two (`balUsdCents`), its
+     * own lane: it counts up on its own pill, from its own figure, and is
+     * never mixed with `usd`, which is the sats' worth in dollars. */
+    const to = { usd: s.balUsd, sats: s.balSats, cents: s.balUsdCents };
     if (to.sats == null) return to;
     if (!s.animFrom) return to;
     const t = s.animT || 0;
     const e = 1 - Math.pow(1 - t, 3);
+    const fromCents = s.animFrom.cents;
     return {
       usd: s.animFrom.usd + (to.usd - s.animFrom.usd) * e,
       sats: Math.round(s.animFrom.sats + (to.sats - s.animFrom.sats) * e),
+      cents: (fromCents == null || to.cents == null) ? to.cents
+        : Math.round(fromCents + (to.cents - fromCents) * e),
     };
   }
 

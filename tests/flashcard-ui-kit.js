@@ -35,8 +35,12 @@ const liftFrom = (src, sig) => {
   return src.slice(at + 3, i + 1);
 };
 const SEND_SIGS = {
-  '01-ui-basics.js': ['confirmSpec() {', 'cfRow(label, value, opt) {', 'sendToText() {', 'sendAmountText() {'],
-  '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'syncSend() {',
+  '01-ui-basics.js': ['confirmSpec() {', 'cfRow(label, value, opt) {', 'sendToText() {', 'sendAmountText() {',
+                      // a mint with two balances: the confirmation's own for it, and what decides which balance pays
+                      'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'rememberWallet(flow, unit) {',
+                      'unitWord(unit) {', 'walletLabel(unit) {', 'unitFigure(amount, unit) {', 'unitBalance(unit) {', 'syncWalletAsk() {',
+                      'openWalletPick() {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'confirmTwoSpec() {'],
+  '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'feeQuotesIn(both) {', 'syncSend() {',
                  'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'startSend() {', 'showPayPending() {', 'checkSendPrice() {', 'startSendNow(to, o) {'],
   '12-receive.js': ['acceptTarget(text) {', 'offlineInvoiceCard() {'],
   '15-paid-wake-keyboard.js': ['syncPreview() {', 'pasteUncovered(el, box) {'],

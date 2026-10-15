@@ -21,12 +21,13 @@ and the counters are the phone's, kept by the native side (the keychain and
 | key | holds |
 |---|---|
 | `foxy.cashu.proofs.<mint>` | the proofs — the balance at that mint |
-| `foxy.cashu.proofs.<mint>@<unit>` | the balance at that mint in another unit (usd, eur), never counted as sats |
+| `foxy.cashu.proofs.<mint>@<unit>` | the balance at that mint in another unit (usd, eur), never counted as sats; a write refuses a piece whose keyset is of another unit (§18) |
+| `foxy.cashu.unitswap` | swaps between sat and usd at one mint still under way: which held melt and which invoice belong together (§18) |
 | `foxy.counter.v1` | a stale copy: per keyset, the counters an older build kept here. The counters are the phone's (`foxy-counters.json`, `STORAGE.md`). This is sent to the phone once at boot (`countersImport`, the higher per keyset) and never written again, so an older build installed over this one finds counters behind the phone's, never zero; nothing else reads it |
 | `foxy.seed.v1` | an older install's words, normally absent: sent to the phone once at boot (`seedMigrate`) and removed once it has them; left untouched when the phone holds a different seed or no longer takes words (`STORAGE.md`) |
 | `foxy.cashu.imported` | secrets of proofs that arrived by import, so nothing treats them as rebuildable |
-| `foxy.cashu.quotes` | invoices issued, not yet claimed |
-| `foxy.cashu.melting` | proofs handed to a melt whose outcome is not yet known |
+| `foxy.cashu.quotes` | invoices issued, not yet claimed, each in its unit |
+| `foxy.cashu.melting` | proofs handed to a melt whose outcome is not yet known, in their unit |
 | `foxy.cashu.swaps` | output counter ranges of swaps whose answer has not arrived |
 | `foxy.cashu.quarantine` | proofs the mint called spent that the seed cannot rebuild |
 | `foxy.cashu.outtoken` | the last token made, not yet marked handed over |
@@ -1523,6 +1524,162 @@ from another circuit…", "a swap whose request never reached the mint…", "a
 swap whose answer comes inside the wait…", "a token send whose answer is
 lost…", "a swap found at the mint is finished once however the page is
 killed…"), `tests/locked-send-lost.js` and `tests/flashcard-sigall.js` 25h.
+
+## 18. Two balances at one mint — sat and usd
+
+A mint can issue ecash in more than one unit. Forge issues sat and usd keysets,
+and a usd piece is worth one cent. Foxy holds both at such a mint as two
+balances (`docs/STORAGE.md`, `foxy.cashu.proofs.<mint>@usd`), and the rule all
+of this keeps is one sentence: **the unit lives in the key of the pile and in
+every record, and a figure is never added across units.** Amounts are integers
+in their own unit everywhere: sats, or cents. `unit` is optional on every call
+and defaults to `'sat'`, so every path above is as it was.
+
+**Which units.** `mintUnits` reads the active keysets the wallet already holds
+(cashu-ts keeps every unit's in its key chain), or the copy kept for a launch
+with no route (`foxy.cashu.mint.cache`). `twoUnits` gates everything a screen
+offers in dollars. The wallet object for a unit (`walletIn`, 08c-units.js) is
+the connected one for sats and a `unitWallet` for usd: built once per connected
+wallet from what it already fetched, kept without a circuit, and put on the
+circuit of each job (`needNow`, `sameCircuit`) — one job, one circuit, as for
+sats.
+
+**Hard rule 1: a piece goes only into its own unit's pile.** `setProofs` asks
+`unitGuard` before it writes: a piece whose keyset the mint lists in another
+unit is refused, and so, in a pile that is not sats, is a keyset the mint does
+not list. It throws "Foxy kept USD ecash out of the sat balance; nothing was
+lost." with `wrongUnit`, before `mustSave`, so the record that would bring the
+pieces back (a held melt, a swap, an invoice's outputs, the quarantine) stays
+where it is, as for a full store. Only pieces new to the pile are looked at,
+and where nothing at all is known about the mint's keysets (no wallet for it,
+no kept copy) nothing is refused: there is nothing to judge by, and refusing
+would strand a restore. A keyset nobody knows still goes into the sat pile, as
+it always did. `releaseHeld` now writes the pile before it drops the held
+record, so a refusal there keeps the record too.
+
+**Hard rule 2: one token encoder.** `encodeToken(mint, proofs, unit, extra)` is
+the only caller of `getEncodedToken` (`tests/two-balances.js` reads the
+sources to hold it). It refuses no pieces ("No ecash to put in a token.") and
+pieces that are not all of the unit it names ("Those pieces are not all USD
+ecash, so no token was made."). The card paths pass `'sat'`.
+
+**Hard rule 3: every record carries its unit**, read as `'sat'` when absent:
+an invoice (`keepQuote`), a held melt (`holdMelt`), a held swap's inputs, the
+outgoing token, its note, a request's unclaimed payment and an open request
+(both `'sat'`: requests are in sats), a bill (`'sat'`), and a swap between
+units. Every reader passes the record's unit on: the claim (`_claimOnce`), the
+watch, `sweepQuotes`, `recoverIssued`, `_sweepMeltsOnce`, `reclaimToken`,
+`dropSpentInputs`. A usd invoice is asked about, claimed and restored by the
+usd wallet: cashu-ts reads a quote's amount in its wallet's unit, and a sat
+wallet asked about a usd quote refuses the answer.
+
+**Hard rule 4: the books, per unit.** A sat row is as it always was. A usd row
+is `{ unit: 'usd', amount, feeAmount, sats: 0, feeSats: 0 }`, so every reader
+that sums `sats` counts none of it. The books every suite ends with
+(`tests/harness.js books`) are kept per mint and unit (`<mint>@usd`), from
+`amount`/`feeAmount` for a usd row and from that unit's pile.
+
+**Receive.** `invoice(amount, memo, { unit: 'usd' })` asks the usd wallet for a
+mint quote in cents (NUT-04 in usd), writes the record with its unit in the
+same step (`makeQuote` = `askQuote` + `keepQuote`), and answers `unit`,
+`amount`, `sats` (0 for usd) and `expiresAt`: a usd quote at Forge lives sixty
+seconds, and the screen counts it down and asks again. The watch is told the
+unit (`onPaid({ hash, unit, amount, sats })`) and asks every two seconds for a
+usd quote's first seventy: Forge has no socket for mint quotes. **The mint's
+node is learned only from a sat invoice** (`createQuote`, `learnMintNode`): a
+dollar invoice at Forge is made by Flash's node, and taken for the mint's own
+it would have the offline path pay a dollar invoice with sat ecash.
+
+**Pay a Lightning invoice from dollars.** `quoteFee(bolt11, { unit: 'usd' })`
+is a usd melt quote: the invoice in cents, the reserve in cents, and the
+mint's price read off it (`rate`, `mintRate`, in memory only and never used to
+move money). `quoteFeeBoth` asks both units at once (melt quotes commit to
+nothing). `payNeed(amount, reserve, { unit })` is `meltNeed` against the usd
+pile, said in dollars ("needs $ 10.02 and you hold $ 2.00"). `pay(bolt11,
+stage, { unit: 'usd', quote })` is `pay` with the usd wallet and pile: the split
+is recorded with its unit, the hold carries it, the change comes back to the
+usd pile, and the row is in cents. A quote is reused only in the unit it was
+asked in. An invoice that names no amount is refused from dollars. A melt cut
+off is settled by `sweepMelts` in its own unit; a usd split fee on a payment
+that did not go is a usd row of its own (`meltBackFee`), since the store of
+fees no row carries is sats.
+
+**Tokens.** `sendToken(amount, { unit: 'usd' })` at a mint with a usd keyset
+(`_sendUnitToken`): with a route only, never locked, never covering with change
+to come back, and no change pool; exact pieces as they are, otherwise a swap
+with its record on disk. Anything else in dollars is refused with "Offline and
+locked payments are bitcoin only for now; nothing was sent." `reclaimToken`
+takes a usd token back into the usd pile. `exportProofs` and `importProofs`
+stay sats; dollars come back with the recovery words. A usd payment request
+(NUT-18) is read in cents with `sats: null` (`decodeRequest`) and refused:
+"That request asks for dollar ecash, which Foxy cannot pay yet."
+
+**Swap between the two (`swapQuote`, `swapRun`).** No mint swaps one unit for
+another in one request, so a swap is two Lightning legs at the same mint: a
+mint quote in the unit wanted, paid by a melt from the unit given. At Forge
+those are two different nodes, so it pays Lightning fees and needs both
+backends up.
+
+- `swapQuote(from, to, amount, { all })` sizes it in two passes (four
+  requests): an invoice in TO at the rate last seen, a melt quote of it in
+  FROM, then once more sized from that answer so what leaves (`total` = melt
+  amount + reserve) is no more than asked. It answers the rate the person gets
+  (`rate.usdPerBtc`, by the mint), the market price if one is known, and
+  `spreadWarn` past 2 % against the person; the rate is held until the soonest
+  of the two quotes' expiries and a minute (`expiresAt`).
+- `swapRun(quote)` refuses with under fifteen seconds left (`expired`), a quote
+  already run, or no route. Then, in this order: the swap's record
+  (`foxy.cashu.unitswap`), the invoice's record in TO (`unit`, `swap`), the
+  payment from FROM (`pay` with `swap`, so its hold and its row carry the
+  swap), and the claim of the invoice, asked every two seconds for half a
+  minute. Each leg's row is `kind: 'swap'` with the swap's id and the mint's
+  rate, one in each unit's history.
+- Killed or unanswered anywhere, a swap is a held melt in FROM and an invoice
+  record in TO, and the sweeps that finish those finish it: `sweepMelts` logs
+  the payment (or gives the pieces back, and the swap is dropped), and
+  `sweepQuotes` claims the invoice. There is no new recovery path. Meanwhile
+  `unitSwapsPending` names it and `heldIn('usd')` counts a usd payment's
+  pieces still with the mint.
+- The screens (`build/app/26i-swap.js`) show the quote before anything
+  moves and run that same object on SWAP. The confirmation counts down to
+  fifteen seconds before the quote's expiry (the point `swapRun` refuses), asks
+  again when it gets there (three times at most with nobody tapping), and
+  reads CONFIRM NEW RATE once a new rate is up; a tap within 1.5 s of the
+  change is ignored. A `'pending'` result is the card SWAP STILL GOING
+  THROUGH, and home's held pill names `unitSwapsPending`'s FROM amounts until
+  the sweeps finish it. A running swap is `moneyBusy`, so no mint switch
+  starts under it.
+
+**What the first review added.**
+- A swap pays the melt quote whose price it showed, or nothing. `pay` with
+  `swap` reuses the shown quote down to ten seconds before its expiry
+  (`swapRun` has already refused under fifteen), and otherwise refuses with
+  `expired` before anything moves. Asked again, the mint would name a new
+  price for the same invoice. At Forge the melt of a sixty-second usd invoice
+  lives about as long as the invoice.
+- A payment from dollars never takes more than the confirmation showed. When
+  the shown usd quote has gone stale and the new one costs more, `pay` refuses
+  before anything moves (`definite`, `repriced`), saying the new figure in
+  dollars. Sats are as they were, since the invoice fixes their amount.
+- An invoice record is dropped as lapsed only five minutes past its expiry,
+  and never while the swap it is the second leg of still has its payment held.
+  A payment on its way as a sixty-second invoice ran out is still settled by
+  the mint, and a record dropped first was money the mint would release to
+  nobody.
+- `unitSwapsPending` drops a swap with nothing at the mint: one cut off before
+  its payment was held (the hold is written before the melt is sent, so its
+  payment never left), or one whose two legs have landed. Before, home's held
+  pill said "pending with the mint" for it for good.
+- Offline, a token in dollars is refused, and so is a token that says sat but
+  holds pieces of another unit's keyset. Kept on trust, its cents were counted
+  in the sat balance and written on a sat row. A payment posted to a request
+  is refused the same way, by its keysets, whatever its `unit` says.
+- `tokensNotClaimed` rows carry `unit` and `amount`, so a dollar token nobody
+  has claimed is named in cents before history forgets it.
+
+Out of scope for now, and refused where a unit cannot go: cards and taps
+(sats), on chain (sats; Forge has none), split bills and transfers between
+mints (sats), NUT-18 in dollars.
 
 ## Paths that move proofs and have no section above
 

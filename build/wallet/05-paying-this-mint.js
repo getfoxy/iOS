@@ -483,8 +483,11 @@
     return (all && typeof all === 'object' && all[canonicalMint(mint)]) || null;
   }
 
-  /* An invoice this mint just made for this wallet names its node. */
-  function learnMintNode(mint, bolt11) {
+  /* An invoice this mint just made for this wallet names its node. Only a
+   * sat invoice: `unit` is the quote's, and a dollar invoice can come from
+   * another node altogether (00-header-and-mint-errors.js, `createQuote`). */
+  function learnMintNode(mint, bolt11, unit) {
+    if (unit !== undefined && unitOf(unit) !== 'sat') return;
     var m = canonicalMint(mint);
     var node = m ? invoicePayee(bolt11) : null;
     if (!node) return;

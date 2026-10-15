@@ -95,7 +95,7 @@
     // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
     this.announcePayment(Object.assign({}, next.ev || {}, {
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
-    }));
+    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {}));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
@@ -455,14 +455,18 @@
     const start = from || this.balNow();
     Promise.all([W.balanceSats(), W.rate().catch(() => null)]).then(([sats, rate]) => {
       const px = rate || this.px();
-      this.setState({
+      /* And the dollar balance, at a mint with two: its own figure, counted up
+       * on its own pill when the money landed there (`lane` 'usd'). */
+      let cents = null;
+      try { cents = (this.twoUnitsOn && this.twoUnitsOn() && W.balanceOf) ? Math.max(0, Math.round(Number(W.balanceOf('usd')) || 0)) : null; } catch (e) { cents = null; }
+      this.setState(Object.assign({
         balSats: sats,
         balUsd: (sats / 1e8) * px,
         satUsd: px / 1e8,
         animFrom: start,
         animT: 0,
         animLane: lane || 'btc',
-      });
+      }, cents != null ? { balUsdCents: cents } : {}));
       this.runBalanceAnim();
     }).catch(() => {});
     return true;

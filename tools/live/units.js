@@ -25,7 +25,8 @@
  *      usd pile, never added to the sats
  *   3. a usd token from a stranger: tokenInfo reads it in cents, receiveToken
  *      swaps it into the usd pile
- *   4. reconcile sees the usd pile; sending usd is refused; a sat token still sends
+ *   4. reconcile sees the usd pile; a usd token sends from it, another unit is
+ *      refused; a sat token still sends
  *   5. a second restore from the words finds the received usd too — the
  *      counters Foxy used for the usd swap were derived and kept per keyset
  *
@@ -121,15 +122,19 @@ const sum = (ps) => ps.reduce((a, p) => a + Number(p.amount), 0);
     const rec = await W.reconcile();
     check('reconcile checks the usd pile and keeps it', rec.units && rec.units.usd && rec.units.usd.after === 225 && rec.spent === 0,
       rec);
+    // usd is sent now, at a mint with a usd keyset (two balances); another unit is still refused
+    const usdSent = await W.sendToken(10, { unit: 'usd' });
+    check('a usd token sends, in cents, from the usd pile', usdSent.unit === 'usd' && usdSent.amount === 10 && W.balanceIn(MINT, 'usd') === 215,
+      { unit: usdSent.unit, amount: usdSent.amount, left: W.balanceIn(MINT, 'usd') });
     let refused = '';
-    try { await W.sendToken(10, { unit: 'usd' }); } catch (e) { refused = e.message; }
-    check('sending usd ecash is refused', /only send sats/.test(refused), refused);
+    try { await W.sendToken(10, { unit: 'eur' }); } catch (e) { refused = e.message; }
+    check('sending another unit is refused', /only send sats/.test(refused), refused);
     const sent = await W.sendToken(20);
     check('a sat token still sends', sent.sats === 20 && (await W.balanceSats()) === 280, { sats: sent.sats, left: await W.balanceSats() });
 
     // 5. restore again: the usd Foxy swapped for is derived from the words too
     const again = (await H.scanFresh(words, [MINT]))[0] || {};
-    check('a second restore finds 300 sats (280 + the unclaimed 20) and 225 usd cents',
+    check('a second restore finds 300 sats (280 + the unclaimed 20) and 225 usd cents (215 + the unclaimed 10)',
       again.sats === 300 && again.units && again.units.usd && again.units.usd.amount === 225,
       { sats: again.sats, usd: again.units && again.units.usd && again.units.usd.amount, partial: again.partial });
   } catch (e) {

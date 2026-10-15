@@ -12,7 +12,7 @@
  *      asked once more on a circuit of its own; a second refusal is said in
  *      words a person can act on.
  *   B. The expiry comes with a new mint quote and is `null` on every later
- *      check. An unpaid invoice past the expiry it was made with is dropped.
+ *      check. An unpaid invoice five minutes past the expiry it was made with is dropped.
  */
 const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
 
@@ -92,10 +92,17 @@ async function run() {
     };
     await c.W.sweepQuotes();
     ok(c.W.pendingQuotes().length === 1, 'not yet expired, it is kept and asked about', c.W.pendingQuotes().length + ' waiting');
+    /* A minute past it, kept: a payment on its way as the invoice ran out is
+     * still settled by the mint (sweepQuotes keeps a lapsed record five
+     * minutes, for that). */
     list[0].expiry = Math.floor(Date.now() / 1000) - 60;
     c.storage.setItem(key, JSON.stringify(list));
     await c.W.sweepQuotes();
-    ok(c.W.pendingQuotes().length === 0, 'past the expiry it was made with, and still unpaid, it is dropped', c.W.pendingQuotes().length + ' waiting');
+    ok(c.W.pendingQuotes().length === 1, 'a minute past the expiry it was made with, it is still kept', c.W.pendingQuotes().length + ' waiting');
+    list[0].expiry = Math.floor(Date.now() / 1000) - 360;
+    c.storage.setItem(key, JSON.stringify(list));
+    await c.W.sweepQuotes();
+    ok(c.W.pendingQuotes().length === 0, 'well past the expiry it was made with, and still unpaid, it is dropped', c.W.pendingQuotes().length + ' waiting');
     const before = c.asked.length;
     await c.W.sweepQuotes();
     ok(c.asked.length === before, 'and the mint is not asked about it again', (c.asked.length - before) + ' more requests');

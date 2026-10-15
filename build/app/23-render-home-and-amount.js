@@ -16,6 +16,8 @@
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         // home's SEND pays from this phone, never from a card (26f-flashcard.js, `fcOutMode`)
         note: '', noteDraft: '', sendFrom: '',
+        // which balance pays is the remembered one until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       // home's SCAN: straight to the scanner, which is how a payment request,
       // an invoice or a token gets in
@@ -23,6 +25,8 @@
         screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         note: '', noteDraft: '', sendFrom: '',
+        // which balance pays is the remembered one until this payment says otherwise
+        wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       goReceive: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'receive',
@@ -31,6 +35,8 @@
         // these belong to sending; left set, they decide what the receive
         // invoice screen displays instead of the amount just typed
         recipient: '', recipientKind: '',
+        // the balance it goes into is the remembered one until the WALLET chip says otherwise
+        wallet: '', walletAuto: false, walletTapped: false,
       })),
       bkBadge: false,
       bkAskAgain: (e) => { e.stopPropagation(); this.setState({ bkAsk: true }); },
@@ -161,6 +167,7 @@
         if (x > 100) this.go('history'); else this.goSwitchMint();
       },
       priceCollapsed: !!s.priceCollapsed, priceExpanded: !s.priceCollapsed,
+      ...this.renderHomeTwo(c),
       /* The banner is the one thing on the home screen that says how Foxy
        * reaches the world, and it says it in a few words: one, "Tor", when
        * Tor is carrying everything. Tapping it says the rest.
@@ -199,10 +206,109 @@
       toggleCollapse: () => this.setState(p => ({ priceCollapsed: !p.priceCollapsed })),
       chevronRot: s.priceCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
       priceFlex: s.priceCollapsed ? '0 0 auto' : '1 1 0%',
-      priceTopPad: s.priceCollapsed ? 2 : 4,
+      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the owner's design)
+      priceTopPad: s.priceCollapsed ? 2 : (this.twoUnitsOn && this.twoUnitsOn()) ? 8 : 4,
       moneyFlex: (s.priceCollapsed || s.priceRemoved) ? '1 1 0%' : '0 0 auto',
       showPriceSection: !s.priceRemoved,
     };
+  }
+
+  /* The home at a mint with two balances, as the owner drew it.
+   *
+   * The sheet is headed by the mint's own name and MINT under it, and the tap
+   * opens SWITCH MINT. Then the pills: dollars over bitcoin, or the one the
+   * person holds (`homePills`). The dollar pill is frost with dark ink, its
+   * figure the cents held, and their worth in sats under it at the market
+   * price (the owner's change: the mirror of the bitcoin pill). The bitcoin
+   * pill is fox fur with white ink, the sats on the big line and their worth in
+   * dollars under, when there is a price. Money landing lights its own pill.
+   * A tap on a pill opens history on that balance. At a mint with one balance
+   * none of this is drawn and the home is as it always was. */
+  /** @param {RenderContext} c */
+  renderHomeTwo(c) {
+    const { s } = c;
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    if (!two) return { homeOneMint: true, homeTwo: false, homeMintName: '', homePillRows: [], goMintHeading: () => this.goSwitchMint() };
+    const bal = this.balNow();
+    const crediting = s.animFrom ? s.animLane : null;
+    const REST = '0 10px 24px rgba(0,0,0,.3)';
+    const cents = bal.cents != null ? bal.cents : s.balUsdCents;
+    const pill = (u) => (u === 'usd' ? {
+      label: 'Dollars', sym: '$', ink: '#10161B', inkRgb: '16,22,27', blend: 'normal',
+      bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.06) 0 1px,transparent 1px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+      big: s.hidden ? '••••••' : cents == null ? '···' : this.usd(Math.max(0, cents) / 100),
+      /* The dollars' worth in sats under them, at the same market price the
+       * bitcoin pill's dollar line uses, so the sats can be seen to move with
+       * the price; nothing under them where there is no price. */
+      small: s.hidden ? '' : cents == null ? 'Loading balance…'
+        : this.satUsd() ? '₿ ' + this.group(Math.round(Math.max(0, cents) / 100 / this.satUsd())) : '',
+      glow: (crediting === 'usd' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(207,224,236,.8)' : REST,
+      tap: () => this.goHistoryIn('usd'),
+    } : {
+      label: 'Bitcoin', sym: '₿', ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal',
+      bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+        + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+      big: s.hidden ? '••••••' : bal.sats == null ? '···' : this.group(bal.sats),
+      // the sats' worth in dollars under them, only where there is a price to say it at
+      small: s.hidden ? '' : bal.sats == null ? 'Loading balance…'
+        : this.satUsd() ? '$' + this.usd(bal.sats * this.satUsd()) + ' USD' : '',
+      glow: (crediting === 'btc' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(247,147,26,.85)' : REST,
+      tap: () => this.goHistoryIn('sat'),
+    });
+    return {
+      homeOneMint: false,
+      homeTwo: true,
+      homeMintName: String(this.mintName() || 'MINT').toUpperCase(),
+      goMintHeading: () => this.goSwitchMint(),
+      homePillRows: this.homePills().map(pill),
+    };
+  }
+
+  /* History, opened on one balance's tab (a tap on its pill). */
+  goHistoryIn(unit) {
+    this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]), histUnit: unit }));
+  }
+
+  /* SWAP, from home's button or the menu's row: dollars into bitcoin or back,
+   * at this mint. It needs the mint, so offline it only says so. */
+  swapStart() {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    const go = /** @type {any} */ (this).goSwap;
+    if (typeof go === 'function') { go.call(this); return; }
+    const first = this.homePills()[0] === 'sat' && this.unitBalance('sat') > 0 ? 'sat' : 'usd';
+    this.setState(p => ({ screen: 'swap', stack: p.stack.concat([p.screen]),
+      swapFrom: first, swapTo: first === 'usd' ? 'sat' : 'usd', swapQuote: null, swapNewRate: false }));
+  }
+
+  /* Is the keypad typing a dollar balance's own amount: cents, exactly, with
+   * no ₿ toggle and no second figure? A dollar receive, and a dollar send of
+   * ecash or of an invoice's own amount. Not a dollar balance paying an
+   * address, which is asked in sats and converts. */
+  usdKeypad() {
+    const s = this.state;
+    if (s.screen !== 'amount' || (s.flow !== 'receive' && s.flow !== 'send')) return false;
+    if (!(this.twoUnitsOn && this.twoUnitsOn())) return false;
+    if (this.walletNow(s.flow === 'receive' ? 'receive' : 'send') !== 'usd') return false;
+    return !(s.flow === 'send' && s.recipientKind === 'email');
+  }
+
+  /* SET AMOUNT's NEXT on a send at a mint with two balances: the remembered
+   * balance cannot cover what was typed and the other can, so the other pays
+   * (once, said in a toast, and not remembered). Not after a pick by hand. */
+  keypadWallet() {
+    const s = this.state;
+    // (a payment from a card is bitcoin only, and capped by the card: no other balance pays it)
+    if (!(this.twoUnitsOn && this.twoUnitsOn()) || s.walletTapped || (this.cardSendNow && this.cardSendNow())) return;
+    const pick = this.walletNow('send') || 'sat';
+    const other = pick === 'usd' ? 'sat' : 'usd';
+    const typedUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * (this.satUsd() || 0) : (parseFloat(s.amount) || 0);
+    const capUsd = (u) => (u === 'usd' ? this.unitBalance('usd') / 100 : this.unitBalance('sat') * (this.satUsd() || 0));
+    if (!(typedUsd > 0) || typedUsd <= capUsd(pick) + 0.005 || typedUsd > capUsd(other) + 0.005) return;
+    const patch = { wallet: other, walletAuto: true };
+    // dollars are typed in dollars: sats on the keypad become their worth
+    if (other === 'usd' && s.unit === 'SATS') Object.assign(patch, { unit: 'USD', amount: typedUsd.toFixed(2) });
+    this.setState(patch);
+    this.toast(other === 'sat' ? 'Bitcoin was chosen for you' : 'Dollars were chosen for you');
   }
 
   /* The home banner's three states, from the route as it is right now.
@@ -347,22 +453,28 @@
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         : s.flow === 'receive' ? 'How much to receive?'
+        : s.flow === 'swap' ? 'How much to swap?'
         : 'How much to send?',
       hideSkip: true,
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit',
+      /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
-        : s.flow === 'cardLimit' ? 'NO LIMIT' : '',
+        : s.flow === 'cardLimit' ? 'NO LIMIT'
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
+        else if (this.state.flow === 'swap') this.swapNext(true);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
         if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
+        // a swap's amount, in the balance it leaves (26i-swap.js)
+        if (this.state.flow === 'swap') { if (!sendOver) this.swapNext(false); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }
         /* Over the balance already has its own line under the amount
          * (sendOverLabel), so the refusal is explained on screen and a toast
@@ -382,8 +494,15 @@
          * screen's NETWORK chip is what chooses Cashu or on chain from there
          * (finding 19). The same two paths, said plainly. */
         if (this.state.flow === 'send') {
+          // the other balance, where the remembered one cannot cover this and the other can
+          if (this.keypadWallet) this.keypadWallet();
           this.setState(p => ({ payFrom: 'BITCOIN', screen: 'sendConfirm', stack: p.stack.concat([p.screen]) }));
         } else {
+          // a dollar code needs the mint: there is nothing to ask for offline
+          if (this.walletNow && this.walletNow('receive') === 'usd' && this.offlineNow()) {
+            this.toast('Receiving dollars needs the mint.', true);
+            return;
+          }
           this.setState({ asset: 'BITCOIN' });
           this.renderVals().pickLightning();
         }
@@ -403,6 +522,13 @@
          * what the amount makes and this phone agrees to it or does not
          * (`dollarsOnly`). */
         if (this.dollarsOnly()) return '';
+        /* A swap converts, so the other balance's figure is under it: about
+         * what the mint's last rate would give (26i-swap.js). */
+        if (s.flow === 'swap') return this.swapEstimate();
+        /* A dollar balance: dollars, exactly, and no second figure, because
+         * nothing is converted. Only a payment to an address converts (it is
+         * asked in sats), and that one keeps its line. */
+        if (this.usdKeypad && this.usdKeypad()) return '';
         const px = this.satUsd();
         if (!px) return '';
         const sats = this.wantedSats() || 0;
@@ -415,6 +541,10 @@
        * same reason PASTE ECASH is hidden rather than dropped. */
       swapVis: this.dollarsOnly() ? 'hidden' : 'visible',
       swapPE: this.dollarsOnly() ? 'none' : 'auto',
+      // and for a dollar balance, typed in dollars exactly: hidden the same way (`usdKeypad`)
+      ...((this.usdKeypad && this.usdKeypad()) ? { swapVis: 'hidden', swapPE: 'none' } : {}),
+      // and for a swap, typed in the balance it leaves: there is nothing to toggle to
+      ...(s.flow === 'swap' ? { swapVis: 'hidden', swapPE: 'none' } : {}),
       toggleUnit: () => this.toggleUnit(),
       // a token carries its own amount, so the two are alternatives
       // gone entirely once there is an amount, back when the field is cleared:
@@ -458,5 +588,7 @@
       ...((s.flow === 'cardWd' || (s.flow === 'send' && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
+      // a swap is out of one balance, and the line names it
+      ...(s.flow === 'swap' ? { sendOverLabel: 'MORE THAN YOUR ' + this.unitWord(this.swapUnits().from) } : {}),
     };
   }

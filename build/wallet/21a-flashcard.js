@@ -463,7 +463,7 @@
                   if (!good) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
                   cardSwapWrite(plan, null);
                   var pieces = [one].concat(plan.inputs.slice(1));
-                  var back = { id: 'cardback-' + plan.id, token: CT.getEncodedToken({ mint: mintOf(w), proofs: pieces, unit: 'sat' }),
+                  var back = { id: 'cardback-' + plan.id, token: encodeToken(mintOf(w), pieces, 'sat'),
                                sats: 0, worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
                   mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
                   firstId = firstId || back.id;
@@ -474,7 +474,7 @@
             var signed = CT.signP2PKProofs(live, key);
             var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
             if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
-            var taken = { id: 'cardback-' + piecesFingerprint(signed), token: CT.getEncodedToken({ mint: mintOf(w), proofs: signed, unit: 'sat' }),
+            var taken = { id: 'cardback-' + piecesFingerprint(signed), token: encodeToken(mintOf(w), signed, 'sat'),
                           sats: 0, worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() };
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
             return cardSwapTaken(taken).then(function (got) { return done(got.sats, taken.id); });

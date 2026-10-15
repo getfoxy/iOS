@@ -178,7 +178,9 @@ function loadReal(opts) {
  * ecash it holds? It is the sum the history screen's card does
  * (16-history-lists.js `histAudit`: ADDS UP, DOES NOT ADD UP) and the live
  * suites do after every scenario (tools/live/tap-scenarios.js `books`), one
- * mint at a time, in sats.
+ * mint at a time, in sats — and, at a mint with a second unit, once more in
+ * that unit (`mint@usd`), from its own rows (`amount`, `feeAmount`, in cents)
+ * and its own pile. A figure is never added across units.
  *
  * A test asks whether the thing it is about happened. This asks whether
  * anything else did: a piece counted twice, a fee on no entry, change that
@@ -210,8 +212,15 @@ function books(ctx) {
   const says = new Map(), holds = new Map();
   const add = (m, mint, n) => m.set(bookMint(mint), (m.get(bookMint(mint)) || 0) + n);
   (Array.isArray(rows) ? rows : []).forEach((e) => {
-    if (!e || (e.unit && e.unit !== 'sat')) return;
+    if (!e) return;
     if (e.state === 'failed' || e.failed || e.atRisk) return;
+    // a row in another unit: its own books, by its own figures (cents for usd)
+    if (e.unit && e.unit !== 'sat') {
+      const at = bookMint(e.mint) + '@' + e.unit;
+      if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(says, at, Number(e.amount) || 0); return; }
+      add(says, at, -((Number(e.amount) || 0) + Math.max(0, Number(e.feeAmount) || 0)));
+      return;
+    }
     if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
     if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(says, e.mint, Number(e.sats) || 0); return; }
     const owedBack = e.changeState === 'owed' ? (Number(e.changeSats) || 0) : 0;
@@ -228,7 +237,8 @@ function books(ctx) {
   const held = stored(ctx, BOOK_KEYS.held, {});
   Object.keys(held || {}).forEach((id) => {
     const h = held[id];
-    if (h && !(h.unit && h.unit !== 'sat')) add(holds, h.mint, sum(h.proofs));
+    if (!h) return;
+    add(holds, h.unit && h.unit !== 'sat' ? bookMint(h.mint) + '@' + h.unit : h.mint, sum(h.proofs));
   });
   const out = {};
   new Set([...says.keys(), ...holds.keys()]).forEach((mint) => {
@@ -337,6 +347,32 @@ function fakeMint(w, opts) {
   const hex = (b) => Buffer.from(Array.from(b)).toString('hex');
   const pubs = {};
   for (const [a, k] of Object.entries(pair.pubKeys)) pubs[a] = typeof k === 'string' ? k : hex(k);
+  /* o.units: ['sat', 'usd'] for a mint that issues dollars as well, as Forge
+   * does. A second keyset of its own (another key seed), listed beside the
+   * sat one; mint and melt quotes in either unit at a fixed o.usdPerBtc
+   * (76,900, the rate Forge was seen quoting); a usd quote lives
+   * o.usdQuoteTtl seconds (60). A melt of an invoice this mint made, in either
+   * unit, marks that invoice paid: the two legs of a swap between units.
+   * With o.quotesUnpaid an invoice waits for that (or `payQuote`) rather than
+   * being paid as it is made. o.meltTtl: the seconds a melt quote lives (3600),
+   * as short as a real mint's melt of a sixty-second invoice. */
+  const units = Array.isArray(o.units) && o.units.length ? o.units : ['sat'];
+  const hasUsd = units.indexOf('usd') >= 0;
+  const usdPair = hasUsd ? C.createNewMintKeys(16, new w.Uint8Array(64).fill((o.fill || 7) + 100), { versionByte: o.versionByte || 0 }) : null;
+  const usdId = usdPair ? usdPair.keysetId : null;
+  const usdPubs = {};
+  if (usdPair) for (const [a, k] of Object.entries(usdPair.pubKeys)) usdPubs[a] = typeof k === 'string' ? k : hex(k);
+  const usdPerBtc = Number(o.usdPerBtc) || 76900;
+  // which key signs a keyset's outputs, and the unit a keyset is in
+  const privOf = (kid) => (usdPair && kid === usdId ? usdPair.privKeys : pair.privKeys);
+  const unitOfKeyset = (kid) => (usdPair && kid === usdId ? 'usd' : kid === id ? 'sat' : '');
+  const idOfUnit = (u) => (u === 'usd' ? usdId : id);
+  const issuedBy = { sat: 0, usd: 0 }, takenBy = { sat: 0, usd: 0 };
+  // an invoice this mint made, by its text, so a melt of it can pay it
+  const byInvoice = {};
+  // a PENDING melt's inputs and change outputs, until `settleMelt` says how it went
+  const pendingOf = {};
+  let dropNext = '';
   const quotes = {}, melts = {}, spent = new Set(), signed = new Map();
   const posted = [], change = [], spentSecrets = [];
   const witnesses = {};
@@ -359,9 +395,11 @@ function fakeMint(w, opts) {
   function sign(outs, amounts) {
     return outs.map((out, i) => {
       const amount = amounts ? amounts[i] : Number(out.amount);
-      const priv = pair.privKeys[String(amount)];
+      // an output on the usd keyset is signed by the usd keys, and counted as usd
+      const kid = usdPair && out.id === usdId ? usdId : id;
+      const priv = privOf(kid)[String(amount)];
       if (!priv) throw new Error('fake mint: no key for ' + amount);
-      const sig = { id, amount, C_: C.createBlindSignature(C.pointFromHex(out.B_), priv, id).C_.toHex(true) };
+      const sig = { id: kid, amount, C_: C.createBlindSignature(C.pointFromHex(out.B_), priv, kid).C_.toHex(true) };
       /* With its DLEQ (NUT-12), as a real mint sends it: Foxy takes locked
        * ecash as final only when the mint's signature can be checked, so a
        * mint that sent none would make every such payment wait for the swap.
@@ -370,8 +408,9 @@ function fakeMint(w, opts) {
         const d = C.createDLEQProof(C.pointFromHex(out.B_), priv);
         sig.dleq = { e: hex(d.e), s: hex(d.s) };
       }
-      signed.set(out.B_, { out: { id, amount, B_: out.B_ }, sig });
-      issued += amount;
+      signed.set(out.B_, { out: { id: kid, amount, B_: out.B_ }, sig });
+      if (kid === id) issued += amount;
+      issuedBy[unitOfKeyset(kid)] += amount;
       return sig;
     });
   }
@@ -381,7 +420,12 @@ function fakeMint(w, opts) {
     ys.forEach((y) => spent.add(y));
     // the signature a piece was spent with, kept to be said to whoever asks about the piece (NUT-07)
     (inputs || []).forEach((p, i) => { if (p && p.witness) witnesses[ys[i]] = typeof p.witness === 'string' ? p.witness : JSON.stringify(p.witness); });
-    (inputs || []).forEach((p) => { spentSecrets.push(String(p.secret)); taken += Number(p.amount) || 0; });
+    (inputs || []).forEach((p) => {
+      spentSecrets.push(String(p.secret));
+      const u = unitOfKeyset(p.id) || 'sat';
+      if (u === 'sat') taken += Number(p.amount) || 0;
+      takenBy[u] += Number(p.amount) || 0;
+    });
     return true;
   }
   /* The change a melt hands back: the largest denominations that fit, signed
@@ -393,6 +437,24 @@ function fakeMint(w, opts) {
     for (let bit = 1; back > 0; bit *= 2) if (back & bit) { amounts.push(bit); back -= bit; }
     const use = (outs || []).slice(0, amounts.length);
     return sign(use, amounts.slice(0, use.length));
+  }
+  /* An invoice for `amount` in `unit`: sats as before (amount × 10 nano-bitcoin),
+   * or cents at the mint's rate, rounded to whole nano-bitcoin. With units on,
+   * each invoice is told apart by its quote's number, so a melt can find it. */
+  const BECH = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+  function invoiceFor(amount, unit, k) {
+    const nano = unit === 'usd' ? Math.max(1, Math.round(amount * 1e9 / usdPerBtc / 100)) : Number(amount) * 10;
+    let tag = '';
+    if (hasUsd) { let v = k; for (let i = 0; i < 8; i++) { tag += BECH[v % 32]; v = Math.floor(v / 32); } }
+    return 'lnbc' + nano + 'n1pvjluezpp5' + (tag || 'qqqsyqcy') + 'q5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq';
+  }
+  // what an invoice is worth in a unit, as a melt quote names it
+  function priceIn(bolt11, unit) {
+    const s = sats(bolt11);
+    if (unit !== 'usd') return s;
+    const m = /^lnbc(\d+)([munp]?)1/.exec(String(bolt11));
+    const msat = m ? Number(m[1]) * ({ '': 1e11, m: 1e8, u: 1e5, n: 100, p: 0.1 }[m[2]]) : s * 1000;
+    return Math.ceil(msat * usdPerBtc / 1e9);
   }
   /* What this mint will do on chain, and what it charges. The floor is the one
    * a real mint advertises; Foxy raises it to its own (onchainFloor). */
@@ -431,7 +493,7 @@ function fakeMint(w, opts) {
       /* The on-chain method sits beside bolt11 in each group, as a mint that
        * does both advertises it: the wallet has to pick it out rather than
        * take the first method it sees. */
-      const methods = (extra) => [{ method: 'bolt11', unit: 'sat' }].concat(
+      const methods = (extra) => units.map((u) => ({ method: 'bolt11', unit: u })).concat(
         o.onchain ? [Object.assign({ method: 'onchain', unit: 'sat',
           min_amount: CHAIN.min, max_amount: CHAIN.max }, extra || {})] : []);
       const nuts = {
@@ -450,12 +512,26 @@ function fakeMint(w, opts) {
       if (o.maxArray > 0) info.max_array_length = o.maxArray;
       return ok(info);
     }
-    if (p === '/v1/keysets') return ok({ keysets: [{ id, unit: 'sat', active: true, input_fee_ppk: Number(o.feePpk) || 0 }] });
-    if (p === '/v1/keys' || p === '/v1/keys/' + id) return ok({ keysets: [{ id, unit: 'sat', active: true, keys: pubs }] });
+    if (p === '/v1/keysets') {
+      const list = [{ id, unit: 'sat', active: true, input_fee_ppk: Number(o.feePpk) || 0 }];
+      if (usdId) list.push({ id: usdId, unit: 'usd', active: true, input_fee_ppk: Number(o.usdFeePpk) || 0 });
+      return ok({ keysets: list });
+    }
+    if (p === '/v1/keys' || p === '/v1/keys/' + id || (usdId && p === '/v1/keys/' + usdId)) {
+      const list = [];
+      if (p !== '/v1/keys/' + usdId) list.push({ id, unit: 'sat', active: true, keys: pubs });
+      if (usdId && p !== '/v1/keys/' + id) list.push({ id: usdId, unit: 'usd', active: true, keys: usdPubs });
+      return ok({ keysets: list });
+    }
     if (p === '/v1/mint/quote/bolt11') {
-      // cashu-ts checks the invoice's amount against the quote's: amount × 10 nano-bitcoin
-      const q = { quote: quoteId(), request: 'lnbc' + (Number(body.amount) * 10) + 'n1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq', amount: Number(body.amount), unit: 'sat',
-                  state: 'PAID', expiry: now() + 3600 };
+      const unit = String(body.unit || 'sat');
+      if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
+      // cashu-ts checks the quote's amount against the one it asked for
+      const k = n + 1;
+      const q = { quote: quoteId(), request: invoiceFor(Number(body.amount), unit, k), amount: Number(body.amount), unit: unit,
+                  state: o.quotesUnpaid ? 'UNPAID' : 'PAID',
+                  expiry: now() + (unit === 'usd' ? (Number(o.usdQuoteTtl) || 60) : 3600) };
+      byInvoice[q.request] = q.quote;
       // a quote asked for locked comes back locked, or cashu-ts refuses it (NUT-20)
       if (typeof body.pubkey === 'string' && body.pubkey) q.pubkey = body.pubkey;
       quotes[q.quote] = q;
@@ -466,11 +542,16 @@ function fakeMint(w, opts) {
       const q = quotes[body.quote];
       if (!q) return no(20007, 'quote not found');
       if (q.state === 'ISSUED') return no(20002, 'quote already issued');
+      if (q.state !== 'PAID') return no(20001, 'quote not paid');
       if (sum(body.outputs) !== q.amount) return no(11002, 'outputs do not add up to the quote');
+      // outputs on the keyset of the quote's unit, as Nutshell insists
+      if ((body.outputs || []).some((x) => (unitOfKeyset(x.id) || 'sat') !== (q.unit || 'sat'))) return no(11005, 'keyset unit does not match the quote');
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
       record(body.outputs);
       q.state = 'ISSUED';
-      return ok({ signatures: sign(body.outputs) });
+      const sigs = sign(body.outputs);
+      if (dropNext === 'mint') { dropNext = ''; return '504\n{"detail":"the answer was lost on the way back"}'; }
+      return ok({ signatures: sigs });
     }
     /* Locked inputs have to be signed for, the way a real mint insists.
      *
@@ -518,8 +599,9 @@ function fakeMint(w, opts) {
      * point for a C, so ecash nobody had signed swapped like the real thing and
      * no test could tell forged from issued (audit N1). */
     const counterfeit = (inputs) => (inputs || []).some((pr) => {
-      const priv = pair.privKeys[String(Number(pr && pr.amount))];
-      if (!priv || (pr.id && pr.id !== id)) return true;
+      if (pr && pr.id && !unitOfKeyset(pr.id)) return true;
+      const priv = privOf(pr && pr.id)[String(Number(pr && pr.amount))];
+      if (!priv) return true;
       try {
         return !C.verifyUnblindedSignature({
           secret: new w.Uint8Array(Buffer.from(String(pr.secret), 'utf8')), C: C.pointFromHex(pr.C) }, priv);
@@ -534,6 +616,12 @@ function fakeMint(w, opts) {
       return (inputs || []).some((pr) => { const k = String(pr && pr.secret); if (seen.has(k)) return true; seen.add(k); return false; });
     };
     if ((p === '/v1/swap' || p === '/v1/melt/bolt11') && repeated(body.inputs)) return no(11007, 'Duplicate inputs provided');
+    // one unit on both sides of a swap or a melt, as Nutshell insists (verification: units match)
+    const unitsOfAll = (list) => new Set((list || []).map((x) => unitOfKeyset(x && x.id) || 'sat'));
+    if (p === '/v1/swap' && hasUsd) {
+      const u = new Set([...unitsOfAll(body.inputs), ...unitsOfAll(body.outputs)]);
+      if (u.size > 1) return no(11005, 'inputs and outputs are not of one unit');
+    }
     if (p === '/v1/swap') {
       // a mint that charges per piece keeps the fee: inputs minus fee is what comes out
       const swapFee = Math.ceil(((body.inputs || []).length * (Number(o.feePpk) || 0)) / 1000);
@@ -551,8 +639,10 @@ function fakeMint(w, opts) {
                                                         witness: (spent.has(Y) && witnesses[Y]) || null })) });
     }
     if (p === '/v1/melt/quote/bolt11') {
-      const q = { quote: quoteId(), amount: sats(body.request), fee_reserve: 10, state: 'UNPAID',
-                  expiry: now() + 3600, request: body.request, unit: 'sat', payment_preimage: null };
+      const unit = String(body.unit || 'sat');
+      if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
+      const q = { quote: quoteId(), amount: priceIn(body.request, unit), fee_reserve: unit === 'usd' ? (Number(o.usdFeeReserve) >= 0 && o.usdFeeReserve !== undefined ? Number(o.usdFeeReserve) : 2) : 10,
+                  state: 'UNPAID', expiry: now() + (Number(o.meltTtl) > 0 ? Number(o.meltTtl) : 3600), request: body.request, unit: unit, payment_preimage: null };
       melts[q.quote] = q;
       return ok(q);
     }
@@ -563,13 +653,27 @@ function fakeMint(w, opts) {
       if (q.state !== 'UNPAID') return no(20005, 'quote already ' + q.state);
       const paidIn = sum(body.inputs);
       if (paidIn < q.amount + q.fee_reserve) return no(11002, 'not enough inputs for the quote');
+      // pieces and change in the quote's unit (Nutshell: "inputs have different units")
+      if (hasUsd && [...unitsOfAll(body.inputs)].some((u) => u !== (q.unit || 'sat'))) return no(11005, 'inputs are not in the unit of the quote');
+      if (hasUsd && (body.outputs || []).some((x) => (unitOfKeyset(x.id) || 'sat') !== (q.unit || 'sat'))) return no(11005, 'change outputs are not in the unit of the quote');
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
       if (counterfeit(body.inputs)) return no(10003, 'Proof could not be verified.');
+      if (o.meltRefuse) return no(20000, 'the payment could not be routed');
       if (!spend(body.inputs)) return no(11001, 'Token already spent.');
       record(body.outputs);
-      const sigs = changeFor(body.outputs, paidIn - q.amount - 2);
+      if (o.meltPending) {
+        // the payment is still routing: the inputs are the mint's, no change yet (`settleMelt`)
+        q.state = 'PENDING';
+        pendingOf[q.quote] = { inputs: paidIn, outputs: body.outputs };
+        return ok(q);
+      }
+      // the paying of the invoice: one of this mint's own, in either unit, is now paid
+      const target = byInvoice[q.request];
+      if (target && quotes[target] && quotes[target].state === 'UNPAID') quotes[target].state = 'PAID';
+      const sigs = changeFor(body.outputs, paidIn - q.amount - Math.min(2, q.fee_reserve));
       change.push(...sigs);
       Object.assign(q, { state: 'PAID', payment_preimage: o.preimage === undefined ? '00'.repeat(32) : o.preimage, change: sigs });
+      if (dropNext === 'melt') { dropNext = ''; return '504\n{"detail":"the answer was lost on the way back"}'; }
       return ok(q);
     }
     /* ---- on chain (NUT-30) -------------------------------------------------
@@ -654,9 +758,33 @@ function fakeMint(w, opts) {
   }
   return {
     id, pubs, posted, change, spentSecrets, handle,
+    // the usd keyset, with o.units
+    usdId, usdPerBtc,
+    quotes, melts,
     // the mint's books, for a wallet's holdings to be measured against
     issuedSats: () => issued,
     takenSats: () => taken,
+    issuedIn: (u) => issuedBy[u] || 0,
+    takenIn: (u) => takenBy[u] || 0,
+    // an invoice paid by somebody else (o.quotesUnpaid)
+    payQuote: (q) => { if (quotes[q] && quotes[q].state === 'UNPAID') { quotes[q].state = 'PAID'; return true; } return false; },
+    // the next answer to 'mint' or 'melt' is lost after the mint has acted on it
+    dropAnswerOf: (what) => { dropNext = what; },
+    /* A PENDING melt (o.meltPending) settles: 'paid' pays the invoice and keeps
+     * the change for whoever asks; 'failed' gives the inputs back as unspent. */
+    settleMelt: (quote, how) => {
+      const q = melts[quote];
+      const held = pendingOf[quote];
+      if (!q || q.state !== 'PENDING' || !held) return false;
+      delete pendingOf[quote];
+      if (how === 'failed') { q.state = 'FAILED'; return true; }
+      const target = byInvoice[q.request];
+      if (target && quotes[target] && quotes[target].state === 'UNPAID') quotes[target].state = 'PAID';
+      const sigs = changeFor(held.outputs, held.inputs - q.amount - Math.min(2, q.fee_reserve));
+      change.push(...sigs);
+      Object.assign(q, { state: 'PAID', payment_preimage: '00'.repeat(32), change: sigs });
+      return true;
+    },
     /* What the world does on chain, which a mint only reports: `onchainCredit`
      * is a payment to that address confirming, `onchainConfirm` is a payout's
      * transaction confirming. Both answer false for a quote it never made. */

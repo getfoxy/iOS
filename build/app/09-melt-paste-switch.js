@@ -298,7 +298,7 @@
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy);
+      || this.state.nmBusy || this.state.reqBusy || this._swapRun);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own
@@ -320,7 +320,7 @@
   moneyMoving() {
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
-      || this._sendRun || this._chasingChange);
+      || this._sendRun || this._chasingChange || this._swapRun);
   }
 
   /* Which of them it was, for the diary. `moneyBusy` is six questions and the
@@ -337,6 +337,7 @@
     if (this._chasingChange) why.push('change is being chased');
     if (this.state.nmBusy) why.push('a new mint is being set up');
     if (this.state.reqBusy) why.push('a request is being paid');
+    if (this._swapRun) why.push('a swap between balances is running');
     return why.join('; ') || 'nothing';
   }
 
@@ -572,6 +573,8 @@
     setTimeout(() => this.custodyNotice(), 900);
     // and, where there is no passcode, that nothing but an alert guards the seed
     setTimeout(() => this.passcodeNotice(), 1000);
+    // and last, at a mint with two balances, what to hold (10-pin.js)
+    setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
     // the concentration nudge waits past those, for a later refresh
     this._readyAt = Date.now();
     // A mint switch that paid but died before claiming leaves the money at the
@@ -671,6 +674,8 @@
       this.setState({ balSats: all });
       return all;
     });
+    // and the dollars, at a mint that issues them: their own figure, in cents, never added to the sats
+    if (this.refreshUsd) this.refreshUsd();
     /* Both halves, and the launch waits for both.
      *
      * For a time it waited only for the sats, because the price sources were
@@ -736,6 +741,21 @@
       this.spreadNudge();
     }).catch(() => {});
     return this._priced;
+  }
+
+  /* The dollar balance at this mint, in cents (`balUsdCents`), read from the
+   * wallet's own pile. It needs no price: a dollar is a dollar. Cleared at a
+   * mint with no dollars, so a switch does not carry one mint's dollars to
+   * another's home screen. */
+  refreshUsd() {
+    const W = window.FoxyWallet;
+    if (!(this.twoUnitsOn && this.twoUnitsOn()) || !W || !W.balanceOf) {
+      if (this.state.balUsdCents != null) this.setState({ balUsdCents: null });
+      return;
+    }
+    let cents = 0;
+    try { cents = Math.max(0, Math.round(Number(W.balanceOf('usd')) || 0)); } catch (e) { return; }
+    if (cents !== this.state.balUsdCents) this.setState({ balUsdCents: cents });
   }
 
   /* How long ago the price on screen was fetched, or '' while it is current.
@@ -817,6 +837,24 @@
   }
 
   syncUnit() {
+    /* A dollar balance is typed in dollars, exactly, online or not and with a
+     * price or without one: there is nothing to convert. */
+    const s0 = this.state;
+    /* And a swap in the balance it leaves: dollars in dollars, bitcoin in
+     * sats, whatever the price is doing (26i-swap.js). */
+    if (s0.flow === 'swap' && s0.screen === 'amount') {
+      const want = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
+      if (s0.unit !== want) this.setState({ unit: want, amount: '' });
+      return;
+    }
+    /* Not a payment to an address: that is asked in sats, so dollars typed
+     * there convert, and its ⇅ works as it always did (`usdKeypad`). */
+    if ((s0.flow === 'receive' || s0.flow === 'send') && (s0.screen === 'amount' || s0.screen === 'confirm')
+        && !(s0.flow === 'send' && s0.recipientKind === 'email')
+        && this.walletNow && this.walletNow(s0.flow === 'receive' ? 'receive' : 'send') === 'usd') {
+      if (s0.unit !== 'USD') this.setState({ unit: 'USD', amount: '' });
+      return;
+    }
     if (this.dollarsOnly() && this.state.unit !== 'USD') {
       console.log('[foxy] offline and asking to be paid, so the keypad is in dollars');
       /* The figure is converted, not relabelled. Switching the unit under a

@@ -166,6 +166,35 @@ starting and its minute, and a second request being the same tap. The pure Swift
 `CardTapDeliveryTests.swift`, run by `tools/nativetests`; **`flashcard-screens.js`**
 begins a real tap from the address, against the model of the card.
 
+**`two-balances.js`** holds the wallet's half of a mint with two balances,
+sats and dollars in cents: which units the mint issues, the choice of what to
+hold and the two remembered starting units, the pile guard (a piece goes only
+into its own unit's pile), the one token encoder that refuses mixed units, a
+dollar invoice and its minute, a payment from either balance, dollar tokens,
+restore and the books, each per unit and never one figure added across units.
+It runs the page as it ships against the harness's mint with a usd keyset;
+`tools/live/two-balances.js` does the same at a real Nutshell with fake money.
+
+**`two-balances-screens.js`** mounts the real page on a stand-in wallet and
+drives the new screens as a person does: home with two pills or one, WHAT DO
+YOU WANT TO HOLD?, CURRENCY once per flow, the dollar keypad and invoice,
+CONFIRM PAYMENT's WALLET button, the picker and the automatic switch, a
+dollar payment whose price moved (back to the confirmation, asked again),
+ADDED TO / FROM in each unit, UNCLAIMED ECASH per unit, history's DOLLARS /
+BITCOIN tab, and the refusals of what dollars cannot do yet.
+
+**`two-balances-swap.js`** holds SWAP, dollars into bitcoin and back at one
+mint, across both of its halves: the wallet's `swapQuote` / `swapRun` and the
+screens of `build/app/26i-swap.js`. The first part lifts the app's swap methods
+onto a real wallet at the harness's two-unit mint and goes through it as a
+person does (the direction, the amount, the confirmation and its rows, SWAP,
+SWAPPED), then a rate that runs out on screen and is asked again with CONFIRM
+NEW RATE, a confirmation left alone that stops asking, the mint refusing the
+payment (nothing held, the pile whole), and a swap cut off once its payment has
+gone (the card, home's held pill, and the next connect finishing it). Every
+page's books close per unit. The second part mounts the real page on a stand-in
+wallet and reads what it draws, down to both pills glowing on home.
+
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:
 `bridgeAsk(` and `nativeJson(`, which is how the seed, counter and lock-key

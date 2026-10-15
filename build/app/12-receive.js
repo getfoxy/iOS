@@ -9,6 +9,14 @@
     return Math.round(val / px * 1e8);
   }
 
+  /* What this receive asks for, in the balance it goes into: cents for
+   * dollars, typed exactly and needing no price, or sats as `wantedSats`
+   * works them out. */
+  wantedAmount() {
+    if (this.walletNow && this.walletNow('receive') === 'usd') return { unit: 'usd', amount: this.centsTyped() };
+    return { unit: 'sat', amount: this.wantedSats() };
+  }
+
   // real invoice for the receive screen, then wait for it to be paid
   openReceive() {
     const W = window.FoxyWallet;
@@ -550,7 +558,12 @@
       const sats = this.state.invoiceIsAddress ? 0
         : (window.FoxyWallet.amountOf(this.state.invoice) || 0);
       const barred = o.rail === 'ON-CHAIN' && this.ocReceiveBlocked(sats);
-      return {
+      /* A dollar invoice has one network: Lightning. On chain is bitcoin's
+       * own, and a Cashu request in dollars comes later. */
+      const usd = !!(this.walletNow && this.walletNow('receive') === 'usd');
+      const notDollars = usd && o.rail !== 'LIGHTNING'
+        ? (o.rail === 'ON-CHAIN' ? 'On chain is bitcoin only.' : 'Dollar requests come later.') : '';
+      const row = {
         label: o.rail, sub: o.sub, on: o.rail === current,
         off: barred, offWhy: barred ? this.ocFloorShort() : '',
         isDefault: !!(W && W.defaultRail && W.defaultRail() === o.rail),
@@ -561,11 +574,20 @@
         } : null,
         tap: () => pick(o.rail),
       };
+      // nor one dollars cannot use, said the same way
+      if (notDollars) Object.assign(row, { off: true, offWhy: notDollars, makeDefault: null });
+      return row;
     }));
   }
 
   openReceiveNow() {
     const W = window.FoxyWallet;
+    /* A dollar balance asks in cents, exactly, by a mint quote in dollars: one
+     * network (Lightning), no tap and no card, and a code that lives a minute
+     * (`recvClock`). */
+    const want = this.wantedAmount ? this.wantedAmount() : { unit: 'sat', amount: this.wantedSats() };
+    const usd = want.unit === 'usd';
+    if (usd) return this.openUsdReceive(want.amount);
     const sats = this.wantedSats();
     /* The network this person asked every receive to start on, which used to
      * be Lightning whatever they chose (FoxyWallet.defaultRail). On-chain is
@@ -584,7 +606,7 @@
      * is exactly right here — the payer is an inch away and the offer crosses
      * Bluetooth, not an onion. */
     if (this.offlineNow()) rail = 'CASHU';
-    this.setState({ recvRail: rail });
+    this.setState({ recvRail: rail, recvUnit: 'sat', recvExpiresAt: null });
     if (sats < 1) {
       /* SKIP on the amount screen: show the address so they choose the amount.
        * Not reachable while the keypad hides SKIP (`hideSkip`, home screen
@@ -683,6 +705,9 @@
       this._stopWatch = W.watch(inv.hash, paid => {
         if (mine !== this._invoiceRun) return;
         this._watching = false;
+        // what arrived, in its own unit: the paid screen reads it first
+        this.setState({ paidUnit: (paid && paid.unit) || 'sat', paidAmount: paid && paid.amount != null ? paid.amount : (paid && paid.sats) });
+        if (this.twoUnitsOn && this.twoUnitsOn()) this.rememberWallet('receive', (paid && paid.unit) || 'sat');
         // the payer said so first, and the mint has now agreed (tapPaidNotice)
         this._tapPaidNote = 0;
         if (this.hideStage) this.hideStage('paidCheck');
@@ -728,6 +753,170 @@
   stopReceive() {
     if (this._stopWatch) { this._stopWatch(); this._stopWatch = null; }
     this._watching = false;
+    clearInterval(this._recvClockT);
+    this._recvClockT = null;
+  }
+
+  /* A receive into the dollar balance.
+   *
+   * The invoice is a mint quote in dollars, for the cents typed. Its life is
+   * the mint's (a minute at Forge), so the screen counts it down under the
+   * code (`recvClock`) and asks for a new one when it runs out: the old one's
+   * watch goes when the new one is up, and its record stays for the wallet's
+   * sweep. What it answers is announced in its unit ("ADDED TO DOLLARS"), and
+   * the balance it went into is remembered for the next receive.
+   *
+   * No Cashu request and no tap: this screen offers Lightning only. Offline
+   * there is no code to give, and SET AMOUNT has already said so. */
+  openUsdReceive(cents) {
+    const W = window.FoxyWallet;
+    this.setState({ recvRail: 'LIGHTNING', invoiceIsAddress: false, recvUnit: 'usd', recvAmount: cents, recvExpiresAt: null });
+    if (!(cents > 0)) { this.toast('Ask for an amount above zero.', true); this.back(); return; }
+    if (this.offlineNow()) {
+      this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
+      this.toast('Receiving dollars needs the mint.', true);
+      this.back();
+      return;
+    }
+    const memo = (this.state.note || '').trim();
+    this._recvMemo = memo;
+    const mine = (this._invoiceRun = (this._invoiceRun || 0) + 1);
+    const G = window.FoxyGate;
+    const attempt = (n, waits) => W.invoice(cents, memo, { unit: 'usd' }).catch(e => {
+      const closed = !!(W.neverSent && W.neverSent(e));
+      if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
+      if (n >= 3) throw e;
+      console.warn('[foxy] dollar invoice attempt', n, 'failed \u2014', W.reason(e), '\u2014 retrying');
+      return new Promise(ok => setTimeout(ok, n * 1500)).then(() => attempt(n + 1, waits));
+    });
+    attempt(1, 0).then(inv => {
+      if (mine !== this._invoiceRun) { console.log('[foxy] dollar invoice: an older request answered late; letting it go'); return; }
+      if (W.tag) W.tag(inv.hash, { note: memo });
+      this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash, note: '', noteDraft: '' });
+      this.usdInvoiceUp(inv, mine);
+    }).catch(e => {
+      if (mine !== this._invoiceRun) return;
+      console.error('[foxy] dollar invoice failed after 3 tries:', e);
+      this.setState(p => ({
+        invoiceErr: W.reason(e), blockedWhy: W.reason(e),
+        screen: (p.stack && p.stack.length) ? p.stack[p.stack.length - 1] : 'home',
+        stack: (p.stack && p.stack.length) ? p.stack.slice(0, -1) : [],
+      }));
+      this.toast(W.reason(e), true);
+    });
+  }
+
+  /* A dollar invoice on screen: watched, and its minute counted down. */
+  usdInvoiceUp(inv, mine) {
+    const W = window.FoxyWallet;
+    const life = Number(inv.expiresIn) > 0 ? Number(inv.expiresIn) : 60;
+    const ends = Number(inv.expiresAt) > 0 ? Number(inv.expiresAt) : Date.now() + life * 1000;
+    this.stopReceive();
+    this.setState({ recvExpiresAt: ends, recvAmount: inv.amount != null ? inv.amount : this.state.recvAmount });
+    this._watching = true;
+    const hash = inv.hash;
+    this._stopWatch = W.watch(hash, paid => {
+      if (mine !== this._invoiceRun) return;
+      // the code on screen, or the one it replaced a moment ago: either is this receive
+      this._watching = false;
+      clearInterval(this._recvClockT);
+      this._recvClockT = null;
+      this._tapPaidNote = 0;
+      if (this.hideStage) this.hideStage('paidCheck');
+      this.haptic && this.haptic('success');
+      const unit = (paid && paid.unit) || 'usd';
+      this.rememberWallet('receive', unit);
+      this.setState(p => ({
+        screen: 'paid', stack: p.stack.concat([p.screen]), recvResolved: true,
+        paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount,
+        recvExpiresAt: null,
+        recv: Object.assign({}, p.recv, { live: 'in' }),
+      }));
+      this.noteReceived();
+      this._seenTx = this._seenTx || {};
+      this._seenTx[hash] = true;
+      if (this._preSettle == null) this._preSettle = this.balNow();
+      this.refreshBalance();
+    }, {
+      // past its minute, the sweep has it; a new code is asked for on the screen
+      timeoutMs: (life + 15) * 1000,
+      onExpired: () => { if (this.state.invoiceHash === hash) this._watching = false; },
+    });
+    clearInterval(this._recvClockT);
+    this._recvClockT = setInterval(() => this.recvClockTick(mine), 1000);
+  }
+
+  /* Once a second while a dollar code is up: the screen redrawn with what is
+   * left of it, and a new code asked for when it runs out. */
+  recvClockTick(mine) {
+    const s = this.state;
+    if (mine !== this._invoiceRun || s.screen !== 'confirm' || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
+      clearInterval(this._recvClockT);
+      this._recvClockT = null;
+      return;
+    }
+    if (Date.now() >= s.recvExpiresAt) { this.recvRequote(mine); return; }
+    this.setState({ recvTick: Date.now() });
+  }
+
+  /* The dollar code ran out unpaid: a new one for the same amount, in place.
+   * The old one's watch is let go when the new one is up, and not before, so
+   * a payment that lands in between is still seen. */
+  recvRequote(mine) {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    if (this._requoting || mine !== this._invoiceRun) return;
+    if (this.offlineNow()) { this.setState({ recvExpiresAt: null }); return; }
+    this._requoting = true;
+    console.log('[foxy] receive: the dollar code ran out; asking for a new one');
+    W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
+      this._requoting = false;
+      if (mine !== this._invoiceRun || this.state.screen !== 'confirm' || this.state.recvUnit !== 'usd') return;
+      if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
+      this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash });
+      this.usdInvoiceUp(inv, mine);
+    }, e => {
+      this._requoting = false;
+      console.warn('[foxy] receive: no new dollar code yet:', W.reason ? W.reason(e) : e);
+      // asked again in a few seconds; the old code is still watched meanwhile
+      if (mine === this._invoiceRun) this.setState({ recvExpiresAt: Date.now() + 5000 });
+    });
+  }
+
+  /* WALLET on the invoice: which balance this receive goes into. The choice
+   * is remembered for the next receive, and a new code is made in it, for the
+   * same amount. */
+  pickRecvWallet() {
+    const now = this.walletNow('receive') || 'sat';
+    this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
+      label: this.unitWord(u),
+      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + (u === 'usd'
+        ? '. Asked in dollars, exactly.' : '. Asked in bitcoin.'),
+      on: u === now,
+      tap: () => this.recvSwitchWallet(u),
+    })));
+  }
+
+  recvSwitchWallet(unit) {
+    const s = this.state;
+    if (unit === (this.walletNow('receive') || 'sat')) return;
+    const patch = { wallet: unit, walletTapped: true };
+    if (unit === 'usd' && s.unit === 'SATS') {
+      // sats on the keypad become their worth in dollars, at the price on screen
+      const px = this.px();
+      if (!px) { this.toast('No bitcoin price yet, so the amount cannot be put in dollars.', true); return; }
+      const v = parseFloat(s.amount) || 0;
+      Object.assign(patch, { unit: 'USD', amount: v ? (v / 1e8 * px).toFixed(2) : '' });
+    }
+    if (unit === 'sat' && s.unit !== 'SATS' && !this.px()) {
+      this.toast('No bitcoin price yet, so the amount cannot be asked in bitcoin.', true);
+      return;
+    }
+    this.rememberWallet('receive', unit);
+    this.stopReceive();
+    this.setState(Object.assign(patch, { invoice: '', invoiceHash: '', recvExpiresAt: null,
+      recvUnit: unit, asset: 'BITCOIN', recvRail: 'LIGHTNING' }));
+    this.openReceive();
   }
 
   // A page loaded from a file is not a secure context, so navigator.clipboard
@@ -1049,11 +1238,14 @@
       recvResolved: true,
       // its own heading, where the ordinary one would say the wrong thing
       paidSays: ev.says || '',
+      // what arrived or left in its own unit, read first by the paid screen: cents for dollars
+      paidUnit: ev.unit || 'sat',
+      paidAmount: ev.amount != null ? ev.amount : ev.sats,
       payOut: out,
       paidTo: ev.to || (out ? p.recipient : ''),
       asset: 'BITCOIN',
       unit: 'SATS',
-      amount: String(ev.sats),
+      amount: String(ev.unit && ev.unit !== 'sat' ? 0 : ev.sats),
       recv: Object.assign({}, p.recv, { live: 'in' }),
     }));
   }

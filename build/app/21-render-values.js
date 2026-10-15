@@ -17,7 +17,7 @@
     const v = /** @type {ReturnType<Component["renderValsBase"]> & {
       clearHistory: () => void, clearContacts: () => void, open0: boolean, rot0: string,
       toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
-      mintHostLabel: string, qrSrc: string, pageHash: string,
+      mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
       histRingInk: string, histRingInk2: string, histRing: string,
     }} */ (this.renderValsBase());
@@ -54,6 +54,8 @@
       logs: 'M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11.5h6M9 14.5h6M9 17.5h3',
       // a payment card: its outline, the stripe across it, a short line of print
       card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
+      // two arrows, one each way: one balance into the other
+      swap: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
       // three coins of different sizes: the pieces themselves, not a wallet
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
@@ -92,12 +94,22 @@
       { label: 'SCAN', path: MENU_ICON.scan, tap: v.goScan, spin: 'rotate(180deg)' },
       { label: 'PASTE', path: MENU_ICON.paste, tap: v.pickPaste, pasteHere: '1' },
     ].map(b => Object.assign({ pasteHere: '', spin: 'none' }, b));
+    /* At a mint with two balances the row has a third button, SWAP, when both
+     * pills are up; with one pill SWAP is a row in the menu instead. Dimmed
+     * offline, where a tap says it needs the mint. */
+    const twoHere = this.twoUnitsOn();
+    const twoPills = twoHere && this.homePills().length === 2;
+    v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b)).concat(twoPills ? [
+      { label: 'SWAP', path: MENU_ICON.swap, tap: () => this.swapStart(), spin: 'none', pasteHere: '',
+        dim: this.offlineNow() ? '0.38' : '1' },
+    ] : []);
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
      * SCAN, PASTE or HISTORY. */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
+    // a balance in either unit: dollars are lost with the words as surely as sats
     const unbacked = !!(window.FoxyWallet && window.FoxyWallet.backedUp
-      && !window.FoxyWallet.backedUp() && (this.state.balSats || 0) > 0);
+      && !window.FoxyWallet.backedUp() && ((this.state.balSats || 0) > 0 || (this.state.balUsdCents || 0) > 0));
     v.menuAlert = unbacked ? 'alertGlow 10.4s ease-in-out infinite' : 'none';
     /* A red ring turning on the menu button, and on BACKUP inside it: words
      * that hold money and have never been written down and checked. The glow
@@ -150,12 +162,14 @@
      * and red too while change is waiting to be scanned or shown. The card is on
      * the history screen; this is what says to go and look. */
     const AU = this.histAudit ? this.histAudit() : { whole: false, off: 0, dueChange: 0, toShowCount: 0 };
+    // and the dollars' own books, at a mint with two balances: each adds up in its own unit
+    const AUusd = (twoHere && this.histAuditUsd) ? this.histAuditUsd() : { whole: false, off: 0 };
     /* Not at the first sign of it. The balance is read a moment before the
      * payment's row is — twelve seconds apart on an older phone after a tap
      * that fell back to a code — and for that long the two disagree about a payment
      * both are about to agree on. History is read again at once, and the ring
      * turns red only if they still disagree four seconds on. */
-    if (AU.whole && AU.off !== 0) {
+    if ((AU.whole && AU.off !== 0) || (AUusd.whole && AUusd.off !== 0)) {
       if (!this._offSince) {
         this._offSince = Date.now();
         clearTimeout(this._offT);
@@ -210,6 +224,11 @@
        * will do, so it reads the same whichever way round it is. */
       { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE',
         path: MENU_ICON.hide, tap: shut(v.toggleHide) },
+      /* SWAP, on a home with one pill at a mint with two balances: home's
+       * button does it when both pills are up. */
+    ]).concat(twoHere && !twoPills ? [
+      { label: 'SWAP', path: MENU_ICON.swap, tap: shut(() => this.swapStart()) },
+    ] : []).concat([
       { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
     ]).concat(mintsWithMoney > 1 ? [
@@ -217,6 +236,12 @@
     ] : []).concat([
       { label: 'SWITCH', path: MENU_ICON.switch,
         tap: shut(() => this.goSwitchMint()) },
+    ]).concat(!twoHere ? [] : [
+      /* What to hold, asked again: the onboarding's last question, from here. */
+      { label: 'WHAT YOU HOLD', path: MENU_ICON.dollars,
+        tap: shut(() => this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]),
+          holdPick: this.walletChoiceNow().hold }))) },
+    ]).concat([
       /* What the pool actually holds, which decides whether this phone can pay an
        * exact amount at all — the one question an offline payer has and no other
        * screen answers. */
@@ -377,6 +402,8 @@
       ...this.renderSent(c),
       ...this.renderToken(c),
       ...this.renderConfirmShell(c),
+      ...this.renderCurrency(c),
+      ...this.renderSwap(c),
       ...this.renderBlocked(c),
       ...this.renderHistory(c),
       ...this.renderTxDetail(c),
@@ -483,8 +510,18 @@
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
     // paying from a card (SEND on its screen, `fcOutMode`): out of what the card holds, and not this phone's balance
     const cardOut = s.flow === 'send' && !!(this.fcOutMode && this.fcOutMode());
+    /* At a mint with two balances a send is capped by the balance that pays,
+     * when one was picked by hand, and otherwise by the larger: a payment the
+     * remembered balance cannot cover goes from the other (`keypadWallet`), so
+     * MORE THAN YOUR BALANCE means neither covers it. Dollars are their own
+     * figure, in cents, and need no price. A card holds bitcoin only, so a
+     * payment from one is capped by the card alone. */
+    const twoSend = s.flow === 'send' && !cardOut && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usdCapUsd = (Number(s.balUsdCents) || 0) / 100;
     const sendCapUsd = !capped ? 0
       : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : twoSend ? (s.walletTapped ? (this.walletNow('send') === 'usd' ? usdCapUsd : btcAvailUsd)
+        : Math.max(usdCapUsd, btcAvailUsd || 0))
       : btcAvailUsd;
     const sendEnteredUsd = s.unit === 'SATS' ? (parseFloat(s.amount) || 0) * this.satUsd() : (parseFloat(s.amount) || 0);
     const SEND_DAY_LIMIT = Infinity; // this fork has no daily limit
@@ -501,7 +538,10 @@
     const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
       ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
-    const sendOver = capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver);
+    /* A swap's amount is typed in the balance it leaves, and capped by it:
+     * cents against cents, or sats against sats, with no price in it. */
+    const swapOver = s.flow === 'swap' && sc === 'amount' && this.swapTyped() > this.unitBalance(this.swapUnits().from);
+    const sendOver = (capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver)) || swapOver;
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;
     // live series or nothing: a canned curve next to a real price is a lie
@@ -521,6 +561,6 @@
     const overBySats = (sendOver && this.satUsd() > 0)
       ? Math.ceil((sendEnteredUsd - sendCapUsd) / this.satUsd()) : 0;
     // what is held with the mint is this phone's balance; a card's is its own
-    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd' && !cardOut) ? this.heldBlocks(overBySats) : '';
+    const sendHeld = (sendOver && !overLimit && !roomOver && this.heldBlocks && s.flow !== 'cardWd' && !cardOut && s.flow !== 'swap') ? this.heldBlocks(overBySats) : '';
     return { s, sc, balLive, btcAvailUsd, sendCapUsd, sendEnteredUsd, SEND_DAY_LIMIT, overLimit, sendOver, roomOver, sendHeld, chart, val, landed, invSats, sats, tx, emailOk };
   }
