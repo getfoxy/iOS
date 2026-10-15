@@ -5,7 +5,7 @@
  *
  *   node tools/live/crowd.js [--people 20] [--rounds 10] [--fund 100] [--socks 53114]
  *                            [--min 1 --max 25] [--stagger 0] [--token <file>]
- *                            [--cross 0.5] <mint A> [<mint B>]
+ *                            [--cross 0.5] [--burst 1,2,4,8,16,32,64,100 --repeat 1] <mint A> [<mint B>]
  *
  * Each person is a wallet page of its own (harness.boot): its own phone, its
  * own seed, its own Tor circuit. A person signs in to Tor's SOCKS port with a
@@ -52,6 +52,17 @@
  *      swap, inputs less amount less change of every melt). Then the funder's
  *      balance at A is swept out to a Cashu token in the run's folder: the
  *      backup is a token, not the seed (production.md).
+ *
+ * --burst replaces the rounds with a ramp of bursts at one mint: for each size,
+ * that many people send a token one after another, and then every receiver
+ * takes its token at the same instant, so the mint sees exactly that many
+ * swaps at once. Each burst reports how many were taken, how many the mint
+ * refused for its own lock ("failed to acquire database lock", "database is
+ * locked"), the median, 90th percentile and longest take, and the swaps a
+ * second; a refused take is offered again alone afterwards, which must go
+ * (the refusal is before any write). --repeat runs the ramp that many times.
+ * The share-out and the sweep go one at a time in burst mode, so the only
+ * bursts are the measured ones. One mint only.
  *
  * The report is printed at the end and written as JSON beside the run's state:
  * each mint, its version and fee; same-mint sends and crossings kept apart,
@@ -121,6 +132,8 @@ const MAX = Math.round(Number(opt('max', 25)));
 const STAGGER = Math.round(Number(opt('stagger', 0)));
 const TOKEN_FILE = opt('token', '');
 const CROSS_ARG = opt('cross', null);
+const BURST = String(opt('burst', '')).split(',').map((x) => Math.round(Number(x))).filter((n) => n >= 1);
+const REPEAT = Math.round(Number(opt('repeat', 1)));
 const LOCAL = flag('local');
 /* A mint's URL as the wallet keys it (canonicalMint in Web/foxy-wallet.js):
  * scheme and host in lower case, no default port, no trailing slash. */
@@ -140,8 +153,18 @@ const URL_OF = { A: MINT, B: MINT_B };
 const LETTERS = TWO ? ['A', 'B'] : ['A'];
 const CROSS = TWO ? (CROSS_ARG == null ? 0.5 : Number(CROSS_ARG)) : 0;
 const usage = 'usage: node tools/live/crowd.js [--people 20] [--rounds 10] [--fund 100] [--socks 53114] '
-  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--local] <mint A> [<mint B>]';
+  + '[--min 1 --max 25] [--stagger 0] [--token <file>] [--cross 0.5] [--burst 1,2,4,8 --repeat 1] [--local] <mint A> [<mint B>]';
 if (!MINT || !/^https:\/\//.test(MINT) || (TWO && !/^https:\/\//.test(MINT_B)) || argv.length > 2) { console.log(usage); process.exit(1); }
+if (BURST.length && TWO) { console.log('FAIL  --burst is for one mint'); process.exit(1); }
+if (!(REPEAT >= 1)) { console.log(usage); process.exit(1); }
+/* In burst mode the share-out and the sweep go one at a time, so the only
+ * bursts at the mint are the measured ones. */
+const allOf = async (list, fn) => {
+  if (!BURST.length) return Promise.all(list.map(fn));
+  const out = [];
+  for (let i = 0; i < list.length; i++) out.push(await fn(list[i], i));
+  return out;
+};
 if (!(PEOPLE >= 2) || !(ROUNDS >= 0) || !(FUND >= 1) || !(MIN >= 1) || !(MAX >= MIN) || !(STAGGER >= 0) || !/^\d+$/.test(SOCKS)
     || !(CROSS >= 0 && CROSS <= 1) || (TWO && MINT === MINT_B) || (TWO && PEOPLE < 2)) {
   console.log('bad arguments: at least 2 people, a fund of 1 sat or more, 1 <= min <= max, 0 <= cross <= 1, two different mints\n' + usage);
@@ -709,7 +732,7 @@ function saveState() {
 }
 
 /* ---- the end ------------------------------------------------------------ */
-const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, fund: FUND,
+const R = { mint: MINT, mintB: MINT_B || null, real: REAL, local: LOCAL, started: STAMP, people: PEOPLE, rounds: ROUNDS, bursts: BURST.length ? BURST : null, repeat: REPEAT, fund: FUND,
             min: MIN, max: MAX, stagger: STAGGER, cross: CROSS, socks: LOCAL ? null : SOCKS, mints: {} };
 let finished = false;
 function finish(code) {
@@ -785,6 +808,14 @@ function report() {
     for (const k of Object.keys(reqs)) line(k, reqs[k]);
     console.log('  failures by kind: ' + (Object.keys(S.failed[g] || {}).length ? JSON.stringify(S.failed[g]) : 'none'));
     if (Object.keys(S.walletFailed[g] || {}).length) console.log('  wallet steps that failed: ' + JSON.stringify(S.walletFailed[g]));
+  }
+  if (R.burstRows && R.burstRows.length) {
+    console.log('\nbursts (every take a swap at the mint, all at the same instant; again = refused takes that went when offered alone):');
+    console.log('  ' + pad('size', 8) + lpad('tried', 6) + lpad('ok', 5) + lpad('lock', 6) + lpad('other', 7) + lpad('again', 7) + lpad('median', 9) + lpad('p90', 8) + lpad('max', 8) + lpad('swaps/s', 9));
+    for (const r of R.burstRows) console.log('  ' + pad(String(r.size) + (REPEAT > 1 ? ' /' + r.repeat : ''), 8) + lpad(String(r.tried), 6) + lpad(String(r.ok), 5)
+      + lpad(String(r.lock), 6) + lpad(String(r.other), 7) + lpad(String(r.retriedOk), 7) + lpad(fmt(r.medianMs), 9) + lpad(fmt(r.p90Ms), 8) + lpad(fmt(r.maxMs), 8) + lpad(String(r.perSecond), 9));
+    const lw = R.burstRows.map((r) => r.lockWhy && r.lockWhy[0]).find(Boolean);
+    if (lw) console.log('  the lock refusal, as the mint words it: ' + lw);
   }
   console.log('\nrounds:');
   for (const r of S.rounds) {
@@ -987,19 +1018,19 @@ async function fundByInvoice(p, want, what) {
     fundRows.push({ sends: groupB.length - 1, sent: outB.filter(Boolean).length, received: nB, ms: Date.now() - t0b });
   }
   const t0f = Date.now();
-  const sharesOut = await Promise.all(groupA.slice(1).map(async (q) => {
+  const sharesOut = await allOf(groupA.slice(1), async (q) => {
     const s = await sendTo(F, share);
     if (s.ok) inFlight.push(Object.assign(s, { from: 0, to: q.n }));
     else say(F.name + ' could not send ' + share + ' sats' + (TWO ? ' at A' : '') + ' to ' + q.name + ': ' + s.why);
     return s.ok ? s : null;
-  }));
+  });
   saveState();
-  const sharesIn = await Promise.all(sharesOut.map(async (s) => {
+  const sharesIn = await allOf(sharesOut, async (s) => {
     if (!s) return { ok: false };
     const r = await take(people[s.to], s);
     if (!r.ok) say(people[s.to].name + ' could not take ' + s.sats + ' sats from ' + F.name + ' (the token is in the state file): ' + r.why);
     return r;
-  }));
+  });
   const fundedAll = sharesIn.filter((x) => x.ok).length;
   ok(fundedAll === groupA.length - 1, 'the funder shared out ' + share + ' sats' + (TWO ? ' at A' : '') + ' to each of ' + (groupA.length - 1),
      fundedAll + ' taken, ' + fmt(Date.now() - t0f) + ' ms');
@@ -1010,9 +1041,76 @@ async function fundByInvoice(p, want, what) {
                   crossed: TWO && R.firstCrossing && R.firstCrossing.ok ? 1 : 0, crossTried: TWO ? 1 : 0 });
   saveState();
 
+  /* ---- 2b. bursts: a ramp of simultaneous swaps at the mint ---- */
+  async function bursts() {
+    R.burstRows = [];
+    const LOCKY = /failed to acquire database lock|database is locked|lock timeout|could not obtain lock/i;
+    const pct = (a, q) => { if (!a.length) return 0; const z = a.slice().sort((x, y) => x - y); return z[Math.min(z.length - 1, Math.floor(q * z.length))]; };
+    for (let rep = 1; rep <= REPEAT; rep++) {
+      for (const size of BURST) {
+        const chosen = people.filter((p) => balAt(p, 'A') >= MAX + 1).slice(0, size);
+        if (chosen.length < size) say('burst of ' + size + ': only ' + chosen.length + ' people hold enough; using them');
+        if (!chosen.length) { say('burst of ' + size + ': nobody holds enough, skipped'); continue; }
+        // the sends, one after another: a token for each take
+        const tokens = [];
+        for (let i = 0; i < chosen.length; i++) {
+          const p = chosen[i];
+          const q = chosen.length > 1 ? chosen[(i + 1) % chosen.length] : people.find((x) => x !== p);
+          const want = MIN + Math.floor(Math.random() * (MAX - MIN + 1));
+          const amount = sendable(p, want);
+          if (!amount) continue;
+          const s = await sendTo(p, amount);
+          if (!s.ok) { say(p.name + ' could not send ' + amount + ' sats for the burst: ' + s.why); continue; }
+          const t = Object.assign(s, { from: p.n, to: q.n });
+          inFlight.push(t);
+          tokens.push(t);
+        }
+        saveState();
+        // the burst: every take at the same instant
+        const t0 = Date.now();
+        const starts = [];
+        const res = await Promise.all(tokens.map(async (t) => {
+          const st = Date.now(); starts.push(st);
+          const g = await take(people[t.to], t);
+          return { ok: g.ok, why: g.why || '', ms: Date.now() - st, t };
+        }));
+        const burstMs = Date.now() - t0;
+        const okRes = res.filter((r) => r.ok);
+        const lock = res.filter((r) => !r.ok && LOCKY.test(r.why));
+        const other = res.filter((r) => !r.ok && !LOCKY.test(r.why));
+        // the refused, offered again one at a time: nothing was spent, so they must go
+        let retriedOk = 0;
+        for (const r of res.filter((x) => !x.ok)) {
+          await sleep(300);
+          const g = await take(people[r.t.to], r.t);
+          if (g.ok) retriedOk++;
+          else say('burst of ' + size + ': ' + people[r.t.to].name + ' could not take ' + r.t.sats + ' sats even alone: ' + g.why);
+        }
+        const row = { repeat: rep, size, tried: tokens.length, ok: okRes.length, lock: lock.length, other: other.length, retriedOk,
+                      medianMs: pct(okRes.map((r) => r.ms), 0.5), p90Ms: pct(okRes.map((r) => r.ms), 0.9),
+                      maxMs: res.length ? Math.max(...res.map((r) => r.ms)) : 0, burstMs,
+                      spreadMs: starts.length ? Math.max(...starts) - Math.min(...starts) : 0,
+                      perSecond: burstMs ? Math.round(okRes.length * 10000 / burstMs) / 10 : 0,
+                      otherWhy: other.slice(0, 3).map((r) => r.why.slice(0, 160)),
+                      lockWhy: lock.slice(0, 1).map((r) => r.why.slice(0, 200)) };
+        R.burstRows.push(row);
+        saveState();
+        console.log('burst ' + String(size).padStart(3) + (REPEAT > 1 ? ' (' + rep + ')' : '') + ': ' + row.tried + ' swaps at once, ' + row.ok + ' ok, '
+          + row.lock + ' refused by the lock, ' + row.other + ' other; median ' + fmt(row.medianMs) + ' ms, p90 ' + fmt(row.p90Ms) + ' ms, max ' + fmt(row.maxMs)
+          + ' ms; ' + row.perSecond + ' swaps/s over ' + fmt(burstMs) + ' ms'
+          + (row.lock + row.other ? '; offered again alone: ' + retriedOk + ' of ' + (row.lock + row.other) + ' taken' : ''));
+        for (const w of row.otherWhy) say('  other: ' + w);
+      }
+    }
+    const tried = R.burstRows.reduce((a, r) => a + r.tried, 0);
+    S.rounds.push({ name: 'bursts', ms: R.burstRows.reduce((a, r) => a + r.burstMs, 0), sends: tried, sent: tried, skipped: 0,
+                    receives: tried, received: R.burstRows.reduce((a, r) => a + r.ok + r.retriedOk, 0), crossed: 0, crossTried: 0 });
+  }
+
   /* ---- 2. rounds ---- */
   phase = 'rounds';
-  for (let r = 1; r <= ROUNDS; r++) {
+  if (BURST.length) await bursts();
+  for (let r = 1; r <= (BURST.length ? 0 : ROUNDS); r++) {
     const t0 = Date.now();
     let skipped = 0, crossTried = 0;
     const sends = await Promise.all(people.map(async (p) => {
@@ -1109,7 +1207,7 @@ async function fundByInvoice(p, want, what) {
   let sweepFailed = 0;
   const sweepWhy = [];
   const tooSmall = [];
-  const back = await Promise.all(people.slice(1).map(async (p) => {
+  const back = await allOf(people.slice(1), async (p) => {
     const out = [];
     for (let i = 0; i < 3; i++) {
       let moved = false;
@@ -1136,7 +1234,7 @@ async function fundByInvoice(p, want, what) {
       if (!moved) break;
     }
     return out;
-  }));
+  });
   // the funder's own sats at B (padding left from its crossing) come home too, a move and no payment
   if (TWO && balAt(F, 'B') > 0) {
     const atB = balAt(F, 'B');

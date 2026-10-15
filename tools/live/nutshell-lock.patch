@@ -1,0 +1,58 @@
+# nutshell-lock.patch — against cashubtc/nutshell 0.21.0 (cashu/mint/db/write.py, cashu/core/db.py).
+# What tools/live/nutshell-pg.sh measured with NUT_PATCH: the four proofs_pending lock budgets 1 s -> 10 s,
+# and, for the 'queued' run, Postgres lock statements without NOWAIT so the database queues waiters in
+# order (bounded by MINT_DATABASE_LOCK_TIMEOUT). The 'timeout10' run is the write.py hunks alone.
+# Not a proposal of code to upstream; a measurement of the two smallest changes for issue 1197.
+--- a/cashu/mint/db/write.py
++++ b/cashu/mint/db/write.py
+@@ -91,7 +91,7 @@
+         try:
+             logger.trace("_verify_spent_proofs_and_set_pending acquiring lock")
+             async with self.db.get_connection(
+-                locks=[LockOptions(table="proofs_pending", timeout=1)],
++                locks=[LockOptions(table="proofs_pending", timeout=10)],
+                 conn=conn,
+             ) as conn:
+                 logger.trace("checking whether proofs are already spent")
+@@ -558,7 +558,7 @@
+                     select_statement="checking_id = :checking_id",
+                     parameters={"checking_id": quote.checking_id},
+                 ),
+-                LockOptions(table="proofs_pending", timeout=1),
++                LockOptions(table="proofs_pending", timeout=10),
+             ],
+         ) as conn:
+             await self._verify_spent_proofs_and_set_pending(
+@@ -592,7 +592,7 @@
+                     select_statement="quote = :quote",
+                     parameters={"quote": quote.quote},
+                 ),
+-                LockOptions(table="proofs_pending", timeout=1),
++                LockOptions(table="proofs_pending", timeout=10),
+             ],
+         ) as conn:
+             await self._unset_proofs_pending(proofs, keysets, spent=False, conn=conn)
+@@ -680,7 +680,7 @@
+                     select_statement="quote = :quote",
+                     parameters={"quote": quote.quote},
+                 ),
+-                LockOptions(table="proofs_pending", timeout=1),
++                LockOptions(table="proofs_pending", timeout=10),
+             ],
+         ) as conn:
+             # Load the quote within the finalization transaction.
+--- a/cashu/core/db.py
++++ b/cashu/core/db.py
+@@ -359,10 +359,10 @@
+         # with postgres, we can lock a row with a SELECT statement with FOR UPDATE NOWAIT
+         if lock.select_statement:
+             if self.type == POSTGRES:
+-                return f"SELECT 1 FROM {self.table_with_schema(lock.table)} WHERE {lock.select_statement} FOR UPDATE NOWAIT;"
++                return f"SELECT 1 FROM {self.table_with_schema(lock.table)} WHERE {lock.select_statement} FOR UPDATE;"
+ 
+         if self.type == POSTGRES:
+-            return f"LOCK TABLE {self.table_with_schema(lock.table)} IN EXCLUSIVE MODE NOWAIT;"
++            return f"LOCK TABLE {self.table_with_schema(lock.table)} IN EXCLUSIVE MODE;"
+         elif self.type == COCKROACH:
+             return f"LOCK TABLE {lock.table};"
+         elif self.type == SQLITE:
