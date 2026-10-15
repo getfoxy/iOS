@@ -840,11 +840,19 @@
     /* A dollar balance is typed in dollars, exactly, online or not and with a
      * price or without one: there is nothing to convert. */
     const s0 = this.state;
-    /* And a swap in the balance it leaves: dollars in dollars, bitcoin in
-     * sats, whatever the price is doing (26i-swap.js). */
+    /* A swap's keypad starts in dollars when its SET AMOUNT opens
+     * (`swapToAmount`), and the ⇅ is the person's from then on: nothing here
+     * moves it back. Typed in the unit the swap does not leave, the figure is
+     * converted at the swap's price (`swapTyped`), and this keypad offers
+     * the other unit only with a market price seen, so with none it goes
+     * back to the unit that leaves, where nothing needs converting
+     * (26i-swap.js). */
     if (s0.flow === 'swap' && s0.screen === 'amount') {
-      const want = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
-      if (s0.unit !== want) this.setState({ unit: want, amount: '' });
+      const exact = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
+      if (s0.unit !== exact && !this.px()) {
+        console.log('[foxy] no price, so the swap is typed in the balance it leaves');
+        this.setState({ unit: exact, amount: '' });
+      }
       return;
     }
     /* Not a payment to an address: that is asked in sats, so dollars typed

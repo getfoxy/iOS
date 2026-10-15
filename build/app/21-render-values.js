@@ -538,8 +538,9 @@
     const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
       ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
-    /* A swap's amount is typed in the balance it leaves, and capped by it:
-     * cents against cents, or sats against sats, with no price in it. */
+    /* A swap's amount is what leaves its balance, and is capped by it: cents
+     * against cents, or sats against sats. Typed in the other unit it is
+     * converted first, at the mint's last rate (`swapTyped`). */
     const swapOver = s.flow === 'swap' && sc === 'amount' && this.swapTyped() > this.unitBalance(this.swapUnits().from);
     const sendOver = (capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver)) || swapOver;
     // handed to syncHaptics, which cannot repeat this balance/limit maths

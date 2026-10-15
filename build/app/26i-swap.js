@@ -4,10 +4,19 @@
    *
    *   swap         which way: the FROM pill over the TO pill, with a round ⇅
    *                on the seam that turns them round, and NEXT
-   *   amount       SET AMOUNT with flow 'swap': "How much to swap?", typed in
-   *                the FROM balance's own unit (cents, or sats), and ALL OF IT
-   *   swapConfirm  the CONFIRM PAYMENT layout: TOTAL, then FROM, YOU GET, RATE
-   *                with how long the mint holds it, FEE INCLUDED, and SWAP
+   *   amount       SET AMOUNT with flow 'swap': "How much to swap?", in dollars
+   *                to start whichever way it goes, with the ⇅ to sats and back
+   *                as a send has it, and ALL OF IT. What the swap moves is the
+   *                FROM balance's own unit, cents or sats, exactly: typed in
+   *                it, nothing converts; typed in the other, it converts at the
+   *                mint's last rate, the one its confirmation will be valued
+   *                at, so the dollars typed are the dollars it repeats
+   *                (`swapTyped`, `swapPx`)
+   *   swapConfirm  four blocks, as the owner laid them out: YOU ARE GETTING,
+   *                YOU ARE SPENDING, FEE, and the mint's RATE with how long it
+   *                is held for, then SWAP. A bitcoin figure is its dollar worth
+   *                at the quote's rate with the sats under it; a dollar figure
+   *                is exact and has no sats line
    *   swapDone     SWAPPED: what left and what arrived, each in its own colour
    *
    * The wallet does the money (16b-two-balances.js): `swapQuote` asks the mint
@@ -63,7 +72,11 @@
     return { from: from, to: from === 'usd' ? 'sat' : 'usd' };
   }
 
-  /* NEXT on the swap screen: SET AMOUNT, typed in the balance that leaves. */
+  /* NEXT on the swap screen: SET AMOUNT, in dollars whichever way it goes,
+   * since dollars are what people think in. Without a price ever seen there
+   * is nothing to convert dollars with, so bitcoin leaving is typed in sats,
+   * its own unit. The unit is set here, once; after that the ⇅ is the
+   * person's (`toggleUnit`). */
   swapToAmount() {
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
@@ -73,18 +86,56 @@
     }
     this.setState(p => ({
       screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'swap',
-      unit: from === 'usd' ? 'USD' : 'SATS', amount: '', asset: '',
+      unit: (from === 'usd' || this.px()) ? 'USD' : 'SATS', amount: '', asset: '',
       note: '', noteDraft: '', recipient: '', recipientKind: '',
     }));
   }
 
-  /* What is typed on SET AMOUNT for a swap, in the FROM unit: cents exactly
-   * for dollars, sats for bitcoin. */
+  /* Is the keypad in the unit that leaves (dollars for dollars, sats for
+   * bitcoin), so that what is typed is what moves? */
+  swapExact() {
+    const { from } = this.swapUnits();
+    return (this.state.unit === 'SATS') === (from === 'sat');
+  }
+
+  /* The price a swap's two units are put side by side at before the mint
+   * has quoted: its last rate, because the confirmation values the swap at
+   * the mint's rate, and a figure converted at the market's would come back
+   * a few cents off what was typed. The market's price when the mint has
+   * given none; 0 with neither. The keypad's figure (`swapTyped`), the line
+   * under it (`swapEstimate`), the ⇅ (`toggleUnit`) and the confirmation
+   * before its rate (`swapSpec`) all read this one. */
+  swapPx() {
+    const W = window.FoxyWallet;
+    let rate = 0;
+    try { rate = this.swapRateOf(W && W.mintRate ? W.mintRate() : null); } catch (e) { rate = 0; }
+    return rate > 0 ? rate : (this.px() || 0);
+  }
+
+  /* What is typed on SET AMOUNT for a swap, in the FROM unit: cents for
+   * dollars, sats for bitcoin. Typed in that unit it is taken exactly. Typed
+   * in the other it converts at the swap's price (`swapPx`), rounded as the
+   * ⇅ rounds: dollars to the nearest sat, sats to the cent the ⇅ would show
+   * (`centsOfSats`), so the cents asked for are the figure seen. No price,
+   * no conversion: nought. */
   swapTyped() {
     const { from } = this.swapUnits();
-    if (from === 'usd') return this.centsTyped();
     const v = parseFloat(this.state.amount) || 0;
-    return v > 0 ? Math.round(v) : 0;
+    if (!(v > 0)) return 0;
+    if (this.swapExact()) return from === 'usd' ? this.centsTyped() : Math.round(v);
+    const px = this.swapPx();
+    if (!px) return 0;
+    return from === 'usd' ? this.centsOfSats(Math.round(v), px) : Math.round(v / px * 1e8);
+  }
+
+  /* A quote is for the amount as it stood at NEXT. The keypad changing under
+   * it (a key, or the ⇅) drops it, and an answer still on its way for the
+   * old figure is not kept (`swapAsk` keeps only its own latest question). */
+  swapForget() {
+    const s = this.state;
+    if (!s.swapQuote && !s.swapQuoting && !s.swapNewRate) return;
+    this._swapAskRun = (this._swapAskRun || 0) + 1;
+    this.setState({ swapQuote: null, swapQuoting: false, swapNewRate: false });
   }
 
   /* NEXT on SET AMOUNT (or ALL OF IT): the confirmation, and the rate asked. */
@@ -147,19 +198,21 @@
     return Math.max(0, Math.floor((Number(q.expiresAt) - this.SWAP_MARGIN_MS - Date.now()) / 1000));
   }
 
-  /* The countdown under RATE, ticking once a second while the confirmation is
-   * up, and a new rate when it runs out. It stops by itself as soon as the
-   * screen has gone: no clock outlives the screen it is for. */
+  /* The countdown under the rate, ticking once a second while the
+   * confirmation is up, and a new rate when it runs out. It stops by itself
+   * as soon as the screen has gone, and as soon as there is no rate on it to
+   * count (lapsed, refused, or dropped): no clock outlives what it is for. A
+   * new rate starts it again (`swapAsk`). */
   swapClock() {
     if (this._swapClockT) return;
     this._swapClockT = setInterval(() => {
       const s = this.state;
-      if (s.screen !== 'swapConfirm') {
+      if (s.screen !== 'swapConfirm' || !s.swapQuote) {
         clearInterval(this._swapClockT);
         this._swapClockT = null;
         return;
       }
-      if (!s.swapQuote || s.swapQuoting || s.swapBusy) return;
+      if (s.swapQuoting || s.swapBusy) return;
       if (this.swapLeft() > 0) { this.setState({ swapTick: Date.now() }); return; }
       if ((s.swapRequotes || 0) >= this.SWAP_REQUOTES) {
         // left alone too long: wait for a tap rather than keep asking
@@ -263,7 +316,7 @@
     return n > 0 ? n : 0;
   }
 
-  /* "₿ 1 = $ 81,786", the way the rows say a rate. */
+  /* "₿ 1 = $ 81,786", the way the screens say a rate. */
   swapRateText(n) { return '₿ 1 = $ ' + this.group(Math.round(n)); }
 
   /* "Forge's rate": whose rate it is, by the mint's own name. */
@@ -272,78 +325,129 @@
     return who + (/s$/i.test(who) ? '’' : '’s') + ' rate';
   }
 
+  /* The same, as the confirmation's heading: FORGE’S RATE. */
+  swapRateHead() { return this.swapRateWho().toUpperCase(); }
+
+  /* "00:52": the time a rate is still held for, minutes and seconds. */
+  swapClockText(sec) {
+    const n = Math.max(0, Math.floor(Number(sec) || 0));
+    return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+  }
+
+  /* An amount as the confirmation shows it, at `rate` dollars per bitcoin.
+   * Dollars are exact, with no sats line. Bitcoin is its dollar worth with
+   * the exact sats under it in brackets; with no rate it is the sats alone.
+   * `cents` and `sats` are its worth in each, for the fee's sum. */
+  swapWorth(n, unit, rate) {
+    const amt = Math.max(0, Math.round(Number(n) || 0));
+    const r = Number(rate) > 0 ? Number(rate) : 0;
+    if (unit === 'usd') {
+      return { main: this.unitFigure(amt, 'usd'), sub: '', cents: amt, sats: r ? Math.round(amt * 1e6 / r) : 0 };
+    }
+    if (!r) return { main: this.unitFigure(amt, 'sat'), sub: '', cents: 0, sats: amt };
+    const cents = Math.round(amt * r / 1e6);
+    return { main: this.swapCents(cents, amt), sub: '(' + this.unitFigure(amt, 'sat') + ')', cents: cents, sats: amt };
+  }
+
+  /* Dollars for something worth sats: not "$ 0.00" for a figure that is not
+   * nothing, as `money` says it. */
+  swapCents(cents, sats) {
+    return (cents === 0 && sats > 0) ? '< $ 0.01' : this.unitFigure(cents, 'usd');
+  }
+
   /* The ink a balance's figure is drawn in on a dark screen: frost for
    * dollars, fur for bitcoin. */
   swapInk(unit) { return unit === 'usd' ? '#D6EEF7' : '#F2742B'; }
 
-  /* What a swap of what is typed would give, roughly, at the mint's last rate
-   * (or the market's): the line under the keypad's figure. '' with no rate. */
+  /* The line under the keypad's figure, in the other unit, as a send has it.
+   * Typed in the unit that leaves: about what the swap would give, at the
+   * mint's last rate (or the market's). Typed in the other: what leaves,
+   * exactly as it will be asked for. '' with nothing to say. */
   swapEstimate() {
-    const W = window.FoxyWallet;
     const { from, to } = this.swapUnits();
     const n = this.swapTyped();
     if (!(n > 0)) return '';
-    let rate = 0;
-    try { rate = this.swapRateOf(W && W.mintRate ? W.mintRate() : null); } catch (e) { rate = 0; }
-    if (!(rate > 0) && this.satUsd()) rate = this.satUsd() * 1e8;
+    if (!this.swapExact()) return this.unitFigure(n, from);
+    const rate = this.swapPx();
     if (!(rate > 0)) return '';
     const got = from === 'usd' ? Math.floor(n / 100 / rate * 1e8) : Math.floor(n * rate / 1e8 * 100);
     return '≈ ' + this.unitFigure(got, to);
   }
 
-  /* The confirmation's contents (confirmSpec): the owner's CONFIRM PAYMENT
-   * layout with the swap's rows, and no NETWORK row, since a swap never
-   * leaves the mint. */
+  /* The confirmation's contents (confirmSpec), in the four blocks the owner
+   * laid out, top to bottom: YOU ARE GETTING, YOU ARE SPENDING, FEE, and the
+   * mint's RATE with how long it is held for. No NETWORK row, since a swap
+   * never leaves the mint, and no TOTAL, since what is spent is its own
+   * block. The fee is the mint's whole cost of the swap: what leaves less
+   * what arrives, both at the quote's rate, in dollars with the sats under
+   * it, so the three figures add up as read. */
   /** @returns {ConfirmSpec} */
   swapSpec() {
     const s = this.state;
     const { from, to } = this.swapUnits();
     const q = s.swapQuote;
-    const fig = (n, u) => this.unitFigure(n, u);
+    const block = (label, w, unit, opt) => this.cfRow(label, unit ? w.main + ' in ' + this.unitWord(unit) : w.main,
+      Object.assign({ sub: w.sub }, opt || {}));
+    // what arrives is the headline: a size up, in the ink of the balance it lands in
+    const getOpt = { ink: this.swapInk(to), size: '30px' };
     const base = {
-      title: 'SWAP', titleUp: true, amountLabel: 'TOTAL', amountInk: 'var(--ink)',
+      title: 'SWAP', titleUp: true, amountLabel: '', amount: '',
       close: () => this.setState({ screen: 'home', stack: [] }),
     };
     if (!q) {
-      const typed = fig(s.swapAmount || 0, from);
+      /* No rate yet: what leaves, and the rest waiting on the mint. Bitcoin
+       * leaving is shown as the keypad showed it, in dollars at the mint's
+       * last rate with the exact sats under it (`swapPx`); with no price at
+       * all it is the sats alone, with no unit word to make it read as a
+       * dollar figure. */
+      const word = s.swapQuoting ? 'CHECKING…' : 'UNKNOWN';
+      const guess = this.swapPx();
+      const spent = this.swapWorth(s.swapAmount || 0, from, guess);
+      const wrong = !s.swapQuoting && !s.swapLapsed;
       const rows = [
-        this.cfRow('FROM ' + this.unitWord(from), typed),
-        this.cfRow('YOU GET', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN', { ink: this.swapInk(to) }),
-        this.cfRow('RATE', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN'),
-        this.cfRow('FEE INCLUDED', s.swapQuoting ? 'CHECKING…' : 'UNKNOWN'),
+        this.cfRow('YOU ARE GETTING', word, getOpt),
+        block('YOU ARE SPENDING', spent, (from === 'usd' || guess > 0) ? from : '', wrong ? { ink: '#FF5C5C' } : {}),
+        this.cfRow('FEE', word),
+        this.cfRow(this.swapRateHead(), word),
       ];
       if (s.swapQuoting) {
-        return Object.assign(base, { amount: typed, rows: rows,
+        return Object.assign(base, { rows: rows,
           cta: 'CHECKING THE RATE…', ctaBusy: true, ctaTone: 'go', go: () => {} });
       }
       if (s.swapLapsed) {
-        return Object.assign(base, { amount: typed, rows: rows,
+        return Object.assign(base, { rows: rows,
           chip: 'The rate ran out. Nothing moved.',
           cta: 'GET A NEW RATE', ctaTone: 'go',
           go: () => { this.setState({ swapRequotes: 0 }); this.swapAsk(true); } });
       }
-      return Object.assign(base, { amount: typed, amountInk: '#FF5C5C', rows: rows,
+      return Object.assign(base, { rows: rows,
         warn: s.swapErr || 'The mint has not given a rate yet.',
         cta: s.swapErrAmount ? 'CHANGE AMOUNT' : 'TRY AGAIN', ctaTone: 'warn',
         go: () => { if (s.swapErrAmount) this.back(); else this.swapAsk(false); } });
     }
     const rate = this.swapRateOf(q.rate);
-    const left = this.swapLeft();
-    const clock = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
     const market = this.swapRateOf(q.market);
+    const got = this.swapWorth(q.get, to, rate);
+    const spent = this.swapWorth(q.total, from, rate);
+    // with no rate to put the two sides in one unit, the mint's own fee in the unit that leaves
+    const fee = rate > 0
+      ? (() => {
+        const c = Math.max(0, spent.cents - got.cents), n = Math.max(0, spent.sats - got.sats);
+        return { main: this.swapCents(c, n), sub: '(' + this.unitFigure(n, 'sat') + ')' };
+      })()
+      : { main: this.unitFigure(q.fee, from), sub: '' };
     const rows = [
-      this.cfRow('FROM ' + this.unitWord(from), fig(q.amount, from)),
-      this.cfRow('YOU GET', fig(q.get, to), { ink: this.swapInk(to) }),
-      this.cfRow('RATE', rate > 0 ? this.swapRateText(rate) + ' · ' + this.swapRateWho() : this.swapRateWho(), {
-        sub: 'Rate held for ' + clock,
+      block('YOU ARE GETTING', got, to, getOpt),
+      block('YOU ARE SPENDING', spent, from),
+      block('FEE', fee, ''),
+      this.cfRow(this.swapRateHead(), rate > 0 ? this.swapRateText(rate) : 'UNKNOWN', {
+        sub: 'Rate held for ' + this.swapClockText(this.swapLeft()),
         // far from the market price: the market's, in red, under the mint's
         sub2: (q.spreadWarn && market > 0) ? 'Market ' + this.swapRateText(market) : '',
         sub2Ink: '#FF5C5C',
       }),
-      this.cfRow('FEE INCLUDED', fig(q.fee, from)),
     ];
     return Object.assign(base, {
-      amount: fig(q.total, from),
       rows: rows,
       warn: s.swapErr || '',
       cta: s.swapBusy ? 'SWAPPING…' : s.swapNewRate ? 'CONFIRM NEW RATE' : 'SWAP',

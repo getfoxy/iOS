@@ -208,8 +208,9 @@ class Component extends DCLogic {
        * four digits somebody is comparing against another phone held beside
        * this one. `big` matches the size the receiver shows them at, so the
        * two screens can be held together and read at a glance rather than
-       * squinted at. */
-      size: o.big ? '88px' : '22px',
+       * squinted at. A figure that heads its screen (what a swap gives) asks
+       * for its own `size`. */
+      size: o.size || (o.big ? '88px' : '22px'),
     };
   }
 

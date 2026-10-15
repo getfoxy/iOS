@@ -10,7 +10,7 @@
  * bundled cashu-ts, the phone's seed) at the harness's mint with a usd keyset (fakeMint `units`), as a person
  * would: SWAP, the direction, the amount, the confirmation, SWAP. Each scenario ends with the books of the page
  * closing in each unit (harness `books`, per mint@unit):
- *   - a quote, and the confirmation's rows drawn from it
+ *   - a quote, and the confirmation's four blocks drawn from it
  *   - a swap run to SWAPPED, a row on each side, both balances right
  *   - a rate that runs out on screen: asked again by itself, and the button reads CONFIRM NEW RATE once
  *   - the mint refusing the payment: nothing held, the pile whole, the screen says so
@@ -19,7 +19,7 @@
  *
  * Part 2 mounts the real page (build/foxy-render.js, as tests/two-balances-screens.js does) on a stand-in wallet
  * that answers the swap calls, and reads what is drawn: the SWAP button, the two pills and the ⇅, SET AMOUNT in the
- * FROM unit with ALL OF IT, the confirmation with RATE, the countdown and the green SWAP, SWAPPED, both pills
+ * dollars with its ⇅ and ALL OF IT, the confirmation's four blocks with the countdown and the green SWAP, SWAPPED, both pills
  * glowing on home, SWAP dimmed offline, and the card for a swap still going through. */
 process.env.TZ = 'UTC';
 const fs = require('fs');
@@ -58,9 +58,10 @@ const method = (sig) => {
 const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
   'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapDoneClose() {',
   'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
+  'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
   'centsTyped() {', 'usd(v) {', 'group(n) {', 'twoUnitsOn() {', 'offlineNow() {', 'moneyBusy() {', 'heldPill() {',
-  'satUsd() {', 'recoveringSats() {'];
+  'satUsd() {', 'recoveringSats() {', 'swapPx() {', 'centsOfSats(sats, px) {'];
 
 // ---- a page at the mint (as tests/two-balances.js has it) ----------------------------------------
 function page(o) {
@@ -129,6 +130,7 @@ function appOn(ctx) {
     settleAnimate(lane) { log.settled.push(lane); },
     showMelt(t) { log.melts.push(t); }, hideMelt() {},
     mintName: () => 'Forge',
+    px() { return app.state.livePrice || null; },
     stageMoney: (n) => '₿ ' + n,
     loadHistory() {},
     refreshBalance() { app.state.balSats = W.balanceOf('sat'); app.state.balUsdCents = W.balanceOf('usd'); return Promise.resolve(); },
@@ -175,14 +177,19 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     ok(q && q.from === 'usd' && q.to === 'sat' && q.total <= 1000 && typeof q._melt === 'object', 'the wallet’s quote is kept whole, insides and all',
       app.state.swapErr);
     spec = app.swapSpec();
-    ok(spec.title === 'SWAP' && spec.titleUp && spec.amountLabel === 'TOTAL' && spec.amount === app.unitFigure(q.total, 'usd'),
-      'TOTAL on top, in dollars, the fee in it', spec.amount);
-    ok(JSON.stringify(spec.rows.map((r) => r.label)) === '["FROM DOLLARS","YOU GET","RATE","FEE INCLUDED"]',
-      'rows FROM DOLLARS, YOU GET, RATE, FEE INCLUDED, and no NETWORK', JSON.stringify(spec.rows.map((r) => r.label)));
-    ok(rowOf(spec, 'YOU GET').value === app.unitFigure(q.get, 'sat') && rowOf(spec, 'YOU GET').ink === '#F2742B', 'YOU GET in sats, in fur ink');
-    ok(/^₿ 1 = \$ 7[67],\d{3} · Forge’s rate$/.test(rowOf(spec, 'RATE').value), 'RATE is the mint’s, by name', rowOf(spec, 'RATE').value);
-    ok(/^Rate held for 0:4\d$/.test(rowOf(spec, 'RATE').sub), 'and how long it is held for, under it', rowOf(spec, 'RATE').sub);
-    ok(rowOf(spec, 'FEE INCLUDED').value === app.unitFigure(q.fee, 'usd'), 'the fee, in dollars');
+    ok(spec.title === 'SWAP' && spec.titleUp && !spec.amountLabel && !spec.amount, 'SWAP, with no TOTAL over the blocks', spec.amount);
+    ok(JSON.stringify(spec.rows.map((r) => r.label)) === '["YOU ARE GETTING","YOU ARE SPENDING","FEE","FORGE’S RATE"]',
+      'blocks YOU ARE GETTING, YOU ARE SPENDING, FEE, FORGE’S RATE, and no NETWORK', JSON.stringify(spec.rows.map((r) => r.label)));
+    const qr = app.swapRateOf(q.rate);
+    const getC = Math.round(q.get * qr / 1e6);
+    ok(rowOf(spec, 'YOU ARE GETTING').value === app.unitFigure(getC, 'usd') + ' in BITCOIN'
+      && rowOf(spec, 'YOU ARE GETTING').sub === '(' + app.unitFigure(q.get, 'sat') + ')' && rowOf(spec, 'YOU ARE GETTING').ink === '#F2742B',
+      'YOU ARE GETTING: the bitcoin’s dollar worth, its sats under it, in fur ink', rowOf(spec, 'YOU ARE GETTING').value);
+    ok(rowOf(spec, 'YOU ARE SPENDING').value === app.unitFigure(q.total, 'usd') + ' in DOLLARS' && rowOf(spec, 'YOU ARE SPENDING').sub === '',
+      'YOU ARE SPENDING: the dollars that leave, exactly, with no sats line', rowOf(spec, 'YOU ARE SPENDING').value);
+    ok(rowOf(spec, 'FEE').value === app.unitFigure(q.total - getC, 'usd'), 'the fee: what leaves less what arrives, in dollars', rowOf(spec, 'FEE').value);
+    ok(/^₿ 1 = \$ 7[67],\d{3}$/.test(rowOf(spec, 'FORGE’S RATE').value), 'the rate is the mint’s, by name', rowOf(spec, 'FORGE’S RATE').value);
+    ok(/^Rate held for 00:4\d$/.test(rowOf(spec, 'FORGE’S RATE').sub), 'and how long it is held for, under it', rowOf(spec, 'FORGE’S RATE').sub);
     ok(spec.cta === 'SWAP' && spec.ctaTone === 'money' && !spec.ctaBusy, 'the button is the green SWAP');
     const run = new Promise((r) => { const t = setInterval(() => { if (app.state.screen !== 'swapConfirm' || app.state.swapErr) { clearInterval(t); r(); } }, 5); });
     spec.go();
@@ -216,7 +223,7 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     app.goSwap();
     ok(app.state.swapFrom === 'sat', 'with no dollars, SWAP opens on bitcoin into dollars');
     app.swapToAmount();
-    ok(app.state.unit === 'SATS', 'typed in sats');
+    ok(app.state.unit === 'USD', 'bitcoin leaving is typed in dollars to start, too');
     app.swapNext(true);
     ok(app.state.swapAmount === 40000 && app.state.swapAll, 'ALL OF IT: the whole bitcoin balance');
     await until(() => app.state.swapQuote);
@@ -487,7 +494,7 @@ async function part2() {
   await settle();
   ok(A.state.screen === 'amount' && /How much to swap\?/.test(text()) && /ALL OF IT \(\$ 42\.05\)/.test(text()), 'SET AMOUNT: How much to swap?, ALL OF IT ($ 42.05)');
   v = A.renderVals();
-  ok(v.swapVis === 'hidden', 'no ₿ toggle: a swap is typed in the balance it leaves');
+  ok(v.swapVis === 'visible' && v.swapPE === 'auto', 'the ⇅ is on screen: dollars or sats, as a send has it');
   ['1', '0', '0', '0'].forEach((k) => A.press(k));
   await settle();
   ok(/\$ 10\.00/.test(text()) && /≈ ₿ 12,2\d\d/.test(text()), 'typed in dollars, with what it makes in sats under it', text().slice(0, 300));
@@ -495,9 +502,10 @@ async function part2() {
   await settle(); await settle();
   ok(A.state.screen === 'swapConfirm' && JSON.stringify(asked.pop()) === '["usd","sat",1000]', 'NEXT: the confirmation, the rate asked for 1,000 cents');
   const t = text();
-  ok(/TOTAL \$ 10\.00/.test(t) && /FROM DOLLARS \$ 9\.98/.test(t) && /YOU GET ₿ 12,2\d\d/.test(t), 'TOTAL, FROM DOLLARS, YOU GET', t.slice(0, 400));
-  ok(/RATE ₿ 1 = \$ 81,786 · .*rate Rate held for 0:5\d Market ₿ 1 = \$ 80,000/.test(t), 'RATE, the time it is held for, and the market price far off', t.slice(0, 500));
-  ok(/FEE INCLUDED \$ 0\.02/.test(t) && !/NETWORK/.test(t), 'FEE INCLUDED, and no NETWORK row');
+  ok(/YOU ARE GETTING \$ 9\.98 in BITCOIN \(₿ 12,2\d\d\) YOU ARE SPENDING \$ 10\.00 in DOLLARS FEE \$ 0\.02 \(₿ \d+\) \S+’S RATE/.test(t),
+    'YOU ARE GETTING, YOU ARE SPENDING, FEE, in that order', t.slice(0, 400));
+  ok(/FORGE’S RATE ₿ 1 = \$ 81,786 Rate held for 00:5\d Market ₿ 1 = \$ 80,000/.test(t), 'the mint’s RATE, the time it is held for, and the market price far off', t.slice(0, 500));
+  ok(!/NETWORK|TOTAL/.test(t), 'no NETWORK row and no TOTAL');
   v = A.renderVals();
   ok(v.cfCtaLabel === 'SWAP' && v.cfCtaBg === '#3AB54A' && v.cfTitleUp === true, 'the green SWAP, the title between the round buttons');
   A.setState({ swapNewRate: true });

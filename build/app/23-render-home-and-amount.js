@@ -522,8 +522,9 @@
          * what the amount makes and this phone agrees to it or does not
          * (`dollarsOnly`). */
         if (this.dollarsOnly()) return '';
-        /* A swap converts, so the other balance's figure is under it: about
-         * what the mint's last rate would give (26i-swap.js). */
+        /* A swap's own line in the other unit: about what the mint's last
+         * rate would give, or, typed in the unit that does not leave, what
+         * leaves (26i-swap.js). */
         if (s.flow === 'swap') return this.swapEstimate();
         /* A dollar balance: dollars, exactly, and no second figure, because
          * nothing is converted. Only a payment to an address converts (it is
@@ -543,8 +544,6 @@
       swapPE: this.dollarsOnly() ? 'none' : 'auto',
       // and for a dollar balance, typed in dollars exactly: hidden the same way (`usdKeypad`)
       ...((this.usdKeypad && this.usdKeypad()) ? { swapVis: 'hidden', swapPE: 'none' } : {}),
-      // and for a swap, typed in the balance it leaves: there is nothing to toggle to
-      ...(s.flow === 'swap' ? { swapVis: 'hidden', swapPE: 'none' } : {}),
       toggleUnit: () => this.toggleUnit(),
       // a token carries its own amount, so the two are alternatives
       // gone entirely once there is an amount, back when the field is cleared:

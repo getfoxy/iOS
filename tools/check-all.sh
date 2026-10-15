@@ -159,6 +159,7 @@ check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
 check "two balances, screens" 1 node tests/two-balances-screens.js
 check "two balances, swap" 1 node tests/two-balances-swap.js
+check "swap in dollars" 1 node tests/swap-dollars.js
 check "dollar taps, two pages" 1 node tests/usd-tap-screens.js
 check "seed on the phone, screens" 1 node tests/native-seed-app.js
 check "NUT-13 vectors" 1 node tests/nut13-vectors.js

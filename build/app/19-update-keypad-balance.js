@@ -169,6 +169,8 @@
      * deep links, toggleUnit) goes on reading it. "00" appends two zeros in
      * either unit; it replaced the decimal point, which this entry has no
      * use for. */
+    // a swap's rate was asked for the figure as it stood, and this changes it (`swapForget`)
+    if (this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget) this.swapForget();
     this.setState(p => {
       let a = p.amount;
       if (p.unit !== 'SATS') {
@@ -210,19 +212,31 @@
       this.toast('Dollars are typed in dollars.', true);
       return;
     }
-    /* A swap is typed in the balance it leaves, cents or sats, exactly. The
-     * control is not on screen for one either (`renderAmount`). */
-    if (this.state.flow === 'swap' && this.state.screen === 'amount') {
-      this.toast('A swap is typed in the balance it leaves.', true);
-      return;
-    }
     const px = this.px();
     if (!px) { this.toast('No bitcoin price yet \u2014 amounts stay in ' + this.state.unit + '.', true); return; }
+    /* A swap turns between dollars and sats as a send does. What it moves is
+     * still the balance it leaves, worked out from the figure at NEXT
+     * (`swapTyped`), so a rate asked for the old figure is dropped. It turns
+     * at the swap's own price, the mint's last rate (`swapPx`), the one the
+     * figure is taken at, so what the ⇅ shows is what is asked for. */
+    const swapping = this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget;
+    if (swapping) this.swapForget();
+    const rate = (swapping && this.swapPx()) || px;
     this.setState(p => {
       const v = parseFloat(p.amount) || 0;
-      if (p.unit === 'USD') return { unit: 'SATS', amount: v ? String(Math.round(v / px * 1e8)) : '' };
-      return { unit: 'USD', amount: v ? (v / 1e8 * px).toFixed(2) : '' };
+      if (p.unit === 'USD') return { unit: 'SATS', amount: v ? String(Math.round(v / rate * 1e8)) : '' };
+      return { unit: 'USD', amount: v ? (this.centsOfSats(v, rate) / 100).toFixed(2) : '' };
     });
+  }
+
+  /* Sats in whole cents at `px` dollars per bitcoin, rounded once, the way
+   * the ⇅ writes them: to two decimals of a dollar. Rounding the cents
+   * straight from the product, times a hundred, can land a cent away from
+   * those two decimals on an exact half (1.115 dollars shows as 1.11, but
+   * times a hundred is 111.5 and rounds up to 112), so anything
+   * that asks for the cents the ⇅ showed reads them here (`swapTyped`). */
+  centsOfSats(sats, px) {
+    return Math.round(Number((Number(sats) / 1e8 * px).toFixed(2)) * 100);
   }
 
   group(n) {

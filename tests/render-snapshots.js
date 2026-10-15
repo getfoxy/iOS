@@ -644,10 +644,10 @@ function representative(logic) {
   add('two balances: history, DOLLARS', at('history', Object.assign({ history: TWO_HIST, historyComplete: true, histUnit: 'usd' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: history, BITCOIN', at('history', Object.assign({ history: TWO_HIST, historyComplete: true, histUnit: 'sat' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: a swap in detail', at('txDetail', Object.assign({ tx: Object.assign({ mint: 'https://forge.example.com' }, SWAP_OUT) }, TWO_LIVE), { wallet: TWO() }));
-  /* SWAP (build/app/26i-swap.js): which way, how much, the rate with the time it is held for, and SWAPPED. The
-   * quote's expiry is read at render time, so the countdown always says 0:52. */
+  /* SWAP (build/app/26i-swap.js): which way, how much, the four blocks with the time the rate is held for, and
+   * SWAPPED. The quote's expiry is read at render time, so the countdown always says 00:52. */
   const SWAP_Q = (over) => Object.assign({ id: 'uswap-1', mint: 'https://forge.example.com', from: 'usd', to: 'sat',
-    total: 1000, amount: 998, fee: 2, get: 1221, rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000,
+    total: 1000, amount: 998, fee: 2, get: 12202, rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000,
     spread: 0.0223, spreadWarn: true, state: 'quoted', get expiresAt() { return Date.now() + 67500; } }, over || {});
   add('two balances: SWAP, from dollars', at('swap', Object.assign({ swapFrom: 'usd', swapTo: 'sat' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
@@ -656,12 +656,20 @@ function representative(logic) {
     swapAmount: 1000, swapQuote: SWAP_Q() }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SWAP confirm, a new rate', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
     swapAmount: 1000, swapNewRate: true, swapQuote: SWAP_Q({ spreadWarn: false, spread: 0.01 }) }, TWO_LIVE), { wallet: TWO() }));
+  // bitcoin leaving before the rate: its dollars at the mint's last rate, $ 10.00, with the sats under it
   add('two balances: SWAP confirm, asking the rate', at('swapConfirm', Object.assign({ swapFrom: 'sat', swapTo: 'usd',
-    swapAmount: 12230, swapQuoting: true }, TWO_LIVE), { wallet: TWO() }));
+    swapAmount: 12230, swapQuoting: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
   add('two balances: SWAPPED', at('swapDone', Object.assign({ swapResult: { id: 'uswap-1', state: 'done', from: { unit: 'usd', amount: 1000 },
     to: { unit: 'sat', amount: 1221 }, fee: 1, rate: { usdPerBtc: 81786, by: 'forge.example.com' } } }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: home, a swap still going through', at('home', Object.assign({}, TWO_LIVE),
     { wallet: TWO({ unitSwapsPending: () => [{ id: 'uswap-1', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1221 } }] }) }));
+  /* The other way round, at the owner's example: $ 1.00 of bitcoin for $ 0.95 at $ 82,601, and its amount typed in
+   * dollars, the sats that leave under it. */
+  add('two balances: SWAP confirm, bitcoin into dollars', at('swapConfirm', Object.assign({ swapFrom: 'sat', swapTo: 'usd',
+    swapAmount: 1211, swapQuote: SWAP_Q({ from: 'sat', to: 'usd', total: 1211, amount: 1150, fee: 61, get: 95,
+      rate: { usdPerBtc: 82601, by: 'forge.example.com' }, market: 82601, spread: 0, spreadWarn: false }) }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: SET AMOUNT, a swap from bitcoin in dollars', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
+    unit: 'USD', amount: '1.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 82601 }) }) }));
   return v;
 }
 

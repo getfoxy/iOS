@@ -1261,23 +1261,23 @@
  },
  "two balances: SET AMOUNT, a swap from bitcoin": {
   "file": "411-two-balances-set-amount-a-swap-from-bitcoin.html",
-  "markup": "0832698d74f84a1a488f5dac0a24ff810002b438768b9fdec2ddcab7c0df5f36",
-  "vals": "ab88d2e4a92311953b6c8107a502b7c62d5622e457f1377829a0a7236267fca6"
+  "markup": "46c98a3ccf6a0ae160ee0f7003b090709b2f573195f7a53bfb8e9758b269c497",
+  "vals": "ede7cc6c5cf5859e89ef0707b8817a5fb6d3261cd9d81d8e96d5adee2d7d2586"
  },
  "two balances: SWAP confirm, the market price far off": {
   "file": "412-two-balances-swap-confirm-the-market-price-far-off.html",
-  "markup": "f350cc077d78ecc38e82082abc283c06e343d681b504db85efcb7636ef78ae1f",
-  "vals": "fc7a2d4b3225b2fb56df33263821a5720968add4430eeaaaa6e3cc6324f5ba7a"
+  "markup": "96ecc79aab303d670d9e7148c40f94b67c7afe9c53c8902803fc06b36274bf42",
+  "vals": "01344e99f98af038e0f79f936c397ddd3f2fd9fe9df2942a4e8dfcf975f32562"
  },
  "two balances: SWAP confirm, a new rate": {
   "file": "413-two-balances-swap-confirm-a-new-rate.html",
-  "markup": "0a50d60e579c83190f332d395cc7f1fa339100fb4a4d269adec76e6e0938993a",
-  "vals": "25080ad685d4340725e120eb064c9093d2141391ac91ef9e548dbbf544fab325"
+  "markup": "dc2fdbc63a3fc197bef3c784bd163053463861a0cc6aadeff53da67459c29886",
+  "vals": "f6253a701a2c9931878a50f5f9f581801701ecc053e971922b52426bdfd5221d"
  },
  "two balances: SWAP confirm, asking the rate": {
   "file": "414-two-balances-swap-confirm-asking-the-rate.html",
-  "markup": "49df11dd6246879b4a533e42630a57c27338c73574887a86e6baacf10619ad65",
-  "vals": "c48af38e8773efa3932186aa7f216a74f1315f46c3ca63cf8d1198d01d9baae1"
+  "markup": "da507f100146f8baf35fc5ab64a280db1f8cc1ef5947108f36ea1343f8cf2fcb",
+  "vals": "f6a8bbcbf01a3b5c6c36e8a90c6eb599cac261bc8883943909861324931643b9"
  },
  "two balances: SWAPPED": {
   "file": "415-two-balances-swapped.html",
@@ -1288,6 +1288,16 @@
   "file": "416-two-balances-home-a-swap-still-going-through.html",
   "markup": "0b0e2176db64ed34ce9a54fa7830bd55606db609f5f57f16da00374c9d9d6b00",
   "vals": "e4d1dfe0f79e20aa1a356697d694ebcd678023c47660f86c86cb6d8aa0260bcd"
+ },
+ "two balances: SWAP confirm, bitcoin into dollars": {
+  "file": "417-two-balances-swap-confirm-bitcoin-into-dollars.html",
+  "markup": "b3de770a721833b084d78becb99edb3dc9657270314a27c4c41d0d276b8cc462",
+  "vals": "59cab98115ffaa1c2f2460a9df02c90fb0c57380c91fd6990500a45ad7d886dd"
+ },
+ "two balances: SET AMOUNT, a swap from bitcoin in dollars": {
+  "file": "418-two-balances-set-amount-a-swap-from-bitcoin-in-dollars.html",
+  "markup": "0e3c912269c85e1d9e76cac4f93d275df5a6041a0592addefdaff3cdf933ae82",
+  "vals": "fd7ae036867e6329e786c372cb48a1a6834fa21ba958f9ebe8907186aef61a4f"
  },
  "card: sendFail": {
   "file": "161-card-sendfail.html",

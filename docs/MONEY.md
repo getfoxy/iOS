@@ -1661,7 +1661,17 @@ backends up.
   `unitSwapsPending` names it and `heldIn('usd')` counts a usd payment's
   pieces still with the mint.
 - The screens (`build/app/26i-swap.js`) show the quote before anything
-  moves and run that same object on SWAP. The confirmation counts down to
+  moves and run that same object on SWAP. The amount is typed in dollars to
+  start, or in sats after the ⇅, and what is asked for is always the FROM
+  unit: exact when typed in it, converted when typed in the other
+  (`swapTyped`) at the mint's last rate, or the market's when the mint has
+  given none (`swapPx`), so the confirmation repeats the dollars typed unless
+  the mint's rate moved since; the ⇅ turns at that same rate, and sats become
+  cents rounded as the ⇅ writes them (`centsOfSats`). There is no conversion
+  and no ⇅ without a market price. The
+  confirmation is YOU ARE GETTING, YOU ARE SPENDING, FEE (what leaves less
+  what arrives, at the quote's rate) and the mint's RATE; bitcoin is shown as
+  its dollar worth at that rate with the exact sats under it. It counts down to
   fifteen seconds before the quote's expiry (the point `swapRun` refuses), asks
   again when it gets there (three times at most with nobody tapping), and
   reads CONFIRM NEW RATE once a new rate is up; a tap within 1.5 s of the

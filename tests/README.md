@@ -195,6 +195,19 @@ gone (the card, home's held pill, and the next connect finishing it). Every
 page's books close per unit. The second part mounts the real page on a stand-in
 wallet and reads what it draws, down to both pills glowing on home.
 
+**`swap-dollars.js`** holds a swap's amount and its confirmation, on the real
+page and a stand-in wallet with a fixed rate. SET AMOUNT opens in dollars both
+ways round, and the ⇅ turns it to sats and back; what the swap moves is still
+the balance that leaves, exactly, converted at the mint's last rate only when
+it was typed in the other unit (so the confirmation repeats the dollars typed,
+even with the market price elsewhere), rounded to the cent the ⇅ shows, and
+asked for at NEXT in that unit. No price
+refuses the ⇅; MORE THAN YOUR ... and ALL OF IT are in the unit that leaves; a
+switch after a rate drops it. The confirmation is the four blocks in order, YOU
+ARE GETTING, YOU ARE SPENDING, FEE and the mint's RATE, both ways round at the
+owner's example figures, with sats lines only under bitcoin and the fee, and a
+countdown whose clock stops with its screen and with its rate.
+
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:
 `bridgeAsk(` and `nativeJson(`, which is how the seed, counter and lock-key
