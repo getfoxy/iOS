@@ -22,7 +22,10 @@
  *      people x fund sats and a little over for the fees, prints the invoice,
  *      and waits for it to be paid (testnut pays its own invoices within
  *      seconds; at a real mint a person pays it). --token <file> funds it with
- *      a Cashu token at A instead, such as the one an earlier run swept out.
+ *      a Cashu token at A instead, such as the one an earlier run swept out;
+ *      one token a line. Each take goes out on its own exit, paced; a take that
+ *      fails on its exit is tried on two more. A token still not taken is kept
+ *      in untaken-<run>.tokens and the run goes on with what came in.
  *      With two mints the funder first crosses the B people's half to person 1
  *      (the first person at B), the way the app pays somebody at another mint,
  *      and that first crossing is reported on its own; person 1 then shares it
@@ -43,7 +46,10 @@
  *      the token at its own mint.
  *   3. The end. Everyone sends everything back to the funder at A: the B people
  *      cross back (and anyone holding sats at B crosses them), then whatever
- *      anyone holds at A goes to the funder as a token. The books must add up
+ *      anyone holds at A goes to the funder as a token. Everything left at A
+ *      (the sweep token, piles too small to send, tokens nobody took) is written
+ *      to leftover-<run>.tokens, one a line, ready for the next run's --token.
+ *      The books must add up
  *      to the sat: what came in = everyone's balance at A and at B + every fee
  *      paid at A + every fee paid at B + what the crossings cost in Lightning
  *      fees, counted twice over — as each wallet's own books count them (a
@@ -228,6 +234,8 @@ const DIR = REAL ? path.join(os.homedir(), '.foxy-live', 'crowd', DAY)
 const STATE_FILE = path.join(DIR, 'state-' + RUN + '.json');
 const REPORT_FILE = path.join(DIR, 'report-' + RUN + '.json');
 const SWEEP_FILE = path.join(DIR, 'sweep-' + RUN + '.token');
+const UNTAKEN_FILE = path.join(DIR, 'untaken-' + RUN + '.tokens');
+const LEFTOVER_FILE = path.join(DIR, 'leftover-' + RUN + '.tokens');
 
 const sleep = H.sleep;
 const sum = (a) => a.reduce((x, y) => x + y, 0);
@@ -263,7 +271,7 @@ const S = {
   busy: 0,              // 429s
   retry429: 0, retry429Ok: 0, retry429Busy: 0, retry429Failed: 0,
   retryNet: 0, retryNetOk: 0, retryNetFailed: 0,
-  stepRetries: 0, stepRetriesOk: 0, stepRetriesFailed: 0,
+  stepRetries: 0, tokenRetries: 0, stepRetriesOk: 0, stepRetriesFailed: 0,
   walletFailed: {},     // group -> what a wallet said when a step failed, by its words
   offeredThenRefused: [], // amounts sendShortfall passed and sendToken refused (sendTo)
   circuits: new Set(),  // every SOCKS name that carried a request
@@ -717,6 +725,11 @@ async function cross(p, q, want, o) {
  * no words. */
 const inFlight = [];
 let phase = 'start', funded = 0;
+/* A token's face, read by the page's own decoder; null when it cannot read it. */
+function faceOf(p, t) {
+  try { const d = p.b.w.CashuTS.getDecodedToken(t); return sum((d.proofs || []).map((x) => Number(x.amount) || 0)); } catch (e) { return null; }
+}
+const untakenFromFile = [];   // tokens from --token the funder could not take: never funded, kept for the next run
 function heldToken(p, k) {
   try {
     const pr = pileAt(p, k);
@@ -954,11 +967,27 @@ async function fundByInvoice(p, want, what) {
     if (!ok(toks.length > 0, 'the token file holds a token', TOKEN_FILE)) return finish(1);
     let tookN = 0; const whyNot = [];
     for (const t of toks) {
-      if (tookN) { F.circuit = label(); await sleep(PACE); }   // each token from another exit, paced
-      const r = await step(F, 'receive', () => F.W.receiveToken(t));
-      if (r.ok) { fundedA += Number(r.v.sats) || 0; tookN++; } else whyNot.push(r.why);
+      if (tookN || untakenFromFile.length) { F.circuit = label(); await sleep(PACE); }   // each token from another exit, paced
+      let r = null;
+      // a take that fails on its exit (a timeout, a broken circuit) is tried again on another; one the mint
+      // calls spent or pending is not: asking again would not change the answer
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (attempt > 1) { F.circuit = label(); await sleep(PACE); S.tokenRetries++; }
+        r = await step(F, 'receive', () => F.W.receiveToken(t));
+        if (r.ok || /already been spent|is pending/.test(r.why)) break;
+      }
+      if (r.ok) { fundedA += Number(r.v.sats) || 0; tookN++; }
+      else { whyNot.push(r.why); untakenFromFile.push({ token: t, sats: faceOf(F, t), why: r.why }); }
     }
-    if (!ok(tookN === toks.length, 'the funder took the token' + (toks.length > 1 ? 's' : '') + ' in ' + TOKEN_FILE, tookN + ' of ' + toks.length + ', ' + fmt(fundedA) + ' sats' + (whyNot.length ? '; ' + whyNot.slice(0, 3).join('; ') : ''))) return finish(1);
+    if (!ok(tookN > 0, 'the funder took the token' + (toks.length > 1 ? 's' : '') + ' in ' + TOKEN_FILE, tookN + ' of ' + toks.length + ', ' + fmt(fundedA) + ' sats' + (whyNot.length ? '; ' + whyNot.slice(0, 3).join('; ') : ''))) return finish(1);
+    if (untakenFromFile.length) {
+      // the run goes on with what came in; what did not is kept for the next run, and never counted as funded
+      const left = sum(untakenFromFile.map((x) => x.sats || 0));
+      fs.writeFileSync(UNTAKEN_FILE, untakenFromFile.map((x) => x.token).join('\n') + '\n', { mode: 0o600 });
+      say(untakenFromFile.length + ' token' + (untakenFromFile.length > 1 ? 's' : '') + ' not taken (' + fmt(left) + ' sats, '
+        + (S.tokenRetries ? S.tokenRetries + ' more tries on other exits' : 'no retry') + '): kept in ' + UNTAKEN_FILE + ' — ' + whyNot.slice(0, 3).join('; '));
+      R.untakenFromFile = { count: untakenFromFile.length, sats: left, file: UNTAKEN_FILE, why: whyNot };
+    }
   } else {
     const want = PEOPLE * FUND + headroom + crossHead;
     fundedA = await fundByInvoice(F, want, PEOPLE + ' x ' + FUND + ' + ' + headroom + ' for fees'
@@ -1359,6 +1388,26 @@ async function fundByInvoice(p, want, what) {
   }
   console.log('balance at the end: ' + fmt(R.balanceAtEnd) + ' sats in the funder’s wallet' + (TWO ? ' at A, ' + fmt(R.balanceAtEndB) + ' at B' : '')
     + (R.sweep ? ', ' + fmt(R.sweep.sats) + ' sats in the token' : ''));
+
+  /* Everything at A that the next run can take, one token a line: the sweep
+   * token (or the funder's pile as it stands when the sweep could not swap),
+   * what others still hold at A, the tokens in flight nobody took, and the
+   * tokens from --token the funder could not take. Money at B is not in it:
+   * the funder takes at A. */
+  const leftover = [];
+  if (R.sweep) leftover.push({ sats: R.sweep.sats, token: fs.readFileSync(SWEEP_FILE, 'utf8').trim(), what: 'the sweep' });
+  else if (balAt(F, 'A') > 0) leftover.push({ sats: balAt(F, 'A'), token: heldToken(F, 'A'), what: 'the funder’s pile, unswapped' });
+  for (let i = 1; i < people.length; i++) if (balAt(people[i], 'A') > 0) leftover.push({ sats: balAt(people[i], 'A'), token: heldToken(people[i], 'A'), what: 'person ' + i + '’s pile' });
+  for (const t of inFlight) if (!t.taken && (t.mint || 'A') === 'A') leftover.push({ sats: t.sats, token: t.token, what: 'in flight, never taken' });
+  for (const x of untakenFromFile) leftover.push({ sats: x.sats || 0, token: x.token, what: 'from the token file, not taken' });
+  const leftoverOk = leftover.filter((x) => x.token);
+  if (leftoverOk.length) {
+    fs.writeFileSync(LEFTOVER_FILE, leftoverOk.map((x) => x.token).join('\n') + '\n', { mode: 0o600 });
+    R.leftover = { sats: sum(leftoverOk.map((x) => x.sats)), tokens: leftoverOk.length, file: LEFTOVER_FILE, parts: leftoverOk.map((x) => ({ sats: x.sats, what: x.what })) };
+    say('left over at A for the next run: ' + fmt(R.leftover.sats) + ' sats in ' + leftoverOk.length + ' token' + (leftoverOk.length > 1 ? 's' : '') + ' — ' + LEFTOVER_FILE
+      + ' (' + leftoverOk.map((x) => x.sats + ' ' + x.what).join(', ') + ')');
+  }
+  if (TWO && heldAt.B > 0) say('left at B: ' + fmt(heldAt.B) + ' sats (in the state file, not in the leftover file)');
 
   ok(H.netStats.fetch === 0, 'no mint request went out by fetch from this Mac',
      H.netStats.fetch + ' by fetch, ' + (H.netStats.via + H.netStats.real) + ' by curl ' + (LOCAL ? 'straight to this Mac' : 'through SOCKS 127.0.0.1:' + SOCKS)
