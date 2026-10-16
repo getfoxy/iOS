@@ -15311,7 +15311,7 @@
      * that had never connected, offered the choice, and took it.
      * So the choice is not offered until it means something. */
     offlineReady: function () {
-      var at = canonicalMint(mintUrl || load(K.mint, '') || '');
+      var at = canonicalMint(currentSourceId() || load(K.mint, '') || '');
       if (!at || !mintCacheFor(at)) return false;
       return !!(Number(FoxyWallet._rate) > 0 && Number(FoxyWallet._rateAt) > 0);
     },
@@ -15514,8 +15514,8 @@
        * At this mint: what is waiting at another is that mint's balance. */
       /* Less change this phone is about to hand back for an over-payment:
        * the entry already says what stays, and so does this (`holdChange`). */
-      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
-                                         - changeLeavingSats(mintUrl || '')));
+      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(currentSourceId() || '')
+                                         - changeLeavingSats(currentSourceId() || '')));
     },
 
     /* Every pile that holds anything, in its own unit: [{ mint, unit, amount }].
@@ -15542,7 +15542,7 @@
     balanceIn: function (mint, unit) {
       var u = unitOf(unit);
       if (!u) return 0;
-      var m = (mint === undefined || mint === null || mint === '') ? mintUrl : canonicalMint(mint);
+      var m = (mint === undefined || mint === null || mint === '') ? currentSourceId() : canonicalMint(mint);
       if (!m) return 0;
       return sumProofs(proofs(m, u));
     },
@@ -16415,7 +16415,7 @@
 
     /* The host of the connected mint, for the interface to show. */
     mintHost: function () {
-      return String(mintUrl || '').replace(/^https?:\/\//, '');
+      return String(currentSourceId() || '').replace(/^https?:\/\//, '');
     },
 
     /* What it would cost to move everything here to another mint.
@@ -23999,7 +23999,7 @@
      * balance already counts it. The app asks before running a claim on a route
      * coming back, so an empty list costs nothing. */
     // change set aside for over-payments and not yet gone, at this mint (`holdChange`); for the suites
-    _changeLeavingSats: function () { return changeLeavingSats(mintUrl || ''); },
+    _changeLeavingSats: function () { return changeLeavingSats(currentSourceId() || ''); },
 
     unclaimedSats: function (at) {
       return unclaimedSats(at);
