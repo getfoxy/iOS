@@ -173,6 +173,21 @@ final class WebHostController: UIViewController {
             source: "window.FOXY_DEBUG = true;",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true))
+        /* A test mint's request mark (NetDiary.applyMark), for a debug build
+         * launched with `-FoxyRequestIdHosts host1,host2`. The phone keeps the
+         * list and the page is handed the same one (FoxyWallet.requestIdHosts);
+         * a request must be on both to carry the header. A Release build never
+         * reads the argument, so it never sends one. */
+        let markHosts = NetDiary.setMarkHosts(UserDefaults.standard.string(forKey: "FoxyRequestIdHosts"))
+        if !markHosts.isEmpty,
+           let data = try? JSONSerialization.data(withJSONObject: markHosts),
+           let list = String(data: data, encoding: .utf8) {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.__foxyRequestIdHosts = \(list);",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true))
+            print("[foxy] net: a request mark goes to \(markHosts.joined(separator: ", ")) (launch argument)")
+        }
         // the first-launch warning again, on a debug build launched with FOXY_SHOW_WARNING=1
         if ProcessInfo.processInfo.environment["FOXY_SHOW_WARNING"] == "1" {
             config.userContentController.addUserScript(WKUserScript(
@@ -1007,6 +1022,10 @@ final class WebHostController: UIViewController {
         SeedVault.putAway()
         // nor does a seed screen stay up, to be found over the PIN lock on return
         SeedScreens.closeAll()
+        /* For the connection diary: what follows (Tor kept on the network or
+         * taken off it, requests cut) only reads right after this. The return
+         * is the page's own line ("[foxy] wake: Ns in the background"). */
+        print("[foxy] app: in the background")
         /* The connection diary, written here because this is where a force-quit
          * begins: the app switcher only reaches an app already backgrounded, so
          * somebody killing Foxy to escape a stuck screen is who this is for. */

@@ -1392,13 +1392,22 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             #if DEBUG
             DebugLog.write("onion GET \(url.path) on circuit \(circuit.prefix(6))")
             #endif
+            let began = Date()
+            // the diary's line, in every build; the onion's name is redacted by FieldLog
+            func diary(_ outcome: String) {
+                print(NetDiary.line(method: "GET", host: NetDiary.host(of: url), path: url.path,
+                                    circuit: circuit, ms: Int(Date().timeIntervalSince(began) * 1000),
+                                    outcome: outcome))
+            }
             OnionPost.get(url, circuit: circuit, timeout: 25) { result in
                 DispatchQueue.main.async {
                     switch result {
                     case .success(let answer):
+                        diary("\(answer.status)")
                         self.resolve(id: id, text: "\(answer.status)\n" + answer.body, error: nil)
                     case .failure(let why):
-                        print("[foxy] onion request to", name, "failed:", why.serviceText)
+                        // one line, the diary's: it says which request and how long, as the old one did not
+                        diary("failed: \(why.diaryText)")
                         self.resolve(id: id, text: nil, error: "\(name) could not be asked over Tor: \(why.serviceText)")
                     }
                 }
@@ -1423,12 +1432,35 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         if Self.movesMoney(method: method, path: url.path) {
             DispatchQueue.main.async { self.moneyInFlight.insert(id) }
         }
+        /* A test mint's mark (NetDiary.applyMark): only when the page made one
+         * for this host and the phone was launched listing it too. Every other
+         * request goes exactly as it did, with no such header. */
+        let mark = NetDiary.applyMark(body["requestId"], to: &mreq)
         // one job's requests share a circuit; anything unlabelled gets one of its own
         let circuit = MintCircuit.label(body["circuit"])
         #if DEBUG
         DebugLog.write("mint \(method) \(url.path) on circuit \(circuit.prefix(6))")
         #endif
-        sendMintRequest(id: id, mreq, url: url, circuit: circuit, triesLeft: 1)
+        let sent = Sent(url: url, method: method, circuit: circuit, began: Date(), mark: mark)
+        sendMintRequest(id: id, mreq, sent: sent, triesLeft: 1)
+    }
+
+    /* What the connection diary says about one request, kept from when it
+     * first left: the time is the whole of it, a second try included, since
+     * that is what the person waited. */
+    private struct Sent {
+        let url: URL
+        let method: String
+        let circuit: String
+        let began: Date
+        let mark: String?
+
+        /// The diary's line for this request, in every build (NetDiary).
+        func diary(_ outcome: String) {
+            print(NetDiary.line(method: method, host: NetDiary.host(of: url), path: url.path,
+                                circuit: circuit, ms: Int(Date().timeIntervalSince(began) * 1000),
+                                outcome: outcome, mark: mark))
+        }
     }
 
     /* Asked again, once, when the request never left.
@@ -1444,10 +1476,12 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
      *
      * Only this code and only once. A timeout or a lost connection may have
      * reached the mint, and those are the page's to reason about. */
-    private func sendMintRequest(id: String, _ mreq: URLRequest, url: URL, circuit: String, triesLeft: Int) {
-        let mintTask = Route.start(mreq, circuit: circuit) { data, response, error in
+    private func sendMintRequest(id: String, _ mreq: URLRequest, sent: Sent, triesLeft: Int) {
+        let url = sent.url
+        let mintTask = Route.start(mreq, circuit: sent.circuit) { data, response, error in
             // the session stopped reading at Route.largestAnswer (RedirectGuard)
             if error is AnswerTooLarge {
+                sent.diary("failed: too large")
                 self.resolve(id: id, text: nil, error: "The answer from \(url.host ?? "that address") was too large.")
                 return
             }
@@ -1457,32 +1491,41 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
                     print("[foxy] mint request to", url.host ?? "?",
                           "never left (the proxy refused the stream); asking again")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        self.sendMintRequest(id: id, mreq, url: url, circuit: circuit, triesLeft: triesLeft - 1)
+                        self.sendMintRequest(id: id, mreq, sent: sent, triesLeft: triesLeft - 1)
                     }
                     return
                 }
                 #if DEBUG && canImport(Tor)
                 ResumeDiagnostics.log("mint request to \(url.host ?? "?") failed: \(e.domain) \(e.code) \(e.localizedDescription) — tor \(TorService.state)")
                 #endif
-                // the code in every build, for the same reason the price
-                // sources carry it: "bad URL" alone names nothing
-                print("[foxy] mint request to", url.host ?? "?", "failed:",
-                      "\(e.localizedDescription) [\(e.domain) \(e.code)] — tor \(TorService.state)")
+                /* One line, the diary's, in every build: which request, how
+                 * long it was out, and the error's code, for the same reason
+                 * the price sources carry it — "bad URL" alone names nothing.
+                 * It used to be a line of its own beside this one. */
+                sent.diary(NetDiary.failure(e) + " · tor \(TorService.state)")
                 self.resolve(id: id, text: nil, error: Self.mintFailureWords(e))
                 return
             }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             // cannot happen now the session stops at the limit; kept as a second line
             if (data?.count ?? 0) > Route.largestAnswer {
+                sent.diary("failed: too large")
                 self.resolve(id: id, text: nil, error: "The answer from \(url.host ?? "that address") was too large.")
                 return
             }
+            sent.diary("\(code)")
             let text = String(data: data ?? Data(), encoding: .utf8) ?? ""
             // the status matters: a mint reports a refusal as JSON with a
             // 4xx, and that body is the message the app reads
             self.resolve(id: id, text: "\(code)\n" + text, error: nil)
         }
-        if mintTask == nil { resolve(id: id, text: nil, error: Route.refusal) }
+        if mintTask == nil {
+            /* Nothing left: there was no route, or Foxy was being put away.
+             * Which one is said here, so the CONNECTION view needs no second
+             * line for it (Route.start's own, which it does not show). */
+            sent.diary(Route.shut() ? "not sent (Foxy put away)" : "not sent (no route)")
+            resolve(id: id, text: nil, error: Route.refusal)
+        }
     }
 
     func resolve(id: String, text: String?, error: String?) {

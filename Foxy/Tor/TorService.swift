@@ -154,6 +154,8 @@ enum TorService {
     /// The last percentage Tor itself reported, as against `progress`, which a
     /// set-up also counts its own steps into.
     private static var bootSaid = 0
+    /// The percentage last written to the log, so a repeat is not (main queue).
+    private static var bootLogged = -1
     private static var extensions = 0
 
     /// The stall watch (`stallTick`), while direct Tor has not yet reached a
@@ -1166,23 +1168,28 @@ enum TorService {
             }
             guard type == "STATUS_CLIENT", action == "BOOTSTRAP",
                   let raw = arguments?["PROGRESS"], let p = Int(raw) else { return false }
-            #if DEBUG
             /* Tor writes its own notices to stderr, so the bootstrap percentages
              * reach Console.app but never the file DebugLog keeps — and they are
              * the most useful thing in a launch, and the whole of what a "stuck
              * at N%" report is about. Tor already hands them to this observer,
              * so put them through print, which is where the file log picks lines
              * up. Nothing is asked of Tor's configuration, which TorService has
-             * been bitten by before (see the SocksPort note in launch()). */
+             * been bitten by before (see the SocksPort note in launch()).
+             *
+             * In every build, for the LOGS screen's connection diary: a shipped
+             * build's "stuck at N%" is the same question with no file to read.
+             * Once per percentage, since Tor repeats one while it waits. */
             let tag = arguments?["TAG"] ?? ""
             let summary = arguments?["SUMMARY"] ?? ""
-            print("[foxy] tor: bootstrapped \(p)%"
-                  + (tag.isEmpty ? "" : " (\(tag))")
-                  + (summary.isEmpty ? "" : " - \(summary)"))
-            #endif
             DispatchQueue.main.async {
                 guard let ctrl, controller === ctrl else { return }
                 noteLife()                        // an event, even at the same percentage
+                if p != bootLogged {
+                    bootLogged = p
+                    print("[foxy] tor: bootstrapped \(p)%"
+                          + (tag.isEmpty ? "" : " (\(tag))")
+                          + (summary.isEmpty ? "" : " - \(summary)"))
+                }
                 bootEventAt = Date()
                 bootSaid = max(bootSaid, p)
                 // only up: a set-up counts its own steps, and Tor's bootstrap finished long ago
@@ -1235,6 +1242,7 @@ enum TorService {
         if let dir = conf?.dataDirectory { TorSeed.proven(in: dir) }
         firstSetup = false
         bootSaid = 0                          // the next set-up's steps are its own
+        bootLogged = -1
         failed = false
         progress = 100
         /* A bridge reached while a tunnel was up is not remembered.

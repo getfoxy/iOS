@@ -13,6 +13,14 @@
     /* Where a fresh install points itself. Nothing asks; boot just connects. */
     defaultMint: 'https://mint.minibits.cash/Bitcoin',
 
+    /* The mint hosts whose requests carry a test mark (`requestMarkFor`).
+     * Empty: only tests, and a debug build launched with -FoxyRequestIdHosts
+     * (FoxyWebView), fill it. */
+    requestIdHosts: (function () {
+      var given = typeof window !== 'undefined' && window.__foxyRequestIdHosts;
+      return Array.isArray(given) ? given.map(String) : [];
+    }()),
+
     /* Erase this device and start over.
      *
      * Every foxy.* key goes: the seed, every mint's proofs, counters, quotes,

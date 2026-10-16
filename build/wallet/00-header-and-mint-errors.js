@@ -523,6 +523,33 @@
     return Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
   }
 
+  /* A test mint's request mark: sixteen random hex characters, new for every
+   * request and saying nothing about the wallet, that the phone sends as
+   * X-Request-Id so a line in the connection diary can be found in the mint's
+   * own log (Foxy/Debug/NetDiary.swift).
+   *
+   * Only for a host on FoxyWallet.requestIdHosts, which is empty: tests set it,
+   * and so does a debug build launched with `-FoxyRequestIdHosts`. Every other
+   * request is sent exactly as before, with no mark made at all. The phone
+   * keeps a list of its own and sends the header only when both name the host,
+   * so this list alone cannot put it on a production mint's requests. */
+  function requestMarkFor(endpoint) {
+    var list = FoxyWallet.requestIdHosts;
+    if (!list || !list.length) return '';
+    var host = '', name = '';
+    try { var u = new URL(String(endpoint || '')); host = u.host.toLowerCase(); name = u.hostname.toLowerCase(); }
+    catch (e) { return ''; }
+    var listed = false;
+    for (var i = 0; i < list.length; i++) {
+      var h = String(list[i] || '').toLowerCase();
+      if (h && (h === host || h === name)) { listed = true; break; }
+    }
+    if (!listed) return '';
+    var b = new Uint8Array(8);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    return hexOf(b);
+  }
+
   /* A melt, the request that pays: its answer waits on the Lightning payment
    * (or the on-chain send), not on the mint alone. Not its quote, which the
    * mint answers by itself. */

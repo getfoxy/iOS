@@ -376,6 +376,10 @@ enum Route {
                                       cellular: path.usesInterfaceType(.cellular),
                                       wired: path.usesInterfaceType(.wiredEthernet),
                                       interfaces: path.availableInterfaces.map { $0.name })
+            // for the diary's line only: neither changes where a request goes
+            Route.networkLock.lock()
+            Route.pathCosts = (path.isExpensive, path.isConstrained)
+            Route.networkLock.unlock()
 #if targetEnvironment(simulator)
             Route.networkLock.lock()
             Route.simPath = kind
@@ -399,11 +403,19 @@ enum Route {
         networkLock.lock()
         let was = networkKind
         networkKind = now
+        let line = NetDiary.networkLine(kind: now, expensive: pathCosts.expensive,
+                                        constrained: pathCosts.constrained)
+        let saidBefore = networkSaid
+        networkSaid = line
         networkLock.unlock()
-        /* Only on a change, and pushed, because a screen that says NO
-         * CONNECTION has to stop saying it the moment there is one. */
+        /* Said when the kind changes, and when only the costs do: Wi-Fi that
+         * becomes a phone's hotspot, or Low Data Mode switched on, is the same
+         * kind of network and a different one to wait on. Once each, in the
+         * connection diary. */
+        if line != saidBefore { print(line) }
+        /* Acted on only when the kind changed, and pushed, because a screen
+         * that says NO CONNECTION has to stop saying it the moment there is one. */
         guard was != now else { return }
-        print("[foxy] network: " + now)
         /* Tor is told, because a stretch with no interface makes its
          * transport ladder's verdicts worthless: every bridge fails the
          * same way with nothing to reach, and the one standing there
@@ -459,6 +471,10 @@ enum Route {
 
     private static let networkLock = NSLock()
     private static var networkKind = "unknown"
+    /// Whether iOS calls the path expensive or constrained, and the diary's
+    /// last line about it (NetDiary.networkLine). Behind networkLock.
+    private static var pathCosts: (expensive: Bool, constrained: Bool) = (false, false)
+    private static var networkSaid = ""
 
     /// The kind of network this phone is on: wifi, cellular, wired, other, none,
     /// or unknown before the first answer.

@@ -524,6 +524,33 @@
     return Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
   }
 
+  /* A test mint's request mark: sixteen random hex characters, new for every
+   * request and saying nothing about the wallet, that the phone sends as
+   * X-Request-Id so a line in the connection diary can be found in the mint's
+   * own log (Foxy/Debug/NetDiary.swift).
+   *
+   * Only for a host on FoxyWallet.requestIdHosts, which is empty: tests set it,
+   * and so does a debug build launched with `-FoxyRequestIdHosts`. Every other
+   * request is sent exactly as before, with no mark made at all. The phone
+   * keeps a list of its own and sends the header only when both name the host,
+   * so this list alone cannot put it on a production mint's requests. */
+  function requestMarkFor(endpoint) {
+    var list = FoxyWallet.requestIdHosts;
+    if (!list || !list.length) return '';
+    var host = '', name = '';
+    try { var u = new URL(String(endpoint || '')); host = u.host.toLowerCase(); name = u.hostname.toLowerCase(); }
+    catch (e) { return ''; }
+    var listed = false;
+    for (var i = 0; i < list.length; i++) {
+      var h = String(list[i] || '').toLowerCase();
+      if (h && (h === host || h === name)) { listed = true; break; }
+    }
+    if (!listed) return '';
+    var b = new Uint8Array(8);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    return hexOf(b);
+  }
+
   /* A melt, the request that pays: its answer waits on the Lightning payment
    * (or the on-chain send), not on the mint alone. Not its quote, which the
    * mint answers by itself. */
@@ -16291,6 +16318,14 @@
     /* Where a fresh install points itself. Nothing asks; boot just connects. */
     defaultMint: 'https://mint.minibits.cash/Bitcoin',
 
+    /* The mint hosts whose requests carry a test mark (`requestMarkFor`).
+     * Empty: only tests, and a debug build launched with -FoxyRequestIdHosts
+     * (FoxyWebView), fill it. */
+    requestIdHosts: (function () {
+      var given = typeof window !== 'undefined' && window.__foxyRequestIdHosts;
+      return Array.isArray(given) ? given.map(String) : [];
+    }()),
+
     /* Erase this device and start over.
      *
      * Every foxy.* key goes: the seed, every mint's proofs, counters, quotes,
@@ -28474,7 +28509,7 @@
       var lockTries = 0;
       // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
       var sentAt = 0;
-      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', {
+      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', withMark({
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,
@@ -28489,7 +28524,15 @@
          *
          * JSONInt is exported for exactly this. */
         body: o.requestBody ? serialiseBody(o.requestBody) : '',
-      }, 65000); };
+      }), 65000); };
+      /* A fresh mark for each request that leaves, asked again ones included,
+       * and only for a test mint (`requestMarkFor`); for any other host the
+       * message has no such field at all. */
+      function withMark(msg) {
+        var mark = requestMarkFor(o.endpoint);
+        if (mark) msg.requestId = mark;
+        return msg;
+      }
       var run = ask(o.foxyCircuit ? String(o.foxyCircuit) : '').then(function answered(text) {
         var s = String(text || '');
         var nl = s.indexOf('\n');

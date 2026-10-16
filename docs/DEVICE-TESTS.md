@@ -2223,7 +2223,10 @@ mint that charges), and a till asking for that amount.*
 `tools/pull-device-log.sh` needs a Debug build and a cable. A person running a
 shipped build has neither, and `DebugLog` is not compiled into one — so what
 they can hand over is the **LOGS** screen: MENU → SETTINGS → LOGS → **SHARE**,
-which puts the session into Files, Mail or AirDrop as one piece of text.
+which puts the session into Files, Mail or AirDrop as one piece of text; its
+CONNECTION pill narrows it to the connection diary (each mint request's time,
+circuit and outcome, the asks on another circuit, network changes and Tor),
+which is what a mint's operator asks for, and SHARE then sends only that.
 
 It is not the same record and it is worth knowing how it differs:
 

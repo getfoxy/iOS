@@ -44,6 +44,17 @@ enum OnionPost {
             case .broken: return "The connection broke."
             }
         }
+        /// The same in the connection diary's few words (NetDiary.failure).
+        var diaryText: String {
+            switch self {
+            case .notOnion: return "not an onion"
+            case .noTor: return "no route"
+            case .unreachable: return "unreachable"
+            case .refusedBySocks: return "no stream"
+            case .timedOut: return "timeout"
+            case .broken: return "connection lost"
+            }
+        }
     }
 
     /// POST `body` to `url`. `done` on the main queue with the HTTP status and body.

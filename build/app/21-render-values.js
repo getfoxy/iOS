@@ -408,11 +408,13 @@
     };
   }
 
-  /* fieldLog: the ERRORS and LOGS screen (28-field-log.js). */
+  /* fieldLog: the LOGS screen, with its CONNECTION and ERRORS views (26c-field-log.js). */
   /** @param {RenderContext} c */
   renderFieldLog(c) {
     const { s, sc } = c;
     const lines = s.flLines;
+    // everything, the connection diary, or the errors (26c-field-log.js)
+    const flView = s.flView === 'bad' || s.flView === 'net' ? s.flView : 'all';
     /* Drawn: the newest 1,500. The log holds 10,000 while Foxy is in testing,
      * and that many rows on one screen is a screen that will not scroll. COPY
      * ALL and SHARE still hand over every line. */
@@ -458,20 +460,33 @@
         + ' them up by itself when it has one.',
       chShort: short > 0,
       isFieldLog: sc === 'fieldLog',
-      flTitle: s.flBad ? 'ERRORS' : 'LOGS',
+      flTitle: flView === 'bad' ? 'ERRORS' : flView === 'net' ? 'CONNECTION' : 'LOGS',
       flSub: lines === null ? 'Reading…'
-        : !rows.length ? (s.flBad ? 'Nothing has gone wrong.' : 'Nothing recorded yet.')
+        : !rows.length ? (flView === 'bad' ? 'Nothing has gone wrong.'
+          : flView === 'net' ? 'No connection lines yet.' : 'Nothing recorded yet.')
         : (lines.length > FL_SHOWN
           ? lines.length + ' lines; the newest ' + FL_SHOWN + ' shown, SHARE sends them all'
           : rows.length + ' line' + (rows.length === 1 ? '' : 's') + ', newest first'),
       flRows: rows,
       flHasRows: rows.length > 0,
+      /* The three ways to look, in history's ALL / RECEIVED / SENT row: the
+       * same pills, the chosen one in the accent. */
+      flAllBg: flView === 'all' ? 'var(--acc)' : 'transparent',
+      flAllFg: flView === 'all' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flNetBg: flView === 'net' ? 'var(--acc)' : 'transparent',
+      flNetFg: flView === 'net' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flBadBg: flView === 'bad' ? 'var(--acc)' : 'transparent',
+      flBadFg: flView === 'bad' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flShowAll: () => this.flShow('all'),
+      flShowNet: () => this.flShow('net'),
+      flShowBad: () => this.flShow('bad'),
       /* Said before anything is copied, not after. Tokens and invoices are
        * already gone; what is left still says who you bank with. */
       flNote: 'Kept on this phone only — Foxy sends none of this anywhere. '
         + 'Tokens, invoices, payment requests and keys are already removed. '
         + 'Mint names and amounts are not, so paste it somewhere you trust.',
-      flCopyLabel: s.flCopied ? 'COPIED' : 'COPY ALL',
+      // what is shown is what is copied: the whole log, or only this view's lines
+      flCopyLabel: s.flCopied ? 'COPIED' : flView === 'all' ? 'COPY ALL' : 'COPY',
       flCopy: () => this.copyFieldLog(),
       // the share sheet, because a session's worth of log is an attachment
       // rather than a paste — and on a Release build this screen is the only

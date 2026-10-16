@@ -59,6 +59,10 @@ WHAT IT CHECKS
      follows, and hands it to the drawer to show; the tool is run over a small
      folder with subfolders and must print the number FoxyTests/PageHashTests
      expects of the Swift, and the same number however a commit is spelled
+ 45. the connection diary: a request mark can be switched on only in a Debug
+     build and is put on a request only by NetDiary.applyMark; every line
+     FieldLog keeps is redacted on the way in; and every way out of a mint
+     request, and of an onion GET, writes its diary line
 
 It cannot render the page. A screen that mounts but draws nothing still needs
 a phone, and tools/foxy-walk.js in the Safari console is the tool for that.
@@ -3070,6 +3074,107 @@ if bad44:
         fail(m)
 else:
     ok('tap to pay: a receiver put away mid-payment still answers, and a payer back in front waits for it')
+
+# 45. The connection diary --------------------------------------------------------
+# A test mint can be sent a mark with each request, to find this side's line in
+# its own log. That is a header a production mint must never see, and the only
+# thing keeping it out of a Release build is that the switch for it is read
+# inside #if DEBUG: moved out of the fence, it compiles and every other test
+# still passes, so this reads the fence. The header itself is set in one place,
+# NetDiary.applyMark, which asks both lists; a second setter would skip them.
+#
+# The diary's lines name onion addresses and are meant to be copied, so the
+# redaction that takes those out has to be on the one way into FieldLog. And a
+# request with no line is a gap the diary cannot show: each exit of a mint
+# request writes one, the success as much as the failures.
+bad45 = []
+diary_swift = os.path.join('Foxy', 'Debug', 'NetDiary.swift')
+switch_seen = False
+for path in swift_files:
+    text45 = open(path, encoding='utf8').read()
+    code45 = blank_comments(text45)
+    spans45 = debug_regions(text45)
+    at45 = lambda i: '%s:%d' % (path, text45.count('\n', 0, i) + 1)
+    for m in re.finditer(r'[Ff]oxyRequestIdHosts|NetDiary\.setMarkHosts\(', code45):
+        if any(a <= m.start() < b for a, b in spans45):
+            switch_seen = True
+        else:
+            bad45.append('the request mark is switched on outside #if DEBUG at %s (%s): a Release build could send it'
+                         % (at45(m.start()), m.group(0)))
+    # the header's name is written once, as markHeader's value
+    for m in re.finditer(r'X-Request-Id', code45, re.I):
+        line45 = code45[:m.start()].rsplit('\n', 1)[-1]
+        if not (path == diary_swift and line45.strip() == 'static let markHeader = "'):
+            bad45.append('X-Request-Id is named outside NetDiary.markHeader at ' + at45(m.start()))
+    # and that name is used only by applyMark
+    apply45 = re.search(r'static func applyMark\(.*?\n    \}\n', code45, re.S) if path == diary_swift else None
+    for m in re.finditer(r'\bmarkHeader\b', code45):
+        line45 = code45[:m.start()].rsplit('\n', 1)[-1]
+        if path == diary_swift and line45.strip() == 'static let':
+            continue
+        if apply45 and apply45.start() <= m.start() < apply45.end():
+            continue
+        bad45.append('the request mark\'s header is used outside NetDiary.applyMark at ' + at45(m.start()))
+if not switch_seen:
+    bad45.append('-FoxyRequestIdHosts is not read anywhere, so what fences it could not be checked')
+# the page asks for a mark; it never puts the header on a request of its own
+for folder in ('build/app', 'build/wallet'):
+    for name in sorted(os.listdir(folder)):
+        if name.endswith('.js'):
+            js45 = open(os.path.join(folder, name), encoding='utf8').read()
+            if re.search('[\'"`]X-Request-Id[\'"`]', js45, re.I):
+                bad45.append('%s/%s names X-Request-Id as a header; the phone puts it on, and only for a listed test mint'
+                             % (folder, name))
+
+fl45 = blank_comments(open(os.path.join('Foxy', 'Debug', 'FieldLog.swift'), encoding='utf8').read())
+w45 = re.search(r'static func write\(_ raw: String\) \{(.*?)\n    \}\n', fl45, re.S)
+if not w45:
+    bad45.append('FieldLog.write was not found, so whether it redacts could not be read')
+else:
+    wb45 = w45.group(1)
+    if wb45.strip().split('\n', 1)[0].strip() != 'let text = redact(raw)' or len(re.findall(r'\braw\b', wb45)) != 1:
+        bad45.append('FieldLog.write keeps something other than the redacted line: its first step must be '
+                     '`let text = redact(raw)`, with `raw` used nowhere else')
+    if re.search(r'\b(ring|keep)\.append\(', fl45[:w45.start()] + fl45[w45.end():]):
+        bad45.append('FieldLog stores a line somewhere other than write(), past the redaction')
+if not re.search(r'static func redact\(_ line: String\) -> String \{ LogRedaction\.redact\(line\) \}', fl45):
+    bad45.append('FieldLog.redact no longer hands the line to LogRedaction.redact, the rules the native tests hold')
+
+def exits_without_diary45(body, diary_call):
+    """The resolve(id: id ...) calls in body with no diary call (a pattern) since the one before, and how many there are."""
+    missing, last, count = [], 0, 0
+    for m in re.finditer(r'\bresolve\(id: id\b', body):
+        count += 1
+        if not re.search(diary_call, body[last:m.start()]):
+            missing.append(body[m.start():].split('\n', 1)[0].strip())
+        last = m.end()
+    return missing, count
+br45 = blank_comments(open(os.path.join('Foxy', 'Bridge', 'FoxyBridge.swift'), encoding='utf8').read())
+smr45 = re.search(r'private func sendMintRequest\(id: String, _ mreq: URLRequest, sent: Sent.*?\n    \}\n', br45, re.S)
+if not smr45:
+    bad45.append('sendMintRequest was not found, so its diary lines could not be read')
+else:
+    missing, count = exits_without_diary45(smr45.group(0), r'\bsent\.diary\(')
+    if count < 5:
+        bad45.append('sendMintRequest has %d ways out, fewer than the five (too large, failed, oversize, '
+                     'answered, not sent) this reads' % count)
+    for what in missing:
+        bad45.append('a mint request leaves sendMintRequest with no diary line: ' + what)
+og45 = re.search(r'func diary\(_ outcome: String\) \{.*?OnionPost\.get\(url, circuit: circuit.*?\n            \}\n', br45, re.S)
+if not og45:
+    bad45.append('the onion GET\'s diary was not found, so its lines could not be read')
+else:
+    # a call, not the definition above OnionPost.get, which also reads `diary(`
+    missing, count = exits_without_diary45(og45.group(0), r'(?<!func )\bdiary\(')
+    if count != 2:
+        bad45.append('the onion GET has %d ways out, not its answer and its failure' % count)
+    for what in missing:
+        bad45.append('an onion GET ends with no diary line: ' + what)
+if bad45:
+    for m in bad45:
+        fail('connection diary: ' + m)
+else:
+    ok('connection diary: the request mark is Debug-only and set only by NetDiary.applyMark; FieldLog keeps only redacted lines; every mint request and onion GET writes its line')
 
 print()
 if skipped:

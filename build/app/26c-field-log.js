@@ -1,8 +1,13 @@
   /* ERRORS and LOGS: what Foxy has been doing, so it can be handed over.
    *
-   * One screen, two ways in. ERRORS is the short list — the lines that read as
-   * trouble — and LOGS is everything, which is what a hard question usually
-   * needs: the screens visited, the mint requests, Tor's state, the timings.
+   * One screen, three ways to look. ALL is everything, which is what a hard
+   * question usually needs: the screens visited, the mint requests, Tor's
+   * state, the timings. ERRORS is the short list — the lines that read as
+   * trouble. CONNECTION is the connection diary (`flIsDiary`): each mint
+   * request's time out and back, its circuit and outcome, the asks on another
+   * circuit, the network's changes, Foxy going to the background and coming
+   * back, and Tor's own lines — what a mint's operator needs to read a slow
+   * request from this side.
    *
    * The lines come from the phone (FoxyWallet.fieldLog → FieldLog.swift), in
    * every build, and are redacted there rather than here: tokens, invoices,
@@ -16,20 +21,53 @@
    * person tapping COPY and choosing where to paste it.
    */
   goFieldLog(onlyBad) {
+    const view = onlyBad ? 'bad' : 'all';
     this.setState(p => ({
       screen: 'fieldLog', stack: p.stack.concat([p.screen]),
-      flLines: null, flBad: !!onlyBad, flCopied: false,
+      flLines: null, flView: view, flCopied: false,
     }));
-    this.loadFieldLog(!!onlyBad);
+    this.loadFieldLog(view);
   }
 
-  loadFieldLog(onlyBad) {
+  /* Another way to look, from the row under the title: the same screen, the
+   * lines read again, and COPY then copies what is shown. */
+  flShow(view) {
+    if (this.state.flView === view && this.state.flLines !== null) return;
+    this.setState({ flLines: null, flView: view, flCopied: false });
+    this.loadFieldLog(view);
+  }
+
+  /* The connection diary's lines, by what they start with or say. Matched
+   * anywhere in the line, as FieldLog's own kept lines are: the page's reach
+   * the log wrapped ("[foxy-js] +195ms [log] [foxy] …"), and last run's carry
+   * "last run · " in front. */
+  flIsDiary(text) {
+    const t = String(text || '');
+    return [
+      /* each mint request (NetDiary.swift), and one that never left and was sent again.
+       * Not Route.start's "[foxy] route:" refusal: a mint request it refuses has
+       * its own net: line saying so, and one refusal is not shown twice. */
+      '[foxy] net:', '[foxy] mint request to',
+      // the network, the app's comings and goings, and Tor
+      '[foxy] network:', '[foxy] app:', '[foxy] wake:', '[foxy] tor', '[foxy] orbot:',
+      '[foxy] tunnel:', '[foxy] simulator: pretend airplane mode',
+      // the asks on another circuit (askedAgain, statesOf, nativeRequest's 429 and lock retries)
+      'on another circuit', 'mint busy (lock), asked again',
+    ].some(k => t.indexOf(k) >= 0);
+  }
+
+  loadFieldLog(view) {
     const W = window.FoxyWallet;
-    if (!W || !W.fieldLog) { this.setState({ flLines: [] }); return; }
-    W.fieldLog(onlyBad).then(lines => {
+    // only the newest question's answer is shown: a tap on another view overtakes the one before
+    const ask = (this._flAsk = (this._flAsk || 0) + 1);
+    const show = (lines) => { if (ask === this._flAsk) this.setState({ flLines: lines }); };
+    if (!W || !W.fieldLog) { show([]); return; }
+    W.fieldLog(view === 'bad').then(lines => {
+      const all = lines || [];
+      const kept = view === 'net' ? all.filter(l => this.flIsDiary(l && l.text)) : all;
       // newest first: what just went wrong is what someone is looking for
-      this.setState({ flLines: (lines || []).slice().reverse() });
-    }, () => this.setState({ flLines: [] }));
+      show(kept.slice().reverse());
+    }, () => show([]));
   }
 
   /* One line as it is copied and shown: the time, then the text.
@@ -45,7 +83,8 @@
 
   flText() {
     const lines = this.state.flLines || [];
-    const head = 'Foxy ' + (this.state.flBad ? 'errors' : 'log') + ', '
+    const view = this.state.flView;
+    const head = 'Foxy ' + (view === 'bad' ? 'errors' : view === 'net' ? 'connection diary' : 'log') + ', '
       + lines.length + ' line' + (lines.length === 1 ? '' : 's')
       + ', newest first. Tokens, invoices, payment requests, onion addresses and '
       + 'keys are already removed; mint hosts and amounts are not.';

@@ -417,7 +417,7 @@
       var lockTries = 0;
       // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
       var sentAt = 0;
-      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', {
+      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', withMark({
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,
@@ -432,7 +432,15 @@
          *
          * JSONInt is exported for exactly this. */
         body: o.requestBody ? serialiseBody(o.requestBody) : '',
-      }, 65000); };
+      }), 65000); };
+      /* A fresh mark for each request that leaves, asked again ones included,
+       * and only for a test mint (`requestMarkFor`); for any other host the
+       * message has no such field at all. */
+      function withMark(msg) {
+        var mark = requestMarkFor(o.endpoint);
+        if (mark) msg.requestId = mark;
+        return msg;
+      }
       var run = ask(o.foxyCircuit ? String(o.foxyCircuit) : '').then(function answered(text) {
         var s = String(text || '');
         var nl = s.indexOf('\n');

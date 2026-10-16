@@ -130,7 +130,9 @@ Three exceptions leave Foxy's Tor:
   long hexadecimal values replaced by a placeholder. Mint addresses and
   amounts stay in it. A shorter record of the connection is saved on the
   iPhone for the next launch, so a stuck start can be explained, and deleted
-  when it is read. You can read the log on the LOGS screen. It leaves the
+  when it is read. You can read the log on the LOGS screen, where CONNECTION
+  shows only how each request to a mint went (its timing, circuit and result,
+  never what it said) and the network's changes. It leaves the
   iPhone only if you tap SHARE and send it somewhere yourself.
 
 Deleting Foxy deletes its storage from the iPhone. Keychain items survive an

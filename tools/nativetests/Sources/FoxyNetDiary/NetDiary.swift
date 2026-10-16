@@ -1,0 +1,1 @@
+../../../../Foxy/Debug/NetDiary.swift

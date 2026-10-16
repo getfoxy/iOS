@@ -137,6 +137,7 @@ check "receive fits"    1 node tests/receive-fits.js
 check "tor banner"      1 node tests/tor-banner.js
 check "home shield"     1 node tests/home-shield.js
 check "screen log"      1 node tests/screen-log.js
+check "connection diary" 1 node tests/connection-diary.js
 check "claim guards"    1 node tests/claim-guards.js
 check "screen lock"     1 node tests/screen-lock.js
 check "deep links"      1 node tests/deep-links.js

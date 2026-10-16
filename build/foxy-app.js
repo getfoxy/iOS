@@ -13842,11 +13842,13 @@ class Component extends DCLogic {
     };
   }
 
-  /* fieldLog: the ERRORS and LOGS screen (28-field-log.js). */
+  /* fieldLog: the LOGS screen, with its CONNECTION and ERRORS views (26c-field-log.js). */
   /** @param {RenderContext} c */
   renderFieldLog(c) {
     const { s, sc } = c;
     const lines = s.flLines;
+    // everything, the connection diary, or the errors (26c-field-log.js)
+    const flView = s.flView === 'bad' || s.flView === 'net' ? s.flView : 'all';
     /* Drawn: the newest 1,500. The log holds 10,000 while Foxy is in testing,
      * and that many rows on one screen is a screen that will not scroll. COPY
      * ALL and SHARE still hand over every line. */
@@ -13892,20 +13894,33 @@ class Component extends DCLogic {
         + ' them up by itself when it has one.',
       chShort: short > 0,
       isFieldLog: sc === 'fieldLog',
-      flTitle: s.flBad ? 'ERRORS' : 'LOGS',
+      flTitle: flView === 'bad' ? 'ERRORS' : flView === 'net' ? 'CONNECTION' : 'LOGS',
       flSub: lines === null ? 'Reading…'
-        : !rows.length ? (s.flBad ? 'Nothing has gone wrong.' : 'Nothing recorded yet.')
+        : !rows.length ? (flView === 'bad' ? 'Nothing has gone wrong.'
+          : flView === 'net' ? 'No connection lines yet.' : 'Nothing recorded yet.')
         : (lines.length > FL_SHOWN
           ? lines.length + ' lines; the newest ' + FL_SHOWN + ' shown, SHARE sends them all'
           : rows.length + ' line' + (rows.length === 1 ? '' : 's') + ', newest first'),
       flRows: rows,
       flHasRows: rows.length > 0,
+      /* The three ways to look, in history's ALL / RECEIVED / SENT row: the
+       * same pills, the chosen one in the accent. */
+      flAllBg: flView === 'all' ? 'var(--acc)' : 'transparent',
+      flAllFg: flView === 'all' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flNetBg: flView === 'net' ? 'var(--acc)' : 'transparent',
+      flNetFg: flView === 'net' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flBadBg: flView === 'bad' ? 'var(--acc)' : 'transparent',
+      flBadFg: flView === 'bad' ? CTA_INK(s) : 'rgba(var(--ink-rgb),.5)',
+      flShowAll: () => this.flShow('all'),
+      flShowNet: () => this.flShow('net'),
+      flShowBad: () => this.flShow('bad'),
       /* Said before anything is copied, not after. Tokens and invoices are
        * already gone; what is left still says who you bank with. */
       flNote: 'Kept on this phone only — Foxy sends none of this anywhere. '
         + 'Tokens, invoices, payment requests and keys are already removed. '
         + 'Mint names and amounts are not, so paste it somewhere you trust.',
-      flCopyLabel: s.flCopied ? 'COPIED' : 'COPY ALL',
+      // what is shown is what is copied: the whole log, or only this view's lines
+      flCopyLabel: s.flCopied ? 'COPIED' : flView === 'all' ? 'COPY ALL' : 'COPY',
       flCopy: () => this.copyFieldLog(),
       // the share sheet, because a session's worth of log is an attachment
       // rather than a paste — and on a Release build this screen is the only
@@ -17000,9 +17015,14 @@ class Component extends DCLogic {
 
   /* ERRORS and LOGS: what Foxy has been doing, so it can be handed over.
    *
-   * One screen, two ways in. ERRORS is the short list — the lines that read as
-   * trouble — and LOGS is everything, which is what a hard question usually
-   * needs: the screens visited, the mint requests, Tor's state, the timings.
+   * One screen, three ways to look. ALL is everything, which is what a hard
+   * question usually needs: the screens visited, the mint requests, Tor's
+   * state, the timings. ERRORS is the short list — the lines that read as
+   * trouble. CONNECTION is the connection diary (`flIsDiary`): each mint
+   * request's time out and back, its circuit and outcome, the asks on another
+   * circuit, the network's changes, Foxy going to the background and coming
+   * back, and Tor's own lines — what a mint's operator needs to read a slow
+   * request from this side.
    *
    * The lines come from the phone (FoxyWallet.fieldLog → FieldLog.swift), in
    * every build, and are redacted there rather than here: tokens, invoices,
@@ -17016,20 +17036,53 @@ class Component extends DCLogic {
    * person tapping COPY and choosing where to paste it.
    */
   goFieldLog(onlyBad) {
+    const view = onlyBad ? 'bad' : 'all';
     this.setState(p => ({
       screen: 'fieldLog', stack: p.stack.concat([p.screen]),
-      flLines: null, flBad: !!onlyBad, flCopied: false,
+      flLines: null, flView: view, flCopied: false,
     }));
-    this.loadFieldLog(!!onlyBad);
+    this.loadFieldLog(view);
   }
 
-  loadFieldLog(onlyBad) {
+  /* Another way to look, from the row under the title: the same screen, the
+   * lines read again, and COPY then copies what is shown. */
+  flShow(view) {
+    if (this.state.flView === view && this.state.flLines !== null) return;
+    this.setState({ flLines: null, flView: view, flCopied: false });
+    this.loadFieldLog(view);
+  }
+
+  /* The connection diary's lines, by what they start with or say. Matched
+   * anywhere in the line, as FieldLog's own kept lines are: the page's reach
+   * the log wrapped ("[foxy-js] +195ms [log] [foxy] …"), and last run's carry
+   * "last run · " in front. */
+  flIsDiary(text) {
+    const t = String(text || '');
+    return [
+      /* each mint request (NetDiary.swift), and one that never left and was sent again.
+       * Not Route.start's "[foxy] route:" refusal: a mint request it refuses has
+       * its own net: line saying so, and one refusal is not shown twice. */
+      '[foxy] net:', '[foxy] mint request to',
+      // the network, the app's comings and goings, and Tor
+      '[foxy] network:', '[foxy] app:', '[foxy] wake:', '[foxy] tor', '[foxy] orbot:',
+      '[foxy] tunnel:', '[foxy] simulator: pretend airplane mode',
+      // the asks on another circuit (askedAgain, statesOf, nativeRequest's 429 and lock retries)
+      'on another circuit', 'mint busy (lock), asked again',
+    ].some(k => t.indexOf(k) >= 0);
+  }
+
+  loadFieldLog(view) {
     const W = window.FoxyWallet;
-    if (!W || !W.fieldLog) { this.setState({ flLines: [] }); return; }
-    W.fieldLog(onlyBad).then(lines => {
+    // only the newest question's answer is shown: a tap on another view overtakes the one before
+    const ask = (this._flAsk = (this._flAsk || 0) + 1);
+    const show = (lines) => { if (ask === this._flAsk) this.setState({ flLines: lines }); };
+    if (!W || !W.fieldLog) { show([]); return; }
+    W.fieldLog(view === 'bad').then(lines => {
+      const all = lines || [];
+      const kept = view === 'net' ? all.filter(l => this.flIsDiary(l && l.text)) : all;
       // newest first: what just went wrong is what someone is looking for
-      this.setState({ flLines: (lines || []).slice().reverse() });
-    }, () => this.setState({ flLines: [] }));
+      show(kept.slice().reverse());
+    }, () => show([]));
   }
 
   /* One line as it is copied and shown: the time, then the text.
@@ -17045,7 +17098,8 @@ class Component extends DCLogic {
 
   flText() {
     const lines = this.state.flLines || [];
-    const head = 'Foxy ' + (this.state.flBad ? 'errors' : 'log') + ', '
+    const view = this.state.flView;
+    const head = 'Foxy ' + (view === 'bad' ? 'errors' : view === 'net' ? 'connection diary' : 'log') + ', '
       + lines.length + ' line' + (lines.length === 1 ? '' : 's')
       + ', newest first. Tokens, invoices, payment requests, onion addresses and '
       + 'keys are already removed; mint hosts and amounts are not.';
