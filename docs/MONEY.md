@@ -1421,7 +1421,8 @@ offline for the first seconds of every session, so `pay`, `sendToken`,
 arriving (`_requestPaid`) wait up to six seconds while Tor is at work over a
 network (`routeSoon`), and not at all with no network or a Tor that has given
 up. The send confirmation is not a step with a six second wait: it holds its
-button, CHECKING, for as long as the banner says SECURING YOUR CONNECTION,
+button, CHECKING, for as long as the banner says SECURING YOUR CONNECTION (the
+money card's shield, with its turning ring, since the banner became a shield),
 and asks what it needs (the address's invoice, the fee quote) by itself the
 moment the route is up; Tor giving up while it waits puts the card for no
 connection over it. A scanned request that is delivered over the route, or

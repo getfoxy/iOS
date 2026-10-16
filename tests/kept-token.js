@@ -116,8 +116,10 @@ ok(/if ready && !wasParked && away < 30 \{/.test(read('Foxy/Tor/TorService.swift
   ok(/var PIECES_LOW = 6;/.test(pool) && /if \(count\[d\] > PIECES_LOW\) return;/.test(pool) && /if \(count\[d\] <= DEEP_LOW\) \{/.test(pool),
      'a tier is refilled once it is half gone, not at the first piece spent');
 }
-ok(/if \(x > 100\) this\.go\('history'\); else this\.goSwitchMint\(\);/.test(read('build/app/23-render-home-and-amount.js')),
-   'the balance pill: mint side to the mints, balance side to history');
+// the pill had a mint half and a balance half; the mint is the card's heading now, at every mint (tests/home-shield.js)
+ok(/goMintHeading: \(\) => this\.goSwitchMint\(\),/.test(read('build/app/23-render-home-and-amount.js'))
+   && /tap: two \? \(\) => this\.goHistoryIn\('sat'\) : \(\) => this\.go\('history'\),/.test(read('build/app/23-render-home-and-amount.js')),
+   'the money card: its mint heading to the mints, the balance pill to history');
 {
   const tidy2 = read('build/app/07-history-tokens-mints.js');
   ok(/if \(!this\._putAway\) \{ this\._tidyOwed = true; this\._tidyMore = !!more; return; \}/.test(tidy2),

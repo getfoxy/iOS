@@ -232,8 +232,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const W = twoWallet({ units: ['sat'] });
     await fresh(W);
     const v = V();
-    ok(v.homeOneMint === true && v.homeTwo === false, 'one balance: the home is as it was (YOUR MONEY, one frost pill)');
-    ok(/YOUR MONEY/.test(textOf(w)) && !/\bMINT\b.*\bUSD\b/.test(textOf(w)), 'one balance: YOUR MONEY on the sheet');
+    ok(v.homeOneMint === true && v.homeTwo === false, 'one balance: the one-balance row of buttons, with no SWAP');
+    // the card itself is the two-balance card with one pill: the mint's name over MINT, and the bitcoin pill (tests/home-shield.js)
+    eq(v.homePillRows.map((p) => p.sym), ['₿'], 'one balance: one pill, the bitcoin one');
+    ok(!/YOUR MONEY/.test(textOf(w)) && textOf(w).indexOf(v.homeMintName) >= 0, 'one balance: the sheet is headed by the mint, not YOUR MONEY');
     eq(v.homeButtonsTwo, [], 'one balance: no SWAP row of three');
     ok(!v.menuItems.some((m) => m.label === 'SWAP' || m.label === 'WHAT YOU HOLD'), 'one balance: no SWAP or WHAT YOU HOLD in the menu');
     eq(A.state.balUsdCents, null, 'one balance: no dollar figure kept');

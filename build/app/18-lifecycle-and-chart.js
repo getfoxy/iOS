@@ -67,7 +67,7 @@
     if (this._onWinScroll) window.removeEventListener('scroll', this._onWinScroll);
     // every timer this component can start, or an orphan keeps running after unmount
     ['_cardBalT','_otpTick','_eta','_balT','_bkT'].forEach(k => { clearInterval(this[k]); this[k] = null; });
-    ['_toastT','_nfcT','_scanT','_sendA','_sendB','_retryT','_moreT','_spResumeT','_queueT','_claimT','_cardTapT'].forEach(k => { clearTimeout(this[k]); this[k] = null; });
+    ['_toastT','_nfcT','_scanT','_sendA','_sendB','_retryT','_moreT','_spResumeT','_queueT','_claimT','_shieldT','_cardTapT'].forEach(k => { clearTimeout(this[k]); this[k] = null; });
     Object.keys(this).filter(k => k.indexOf('_afT_') === 0).forEach(k => { (this[k] || []).forEach(clearTimeout); this[k] = null; });
     (this._fullT || []).forEach(clearTimeout); this._fullT = null;
     this.closeFeed();

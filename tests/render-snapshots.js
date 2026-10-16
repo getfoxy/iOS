@@ -337,6 +337,10 @@ function representative(logic) {
   add('flashcard, change a till never handed over, fetched and put on', at('flashcard', { fc: FC({ owes: OWES([{ state: 'put', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
   add('flashcard, change the till has not made yet', at('flashcard', { fc: FC({ owes: OWES([{ state: 'unmade', sats: 280, count: 3 }]) }) }, { wallet: CARDS() }));
   add('flashcard, change owed in two states, under the limits', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP, owes: OWES([{ state: 'put', sats: 280, count: 3 }, { state: 'unmade', sats: 112, count: 2 }]) }) }, { wallet: CARDS() }));
+  // a card whose software reported two units, which no card's does yet: SWAP joins RESET, CHANGE PIN and LIMITS
+  add('flashcard, a card holding two balances, with SWAP', at('flashcard', { fc: FC(Object.assign({ units: ['sat', 'usd'] }, R17)) }, { wallet: CARDS() }));
+  // a card at another mint than this phone's: headed by the card's own mint
+  add('flashcard, a card at another mint than this phone\u2019s', at('flashcard', { fc: FC({ mint: 'https://forge.example/Bitcoin' }) }, { wallet: CARDS() }));
   add('flashcard, a new card', at('flashcard', { fc: FC({ balance: 0, count: 0, room: 64, pin: 'none', hasRecord: false, setUp: false, pinSet: false, mint: '', recoverable: false, mine: false, first: 0, last: 0, check: 'none' }) }, { wallet: CARDS() }));
   /* Software 1.16: a card with no PIN has ADD PIN where a card with one has CHANGE PIN; a card with a PIN may have a limit for paying without
    * it, on the card's face as the one limit there is, and under it with what is left of it today, beside the other limits. */
@@ -661,6 +665,36 @@ function representative(logic) {
     swapAmount: 12230, swapQuoting: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
   add('two balances: SWAPPED', at('swapDone', Object.assign({ swapResult: { id: 'uswap-1', state: 'done', from: { unit: 'usd', amount: 1000 },
     to: { unit: 'sat', amount: 1221 }, fee: 1, rate: { usdPerBtc: 81786, by: 'forge.example.com' } } }, TWO_LIVE), { wallet: TWO() }));
+  /* The shield on the money card, in each of the states the Tor banner had (23-render-home-and-amount.js, `shieldVals`), at a
+   * mint with one balance and at one with two; the first frame of the pulse a turn to IP EXPOSED starts; and the connection
+   * card its tap opens, which now carries the state's words. */
+  const ROUTE = (over) => ({ privacy: () => Object.assign({ tor: 'up', progress: 100, everUp: true, unprotected: false, offline: false,
+    network: 'wifi', orbot: 'none', vpn: false, orbotKey: false }, over || {}) });
+  const SHIELDS = [
+    ['secure', ROUTE()],
+    ['securing, Tor connecting at launch', ROUTE({ tor: 'connecting', progress: 40, everUp: false })],
+    ['offline, no network', ROUTE({ tor: 'connecting', progress: 0, offline: true, network: 'none' })],
+    ['cannot connect', ROUTE({ tor: 'failed', progress: 0, offline: true, network: 'wifi' })],
+    // where the banner was blank and nothing is under way: no ring
+    ['offline, Tor up over no network, not chosen', ROUTE({ network: 'none' })],
+    ['cannot connect, Tor failed, not chosen', ROUTE({ tor: 'failed', progress: 0, everUp: false })],
+    ['via a VPN', ROUTE({ tor: 'connecting', progress: 0, unprotected: true, vpn: true })],
+    ['IP exposed', ROUTE({ tor: 'connecting', progress: 0, unprotected: true })],
+  ];
+  for (const [name, route] of SHIELDS) {
+    add('home shield: ' + name + ', one balance', at('home', { series: SERIES, range: '1D' }, { wallet: route }));
+    add('home shield: ' + name + ', two balances', at('home', Object.assign({ series: SERIES, range: '1D' }, TWO_LIVE),
+      { wallet: TWO(route) }));
+  }
+  // a mint name too long for the heading runs to an ellipsis short of the shield, at one balance and two
+  const LONG = { mintHost: () => 'cashu-mint-of-the-northern-valley.example/Bitcoin' };
+  add('home shield: a long mint name, one balance', at('home', { series: SERIES, range: '1D' }, { wallet: Object.assign(ROUTE(), LONG) }));
+  add('home shield: a long mint name, two balances', at('home', Object.assign({ series: SERIES, range: '1D' }, TWO_LIVE),
+    { wallet: TWO(Object.assign(ROUTE(), LONG)) }));
+  add('home shield: IP exposed, the first frame of its pulse', at('home', { series: SERIES, range: '1D', shieldPulse: true },
+    { wallet: ROUTE({ tor: 'connecting', progress: 0, unprotected: true }) }));
+  add('home shield: a pulse left over draws nothing once the route is secure', at('home', { series: SERIES, range: '1D', shieldPulse: true },
+    { wallet: ROUTE() }));
   add('two balances: home, a swap still going through', at('home', Object.assign({}, TWO_LIVE),
     { wallet: TWO({ unitSwapsPending: () => [{ id: 'uswap-1', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1221 } }] }) }));
   /* The other way round, at the owner's example: $ 1.00 of bitcoin for $ 0.95 at $ 82,601, and its amount typed in
@@ -684,6 +718,9 @@ function cards() {
     tone: 'ask', title: 'TOR CONNECTION',
     reason: 'Tor is a privacy network that hides your IP address while you use Foxy.',
   }));
+  // the same card from the shield's tap, which carries the words the shield no longer says: here, that the IP address is exposed
+  add('card: the shield\u2019s tap, IP exposed, says so in words', (a) => a.renderVals().torBanner(), { wallet: { privacy: () => ({
+    tor: 'connecting', progress: 0, everUp: false, unprotected: true, offline: false, network: 'wifi', orbot: 'none', vpn: false, orbotKey: false }) } });
   add('card: secure Foxy, three ways', (a) => a.blockedCard('secureFoxy', {
     tone: 'ask', title: 'SECURE FOXY',
     reason: 'You have bitcoin in Foxy now. What should stand in front of it?',

@@ -47,7 +47,10 @@ mint is `mint.minibits.cash`.
   The banner at the foot of the home screen says which: SECURING YOUR
   CONNECTION while Tor is at work, OFFLINE - NO CONNECTION with no network,
   CANNOT CONNECT when Tor has given up, and a tap on it brings the connection
-  screen with its count and its choices. Only a first launch, with nothing on
+  screen with its count and its choices. The banner is now a round shield in
+  the money card's top right corner, in the same states and colours with a mark
+  inside (a turning ring while securing, a red pulse and a toast when the IP
+  address is exposed), and its tap is the banner's. Only a first launch, with nothing on
   file, waits behind that screen. Nothing about what is sent changes: the
   phone refuses every request without Tor, as before. A step that moves
   money waits a few seconds for a connection that is on its way rather than

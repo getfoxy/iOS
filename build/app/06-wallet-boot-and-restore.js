@@ -79,6 +79,8 @@
          * behind what it is telling the person about their IP address. */
         if (W.onPrivacy) W.onPrivacy(() => {
           this.setState({ routeAt: Date.now() });
+          // the shield on the money card says a turn to IP EXPOSED out loud, once
+          this.shieldWatch();
           this.sayBackOnline();
           this.connectForRealOnceOnline();
           this.claimWhenRouteReturns();

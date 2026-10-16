@@ -60,16 +60,6 @@
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
     const shut = (fn) => () => { this.setState({ open0: false }); if (fn) fn(); };
-    // the mockup's balance pill: taller, with a soft orange halo that
-    // brightens rather than appears when a payment lands
-    // the price gave back its height, so the pill takes it
-    v.pillH = this.state.priceCollapsed ? 124 : 120;
-    /* The pill's resting glow. It was bitcoin orange around a bitcoin-orange
-     * pill; the pill is frost now and so is this, except at the moment sats
-     * land, which keeps its orange. */
-    v.balGlowBtc = /rgba\(247,147,26,\.85\)/.test(v.balGlowBtc || '')
-      ? v.balGlowBtc
-      : '0 0 30px 2px rgba(207,224,236,.22)';
     v.clearHistory = () => this.askClear('history');
     v.clearContacts = () => this.askClear('contacts');
     v.open0 = !!this.state.open0;

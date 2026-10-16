@@ -90,6 +90,8 @@ class Component extends DCLogic {
     theme: 'dark',
     hidden: false, range: '1D', rangeOpen: false, open: { contact: true, account: false, login: false },
     priceCollapsed: false,
+    // the few seconds the money card's shield pulses after the route turns to IP EXPOSED (`shieldWatch`)
+    shieldPulse: false,
     noteOpen: this.props.startPopup === 'noteOpen' || this.props.startOpen === 'noteOpen', note: '', noteDraft: '', kbShift: true, kbSymbols: false,
     priceRemoved: false, removeConfirmOpen: false, addConfirmOpen: false,
     ...(this.props.startOpen ? { [this.props.startOpen]: true } : {}),

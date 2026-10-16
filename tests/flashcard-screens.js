@@ -151,7 +151,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   v = vals(holder);
   ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
      'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
-  ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcPillLetter === 'M' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
+  ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
   ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS' && v.fcRowShown === true && v.fcHistoryVis === 'visible' && v.fcResetVis === undefined && v.fcReset === undefined
@@ -2611,7 +2611,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(num(lines, 'left') + room < 100 - 8.4 - 15.8 && num(lines, 'left') + room < 100 - Number(bearerRight[1]) - 5.533 * bFs,
        'a long line wraps within ' + room + '% of the width, and is stopped well before BEARER in both designs', String(num(lines, 'left') + room));
     // the pill under the card has no limit line any more, and the card’s face has it
-    const pill = markup.slice(markup.indexOf('{{ fcPillLetter }}'), markup.indexOf('{{ fcHistory }}', markup.indexOf('{{ fcPillLetter }}')));
+    const pill = markup.slice(markup.indexOf('{{ fcPillRows }}'), markup.indexOf('</sc-for>', markup.indexOf('{{ fcPillRows }}')));
     ok(pill.indexOf('fcLimitLine') < 0 && markup.indexOf('{{ fcLimitLine }}') > markup.indexOf('data-card-face') && markup.split('{{ fcLimitLine }}').length === 2,
        'the limit line is drawn once, on the card’s face, and no longer in the pill under it');
     // HISTORY is at the top left again, and RESET is no longer there

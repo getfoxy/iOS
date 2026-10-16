@@ -338,8 +338,8 @@ gate, then make an invoice.
 
 **Pass:** `mint.minibits.cash` now **does** appear in the DNS and SNI lists.
 That is the result you want here. It says the method works, which is what makes
-the first capture's silence mean something. (The home banner should also be red
-and read IP Address Exposed — 21d.)
+the first capture's silence mean something. (The home shield should also be red,
+labelled IP Address Exposed, and have pulsed once with a toast — 21d.)
 
 Also run the page-side check, which needs no capture:
 
@@ -1547,7 +1547,7 @@ and load it), a phone whose build carries the NFC entitlement
    nothing is read after it. **Pass:** the card's screen stays up, with the line `The card is set
    up.` (Back from it is where you were; MENU, FLASHCARD, tap, shows the same screen.) The screen is home's shape: history and a cross
    at the top with FLASHCARD and "Verified Just Now" between them, the card
-   with its limit line on it at the bottom left (`NO LIMIT`), and CARD BALANCE with this phone's mint and a balance of 0 in the pill,
+   with its limit line on it at the bottom left (`NO LIMIT`), and the card's mint over MINT with a balance of 0 in the bitcoin pill,
    over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS.
 
 #### 23b. Money on, and off
@@ -2138,6 +2138,10 @@ two phones for the last.*
 
 *Needs phones. A wallet that has connected at least once; the first step needs
 a fresh install.*
+
+The banner is now the round shield at the top right of the money card: where a
+step below names the banner's words, read the shield's state (SECURING is the
+dark circle with the turning ring), and tap the shield where it says to tap the banner.
 
 1. **A first launch.** Delete Foxy, install, open. **Pass:** the fox plays,
    then SECURING YOUR CONNECTION with its count, then the home screen. Close

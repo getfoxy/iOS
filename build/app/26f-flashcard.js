@@ -1831,6 +1831,12 @@
     }, 40);
   }
 
+  /* Does this card hold two balances? Only a card whose software reports more than one unit, and none does yet:
+   * a card of software 1.20 and before holds sats alone and reports no units at all. */
+  fcTwoUnits(fc) {
+    return !!(fc && Array.isArray(fc.units) && fc.units.length > 1);
+  }
+
   /* The sats the balance on the card's screen says now: what it holds, or where its count has got to. */
   fcBalanceShown(fc, s) {
     if (!fc) return 0;
@@ -1906,6 +1912,8 @@
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
       mint: (card.record && card.record.mint) || '',
+      // the units it holds, where its software says (none does yet: `fcTwoUnits`)
+      units: (card.info && Array.isArray(card.info.units)) ? card.info.units.slice() : null,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
       first: dates.length ? Math.min.apply(null, dates) : 0,
@@ -3522,6 +3530,11 @@
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
       { label: 'LIMITS', tap: () => this.fcSetLimit(),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
+    ]).concat(!(fc && fc.hasRecord && this.fcTwoUnits(fc)) ? [] : [
+      /* SWAP, for a card that holds two balances, as home has it at a mint with two. No card does yet: every card's
+       * software holds one unit, and what two would take is not built, so the tap only says so. */
+      { label: 'SWAP', tap: () => this.toast('This card cannot swap yet.', true),
+        path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ]);
 
     /* Under the title: how fresh the mint's word on this card is. Just now,
@@ -3576,16 +3589,27 @@
       fcNotes: notes,
       fcHasRows: rows.length > 0,
       fcRows: rows,
-      /* Dollars first and the sats under them, as on home. With no price to
-       * say dollars at, the sats are the figure and there is no second line. */
-      /* Home's own pill, for a card that has a mint: the mint by the name this
-       * phone knows it by, and what the card holds. */
+      /* Home's own money card, for a card that has a mint: headed by the card's mint, by the name this phone
+       * knows it by, over MINT (the card's own, from its record, which need not be this phone's), and home's
+       * bitcoin pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
+       * CARD BALANCE. */
       fcPill: !!fc && !!fc.hasRecord,
       fcPillMint: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '') : '',
-      fcPillLetter: (fc && fc.hasRecord) ? (String(this.mintNameOf(fc.mint) || '?').slice(0, 1).toUpperCase() || '?') : '',
-      fcBalance: !fc ? '' : px > 0 ? '$ ' + this.usd((shown / 1e8) * px) : '\u20bf ' + this.group(shown),
-      fcShowAlt: !!fc && px > 0,
-      fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(shown) : '',
+      fcMintShown: !!fc && !!fc.hasRecord && !!fc.mint,
+      fcMintNone: !(fc && fc.hasRecord && fc.mint),
+      fcMintName: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '').toUpperCase() : '',
+      fcPillRows: (fc && fc.hasRecord) ? [{
+        ...this.BTC_PILL,
+        label: 'This card\u2019s history',
+        big: this.group(shown),
+        // their worth in dollars, only where there is a price to say it at
+        small: px > 0 ? '$' + this.usd((shown / 1e8) * px) + ' USD' : '',
+        glow: '0 10px 24px rgba(0,0,0,.3)',
+        tap: () => this.fcHistory(),
+        badge: false,
+      }] : [],
+      // what the card holds, in words: the pill's figure with its sign
+      fcBalance: !fc ? '' : '\u20bf ' + this.group(shown),
       /* The limit line is on the card's own face, at its bottom left, where its design has BEARER at the bottom right (build/markup.html;
        * with the card's badge above it where it has one), in dollars first as the balance is. */
       fcLimitShown: limitShown,

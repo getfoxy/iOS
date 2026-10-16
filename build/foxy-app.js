@@ -92,6 +92,8 @@ class Component extends DCLogic {
     theme: 'dark',
     hidden: false, range: '1D', rangeOpen: false, open: { contact: true, account: false, login: false },
     priceCollapsed: false,
+    // the few seconds the money card's shield pulses after the route turns to IP EXPOSED (`shieldWatch`)
+    shieldPulse: false,
     noteOpen: this.props.startPopup === 'noteOpen' || this.props.startOpen === 'noteOpen', note: '', noteDraft: '', kbShift: true, kbSymbols: false,
     priceRemoved: false, removeConfirmOpen: false, addConfirmOpen: false,
     ...(this.props.startOpen ? { [this.props.startOpen]: true } : {}),
@@ -1835,6 +1837,8 @@ class Component extends DCLogic {
          * behind what it is telling the person about their IP address. */
         if (W.onPrivacy) W.onPrivacy(() => {
           this.setState({ routeAt: Date.now() });
+          // the shield on the money card says a turn to IP EXPOSED out loud, once
+          this.shieldWatch();
           this.sayBackOnline();
           this.connectForRealOnceOnline();
           this.claimWhenRouteReturns();
@@ -11321,7 +11325,7 @@ class Component extends DCLogic {
     if (this._onWinScroll) window.removeEventListener('scroll', this._onWinScroll);
     // every timer this component can start, or an orphan keeps running after unmount
     ['_cardBalT','_otpTick','_eta','_balT','_bkT'].forEach(k => { clearInterval(this[k]); this[k] = null; });
-    ['_toastT','_nfcT','_scanT','_sendA','_sendB','_retryT','_moreT','_spResumeT','_queueT','_claimT','_cardTapT'].forEach(k => { clearTimeout(this[k]); this[k] = null; });
+    ['_toastT','_nfcT','_scanT','_sendA','_sendB','_retryT','_moreT','_spResumeT','_queueT','_claimT','_shieldT','_cardTapT'].forEach(k => { clearTimeout(this[k]); this[k] = null; });
     Object.keys(this).filter(k => k.indexOf('_afT_') === 0).forEach(k => { (this[k] || []).forEach(clearTimeout); this[k] = null; });
     (this._fullT || []).forEach(clearTimeout); this._fullT = null;
     this.closeFeed();
@@ -13440,16 +13444,6 @@ class Component extends DCLogic {
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
     const shut = (fn) => () => { this.setState({ open0: false }); if (fn) fn(); };
-    // the mockup's balance pill: taller, with a soft orange halo that
-    // brightens rather than appears when a payment lands
-    // the price gave back its height, so the pill takes it
-    v.pillH = this.state.priceCollapsed ? 124 : 120;
-    /* The pill's resting glow. It was bitcoin orange around a bitcoin-orange
-     * pill; the pill is frost now and so is this, except at the moment sats
-     * land, which keeps its orange. */
-    v.balGlowBtc = /rgba\(247,147,26,\.85\)/.test(v.balGlowBtc || '')
-      ? v.balGlowBtc
-      : '0 0 30px 2px rgba(207,224,236,.22)';
     v.clearHistory = () => this.askClear('history');
     v.clearContacts = () => this.askClear('contacts');
     v.open0 = !!this.state.open0;
@@ -14040,7 +14034,7 @@ class Component extends DCLogic {
         // the balance it goes into is the remembered one until the WALLET chip says otherwise
         wallet: '', walletAuto: false, walletTapped: false,
       })),
-      bkBadge: false,
+      bkBadge: this.BK_BADGE,
       bkAskAgain: (e) => { e.stopPropagation(); this.setState({ bkAsk: true }); },
       goRecovery: () => this.setState(p => ({ screen: 'bkStart', stack: p.stack.concat([p.screen]) })),
       chartPath: chart ? chart.d : '',
@@ -14099,26 +14093,11 @@ class Component extends DCLogic {
       toggleRange: () => this.setState(p => ({ rangeOpen: !p.rangeOpen })),
       fiatDisplay: s.hidden ? '••••••' : this.usd(bal.usd),
       fiatSub: s.hidden ? '' : 'USD',
-      /* Dollars on the big line and the sats under it. The
-       * names are from when it was the other way up. With no price the sats
-       * take the big line alone, rather than a dollar figure nobody can stand
-       * behind. */
-      satsDisplay: s.hidden ? '••••••'
-        : bal.sats == null ? '···'
-        : this.satUsd() ? '$ ' + this.usd(bal.sats * this.satUsd())
-        : '₿ ' + this.group(bal.sats),
-      satsSub: s.hidden ? ''
-        : bal.sats == null ? 'Loading balance…'
-        : !this.satUsd() ? ''
-        : '₿ ' + this.group(bal.sats),
       /* Money landing still lights the pill up, in the snow-fox design's own
        * frost rather than the accent — the orange is kept
        * for the price line, which is the one warm thing on the screen. */
       balGlowUsd: crediting === 'usd'
         ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(207,224,236,.8)'
-        : '0 0 26px rgba(207,224,236,.24)',
-      balGlowBtc: crediting === 'btc'
-        ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(247,147,26,.85)'
         : '0 0 26px rgba(207,224,236,.24)',
       // an open eye while hidden (tap to show), struck through while showing
       hideIconPath: s.hidden
@@ -14144,29 +14123,12 @@ class Component extends DCLogic {
         && !!s.everReceived
         && !s.dismissedBackup,
       dismissBackup: (e) => { e.stopPropagation(); this.setState({ dismissedBackup: true }); },
-      pillH: s.priceCollapsed ? 73 : 68,
       // The pill toggles too, and this button sits inside it — without
       // stopping the event here, one tap fires both handlers and the balance
       // hides and shows again in the same frame.
       toggleHide: (e) => {
         if (e && e.stopPropagation) e.stopPropagation();
         this.setState(p => ({ hidden: !p.hidden }));
-      },
-      /* The mint this balance is at, in the pill: its first letter in the
-       * accent on black where the bitcoin sign was, with its name under it. */
-      pillLetter: (this.mintName() || '?').slice(0, 1).toUpperCase(),
-      pillMintName: this.mintName() || '',
-      /* Two halves, either side of the line at 100px: the mint on the left
-       * goes to the mints, the balance on the right goes to history. Hiding
-       * stays on the eye, which is what that icon means. */
-      togglePill: (e) => {
-        let x = 0;
-        try {
-          const box = e && e.currentTarget && e.currentTarget.getBoundingClientRect
-            ? e.currentTarget.getBoundingClientRect() : null;
-          x = box ? (Number(e.clientX) || 0) - box.left : 0;
-        } catch (x2) { x = 0; }
-        if (x > 100) this.go('history'); else this.goSwitchMint();
       },
       priceCollapsed: !!s.priceCollapsed, priceExpanded: !s.priceCollapsed,
       ...this.renderHomeTwo(c),
@@ -14184,7 +14146,9 @@ class Component extends DCLogic {
        * all while Tor is still connecting — there is no claim to make yet,
        * and the gate is already saying so. */
       ...this.torBannerVals(),
-      /* The banner's tap. Offline it is the way back — which is the whole of
+      // and the shield on the money card that draws it now, in place of the banner at the bottom of the screen
+      ...this.shieldVals(),
+      /* The banner's tap, which is the shield's. Offline it is the way back — which is the whole of
        * what TAP TO RETRY promises, so it must do that and not open a card
        * explaining what Tor is to somebody who has already read it once and
        * chosen to go without. Every other state has nothing a tap could change,
@@ -14203,6 +14167,8 @@ class Component extends DCLogic {
           tone: 'ask',
           title: 'TOR CONNECTION',
           reason: 'Tor is a privacy network that hides your IP address while you use Foxy.',
+          // the shield says its state by colour alone, so the card it opens says it in words
+          chip: this.shieldVals().shieldLabel,
         });
       },
       toggleCollapse: () => this.setState(p => ({ priceCollapsed: !p.priceCollapsed })),
@@ -14215,7 +14181,17 @@ class Component extends DCLogic {
     };
   }
 
-  /* The home at a mint with two balances, as the owner drew it.
+  /* The bitcoin pill's look: fox fur with white ink and the ₿ at its left. Home's, and a card's on its own screen. */
+  BTC_PILL = {
+    sym: '₿', ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal',
+    bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+      + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+  };
+
+  /* The ! on the bitcoin pill that asks about the backup again (`bkAskAgain`), drawn where this is true. */
+  BK_BADGE = false;
+
+  /* The money card's heading and pills, as the owner drew them, at every mint.
    *
    * The sheet is headed by the mint's own name and MINT under it, and the tap
    * opens SWITCH MINT. Then the pills: dollars over bitcoin, or the one the
@@ -14224,13 +14200,18 @@ class Component extends DCLogic {
    * price (the owner's change: the mirror of the bitcoin pill). The bitcoin
    * pill is fox fur with white ink, the sats on the big line and their worth in
    * dollars under, when there is a price. Money landing lights its own pill.
-   * A tap on a pill opens history on that balance. At a mint with one balance
-   * none of this is drawn and the home is as it always was. */
+   * A tap on a pill opens history on that balance.
+   *
+   * A mint with one balance has the same card with one pill, the bitcoin one: it
+   * had YOUR MONEY over a dark pill with the mint's first letter, and someone
+   * holding bitcoin wants to see the sats. What still differs there is the row of
+   * round buttons under the card (`homeOneMint`, `homeButtons`), which has no
+   * SWAP, and the backup's ! (`BK_BADGE`), which sits on that one pill as it sat
+   * on the old one. */
   /** @param {RenderContext} c */
   renderHomeTwo(c) {
     const { s } = c;
     const two = !!(this.twoUnitsOn && this.twoUnitsOn());
-    if (!two) return { homeOneMint: true, homeTwo: false, homeMintName: '', homePillRows: [], goMintHeading: () => this.goSwitchMint() };
     const bal = this.balNow();
     const crediting = s.animFrom ? s.animLane : null;
     const REST = '0 10px 24px rgba(0,0,0,.3)';
@@ -14247,22 +14228,23 @@ class Component extends DCLogic {
       glow: (crediting === 'usd' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(207,224,236,.8)' : REST,
       tap: () => this.goHistoryIn('usd'),
     } : {
-      label: 'Bitcoin', sym: '₿', ink: '#FFFFFF', inkRgb: '255,255,255', blend: 'normal,soft-light,normal',
-      bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
-        + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+      ...this.BTC_PILL,
+      label: 'Bitcoin',
       big: s.hidden ? '••••••' : bal.sats == null ? '···' : this.group(bal.sats),
       // the sats' worth in dollars under them, only where there is a price to say it at
       small: s.hidden ? '' : bal.sats == null ? 'Loading balance…'
         : this.satUsd() ? '$' + this.usd(bal.sats * this.satUsd()) + ' USD' : '',
       glow: (crediting === 'btc' || crediting === 'both') ? '0 0 0 2.5px rgba(255,255,255,.6),0 0 38px rgba(247,147,26,.85)' : REST,
-      tap: () => this.goHistoryIn('sat'),
+      // (one balance has no tabs in history to open it on)
+      tap: two ? () => this.goHistoryIn('sat') : () => this.go('history'),
     });
     return {
-      homeOneMint: false,
-      homeTwo: true,
+      homeOneMint: !two,
+      homeTwo: two,
       homeMintName: String(this.mintName() || 'MINT').toUpperCase(),
       goMintHeading: () => this.goSwitchMint(),
-      homePillRows: this.homePills().map(pill),
+      homePillRows: this.homePills().map(pill)
+        .map((p, i) => Object.assign(p, { badge: !two && i === 0 && !!this.BK_BADGE })),
     };
   }
 
@@ -14405,8 +14387,102 @@ class Component extends DCLogic {
       torBannerOffline: offline,
       // and whether there is anything for that tap to announce: Tor is already at it
       torBannerMaking: making,
+      /* Which of these it is, by name, for the shield on the money card to draw (`shieldVals`): read off the
+       * same flags as the words and colours above, never worked out again. Empty where the banner made no claim. */
+      torBannerState: !(secure || off || offline) ? ''
+        : offline ? (noNet ? 'noNet' : making ? 'making' : 'cannot')
+        : exposed ? 'exposed' : viaOrbot ? 'orbot' : viaVpn ? 'vpn' : 'secure',
     };
   }
+
+  /* The shield on the money card: the banner's states, drawn as a round button in the card's top right corner.
+   *
+   * The banner sat at the bottom of the home screen and said its state in words. The shield says it by its colour
+   * and the mark inside it, and its tap is the banner's tap (`torBanner`), so the connection card it opens says the
+   * words. Nothing here decides anything about the route: each state is `torBannerVals`' own, by name.
+   *
+   * One difference, which is the owner's: while Tor is connecting the banner made no claim and was not drawn, and
+   * the shield is. It shows SECURING, a dark circle with a ring turning round it, so the corner never jumps when Tor
+   * comes up.
+   *
+   * The banner was blank in more states than that one, and a turning ring says something is under way. With no
+   * network, or with Tor stopped or given up, nothing is, even when the person has not chosen to work offline (the
+   * launch makes that choice for them, `homeFirst`, but a route can get there by other ways). So a blank banner is
+   * read once more, from the same route: no network is OFFLINE, Tor stopped or failed is CANNOT CONNECT, and only
+   * the rest, a connection on its way or no wallet yet, is SECURING. */
+  shieldVals() {
+    const b = this.torBannerVals();
+    const st = b.torBannerState;
+    const W = window.FoxyWallet;
+    const p = (!st && W && W.privacy) ? W.privacy() : null;
+    const blank = st ? ''
+      : (p && p.network === 'none') ? 'offline'
+      : (p && (p.tor === 'failed' || p.tor === 'stopped')) ? 'cannot'
+      : 'securing';
+    const state = blank || (st === 'making' ? 'securing'
+      : st === 'noNet' ? 'offline'
+      : (st === 'orbot' || st === 'vpn') ? 'tunnel'
+      : st);
+    const AMBER = ['#E6D8A8', '#3A2F0B'];
+    const look = {
+      secure: ['#BFE3EC', '#123642'],
+      securing: ['var(--frost-chip)', '#BFE3EC'],
+      offline: AMBER, cannot: AMBER, tunnel: AMBER,
+      exposed: ['#FF5C5C', '#3A0B0B'],
+    }[state];
+    // what goes inside the shield: a tick, a slash, a lock or an exclamation (its dot is a stroke with no length)
+    const BANG = 'M12 8v4.6M12 15.8h.01';
+    const mark = {
+      secure: 'M8.6 12.3l2.3 2.3 4.5-4.9',
+      securing: '',
+      offline: 'M6 18.5 18 5.5',
+      cannot: BANG,
+      tunnel: 'M10.2 11.2h3.6a1 1 0 0 1 1 1v2.4a1 1 0 0 1-1 1h-3.6a1 1 0 0 1-1-1v-2.4a1 1 0 0 1 1-1zM10.3 11.2V9.9a1.7 1.7 0 0 1 3.4 0v1.3',
+      exposed: BANG,
+    }[state];
+    const turning = state === 'securing';
+    return {
+      shieldState: state,
+      /* Its words, for whoever cannot see the colour: the banner's own, and for the two states it said in one
+       * word or none, the sentence the word stood for. */
+      shieldLabel: state === 'securing' ? 'SECURING YOUR CONNECTION'
+        : state === 'secure' ? 'Connected Over Tor'
+        /* a blank banner has no words of its own; the banner's for these, short of TAP TO RETRY, which is the
+         * offline tap's promise and not this one's (`torBanner` opens the connection card here) */
+        : blank === 'offline' ? 'OFFLINE - NO CONNECTION'
+        : blank === 'cannot' ? 'CANNOT CONNECT' : b.torBannerText,
+      shieldBg: look[0],
+      shieldInk: look[1],
+      // the dark circle has the round buttons' own edge; the coloured ones have none
+      shieldEdge: turning ? '1px solid var(--frost-chip-edge)' : '0',
+      shieldMark: mark,
+      // the ring the history and menu buttons turn, in the shield's blue
+      shieldRing: turning ? 'foxyRing 1.15s linear infinite' : 'none',
+      shieldRingInk: turning ? '#BFE3EC' : 'transparent',
+      shieldRingInk2: turning ? 'rgba(191,227,236,.3)' : 'transparent',
+      /* Red stays loud: for the few seconds after the route turns to exposed (`shieldWatch`) the circle pulses, in
+       * an animation that runs three times and ends by itself. */
+      shieldPulse: (state === 'exposed' && this.state.shieldPulse) ? 'shieldPulse 1s ease-out 3' : 'none',
+    };
+  }
+
+  /* Run on every push of the route (06-wallet-boot-and-restore.js, `onPrivacy`): when the shield turns to IP
+   * EXPOSED it says so once, in a toast, and pulses for three seconds. Once per change, not once per render: the
+   * state it was is kept here, and only a change into exposed counts. The timer that ends the pulse is one shot,
+   * replaced rather than doubled when the route turns again inside it, and cleared when the app goes away
+   * (`componentWillUnmount`). */
+  shieldWatch() {
+    const now = this.shieldVals().shieldState;
+    const was = this._shieldWas;
+    this._shieldWas = now;
+    if (now !== 'exposed' || was === 'exposed') return;
+    this.toast('IP address exposed', true);
+    clearTimeout(this._shieldT);
+    this.setState({ shieldPulse: true });
+    this._shieldT = setTimeout(() => { this._shieldT = null; this.setState({ shieldPulse: false }); }, this.SHIELD_PULSE_MS);
+  }
+
+  SHIELD_PULSE_MS = 3000;
   /* amount: the keypad, for sending, receiving and making a token. */
   /** @param {RenderContext} c */
   renderAmount(c) {
@@ -22550,6 +22626,12 @@ class Component extends DCLogic {
     }, 40);
   }
 
+  /* Does this card hold two balances? Only a card whose software reports more than one unit, and none does yet:
+   * a card of software 1.20 and before holds sats alone and reports no units at all. */
+  fcTwoUnits(fc) {
+    return !!(fc && Array.isArray(fc.units) && fc.units.length > 1);
+  }
+
   /* The sats the balance on the card's screen says now: what it holds, or where its count has got to. */
   fcBalanceShown(fc, s) {
     if (!fc) return 0;
@@ -22625,6 +22707,8 @@ class Component extends DCLogic {
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
       mint: (card.record && card.record.mint) || '',
+      // the units it holds, where its software says (none does yet: `fcTwoUnits`)
+      units: (card.info && Array.isArray(card.info.units)) ? card.info.units.slice() : null,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
       first: dates.length ? Math.min.apply(null, dates) : 0,
@@ -24241,6 +24325,11 @@ class Component extends DCLogic {
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
       { label: 'LIMITS', tap: () => this.fcSetLimit(),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
+    ]).concat(!(fc && fc.hasRecord && this.fcTwoUnits(fc)) ? [] : [
+      /* SWAP, for a card that holds two balances, as home has it at a mint with two. No card does yet: every card's
+       * software holds one unit, and what two would take is not built, so the tap only says so. */
+      { label: 'SWAP', tap: () => this.toast('This card cannot swap yet.', true),
+        path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ]);
 
     /* Under the title: how fresh the mint's word on this card is. Just now,
@@ -24295,16 +24384,27 @@ class Component extends DCLogic {
       fcNotes: notes,
       fcHasRows: rows.length > 0,
       fcRows: rows,
-      /* Dollars first and the sats under them, as on home. With no price to
-       * say dollars at, the sats are the figure and there is no second line. */
-      /* Home's own pill, for a card that has a mint: the mint by the name this
-       * phone knows it by, and what the card holds. */
+      /* Home's own money card, for a card that has a mint: headed by the card's mint, by the name this phone
+       * knows it by, over MINT (the card's own, from its record, which need not be this phone's), and home's
+       * bitcoin pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
+       * CARD BALANCE. */
       fcPill: !!fc && !!fc.hasRecord,
       fcPillMint: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '') : '',
-      fcPillLetter: (fc && fc.hasRecord) ? (String(this.mintNameOf(fc.mint) || '?').slice(0, 1).toUpperCase() || '?') : '',
-      fcBalance: !fc ? '' : px > 0 ? '$ ' + this.usd((shown / 1e8) * px) : '\u20bf ' + this.group(shown),
-      fcShowAlt: !!fc && px > 0,
-      fcBalanceAlt: (fc && px > 0) ? '\u20bf ' + this.group(shown) : '',
+      fcMintShown: !!fc && !!fc.hasRecord && !!fc.mint,
+      fcMintNone: !(fc && fc.hasRecord && fc.mint),
+      fcMintName: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '').toUpperCase() : '',
+      fcPillRows: (fc && fc.hasRecord) ? [{
+        ...this.BTC_PILL,
+        label: 'This card\u2019s history',
+        big: this.group(shown),
+        // their worth in dollars, only where there is a price to say it at
+        small: px > 0 ? '$' + this.usd((shown / 1e8) * px) + ' USD' : '',
+        glow: '0 10px 24px rgba(0,0,0,.3)',
+        tap: () => this.fcHistory(),
+        badge: false,
+      }] : [],
+      // what the card holds, in words: the pill's figure with its sign
+      fcBalance: !fc ? '' : '\u20bf ' + this.group(shown),
       /* The limit line is on the card's own face, at its bottom left, where its design has BEARER at the bottom right (build/markup.html;
        * with the card's badge above it where it has one), in dollars first as the balance is. */
       fcLimitShown: limitShown,

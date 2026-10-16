@@ -197,6 +197,14 @@ dollar payment whose price moved (back to the confirmation, asked again),
 ADDED TO / FROM in each unit, UNCLAIMED ECASH per unit, history's DOLLARS /
 BITCOIN tab, and the refusals of what dollars cannot do yet.
 
+**`home-shield.js`** mounts the real page on a stand-in wallet and checks the
+round shield that took the Tor banner's place on the money card: each of the
+banner's states drawn with its colour, mark and label, its tap the banner's
+own, a turn to IP EXPOSED said once with a pulse whose timer stops; the
+one-balance home as the two-balance card with the bitcoin pill and the
+backup's ! on it; and the card's screen headed by the card's own mint, with
+SWAP only for a card that reports two units.
+
 **`two-balances-swap.js`** holds SWAP, dollars into bitcoin and back at one
 mint, across both of its halves: the wallet's `swapQuote` / `swapRun` and the
 screens of `build/app/26i-swap.js`. The first part lifts the app's swap methods
