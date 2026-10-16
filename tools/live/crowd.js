@@ -221,7 +221,9 @@ if (FAKE && anyLocal && !LOCAL) {
 const LOCAL_CA = path.join(H.ROOT, 'build', 'live-tls', 'cert.pem');
 const WAY = LOCAL ? 'straight to this Mac (local, not over Tor)' : 'over Tor at 127.0.0.1:' + SOCKS;
 
-const WATCHDOG_S = Number(process.env.FOXY_CROWD_WATCHDOG_S) || 5400;
+/* The watchdog's default grows with the rounds asked for: a soak of hundreds of rounds at a minute each
+ * is meant to run for hours, and a 90-minute limit cut one short at round 112. FOXY_CROWD_WATCHDOG_S still wins. */
+const WATCHDOG_S = Number(process.env.FOXY_CROWD_WATCHDOG_S) || Math.max(5400, ROUNDS * 120 + 1800);
 setTimeout(() => { console.log('\nWATCHDOG ' + WATCHDOG_S + 's: the run did not finish'); finish(2); }, WATCHDOG_S * 1000).unref();
 
 /* Where the run's state and report go. Real money: ~/.foxy-live/crowd/<date>/,
