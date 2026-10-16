@@ -1217,7 +1217,7 @@
                * home, not ecash from anywhere else. */
               /* A card's pieces go back to the hold they came from, for the card (08a-flashcard.js, `cardOutsLeft` takes them
                * there at once), and not into this phone's pile. */
-              if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs || [], here, entry.cardHold || { card: entry.card || '' }, 0);
+              if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs || [], here, entry.cardHold || { card: entry.card || '', unit: unit }, 0);
               else addOwnProofs(entry.proofs || [], here, mw, unit, true);
               /* Charged only when the hold really went: a drop that was refused
                * leaves it for the next sweep, which would charge it again. */
@@ -1240,7 +1240,7 @@
                   return;
                 }
                 // idempotent, like the UNPAID/FAILED branch above (and a card's pieces back to their hold, as there)
-                if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs, here, entry.cardHold || { card: entry.card || '' }, 0);
+                if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs, here, entry.cardHold || { card: entry.card || '', unit: unit }, 0);
                 else addOwnProofs(entry.proofs, here, mw, unit, true);
                 dropMelt(entry.quote);
                 if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }

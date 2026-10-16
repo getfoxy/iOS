@@ -105,8 +105,12 @@
         if (heldId) e.held = heldId;
         return e;
       };
-      // a card holds bitcoin only: its pieces never pay from another unit's pile
-      if (heldId && unit !== 'sat') return Promise.reject(unsent('A card holds bitcoin only, so it pays in bitcoin. Nothing was paid.'));
+      /* A card holds one unit, and its pieces pay in that unit and no other: a dollar card's by a melt in dollars, a bitcoin
+       * card's in sats. Asked of the hold itself, before anything is quoted. */
+      var hold0 = heldId ? load(K.held, {})[heldId] : null;
+      if (heldId && hold0 && recordUnit(hold0) !== unit) {
+        return Promise.reject(unsent('This card\u2019s money is in ' + balanceWord(hold0.unit) + ', so it pays in ' + balanceWord(hold0.unit) + '. Nothing was paid.'));
+      }
       var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv && keptUnit === unit
         && (heldId || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000))
         && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + (swapId ? 10000 : 30000)));
@@ -127,7 +131,10 @@
        * the new figure. Sats are as they were: the invoice fixes their amount. */
       var shownMost = (kept && kept.quote && keptUnit === unit && unit !== 'sat' && kept.bolt11 === inv)
         ? satsOf(kept.quote.amount) + satsOf(kept.quote.fee_reserve) : 0;
-      var quoted = reuse ? Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w })
+      /* A card's pieces are melted on the circuit kept ready (`w`), by the wallet of their unit: a dollar card's by the dollar
+       * wallet, on that same circuit. */
+      var quoted = reuse ? ((heldId && unit !== 'sat') ? unitWalletOn(w, unit).then(function (uw) { return { got: kept.quote, w: uw }; })
+                                                     : Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w }))
         : unitWalletOn(w, unit).then(function (uw) {
           return withTimeout(askedAgain(uw, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
         });
@@ -152,12 +159,15 @@
          * of the pile's added. Short of the quote (the fee rose while the card was read) or not there at all, nothing is sent
          * and the hold is left as it is, for the card. What they come to over the quote comes back as the melt's change. */
         var hold = heldId ? load(K.held, {})[heldId] : null;
-        var cardHold = hold ? { card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '' } : null;
+        // (with its unit, so a hold made again from these pieces is of their unit: `cardOutReturn`)
+        /* (and whether it is this phone's own, held for its own invoice: a hold made again is kept by it too, `cardOutKeep`) */
+        var cardHold = hold ? Object.assign({ card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '', unit: recordUnit(hold) },
+                                            hold.tillKeeps ? { tillKeeps: true } : {}) : null;
         if (heldId) {
           if (!hold || hold.kind !== 'card out' || !(hold.proofs || []).length) throw unsent('The card\u2019s pieces for this payment are not here any more. Nothing was paid.');
           if (canonicalMint(hold.mint) !== canonicalMint(at)) throw unsent('The card\u2019s pieces are at another mint than this payment. Nothing was paid.');
           var heldWorth = sumProofs(hold.proofs) - feeForInputs(w, hold.proofs.length);
-          if (heldWorth < owed) throw unsent('The fee went up while the card was read, so the card\u2019s ' + sumProofs(hold.proofs) + ' sats do not cover it. Nothing was paid.');
+          if (heldWorth < owed) throw unsent('The fee went up while the card was read, so the card\u2019s ' + (unit === 'sat' ? sumProofs(hold.proofs) + ' sats do' : moneyWords(sumProofs(hold.proofs), unit) + ' does') + ' not cover it. Nothing was paid.');
         }
         var have = heldId ? hold.proofs.slice() : proofs(at, unit);
         // the split itself costs this mint's input fee, on top of the melt

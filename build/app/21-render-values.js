@@ -556,7 +556,13 @@
      * payment from one is capped by the card alone. */
     const twoSend = s.flow === 'send' && !cardOut && !!(this.twoUnitsOn && this.twoUnitsOn());
     const usdCapUsd = (Number(s.balUsdCents) || 0) / 100;
+    /* A dollar card's figures are its cents: what it holds caps a withdrawal or a payment from it, and this phone's dollars
+     * cap money put on one, all in dollars, with no price in any of it (26f-flashcard.js, `fcTypedUnit`). */
+    const usdCard = !!(s.fc && s.fc.unit === 'usd');
+    const usdLoad = (s.flow === 'cardAdd' || s.flow === 'cardSend') && !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
     const sendCapUsd = !capped ? 0
+      : ((s.flow === 'cardWd' || cardOut) && usdCard) ? ((s.fc && s.fc.balance) || 0) / 100
+      : usdLoad ? usdCapUsd
       : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
       : twoSend ? (s.walletTapped ? (this.walletNow('send') === 'usd' ? usdCapUsd : btcAvailUsd)
         : Math.max(usdCapUsd, btcAvailUsd || 0))
@@ -574,7 +580,8 @@
      * on the send screen has no card on show and is capped by the balance
      * alone. */
     const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
-      ? this.fcLoadFits(Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
+      ? this.fcLoadFits(usdLoad ? Math.min(Math.round(sendEnteredUsd * 100), Math.max(0, Math.round(Number(s.balUsdCents) || 0)))
+        : Math.min(this.wantedSats(), Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
     /* A swap's amount is what leaves its balance, and is capped by it: cents
      * against cents, or sats against sats. Typed in the other unit it is

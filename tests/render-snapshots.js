@@ -768,6 +768,36 @@ function representative(logic) {
     { wallet: HOLDS_USD }));
   add('two balances: a payment in the pile to be swapped into dollars, in detail', at('txDetail', Object.assign({ tx: Object.assign({ stamp: 'Today, 09:40' }, CONV_CLAIMED) }, TWO_LIVE),
     { wallet: HOLDS_USD }));
+  /* A card that holds dollars (26f-flashcard.js): its screen, its keypad and its limit in dollars, the CURRENCY screen asking
+   * what a new card will hold, PAYMENT RECEIVED for one, and dollars it paid for sats this phone asked (a bitcoin-only phone's
+   * to be swapped into bitcoin, a phone of both's kept), in history and in detail. */
+  const USD_DAY = { limited: true, limit: 5000, spent: 1200, left: 3800, turns: 4102444800, now: 4102358400, noTime: false };
+  add('flashcard, a dollar card', at('flashcard', Object.assign({ fc: FC({ unit: 'usd', balance: 2000, limit: 5000, day: USD_DAY, tap: TAP }) }, TWO_LIVE), { wallet: CARDS() }));
+  add('flashcard, a dollar card with no PIN', at('flashcard', Object.assign({ fc: FC({ unit: 'usd', balance: 2000, pin: 'none', pinSet: false, noPinKnown: true,
+    noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, TWO_LIVE), { wallet: CARDS() }));
+  // (this phone's $42.05 is what can be put on it: the dollar keypad, capped by it)
+  add('amount, adding to a dollar card', at('amount', Object.assign({ flow: 'cardAdd', amount: '5.00', unit: 'USD', fc: FC({ unit: 'usd', balance: 2000 }) }, TWO_LIVE),
+    { wallet: Object.assign(TWO(), CARDS()) }));
+  add('fcLimitConfirm, a dollar card\u2019s daily limit', at('fcLimitConfirm', { fc: FC({ unit: 'usd', balance: 2000 }), fcLimit: { sats: 2000, usd: 0 } },
+    { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = false; a._fcLimitTap = false; } }));
+  add('CURRENCY, setting up a card', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard' }, TWO_LIVE), { wallet: TWO() }));
+  add('PAYMENT RECEIVED, a dollar card paid', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 475, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
+  add('PAYMENT RECEIVED, sats asked of a dollar card, to be swapped into bitcoin', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 592, paidAskedSats: 7000,
+    paidAskOwn: true, paidAskAgeMs: 2 * 3600 * 1000, paidConvert: true, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: 'bitcoin', recv: 'sat', send: 'sat' }) }) }));
+  add('PAYMENT RECEIVED, sats asked of a dollar card, kept as dollars', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 592, paidAskedSats: 7000,
+    paidAskOwn: true, paidAskAgeMs: 2 * 3600 * 1000, paidConvert: false, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
+  const HOLDS_BTC = TWO({ walletChoice: () => ({ hold: 'bitcoin', recv: 'sat', send: 'sat' }) });
+  const SATS_ASKED = { name: 'From a card', dir: 'in', unit: 'usd', amount: 592, feeAmount: 0, sats: 0, fee: 0, rail: 'CASHU', satsAsked: 7000,
+    askRate: 84571, askAgeMs: 2 * 3600 * 1000, askSeenAt: 1, askOwn: true, memo: 'card, offline' };
+  const ASK_ROW = (hash, time, over) => Object.assign({ hash, time }, SATS_ASKED, over || {});
+  add('two balances: history, DOLLARS, dollars a card paid for sats, in each state', at('history', Object.assign({ history: [{ label: 'TODAY', items: [
+    ASK_ROW('req-d1', '09:10', { convert: 'owed' }), ASK_ROW('req-d2', '09:20', { convert: 'swapping' }), ASK_ROW('req-d3', '09:30', { convert: 'done', convertSats: 6961 }),
+    ASK_ROW('req-d4', '09:40', { convert: 'failed' }), ASK_ROW('req-d5', '09:50', { convert: 'kept', convertWhy: 'small' }), ASK_ROW('req-d6', '10:00', { convert: 'kept', convertWhy: 'hold' }),
+    ASK_ROW('req-d7', '10:10', { convert: 'owed', cardWaits: true }),
+  ] }], historyComplete: false, histUnit: 'usd' }, TWO_LIVE), { wallet: HOLDS_BTC }));
+  add('two balances: dollars a card paid for sats, swapped into bitcoin, in detail', at('txDetail', Object.assign({ tx: ASK_ROW('req-d3', '09:30',
+    { convert: 'done', convertSats: 6961, stamp: 'Today, 09:30' }) }, TWO_LIVE), { wallet: HOLDS_BTC }));
   return v;
 }
 
@@ -961,7 +991,12 @@ function cards() {
   // or the mint would not take the card's signature at all, and a share of a bill it paid is open again
   add('card: a card payment not settled, its signature refused', (a) => a.cardKeptLostCard({ id: 'card-1', sats: 592, cause: 'retired', why: 'signature', date: 4102444800, shares: [0] }));
   // a dollar receive by card with no route, and this phone's price too old to work out the sats from
-  add('card: the bitcoin price too old for a dollar receive by card', (a) => a.payUsdByCard(), { wallet: {
+  /* A dollar receive with no route taps the card for dollars whatever the price (a dollar card pays them), and a bitcoin card,
+   * read, is told why it was not asked for its sats: here, a price two days old (26f-flashcard.js, `fcFailed`). */
+  add('card: the bitcoin price too old for a dollar receive by card', (a) => a.fcFailed(
+    { card: 'wrong-unit', message: 'This card holds bitcoin here, not dollars.', cardUnit: 'sat', askUnit: 'usd' },
+    { paying: true, taken: true, offline: true, dollarAsk: true, codeUp: false,
+      usd: { cents: 100, bolt11: '', satsWhy: 'old', price: { rate: 64000, at: 1, ageMs: 2 * 86400000 } } }), { wallet: {
     privacy: () => ({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, offline: true, orbot: 'none', vpn: false, orbotKey: false }),
     cardSession: () => Promise.resolve(), cardOnline: () => false, cardOffline: () => true, convertOne: () => Promise.resolve(null),
     lastPrice: () => ({ rate: 64000, at: 1, ageMs: 2 * 86400000 }), priceTooOld: () => true } });
@@ -993,6 +1028,39 @@ function cards() {
   add('card: a payment the mint refused, the card to be tapped again', (a) => a.fcFailed({ card: 'putback', owed: 600, limited: true, message: 'x' }, { paying: true, taken: true }));
   add('card: a payment the mint refused, a card with no limit', (a) => a.fcFailed({ card: 'putback', owed: 88, limited: false, message: 'x' }, { paying: true, taken: true }));
   add('card: a withdrawal the mint refused', (a) => a.fcFailed({ card: 'putback', owed: 1024, limited: true, message: 'x' }, { taken: true }));
+  /* A card that holds dollars: the refusals it can meet, said before its PIN, and a dollar card asked for sats, the figure
+   * worked out at this phone's own price or at the mint's rate for the holder to agree to (26f-flashcard.js, `fcOtherUnit`). */
+  add('card error, this card holds dollars', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'usd', message: 'This card holds dollars, so it is paid with the dollars wallet.' },
+    { paying: true, taken: true }));
+  add('card error, this card holds bitcoin (offline)', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'sat', askUnit: 'usd', message: 'This card holds bitcoin here, not dollars.' },
+    { paying: true, taken: true, offline: true, dollarAsk: true, usd: { cents: 100, bolt11: '', satsWhy: 'build' } }));
+  add('card error, this card holds bitcoin, before the dollar code', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'sat', askUnit: 'usd', message: 'This card holds bitcoin here, not dollars.' },
+    { paying: true, taken: true, dollarAsk: true, codeUp: false, usd: { cents: 100, bolt11: '' } }));
+  add('card error, no dollars at this mint', (a) => a.fcFailed({ card: 'no-dollars-here', cardUnit: 'usd', message: 'mint.minibits.cash does not issue dollars now, so this card cannot be used here.' },
+    { paying: true, taken: true }));
+  const USD_TERMS = { payUnit: 'usd', pay: 592, sats: 7000, rate: 84571, ageMs: 2 * 3600 * 1000, seenAt: 1, own: true, convert: true };
+  add('overlay: a dollar card\u2019s PIN, for sats asked, at this phone\u2019s price', (a) => a.fcPayAsk(7000, true, false, null, null, null, USD_TERMS, 'usd'));
+  add('overlay: a dollar card\u2019s PIN, for sats asked, at the mint\u2019s rate', (a) => a.fcPayAsk(7000, false, false, null, null, null,
+    { payUnit: 'usd', pay: 593, sats: 7000, online: true }, 'usd'));
+  add('overlay: a dollar card\u2019s PIN, for a dollar receive', (a) => a.fcPayAsk(0, false, false, null, null, { cents: 475, bolt11: '' }, null, 'usd'));
+  const ASKED_OF = { card: 'other-unit', unit: 'usd', asked: 'sat', message: 'This card holds dollars here, not bitcoin.', mint: MINT, pinSet: false, noPinLeft: 0 };
+  const PRICED = (over) => Object.assign({ cardSession: () => Promise.resolve(), twoUnits: () => true, mintUnits: () => ['sat', 'usd'],
+    lastPrice: () => ({ rate: 84571, at: 1, ageMs: 2 * 3600 * 1000 }), priceTooOld: () => false, unitKeysOffline: () => true,
+    centsFor: (n) => ({ sats: n, cents: 592, rate: 84571, at: 1, ageMs: 2 * 3600 * 1000 }), walletChoice: () => ({ hold: 'bitcoin', recv: 'sat', send: 'sat' }) }, over || {});
+  add('card: this card holds dollars, the sats asked at this phone\u2019s price', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); }, { wallet: PRICED() });
+  add('card: no bitcoin price, for a dollar card', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); },
+    { wallet: PRICED({ lastPrice: () => ({ rate: 0, at: 0, ageMs: 0 }) }) });
+  add('card: the bitcoin price too old, for a dollar card', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); },
+    { wallet: PRICED({ lastPrice: () => ({ rate: 84571, at: 1, ageMs: 25 * 3600 * 1000 }), priceTooOld: () => true }) });
+  add('card: card not taken, no dollar keys seen', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); },
+    { wallet: PRICED({ unitKeysOffline: () => false }) });
+  add('stage: a dollar card asked for sats, the second tap', behind({ amount: '$ 5.92', amountSub: '\u20bf 7,000 at this phone\u2019s price, seen 2 hours ago' }));
+  add('card: paid in dollars, the invoice not paid', (a) => a.fcBtcKept({ pay: 593, bolt11: 'lnbc1' }, null, 'The mint could not find a route.'));
+  add('card: a dollar card\u2019s payment not settled', (a) => a.cardKeptLostCard({ id: 'card-2', unit: 'usd', amount: 592, sats: 0, cause: 'spent', date: 4102444800 }));
+  add('card: a dollar card cannot switch mints with money on it', (a) => { a._fcCard = {}; a.state.fc = { unit: 'usd', balance: 2000, mint: MINT, key: '02' + 'a1'.repeat(30) + 'c3d4' }; a.fcSwitchMint(); },
+    { wallet: { cardSession: () => Promise.resolve(), cardOwed: () => [] } });
+  add('card: a dollar card cannot pay a bitcoin address', (a) => { a.state.fc = { unit: 'usd', balance: 2000, mint: MINT }; a.fcOutAddress('bc1qexample'); },
+    { wallet: { cardSession: () => Promise.resolve(), connected: true } });
   v.push(['importSeed, the words on the phone', at('importSeed', {})]);
   v.push(['importSeed, on the phone, a finished scan', at('importSeed', {
     rsCandidate: 'candidate-1',

@@ -24,7 +24,8 @@ const OTHER_WORDS = 'legal winner thank year wave sausage worth useful legal win
  * and `dleq: false` a mint that gives no NUT-12 proof with its signatures. */
 function page(o) {
   const opts = o || {};
-  const phone = nativePhone({ words: opts.words || PHONE_WORDS });
+  // `phone`: another page's phone, for a page that is that page launched again (its counters and lock keys)
+  const phone = opts.phone || nativePhone({ words: opts.words || PHONE_WORDS });
   let mint = null;
   let mint2 = null;
   let ctx = null;
@@ -115,8 +116,8 @@ function page(o) {
       // `units`: ['sat', 'usd'] for a mint that issues dollars as well (fakeMint), as a mint with two balances does; `mintOpts`: any other of its options
       mint = opts.sharedMint || fakeMint(w, Object.assign({}, opts.mintOpts || {},
         { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte, dleq: opts.dleq, units: opts.units }));
-      // keys and quote numbers of its own, as two real mints have
-      if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2 });
+      // keys and quote numbers of its own, as two real mints have (`units2`: the units it issues, as `units` for the first)
+      if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2, units: opts.units2 });
     },
   });
   ctx.deaf = !!opts.deaf;

@@ -255,7 +255,8 @@ class Component extends DCLogic {
     // sendConfirm
     const W = window.FoxyWallet;
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
-     * bitcoin only: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button or RATE row. */
+     * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
+     * (a dollar card's has the RATE row, since it pays a bitcoin invoice in dollars). */
     if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
         && this.twoUnitsOn && this.twoUnitsOn() && !this.cardSendNow()) return this.confirmTwoSpec();
     /* Waiting on the connection, or on what it is for.
@@ -279,6 +280,10 @@ class Component extends DCLogic {
      * the payment off the card (`fcOutNext`). */
     const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
     const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
+    /* A dollar card pays by a melt of its dollars, quoted in cents (03-send.js, `quoteSendFee`): its card's figures, the fee
+     * and the total are dollars, and nothing of a sats figure is set against what it holds. */
+    const cardUsd = out && s.fc.unit === 'usd';
+    const cfig = (n) => (cardUsd ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
       // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
@@ -299,11 +304,18 @@ class Component extends DCLogic {
        * times, each with a different patch. The value simply does not belong
        * on a screen shown before the payment — a quote or nothing. */
       this.cfRow('FEE', s.quotedFee != null
-        ? 'UP TO ' + this.money(s.quotedFee).main
+        ? 'UP TO ' + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
-        { half: true, sub: s.quotedFee != null ? this.money(s.quotedFee).sub : '' }),
+        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '' }),
     ].filter(Boolean);
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
+    /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. A payment in the card's own
+     * unit would have none; every Lightning invoice names bitcoin, so a dollar card's always has it. */
+    const cardRate = (cardUsd && this._feeQuote && this._feeQuote.rate) ? Math.round(Number(this._feeQuote.rate.usdPerBtc) || 0) : 0;
+    if (cardRate > 0) {
+      const who = String(this.mintName() || 'the mint');
+      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(cardRate) + ' · ' + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
+    }
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
@@ -313,6 +325,8 @@ class Component extends DCLogic {
      * for, and nothing the fee could change. The invoice alone fitting is not
      * the payment fitting, which is asked once the quote is in, below. */
     const shortOf = (() => {
+      // (a dollar card holds cents, and an invoice names sats: the quote in dollars says whether it covers it, below)
+      if (cardUsd) return 0;
       if (s.recipientKind !== 'invoice' || !s.recipient || !W || !W.amountOf) return 0;
       const need = W.amountOf(s.recipient) || 0;
       const have = out ? cardHas : (s.balSats || 0);
@@ -359,19 +373,22 @@ class Component extends DCLogic {
       /* From a card, the card pays: the amount and the fee, with the mint's fee on the pieces they are cut into, against what
        * the card holds (`cardOutTotal`, the very figure NEXT reads off it). */
       if (out && s.quotedFee != null && asks && W && W.cardOutTotal) {
-        const total = W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
+        const total = cardUsd ? W.cardOutTotal(s.quotedAmt, s.quotedFee, 'usd')
+          : W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
         covers = total > cardHas
-          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + cfig(cardHas).main + '. This needs ' + cfig(total).main + ' with its fee.' }
           : { ok: true };
       } else {
         covers = (s.quotedFee != null && asks && W && W.payNeed)
           ? W.payNeed(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee) : null;
       }
     } catch (e) { covers = null; }
+    // a dollar card's headline is what the invoice costs in dollars, at the mint's quote, once it has one
+    const cardHead = (cardUsd && s.quotedAmt != null) ? cfig(s.quotedAmt).main : null;
     if (covers && !covers.ok) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING',
-        amount: this.sendAmountText(),
+        amount: cardHead || this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
         warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
@@ -411,6 +428,11 @@ class Component extends DCLogic {
     };
     // from a card, NEXT, which reads the payment off the card (`fcOutNext`) before anything is paid
     if (out && !held) Object.assign(spec, { cta: 'NEXT', go: () => this.fcOutNext() });
+    // a dollar card: the dollars it pays, and under them the sats the payee is paid
+    if (cardHead) {
+      const inv = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(s.recipient) : 0;
+      Object.assign(spec, { amount: cardHead, amountSub: inv ? '₿ ' + this.group(inv) : '' });
+    }
     return spec;
   }
 
@@ -472,9 +494,9 @@ class Component extends DCLogic {
     try { return !!(W && W.twoUnits && W.twoUnits()); } catch (e) { return false; }
   }
 
-  /* Paying from a card (SEND on the card's screen, 26f-flashcard.js `fcOutMode`)? A card holds bitcoin only, so while it
-   * pays, the send flow has the one balance whatever the mint issues: no CURRENCY question, no WALLET button, no RATE row,
-   * and the payment is in sats. */
+  /* Paying from a card (SEND on the card's screen, 26f-flashcard.js `fcOutMode`)? A card holds one kind of money, so while
+   * it pays, the send flow has the one balance whatever the mint issues: the card's. No CURRENCY question and no WALLET
+   * button; a bitcoin card's payment is in sats, and a dollar card's is a melt of its dollars, with the mint's RATE row. */
   cardSendNow() {
     try { return !!(this.fcOutMode && this.fcOutMode()); } catch (e) { return false; }
   }
@@ -494,8 +516,8 @@ class Component extends DCLogic {
    * 'sat' at a mint with one balance. `flow` is 'receive' or 'send'. */
   walletNow(flow) {
     if (!this.twoUnitsOn()) return 'sat';
-    // a card pays in bitcoin, whatever balance this phone's own sends use
-    if (flow === 'send' && this.cardSendNow()) return 'sat';
+    // a card pays in what it holds, whatever balance this phone's own sends use
+    if (flow === 'send' && this.cardSendNow()) return (this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : 'sat';
     const s = this.state;
     if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
     const c = this.walletChoiceNow();
@@ -576,8 +598,17 @@ class Component extends DCLogic {
   }
 
   /* A card on CURRENCY: the balance for this flow, remembered for the next. */
+  /* Except setting up a Flashcard (`currencyFlow: 'card'`, 26f-flashcard.js `fcUnitAsk`): the pick is what that card will
+   * hold, and nothing of this phone's own choice is written. Back to the card's screen, and on with the set-up. */
   currencyPick(unit) {
     const s = this.state;
+    if (s.currencyFlow === 'card') {
+      const then = this._fcUnitThen;
+      this._fcUnitThen = null;
+      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '' }));
+      if (then) then(unit === 'usd' ? 'usd' : 'sat');
+      return;
+    }
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
     this.rememberWallet(flow, unit);
     const patch = { wallet: unit, walletAuto: false, walletTapped: false,

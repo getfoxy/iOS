@@ -3043,6 +3043,34 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     app.offline = false;
     await settle();
   }
+
+  /* ---- a card that holds dollars: the figures every screen above says, in the card's unit -----------------------------
+   * The screens' money is said by three helpers, and a dollar card's figures are its cents: said as dollars, exactly, with no
+   * price in them. Named no unit, every one of them is a bitcoin card's as it always was (the whole of this suite). And what
+   * the till asks a card in each case it can be in, for the wallet to pick by the card's unit (tests/flashcard-usd-ui.js). */
+  {
+    const app = appOn(H);
+    app.price = 64000;
+    ok(app.fcSats(1300) === '₿1,300' && app.fcPrice(1300) === '$0.83' && app.fcBoth(1300) === '$0.83 (₿1,300)',
+       'with no unit named: sats, and their dollars at the price, as ever', [app.fcSats(1300), app.fcPrice(1300), app.fcBoth(1300)].join(' | '));
+    ok(app.fcSats(475, 'usd') === '$ 4.75' && app.fcPrice(475, 'usd') === '$4.75' && app.fcBoth(475, 'usd') === '$4.75',
+       'in dollars: the cents as dollars, and no sats after them', [app.fcSats(475, 'usd'), app.fcPrice(475, 'usd'), app.fcBoth(475, 'usd')].join(' | '));
+    app.price = 0;
+    ok(app.fcPrice(475, 'usd') === '$4.75' && app.fcPrice(1300) === '₿1,300', 'with no price, a dollar card still says dollars, and sats say sats');
+    const usd = { cents: 475, bolt11: '' };
+    ok(JSON.stringify(app.fcAsks(1300)) === JSON.stringify([{ unit: 'sat', amount: 1300 }])
+       && JSON.stringify(app.fcAsks(0, usd)) === JSON.stringify([{ unit: 'usd', amount: 475 }])
+       && JSON.stringify(app.fcAsks(6112, { cents: 475, bolt11: 'lnbc1' })) === JSON.stringify([{ unit: 'usd', amount: 475 }, { unit: 'sat', amount: 6112 }])
+       && JSON.stringify(app.fcAsks(593, null, null, { unit: 'usd' })) === JSON.stringify([{ unit: 'usd', amount: 593 }])
+       && app.fcAsks(7000, null, { payUnit: 'usd', pay: 592, sats: 7000 })[0].amount === 592,
+       'the till asks: sats; dollars before a code; dollars and the code’s sats; a dollar card’s own total; the cents agreed for sats');
+    app.state.fc = { unit: 'usd' };
+    ok(app.fcUnit() === 'usd' && app.fcTypedUnitFor('cardAdd') === 'usd' && app.fcTypedUnitFor('cardWd') === 'usd' && app.fcTypedUnitFor('cardLimit') === 'usd'
+       && app.fcTypedUnitFor('cardSend') === 'sat',
+       'a dollar card’s own amounts are typed in dollars; money onto any card from this phone’s bitcoin, in sats');
+    app.state.fc = { unit: 'sat' };
+    ok(app.fcUnit() === 'sat' && app.fcTypedUnitFor('cardAdd') === 'sat', 'and a bitcoin card’s in sats, as ever');
+  }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

@@ -511,6 +511,10 @@
            * went (20-helpers.js, `termsFields`; 16b-two-balances.js,
            * `convertOne`). For reading only; the books never look at them. */
           usdAsked: Number(t.usdAsked) || 0,
+          // and the mirror, on a dollar row: the sats asked of a dollar card, whose price, and what the swap into bitcoin gave
+          satsAsked: Number(t.satsAsked) || 0,
+          askOwn: !!t.askOwn,
+          convertSats: t.convertSats == null ? null : Number(t.convertSats),
           askRate: Number(t.askRate) || 0,
           askAgeMs: t.askAgeMs == null ? null : Number(t.askAgeMs),
           askSeenAt: Number(t.askSeenAt) || 0,

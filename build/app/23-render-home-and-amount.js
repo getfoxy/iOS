@@ -192,6 +192,12 @@
       + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
   };
 
+  /* The dollar pill's look: frost with dark ink and the $ at its left. Home's, and a dollar card's on its own screen. */
+  USD_PILL = {
+    sym: '$', ink: '#10161B', inkRgb: '16,22,27', blend: 'normal',
+    bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.06) 0 1px,transparent 1px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+  };
+
   /* The ! on the bitcoin pill that asks about the backup again (`bkAskAgain`), drawn where this is true. */
   BK_BADGE = false;
 
@@ -221,8 +227,7 @@
     const REST = '0 10px 24px rgba(0,0,0,.3)';
     const cents = bal.cents != null ? bal.cents : s.balUsdCents;
     const pill = (u) => (u === 'usd' ? {
-      label: 'Dollars', sym: '$', ink: '#10161B', inkRgb: '16,22,27', blend: 'normal',
-      bg: 'radial-gradient(circle at 18% 30%,rgba(255,255,255,.06) 0 1px,transparent 1px),linear-gradient(160deg,#D6EEF7,#B9DCEA)',
+      label: 'Dollars', ...this.USD_PILL,
       big: s.hidden ? '••••••' : cents == null ? '···' : this.usd(Math.max(0, cents) / 100),
       /* The dollars' worth in sats under them, at the same market price the
        * bitcoin pill's dollar line uses, so the sats can be seen to move with
@@ -277,6 +282,9 @@
    * address, which is asked in sats and converts. */
   usdKeypad() {
     const s = this.state;
+    /* A dollar card's own amounts (ADD FUNDS, WITHDRAW, LIMITS), and money onto a card from the dollar balance: cents,
+     * typed in dollars exactly, as the card holds them (26f-flashcard.js, `fcTypedUnit`). */
+    if (s.screen === 'amount' && /^card(Add|Wd|Limit|Send)$/.test(String(s.flow))) return !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
     if (s.screen !== 'amount' || (s.flow !== 'receive' && s.flow !== 'send')) return false;
     if (!(this.twoUnitsOn && this.twoUnitsOn())) return false;
     if (this.walletNow(s.flow === 'receive' ? 'receive' : 'send') !== 'usd') return false;
@@ -549,7 +557,7 @@
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
       amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap',
-      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0) + ')'
+      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0, s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
         : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')' : '',
       amtAltTap: () => {

@@ -801,9 +801,11 @@
    *
    * Beside it, on the air, a Cashu request in dollars (`unit: 'usd'`, the
    * cents): another Foxy at this mint pays it in dollar ecash by a tap, with
-   * no price anywhere (`tapOffering`). And CARD: a card held to this phone
-   * pays the invoice's own sats, which then pay it (26f-flashcard.js,
-   * `payUsdByCard`), and the dollars land here as for any other payer.
+   * no price anywhere (`tapOffering`). And CARD: a dollar card held to this
+   * phone pays the cents asked straight into the dollar balance, with no
+   * code needed; a bitcoin card pays the invoice's own sats, which then pay
+   * it (26f-flashcard.js, `payUsdByCard`), and the dollars land here as for
+   * any other payer.
    *
    * Offline there is no invoice: the mint makes those. The request is this
    * phone's own, so it is the code (NETWORK CASHU), with no minute to count
@@ -1289,8 +1291,12 @@
        * dollars: the dollars asked and how old the payer's price was, for
        * the headline (`renderPaid`). Nothing on any other payment. */
       paidAsked: !out && ev.askConvert && Number(ev.usdAsked) > 0 ? Math.round(Number(ev.usdAsked)) : 0,
-      paidAskAgeMs: !out && ev.askConvert && Number(ev.askAgeMs) >= 0 ? Number(ev.askAgeMs) : 0,
-      paidConvert: !out && !!ev.askConvert && Number(ev.usdAsked) > 0,
+      /* The mirror: dollars a dollar card paid for sats this phone asked (26f-flashcard.js, `fcOtherUnit`), whether they are
+       * to be swapped into bitcoin or kept, and whose price the sats were worked out at (`askOwn`: this phone's own). */
+      paidAskedSats: !out && Number(ev.satsAsked) > 0 ? Math.round(Number(ev.satsAsked)) : 0,
+      paidAskOwn: !out && !!ev.askOwn,
+      paidAskAgeMs: !out && (ev.askConvert || Number(ev.satsAsked) > 0) && Number(ev.askAgeMs) >= 0 ? Number(ev.askAgeMs) : 0,
+      paidConvert: !out && !!ev.askConvert && (Number(ev.usdAsked) > 0 || Number(ev.satsAsked) > 0),
       payOut: out,
       paidTo: ev.to || (out ? p.recipient : ''),
       asset: 'BITCOIN',

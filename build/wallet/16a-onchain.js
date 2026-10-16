@@ -352,7 +352,8 @@
       var owed = plan.sats + pick.fee;
       var heldId = (opts && typeof opts.held === 'string') ? opts.held : '';
       var hold = heldId ? load(K.held, {})[heldId] : null;
-      var cardHold = hold ? { card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '' } : null;
+      // (with its unit, as `pay` gives it: a hold made again from these pieces is of their unit, `cardOutReturn`)
+      var cardHold = hold ? { card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '', unit: recordUnit(hold) } : null;
       // refused before anything moves: the card's pieces stay in their hold, for the card
       var unsent = function (message) {
         var e = /** @type {any} */ (new Error(message));
@@ -362,6 +363,9 @@
       };
       if (heldId) {
         if (!hold || hold.kind !== 'card out' || !(hold.proofs || []).length) return Promise.reject(unsent('The card’s pieces for this payment are not here any more. Nothing was paid.'));
+        /* A payment on chain is a melt in sats, and a card's pieces pay in their own unit and no other: a dollar card's are
+         * never melted against a figure in sats (the screens refuse it first, 26f-flashcard.js `fcOutAddress`). */
+        if (recordUnit(hold) !== 'sat') return Promise.reject(unsent('This card’s money is in dollars, so it pays Lightning invoices. Nothing was paid.'));
         if (canonicalMint(hold.mint) !== canonicalMint(at)) return Promise.reject(unsent('The card’s pieces are at another mint than this payment. Nothing was paid.'));
         var heldWorth = sumProofs(hold.proofs) - feeForInputs(w, hold.proofs.length);
         if (heldWorth < owed) return Promise.reject(unsent('The fee went up while the card was read, so the card’s ' + sumProofs(hold.proofs) + ' sats do not cover it. Nothing was paid.'));

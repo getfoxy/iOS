@@ -421,12 +421,12 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([v.confirmAmount, v.showSats], ['$ 5.00', false], 'the amount is the cents, with no sats line');
     ok(v.recvTapShown === true && v.recvCardShown === true, 'TAP and CARD on a dollar invoice (the card pays the invoice’s sats: tests/flashcard-usd-receive.js)');
     {
-      // the same screen a moment earlier, before the mint had made the invoice: no sats to pay yet, so no CARD
+      // the same screen a moment earlier, before the mint had made the invoice: a dollar card pays the cents and needs none, so CARD is there
       const was = A.state;
       A.state = Object.assign({}, was, { invoice: '', invoiceHash: '' });
       const before = V();
       A.state = was;
-      eq([before.recvTapShown, before.recvCardShown], [true, false], 'and before the invoice is there, TAP and no CARD');
+      eq([before.recvTapShown, before.recvCardShown], [true, true], 'and before the invoice is there, TAP and CARD (a dollar card needs no invoice: tests/flashcard-usd-ui.js)');
     }
     eq(A.tapOffering(), { inv: W.rec.invoices[0].inv.bolt11, req: '', waiting: false },
       'the dollar invoice goes on the air (its request in dollars beside it is tests/usd-tap-screens.js)');

@@ -114,6 +114,8 @@
       grey: { bg: 'linear-gradient(160deg,#2A3034,#1C2124)', ink: 'rgba(255,255,255,.55)', inkRgb: '255,255,255',
         blend: 'normal', edge: 'rgba(255,255,255,.1)', badgeBg: 'rgba(255,255,255,.14)', badgeInk: 'rgba(255,255,255,.55)' },
     };
+    // (setting up a Flashcard: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
+    const cardFlow = s.currencyFlow === 'card';
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
     const current = pick ? (this.walletNow('send') || 'sat') : '';
     const off = this.offlineNow();
@@ -161,6 +163,7 @@
       isCurrency: sc === 'currency' || pick,
       curTitle: pick ? 'WALLET' : 'CURRENCY',
       curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+        : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
       curFoot: pick
@@ -170,6 +173,7 @@
             + ' was chosen for you: your ' + this.unitWord(current === 'usd' ? 'sat' : 'usd').toLowerCase()
             + ' cannot cover this one.'
           : 'The one you pick is remembered for your next payment.')
+        : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',
       curBack: () => this.back(),

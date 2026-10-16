@@ -173,9 +173,11 @@
      * stated confidently is worse than UNKNOWN. */
     /* At a mint with two balances both are quoted, in parallel (a melt
      * quote is free), so the confirmation can say what each would cost and
-     * pay from the one that covers it (`autoWallet`). From a card, bitcoin
-     * only, the one quote as at a mint with one balance (`cardSendNow`). */
-    const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !(this.cardSendNow && this.cardSendNow());
+     * pay from the one that covers it (`autoWallet`). From a card, the one
+     * quote, in what the card holds (`cardSendNow`): a dollar card's in dollars. */
+    const cardOut = !!(this.cardSendNow && this.cardSendNow());
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
+    const cardUnit = (cardOut && this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : '';
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
@@ -203,7 +205,7 @@
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
-      return two ? W.quoteFeeBoth(found.pr) : W.quoteFee(found.pr);
+      return two ? W.quoteFeeBoth(found.pr) : cardUnit ? W.quoteFee(found.pr, { unit: cardUnit }) : W.quoteFee(found.pr);
     }).then(q => {
       if (stale()) return;
       if (two) { this.feeQuotesIn(q || {}); return; }
@@ -507,8 +509,8 @@
     if (found) { this._found = null; this._quotedFor = null; }
     // from a card: its held pieces, by name, and the card (an entry that says it was paid from the card)
     const fromCard = card ? { held: card.held, card: card.card } : {};
-    // at a mint with two balances (never from a card, which holds bitcoin only): the balance that pays
-    const inUnit = two ? { unit: unit } : {};
+    // at a mint with two balances: the balance that pays; from a dollar card, its dollars (a bitcoin card's pays in sats, as ever)
+    const inUnit = two ? { unit: unit } : (card && card.unit === 'usd') ? { unit: 'usd' } : {};
     const invQuote = card ? kept
       : two ? unitQuote(to)
       : (this._feeQuote && this._feeQuote.bolt11 === to) ? this._feeQuote : null;

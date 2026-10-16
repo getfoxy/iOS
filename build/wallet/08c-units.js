@@ -50,8 +50,11 @@
     };
     fromChain(w);
     fromChain(wallet);
+    /* And the unit wallets built for the connected wallet, not those of a connect before it: a mint that has since stopped
+     * listing a keyset (it no longer issues dollars, say) is taken at its word, not at what an older wallet still holds. */
     var cached = unitWallets || {};
-    Object.keys(cached).forEach(function (u) { if (cached[u] && cached[u].ready) fromChain(cached[u].ready); });
+    var conn = wallet ? (wallet.foxyBase || wallet) : null;
+    Object.keys(cached).forEach(function (u) { if (cached[u] && cached[u].ready && cached[u].base === conn) fromChain(cached[u].ready); });
     if (!found) {
       var c = mintCacheFor(String(mint || mintUrl || '')) || mintCacheFor(m);
       var list = (c && c.keys && Array.isArray(c.keys.keysets)) ? c.keys.keysets : [];
@@ -318,6 +321,35 @@
     return unitWalletBase(u);
   }
 
+  /* Whether the wallet for `unit` can be built here with nothing asked of
+   * the mint, with the keys of its keyset in hand: what a phone with no
+   * route needs before it takes a dollar card. Local and at once.
+   *
+   * `unitWallet` builds from the connected wallet's own copy of the mint's
+   * keys, and falls back to asking the mint where that copy is missing,
+   * which with no route is half a minute of nothing in front of a till. So
+   * this asks only what is in hand: the dollar wallet already built, or the
+   * connected wallet's copy, which holds every unit's keysets with their
+   * keys (a connect asks the mint for all of them), and the active keyset
+   * of the unit with its keys among them. Never a request. The seed is a
+   * separate matter: `unitWallet` refuses until the phone has answered for
+   * it, and says so in its own words. True for sats wherever there is a
+   * wallet. */
+  function unitKeysOffline(unit) {
+    var u = unitOf(unit) || 'sat';
+    if (!wallet) return false;
+    var base = wallet.foxyBase || wallet;
+    var built = unitWalletNow(u);
+    var id = unitKeysetId(u, mintOf(base), base);
+    if (!id) return false;
+    if (built && keysetFor(built, id)) return true;
+    if (u === 'sat') return !!keysetFor(base, id);
+    var cached = null;
+    try { cached = { info: base.getMintInfo().cache, keys: base.keyChain.cache }; } catch (e) { cached = null; }
+    if (!cached || !cached.info || !cached.keys) return false;
+    return !!keysetFor(base, id);
+  }
+
   /* The id of the active keyset `mint` issues `unit` on, or '' when this phone
    * does not know one. */
   function unitKeysetId(unit, mint, w) {
@@ -551,22 +583,34 @@
     return ask();
   }
 
-  /* ---- sats paid to a dollars wallet: foxy.cashu.convert ----
+  /* ---- money paid in the other unit: foxy.cashu.convert ----
    *
    * Someone who chose to hold dollars can be paid in sats: a payer with no
    * dollars, or one offline, pays a dollar request with the sats it works
    * out from its own price. Those sats are swapped into dollars at the mint
    * as soon as they are in the pile here (`convertOne`, 16b-two-balances.js).
+   * The mirror holds too: someone who chose to hold bitcoin can be paid in
+   * dollars (a dollar card pays cents, at this phone's price, for a sats
+   * ask), and those dollars are swapped into sats the same way.
    *
    * One record per payment, by request id: { id, hash, mint, at, state,
-   * sats, got, usd, ask, pileAt, seq, swap, tries, triedAt, gotUsd, why }.
-   * `sats` is what was kept when it arrived, `got` what the claim really put
-   * in the pile, `usd` the cents asked for (0 when nobody said), `ask` the
-   * row's fields for what was agreed (`termsFields`), kept for a claim that
-   * lands after the row was written without them. `pileAt` is the whole
-   * sat pile at that mint just after the claim landed and `seq` the order
-   * claims landed in: what of the pile is not this payment's is `pileAt`
-   * less `got`, and that is never swapped (`convertOne`). The states:
+   * from, to, sats, got, usd, asked, ask, pileAt, seq, swap, tries, triedAt,
+   * gotUsd, gotTo, why }. `from` and `to` are the units: the one the money
+   * came in and the one it is swapped into. A record written before they
+   * were kept is sats into dollars (`convertUnits`). `sats` is what was kept
+   * when it arrived and `got` what the claim really put in the pile, both in
+   * the FROM unit (cents for dollars into bitcoin, whatever the names say:
+   * they are kept so that the records of sats into dollars read as they
+   * always did). `asked` is the figure asked for in the TO unit (cents for
+   * sats into dollars, sats for dollars into bitcoin), 0 when nobody said;
+   * `usd` is the same where the TO unit is dollars, and 0 otherwise. `ask`
+   * is the row's fields for what was agreed (`termsFields`), kept for a
+   * claim that lands after the row was written without them. `pileAt` is
+   * the whole FROM pile at that mint just after the claim landed and `seq`
+   * the order claims landed in: what of the pile is not this payment's is
+   * `pileAt` less `got`, and that is never swapped (`convertOne`). `gotTo`
+   * is what the swap gave, in the TO unit, and `gotUsd` the same where that
+   * is dollars. The states:
    *
    *   owed      arrived, not in the pile yet. Never converted: only a claim
    *             that lands moves it on, so sats that never arrived (spent,
@@ -576,9 +620,9 @@
    *             found on a launch goes back to claimed.
    *   swapping  the swap is running or with the mint; `swap` names it, and
    *             its rows say how it ended (`convertSettle`).
-   *   done      swapped; `gotUsd` is what arrived.
-   *   kept      deliberately left as bitcoin: too little after the fee, the
-   *             person no longer holds dollars, or the sats were spent.
+   *   done      swapped; `gotTo` (and `gotUsd`, into dollars) is what arrived.
+   *   kept      deliberately left as it came: too little after the fee, the
+   *             person no longer holds the other unit, or the money was spent.
    *   failed    three tries spent, or paid with no dollars to show for it.
    *             Never tried again.
    *
@@ -641,26 +685,54 @@
     mustSave(K.convert, convertPruned(l));
   }
 
-  /* Whether sats paid to this request are to be swapped into dollars.
+  /* The unit a person's choice of what to hold is: 'usd' for dollars, 'sat'
+   * for bitcoin, and '' for both or nothing chosen, which converts nothing. */
+  function holdUnit(hold) { return hold === 'dollars' ? 'usd' : hold === 'bitcoin' ? 'sat' : ''; }
+
+  /* The units of a record: { from, to }. A record written before they were
+   * kept is sats into dollars, which is all there was then. */
+  function convertUnits(rec) {
+    var from = rec && rec.from ? (unitOf(rec.from) || 'sat') : 'sat';
+    var to = rec && rec.to ? (unitOf(rec.to) || 'usd') : (from === 'usd' ? 'sat' : 'usd');
+    return { from: from, to: to };
+  }
+
+  /* Whether money paid to this request in one unit is to be swapped into
+   * the other.
    *
-   * Every sat payment to one of this phone's own requests, at the mint the
-   * phone is on, while the person holds dollars there. The person's own
-   * pick of bitcoin wins: a receive they started in bitcoin (`recv` 'sat')
-   * converts only what was agreed for dollars (`terms.convert`). Never a
-   * share of a bill, a payment being carried home, change or a card's: none
-   * of those is the person being paid. Nothing at a mint with one unit, and
-   * nothing while a late claim has the phone at another mint. */
+   * Every payment to one of this phone's own requests, at the mint the phone
+   * is on, in the unit the person does not hold, while they hold just the
+   * other there: sats while they hold dollars, and dollars while they hold
+   * bitcoin. Someone who holds both keeps what came. The person's own pick
+   * wins: a receive they started in the unit that came (`recv`) converts
+   * only what was agreed for the other (`terms.convert`). Never a share of a
+   * bill, a payment being carried home, change or a card's own taking-off:
+   * none of those is the person being paid. Nothing at a mint with one unit,
+   * and nothing while a late claim has the phone at another mint. For sats
+   * this is the rule it always was: they convert only into dollars, and only
+   * for a person who holds dollars. */
   function convertDue(p) {
-    if (!p || (unitOf(p.unit) || 'sat') !== 'sat') return false;
+    if (!p) return false;
+    var from = unitOf(p.unit) || 'sat';
+    if (from !== 'sat' && from !== 'usd') return false;
+    var choice = FoxyWallet.walletChoice();
+    var to = holdUnit(choice.hold);
+    if (!to || to === from) return false;
     if (claimAway) return false;
     var at = canonicalMint(String(p.mint || ''));
     if (!at || at !== canonicalMint(String(mintUrl || ''))) return false;
     if (!FoxyWallet.twoUnits(at)) return false;
     var purpose = String(p.purpose || '');
     if (/^(split|carry):/.test(purpose) || purpose === 'change' || purpose === 'card') return false;
-    var choice = FoxyWallet.walletChoice();
-    if (choice.hold !== 'dollars') return false;
-    return !!(p.terms && p.terms.convert === true) || choice.recv === 'usd';
+    return !!(p.terms && p.terms.convert === true) || choice.recv === to;
+  }
+
+  /* What a payment was asked for in the unit it is swapped into: cents for
+   * sats into dollars, sats for dollars into bitcoin, 0 when nobody said. */
+  function convertAsked(t, to) {
+    var x = t || {};
+    var n = to === 'usd' ? Number(x.usd) : Number(x.sats);
+    return n > 0 ? Math.round(n) : 0;
   }
 
   /* An arrival that is not in the pile yet: owed. Answers whether a record
@@ -670,34 +742,39 @@
     try {
       var had = convertRec(p.id);
       if (had) return had.state === 'owed';
-      var t = p.terms || {};
+      var from = unitOf(p.unit) || 'sat';
+      var to = holdUnit(FoxyWallet.walletChoice().hold) || (from === 'usd' ? 'sat' : 'usd');
       putConvert({ id: p.id, hash: 'req-' + p.id, mint: canonicalMint(String(p.mint || '')), at: Date.now(),
-                   state: 'owed', sats: Math.max(0, Math.round(Number(kept) || 0)), got: 0,
-                   usd: Number(t.usd) > 0 ? Math.round(Number(t.usd)) : 0, ask: termsFields(p.terms),
-                   swap: '', tries: 0, triedAt: 0, gotUsd: 0, why: '' });
+                   state: 'owed', from: from, to: to, sats: Math.max(0, Math.round(Number(kept) || 0)), got: 0,
+                   usd: to === 'usd' ? convertAsked(p.terms, 'usd') : 0, asked: convertAsked(p.terms, to), ask: termsFields(p.terms, from),
+                   swap: '', tries: 0, triedAt: 0, gotUsd: 0, gotTo: 0, why: '' });
       return true;
     } catch (e) {
-      console.warn('[foxy] sats paid to a dollars wallet could not be marked to be swapped; they stay bitcoin:',
+      console.warn('[foxy] money paid in the other unit could not be marked to be swapped; it stays as it came:',
                    (e && e.message) || e);
       return false;
     }
   }
 
-  /* A claim landed: `got` sats are in the pile at `mint`. An owed record
-   * there moves to claimed, holding no more than it was kept as. With `p`
-   * (a payment swapped in as it arrived, never owed) one is made claimed
-   * from the start. Only a claim that landed calls this, so only sats that
-   * are really here are ever swapped. Answers whether one is claimed now. */
-  function convertClaimed(id, got, mint, p) {
+  /* A claim landed: `got` of `unit` (sats when not named) is in the pile at
+   * `mint`. An owed record there in that unit moves to claimed, holding no
+   * more than it was kept as: a dollar claim never moves a record of sats,
+   * nor the other way round. With `p` (a payment swapped in as it arrived,
+   * never owed) one is made claimed from the start. Only a claim that landed
+   * calls this, so only money that is really here is ever swapped. Answers
+   * whether one is claimed now. */
+  function convertClaimed(id, got, mint, p, unit) {
     try {
       var n = Math.max(0, Math.round(Number(got) || 0));
       var at = canonicalMint(String(mint || ''));
       if (!(n > 0) || !at) return false;
       var rec = convertRec(id);
+      var u = rec ? convertUnits(rec).from : (unitOf((p && p.unit) || unit) || 'sat');
+      if ((unitOf(unit) || 'sat') !== u) return false;
       /* The pile as the claim left it, and where this claim comes in the
        * order they landed: the rest of that pile was there before, or came
        * by other ways, and is not this payment's to swap. */
-      var pileAt = sumProofs(proofs(at, 'sat'));
+      var pileAt = sumProofs(proofs(at, u));
       var seq = converts().reduce(function (m, r) { return Math.max(m, Number(r.seq) || 0); }, 0) + 1;
       if (rec) {
         if (rec.state !== 'owed' || canonicalMint(String(rec.mint || '')) !== at) return false;
@@ -709,13 +786,13 @@
         return true;
       }
       if (!p || canonicalMint(String(p.mint || '')) !== at) return false;
-      var t = p.terms || {};
-      putConvert({ id: id, hash: 'req-' + id, mint: at, at: Date.now(), state: 'claimed', sats: n, got: n,
-                   usd: Number(t.usd) > 0 ? Math.round(Number(t.usd)) : 0, ask: termsFields(p.terms),
-                   pileAt: Math.max(pileAt, n), seq: seq, swap: '', tries: 0, triedAt: 0, gotUsd: 0, why: '' });
+      var to = holdUnit(FoxyWallet.walletChoice().hold) || (u === 'usd' ? 'sat' : 'usd');
+      putConvert({ id: id, hash: 'req-' + id, mint: at, at: Date.now(), state: 'claimed', from: u, to: to, sats: n, got: n,
+                   usd: to === 'usd' ? convertAsked(p.terms, 'usd') : 0, asked: convertAsked(p.terms, to), ask: termsFields(p.terms, u),
+                   pileAt: Math.max(pileAt, n), seq: seq, swap: '', tries: 0, triedAt: 0, gotUsd: 0, gotTo: 0, why: '' });
       return true;
     } catch (e) {
-      console.warn('[foxy] sats paid to a dollars wallet could not be marked as in; they stay bitcoin for now:',
+      console.warn('[foxy] money paid in the other unit could not be marked as in; it stays as it came for now:',
                    (e && e.message) || e);
       return false;
     }
@@ -747,7 +824,8 @@
       if (!rec || rec.state !== 'owed') return false;
       var mine = takenBefore(pieces || []);
       if (mine) {
-        if (!convertClaimed(id, Number(mine.sats) > 0 ? mine.sats : rec.sats, mint || rec.mint, null)) return false;
+        // (the note of what was taken keeps its figure in the token's own unit, which is the record's FROM unit)
+        if (!convertClaimed(id, Number(mine.sats) > 0 ? mine.sats : rec.sats, mint || rec.mint, null, convertUnits(rec).from)) return false;
         amendTx(rec.hash, Object.assign({}, rec.ask || {}, { convert: 'claimed' }));
         return true;
       }
@@ -776,21 +854,25 @@
     }
   }
 
-  /* A swap of one payment's sats has left the pile: what it cost, from its
-   * own bitcoin row, comes off the pile every later claim saw. Those claims
-   * counted this payment's sats as not theirs, and with them gone that share
-   * is smaller by as much. Earlier claims never counted it and are left
-   * alone. A record whose swap is not found is left alone too: the share
-   * then stays larger, and a later payment swaps less, never more. */
+  /* A swap of one payment's money has left the pile: what it cost, from its
+   * own FROM row, comes off the pile every later claim in that unit saw.
+   * Those claims counted this payment's money as not theirs, and with it
+   * gone that share is smaller by as much. Earlier claims never counted it
+   * and are left alone, and so are claims of the other unit, whose pile it
+   * never was. A record whose swap is not found is left alone too: the
+   * share then stays larger, and a later payment swaps less, never more. */
   function convertSpent(rec) {
+    var u = convertUnits(rec).from;
     var rows = load(K.log, []);
     var out = (Array.isArray(rows) ? rows : []).filter(function (e) {
-      return e && rec.swap && e.swap === rec.swap && e.dir === 'out' && recordUnit(e) === 'sat' && e.state !== 'failed';
+      return e && rec.swap && e.swap === rec.swap && e.dir === 'out' && recordUnit(e) === u && e.state !== 'failed';
     })[0];
-    var n = out ? Math.max(0, Math.round(satsOf(out.sats) + satsOf(out.feeSats))) : 0;
+    var n = !out ? 0 : u === 'sat' ? Math.max(0, Math.round(satsOf(out.sats) + satsOf(out.feeSats)))
+      : Math.max(0, Math.round(satsOf(out.amount) + satsOf(out.feeAmount)));
     if (!(n > 0) || !(Number(rec.seq) > 0)) return;
     converts().forEach(function (r) {
       if (r.id === rec.id || !(Number(r.seq) > Number(rec.seq)) || typeof r.pileAt !== 'number') return;
+      if (convertUnits(r).from !== u) return;
       if (['claimed', 'quoting', 'swapping'].indexOf(r.state) < 0) return;
       r.pileAt = Math.max(0, r.pileAt - n);
       putConvert(r);
@@ -800,23 +882,35 @@
   /* The fields a payment's row carries for what it was agreed for: the
    * dollars asked, the payer's price and how old it was, when that was, and
    * that price as the row's own, so the row's dollars are the dollars asked.
-   * For reading only: the books never read them (16-history-lists.js). */
-  function termsFields(t) {
-    if (!t || !(Number(t.usd) > 0)) return {};
-    var f = /** @type {any} */ ({ usdAsked: Math.round(Number(t.usd)) });
-    if (Number(t.rate) > 0) { f.askRate = Number(t.rate); f.rate = Math.round(Number(t.rate)); }
+   * The mirror for a dollar row that was asked in sats (a dollar card paying
+   * a sats ask): the sats asked and the price, and no `rate` of the row's
+   * own, since a dollar row's figure is its cents. `askOwn`: the price was
+   * this phone's, not the payer's (both card paths). `unit`: the row's, where
+   * the caller knows it. For reading only: the books never read them
+   * (16-history-lists.js). */
+  function termsFields(t, unit) {
+    if (!t) return {};
+    var f = /** @type {any} */ ({});
+    if (Number(t.usd) > 0) {
+      f.usdAsked = Math.round(Number(t.usd));
+      if (Number(t.rate) > 0) { f.askRate = Number(t.rate); f.rate = Math.round(Number(t.rate)); }
+    } else if (Number(t.sats) > 0 && (t.payUnit === 'usd' || unitOf(unit) === 'usd')) {
+      f.satsAsked = Math.round(Number(t.sats));
+      if (Number(t.rate) > 0) f.askRate = Number(t.rate);
+    } else return {};
     if (typeof t.ageMs === 'number') f.askAgeMs = t.ageMs;
     if (typeof t.seenAt === 'number') f.askSeenAt = t.seenAt;
+    if (t.own === true) f.askOwn = true;
     return f;
   }
 
   /* Records whose swap ended while nobody was watching, put right from the
    * rows the swap itself wrote. A swap still with the mint is left alone.
-   * A dollar row with the swap's id: done. A bitcoin row with it and no
-   * dollar row: the sats went and no dollars came, which is for the person
-   * and the SWAP screen to look into, so never tried again. Neither: nothing
-   * left the phone, and it may be tried again. A rate being asked for when
-   * the page went away moved nothing either. */
+   * A row in the TO unit with the swap's id: done. A row in the FROM unit
+   * with it and none in the TO unit: the money went and nothing came, which
+   * is for the person and the SWAP screen to look into, so never tried
+   * again. Neither: nothing left the phone, and it may be tried again. A
+   * rate being asked for when the page went away moved nothing either. */
   function convertSettle() {
     var live = {};
     FoxyWallet.unitSwapsPending().forEach(function (s) { live[s.id] = true; });
@@ -838,26 +932,29 @@
           return e && rec.swap && e.swap === rec.swap && e.dir === dir && recordUnit(e) === unit && e.state !== 'failed';
         })[0] || null;
       };
-      var usdIn = leg('in', 'usd');
-      if (usdIn) {
+      var u = convertUnits(rec);
+      var toIn = leg('in', u.to);
+      if (toIn) {
         rec.state = 'done';
-        rec.gotUsd = Math.round(satsOf(usdIn.amount));
+        rec.gotTo = u.to === 'sat' ? Math.round(satsOf(toIn.sats)) : Math.round(satsOf(toIn.amount));
+        if (u.to === 'usd') rec.gotUsd = rec.gotTo;
         rec.why = '';
         putConvert(rec);
-        amendTx(rec.hash, { convert: 'done', convertUsd: rec.gotUsd, convertSwap: rec.swap });
+        amendTx(rec.hash, u.to === 'usd' ? { convert: 'done', convertUsd: rec.gotTo, convertSwap: rec.swap }
+                                         : { convert: 'done', convertSats: rec.gotTo, convertSwap: rec.swap });
         convertSpent(rec);
-        console.log('[foxy] sats paid to a dollars wallet: its swap finished while away, '
-          + moneyWords(rec.gotUsd, 'usd') + ' arrived');
+        console.log('[foxy] ' + balanceWord(u.from) + ' paid to a ' + balanceWord(u.to) + ' wallet: its swap finished while away, '
+          + moneyWords(rec.gotTo, u.to) + ' arrived');
         return;
       }
-      if (leg('out', 'sat')) {
+      if (leg('out', u.from)) {
         rec.state = 'failed';
-        rec.why = 'paid, no dollars yet';
+        rec.why = u.to === 'usd' ? 'paid, no dollars yet' : 'paid, no bitcoin yet';
         putConvert(rec);
         amendTx(rec.hash, { convert: 'failed' });
         convertSpent(rec);
-        console.warn('[foxy] sats paid to a dollars wallet: its swap paid out and no dollars are on record;'
-          + ' not tried again');
+        console.warn('[foxy] ' + balanceWord(u.from) + ' paid to a ' + balanceWord(u.to) + ' wallet: its swap paid out and no '
+          + balanceWord(u.to) + ' is on record; not tried again');
         return;
       }
       rec.state = 'claimed';

@@ -47,7 +47,11 @@ const SEND_SIGS = {
                       // a mint with two balances: the confirmation's own for it, and what decides which balance pays
                       'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'rememberWallet(flow, unit) {',
                       'unitWord(unit) {', 'walletLabel(unit) {', 'unitFigure(amount, unit) {', 'unitBalance(unit) {', 'syncWalletAsk() {',
-                      'openWalletPick() {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'confirmTwoSpec() {'],
+                      'openWalletPick() {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'confirmTwoSpec() {',
+                      // the dollar keypad's cents, exactly: a dollar card's own amounts are typed on it (26f-flashcard.js, `fcTyped`)
+                      'centsTyped() {'],
+  // whether the keypad types a dollar balance's own amount, which a dollar card's flows do
+  '23-render-home-and-amount.js': ['usdKeypad() {'],
   '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'feeQuotesIn(both) {', 'syncSend() {',
                  'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'startSend() {', 'showPayPending() {', 'checkSendPrice() {', 'startSendNow(to, o) {'],
   '12-receive.js': ['acceptTarget(text) {', 'offlineInvoiceCard() {'],
@@ -60,7 +64,6 @@ const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => l
   + '\n' + read(['26b-onchain.js']);
 const MONEY_PARTS = liftFrom(read(['03-send.js']), 'money(sats, fiatCents) {');
 const RECEIVE_SIGS = {
-  '01-ui-basics.js': ['centsTyped() {'],
   '12-receive.js': ['wantedAmount() {', 'stopReceive() {', 'openUsdReceive(cents) {', 'usdInvoiceUp(inv, mine) {', 'recvClockTick(mine) {', 'recvRequote(mine) {'],
   '24-render-receive-and-send.js': ['renderReceive(c) {'],
 };

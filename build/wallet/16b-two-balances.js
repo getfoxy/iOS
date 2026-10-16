@@ -34,6 +34,12 @@
      * (08c-units.js, `walletIn`). */
     walletIn: function (unit) { return walletIn(unit); },
 
+    /* Whether the connected mint's wallet for `unit` can be built with no
+     * request, its keys in hand (08c-units.js, `unitKeysOffline`): what a till
+     * with no route asks before it takes a dollar card. Local, at once, a
+     * boolean. */
+    unitKeysOffline: function (unit) { return unitKeysOffline(unit); },
+
     /* What the person said they want to hold ('dollars', 'bitcoin', 'both',
      * or '' when never asked), and the unit a receive and a send start in
      * ('sat', 'usd', or '' when the CURRENCY screen should ask). */
@@ -188,11 +194,13 @@
       if (no) return Promise.reject(no);
       var want = Math.round(Number(amount));
       if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
-      // a card's one-signature pieces and cut ladders are sats only (08a-flashcard.js)
-      if (o.sigAll || (Array.isArray(o.denominations) && o.denominations.length)) {
-        return Promise.reject(new Error('Cards are bitcoin only; nothing was sent.'));
-      }
       var lockTo = typeof o.lockTo === 'string' ? o.lockTo : '';
+      /* A card's one-signature pieces, and the drawer they are cut into, are a
+       * locked send's (a dollar card's load and its change, 08a-flashcard.js):
+       * never pieces anybody could take. */
+      if ((o.sigAll || (Array.isArray(o.denominations) && o.denominations.length)) && !lockTo) {
+        return Promise.reject(new Error('A card’s pieces are locked to the card; nothing was sent.'));
+      }
       var online = routeOpen();
       if (lockTo && !online) {
         return Promise.reject(new Error('A locked payment needs the mint, and this phone is offline. Nothing was sent.'));
@@ -324,8 +332,20 @@
           var guard = swapGuard(w, 'send', { inputs: have, unit: u, locked: !!lockTo,
             pay: { want: want, purpose: o.purpose || '', forHash: o.forHash || '', owed: o.owed || 0 } });
           made = guard.run('token', function () {
+            /* Locked as the sat send locks (19-bill-split.js): a refund to the
+             * card's owner after its date where one is named, the one-signature
+             * flag a card of format 4 signs under, and the pieces cut as the
+             * caller says (a card's drawer). Whatever the cut leaves of the
+             * amount, and the fee on it, the library fills as it always did. */
+            var lockOut = /** @type {any} */ ({ type: 'p2pk', options: (o.lockUntil > 0)
+              ? { pubkey: lockTo, locktime: Math.floor(o.lockUntil), refundKeys: o.refundTo ? [String(o.refundTo)] : undefined }
+              : { pubkey: lockTo } });
+            if (o.sigAll) lockOut.options.sigFlag = 'SIG_ALL';
+            if (Array.isArray(o.denominations) && o.denominations.length) {
+              lockOut.denominations = o.denominations.map(function (d) { return Math.round(Number(d)); });
+            }
             return lockTo
-              ? w.send(want, have, { includeFees: true }, { send: { type: 'p2pk', options: { pubkey: lockTo } } })
+              ? w.send(want, have, { includeFees: true }, { send: lockOut })
               : w.send(want, have, { includeFees: true });
           }).catch(function (e) {
             /* The mint never answered and it had made the payment: rebuilt
@@ -631,14 +651,17 @@
       return FoxyWallet.swapQuote(from, to, amount, opts).then(function (q) { return FoxyWallet.swapRun(q, onStage); });
     },
 
-    /* ---- sats paid to a dollars wallet, swapped into dollars ------------
+    /* ---- money paid in the other unit, swapped into the one held --------
      *
-     * The records are in 08c-units.js (foxy.cashu.convert). This is the one
-     * step that moves money for them: the oldest payment in the pile and not
-     * yet swapped, swapped by the ordinary swap (`swapQuote`, `swapRun`),
-     * with its two ordinary rows. The payment's own row is never touched but
-     * for the words it shows (`convert`, `convertSwap`, `convertUsd`,
-     * `convertWhy`).
+     * The records are in 08c-units.js (foxy.cashu.convert): sats paid to a
+     * dollars wallet, swapped into dollars, and dollars paid to a bitcoin
+     * wallet, swapped into sats. Each record says which (`convertUnits`), and
+     * every figure below is in the record's FROM unit unless it says. This is
+     * the one step that moves money for them: the oldest payment in the pile
+     * and not yet swapped, swapped by the ordinary swap (`swapQuote`,
+     * `swapRun`), with its two ordinary rows. The payment's own row is never
+     * touched but for the words it shows (`convert`, `convertSwap`,
+     * `convertUsd` or `convertSats`, `convertWhy`).
      *
      * Nobody is waiting on it, so it is careful rather than quick. It does
      * nothing (resolves null, writes nothing) without a route and the mint's
@@ -678,18 +701,21 @@
         return r.state === 'claimed' && canonicalMint(String(r.mint || '')) === here && !convertTried[r.id];
       }).sort(function (a, b) { return (Number(a.at) || 0) - (Number(b.at) || 0); })[0];
       if (!rec) return Promise.resolve(null);
+      var u = convertUnits(rec);
+      // the words of the log, by the record's units: "sats paid to a dollars wallet", or "dollars paid to a bitcoin wallet"
+      var what = (u.from === 'sat' ? 'sats' : balanceWord(u.from)) + ' paid to a ' + balanceWord(u.to) + ' wallet';
       var amount = 0;
       var answer = function (outcome, q) {
         return { id: rec.id, state: rec.state, outcome: outcome, why: rec.why || '',
-                 from: { unit: 'sat', amount: q ? q.total : amount },
-                 to: { unit: 'usd', amount: q ? q.get : 0 }, rec: Object.assign({}, rec) };
+                 from: { unit: u.from, amount: q ? q.total : amount },
+                 to: { unit: u.to, amount: q ? q.get : 0 }, rec: Object.assign({}, rec, { from: u.from, to: u.to }) };
       };
       // the end of a record's life, or of this try, written down and said on its row
       var mark = function (state, why, row) {
         rec.state = state;
         rec.why = why || '';
         try { putConvert(rec); } catch (e) {
-          console.warn('[foxy] sats paid to a dollars wallet: the record could not be written:', (e && e.message) || e);
+          console.warn('[foxy] ' + what + ': the record could not be written:', (e && e.message) || e);
         }
         if (row) amendTx(rec.hash, row);
       };
@@ -698,13 +724,13 @@
         var last = (Number(rec.tries) || 0) >= CONVERT_TRIES;
         rec.swap = '';
         mark(last ? 'failed' : 'claimed', why, { convert: 'failed' });
-        console.warn('[foxy] sats paid to a dollars wallet were not swapped (' + why + ')'
-          + (last ? '; that was the last try, they stay bitcoin' : '; tried again next launch'));
+        console.warn('[foxy] ' + what + ' were not swapped (' + why + ')'
+          + (last ? '; that was the last try, they stay ' + balanceWord(u.from) : '; tried again next launch'));
         return answer('failed');
       };
-      if (FoxyWallet.walletChoice().hold !== 'dollars') {
+      if (holdUnit(FoxyWallet.walletChoice().hold) !== u.to) {
         mark('kept', 'hold', { convert: 'kept', convertWhy: 'hold' });
-        console.log('[foxy] sats paid to a dollars wallet are kept as bitcoin: the wallet holds ' + (FoxyWallet.walletChoice().hold || 'nothing chosen') + ' now');
+        console.log('[foxy] ' + what + ' are kept as ' + balanceWord(u.from) + ': the wallet holds ' + (FoxyWallet.walletChoice().hold || 'nothing chosen') + ' now');
         return Promise.resolve(answer('kept'));
       }
       /* No yardstick, no swap. The mint's rate is judged against this
@@ -714,7 +740,7 @@
        * and comes back (`convertOnReturn`). */
       var market = FoxyWallet.lastPrice();
       if (!market.rate || FoxyWallet.priceTooOld(market.at) || market.ageMs > CONVERT_PRICE_MS) {
-        console.log('[foxy] sats paid to a dollars wallet: waiting for a current bitcoin price before swapping');
+        console.log('[foxy] ' + what + ': waiting for a current bitcoin price before swapping');
         return Promise.resolve(null);
       }
       /* What may be swapped: this payment's sats and none of the person's
@@ -724,7 +750,7 @@
        * made since came out of the same pile, and is taken to have come out
        * of this one first, so the person's own sats are never touched. A
        * record that does not say what the pile was is not swapped at all. */
-      var pileNow = sumProofs(proofs(at, 'sat'));
+      var pileNow = sumProofs(proofs(at, u.from));
       var got = Math.max(0, Math.round(Number(rec.got) || 0));
       if (Number(rec.sats) > 0) got = Math.min(got, Math.round(Number(rec.sats)));
       var known = typeof rec.pileAt === 'number' && isFinite(rec.pileAt) && rec.pileAt >= 0;
@@ -732,7 +758,7 @@
       var cap = Math.min(got, pileNow - notThis);
       if (!(cap > 0)) {
         mark('kept', 'spent', { convert: 'kept', convertWhy: 'spent' });
-        console.log('[foxy] sats paid to a dollars wallet were spent before they could be swapped; nothing is swapped');
+        console.log('[foxy] ' + what + ' were spent before they could be swapped; nothing is swapped');
         return Promise.resolve(answer('kept'));
       }
       /* And the swap's own costs come out of that too, not out of the rest:
@@ -741,8 +767,10 @@
        * quote is asked for less by that much, and what it comes back at is
        * checked against the same sum, once more a little lower if it is
        * over. */
+      // the fees of the FROM unit's own keyset: the sat wallet's for sats, the dollar wallet's (or its stand-in) for dollars
+      var feeW = u.from === 'sat' ? wallet : (unitWalletNow(u.from) || feeWalletFor(u.from, wallet));
       var costOf = function (owed) {
-        try { return meltNeed(wallet, proofs(at, 'sat'), owed); } catch (e) { return null; }
+        try { return meltNeed(feeW, proofs(at, u.from), owed); } catch (e) { return null; }
       };
       var within = function (q) {
         var n = costOf(Number(q.total) || 0);
@@ -760,19 +788,19 @@
       rec.tries = (Number(rec.tries) || 0) + 1;
       rec.triedAt = Date.now();
       try { putConvert(rec); } catch (eMark) {
-        console.warn('[foxy] sats paid to a dollars wallet: the try could not be written down, so none is made:',
+        console.warn('[foxy] ' + what + ': the try could not be written down, so none is made:',
                      (eMark && eMark.message) || eMark);
         return Promise.resolve(null);
       }
-      console.log('[foxy] sats paid to a dollars wallet: swapping ' + moneyWords(amount, 'sat') + ' into dollars (try '
+      console.log('[foxy] ' + what + ': swapping ' + moneyWords(amount, u.from) + ' into ' + balanceWord(u.to) + ' (try '
         + rec.tries + ' of ' + CONVERT_TRIES + ')');
-      var quoted = FoxyWallet.swapQuote('sat', 'usd', amount).then(function (q) {
+      var quoted = FoxyWallet.swapQuote(u.from, u.to, amount).then(function (q) {
         var n = within(q);
         if (n) return { q: q, need: n };
         var over = Math.max(1, Math.round(((costOf(Number(q.total) || 0) || {}).need || Number(q.total) || 0) - cap));
         var less = amount - over;
         if (!(less > 0)) throw tooLittle();
-        return FoxyWallet.swapQuote('sat', 'usd', less).then(function (q2) {
+        return FoxyWallet.swapQuote(u.from, u.to, less).then(function (q2) {
           var n2 = within(q2);
           if (!n2) throw tooLittle();
           return { q: q2, need: n2 };
@@ -787,7 +815,7 @@
          * is not run at a rate or a fee a person would turn down. */
         if (Number(held.need.need) - satsOf(q.amount) > 0.1 * Number(held.need.need)) {
           mark('kept', 'small', { convert: 'kept', convertWhy: 'small' });
-          console.log('[foxy] sats paid to a dollars wallet: the mint’s fee is over a tenth of them; kept as bitcoin');
+          console.log('[foxy] ' + what + ': the mint’s fee is over a tenth of them; kept as ' + balanceWord(u.from));
           return answer('kept');
         }
         if (q.spreadWarn) return notNow('rate');
@@ -797,27 +825,28 @@
           // not run: with no record of it, a swap cut off here could not be told from one never made
           rec.state = 'claimed';
           rec.swap = '';
-          console.warn('[foxy] sats paid to a dollars wallet: the swap could not be written down, so it is not run');
+          console.warn('[foxy] ' + what + ': the swap could not be written down, so it is not run');
           return answer('failed');
         }
         amendTx(rec.hash, { convert: 'swapping', convertSwap: q.id });
-        try { stage('start', Object.assign({}, rec), q); } catch (eStage) {}
+        try { stage('start', Object.assign({}, rec, { from: u.from, to: u.to }), q); } catch (eStage) {}
         return FoxyWallet.swapRun(q).then(function (r) {
           if (r && r.state === 'done') {
-            rec.gotUsd = Math.round(Number(q.get) || 0);
-            mark('done', '', { convert: 'done', convertUsd: rec.gotUsd });
+            rec.gotTo = Math.round(Number(q.get) || 0);
+            if (u.to === 'usd') rec.gotUsd = rec.gotTo;
+            mark('done', '', u.to === 'usd' ? { convert: 'done', convertUsd: rec.gotTo } : { convert: 'done', convertSats: rec.gotTo });
             try { convertSpent(rec); } catch (eSpent) {}
-            console.log('[foxy] sats paid to a dollars wallet are swapped: ' + moneyWords(rec.gotUsd, 'usd'));
+            console.log('[foxy] ' + what + ' are swapped: ' + moneyWords(rec.gotTo, u.to));
             return answer('done', q);
           }
           if (r && r.state === 'pending') {
-            console.log('[foxy] sats paid to a dollars wallet: the swap is with the mint; the sweeps finish it');
+            console.log('[foxy] ' + what + ': the swap is with the mint; the sweeps finish it');
             return answer('pending', q);
           }
           return notNow('mint');
         }, function (e) {
           // swapRun throws only when nothing left the phone (16b, `swapRun`)
-          console.warn('[foxy] sats paid to a dollars wallet: the swap did not start:', (e && e.message) || e);
+          console.warn('[foxy] ' + what + ': the swap did not start:', (e && e.message) || e);
           return notNow('mint');
         });
       }, function (e) {
@@ -831,18 +860,22 @@
         }
         if (/too little/i.test(msg)) {
           mark('kept', 'small', { convert: 'kept', convertWhy: 'small' });
-          console.log('[foxy] sats paid to a dollars wallet are too little to swap after the mint’s fee; kept as bitcoin');
+          console.log('[foxy] ' + what + ' are too little to swap after the mint’s fee; kept as ' + balanceWord(u.from));
           return answer('kept');
         }
         return notNow('quote');
       }).then(null, function (e) {
-        console.warn('[foxy] sats paid to a dollars wallet: the swap stopped:', (e && e.message) || e);
+        console.warn('[foxy] ' + what + ': the swap stopped:', (e && e.message) || e);
         return null;
       });
       var free = function (r) { converting = null; return r; };
       converting = run.then(free, free);
       return converting;
     },
+
+    /* Whether a payment of `p` ({ unit, mint, purpose, terms }) would be swapped into the unit held (08c-units.js,
+     * `convertDue`): for the suites, which hold it to the same answers for sats as it always gave. */
+    _convertDue: function (p) { return convertDue(p); },
 
     /* Whether the swap into dollars waits on a bitcoin price: none, or one
      * older than `convertOne` judges a rate by. The app asks for one then. */
@@ -858,6 +891,7 @@
       return converts().filter(function (r) {
         return ['owed', 'claimed', 'quoting', 'swapping'].indexOf(r.state) >= 0;
       }).sort(function (a, b) { return (Number(a.at) || 0) - (Number(b.at) || 0); })
-        .map(function (r) { return Object.assign({}, r, { tried: !!convertTried[r.id] }); });
+        // with its units said, an old record's too (sats into dollars)
+        .map(function (r) { var u = convertUnits(r); return Object.assign({}, r, { tried: !!convertTried[r.id], from: u.from, to: u.to }); });
     },
 

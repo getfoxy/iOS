@@ -21,8 +21,11 @@
      * follow it, each in its own unit. A swap between them is two rows, one
      * in each tab, each with the other leg's figure under it. */
     const two = !!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard;
-    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : 'sat';
-    const A = (two && this.histAuditIn) ? this.histAuditIn(tab) : this.histAudit();
+    /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card holds
+     * one kind, so its list has no tabs. */
+    const usdCard = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
+    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : usdCard ? 'usd' : 'sat';
+    const A = ((two || usdCard) && this.histAuditIn) ? this.histAuditIn(tab) : usdCard && this.histAuditUsd ? this.histAuditUsd() : this.histAudit();
     const balOf = A.balOf, balNow = A.balNow, run = A.run;
     const dueChange = A.dueChange, dueCount = A.dueCount;
     /* The audit. Walked back through every entry, the balance before the
@@ -101,7 +104,7 @@
     const cardName = (t) => (t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
     const cardRail = (t) => {
       if (unfinished(t)) return t.changeState === 'given back' ? 'Put back on the card' : 'To go back on the card';
-      if (t.dir === 'in' && t.changeState === 'not handed' && t.changeSats > 0) return 'Change to go back on the card';
+      if (t.dir === 'in' && t.changeState === 'not handed' && (t.changeSats > 0 || t.changeAmount > 0)) return 'Change to go back on the card';
       return '';
     };
     // the other leg of a swap, by the swap they share: its figure goes under this one
@@ -166,9 +169,9 @@
          * the entry then and never worked out again, so yesterday's coffee
          * does not change price with bitcoin. */
         amtText: ofCard
-          ? (unfinished(t) ? '' : dirOf(t) === 'in' ? '+' : '−') + this.money(t.sats, this.txFiat(t, t.sats)).main
+          ? (unfinished(t) ? '' : dirOf(t) === 'in' ? '+' : '−') + (usdCard ? this.unitFigure(t.amount, 'usd') : this.money(t.sats, this.txFiat(t, t.sats)).main)
           : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
-        amtSub: ofCard ? this.money(t.sats, this.txFiat(t, t.sats)).sub
+        amtSub: ofCard ? (usdCard ? '' : this.money(t.sats, this.txFiat(t, t.sats)).sub)
           : t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
         // dollars at today's price, and the sats that actually add up
         // the wallet's running balance, which is not a card's: left off a card's own list
@@ -274,8 +277,12 @@
        * asked, the payer's price it was worked out at and how old that was,
        * and, when the sats are to be swapped into dollars here, what the
        * swap gave or how it stands. */
-      txAskShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0,
-      txAsked: this.unitFigure(Math.round(Number(tx.usdAsked) || 0), 'usd'),
+      /* And the mirror: dollars a dollar card paid for sats this phone asked, at this phone's own price (`askOwn`, said as
+       * THIS PHONE'S PRICE: it was not the payer's), and what the swap into bitcoin gave. */
+      txAskShown: tx.dir === 'in' && ((!tx.unit && Number(tx.usdAsked) > 0) || (tx.unit === 'usd' && Number(tx.satsAsked) > 0)),
+      txAsked: tx.unit === 'usd' ? this.unitFigure(Math.round(Number(tx.satsAsked) || 0), 'sat')
+        : this.unitFigure(Math.round(Number(tx.usdAsked) || 0), 'usd'),
+      txAskPriceHead: tx.askOwn ? 'THIS PHONE\u2019S PRICE' : 'THEIR PRICE',
       txAskPrice: Number(tx.askRate) > 0
         ? '\u20bf 1 = $ ' + this.group(Math.round(Number(tx.askRate)))
           + ((() => {
@@ -283,8 +290,17 @@
             return words ? ', seen ' + words.toLowerCase() : '';
           })())
         : '\u2014',
-      txConvertShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0 && !!tx.convert,
-      txConverted: tx.convert === 'done'
+      txConvertShown: tx.dir === 'in' && ((!tx.unit && Number(tx.usdAsked) > 0) || (tx.unit === 'usd' && Number(tx.satsAsked) > 0)) && !!tx.convert,
+      txConverted: tx.unit === 'usd' ? (tx.convert === 'done'
+        ? (Number(tx.convertSats) > 0 ? this.unitFigure(Math.round(Number(tx.convertSats)), 'sat') : 'Bitcoin')
+        : tx.convert === 'owed' ? 'Once online'
+        : tx.convert === 'claimed' ? 'Soon'
+        : tx.convert === 'swapping' ? 'Under way'
+        : tx.convert === 'failed' ? 'Not swapped, still dollars'
+        : (tx.convert === 'kept' && tx.convertWhy === 'small') ? 'Too little after the fee'
+        : (tx.convert === 'kept' && tx.convertWhy === 'spent') ? 'Spent first'
+        : tx.convert === 'kept' ? 'Kept as dollars' : '')
+        : tx.convert === 'done'
         ? (Number(tx.convertUsd) > 0 ? this.unitFigure(Math.round(Number(tx.convertUsd)), 'usd') : 'Dollars')
         // owed waits for a connection; in the pile, it waits only for a quiet moment
         : tx.convert === 'owed' ? 'Once online'
@@ -599,7 +615,24 @@
         : (t.convert === 'kept' && t.convertWhy === 'spent') ? 'Spent before it was swapped'
         : t.convert === 'kept' ? 'Kept as bitcoin'
         : '';
-      if (said && !t.failed && !t.atRisk && !t.highRisk) out.metaRail = said;
+      // (a card's payment waiting for the mint says that first: `cardWaits`)
+      if (said && !t.failed && !t.atRisk && !t.highRisk && !t.cardWaits) out.metaRail = said;
+    }
+    /* The mirror on a dollar row: dollars a dollar card paid for sats this phone asked, the sats asked under them, and how
+     * the swap into bitcoin went where the person holds bitcoin alone ("Asked ₿ 5,000 · Swapped into ₿ 4,961"). */
+    const askedSats = usd && !swap ? Math.round(Number(t.satsAsked) || 0) : 0;
+    if (askedSats > 0) {
+      out.amtSub = 'Asked ' + this.unitFigure(askedSats, 'sat');
+      const leg = (t.convertSwap && legOf && legOf.get) ? legOf.get(t.convertSwap + '|sat') : null;
+      const gave = Number(t.convertSats) > 0 ? Number(t.convertSats) : leg ? Math.round(Number(leg.sats != null ? leg.sats : leg.amount) || 0) : 0;
+      const said = t.convert === 'done' || (gave > 0 && t.convert === 'swapping' && !!leg)
+        ? (gave > 0 ? 'Swapped into ' + this.unitFigure(gave, 'sat') : 'Swapped into bitcoin')
+        : (t.convert === 'owed' || t.convert === 'claimed') ? 'To be swapped into bitcoin once online'
+        : t.convert === 'swapping' ? 'Being swapped into bitcoin'
+        : t.convert === 'failed' ? 'Not swapped. It stays dollars'
+        : (t.convert === 'kept' && t.convertWhy === 'small') ? 'Too little to swap after the mint\u2019s fee'
+        : t.convert === 'kept' ? 'Kept as dollars' : '';
+      if (said && !t.failed && !t.atRisk && !t.highRisk && !t.cardWaits) out.metaRail = said;
     }
     if (swap) {
       return Object.assign(out, {

@@ -359,11 +359,16 @@
       }
       return;
     }
-    const said = (n) => this.unitFigure(Math.round(Number(n) || 0), 'sat');
+    /* In the units the payment came in and is swapped into: sats into dollars for a person holding dollars alone, and dollars
+     * into bitcoin for one holding bitcoin alone (dollars a dollar card paid for sats asked). The record says which (`from`,
+     * `to`); one from before records said is sats into dollars. */
+    const said = (n, unit) => this.unitFigure(Math.round(Number(n) || 0), unit === 'usd' ? 'usd' : 'sat');
+    const into = (unit) => (unit === 'sat' ? 'bitcoin' : 'dollars');
     const run = W.convertOne((stage, rec, q) => {
       if (stage !== 'start') return;
-      this.toast('You chose dollars, so Foxy is swapping the ' + said((rec && rec.got) || (q && q.total))
-        + ' you were paid into dollars.');
+      const from = (rec && rec.from) || 'sat', to = (rec && rec.to) || 'usd';
+      this.toast('You chose ' + into(to) + ', so Foxy is swapping the ' + said((rec && rec.got) || (q && q.total), from)
+        + ' you were paid into ' + into(to) + '.');
     });
     this._swapRun = this._converting = run;
     run.then((r) => {
@@ -381,7 +386,7 @@
         this.refreshBalance();
         this.loadHistory();
         if (home) this.swapPendingCard(r);
-        else this.toast('The swap into dollars is still going through. Foxy finishes it by itself.', true);
+        else this.toast('The swap into ' + into((r.to && r.to.unit) || 'usd') + ' is still going through. Foxy finishes it by itself.', true);
       } else if (r.outcome === 'failed') {
         this.loadHistory();
         // once for each payment, however many times it is tried
@@ -389,7 +394,9 @@
         if (!this._convertSaid[r.id]) {
           this._convertSaid[r.id] = true;
           const got = r.rec && Number(r.rec.got) > 0 ? r.rec.got : (r.from && r.from.amount);
-          this.toast('Foxy could not swap the ' + said(got) + ' into dollars just now. It stays as bitcoin.', true);
+          const from = (r.from && r.from.unit) || 'sat', to = (r.to && r.to.unit) || 'usd';
+          this.toast('Foxy could not swap the ' + said(got, from) + ' into ' + into(to) + ' just now. It stays as '
+            + (from === 'usd' ? 'dollars' : 'bitcoin') + '.', true);
         }
       } else if (r.outcome === 'kept') {
         this.loadHistory();

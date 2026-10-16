@@ -81,7 +81,8 @@ async function receiveDollars(till, R, amount) {
     ok(till.twoUnitsOn() && till.walletNow('receive') === 'usd', 'a mint with two balances, and this receive is into dollars');
     till.setState({ amount: '1.00', invoice: '' });
     let v = screen(till);
-    ok(v.recvTapShown === true && v.recvCardShown === false, 'before the mint has made the invoice: TAP, and no CARD (there are no sats to pay yet)');
+    // (a dollar card pays the cents and needs no invoice, so CARD is there already; a bitcoin card is told to tap again: tests/flashcard-usd-ui.js)
+    ok(v.recvTapShown === true && v.recvCardShown === true, 'before the mint has made the invoice: TAP, and CARD for a dollar card');
     const inv = await receiveDollars(till, R, '1.00');
     v = screen(till);
     ok(v.recvCardShown === true && v.recvTapShown === true && v.confirmAmount === '$ 1.00',

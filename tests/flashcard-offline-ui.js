@@ -497,25 +497,38 @@ async function keptPay(R, k, sats) {
     offline(R);
     R.nfc = k;
     t.state.recvAmount = 100;                 // one dollar asked
-    // a build that cannot turn sats into dollars later: refused as any card payment with no connection
+    /* A dollar card pays a dollar receive in cents with no price and needs no build that converts, so CARD taps the card for
+     * dollars whatever this phone's price is; a bitcoin card is asked for sats only where its sats can be worked out and turned
+     * into dollars later. This card holds bitcoin: it is read, and refused before its PIN and before it signs, with why
+     * (a dollar card's side is tests/flashcard-usd-ui.js). */
+    const signed = () => k.sent.some((x) => /^b0(40|22)/.test(x));
+    // a build that cannot turn sats into dollars later: a bitcoin card is told a phone that is offline takes dollars only from a dollar card
     const realConvert = R.W.convertOne;
     delete R.W.convertOne;
     t.toasts.length = 0;
     k.sent.length = 0;
     t.payUsdByCard();
-    ok(t.toasts.indexOf('A card payment needs a connection.') >= 0 && !card(t) && !pad(t) && k.sent.length === 0,
-       'without the dollars build, a dollar receive by card with no route needs a connection, and the card is not touched', t.toasts.join(' | '));
+    await until('the bitcoin card to be refused', () => !!card(t));
+    ok(card(t).title === 'THIS CARD HOLDS BITCOIN'
+       && card(t).reason === 'This card holds bitcoin here, not dollars. A phone that is offline takes dollars only from a dollar card. Take this payment in bitcoin, or when this phone is online.'
+       && /Nothing was taken/.test(card(t).all) && !pad(t) && !signed() && k.balance() === 2000,
+       'without the dollars build, a bitcoin card at a dollar receive with no route is read and refused, before its PIN and before it signs', card(t) && card(t).all);
+    card(t).press(card(t).has('CLOSE') ? 'CLOSE' : 'OK');
     // with it: the wallet's own rule for a price too old to use, and `convertOne` stood in for (nothing is swapped here)
     R.W.convertOne = () => Promise.resolve(null);
     R.W._rate = 64000; R.W._rateAt = Date.now() - 2 * DAY;
+    k.sent.length = 0;
     t.payUsdByCard();
+    await until('the price to be refused', () => !!card(t));
     ok(card(t) && card(t).title === 'BITCOIN PRICE TOO OLD' && card(t).reason === 'This phone last saw the Bitcoin price 2 days ago. That is too old to work out what to take from the card.'
-       && /Nothing was taken/.test(card(t).all) && !pad(t) && k.sent.length === 0,
-       'a price two days old is refused before the card is touched', card(t) && card(t).all);
+       && /Nothing was taken/.test(card(t).all) && !pad(t) && !signed() && k.balance() === 2000,
+       'a price two days old: a bitcoin card is refused before its PIN and before it signs', card(t) && card(t).all);
     card(t).press(card(t).has('CLOSE') ? 'CLOSE' : 'OK');
     R.W._rate = 0; R.W._rateAt = 0;
+    k.sent.length = 0;
     t.payUsdByCard();
-    ok(card(t) && card(t).title === 'BITCOIN PRICE TOO OLD' && /has not seen the Bitcoin price/.test(card(t).reason), 'and no price at all is said so', card(t) && card(t).reason);
+    await until('no price to be said', () => !!card(t));
+    ok(card(t) && card(t).title === 'BITCOIN PRICE TOO OLD' && /has not seen the Bitcoin price/.test(card(t).reason) && !signed(), 'and no price at all is said so', card(t) && card(t).reason);
     card(t).press(card(t).has('CLOSE') ? 'CLOSE' : 'OK');
     R.W._rate = 64000; R.W._rateAt = Date.now() - 60 * 1000;
     t.payUsdByCard();

@@ -972,8 +972,10 @@
    *
    * The first three are out of the balance and failed in HISTORY by the time this is called; the screens catch up. */
   cardKeptLostCard(info) {
-    const sats = Math.round(Number(info && info.sats) || 0);
-    const money = this.moneyIn(sats, 'sat');
+    // in the unit the card paid in: a dollar card's cents (`amount`), and a bitcoin card's sats, as ever
+    const unit = (info && info.unit === 'usd') ? 'usd' : 'sat';
+    const n = Math.round(Number(info && (info.amount != null ? info.amount : info.sats)) || 0);
+    const money = this.moneyIn(n, unit);
     const date = Number(info && info.date) || 0;
     const day = date > 0 && this.fcDay ? this.fcDay(date) : '';
     const cause = String((info && info.cause) || '');

@@ -28,11 +28,12 @@
      * invoice is there, and on Lightning the minute the code lives counted
      * down. A request in dollars (CASHU, and every dollar receive offline)
      * does not run out, so it has no clock.
-     * A card holds bitcoin, and a dollar invoice is a Lightning invoice for a
-     * number of sats at the mint's rate: the card pays those sats, and they pay
-     * the invoice (26f-flashcard.js, `payUsdByCard`). Until the mint has made
-     * the invoice there is no number of sats to pay, so there is no CARD; and
-     * offline there is no invoice at all. */
+     * A card holds one kind of money. A dollar card pays the cents asked,
+     * straight into the dollar balance, and needs no invoice, so CARD is there
+     * before the mint has made one, and offline where cards are taken with no
+     * route. A bitcoin card pays the sats the dollar invoice names, and they
+     * pay it (26f-flashcard.js, `payUsdByCard`); until the code is up it is
+     * told to tap again then. */
     const two = !!(this.twoUnitsOn && this.twoUnitsOn());
     const usdIn = two && this.walletNow('receive') === 'usd';
     const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
@@ -47,7 +48,8 @@
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      recvCardShown: !usdIn || (!!s.invoice && !s.invoiceIsAddress),
+      recvCardShown: !usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
+        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline()),
       recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
@@ -206,7 +208,7 @@
     if (usdPaid) {
       const cents = Math.round(Number(s.paidAmount) || 0);
       const fee = s.payOut ? Math.round(Number(this._lastPay && this._lastPay.fee) || 0) : 0;
-      return Object.assign(this.renderPaidBase(c), {
+      const out = Object.assign(this.renderPaidBase(c), {
         paidHeadline: this.unitFigure(cents + fee, 'usd'),
         paidHeadlineSub: '',
         paidBreakdown: !!s.payOut && fee > 0,
@@ -215,6 +217,23 @@
         paidAddedTo: s.payOut ? this.paidTargetLabel() : 'DOLLARS',
         paidStack: '',
       });
+      /* Dollars a dollar card paid for sats this phone asked (26f-flashcard.js, `fcOtherUnit`). To be swapped into bitcoin
+       * (`paidConvert`, holding bitcoin alone): the sats asked are the headline, the dollars that came under them with whose
+       * price it was and how old, and where they go: dollars now, bitcoin once swapped. Kept as dollars (holding both): the
+       * dollars are the headline, and the line under them says that is what was paid. */
+      const askedSats = Math.round(Number(s.paidAskedSats) || 0);
+      if (!s.payOut && askedSats > 0) {
+        if (s.paidConvert) {
+          const words = this.priceAgeWords ? this.priceAgeWords(Number(s.paidAskAgeMs) || 0) : '';
+          out.paidHeadline = this.unitFigure(askedSats, 'sat');
+          out.paidHeadlineSub = this.unitFigure(cents, 'usd')
+            + (words ? ' \u00b7 ' + (s.paidAskOwn ? 'THIS PHONE\u2019S PRICE ' : 'THEIR PRICE ') + words : '');
+          out.paidAddedTo = 'DOLLARS, THEN BITCOIN';
+        } else {
+          out.paidHeadlineSub = 'Paid in dollars: ' + this.unitFigure(cents, 'usd') + ' for ' + this.unitFigure(askedSats, 'sat');
+        }
+      }
+      return out;
     }
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
@@ -228,7 +247,8 @@
     if (two && !s.payOut && asked > 0 && s.paidConvert) {
       const words = this.priceAgeWords ? this.priceAgeWords(Number(s.paidAskAgeMs) || 0) : '';
       base.paidHeadline = this.unitFigure(asked, 'usd');
-      base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 THEIR PRICE ' + words : '');
+      // whose price: the payer's, over a tap; this phone's own, for a card (`askOwn`)
+      base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 ' + (s.paidAskOwn ? 'THIS PHONE\u2019S PRICE ' : 'THEIR PRICE ') + words : '');
       base.paidAddedTo = 'BITCOIN, THEN DOLLARS';
     }
     return base;
@@ -280,7 +300,7 @@
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };

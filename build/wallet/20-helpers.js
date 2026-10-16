@@ -845,6 +845,27 @@
       return quote;
     },
 
+    /* The other way round, for a till: what a dollar card is to pay, in cents,
+     * for `sats` asked, at this phone's own price. `typed` is the cents the
+     * person typed where they typed dollars, which the card then pays exactly,
+     * not a figure turned into sats and back. Rounded up to the whole cent: a
+     * cent is a thousand sats and more, and to the nearest would leave the
+     * receiver short of what it asked by up to half of one, where up costs the
+     * holder a cent at most, and the holder sees the figure before tapping.
+     * Resolves nothing: { sats, cents, rate, at, ageMs }, or null with no
+     * price, or one over a day old (or ahead of this phone's clock), or no
+     * amount. */
+    centsFor: function (sats, typed) {
+      var mine = FoxyWallet.lastPrice();
+      if (!mine.rate) return null;
+      if (FoxyWallet.priceTooOld(mine.at)) return null;
+      var n = Math.round(Number(sats) || 0);
+      if (!(n > 0)) return null;
+      var cents = Number(typed) > 0 ? Math.round(Number(typed)) : Math.ceil(n * mine.rate / 1e6);
+      if (!(cents > 0)) return null;
+      return { sats: n, cents: cents, rate: mine.rate, at: mine.at, ageMs: mine.ageMs };
+    },
+
     /* The payer's other answer: "I have no route, and my sats are at this mint."
      *
      * Ecash is only ever worth what its own mint will honour, so a phone with
@@ -1209,7 +1230,8 @@
               /* With what it was agreed for, kept on the record: a payment
                * whose own claim was cut off was written by this claim, with
                * none of it. */
-              if (ru === 'sat' && convertClaimed(id, got, where || unclaimedMint(one), null)) {
+              // in either unit: dollars owed a swap into bitcoin move the same way (and a claim moves only a record of its own unit)
+              if ((ru === 'sat' || ru === 'usd') && convertClaimed(id, got, where || unclaimedMint(one), null, ru)) {
                 amendTx('req-' + id, Object.assign({}, (convertRec(id) || {}).ask || {}, { convert: 'claimed' }));
                 convertDueIds.push(id);
               }
@@ -1274,7 +1296,7 @@
               /* Owed a swap into dollars and gone: in the pile already if this
                * phone took it (and the page went before it said so), nowhere
                * here if anyone else did (`convertGone`). */
-              if (gone && ru === 'sat') {
+              if (gone && (ru === 'sat' || ru === 'usd')) {
                 var goneOf = [];
                 try { goneOf = (FoxyWallet.tokenInfo(claimText) || {}).proofs || []; } catch (eGone) { goneOf = []; }
                 if (convertGone(id, goneOf, where || unclaimedMint(one))) convertDueIds.push(id);
@@ -1441,8 +1463,11 @@
        * are in the pile (08c-units.js, `convertDue`). Decided here, before
        * anything is told, so the screen knows from the first word that this
        * is a dollars wallet being paid in sats and not a person who chose
-       * bitcoin. Taken on trust, it is never converted (below). */
-      var convertable = convertDue(p);
+       * bitcoin. Taken on trust, it is never converted (below). Sats only:
+       * no payment between phones pays dollars to a bitcoin wallet's request
+       * (it asks in dollars only where its person picked dollars), so the
+       * mirror is not asked here (`convertDue` would answer it for dollars). */
+      var convertable = pu === 'sat' && convertDue(p);
       /* Told in the payment's unit: `amount` and `unit`, and `sats` as it
        * always was for a sat payment (0 for a dollar one). */
       var tell = function (stage, r) {

@@ -49,7 +49,14 @@
  *   17 no current price: nothing tried and no try spent until there is one
  *   18 records that do not add up swap no more than they were kept as, or
  *      nothing
- *   19 a fee over a tenth: kept as too little, not tried again */
+ *   19 a fee over a tenth: kept as too little, not tried again
+ *   20 for sats, every answer of the rule is the one it always was; for dollars, its mirror
+ *   21 the mirror: dollars paid to a phone that holds bitcoin, swapped into sats once
+ *   22 held by the mint, then finished by the sweeps with no second swap
+ *   23 refused (tried again later), a phone that holds both by then (kept), too little (kept)
+ *   24 the person's own dollars are never swapped
+ *   25 a dollar claim never moves a record of sats, nor a sat claim one of dollars
+ *   26 the dollars paid out and no sats on record after a restart: failed, never again */
 process.env.TZ = 'UTC';
 const fs = require('fs');
 const path = require('path');
@@ -915,6 +922,181 @@ async function run() {
       && !app.toasts.some((x) => /could not swap/.test(x)),
       '19: the mint’s fee is over a tenth of the payment: too little to swap, kept, not tried again', JSON.stringify({ rec, toasts: app.toasts }));
     await booksShut(t.rx, '19', from);
+  }
+
+  /* ---- the mirror: dollars paid to a phone that holds bitcoin, swapped into sats ----------
+   *
+   * A dollar card pays cents for a sats ask at a till with no route (tests/flashcard-usd.js
+   * pins the tap and its record). Here the record is put where it would be, with the dollars
+   * really in the pile, and the runner is held to the same rules in the other direction. */
+
+  // ---- 20. sats are what they always were: the rule's answers, hold by recv by terms by purpose
+  {
+    const c = await connected({});
+    const holds = ['dollars', 'bitcoin', 'both', ''];
+    const recvs = ['sat', 'usd', ''];
+    const termsOf = [null, { convert: true }, { convert: false }];
+    const purposes = ['receive', 'card', 'card-offline', 'change', 'split:1', 'carry:1'];
+    const old = (hold, recv, t, purpose) => hold === 'dollars' && !/^(split|carry):/.test(purpose) && purpose !== 'change' && purpose !== 'card'
+      && (!!(t && t.convert === true) || recv === 'usd');
+    const wrong = [];
+    let asked = 0;
+    for (const hold of holds) for (const recv of recvs) for (const t of termsOf) for (const purpose of purposes) {
+      if (hold) c.storage.setItem('foxy.wallet.hold', JSON.stringify(hold)); else c.storage.removeItem('foxy.wallet.hold');
+      if (recv) c.storage.setItem('foxy.wallet.recv', JSON.stringify(recv)); else c.storage.removeItem('foxy.wallet.recv');
+      const said = c.W._convertDue({ id: 'x', unit: 'sat', mint: MINT, purpose, terms: t });
+      asked += 1;
+      if (said !== old(hold, recv, t, purpose)) wrong.push({ hold, recv, t, purpose, said });
+      // and the mirror: dollars convert only for a phone that holds bitcoin, by the same rules
+      const usd = c.W._convertDue({ id: 'x', unit: 'usd', mint: MINT, purpose, terms: t });
+      const want = hold === 'bitcoin' && !/^(split|carry):/.test(purpose) && purpose !== 'change' && purpose !== 'card'
+        && (!!(t && t.convert === true) || recv === 'sat');
+      if (usd !== want) wrong.push({ unit: 'usd', hold, recv, t, purpose, said: usd });
+    }
+    ok(wrong.length === 0 && asked === 216, '20: for sats, every answer is the one it always was; for dollars, the mirror of it', JSON.stringify(wrong.slice(0, 4)));
+    c.storage.removeItem('foxy.wallet.hold'); c.storage.removeItem('foxy.wallet.recv');
+    ok(c.W._convertDue({ id: 'x', unit: 'usd', mint: OTHER, purpose: 'card-offline', terms: { convert: true } }) === false,
+      '20: never at another mint than the one the phone is on');
+  }
+
+  /* A receiver that holds bitcoin with `cents` of dollars in its pile, and a record of them owed a swap into sats, as a
+   * dollar card's payment kept offline and then claimed leaves it: `state` claimed (or owed), its entry the funding's. */
+  async function mirror(o) {
+    const opts = o || {};
+    const c = await connected({ mintOpts: opts.mintOpts });
+    c.W.setWalletChoice({ hold: opts.hold || 'bitcoin' });
+    if (opts.other) await fund(c, opts.other, 'usd');
+    const got = await fund(c, opts.cents || 592, 'usd');
+    const hash = (got && got.hash) || (rows(c).filter((r) => r.unit === 'usd' && r.dir === 'in').slice(-1)[0] || {}).hash;
+    const pile = sumOf(read(c, 'foxy.cashu.proofs.' + MINT + '@usd', []));
+    const rec = { id: 'd1', hash: hash, mint: MINT, at: Date.now(), state: opts.state || 'claimed', from: 'usd', to: 'sat',
+                  sats: opts.cents || 592, got: opts.state === 'owed' ? 0 : (opts.cents || 592), usd: 0, asked: 7000, ask: { satsAsked: 7000, askOwn: true },
+                  pileAt: pile, seq: 1, swap: '', tries: 0, triedAt: 0, gotUsd: 0, gotTo: 0, why: '' };
+    c.storage.setItem('foxy.cashu.convert', JSON.stringify([rec]));
+    return { c, hash, from: books(c) };
+  }
+  const sumOf = (l) => (l || []).reduce((n, p) => n + (Number(p && p.amount) || 0), 0);
+
+  // ---- 21. dollars into sats, once -------------------------------------------------------
+  {
+    const { c, hash, from } = await mirror({});
+    const sat0 = c.W.balanceOf('sat'), usd0 = c.W.balanceOf('usd');
+    const stages = [];
+    const r = await c.W.convertOne((stage, rec, q) => stages.push({ stage, from: rec.from, to: rec.to, total: q && q.total }));
+    const rec = recOf(c, 'd1') || {};
+    const legs = swapRows(c).filter((x) => x.swap === rec.swap);
+    const out = legs.find((x) => x.dir === 'out'), inn = legs.find((x) => x.dir === 'in');
+    ok(r && r.outcome === 'done' && r.from.unit === 'usd' && r.to.unit === 'sat' && rec.state === 'done' && rec.gotTo === r.to.amount && rec.gotUsd === 0
+      && legs.length === 2 && out && out.unit === 'usd' && inn && (inn.unit || 'sat') === 'sat' && inn.sats === rec.gotTo,
+      '21: a phone that holds bitcoin swaps the dollars it was paid into sats: a dollar row out, a sat row in, one swap id', JSON.stringify({ r, rec, legs: legs.length }));
+    ok(stages.length === 1 && stages[0].from === 'usd' && stages[0].to === 'sat', '21: the start of the swap names its units, for the words the screen says', JSON.stringify(stages));
+    ok(c.W.balanceOf('sat') === sat0 + rec.gotTo && c.W.balanceOf('usd') === usd0 - out.amount - (out.feeAmount || 0) && out.amount + (out.feeAmount || 0) <= 592,
+      '21: no more than the payment left the dollars', JSON.stringify({ sat: c.W.balanceOf('sat') - sat0, usd: usd0 - c.W.balanceOf('usd') }));
+    const row = rows(c).find((x) => x.hash === hash) || {};
+    ok(row.convert === 'done' && row.convertSats === rec.gotTo && row.convertUsd === undefined, '21: the payment’s row says swapped into sats', JSON.stringify(row));
+    ok(await c.W.convertOne() === null && swapRows(c).length === 2, '21: a second go does nothing');
+    ok(c.W.convertsOwed().length === 0, '21: nothing is owed any more');
+    await booksShut(c, '21', from);
+  }
+
+  // ---- 22. held by the mint, then finished by the sweeps ---------------------------------
+  {
+    const { c, from } = await mirror({ mintOpts: { meltPending: true } });
+    const r = await c.W.convertOne();
+    const rec = recOf(c, 'd1') || {};
+    ok(r && r.outcome === 'pending' && r.from.unit === 'usd' && rec.state === 'swapping' && c.W.unitSwapsPending().length === 1,
+      '22: with the mint: swapping', JSON.stringify({ r, rec }));
+    ok(c.W.convertsOwed()[0].from === 'usd' && c.W.convertsOwed()[0].to === 'sat', '22: and the list of what is owed says its units');
+    const hold = read(c, 'foxy.cashu.melting', []).find((h) => h.swap === rec.swap);
+    c.mints[MINT].settleMelt(hold.quote, 'paid');
+    await c.W.sweepMelts();
+    await c.W.sweepQuotes();
+    const again = await c.W.convertOne();
+    const done = recOf(c, 'd1') || {};
+    ok(again === null && done.state === 'done' && done.gotTo > 0 && swapRows(c).length === 2, '22: and the record settles done from its rows, with no second swap', JSON.stringify(done));
+    await booksShut(c, '22', from);
+  }
+
+  // ---- 23. refused, kept, too little -----------------------------------------------------
+  {
+    const t1 = await mirror({ mintOpts: { meltRefuse: true } });
+    const r1 = await t1.c.W.convertOne();
+    const rec1 = recOf(t1.c, 'd1') || {};
+    ok(r1 && r1.outcome === 'failed' && rec1.state === 'claimed' && rec1.tries === 1 && swapRows(t1.c).length === 0 && t1.c.W.balanceOf('usd') === 592,
+      '23: refused by the mint: the dollars stay, tried again next launch', JSON.stringify(rec1));
+    await booksShut(t1.c, '23 refused', t1.from);
+    const t2 = await mirror({});
+    t2.c.W.setWalletChoice({ hold: 'both' });
+    const r2 = await t2.c.W.convertOne();
+    const rec2 = recOf(t2.c, 'd1') || {};
+    ok(r2 && r2.outcome === 'kept' && rec2.state === 'kept' && rec2.why === 'hold' && swapRows(t2.c).length === 0,
+      '23: a phone that holds both by the time it is back keeps the dollars', JSON.stringify(rec2));
+    await booksShut(t2.c, '23 both', t2.from);
+    const t3 = await mirror({ cents: 5, mintOpts: { usdFeePpk: 1000 } });
+    const r3 = await t3.c.W.convertOne();
+    const rec3 = recOf(t3.c, 'd1') || {};
+    ok(r3 && r3.outcome === 'kept' && rec3.why === 'small' && swapRows(t3.c).length === 0, '23: five cents is too little to swap after the fee', JSON.stringify(rec3));
+    await booksShut(t3.c, '23 small', t3.from);
+  }
+
+  // ---- 24. the person's own dollars are never swapped ------------------------------------
+  {
+    const { c, from } = await mirror({ other: 2000 });
+    const usd0 = c.W.balanceOf('usd');
+    const r = await c.W.convertOne();
+    const out = swapRows(c).find((x) => x.dir === 'out') || {};
+    ok(r && r.outcome === 'done' && out.amount + (out.feeAmount || 0) <= 592 && c.W.balanceOf('usd') >= usd0 - 592,
+      '24: of a dollar pile with 2,000 of the person’s own, no more than the 592 paid is swapped', JSON.stringify({ out: out.amount, fee: out.feeAmount }));
+    await booksShut(c, '24', from);
+  }
+
+  // ---- 25. a dollar claim moves only a dollar record, and a sat claim only a sat one -----
+  {
+    const t = await pair({ hold: 'bitcoin' });
+    await fund(t.payer, 2000, 'usd');
+    const rx = t.rx;
+    const from = books(rx);
+    const usdTok = await t.payer.W.sendToken(300, { unit: 'usd' });
+    const satTok = await t.payer.W.sendToken(500, { unit: 'sat' });
+    const at = Date.now();
+    // a dollar row under a sat record's id, and a dollar row under a dollar record's: as two payments kept offline would be
+    rx.storage.setItem('foxy.req.unclaimed', JSON.stringify({
+      s1: { token: usdTok.token, at, amount: 300, unit: 'usd', mint: MINT },
+      u2: { token: satTok.token, at, amount: 500, unit: 'sat', sats: 500, mint: MINT },
+    }));
+    rx.storage.setItem('foxy.cashu.convert', JSON.stringify([
+      { id: 's1', hash: 'req-s1', mint: MINT, at, state: 'owed', sats: 300, got: 0, usd: 0, swap: '', tries: 0, triedAt: 0, gotUsd: 0, why: '' },
+      { id: 'u2', hash: 'req-u2', mint: MINT, at, state: 'owed', from: 'usd', to: 'sat', sats: 500, got: 0, usd: 0, asked: 0, swap: '', tries: 0, triedAt: 0, gotUsd: 0, gotTo: 0, why: '' },
+    ]));
+    await rx.W.claimUnclaimed();
+    await wait(80);
+    const s1 = recOf(rx, 's1') || {}, u2 = recOf(rx, 'u2') || {};
+    ok(s1.state === 'owed' && u2.state === 'owed' && !Object.keys(read(rx, 'foxy.req.unclaimed', {})).length,
+      '25: dollars claimed under a record of sats, and sats under a record of dollars: neither record moves', JSON.stringify({ s1: s1.state, u2: u2.state }));
+    noBooks(rx, 'rows planted under records of the other unit');
+    void from;
+  }
+
+  // ---- 26. a record of dollars paid out with no sats on record, found after a restart ----
+  {
+    const { c, from } = await mirror({ mintOpts: { meltPending: true } });
+    const r = await c.W.convertOne();
+    const rec = recOf(c, 'd1') || {};
+    // the sat leg's invoice lost from this phone's list (it lapsed), and the mint pays the melt
+    const hold = read(c, 'foxy.cashu.melting', []).find((h) => h.swap === rec.swap);
+    c.mints[MINT].settleMelt(hold.quote, 'paid');
+    const lost = store(c);
+    lost['foxy.cashu.quotes'] = JSON.stringify(JSON.parse(lost['foxy.cashu.quotes'] || '[]').filter((x) => x.swap !== rec.swap));
+    const b = page({ storage: lost, phone: c.phone, mints: c.mints });
+    b.booksFrom = from;
+    noBooks(c, 'its storage went on in the next launch');
+    await b.W.connect(MINT, null, null, { remember: true });
+    await until(() => swapRows(b).some((x) => x.swap === rec.swap && x.dir === 'out'));
+    await b.W.convertOne();
+    const after = recOf(b, 'd1') || {};
+    ok(r && r.outcome === 'pending' && after.state === 'failed' && after.why === 'paid, no bitcoin yet' && (await b.W.convertOne()) === null,
+      '26: the dollars paid out and no sats on record: failed, and never tried again', JSON.stringify(after));
+    await booksShut(b, '26', from);
   }
 }
 

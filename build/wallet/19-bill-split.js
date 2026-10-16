@@ -915,7 +915,10 @@
            * it signed for and no others (`cardSwapFor`, 08a-flashcard.js): the
            * mint takes its signature for nothing else. Their counters go on
            * the record before the request does, as any swap's do. */
-          var fixed = unit === 'sat' ? cardSwapFor(incomingProofs) : null;
+          /* In any unit: a dollar card's pieces are swapped on the dollar wallet for the outputs it signed for, on the dollar
+           * keyset the row names. Only the exact pieces a card signed find a row (`cardSwapFor` holds them to the fingerprint of
+           * the whole set). */
+          var fixed = cardSwapFor(incomingProofs);
           /* The card's own change (software 1.12) is in that swap too, as outputs this phone has no part in: the amount the record
            * keeps is what the token came to for this phone, so that what is not found of it later is the mint's fee and not the card's change. */
           var forCard = (fixed && fixed.change && Array.isArray(fixed.change.outs)) ? fixed.change.outs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0) : 0;
@@ -947,7 +950,8 @@
              * leaves the split to cashu-ts, which makes the fewest pieces. */
             /* Held for a payment out of this phone (`opts.holdAs`): cut as the amount kept in powers of two and the rest after
              * it, so the amount is always an exact set of what comes in (`cardOutHold`, below). */
-            var keepN = Math.round(Number(opts && opts.keptSats) || 0);
+            // (the amount kept in the token's own unit: `keptAmount` for any unit but sats)
+            var keepN = Math.round(Number(opts && (unit === 'sat' ? opts.keptSats : opts.keptAmount)) || 0);
             var cut = (holdAs && isFinite(expect) && keepN > 0 && expect >= keepN)
               ? cardBinary(keepN, cardMaxPiece(w)).concat(cardBinary(expect - keepN, cardMaxPiece(w))) : [];
             // (within what the mint takes in one request; otherwise shaped as ever, and all of it is held)
@@ -971,7 +975,7 @@
         var got = sumProofs(fresh);
         /* Held for a payment out of this phone: the pieces that make the amount kept go to one side, out of the pile, before
          * the swap's record is let go, and only the rest (the change this phone makes for the card) is filed in the pile. */
-        var toPile = (holdAs && unit === 'sat') ? cardOutHold(holdAs, fresh, intoMint, Math.round(Number(opts.keptSats) || 0)) : fresh;
+        var toPile = holdAs ? cardOutHold(holdAs, fresh, intoMint, Math.round(Number(unit === 'sat' ? opts.keptSats : opts.keptAmount) || 0), unit) : fresh;
         addProofs(toPile, intoMint, intoWallet, unit);
         // a payment that was arriving is in the pile now, and counted there alone (`arrivingLand`)
         if (/^req-/.test(into)) arrivingLand(into.slice(4));
@@ -994,11 +998,14 @@
           var recU = (keptU >= 0 && keptU <= got) ? keptU : got;
           var changeU = Math.max(0, Number(opts && opts.changeAmount) || 0);
           if (changeU > 0) recU = Math.max(0, Math.min(recU, got - changeU));
+          /* What of the token went to outputs a dollar card made for itself (`opts.toCard`, 08a-flashcard.js): not this
+           * phone's, and not the mint's fee either, as on the sat entry below. */
+          var toCardU = (opts && Number(opts.toCard) > 0) ? Math.round(Number(opts.toCard)) : 0;
           var entryU = /** @type {any} */ ({
             dir: 'in',
             unit: unit,
             amount: recU,
-            feeAmount: Math.max(0, tok.amount - got),
+            feeAmount: Math.max(0, tok.amount - got - toCardU),
             sats: 0,
             feeSats: 0,
             settled: true,
@@ -1006,9 +1013,9 @@
             memo: (opts && typeof opts.memo === 'string' && opts.memo) || 'ecash',
             hash: into || 'token-' + Date.now(),
           });
-          if (changeU > 0) {
-            entryU.grossAmount = Number(opts && opts.grossAmount) || got;
-            entryU.changeAmount = changeU;
+          if (changeU > 0 || toCardU > 0) {
+            entryU.grossAmount = Number(opts && opts.grossAmount) || (got + toCardU);
+            entryU.changeAmount = changeU + toCardU;
           }
           if (into) {
             try {
@@ -1026,7 +1033,8 @@
           if (!into || !txSeen(into)) entryU.mint = intoMint;
           logTx(entryU, into);
           console.log('[foxy] took', formatAmount(got, unit), 'of', unitName(unit), 'ecash at', hostOf(tok.mint),
-                      tok.amount !== got ? '(' + formatAmount(tok.amount - got, unit) + ' to the mint fee)' : '');
+                      tok.amount !== got + toCardU ? '(' + formatAmount(tok.amount - got - toCardU, unit) + ' to the mint fee)' : '',
+                      toCardU ? '(' + formatAmount(toCardU, unit) + ' went to the card’s own change)' : '');
           return { sats: null, unit: unit, amount: got, mint: tok.mint, host: hostOf(tok.mint), switched: switched,
                    hash: entryU.hash };
         }

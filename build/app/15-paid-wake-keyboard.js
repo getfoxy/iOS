@@ -97,7 +97,9 @@
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
     }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {},
     // sats paid for dollars asked for, to be swapped into dollars: the dollars asked, and how old the payer's price was
-    Number(next.usdAsked) > 0 && next.convert ? { usdAsked: next.usdAsked, askAgeMs: next.askAgeMs, askConvert: true } : {}));
+    Number(next.usdAsked) > 0 && next.convert ? { usdAsked: next.usdAsked, askAgeMs: next.askAgeMs, askConvert: true, askOwn: !!next.askOwn } : {},
+    // and dollars a dollar card paid for sats asked: the sats asked, how old this phone's price was, and whether they are to be swapped
+    Number(next.satsAsked) > 0 ? { satsAsked: next.satsAsked, askAgeMs: next.askAgeMs, askOwn: !!next.askOwn, askConvert: !!next.convert } : {}));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
