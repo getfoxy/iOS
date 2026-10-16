@@ -252,6 +252,10 @@
     /** @type {?function(any): void} */
     _onLateClaim: null,
     onLateClaim: function (fn) { FoxyWallet._onLateClaim = fn; },
+    // invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }]
+    /** @type {?function(Array<any>): void} */
+    _onSwept: null,
+    onSwept: function (fn) { FoxyWallet._onSwept = fn || null; },
     // a locked payment Foxy was killed in the middle of, rebuilt on reopening: { sats, change }
     /** @type {?function(any): void} */
     _onSendRebuilt: null,
@@ -300,7 +304,11 @@
       return load(K.quotes, []).concat(load(K.quotesOld, [])).filter(function (q) {
         return q && q.unclaimed;
       }).map(function (q) {
-        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: q.unclaimed };
+        /* A record written before `unsent` was: its reason says whether the
+         * mint was asked, in the words a refusal that never left uses. */
+        var u = q.unclaimed;
+        var unsent = !!u.unsent || NEVER_SENT.indexOf(String(u.reason || '')) >= 0;
+        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
       });
     },
     /* What stands in front of the seed (the SECURE FOXY card, 10-pin.js).

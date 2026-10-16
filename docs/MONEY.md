@@ -161,6 +161,19 @@ refused if a DLEQ it carries fails. A proof with no DLEQ is accepted.
 and on resume, asks the mint about each quote it issued, and claims anything
 paid. Nothing lost.
 
+**If paid while Foxy was in the background:** the return runs the sweep at
+once, and Tor is often a few seconds from up. A sweep with no route asks
+nothing and is marked held. The route coming up runs it once, with no connect
+or mint switch needed (`_sweepHeldNow`, from `_privacy`); a sweep that loses
+its route halfway is marked held the same way. A wallet built from storage is
+left to the connect that follows its route, which sweeps with the mint's
+current keysets. A sweep asked for while one is already running at that mint
+waits for that one, so a connect and a route coming up in the same second ask
+the mint once; a hold such a call came to run is run when that walk ends, as
+the walk may have skipped a paid invoice to the route lost before it. While
+there is no route, the PAID, NOT COLLECTED YET card says it is waiting for a
+connection, not retrying.
+
 **If killed during 3, or the answer is lost, after the mint issued proofs but
 before the write:** the mint has marked the quote issued; the proofs exist only
 in the dead process or the dropped response. As cashu-ts reserves the claim's

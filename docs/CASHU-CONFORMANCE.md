@@ -384,7 +384,8 @@ Proven against other wallets on local mints (results below):
    can still be in flight by then.
 
 **Mint quotes** (`MONEY.md` §1):
-- The claim runs while polling. `sweepQuotes` runs on connect and on resume.
+- The claim runs while polling. `sweepQuotes` runs on connect and on resume,
+  and when a route comes up after a sweep was held for want of one.
 - An expired `UNPAID` quote is dropped.
 - An `ISSUED` quote with recorded outputs is restored from them.
 - After 3 refusals (a 4xx or a coded error, `mintRefused` in

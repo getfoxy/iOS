@@ -125,6 +125,7 @@ check "on-chain faults"  1 node tests/onchain-faults.js
 check "on-chain watch"  1 node tests/onchain-watch.js
 check "on-chain receipt" 1 node tests/onchain-receipt.js
 check "watcher re-arms" 1 node tests/watch-rearm.js
+check "held sweep re-arms" 1 node tests/stuck-invoice-rearm.js
 check "wallet watch loops" 1 node tests/watch-loop.js
 check "address vectors" 1 node tests/address-vectors.js
 check "inbox payments"  1 node tests/inbox-payment.js

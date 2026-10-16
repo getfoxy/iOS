@@ -51,6 +51,11 @@
       }
       // whatever was waiting for a route that was on its way hears how that ended (`routeSoon`)
       routeChanged();
+      /* A quote sweep held for want of a route runs now that there is one.
+       * After this push has been told to everyone, not inside it. */
+      if (quoteSweepHeld && routeOpen()) {
+        Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
+      }
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
@@ -134,6 +139,8 @@
      * for the screens, which say SECURING YOUR CONNECTION while it is true
      * and hold a step a few seconds for it rather than take the offline way. */
     routeComing: function () { return routeComing(); },
+    // may a mint be asked anything right now (`routeOpen`): for a screen whose words depend on it
+    routeOpen: function () { return routeOpen(); },
     routeSoon: function (ms) {
       return routeSoon(ms === undefined ? FoxyWallet._routeWaitMs : ms);
     },

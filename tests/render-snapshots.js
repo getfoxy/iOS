@@ -737,6 +737,9 @@ function cards() {
   add('card: paid, not collected, bad signatures', (a) => a.showStuckInvoice({ quote: 'q1', mint: MINT, amount: 2100, unclaimed: { badSignatures: true } }));
   add('card: paid, not collected, refused', (a) => a.showStuckInvoice({ quote: 'q2', mint: MINT, amount: 2100, unclaimed: { refused: 3, reason: 'outputs already signed' } }));
   add('card: paid, not collected yet', (a) => a.showStuckInvoice({ quote: 'q3', mint: MINT, amount: 2100, unclaimed: { refused: 1, reason: 'busy' } }));
+  // with no route nothing is being tried, so the card does not say retrying (11-cards.js `stuckRetryCard`)
+  add('card: paid, not collected yet, no connection', (a) => a.showStuckInvoice({ quote: 'q4', mint: MINT, amount: 2100, unclaimed: { unsent: true, reason: 'Foxy is not connected to Tor.' } }),
+    { wallet: { routeOpen: () => false } });
   /* Both phones offline: the only card in Foxy that decides whether money is
    * taken. Pinned as a picture because its words are the whole protection. */
   add('card: both offline, high risk', (a) => { a.offlineRiskCard({ sats: 4900 }); });
@@ -896,7 +899,7 @@ function cards() {
 
 // what a view leaves behind on the instance, cleared before the next
 const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
-  '_meltEl', '_fcTapO', '_stuckShown', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
+  '_meltEl', '_fcTapO', '_stuckShown', '_stuckOpen', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
   // what the send confirmation has asked, and whether it waited (03-send.js `quoteSendFee`, `syncSend`)
   '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited',
   // which balance paid, and the quotes of both, at a mint with two (03-send.js)

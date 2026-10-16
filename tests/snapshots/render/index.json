@@ -1489,6 +1489,11 @@
   "markup": "5c36c72d64eb1be9cd2555cd585f0eb3f3defe3108f19611494fc236b530091d",
   "vals": "66f390f86ff49b7ea5b28f109579079588b2c3f0b45c39f1aaf24be5269d9612"
  },
+ "card: paid, not collected yet, no connection": {
+  "file": "419-card-paid-not-collected-yet-no-connection.html",
+  "markup": "e1e15196e167918d29f624f9d7abd469c5ec2cbc9acb0e32cc01faab03f5d303",
+  "vals": "f957bb48964d1c772acc5bd9d775ede3332bea46f8c3785fbdc06ab7bdf2a9f9"
+ },
  "card: both offline, high risk": {
   "file": "226-card-both-offline-high-risk.html",
   "markup": "fa7b90eea68c1577ccb02c382e20ef82696ee657fc6809f035e16ce5e45a7b83",

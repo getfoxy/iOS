@@ -231,6 +231,8 @@
     this._stuckShown = this._stuckShown || {};
     if (this._stuckShown[hit.quote]) return;
     this._stuckShown[hit.quote] = true;
+    // the newest card of this kind is the one up or waiting; only a retry card is redrawn on a route change
+    this._stuckOpen = null;
     const u = hit.unclaimed;
     const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
     const sats = this.group(Number(hit.amount) || 0);
@@ -284,12 +286,55 @@
       });
       return;
     }
+    this.stuckRetryCard(hit);
+  }
+
+  /* PAID, NOT COLLECTED YET, in words that are true now.
+   *
+   * "Retrying" only while there is a route to retry over. With none, nothing
+   * is being tried: the claim waits for the connection, and the route coming
+   * up runs it (FoxyWallet `_sweepHeldNow`). A reason from a try that never
+   * reached the mint, such as "not connected to Tor", is about the phone, so
+   * it is left out once the phone has a route. The card is drawn again when
+   * the route changes while it is up or waiting its turn (`stuckInvoiceRoute`). */
+  stuckRetryCard(hit) {
+    const W = window.FoxyWallet;
+    const u = hit.unclaimed;
+    const up = !(W && W.routeOpen) || W.routeOpen();
+    this._stuckOpen = { hit, up };
+    const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
+    const sats = this.group(Number(hit.amount) || 0);
     this.blockedCard('stuckInvoice', {
       tone: 'warn',
       title: 'PAID, NOT COLLECTED YET',
-      reason: sats + ' sats at ' + host + ' \u2014 retrying. ' + (u.reason || ''),
+      reason: sats + ' sats at ' + host + (up
+        ? ' \u2014 retrying.' + (u.reason && !u.unsent ? ' ' + u.reason : '')
+        : ' \u2014 waiting for a connection.'),
       chip: 'The money is at the mint, waiting for this phone. Keep Foxy installed until it arrives.',
     });
+  }
+
+  /* The route changed: a PAID, NOT COLLECTED YET card still up, or still
+   * waiting behind another card, is drawn again if its words no longer fit. */
+  stuckInvoiceRoute() {
+    const was = this._stuckOpen;
+    if (!was) return;
+    const open = this._blockedKind === 'stuckInvoice' && !!this._blockedEl;
+    const queued = (this._cardQueue || []).some(c => c.kind === 'stuckInvoice');
+    if (!open && !queued) { this._stuckOpen = null; return; }
+    const W = window.FoxyWallet;
+    const up = !(W && W.routeOpen) || W.routeOpen();
+    if (up !== was.up) this.stuckRetryCard(was.hit);
+  }
+
+  /* The invoice of a PAID, NOT COLLECTED YET card has been claimed: the card
+   * is no longer true, so it goes, whether it is up or waiting its turn. */
+  stuckInvoiceLanded(claimed) {
+    const was = this._stuckOpen;
+    if (!was || !(claimed || []).some(c => c && c.quote === was.hit.quote)) return;
+    this._stuckOpen = null;
+    this._cardQueue = (this._cardQueue || []).filter(c => c.kind !== 'stuckInvoice');
+    if (this._blockedKind === 'stuckInvoice' && this._blockedEl && this._blockedClose) this._blockedClose();
   }
 
   claimFailed(e, again) {

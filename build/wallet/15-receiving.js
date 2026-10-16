@@ -416,12 +416,74 @@
       });
     },
 
-    /* Claim anything paid while the app was away. Safe to call repeatedly. */
+    /* Claim anything paid while the app was away. Safe to call repeatedly.
+     *
+     * With no route nothing is asked, and the sweep is marked held: the
+     * route coming up runs it (`_sweepHeldNow`). A call while a sweep at the
+     * same mint is running shares that sweep (`quoteSweep`). */
     sweepQuotes: function () {
       if (!routeOpen()) {
-        console.log('[foxy] quote sweep held \u2014 gate is closed');
+        quoteSweepHeld = true;
+        console.log('[foxy] quote sweep held \u2014 gate is closed; it runs when a route is up');
         return Promise.resolve([]);
       }
+      if (!wallet) return Promise.resolve([]);
+      var here = String(mintUrl || '').replace(/\/+$/, '');
+      if (quoteSweep && quoteSweep.mint === here) {
+        console.log('[foxy] quote sweep already running \u2014 this call waits for it');
+        // a hold this call came to run is run when the walk ends (`done` below)
+        if (quoteSweepHeld) quoteSweep.heldShared = true;
+        return quoteSweep.run;
+      }
+      quoteSweepHeld = false;
+      var mine = { mint: here, heldShared: false, run: /** @type {?Promise<Array<any>>} */ (null) };
+      quoteSweep = mine;
+      var run;
+      try { run = FoxyWallet._sweepQuotesOnce(); }
+      catch (e) { run = Promise.reject(e); }
+      /* What was claimed is told to the page (`onSwept`): a sweep the route
+       * coming up ran has no connect or return to refresh the balance after
+       * it, and a card about an invoice just claimed is no longer true. */
+      run = run.then(function (claimed) {
+        if (claimed && claimed.length && typeof FoxyWallet._onSwept === 'function') {
+          try { FoxyWallet._onSwept(claimed); } catch (x) {}
+        }
+        return claimed;
+      });
+      mine.run = run;
+      /* A route that came up while this walk was running had its push
+       * share the walk, and the walk may have skipped an invoice to a route
+       * lost before that (the hold set at its pause). Nothing else would ask
+       * again until the next push, so a hold such a call shared runs once the
+       * walk is gone. Only then: a walk that ends with the hold set and no
+       * call waiting on it leaves it to the next push, so a hold is never run
+       * walk after walk on its own. */
+      var done = function () {
+        if (quoteSweep === mine) quoteSweep = null;
+        if (mine.heldShared && quoteSweepHeld && routeOpen()) {
+          Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
+        }
+      };
+      run.then(done, done);
+      return run;
+    },
+
+    /* A route has come up: a quote sweep held for want of one runs now, once.
+     *
+     * Not on a wallet built from storage. Its keysets may be old, and such a
+     * wallet is connected for real as soon as there is a route, which sweeps
+     * with the mint's current keysets (`connect`). The mark stays for that
+     * sweep to clear. */
+    _sweepHeldNow: function () {
+      if (!quoteSweepHeld || !routeOpen() || !wallet || wallet.foxyFromCache) return Promise.resolve([]);
+      console.log('[foxy] a route is up and the quote sweep was held \u2014 running it now');
+      return FoxyWallet.sweepQuotes().then(null, function (e) {
+        console.warn('[foxy] the held quote sweep:', e && e.message);
+        return [];
+      });
+    },
+
+    _sweepQuotesOnce: function () {
       var w = wallet;
       if (!w) return Promise.resolve([]);
 
@@ -470,8 +532,9 @@
         chain = afterPause(chain).then(function () {
           /* A pause can outlast a trip to the background: its timer fires the
            * moment Foxy is back, before Tor is. Seen on a phone.
-           * The rest wait for the next sweep. */
-          if (!routeOpen()) return;
+           * The rest wait for the next sweep, which the route coming up
+           * runs (`_sweepHeldNow`). */
+          if (!routeOpen()) { quoteSweepHeld = true; return; }
           // each invoice on its own circuit: asked together, they were one wallet's list;
           // and by the wallet of its unit, which is the only one that reads its amount right
           return unitWalletOn(onCircuit(w, 'quote:' + entry.quote), recordUnit(entry)).then(function (qw) {

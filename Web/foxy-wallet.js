@@ -21,8 +21,9 @@
  * Receiving takes two steps. The mint issues a quote and an invoice; once the
  * invoice is paid, this wallet has to claim the proofs. The mint cannot do it
  * alone — the blinding secrets live here — so an unclaimed quote sits at the
- * mint until the app comes back. sweepQuotes() handles that on connect and on
- * resume, but a quote that expires first may be lost.
+ * mint until the app comes back. sweepQuotes() handles that on connect, on
+ * resume, and when a route comes up after a sweep was held for want of one;
+ * but a quote that expires first may be lost.
  *
  * The mint is custodian. Keep the balance small.
  */
@@ -306,6 +307,23 @@
    * sharing has to happen before the waiting, or there is nothing left to
    * share by the time the second caller is let through. */
   var sweeping = null;
+
+  /* The quote sweep in flight, if one is: { mint, run }.
+   *
+   * A connect and a route coming up can both start one in the same second,
+   * and each asks the mint about every invoice on file. `claim` shares a claim
+   * already on its way, but a second walk that starts just after the first has
+   * claimed asks again and restores what it finds. A second call while one
+   * walk is running at the same mint now gets that walk's answer instead. */
+  var quoteSweep = null;
+  /* A quote sweep was asked for while there was no route, so it asked nothing.
+   *
+   * A return from the background runs the sweep at once, and Tor is
+   * usually still a few seconds from up: the sweep said it was held, and
+   * nothing ran it again. Paid invoices then sat unclaimed until something
+   * else connected the wallet, such as a mint switch. Set here, cleared when a
+   * sweep really starts, and read when a route comes up (`_privacy`). */
+  var quoteSweepHeld = false;
 
   /* The same for `finishMove`: the launch, the resume and the app each ask,
    * and two walks would each claim the same quote. */
@@ -781,6 +799,10 @@
           tries: tries,
           refused: refused,
           reason: FoxyWallet.reason(e),
+          /* This failure asked the mint nothing (no route, or Tor still coming
+           * up). Its reason is about the phone then, not the mint, and the
+           * card leaves it out once a route is up (`showStuckInvoice`). */
+          unsent: free,
           badSignatures: badly,
           /* Why Foxy stopped asking on its own, or '' while it has not.
            *
@@ -16388,6 +16410,11 @@
       }
       // whatever was waiting for a route that was on its way hears how that ended (`routeSoon`)
       routeChanged();
+      /* A quote sweep held for want of a route runs now that there is one.
+       * After this push has been told to everyone, not inside it. */
+      if (quoteSweepHeld && routeOpen()) {
+        Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
+      }
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
@@ -16471,6 +16498,8 @@
      * for the screens, which say SECURING YOUR CONNECTION while it is true
      * and hold a step a few seconds for it rather than take the offline way. */
     routeComing: function () { return routeComing(); },
+    // may a mint be asked anything right now (`routeOpen`): for a screen whose words depend on it
+    routeOpen: function () { return routeOpen(); },
     routeSoon: function (ms) {
       return routeSoon(ms === undefined ? FoxyWallet._routeWaitMs : ms);
     },
@@ -18773,12 +18802,74 @@
       });
     },
 
-    /* Claim anything paid while the app was away. Safe to call repeatedly. */
+    /* Claim anything paid while the app was away. Safe to call repeatedly.
+     *
+     * With no route nothing is asked, and the sweep is marked held: the
+     * route coming up runs it (`_sweepHeldNow`). A call while a sweep at the
+     * same mint is running shares that sweep (`quoteSweep`). */
     sweepQuotes: function () {
       if (!routeOpen()) {
-        console.log('[foxy] quote sweep held \u2014 gate is closed');
+        quoteSweepHeld = true;
+        console.log('[foxy] quote sweep held \u2014 gate is closed; it runs when a route is up');
         return Promise.resolve([]);
       }
+      if (!wallet) return Promise.resolve([]);
+      var here = String(mintUrl || '').replace(/\/+$/, '');
+      if (quoteSweep && quoteSweep.mint === here) {
+        console.log('[foxy] quote sweep already running \u2014 this call waits for it');
+        // a hold this call came to run is run when the walk ends (`done` below)
+        if (quoteSweepHeld) quoteSweep.heldShared = true;
+        return quoteSweep.run;
+      }
+      quoteSweepHeld = false;
+      var mine = { mint: here, heldShared: false, run: /** @type {?Promise<Array<any>>} */ (null) };
+      quoteSweep = mine;
+      var run;
+      try { run = FoxyWallet._sweepQuotesOnce(); }
+      catch (e) { run = Promise.reject(e); }
+      /* What was claimed is told to the page (`onSwept`): a sweep the route
+       * coming up ran has no connect or return to refresh the balance after
+       * it, and a card about an invoice just claimed is no longer true. */
+      run = run.then(function (claimed) {
+        if (claimed && claimed.length && typeof FoxyWallet._onSwept === 'function') {
+          try { FoxyWallet._onSwept(claimed); } catch (x) {}
+        }
+        return claimed;
+      });
+      mine.run = run;
+      /* A route that came up while this walk was running had its push
+       * share the walk, and the walk may have skipped an invoice to a route
+       * lost before that (the hold set at its pause). Nothing else would ask
+       * again until the next push, so a hold such a call shared runs once the
+       * walk is gone. Only then: a walk that ends with the hold set and no
+       * call waiting on it leaves it to the next push, so a hold is never run
+       * walk after walk on its own. */
+      var done = function () {
+        if (quoteSweep === mine) quoteSweep = null;
+        if (mine.heldShared && quoteSweepHeld && routeOpen()) {
+          Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
+        }
+      };
+      run.then(done, done);
+      return run;
+    },
+
+    /* A route has come up: a quote sweep held for want of one runs now, once.
+     *
+     * Not on a wallet built from storage. Its keysets may be old, and such a
+     * wallet is connected for real as soon as there is a route, which sweeps
+     * with the mint's current keysets (`connect`). The mark stays for that
+     * sweep to clear. */
+    _sweepHeldNow: function () {
+      if (!quoteSweepHeld || !routeOpen() || !wallet || wallet.foxyFromCache) return Promise.resolve([]);
+      console.log('[foxy] a route is up and the quote sweep was held \u2014 running it now');
+      return FoxyWallet.sweepQuotes().then(null, function (e) {
+        console.warn('[foxy] the held quote sweep:', e && e.message);
+        return [];
+      });
+    },
+
+    _sweepQuotesOnce: function () {
       var w = wallet;
       if (!w) return Promise.resolve([]);
 
@@ -18827,8 +18918,9 @@
         chain = afterPause(chain).then(function () {
           /* A pause can outlast a trip to the background: its timer fires the
            * moment Foxy is back, before Tor is. Seen on a phone.
-           * The rest wait for the next sweep. */
-          if (!routeOpen()) return;
+           * The rest wait for the next sweep, which the route coming up
+           * runs (`_sweepHeldNow`). */
+          if (!routeOpen()) { quoteSweepHeld = true; return; }
           // each invoice on its own circuit: asked together, they were one wallet's list;
           // and by the wallet of its unit, which is the only one that reads its amount right
           return unitWalletOn(onCircuit(w, 'quote:' + entry.quote), recordUnit(entry)).then(function (qw) {
@@ -28217,6 +28309,10 @@
     /** @type {?function(any): void} */
     _onLateClaim: null,
     onLateClaim: function (fn) { FoxyWallet._onLateClaim = fn; },
+    // invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }]
+    /** @type {?function(Array<any>): void} */
+    _onSwept: null,
+    onSwept: function (fn) { FoxyWallet._onSwept = fn || null; },
     // a locked payment Foxy was killed in the middle of, rebuilt on reopening: { sats, change }
     /** @type {?function(any): void} */
     _onSendRebuilt: null,
@@ -28265,7 +28361,11 @@
       return load(K.quotes, []).concat(load(K.quotesOld, [])).filter(function (q) {
         return q && q.unclaimed;
       }).map(function (q) {
-        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: q.unclaimed };
+        /* A record written before `unsent` was: its reason says whether the
+         * mint was asked, in the words a refusal that never left uses. */
+        var u = q.unclaimed;
+        var unsent = !!u.unsent || NEVER_SENT.indexOf(String(u.reason || '')) >= 0;
+        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
       });
     },
     /* What stands in front of the seed (the SECURE FOXY card, 10-pin.js).

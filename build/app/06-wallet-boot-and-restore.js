@@ -84,6 +84,8 @@
           this.sayBackOnline();
           this.connectForRealOnceOnline();
           this.claimWhenRouteReturns();
+          // a PAID, NOT COLLECTED YET card says "retrying" only with a route
+          this.stuckInvoiceRoute();
         });
         // A mint whose signatures do not match the keys it publishes is broken
         // or singling this wallet out. Said plainly, with nothing to retry.
@@ -141,6 +143,9 @@
           window.addEventListener('foxy-gate-up', () => { if (this.syncPreview) this.syncPreview(); });
         }
         if (W.onLateClaim) W.onLateClaim((info) => this.moneyIsSafe(info));
+        /* Paid while Foxy was away, and claimed by the sweep a route coming up
+         * ran: no connect or return is there to show the balance after it. */
+        if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); });
         /* A payment Foxy was closed in the middle of making. The mint had made
          * it, so it is rebuilt from what was written down and put on its own
          * entry — but it never reached the other phone, and the person has to

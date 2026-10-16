@@ -20,8 +20,9 @@
  * Receiving takes two steps. The mint issues a quote and an invoice; once the
  * invoice is paid, this wallet has to claim the proofs. The mint cannot do it
  * alone — the blinding secrets live here — so an unclaimed quote sits at the
- * mint until the app comes back. sweepQuotes() handles that on connect and on
- * resume, but a quote that expires first may be lost.
+ * mint until the app comes back. sweepQuotes() handles that on connect, on
+ * resume, and when a route comes up after a sweep was held for want of one;
+ * but a quote that expires first may be lost.
  *
  * The mint is custodian. Keep the balance small.
  */
@@ -305,6 +306,23 @@
    * sharing has to happen before the waiting, or there is nothing left to
    * share by the time the second caller is let through. */
   var sweeping = null;
+
+  /* The quote sweep in flight, if one is: { mint, run }.
+   *
+   * A connect and a route coming up can both start one in the same second,
+   * and each asks the mint about every invoice on file. `claim` shares a claim
+   * already on its way, but a second walk that starts just after the first has
+   * claimed asks again and restores what it finds. A second call while one
+   * walk is running at the same mint now gets that walk's answer instead. */
+  var quoteSweep = null;
+  /* A quote sweep was asked for while there was no route, so it asked nothing.
+   *
+   * A return from the background runs the sweep at once, and Tor is
+   * usually still a few seconds from up: the sweep said it was held, and
+   * nothing ran it again. Paid invoices then sat unclaimed until something
+   * else connected the wallet, such as a mint switch. Set here, cleared when a
+   * sweep really starts, and read when a route comes up (`_privacy`). */
+  var quoteSweepHeld = false;
 
   /* The same for `finishMove`: the launch, the resume and the app each ask,
    * and two walks would each claim the same quote. */
@@ -780,6 +798,10 @@
           tries: tries,
           refused: refused,
           reason: FoxyWallet.reason(e),
+          /* This failure asked the mint nothing (no route, or Tor still coming
+           * up). Its reason is about the phone then, not the mint, and the
+           * card leaves it out once a route is up (`showStuckInvoice`). */
+          unsent: free,
           badSignatures: badly,
           /* Why Foxy stopped asking on its own, or '' while it has not.
            *
