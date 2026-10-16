@@ -30,6 +30,8 @@ node tools/live/faults.js all           # fault proxy scenarios; FOXY_FAULTS_SLO
                                         # FOXY_FAULTS_ONLY=a2,d1 runs only those sections
 node tools/live/faults.js onchain       # section (f) alone, against testnut (no Docker mint needed);
                                         # a second argument names another fake-money mint
+node tools/live/fault-proxy-test.js     # the fault proxy itself against a fake mint: every action, the
+                                        # seconds rule, canned rules, the log line, nothing left open
 node tools/live/cross-mint.js           # paying somebody at another mint, both directions:
                                         # the payer moving the money there, and the receiver
                                         # carrying it home for a payer with no route
@@ -80,7 +82,7 @@ sh tools/live/mint-pair.sh down
 | `tls-proxy.js` | HTTPS in front of a local mint: Foxy talks only to https or `.onion` mints, and a mint in Docker speaks plain http. A self-signed certificate (made by `local-mint.sh`), trusted through `NODE_EXTRA_CA_CERTS` |
 | `mint-survey.py` | how a real mint behaves when asked what Foxy asks first (`/v1/info`, and a quote for an invoice that is never paid), over a running Foxy's Tor SOCKS port, with the median of several rounds and the spread |
 | `production.md` | the rules for real mints with real money, and what real mints showed |
-| `fault-proxy.js` | HTTPS proxy with per-path faults (drop before/after, status, hang, delay, JSON rewrite); in-process API or `/__fault` control endpoint. `target` is a local port or, for a mint elsewhere, a URL or `{ host, port, protocol }` |
+| `fault-proxy.js` | HTTPS proxy with per-path faults: drop before/after, status (with its own `headers`, e.g. Retry-After), hang, delay, JSON rewrite, `cut-mid-body` (the headers and half the body, then the connection cut), `trickle` (the answer `chunk` bytes every `ms`) and `refuse` (every connection closed at accept, as a mint being restarted looks). A rule lasts `times` requests or `seconds` from when it is added; canned rules `lock-refusal` (Nutshell's busy 400 on a swap), `rate-limit` (429, `retryAfter`) and `bad-gateway`. In-process API or `/__fault` control endpoint; standalone it takes `--log <file>` and `--rule '<json>'`. A request log of one line each — time, method, path with ids as `:id`, status or fault, milliseconds, the `X-Request-Id` when sent, nothing else — on stdout, in `--log` and in `GET /__fault`. `target` is a local port or, for a mint elsewhere, a URL (a path such as `/Bitcoin` is kept) or `{ host, port, protocol, path }`. Run in front of somebody else's test mint, it sends only what the wallet behind it sends. `node tools/live/fault-proxy-test.js` proves it against a fake mint in this process, no Docker and no network, in a few seconds |
 | `faults.js` | (a) swap/claim answer lost, (b) melt answer lost, (c) quote-check 500s, (d) broken DLEQ, (e) slow answers, (f) on chain (NUT-30) |
 | `array-cap.js` | a mint advertising a small NUT-06 `max_array_length`: the sent-token watch's `/v1/checkstate` and the restore walk's `/v1/restore` chunked by it (needs `CDK_MAX_ARRAY`) |
 | `mint-pair.sh` | two CDK mints at the versions and input fees of mint.macadamia.cash and mint.minibits.cash, as read from their `/v1/info` and `/v1/keysets` |
@@ -94,6 +96,13 @@ sh tools/live/mint-pair.sh down
 | `pending-mint.sh` | the extra Nutshell with `FAKEWALLET_PAY_INVOICE_STATE=PENDING` |
 
 Notes:
+- The fault proxy in front of a mint somebody else runs, for a session:
+  `node tools/live/fault-proxy.js 8458 https://testmint.example/Bitcoin build/live-tls --log build/proxy.log`,
+  the wallet pointed at `https://127.0.0.1:8458`, and faults turned on and off over `/__fault`, e.g.
+  `-d '{"canned":"rate-limit","seconds":60,"retryAfter":30}'`, `-d '{"canned":"lock-refusal","times":1}'`,
+  `-d '{"path":"/v1/swap","action":"cut-mid-body","times":1}'`, `-d '{"action":"refuse","seconds":10}'`
+  (a refusal closes the control endpoint too until it is over). The log lines are what is handed back to
+  the mint's operator; a client that sends `X-Request-Id` can be matched against the mint's own log.
 - `faults.js onchain` is its own run and needs no Docker mint: the fault proxy points at a mint
   that speaks NUT-30 with fake money — `https://testnut.cashu.space` by default, any fake-money
   mint as the second argument — and only section (f) runs. Keep `FOXY_LIVE_LOCAL=1` on the
