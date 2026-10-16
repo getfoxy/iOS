@@ -23,12 +23,13 @@
       var at = mintOf(w);
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
-      /* Asked again on another circuit after five seconds of nothing
-       * (`askedAgain`, in `makeQuote`), each asking with a one-time key of
-       * its own, so the two quotes share nothing the mint could join them
-       * by. The first to answer is the invoice, and it is its key that is
-       * kept. The other, if it comes, is a quote nobody was shown. The
-       * record is written in the same step (`keepQuote`). */
+      /* Asked again on another circuit after five seconds of nothing,
+       * longer at a mint that has lately been slow (`askedAgain`, in
+       * `makeQuote`), each asking with a one-time key of its own, so the two
+       * quotes share nothing the mint could join them by. The first to
+       * answer is the invoice, and it is its key that is kept. The other, if
+       * it comes, is a quote nobody was shown. The record is written in the
+       * same step (`keepQuote`). */
       return unitWalletOn(w, unit).then(function (via) {
         return makeQuote(via, amount, memo || '', unit);
       }).then(function (made) {

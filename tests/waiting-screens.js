@@ -134,7 +134,8 @@ ok(/__foxyStopWaiting = \(\) => \{[\s\S]{0,300}?this\._takingToken = false;[\s\S
   ok(/\.then\(q => \{[\s\S]{0,400}quotingFee: false/.test(quote) && /\.catch\(e => \{[\s\S]{0,300}quotingFee: false/.test(quote),
      'the question being asked ends in an answer or a refusal, and either way the button is let go', 'quoteSendFee');
   const wallet = fs.readFileSync(path.join(__dirname, '..', 'Web', 'foxy-wallet.js'), 'utf8');
-  ok(/withTimeout\(askedAgain\(w, 'the mint\\u2019s fee quote', function \(via\) \{\s*return via\.createMeltQuoteBolt11\(String\(bolt11\)\);\s*\}\), 20000/.test(wallet),
+  // and its askings are told the same twenty, so none is planned after the caller has given up (tests/ask-again-pace.js)
+  ok(/withTimeout\(askedAgain\(w, 'the mint\\u2019s fee quote', function \(via\) \{\s*return via\.createMeltQuoteBolt11\(String\(bolt11\)\);\s*\}, null, 20000\), 20000/.test(wallet),
      'the fee quote has its twenty seconds', 'quoteFee');
   ok(/var asked = askedAgain\('', label, function \(circuit\) \{[\s\S]{0,260}return withTimeout\(asked, REACH_MS, label\)/.test(wallet),
      'and the address\'s lookup the deadline it always had, over all its askings', 'lookupLnurl');

@@ -75,8 +75,9 @@
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      /* And asked again on another circuit every five seconds of nothing
-       * (`askedAgain`): a quote commits to nothing, so several cost nothing.
+      /* And asked again on another circuit after five seconds of nothing,
+       * longer at a mint that has lately been slow (`askedAgain`): a quote
+       * commits to nothing, so several cost nothing.
        * The payment then goes by the circuit that answered. The split and the
        * melt are never asked twice, and a road that would not carry a quote
        * is no road to send them down.
@@ -535,9 +536,10 @@
        * and says the same words when none of them answers. */
       var get = function (u, label) {
         if (bridged()) {
+          // `foxyNoPace`: an address's server is no mint, and its answer times pace none (`askAgainWait`)
           var asked = askedAgain('', label, function (circuit) {
-            return FoxyWallet.nativeRequest({ endpoint: u, method: 'GET', foxyCircuit: circuit });
-          }, newCircuitLabel).then(function (won) { return won.got; });
+            return FoxyWallet.nativeRequest({ endpoint: u, method: 'GET', foxyCircuit: circuit, foxyNoPace: true });
+          }, newCircuitLabel, REACH_MS).then(function (won) { return won.got; });
           return withTimeout(asked, REACH_MS, label);
         }
         return withTimeout(fetch(u), REACH_MS, label).then(function (r) {

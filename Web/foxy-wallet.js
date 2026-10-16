@@ -454,6 +454,67 @@
   function noteMintBusy(u) { var k = busyKey(u); if (k) busyMints[k] = Date.now() + 60000; }
   function mintBusy(u) { var k = busyKey(u); return !!k && (busyMints[k] || 0) > Date.now(); }
 
+  /* How long a mint has lately taken to answer, and so how long to wait
+   * before asking it again on another circuit (`askedAgain`, `statesOf`).
+   *
+   * A slow question used to be asked again every five seconds whatever the
+   * mint. A mint answering in thirteen seconds because it is busy got a
+   * second, third and fourth circuit asking the same thing, which is more
+   * load on a mint that already had too much. So the wait stretches with the
+   * mint's own recent answers: twice the middle one of the last eight, never
+   * below five seconds nor above twenty.
+   *
+   * Only a mint's real answers count (any 2xx), timed from the moment the
+   * request left (`nativeRequest`). A timeout or a broken circuit says
+   * nothing about the mint, and one bad circuit must never slow the app
+   * down; a refusal (a 429, a 400) comes back fast without the mint having
+   * done the work, and must not hurry it. Kept in memory per mint host, like
+   * `busyMints`, and empty at launch: an empty record is today's five
+   * seconds.
+   *
+   * A mint is paced only once it has answered a few times (three). An answer
+   * is timed from when the request left, so it holds the building of its
+   * circuit too, and the first request after a route comes back can take
+   * twenty seconds for that alone. Alone on the record, that one answer would
+   * stretch the wait to twenty and switch off the very asking again that
+   * saves a question from a dead circuit; among three it is not the middle.
+   *
+   * Nor is a melt timed (`waitsOnLightning`): the mint holds it open while
+   * the Lightning payment finds its way, which is how long Lightning took,
+   * not how busy the mint is. A few payments would otherwise pace a mint
+   * that is not busy at all. */
+  var ANSWER_TIMES_KEPT = 8;
+  var ANSWER_TIMES_LEAST = 3;
+  var ASK_AGAIN_MOST_MS = 20000;
+  var answerTimes = {};
+  function noteAnswerTime(u, ms) {
+    var k = busyKey(u), t = Number(ms);
+    if (!k || !isFinite(t) || t < 0) return;
+    var list = answerTimes[k] || (answerTimes[k] = []);
+    list.push(t);
+    if (list.length > ANSWER_TIMES_KEPT) list.splice(0, list.length - ANSWER_TIMES_KEPT);
+  }
+  /* The wait before asking `u`'s mint again: twice its middle answer time,
+   * between `least` (five seconds unless said) and twenty seconds; `least`
+   * itself until the mint has answered three times. */
+  function askAgainWait(u, least) {
+    var floor = Number(least) > 0 ? Number(least) : 5000;
+    var list = (answerTimes[busyKey(u)] || []).slice().sort(function (a, b) { return a - b; });
+    if (list.length < ANSWER_TIMES_LEAST) return floor;
+    var n = list.length;
+    var middle = n % 2 ? list[(n - 1) / 2] : (list[n / 2 - 1] + list[n / 2]) / 2;
+    return Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
+  }
+
+  /* A melt, the request that pays: its answer waits on the Lightning payment
+   * (or the on-chain send), not on the mint alone. Not its quote, which the
+   * mint answers by itself. */
+  function waitsOnLightning(method, endpoint) {
+    if (String(method || '').toUpperCase() !== 'POST') return false;
+    var path = String(endpoint || '').split(/[?#]/)[0].replace(/\/+$/, '');
+    return /\/v1\/melt\/(bolt11|bolt12|onchain)$/.test(path);
+  }
+
   /* A mint too busy to take its own database lock.
    *
    * Under load a Nutshell mint refuses a swap with a 400 whose detail begins
@@ -761,12 +822,23 @@
     };
   }
 
-  /* Asked on `w`, and asked again on a fresh circuit every five seconds it
-   * has not answered (`FoxyWallet._askAgainMs`), up to `_askAgainMost` more
-   * circuits: five askings within the thirty seconds a caller allows. It
-   * used to ask again once, which was enough for a circuit that was merely
-   * slow; two new circuits that never delivered, in one bad minute, failed a
-   * payment that a third would have carried in two seconds.
+  /* Asked on `w`, and asked again on a fresh circuit each time it has gone
+   * unanswered for a while, a few times, inside the thirty seconds a caller
+   * allows. It used to ask again once, which was enough for a circuit that was
+   * merely slow; two new circuits that never delivered, in one bad minute,
+   * failed a payment that a third would have carried in two seconds.
+   *
+   * The while is paced to the mint (`askAgainWait`): five seconds at a mint
+   * that answers quickly or has not answered yet, and up to twenty at one
+   * whose recent answers have been slow, since a busy mint is only made
+   * busier by more circuits asking the same thing. Fewer askings fit in a
+   * longer wait, so the number of extra circuits shrinks with it, at least
+   * one: four at five seconds, two at ten, one at twenty. `within` is the
+   * caller's allowance (thirty seconds unless said), and no asking is planned
+   * at or past it, so no timer of this outlives the question: the last one
+   * goes when the answer comes, when every asking has failed, or by itself
+   * before the caller gives up. `FoxyWallet._askAgainMs` and `_askAgainMost`
+   * set the wait and the count outright, for the tests.
    *
    * An answer from any of them is the answer, and says which circuit gave it
    * (`w`), so what follows goes by the road that answered. A failure ends it
@@ -778,39 +850,49 @@
    * given what `another()` makes: `onCircuit(w)` unless a caller says
    * otherwise, a wallet view on a circuit of its own. A question that is not
    * a mint's, a Lightning address's lookup (`lookupLnurl`), has no wallet
-   * view to put on a circuit and passes a maker of fresh circuit labels
-   * (`newCircuitLabel`) for the request to carry. */
-  function askedAgain(w, what, ask, another) {
+   * view to put on a circuit, and no mint to pace it by: it passes a maker of
+   * fresh circuit labels (`newCircuitLabel`) for the request to carry, and is
+   * asked again every five seconds. */
+  function askedAgain(w, what, ask, another, within) {
     return new Promise(function (ok, no) {
       var settled = false, asked = 0, failed = 0, again = null;
-      var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 5000;
+      var began = Date.now();
+      var allowed = Number(within) > 0 ? Number(within) : 30000;
+      var at = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
+      var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : askAgainWait(at || '');
       var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
+      most = Math.max(1, Math.min(most, Math.floor(allowed / ms) - 1));
       var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
+      var stop = function () { settled = true; clearTimeout(again); again = null; };
       var yes = function (via) {
-        return function (r) { if (settled) return; settled = true; clearTimeout(again); ok({ got: r, w: via }); };
+        return function (r) { if (settled) return; stop(); ok({ got: r, w: via }); };
       };
       var bad = function (e) {
         failed += 1;
         if (settled || failed < asked) return;
-        settled = true; clearTimeout(again); no(e);
+        stop(); no(e);
       };
       var send = function (via) {
         asked += 1;
         Promise.resolve().then(function () { return ask(via); }).then(yes(via), bad);
       };
-      var later = function () {
+      var askAgainLater = function () {
+        again = null;
+        // every extra circuit asked, or the next would go when the caller has given up: no timer at all
+        if (settled || asked > most || Date.now() - began + ms >= allowed) return;
         again = setTimeout(function () {
-          if (settled || asked > most) return;
+          again = null;
+          if (settled) return;
           var other;
           try { other = next(); } catch (e) { other = null; }
           if (!other) return;
-          console.log('[foxy] ' + what + ' has not answered in ' + Math.round(asked * ms / 1000) + 's; asking again on another circuit');
+          console.log('[foxy] ' + what + ' has not answered in ' + Math.round((Date.now() - began) / 1000) + 's; asking again on another circuit');
           send(other);
-          later();
+          askAgainLater();
         }, ms);
       };
       send(w);
-      later();
+      askAgainLater();
     });
   }
 
@@ -818,11 +900,15 @@
   /* Each proof's state at the mint, as 'UNSPENT' / 'PENDING' / 'SPENT'. */
   function statesOf(w, list) {
     /* Asked again, on a circuit of its own, when the first has said nothing
-     * for six seconds. The check reads and changes nothing, so two of them
-     * cost nothing — and the first request after a route comes back is the
-     * one that waits on a circuit still being built: 21.7 seconds, in front
-     * of money that was at risk until it answered. Whichever answers
-     * first is the answer. */
+     * for six seconds, or longer at a mint whose recent answers have been
+     * slow (`askAgainWait`, twenty at most): a second circuit asking a busy
+     * mint the same thing is only more load on it. The check reads and
+     * changes nothing, so two of them cost nothing — and the first request
+     * after a route comes back is the one that waits on a circuit still being
+     * built: 21.7 seconds, in front of money that was at risk until it
+     * answered. Whichever answers first is the answer. */
+    var wait = Number(FoxyWallet._checkAgainMs) > 0 ? Number(FoxyWallet._checkAgainMs)
+      : askAgainWait((w && ((w.mint && w.mint.mintUrl) || w.mintUrl)) || '', 6000);
     var asked = new Promise(function (ok, no) {
       var settled = false, second = false, failed = 0;
       var yes = function (r) { if (settled) return; settled = true; clearTimeout(again); ok(r); };
@@ -834,12 +920,12 @@
       var again = setTimeout(function () {
         if (settled) return;
         second = true;
-        console.log('[foxy] the mint\u2019s proof check has not answered in 6s; asking again on another circuit');
+        console.log('[foxy] the mint\u2019s proof check has not answered in ' + Math.round(wait / 1000) + 's; asking again on another circuit');
         var other;
         try { other = onCircuit(w, 'check-again:' + Date.now()); } catch (e) { other = null; }
         if (!other || !other.checkProofsStates) { second = false; return; }
         Promise.resolve().then(function () { return other.checkProofsStates(list); }).then(yes, bad);
-      }, FoxyWallet._checkAgainMs || 6000);
+      }, wait);
       Promise.resolve().then(function () { return w.checkProofsStates(list); }).then(yes, bad);
     });
     return withTimeout(asked, 30000, 'the mint\u2019s proof check').then(function (states) {
@@ -16060,7 +16146,8 @@
    * SWAP (`askQuote`, then `keepQuote`). */
 
   /* The mint's quote for `amount` in `w`'s unit. Asked again on another
-   * circuit after five seconds of nothing (`askedAgain`), each asking with a
+   * circuit after five seconds of nothing, longer at a mint that has lately
+   * been slow (`askedAgain`), each asking with a
    * one-time key of its own (NUT-20), so the two share nothing the mint
    * could join them by. Resolves { q, lock, w } of the one that answered. */
   function askQuote(w, amount, memo) {
@@ -18293,12 +18380,13 @@
       var at = mintOf(w);
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
-      /* Asked again on another circuit after five seconds of nothing
-       * (`askedAgain`, in `makeQuote`), each asking with a one-time key of
-       * its own, so the two quotes share nothing the mint could join them
-       * by. The first to answer is the invoice, and it is its key that is
-       * kept. The other, if it comes, is a quote nobody was shown. The
-       * record is written in the same step (`keepQuote`). */
+      /* Asked again on another circuit after five seconds of nothing,
+       * longer at a mint that has lately been slow (`askedAgain`, in
+       * `makeQuote`), each asking with a one-time key of its own, so the two
+       * quotes share nothing the mint could join them by. The first to
+       * answer is the invoice, and it is its key that is kept. The other, if
+       * it comes, is a quote nobody was shown. The record is written in the
+       * same step (`keepQuote`). */
       return unitWalletOn(w, unit).then(function (via) {
         return makeQuote(via, amount, memo || '', unit);
       }).then(function (made) {
@@ -19540,8 +19628,9 @@
       // left the send sitting at 0% with no error and no way back. A melt
       // quote is a plain request — if it has not answered in 30 seconds it is
       // not going to.
-      /* And asked again on another circuit every five seconds of nothing
-       * (`askedAgain`): a quote commits to nothing, so several cost nothing.
+      /* And asked again on another circuit after five seconds of nothing,
+       * longer at a mint that has lately been slow (`askedAgain`): a quote
+       * commits to nothing, so several cost nothing.
        * The payment then goes by the circuit that answered. The split and the
        * melt are never asked twice, and a road that would not carry a quote
        * is no road to send them down.
@@ -20000,9 +20089,10 @@
        * and says the same words when none of them answers. */
       var get = function (u, label) {
         if (bridged()) {
+          // `foxyNoPace`: an address's server is no mint, and its answer times pace none (`askAgainWait`)
           var asked = askedAgain('', label, function (circuit) {
-            return FoxyWallet.nativeRequest({ endpoint: u, method: 'GET', foxyCircuit: circuit });
-          }, newCircuitLabel).then(function (won) { return won.got; });
+            return FoxyWallet.nativeRequest({ endpoint: u, method: 'GET', foxyCircuit: circuit, foxyNoPace: true });
+          }, newCircuitLabel, REACH_MS).then(function (won) { return won.got; });
           return withTimeout(asked, REACH_MS, label);
         }
         return withTimeout(fetch(u), REACH_MS, label).then(function (r) {
@@ -27911,10 +28001,10 @@
       var msat = 0;
       try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e) { msat = 0; }
       return unitWalletOn(viewNow(wallet), unit).then(function (w) {
-        // asked again on another circuit every five seconds of nothing (`askedAgain`)
+        // asked again on another circuit after five seconds of nothing, longer at a slow mint (`askedAgain`), inside the twenty allowed
         return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
           return via.createMeltQuoteBolt11(String(bolt11));
-        }), 20000, 'the mint\u2019s fee quote');
+        }, null, 20000), 20000, 'the mint\u2019s fee quote');
       })
         .then(function (won) {
           var q = won.got;
@@ -28243,6 +28333,11 @@
      * warmed was a road it did not take. It is the circuit kept ready that is
      * opened now, and the invoice takes that one (`warmSpare`, `needNow`). */
     warmMint: function () { return warmSpare(); },
+    /* For the tests: a mint host's recent answer times, newest last, and the
+     * wait before asking it again (`askAgainWait`; `least` as statesOf's six
+     * seconds). */
+    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).slice(); },
+    _askAgainWait: function (u, least) { return askAgainWait(u, least); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 
@@ -28277,7 +28372,9 @@
       var busyOnce = false;
       // how many times this swap has been asked again after a mint was too busy to take its lock (`lockBusy`)
       var lockTries = 0;
-      var ask = function (circuit) { return bridgeAsk('mintRequest', {
+      // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
+      var sentAt = 0;
+      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', {
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,
@@ -28333,6 +28430,13 @@
             .then(function () { return ask(o.foxyCircuit ? String(o.foxyCircuit) : ''); }).then(answered);
         }
         if (code >= 200 && code < 300) {
+          /* A mint's answer, and how long it took: what paces asking it again
+           * (`askAgainWait`). Only here, on a 2xx: a refusal or no answer at
+           * all says nothing about how long the mint takes to do the work.
+           * Nor does a melt, which waits on Lightning (`waitsOnLightning`), or
+           * what is not a mint's question at all (`foxyNoPace`: a Lightning
+           * address's lookup, whose server may share a mint's host). */
+          if (!o.foxyText && !o.foxyNoPace && !waitsOnLightning(o.method, o.endpoint)) noteAnswerTime(o.endpoint, Date.now() - sentAt);
           /* `foxyText`: the answer as it came, for the few things asked of this road that are not a mint's JSON (a block
            * explorer's hex: build/wallet/08b-block-headers.js). Nothing of a mint's is read out of it. */
           if (o.foxyText) return raw;

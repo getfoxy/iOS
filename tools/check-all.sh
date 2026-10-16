@@ -77,6 +77,7 @@ check "spend offline"  1 node tests/spend-offline.js
 check "change recovery" 1 node tests/change-recovery.js
 check "audit"          1 node tests/audit.js
 check "waiting screens" 1 node tests/waiting-screens.js
+check "ask-again pace" 1 node tests/ask-again-pace.js
 check "send fee check" 1 node tests/send-fee-check.js
 check "long exact set" 1 node tests/long-exact-set.js
 check "held swap"      1 node tests/held-swap.js

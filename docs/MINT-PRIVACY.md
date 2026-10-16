@@ -60,9 +60,18 @@ token".
 **N1a. A question asked twice — a small, chosen cost.** A circuit sometimes
 goes nowhere, and a request on it sits until its clock runs out: a minute for
 an invoice, on a phone standing beside one the same mint answered in two
-seconds. An invoice and a fee quote are asked again on a fresh circuit every
+seconds. An invoice and a fee quote are asked again on a fresh circuit after
 five seconds of nothing, up to five askings, and the first answer is used
-(`askedAgain`); a proof check is asked again once, after six. A payment also
+(`askedAgain`); a proof check is asked again once, after six. At a mint whose
+recent answers have been slow the wait stretches with them: twice the middle
+of its last eight answer times, never below five seconds (six for the proof
+check) nor above twenty, with fewer askings so that they still fit the thirty
+seconds a caller allows (four more at five seconds, two at ten, one at
+twenty). Only real answers are timed: a refusal or a circuit that broke
+changes nothing, and nor does a melt, which waits on Lightning
+(`askAgainWait`). A mint is paced only once it has answered a few times
+(three), so one slow first answer, its circuit still being built, does not
+stretch the wait. Test: tests/ask-again-pace.js. A payment also
 takes the fee quote its confirmation screen fetched moments before, while it
 is fresh, rather than asking again (`pay`, `opts.quote`). What the mint can join by it: the two fee
 quotes name the same Lightning invoice, so they are plainly one payment's, as

@@ -442,7 +442,8 @@
    * SWAP (`askQuote`, then `keepQuote`). */
 
   /* The mint's quote for `amount` in `w`'s unit. Asked again on another
-   * circuit after five seconds of nothing (`askedAgain`), each asking with a
+   * circuit after five seconds of nothing, longer at a mint that has lately
+   * been slow (`askedAgain`), each asking with a
    * one-time key of its own (NUT-20), so the two share nothing the mint
    * could join them by. Resolves { q, lock, w } of the one that answered. */
   function askQuote(w, amount, memo) {

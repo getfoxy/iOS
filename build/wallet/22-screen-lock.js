@@ -36,10 +36,10 @@
       var msat = 0;
       try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e) { msat = 0; }
       return unitWalletOn(viewNow(wallet), unit).then(function (w) {
-        // asked again on another circuit every five seconds of nothing (`askedAgain`)
+        // asked again on another circuit after five seconds of nothing, longer at a slow mint (`askedAgain`), inside the twenty allowed
         return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
           return via.createMeltQuoteBolt11(String(bolt11));
-        }), 20000, 'the mint\u2019s fee quote');
+        }, null, 20000), 20000, 'the mint\u2019s fee quote');
       })
         .then(function (won) {
           var q = won.got;
@@ -368,6 +368,11 @@
      * warmed was a road it did not take. It is the circuit kept ready that is
      * opened now, and the invoice takes that one (`warmSpare`, `needNow`). */
     warmMint: function () { return warmSpare(); },
+    /* For the tests: a mint host's recent answer times, newest last, and the
+     * wait before asking it again (`askAgainWait`; `least` as statesOf's six
+     * seconds). */
+    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).slice(); },
+    _askAgainWait: function (u, least) { return askAgainWait(u, least); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 
@@ -402,7 +407,9 @@
       var busyOnce = false;
       // how many times this swap has been asked again after a mint was too busy to take its lock (`lockBusy`)
       var lockTries = 0;
-      var ask = function (circuit) { return bridgeAsk('mintRequest', {
+      // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
+      var sentAt = 0;
+      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', {
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,
@@ -458,6 +465,13 @@
             .then(function () { return ask(o.foxyCircuit ? String(o.foxyCircuit) : ''); }).then(answered);
         }
         if (code >= 200 && code < 300) {
+          /* A mint's answer, and how long it took: what paces asking it again
+           * (`askAgainWait`). Only here, on a 2xx: a refusal or no answer at
+           * all says nothing about how long the mint takes to do the work.
+           * Nor does a melt, which waits on Lightning (`waitsOnLightning`), or
+           * what is not a mint's question at all (`foxyNoPace`: a Lightning
+           * address's lookup, whose server may share a mint's host). */
+          if (!o.foxyText && !o.foxyNoPace && !waitsOnLightning(o.method, o.endpoint)) noteAnswerTime(o.endpoint, Date.now() - sentAt);
           /* `foxyText`: the answer as it came, for the few things asked of this road that are not a mint's JSON (a block
            * explorer's hex: build/wallet/08b-block-headers.js). Nothing of a mint's is read out of it. */
           if (o.foxyText) return raw;
