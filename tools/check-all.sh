@@ -122,6 +122,8 @@ check "flashcard switch" 1 node tests/flashcard-switch.js
 check "flashcard fewer" 1 node tests/flashcard-fewer.js
 check "flashcard release" 1 node tests/flashcard-release.js
 check "flashcard proofs" 1 node tests/flashcard-proofs.js
+check "flashcard offline" 1 node tests/flashcard-offline.js
+check "flashcard offline, screens" 1 node tests/flashcard-offline-ui.js
 check "switch guard"   1 node tests/switch-guard.js
 check "transfer quote"  1 node tests/transfer-quote.js
 check "on-chain flow"  1 node tests/onchain-flow.js

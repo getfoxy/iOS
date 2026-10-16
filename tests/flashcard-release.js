@@ -286,11 +286,12 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     ok(settled.length === 1 && settled[0].state === 'paid' && (await bal(Rm)) === 50 && Rm.W.cardTaken().length === 0, 'and is made when the wallet asks again', JSON.stringify(settled));
   }
 
-  /* ---- 4: a till with no route is as it was ----------------------------------------------- */
+  /* ---- 4: a till with no route is as it was ----------------------------------------------- *
+   * With a card that can pay one: of one signature, keeping the mint's proofs (software 1.20). */
   {
     const Hh = await funded({}, 3000);
     const Ro = await funded({ sharedMint: Hh.mint, words: OTHER_WORDS }, 0);
-    const c = newCard(Hh);
+    const c = newCard(Hh, undefined, { format: 4 });
     await Hh.W.cardSetUp(c, { pin: '1234' });
     c.tap();
     await Hh.W.cardAdd(c, { sats: 2000, pin: '1234' });
@@ -299,9 +300,9 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     Ro.sheet.length = 0;
     Ro.circuits.length = 0;
     const steps = [];
-    const got = await tap(Ro, c, (link) => Ro.W.cardPay(link, { sats: 592, pin: '1234', trusted: true, on: (s) => steps.push(s) }));
-    ok(got.trusted === true && got.sats === 592 && Ro.W.trustedWaiting().length === 1 && Ro.W.cardTaken().length === 0,
-       'with no route a card is taken on trust, kept as a pending row, as it was');
+    const got = await tap(Ro, c, (link) => Ro.W.cardPay(link, { sats: 592, pin: '1234', offline: true, on: (s) => steps.push(s) }));
+    ok(got.kept === true && got.sats === 592 && Ro.W.cardKeptWaiting().length === 1 && Ro.W.trustedWaiting().length === 0 && Ro.W.cardTaken().length === 0,
+       'with no route a card’s payment is proved, signed over to this phone and kept for the mint');
     ok(Ro.trace.join(' ') === 'begin end' && Ro.sheet[Ro.sheet.length - 1] === 'end: Done.', 'the mint is never asked, and the sheet ends once, at the end', Ro.trace.join(', '));
     ok(steps.join(' ') === 'reading signing done', 'the screen is told reading, signing, done: there is no mint to wait for', steps.join(' '));
     ok(Ro.circuits.length === 0 && Ro.refusedAfterEnd === 0, 'no request of any kind went out');

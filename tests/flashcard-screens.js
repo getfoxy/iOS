@@ -99,6 +99,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const H = await funded({}, 6000);
   const R = await funded({ sharedMint: H.mint, words: OTHER_WORDS }, 0);
   const holder = appOn(H);
+  /* The list of cards this phone loaded switched off (FC_RECOVERABLE) for the first part of this suite, as the screens
+   * were drawn before every card could be taken back: no screen for no card, and a card that leaves takes its screen
+   * with it. It ships on, and is switched on below ("with the switch on"); a card is set up recoverable either way. */
+  holder.FC_RECOVERABLE = false;
   const till = appOn(R, { screen: 'confirm' });
   await holder.refreshBalance();
   const c = newCard(H);
@@ -149,8 +153,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'and the person stays on the card’s screen, told so in a line, with nothing to read or press; back from it is where they were', holder.toasts.slice(-1)[0]);
   await settle();
   v = vals(holder);
-  ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && !holder.state.fc.mine && !holder.state.fc.recoverable && H.W.cardsList().length === 0,
-     'one tap later it has a PIN and is cash: no key of this phone’s is on it, and this phone keeps no list of it');
+  ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && holder.state.fc.mine && holder.state.fc.recoverable && H.W.cardsList().length === 1
+     && /^0[23]/.test(c.state.record.refund),
+     'one tap later it has a PIN and can be taken back if it is lost, with nothing asked: a key of this phone’s is on it, and this phone lists it');
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === false, 'and under it, that it has no limit, with nothing else to say of its day', v.fcLimitLine);
@@ -385,7 +390,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   // the card is let go before its change is made: paid, and the change waits for it.
   // A card of one piece, so there is change to give: cut the old way, with the wallet itself
   const c2 = newCard(H);
-  await H.W.cardSetUp(c2, { pin: '1234' });
+  // like cash, as the cards of this part are: none of them is on the list of cards to take back below
+  await H.W.cardSetUp(c2, { pin: '1234', recoverable: false });
   await binaryLoad(H, c2, 1024);
   till.state.screen = 'confirm';
   till.asking = 200;
@@ -425,7 +431,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
      'a payment whose second tap reads no card: the payment stands, and the change is said to be still waiting, with TAP CARD to try again', card(till).reason);
   // a fresh card that has never paid: it has no change note, so it asks for the PIN after all
   const cElse = newCard(H);
-  await H.W.cardSetUp(cElse, { pin: '1234' });
+  await H.W.cardSetUp(cElse, { pin: '1234', recoverable: false });
   R.nfc = cElse;
   cElse.tap();
   card(till).press('TAP CARD');
@@ -1019,7 +1025,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   {
     const quiet = appOn(H);
     const rm = newCard(H);
-    await H.W.cardSetUp(rm, { pin: '1234' });
+    await H.W.cardSetUp(rm, { pin: '1234', recoverable: false });
     H.nfc = rm;
     rm.tap();
     quiet.goFlashcard();
@@ -1147,33 +1153,34 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   card(till).press('OK');
 
   /* ---- with the switch on: cards that can be taken back -----------------------
-   * Off, as it ships: no list, and a card that leaves the screen takes the
-   * screen with it. On, for the rest of this suite: the choice at set-up, the
-   * list of cards this phone loaded, RENEW in a card's last month, and a lost
-   * card's money taken back. */
-  ok(vals(holder).fcRows.length === 0 && vals(holder).fcHasRows === false, 'as it ships, there is no list of cards to take back');
+   * Off: no list, and a card that leaves the screen takes the screen with it.
+   * On, as it ships, for the rest of this suite: the list of cards this phone
+   * loaded, set-up with nothing asked, RENEW with under twenty days left, and a
+   * lost card's money taken back. */
+  ok(vals(holder).fcRows.length === 0 && vals(holder).fcHasRows === false, 'switched off, there is no list of cards to take back');
   holder.fcGone();
   ok(holder.state.screen === 'home' && !holder.state.fc, 'and a card that is no longer known takes its screen with it');
   holder.FC_RECOVERABLE = true;
-  const cashCard = c;
+  // the first card, which this phone set up and so can take back too, though it is not the one lost below
+  const firstCard = c;
   const rc = newCard(H);
   H.nfc = null;
   holder.goFlashcard();
   await settle();
   v = vals(holder);
-  ok(holder.state.screen === 'flashcard' && v.fcNone && v.fcRows.length === 0, 'switched on, the sheet dismissed leaves the screen where lost cards are listed');
+  ok(holder.state.screen === 'flashcard' && v.fcNone && v.fcRows.length === 1 && v.fcRows[0].name === holder.fcName(c.key),
+     'switched on, the sheet dismissed leaves the screen where the cards this phone loaded are listed', v.fcRows.map((r) => r.name).join());
   H.nfc = rc;
   holder.fcRead();
   await until('the second card to be read', () => !!holder.state.fc);
   holder.fcSetUp();
   pad(holder).type('4321');
-  pad(holder).type('4321');
-  ok(!pad(holder) && card(holder) && card(holder).title === 'IF THE CARD IS LOST' && card(holder).has('RECOVERABLE') && card(holder).has('LIKE CASH'),
-     'and set-up has its one choice, straight after the PIN: recoverable, or like cash', card(holder) && card(holder).title);
   rc.tap();
-  card(holder).press('RECOVERABLE');
+  pad(holder).type('4321');
+  ok(!pad(holder) && !(card(holder) && card(holder).title === 'IF THE CARD IS LOST'),
+     'and set-up asks nothing after the PIN: there is no choice of recoverable or like cash', card(holder) && card(holder).title);
   await until('the second card to be set up', () => holder.state.screen === 'flashcard' && !!rc.state.owner && holder.state.fc && holder.state.fc.owner);
-  ok(holder.state.fc.mine && holder.state.fc.recoverable, 'chosen recoverable, it is this phone\u2019s to take back');
+  ok(holder.state.fc.mine && holder.state.fc.recoverable && /^0[23]/.test(rc.state.record.refund), 'it is this phone\u2019s to take back', rc.state.record.refund);
   holder.goFlashcard();
   await until('the second card to be read again', () => holder.state.screen === 'flashcard' && holder.state.fc && holder.state.fc.mine === true);
   await settle();
@@ -1184,14 +1191,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await counted(holder, 1024, '1,024 to be on the card');
   ok(rc.state.record.limit === 0 && rc.balance() === 1024 && !card(holder), 'and the card has it, and no limit', String(rc.state.record.limit));
   const renewLine = (vv) => vv.fcNotes.filter((n) => /must be renewed by/.test(n.text))[0];
-  ok(!renewLine(vals(holder)), 'with a year to run there is nothing to renew');
+  ok(!renewLine(vals(holder)), 'with thirty days to run there is nothing to renew');
   const real = H.window.Date.now.bind(H.window.Date);
   const realHere = Date.now;
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
-  move(350 * 86400000);
+  move(11 * 86400000);
   v = vals(holder);
   ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcLinks.length === 2,
-     'in its last month the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
+     'with under twenty days to run the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
@@ -1199,19 +1206,20 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be renewed', () => card(holder) && card(holder).title === 'ON THE CARD');
   ok(rc.balance() === 1024 && !renewLine(vals(holder)) && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
      && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).every((e) => holder.seen[e.hash]),
-     'renewed in one tap: the same 1,024, a year on, its two entries not announced', card(holder).reason);
+     'renewed in one tap: the same 1,024, thirty days on, its two entries not announced', card(holder).reason);
   ok(rc.state.record.limit === 0, 'and the limit is what it was', String(rc.state.record.limit));
   card(holder).press('DONE');
 
-  // a year later the card is lost
-  move(800 * 86400000);
+  // a month after that the card is lost
+  move(45 * 86400000);
   H.nfc = null;                         // the card is lost: nothing answers the sheet
   holder.state.screen = 'home'; holder.state.stack = [];
   holder.goFlashcard();
   await settle();
   v = vals(holder);
-  ok(v.fcRows[0].text === 'TAKE BACK' && v.fcRows[0].sub === '₿1,024 when last seen', 'past its date the list offers to take it back', v.fcRows[0].text);
-  v.fcRows[0].tap();
+  const lostRow = (vv) => vv.fcRows.filter((r) => r.name === holder.fcName(rc.key))[0] || {};
+  ok(lostRow(v).text === 'TAKE BACK' && lostRow(v).sub === '₿1,024 when last seen', 'past its date the list offers to take it back', lostRow(v).text);
+  lostRow(v).tap();
   ok(card(holder).title === 'TAKE IT BACK?' && /lost or blocked/.test(card(holder).reason), 'asked first, and told what it is for', card(holder).reason);
   await holder.refreshBalance();
   const beforeBack = holder.have;
@@ -1219,8 +1227,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the money to be back', () => card(holder) && card(holder).title === 'BACK IN YOUR WALLET');
   ok((await H.W.balanceSats()) === beforeBack + 1024 && /₿1,024 from the card/.test(card(holder).reason) && !stage(H), 'and 1,024 sats are back with no card', card(holder).reason);
   card(holder).press('DONE');
-  ok(vals(holder).fcRows[0].sub === 'Taken back', 'the list says so');
-  ok(cashCard.balance() === 0, 'and the cash card was never in it');
+  ok(lostRow(vals(holder)).sub === 'Taken back', 'the list says so');
+  ok(firstCard.balance() === 0, 'and the first card, empty, had nothing to take back');
   H.window.Date.now = real;
   Date.now = realHere;
 
@@ -1670,42 +1678,40 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await settle();
     }
 
-    /* ---- with no route: the HIGH RISK card first, a yes or a no, the exact set only ------ */
+    /* ---- with no route: the exact set only, from a card that proves its money (1.20) ------ */
     const offline = () => R.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
     const online = () => R.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
-    const e = newCard(H);
+    const e = newCard(H, undefined, { format: 4 });
     await H.W.cardSetUp(e, { pin: '1234' });
     await binaryLoad(H, e, 1000);            // 512 256 128 64 32 8
-    R.W.onOfflineOffer((info) => till.offlineRiskCard(info));
+    // the HIGH RISK question is plain ecash's: a card's payment never raises it
+    const asked = [];
+    R.W.onOfflineOffer((info) => { asked.push(info); return till.offlineRiskCard(info); });
     R.nfc = e;
     offline();
     till.state.screen = 'confirm';
     till.asking = 800;                  // 512 + 256 + 32 = 800
     e.sent.length = 0;
+    till.toasts.length = 0;
     till.payByCard();
-    ok(card(till) && card(till).title === 'HIGH RISK \u2014 YOU ARE OFFLINE' && !pad(till) && e.sent.length === 0 && /Amount/.test(card(till).all),
-       'a till with no route puts the HIGH RISK card first, with the amount, before the PIN and before the card is touched', card(till) && card(till).title);
-    card(till).press('REJECT');
-    await settle();
-    ok(!pad(till) && !card(till) && e.sent.length === 0 && R.W.trustedWaiting().length === 0 && till.state.screen === 'confirm',
-       'REJECT: nothing asked of the card, nothing kept, and the invoice is still up');
-    till.payByCard();
-    card(till).press('CONTINUE');
+    ok(!card(till) && asked.length === 0 && R.sheet.slice(-1)[0] === 'begin: Tap behind the phone.',
+       'with no route, CARD goes straight to the card: no HIGH RISK card, nothing asked of the person', card(till) && card(till).title);
     await until('the PIN pad', () => !!pad(till));
-    ok(pad(till).title === 'CARD PIN', 'CONTINUE: the PIN is asked for next');
+    ok(pad(till).title === 'CARD PIN', 'the card wants its PIN for the amount, and the pad comes up for a second tap');
     pad(till).type('1234');
-    await until('the card to be taken on trust', () => card(till) && card(till).title === 'TAKEN ON TRUST');
-    ok(/not paid until this phone is online/.test(card(till).reason) && !/\bPAID\b|PAYMENT RECEIVED/.test(card(till).title) && R.W.trustedWaiting().length === 1
-       && e.balance() === 200, 'it is said to be taken on trust and not paid, and kept as a pending trusted payment', card(till).reason);
-    card(till).press('OK');
-    ok(till.state.screen === 'home', 'OK closes the invoice');
+    await until('the card’s payment to be kept', () => R.W.cardKeptWaiting().length === 1 && till.state.screen !== 'confirm');
+    await settle();
+    ok(R.W.cardKeptWaiting().length === 1 && R.W.trustedWaiting().length === 0 && e.balance() === 200 && !card(till) && asked.length === 0 && till.state.screen === 'home',
+       'the card proves its money and signs it over: kept for the mint, the receive closed as for any payment, and nothing raised over it', R.W.cardKeptWaiting().map((x) => x.sats).join(','));
+    ok(till.toasts.indexOf('Paid by card while this phone is offline. Foxy settles it with the mint when it is online.') >= 0, 'said in passing', till.toasts.join(' | '));
+    const kept800 = history(R).filter((x) => x.hash === 'req-' + R.W.cardKeptWaiting()[0].id)[0] || {};
+    ok(kept800.settled === true && kept800.cardKept === 'waiting' && kept800.sats === 800, 'its entry is received now, so the history pass says PAYMENT RECEIVED', JSON.stringify({ s: kept800.settled, k: kept800.cardKept }));
     // a price the card does not make
     till.state.screen = 'confirm';
     till.asking = 150;                  // the card holds 128 + 64 + 8: no 150
     e.tap();
     e.sent.length = 0;
     till.payByCard();
-    card(till).press('CONTINUE');
     await until('the inexact price to be refused', () => card(till) && card(till).title === 'NO CHANGE WHILE OFFLINE');
     ok(/cannot give change/.test(card(till).reason) && /Nothing was taken/.test(card(till).reason) && !e.sent.some((a) => /^b040|^b020/.test(a)) && e.balance() === 200,
        'a price the card cannot make exactly is refused in plain words in the first tap, before any PIN is asked for or sent', card(till).reason);
@@ -1713,7 +1719,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     online();
     await R.W.claimUnclaimed();
     await settle();
-    ok(R.W.trustedWaiting().length === 0, 'online again, what was taken on trust is swapped in');
+    ok(R.W.cardKeptWaiting().length === 0, 'online again, what the card signed over is swapped in');
   }
 
   /* ---- a card at another mint ------------------------------------------------------ */
@@ -2205,7 +2211,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
     /* a card of software 1.15 has always asked for its PIN: the same first tap, then the pad, then the second */
     {
-      await H2.W.cardSetUp(old, { pin: '1234' });
+      await H2.W.cardSetUp(old, { pin: '1234', recoverable: false });
       old.tap();
       await H2.W.cardAdd(old, { sats: 1000, owner: true });
       till3.state.screen = 'confirm';
@@ -2223,20 +2229,23 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       ok((await bal2()) - before === 200, 'and pays with it at the second tap', String((await bal2()) - before));
     }
 
-    // where a card can be set up as recoverable, the kind of card is asked next, with no PIN to be asked for first
-    {
+    // every card is set up so that this phone can take it back: SET UP on a card with no PIN asks nothing, and the tap makes it so
+    for (const listed of [true, false]) {
       const n2 = newCard(H2, undefined, { format: 4 });
-      owner.FC_RECOVERABLE = true;
+      owner.FC_RECOVERABLE = listed;
       H2.nfc = n2;
+      const listedBefore = H2.W.cardsList().length;
+      owner.toasts.length = 0;
       owner.goFlashcard();
       await until('another new card to be read', () => !!owner.state.fc && owner.state.fc.key === n2.key);
       owner.fcSetUp();
-      ok(!pad(owner) && card(owner) && card(owner).title === 'IF THE CARD IS LOST' && card(owner).has('RECOVERABLE'), 'with cards that can be taken back, SET UP goes straight to that question: no PIN is asked first');
-      card(owner).press('RECOVERABLE');
+      ok(!pad(owner) && !(card(owner) && card(owner).title === 'IF THE CARD IS LOST'),
+         'with the list of cards ' + (listed ? 'shown' : 'hidden') + ', SET UP asks nothing: no PIN, and no IF THE CARD IS LOST', card(owner) && card(owner).title);
       await until('the recoverable card to be set up with no PIN', () => owner.state.screen === 'flashcard' && !!n2.state.owner && owner.toasts.indexOf('The card is set up.') >= 0);
-      ok(n2.state.pinState === 0 && n2.state.record.refund !== '00'.repeat(33) && H2.W.cardsList().length === 1, 'and the card is set up with no PIN and its key of this phone’s on it');
-      owner.FC_RECOVERABLE = false;
+      ok(n2.state.pinState === 0 && /^0[23]/.test(n2.state.record.refund) && H2.W.cardsList().length === listedBefore + 1 && owner.state.fc.recoverable,
+         'and the card is set up with no PIN and its key of this phone’s on it', n2.state.record.refund);
     }
+    owner.FC_RECOVERABLE = true;
   }
 
   failed += until.failed;
@@ -2682,7 +2691,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       bill.setState({ screen: 'spPayer', spIdx: 0 });
     };
     const holding = async (sats, o) => {
-      const k = newCard(HB);
+      // `o.format`: 4 for a card that signs once and keeps the mint's proofs (1.20), which can pay with no route
+      const k = newCard(HB, undefined, o && o.format ? { format: o.format } : undefined);
       await HB.W.cardSetUp(k, { pin: '1234' });
       await binaryLoad(HB, k, sats, o);
       return k;
@@ -2820,42 +2830,33 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'when the payment lands, late, the share is ticked from the ledger, its invoice is no longer asked about, and the collecting screen goes on to EVERYONE HAS PAID',
        JSON.stringify({ rows: rows().map((r) => !!r.paid), screen: bill.state.screen }));
 
-    /* with no route: the HIGH RISK card, and a card taken on trust is not paid, so its share is not ticked until the payment has been swapped
-     * and the mint has vouched for it, and it is ticked then, late, as a payment the mint answered late is */
+    /* with no route: a card that proves its money (1.20) signs the share over to this phone, and the payment is received at once, so
+     * the share is ticked then; the mint's swap at the next connection settles it and changes nothing on the bill */
     await startBill();
-    const exact = await holding(100);          // 64 32 4: exactly a share, which is all a till with no route takes
+    const exact = await holding(100, { format: 4 });          // 64 32 4: exactly a share, which is all a till with no route takes
     RB.nfc = exact;
-    RB.W.onOfflineOffer((info) => bill.offlineRiskCard(info));
+    // the HIGH RISK question is plain ecash's: a share paid by a card never raises it
+    const askedB = [];
+    RB.W.onOfflineOffer((info) => { askedB.push(info); return bill.offlineRiskCard(info); });
     const offline = () => RB.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
     const online = () => RB.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
     offline();
-    const sheets = begins();
     shares().spCardPay();
-    ok(card(bill) && card(bill).title === 'HIGH RISK \u2014 YOU ARE OFFLINE' && !pad(bill) && begins() === sheets,
-       'a share paid by a card with no route puts the HIGH RISK card first, before the PIN and before the card is touched', card(bill) && card(bill).title);
-    card(bill).press('REJECT');
-    await settle();
-    ok(!pad(bill) && !card(bill) && begins() === sheets && bill.spPaidArr()[0] === false && !rows()[0].card, 'REJECT: nothing asked of the card, nothing noted, and nothing ticked');
-    shares().spCardPay();
-    card(bill).press('CONTINUE');
+    ok(!card(bill) && askedB.length === 0, 'a share paid by a card with no route goes straight to the card, with no HIGH RISK card', card(bill) && card(bill).title);
     await until('the PIN pad', () => !!pad(bill));
     exact.tap();
     pad(bill).type('1234');
-    await until('the card to be taken on trust', () => card(bill) && card(bill).title === 'TAKEN ON TRUST');
-    ok(rows()[0].paid === false && bill.spPaidArr()[0] === false && bill.state.spIdx === 0 && bill.state.screen === 'spPayer' && RB.W.trustedWaiting().length === 1 && /^req-card-/.test(rows()[0].card || ''),
-       'taken on trust: said, kept as a pending payment, named on the share’s row, and the share is not ticked, since the mint has not been asked', card(bill).reason);
-    card(bill).press('OK');
-    bill.loadHistory();                                     // a history pass while it is still on trust
+    await until('the share to be ticked', () => bill.spPaidArr()[0] === true);
     await settle();
-    ok(bill.state.screen === 'spPayer' && bill.state.spIdx === 0 && bill.spPaidArr()[0] === false && rows()[0].paid === false, 'OK leaves the share where it was, and a history pass ticks nothing while the payment is pending');
+    ok(rows()[0].paid === true && /^req-card-/.test(rows()[0].card || '') && RB.W.cardKeptWaiting().length === 1 && RB.W.trustedWaiting().length === 0 && !card(bill) && askedB.length === 0,
+       'kept for the mint and received: the entry is named on the share’s row, and the share is ticked at once, since that entry is settled', JSON.stringify(rows().map((r) => !!r.paid)));
     online();
-    await RB.W.claimUnclaimed();                            // the swap, once there is a route: the mint vouches for it
+    await RB.W.claimUnclaimed();                            // the swap, once there is a route
     await settle();
-    bill.loadHistory();                                     // and the next history pass
-    await until('the share to be ticked once the swap has landed', () => bill.spPaidArr()[0] === true);
+    bill.loadHistory();
     await settle();
-    ok(rows()[0].paid === true && rows()[1].paid === false && bill.state.spIdx === 1 && bill.state.screen === 'spPayer' && RB.W.trustedWaiting().length === 0 && watched[0].stopped === true && raised.length === 0,
-       'swapped and vouched for, the share is ticked, late, and the screen is on to the next payer', JSON.stringify(rows().map((r) => !!r.paid)));
+    ok(rows()[0].paid === true && rows()[1].paid === false && RB.W.cardKeptWaiting().length === 0 && raised.length === 0,
+       'swapped at the next connection, the share stays ticked and nothing more is said', JSON.stringify(rows().map((r) => !!r.paid)));
 
     /* a card that leaves before it has signed for all of a share, and is not brought back when the sheet looks for it: NOT PAID YET, and
      * TAP CARD finishes the same share, which is ticked then and not before */

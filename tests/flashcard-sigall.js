@@ -161,11 +161,12 @@ async function world(feePpk, sats, make) {
 
   /* ---- 5: a top-up keeps the card's date ---------------------------------- */
   {
-    const undo = later(H, 40 * DAY);
+    // nine days on, its date has twenty-one days left: more than the twenty a top-up keeps a date for
+    const undo = later(H, 9 * DAY);
     card.tap();
     await H.W.cardAdd(card, { sats: 1500, pin: '1234' });
     undo();
-    ok(card.balance() === 2500 && dates(card).length === 1, 'money put on forty days later takes the date the card already has', JSON.stringify(dates(card)));
+    ok(card.balance() === 2500 && dates(card).length === 1, 'money put on nine days later takes the date the card already has', JSON.stringify(dates(card)));
     card.tap();
     card.sent.length = 0;
     const before = await bal(R);
@@ -181,11 +182,12 @@ async function world(feePpk, sats, make) {
     const T = await world(0, 9000);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 600, pin: '1234' });
-    const undo = later(T.H, 300 * DAY);
+    // twelve days on, its date has eighteen left: under twenty, so the top-up takes a date of its own
+    const undo = later(T.H, 12 * DAY);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 500, pin: '1234' });
     undo();
-    ok(dates(T.card).length === 2, 'a card topped up near the end of its year has pieces of two dates', JSON.stringify(dates(T.card)));
+    ok(dates(T.card).length === 2, 'a card topped up with under twenty days left on its money has pieces of two dates', JSON.stringify(dates(T.card)));
     T.card.tap();
     T.card.sent.length = 0;
     const e = await T.R.W.cardPay(T.card, { sats: 900, pin: '1234' }).then(() => null, (x) => x);
@@ -200,7 +202,7 @@ async function world(feePpk, sats, make) {
     // the holder's own phone takes a whole card off in as many signatures as it has dates
     if (b.change && b.change.sats) { T.card.tap(); await T.R.W.cardWrite(T.card, { pin: '1234' }); }
     // topped up again when what is on it is nearly at its date: a second date once more
-    const undo2 = later(T.H, 640 * DAY);
+    const undo2 = later(T.H, 25 * DAY);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 400, pin: '1234' });
     undo2();
@@ -581,36 +583,36 @@ async function world(feePpk, sats, make) {
     await settle();
   }
 
-  /* ---- 14: with no route, on trust ------------------------------------------
+  /* ---- 14: with no route ----------------------------------------------------
    * The outputs are made from this phone's own seed and need no mint, so a
    * card signs for a swap with no route as it does with one. The outputs it
    * signed for wait with the pieces, and are the swap that is made when there
-   * is a route again. */
+   * is a route again. A card that keeps the mint's proofs (1.20) proves its
+   * pieces first; no question is put. (tests/flashcard-offline.js has the rest.) */
   {
     const offline = (W) => W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
     const online = (W) => W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
-    const O = await world(0, 9000);
+    const O = await world(0, 9000, (ctx) => makeCard({ window: ctx.window, format: 4 }));
     O.card.tap();
     await O.H.W.cardAdd(O.card, { sats: 2000, pin: '1234' });
-    O.R.W.onOfflineOffer(() => Promise.resolve(true));
     offline(O.R.W);
     O.card.tap();
     O.card.sent.length = 0;
-    const got = await O.R.W.cardPay(O.card, { sats: 592, pin: '1234', trusted: true });
-    ok(got.trusted === true && got.sats === 592 && got.change === null && count(O.card, '24') === 1 && count(O.card, '26') === 0 && O.card.balance() === 2000 - 592,
-       'with no route and a yes, a price the card makes exactly is signed for once and kept on trust', JSON.stringify({ sats: got.sats, trusted: got.trusted }));
-    ok(O.R.W.trustedWaiting().length === 1 && swaps(O.R).length === 1 && !swaps(O.R)[0].asked && O.R.W.cardTaken().length === 0,
-       'it waits as a trusted row, with the outputs it was signed for beside it');
+    const got = await O.R.W.cardPay(O.card, { sats: 592, pin: '1234', offline: true });
+    ok(got.kept === true && got.sats === 592 && got.change === null && count(O.card, '24') === 1 && count(O.card, '26') === 0 && count(O.card, '1a') > 0 && O.card.balance() === 2000 - 592,
+       'with no route, a price the card makes exactly is proved, signed for once and kept', JSON.stringify({ sats: got.sats, kept: got.kept }));
+    ok(O.R.W.cardKeptWaiting().length === 1 && O.R.W.trustedWaiting().length === 0 && swaps(O.R).length === 1 && !swaps(O.R)[0].asked && O.R.W.cardTaken().length === 0,
+       'it waits as a kept card payment, with the outputs it was signed for beside it');
     O.card.tap();
-    const inexact = await O.R.W.cardPay(O.card, { sats: 2000, pin: '1234', trusted: true }).then(() => null, (e) => e);
+    const inexact = await O.R.W.cardPay(O.card, { sats: 2000, pin: '1234', offline: true }).then(() => null, (e) => e);
     ok(inexact && inexact.card !== 'went through' && O.card.balance() === 2000 - 592, 'and a price it cannot make exactly is not taken with no route', inexact && inexact.card);
     online(O.R.W);
     await O.R.W.claimUnclaimed();
     await settle();
-    ok((await bal(O.R)) === 592 && O.R.W.trustedWaiting().length === 0 && swaps(O.R).length === 0,
+    ok((await bal(O.R)) === 592 && O.R.W.cardKeptWaiting().length === 0 && swaps(O.R).length === 0,
        'online again, it is swapped for exactly those outputs and is the till’s money', String(await bal(O.R)));
     const e = history(O.R).filter((x) => x.hash === got.hash)[0] || {};
-    ok(e.state !== 'pending' && e.settled !== false && e.sats === 592, 'and its entry is settled', JSON.stringify({ s: e.state, sats: e.sats }));
+    ok(e.state !== 'pending' && e.settled !== false && e.sats === 592 && e.cardKept === 'settled', 'and its entry is settled', JSON.stringify({ s: e.state, sats: e.sats, k: e.cardKept }));
     await settle();
   }
 
@@ -1293,7 +1295,7 @@ async function world(feePpk, sats, make) {
     const hb = await bal(K.H);
     const soon = await K.H.W.cardTakeBack(K.card.key).then(() => null, (e) => e);
     ok(soon && soon.card === 'too-soon', 'before its date nothing can be taken back', soon && soon.card);
-    const undo = later(K.H, 366 * DAY);
+    const undo = later(K.H, 31 * DAY);
     const back = await K.H.W.cardTakeBack(K.card.key);
     undo();
     ok(back.sats === 2000 && (await bal(K.H)) === hb + 2000, 'after it, the phone that set the card up takes it back with its own key, with no card', String(back.sats));

@@ -150,7 +150,7 @@
    * history load.
    *
    * A share paid by a card lands this way when the mint's answer came late, or
-   * a payment taken on trust has been swapped: its row names the card payment's
+   * the card paid while this phone was offline (its entry is received at once): its row names the card payment's
    * entry (`splitNoteCard`), the reconcile marks the row when that entry settles,
    * and the screen follows. Its invoice, which nobody will pay, is no longer
    * asked about, as it is when the screen sees the share paid (`spMarkPaid`). */
@@ -184,6 +184,20 @@
       if (row.card) this.spStopOne(i, row.hash);
       this.spPaidOnScreen(i, row.card ? 'by card' : undefined);
     });
+  }
+
+  /* Shares a card's payment had ticked, open again because that payment did not settle (the wallet's `cardKeptEnd`): the
+   * collecting screen unticks them, and their invoices, no longer watched since they were ticked, are watched again. Only
+   * those shares: one ticked by hand or by its invoice stays as it is. */
+  spReopened(shares) {
+    const idx = (shares || []).filter(i => Number.isInteger(i) && i >= 0);
+    if (!idx.length) return;
+    this.setState(p => {
+      const paid = (p.spPaid || []).slice();
+      idx.forEach(i => { if (i < paid.length) paid[i] = false; });
+      return { spPaid: paid, screen: p.screen === 'spAllPaid' ? 'spWaiting' : p.screen };
+    });
+    if (this.resumeSplitNow) this.resumeSplitNow(true);
   }
 
   /* The entries of the card payments that pay the shares of the bill being collected, by name (`splitNoteCard`). The bill's own screens

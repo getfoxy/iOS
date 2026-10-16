@@ -438,8 +438,10 @@
    * when the caller names one, has to be the token's, or nothing is kept and
    * this throws (a payment to a dollar request that arrives in bitcoin is
    * refused, not filed under the wrong unit). A sat row also carries `sats`,
-   * as every row did before units were kept. */
-  function keepUnclaimed(id, token, amount, trusted, plain, unit) {
+   * as every row did before units were kept. `extra`: fields of the caller's
+   * own, copied onto the row (a card's payment kept with no route: `card`,
+   * `cardKept`, `date`, 08a-flashcard.js). */
+  function keepUnclaimed(id, token, amount, trusted, plain, unit, extra) {
     if (!id || !token) return;
     var info = null;
     try { info = FoxyWallet.tokenInfo(token); } catch (e) { info = null; }
@@ -457,6 +459,7 @@
     if (trusted) all[id].trusted = true;
     // taken at another mint to be carried home: claimed as it is, not cut into small change
     if (plain) all[id].plain = true;
+    if (extra && typeof extra === 'object') Object.keys(extra).forEach(function (k) { all[id][k] = extra[k]; });
     /* mustSave, and `_requestPaid` refuses the payment when it throws.
      *
      * The comment above this store is the whole reason it exists, and the write

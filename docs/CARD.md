@@ -62,10 +62,12 @@ nothing from this: the receiver always asks the mint first.
   and clock stay as they were. Moving the money across by Lightning, with a
   card that still holds it, is built and tested at two local mints, but the app
   has no button for it.
-- **Cards are cash only.** A card set up so that the phone that loaded it can
-  take its money back after a date, if the card is lost, is built and switched
-  off (`FC_RECOVERABLE` in `build/app/26f-flashcard.js`). Nothing in the app
-  offers it.
+- **Every card can be taken back.** A card is set up so that the phone that
+  loaded it can take its money back after its date (thirty days from when it
+  was put on) if the card is lost. Set-up asks nothing about it, and FLASHCARD
+  lists the cards this phone loaded, with TAKE BACK for any past its date
+  (`FC_RECOVERABLE` in `build/app/26f-flashcard.js`). A cash card set up before
+  reads and pays as what it is.
 - **Foxy speaks only to its own applet.** The phone selects the applet by its
   whole name and carries a fixed list of its commands. The page cannot send
   anything else to a card, and a bank card held to the phone is not read.
@@ -475,7 +477,8 @@ card is read, no payment of it is sent and the card's sats stay as bitcoin (PAID
 screen, in the row beside SHARE, COPY and SCAN (four, as the receive invoice screen's row; the Bluetooth tap sits in the QR), for that payer's share: one share to a tap, ticked (and the screen moved on
 to the next payer) when the mint has given this phone its pieces, as *Paid* below says, and not before. The share's row in the
 bill's ledger names the payment's entry from the moment the card has signed, so a payment the mint answers late (CHECKING closed
-first), or one taken on trust and swapped later, ticks its share when it lands, as a share paid by its invoice late does.
+first) ticks its share when it lands, as a share paid by its invoice late does; one a card paid while this phone was offline is
+received at once, and its share is ticked then.
 
 **The tap comes first, and the PIN is asked only if the card wants it.** CARD brings up the sheet and the tap at once, with
 no pad before it. The card is read; a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap
@@ -640,7 +643,8 @@ or two buttons. The ones a payment can end in:
 | OVER THE CARD'S PER TAP LIMIT | how long the card would have to be held to pay this (longer than a tap lasts), its per tap limit, and what can be taken at a time; said before the PIN is sent. A charge that waits less than that is not refused: the sheet says `Over per tap limit`, and the level (`x2`, `x3`) as it goes on. (An older card, whose limit was a window: the most it pays in one tap, or what the tap has left) |
 | A DIFFERENT MINT | the card's mint and this phone's. Adding funds to a card that holds money: "You need to withdraw all funds on the card before you can switch mints." and CLOSE. To an empty card, on its owner's phone: SWITCH TO <MINT>, which goes to the amount and moves the card in the tap that writes the funds; on any other phone, that only the phone that set the card up can switch it |
 | NO CHANGE WHILE OFFLINE | no connection, and the card has no pieces that make the price exactly; said before the PIN |
-| TAKEN ON TRUST | no connection: kept, not paid, swapped in when online |
+| (the receive closes, and PAYMENT RECEIVED) | no connection, and the card proved its money and signed it over: a line says Foxy settles it with the mint when it is online |
+| TOO OLD TO PAY OFFLINE · CANNOT PROVE ITS MONEY · NOT THE MINT'S MONEY | no connection, and a card that cannot pay this phone so; said before the PIN |
 | NO MONEY ON THIS CARD | a card with no PIN, or nothing on it |
 | NOT A FOXY CARD | it could not be read, or is another kind |
 | NO CARD READER | this phone, or this build, cannot read a card |
@@ -727,9 +731,11 @@ sheet comes up again by itself for it, with the PIN already given:
   that payment, and the next tap of the same card for the same amount signs only
   the rest. The two are swapped at the mint as one payment. Nothing has to be
   written back to the card, so the card is never short for a payment that was
-  finished. Cut short again, what it signed is held with the rest. Offline, taken
-  on trust, it works the same way: the rest of the exact set, kept on trust as one
-  payment. A held payment is given back to the card, by the road a refund always
+  finished. Cut short again, what it signed is held with the rest. With no
+  connection it works the same way, for a payment whose pieces this phone proved
+  before the card signed them: the rest of the exact set, proved in its turn, and
+  the whole kept as one payment to settle online. One begun while the phone was
+  online was never proved, and is not taken up with no connection. A held payment is given back to the card, by the road a refund always
   took, when the person presses CANCEL, when the card pays another amount at that
   till (its money then goes back in the same tap as that payment's change), or
   three minutes later, at the next settling.
@@ -855,10 +861,12 @@ What that changes:
   the same flag, and is money it signs for again.
 - **One date.** A mint takes one signature only for pieces whose secrets agree
   in everything but the nonce, and a recoverable card's pieces carry a date.
-  So a payment is of one date's pieces. A top-up takes the date the card
-  already has while that is ninety days off or more, and a new year after
-  that, so a card is mostly of one date. A card topped up near the end of its
-  year holds two; a price that neither covers alone is refused before the PIN
+  So a payment is of one date's pieces. A card's money is good for thirty days.
+  A top-up takes the date the card already has while that is twenty days off or
+  more, and a new thirty days after that, so a card is mostly of one date; its
+  owner's phone renews the whole card, to one date, once it has less than twenty
+  days left: its owner's read, online, offers it (RENEW THIS CARD, with RENEW and
+  LATER, once a session), and the card's screen keeps a line for it. A card topped up after that holds two; a price that neither covers alone is refused before the PIN
   with `TAKE IT IN TWO PARTS` and the most it can pay at once. The holder's own
   phone, taking a whole card off, asks for a signature for each date (and for
   each eight pieces, on a card before 1.8) in the one tap. Where that is more
@@ -891,14 +899,15 @@ What that changes:
   seed is refused once, the pieces go back to the card, and the counters are
   moved on so that the next payment is made.
 - **With no connection** the swap is set out all the same (it needs no mint),
-  and the outputs wait with the pieces kept on trust.
+  and the outputs wait with the signed pieces, kept whole for the first connection
+  (*Paying with no connection*).
 - **Taking a lost card back**: this phone's own key signs once for each date's
   pieces, over the swap they come back in.
 
 What it costs: a signature that names its outputs is good only while the mint
 will still make that swap. A mint that retires the keyset the outputs are on,
 or raises its fee, between the signature and the swap (which matters for a
-payment kept on trust for days) leaves pieces the card's signature can no
+payment kept with no connection for days) leaves pieces the card's signature can no
 longer spend; on a recoverable card they come back to the holder's phone after
 their date.
 
@@ -1539,41 +1548,77 @@ not.
 
 ## Paying with no connection
 
-A till with no connection cannot ask the mint, and a card cannot prove that what
-it signs is unspent: it holds no copy of the mint's answer, and a cloned card
-signs the same piece again. So a card taken with no connection is taken as
-**HIGH RISK**, the word `MONEY.md` uses for ecash another phone has seen and this
-phone has not yet swapped. It is ecash taken on trust, and the risk is the
-receiver's.
+A till with no connection cannot ask the mint. A card of one signature (format 4)
+that keeps the mint's proofs (software 1.20) can still pay it: the till sets the
+swap out from its own seed, the card signs it over, and that signature is good for
+those outputs and no others. Nobody but this phone can use it.
 
-- CARD on the receive screen, with no connection, puts the HIGH RISK card first
-  (YOU ARE OFFLINE: whoever gave it can still spend it until this phone is online),
-  in front of the amount and before the PIN. CONTINUE or REJECT; the person's
-  answer decides, and REJECT touches nothing;
+- CARD on the receive screen, with no connection, asks no question first; the PIN
+  comes as it does online;
+- before the PIN and before the card is asked to sign, the till reads the mint's
+  proof (NUT-12) for each piece it picked (GET_DLEQ, two places to a command) and
+  checks it against the mint's keys it kept. A card before 1.20, or a card of one
+  piece at a time, is refused as too old; a card whose pieces have no proof, or
+  whose keys are not at hand, cannot prove its money; a proof that fails is a card
+  holding money the mint did not sign. Each is refused, and can pay once this phone
+  is online;
+- a payment the card left part way through is taken up with no connection only
+  where what it signed was proved here before it signed; one begun online is not;
+- a piece must have a week left to its date, by the latest clock the till has
+  evidence for: its own, the newest block header it kept, the card's own clock, when
+  it last had the mint's keys, and the newest card payment it kept. A clock set back
+  cannot pass a piece it has seen evidence is near its date. A till with a
+  connection needs a day; the card's own phone ten minutes. Pieces with no date
+  (a card set up like cash, which no screen does now) have nothing to race;
 - only an exact set of pieces; an offline till cannot make change. A card that has
-  none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE).
-  It is one tap, with no second, and a longer one than online: from a drawer of
-  $50 a price of $1 to $10 is five to nine pieces;
+  none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE);
 - the card's clock needs no connection: the phone tells it the time (a note, or
   before 1.15 a signed time) and shows it the newest header it has kept (1.15
   and on), and the daily limit is looked at as ever, by the clock the card has;
-- the card's signatures are checked on the phone, and so is each piece's DLEQ
-  proof where the card can supply one. A card before 1.20 holds none, and a card
-  of 1.20 holds the mint's proof for the pieces it was loaded with one for but
-  a till does not read it (that is not built: *What Verified says*, below), so a
-  piece the mint never signed cannot be told from a real one, which is why this
-  stays HIGH RISK;
-- the amount is kept as a trusted row with a pending entry, swapped when the
-  phone is back online, and **never shown as paid while offline** (TAKEN ON
-  TRUST);
-- if the mint says the pieces were spent in the meantime, the entry is marked
-  taken back and the person is told. Nothing was paid, and the receiver bears the
-  loss.
+- the whole request is kept (`foxy.flashcard.kept`: the signed pieces, the outputs,
+  their counters and digest, the dates, how many pieces proved), with a row of the
+  unclaimed store and an entry that says received at once, waiting for the mint. It
+  counts in the balance;
+- at the first connection the swap is posted as it was signed. A lost answer, or the
+  same request posted by anybody else, is found to be this phone's by its own
+  outputs (NUT-09) and settles. If the mint says the pieces were spent first (a copy
+  of the card), or the card's owner took them back after their date, or the mint's
+  keys or fee changed so that it will not take the signature now, or it will not
+  take the card's signature at all, the entry is marked failed and the person is
+  told. Only the mint's own answer ends a payment: this phone's library failing to
+  set the swap out is asked again. A mint that does not answer is asked again at
+  every connection, and the person is told once if the payment is near its date.
+  The recovery of lost swaps, which runs before the claim at a connection, settles
+  one it finds made;
+- what a payment that did not settle was counted for is undone with it: a share of a
+  split bill it paid is open again, and a wallet that holds dollars lets go of the
+  swap into dollars it owed itself;
+- each step of the tap and of the settling is written before the next, and one
+  that did not land (a page gone between two of them, a write refused) is put right
+  at the next settling from what else is on file: a record left with no row is
+  settled, or ended, or given its row back, by its entry and its pieces, and the
+  tap's TAKEN copy of a kept payment is struck and never posted as a second.
 
-It is an exception, for a card only, to the rule in `OVERVIEW.md` that Foxy does
-not receive ordinary ecash offline. It has a switch of its own
-(`CARD_OFFLINE`, build/wallet/08a-flashcard.js); plain ecash between two offline
-phones keeps `OFFLINE_TO_OFFLINE`, which is off.
+On the screens: the receive closes as for any payment, and the history pass says
+PAYMENT RECEIVED. While it waits the HISTORY ring is amber (red is for money somebody
+else can still take), its row says *Paid by card · settles online*, and its detail
+says SETTLES ONLINE and the day to be online by. Settled, it is an ordinary receive,
+not announced again. One that does not settle is said by a card: CARD PAYMENT NOT
+SETTLED (spent by a copy of the card, a mint whose keys or fee changed, or a mint that
+would not take the card's signature) or CARD
+PAYMENT WENT BACK (its date passed and its owner took it back), and its row says
+Failed; a payment near its date with the mint not answering is said in a line, once.
+Coming back to Foxy with a route settles a waiting one at once. A dollar receive by
+card with no connection (a wallet with two balances) takes the sats the dollars come
+to at this phone's own last price, keeps that price with the payment, and turns the
+sats into dollars once it has settled; a price too old is refused first (BITCOIN
+PRICE TOO OLD).
+
+The risk left is a copy of the card: the proofs say the mint signed the pieces, not
+that they are unspent. It is an exception, for a card only, to the rule in
+`OVERVIEW.md` that Foxy does not receive ordinary ecash offline. It has a switch of
+its own (`CARD_OFFLINE`, build/wallet/08a-flashcard.js); plain ecash between two
+offline phones keeps `OFFLINE_TO_OFFLINE`, which is off.
 
 ## A payment the mint refuses
 
@@ -1657,9 +1702,8 @@ gives it back to anybody who asks (`GET_DLEQ`, no PIN) and checks nothing. This 
   either is being worked out it says `Verifying…`. A read of the short kind keeps what the screen said. A card of 1.19
   and before reads exactly as it did: the mint's word alone.
 
-What it does not do. It does not show that a piece is unspent: the mint says that, and is asked as ever. A till
-that takes a card's pieces on trust with no connection (*Paying with no connection*) could check their proofs first; it does
-not. The card gives the blinding factor to any reader with no PIN, for every piece that has a proof, and the mint can
+What it does not do. It does not show that a piece is unspent: the mint says that, and is asked as ever. A till with
+no connection checks the proofs of the pieces it is paid with, afresh at every tap (*Paying with no connection*). The card gives the blinding factor to any reader with no PIN, for every piece that has a proof, and the mint can
 tie a piece to the request that made it from `r` (the card repository's 5.9 says so): this phone sends it nowhere.
 
 ## What is kept on the phone
@@ -1763,7 +1807,12 @@ matter to a person:
   they went, the commands to a card of 1.19 byte for byte, the store and its caps, the
   look that asks for proofs and the payments that do not, good proofs, a made-up piece,
   another piece's proof, no proof and no keys, a tap cut in the middle of a load, the card's
-  own change with its proof, and the three states of the line. `tests/flashcard-applet.js` is
+  own change with its proof, and the three states of the line. `tests/flashcard-offline.js` pins a card paying
+  a till with no connection: the proofs read and checked, the week by the latest clock, the record kept, settling at
+  the first connection, a keyset or fee changed, the owner's take-back either side of it, an answer lost, a repeat and a
+  copy posted elsewhere, a silent mint, the owner's renewal, and set-up recoverable; `tests/flashcard-offline-ui.js` the
+  same at the screens (the receive, PAYMENT RECEIVED, the ring, the history row, the cards for a payment that did not
+  settle, the late line, RENEW THIS CARD, set-up, the dollar receive). `tests/flashcard-applet.js` is
   opt-in and drives the wallet against the applet itself over a local port.
   `tools/live/flashcard-switch.js` moves a card between two local mints.
   `DEVICE-TESTS.md` §23 is what only a card and a phone can show.

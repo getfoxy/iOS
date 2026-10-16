@@ -42,11 +42,19 @@
     /* What a card holds, as the amounts of its pieces, for cutting more for it. */
     cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
     cardMaxPiece: function () { try { return cardMaxPiece(need()); } catch (e) { return 0; } },
-    /* A till with no route: whether a card may be taken on trust at all (the card's own switch), whether this
-     * phone has a route, and the question put to the person first. */
+    /* A till with no route: whether a card may pay it at all (the card's own switch), whether this phone has a route,
+     * and the question once put to the person first (no screen asks it now). */
     cardOffline: function (on) { return cardOffline(on); },
     cardOnline: function () { return routeOpen(); },
     cardOfflineAsk: function (sats) { return cardOfflineAsk(sats); },
+    /* The card payments this phone took with no route and the mint has not swapped yet: [{ id, sats, date, state, at }],
+     * `id` the unclaimed row's ('card-…', its entry is 'req-' and that), `date` the pieces' date in seconds (0 for none: the
+     * card's owner can never take them back), `state` kept or posting. `cardKept(id)` is one record whole, as a copy, in any
+     * state (kept, posting, settled, spent, retired, unwound), or null. */
+    cardKeptWaiting: function () { return cardKeptWaiting(); },
+    cardKept: function (id) { return cardKept(id); },
+    // how near its date a card's money is renewed when its owner reads it online, in seconds (twenty days)
+    cardRefreshLeft: function () { return CARD_REFRESH_LEFT; },
 
     /* Whether a card (as `cardLook` gave it) will ask for its PIN to sign for a payment that takes `net` sats off it (software
      * 1.16 and on): false for a card with no PIN and for one whose no-PIN allowance (`card.noPin`) has `net` left; true for
@@ -99,11 +107,13 @@
      *
      * `recoverable`: a key from this phone's words is written to the card, and
      * every piece loaded later names it, so a lost or blocked card's money
-     * comes back to these words after the piece's date. Without it the card is
+     * comes back to these words after the piece's date. On unless it is
+     * `false`: every card is set up this way, and only a test makes one that is
      * cash. The key is on file here before the card is told it, and the card
      * is told once: its record cannot change while it holds money. */
     cardSetUp: function (link, opts) {
       var o = opts || {};
+      var recoverable = o.recoverable !== false;
       /* `o.pin` empty or absent: a card with no PIN (software 1.16 and on). It pays without one, and its per tap and daily limits are
        * set later by its owner as for any card; no allowance exists on it. A PIN can be added later (`cardAddPin`). */
       var pin = '';
@@ -131,9 +141,9 @@
         return cardOwnerPub(card.key);
       }).then(function (pub) {
         ownerPub = pub;
-        return o.recoverable ? cardRefundKey(card.key) : '';
+        return recoverable ? cardRefundKey(card.key) : '';
       }).then(function (refund) {
-        if (o.recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
+        if (recoverable && !refund) throw cardError('no-key', 'This phone could not make the key that would bring a lost card\u2019s money back. Try again in a moment.');
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
         // a card that names a design already (written at the factory, or by hand) keeps it; else the one this phone chose
         var design = cardCanDesign(card) ? String((card.record && card.record.design) || o.design || '') : '';
@@ -147,7 +157,7 @@
           return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
         });
       }).then(function () {
-        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (o.recoverable ? ', recoverable' : ', as cash') + ', with ' + (noPin ? 'no PIN and ' : '') + 'no limit');
+        console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + (recoverable ? ', recoverable' : ', as cash') + ', with ' + (noPin ? 'no PIN and ' : '') + 'no limit');
         /* The design this phone chose for it (`o.design`, a code of three
          * characters), written down here for a card whose software cannot
          * carry it (before 1.10): its own note, not the list of cards this
@@ -833,7 +843,7 @@
     },
 
     /* A card's money given a new date, in one tap: all of it off the card and
-     * on again. The pieces that come back carry a date a year from now, which
+     * on again. The pieces that come back carry a date thirty days from now, which
      * is the only way a piece's date changes: it is part of the piece. At a
      * mint that charges for inputs this costs what a withdrawal and a top-up
      * cost. A tap cut short between the two leaves the money in this phone
@@ -958,6 +968,9 @@
      * stays charged for them). */
     cardSettle: function () {
       var out = [];
+      /* A TAKEN row a card's payment kept with no route left behind (a tap cut off before its last step) is that payment's
+       * copy, not another payment: struck here first, never posted (`cardKeptTidy`, 08a-flashcard.js). */
+      try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
           /* A payment the card left part way through, held for its next tap

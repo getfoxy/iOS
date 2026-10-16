@@ -877,7 +877,12 @@
                 var hashPre = r.kind === 'reclaim' ? 'reclaim-' : 'token-';
                 var fee = r.amount ? Math.max(0, satsOf(r.amount) - amount) : 0;
                 var into = typeof r.into === 'string' ? r.into : '';
-                logTx(unit === 'sat'
+                /* A card's payment kept with no route (08a-flashcard.js): its entry is right as it stands, and only its
+                 * record and the entry's word for it change, to settled. Its walk would never come to it now, with its row
+                 * gone below, and it would say it waits for the mint for good. */
+                var keptId = /^req-card-/.test(into) ? into.slice(4) : '';
+                if (keptId && (cardKeptRow(keptId) || (unclaimed()[keptId] || {}).cardKept)) cardKeptSettled(keptId, amount);
+                else logTx(unit === 'sat'
                   ? { dir: 'in', sats: amount, feeSats: fee, settled: true, state: 'success', mint: here,
                       memo: r.kind === 'reclaim' ? 'reclaimed' : 'ecash', hash: into || hashPre + Date.now() }
                   : { dir: 'in', unit: unit, amount: amount, feeAmount: fee, sats: 0, feeSats: 0, settled: true, mint: here,

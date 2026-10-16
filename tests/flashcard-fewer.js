@@ -643,104 +643,52 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     await settle();
   }
 
-  /* ---- 8: a till with no route ----------------------------------------------------- */
+  /* ---- 8: a till with no route -----------------------------------------------------
+   * A card that signs for each piece cannot pay a phone with no route: only one that signs once for the payment and
+   * keeps the mint's proofs can (tests/flashcard-offline.js, where a payment kept offline, its settling, and a copy
+   * of the card that spends first are). Here, what this card gets is a refusal before anything is asked of it. */
   {
-    // 11,000 sats cut the old way (8192, 2048, 512, 128, 64, 32, 16, 8): there are prices the card cannot make exactly (300, say)
+    // 11,000 sats cut the old way (8192, 2048, 512, 128, 64, 32, 16, 8)
     const P = await funded({ feePpk: 0 }, 14000);
     const Rv = await funded({ sharedMint: P.mint, words: OTHER_WORDS }, 0);
     const c = newCard(P);
     await P.W.cardSetUp(c, { pin: '1234' });
     await binaryLoad(P, c, 11000);
-    const rb = await bal(Rv);
     offline(Rv.W);
 
-    // no yes: the card is not touched
+    // not asked for with no route: the card is not touched
     c.tap();
     c.sent.length = 0;
     const refused = await why(Rv.W.cardPay(c, { sats: 592, pin: '1234' }));
-    ok(refused !== 'went through' && c.sent.length === 0 && Rv.W.trustedWaiting().length === 0, 'with no route and no yes, a card is refused as it was, and not spoken to', refused);
+    ok(refused !== 'went through' && c.sent.length === 0 && Rv.W.trustedWaiting().length === 0 && Rv.W.cardKeptWaiting().length === 0,
+       'with no route, a payment not asked for as one is refused as it was, and the card is not spoken to', refused);
+    // the question once put first (the HIGH RISK card) is still answered, though no screen asks it of a card now
     ok((await Rv.W.cardOfflineAsk(592)) === false, 'with nobody to ask, the answer is no');
     const asked = [];
     Rv.W.onOfflineOffer((info) => { asked.push(info); return Promise.resolve(false); });
     ok((await Rv.W.cardOfflineAsk(592)) === false && asked.length === 1 && asked[0].sats === 592 && asked[0].scanned === true,
        'the question is the HIGH RISK card’s, with the amount, and a no is a no');
-    Rv.W.onOfflineOffer(() => Promise.resolve(true));
-    ok((await Rv.W.cardOfflineAsk(592)) === true, 'and a yes is a yes');
 
-    // a yes, and a price the card cannot make: refused before the PIN
+    // asked for with no route: this card is too old for it, and is told so before its PIN
     c.tap();
     c.sent.length = 0;
-    const inexact = await Rv.W.cardPay(c, { sats: 300, pin: '1234', trusted: true }).then(() => null, (e) => e);
-    ok(inexact && inexact.card === 'inexact' && count(c, CMD.pin) === 0 && count(c, CMD.spend) === 0 && Rv.W.trustedWaiting().length === 0,
-       'a price the card does not make exactly is refused before the PIN is sent, and says why', inexact && inexact.message);
-    ok(/offline/i.test(inexact.message) && /change/i.test(inexact.message), 'in plain words');
+    const old = await Rv.W.cardPay(c, { sats: 592, pin: '1234', offline: true }).then(() => null, (e) => e);
+    ok(old && old.card === 'offline-old' && count(c, CMD.pin) === 0 && count(c, CMD.spend) === 0 && Rv.W.cardKeptWaiting().length === 0 && c.balance() === 11000,
+       'a card that signs for each piece is refused offline as too old, before the PIN, and nothing is signed', old && old.message);
+    ok(/offline/i.test(old.message) && /online/i.test(old.message), 'in plain words: take it when this phone is online');
+    // its old name for the same asking is the same
+    c.tap();
+    ok((await why(Rv.W.cardPay(c, { sats: 592, pin: '1234', trusted: true }))) === 'offline-old', 'and `trusted`, the old name of the asking, is the same asking');
 
-    // a yes, and a price it makes
-    c.tap();
-    c.sent.length = 0;
-    const got = await Rv.W.cardPay(c, { sats: 592, pin: '1234', trusted: true });
-    ok(got.trusted === true && got.sats === 592 && got.change === null && count(c, CMD.auth) === 0 && count(c, CMD.spend) === 3,
-       'a price the card makes exactly is taken on a yes: three pieces signed, and no change', JSON.stringify(got));
-    const wait = Rv.W.trustedWaiting();
-    ok(wait.length === 1 && wait[0].sats === 592 && Rv.W.cardTaken().length === 0,
-       'it waits on trust as a trusted row, not yet money, and nothing is left in the card store', JSON.stringify(wait.map((x) => x.sats)));
-    const entry = history(Rv).filter((e) => e.hash === got.hash)[0] || {};
-    ok(entry.trusted === true && entry.state === 'pending' && entry.settled === false && entry.dir === 'in' && entry.sats === 592 && entry.card === c.key,
-       'with a PENDING entry that says it is on trust', JSON.stringify({ t: entry.trusted, s: entry.state, memo: entry.memo }));
-    ok(c.balance() === 11000 - 592, 'and the card is down by exactly that');
-
-    // the day’s limit is looked at before the PIN, as it is online
-    c.tap();
-    await P.W.cardSetLimit(c, { sats: 100 });
-    c.tap();
-    c.sent.length = 0;
-    const dear = await Rv.W.cardPay(c, { sats: 128, pin: '1234', trusted: true }).then(() => null, (e) => e);
-    ok(dear && dear.card === 'limit' && count(c, CMD.pin) === 0, 'a card’s daily limit is kept to offline too', dear && dear.message);
-    c.tap();
-    await P.W.cardSetLimit(c, { sats: 0 });
-
-    // a card that cannot sign for its own key keeps nothing
-    c.tap();
-    const fakeCard = makeCard({ window: Rv.window });
-    Object.assign(fakeCard.state, JSON.parse(JSON.stringify(c.state)), { verified: false, nonce: null, grant: false, selected: false });
-    const liar = { send: (x) => fakeCard.send(x).then((r) => (x.slice(0, 4) === CMD.key ? c.key + '9000' : r)) };
-    const noSig = await why(Rv.W.cardPay(liar, { sats: 40, pin: '1234', trusted: true }));
-    ok(noSig === 'bad-signature' && Rv.W.trustedWaiting().length === 1, 'a signature that is not good is refused offline, and nothing more is kept', noSig);
-
-    // a second payment, and then the payer gets there first
-    c.tap();
-    const second = await Rv.W.cardPay(c, { sats: 40, pin: '1234', trusted: true });   // 32 and 8: exact from what is left
-    ok(second.trusted === true && Rv.W.trustedWaiting().length === 2, 'a second one is taken the same way');
-    // the signed pieces of the second, swapped by somebody else before the till is online
-    const rows = JSON.parse(Rv.storage.getItem('foxy.req.unclaimed') || '{}');
-    const secondRow = rows[second.hash.replace(/^req-/, '')];
-    let lost = null;
-    Rv.W._onTrustLost = (x) => { lost = x; };
-    let safe = null;
-    Rv.W._onTrustSettled = (x) => { safe = x; };
-    const thief = await funded({ sharedMint: P.mint, words: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above' }, 0).catch(() => null);
-    if (thief && secondRow) {
-      const took = await thief.W.receiveToken(secondRow.token).then((r) => r, (e) => ({ why: e && e.message }));
-      ok(took && took.sats > 0, 'another phone, online, swaps the signed pieces first', JSON.stringify(took));
-      await settle();
-    }
-
-    // online again: the first is swapped in and the second is found taken back
-    online(Rv.W);
-    await Rv.W.claimUnclaimed();
-    await settle();
-    ok((await bal(Rv)) === rb + 592, 'online again, the first is swapped in at the mint and is the till’s money', String((await bal(Rv)) - rb));
-    const done1 = history(Rv).filter((e) => e.hash === got.hash)[0] || {};
-    ok(done1.state !== 'pending' && done1.state !== 'failed' && done1.settled !== false && !!safe && safe.sats > 0, 'its entry is settled and the person is told it is safe', JSON.stringify({ s: done1.state, settled: done1.settled }));
-    const done2 = history(Rv).filter((e) => e.hash === second.hash)[0] || {};
-    ok(!!thief && done2.state === 'failed' && /taken back/.test(String(done2.memo)) && !!lost && Rv.W.trustedWaiting().length === 0 && (await bal(Rv)) === rb + 592,
-       'the second, which the mint says was spent first, is marked taken back, and the person is told', JSON.stringify({ s: done2.state, memo: done2.memo }));
+    // with the switch off, a till with no route refuses a card as it always did, and does not speak to it
     ok(Rv.W.cardOffline() === true, 'the card’s switch is on, and is its own');
     Rv.W.cardOffline(false);
-    offline(Rv.W);
     c.tap();
-    ok((await why(Rv.W.cardPay(c, { sats: 50, pin: '1234', trusted: true }))) !== 'went through' && Rv.W.trustedWaiting().length === 0, 'with the switch off, a till with no route refuses a card again');
+    c.sent.length = 0;
+    ok((await why(Rv.W.cardPay(c, { sats: 50, pin: '1234', offline: true }))) !== 'went through' && c.sent.length === 0,
+       'with the switch off, a till with no route refuses a card again, unspoken to');
     Rv.W.cardOffline(true);
+    online(Rv.W);
     await settle();
   }
 

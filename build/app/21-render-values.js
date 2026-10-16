@@ -131,8 +131,10 @@
       try { const sp = W21 && W21.splitPending && W21.splitPending(); return !!(sp && !sp.done); }
       catch (e) { return false; }
     };
+    /* And a card's payment taken while this phone was offline, until the mint has swapped it: received, and in the
+     * balance, and nobody else can take it (the card signed it over to this phone), so amber and not red. */
     const waiting = !!(W21 && (
-      someOf(W21.onchainSending) || someOf(W21.watchedTokens) || splitOpen()
+      someOf(W21.onchainSending) || someOf(W21.watchedTokens) || splitOpen() || someOf(W21.cardKeptWaiting)
     ));
     /* Red, not amber, and it wins.
      *

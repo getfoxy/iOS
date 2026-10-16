@@ -267,8 +267,9 @@ check('a row is at risk only while it is still waiting',
   /atRisk: !!t\.trusted && !t\.settled && t\.state !== 'failed'/.test(app),
   'the claim settles the same entry, and settled money is ordinary money');
 
+// (a card's payment taken offline says SETTLES ONLINE there instead: it is received, and nobody else can take it)
 check('the detail screen says AT RISK where it would say PENDING',
-  /txStatus: tx\.highRisk \? 'HIGH RISK' : tx\.atRisk \? 'AT RISK' : tx\.failed \? 'FAILED' : tx\.pending \? 'PENDING' : 'COMPLETE'/.test(app));
+  /txStatus: tx\.highRisk \? 'HIGH RISK' : tx\.atRisk \? 'AT RISK' : tx\.failed \? 'FAILED' : tx\.cardWaits \? 'SETTLES ONLINE' : tx\.pending \? 'PENDING' : 'COMPLETE'/.test(app));
 check('and explains what that means, in the person\u2019s words',
   /txAtRiskLine[\s\S]{0,240}?spend their copy and take it back/.test(app));
 check('and the markup really draws that explanation',

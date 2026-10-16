@@ -289,6 +289,38 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     await sleep(60);
     ok(t.W.privacy().offline === false && t.title() === '', 'then connected, with nothing ever shown'); }
 
+  /* A card's payment taken with no route is claimed on a return with a route (the return's own sweeps do not claim),
+   * once those sweeps are done; a return with none waiting claims nothing more than it did. */
+  { const t = home();
+    await t.set({ tor: 'up', everUp: true, progress: 100, network: 'wifi' });
+    await t.G.check(() => {});
+    const real = { waiting: t.W.cardKeptWaiting, claim: t.W.claimUnclaimed, online: t.W.cardOnline, sweeps: t.W.resumeSweeps };
+    const order = [];
+    let waiting = [{ id: 'card-x', sats: 592, date: 0, state: 'kept', at: Date.now() }];
+    t.W.cardKeptWaiting = () => waiting;
+    t.W.cardOnline = () => true;
+    t.W.resumeSweeps = () => new Promise((res) => setTimeout(() => { order.push('sweeps'); res(); }, 30));
+    t.W.claimUnclaimed = () => { order.push('claim'); return Promise.resolve(592); };
+    const r = returning(t);
+    await r.app.setUpAfterReturn();
+    await sleep(80);
+    ok(order.join(',') === 'sweeps,claim' && r.did.filter((k) => k === 'balance').length >= 1,
+       'a return with a card’s payment kept with no route: claimed once the sweeps are done, and the balance read again', order.join(','));
+    order.length = 0;
+    waiting = [];
+    const r2 = returning(t);
+    await r2.app.setUpAfterReturn();
+    await sleep(80);
+    ok(order.join(',') === 'sweeps', 'with none waiting, a return claims nothing more than it did', order.join(','));
+    waiting = [{ id: 'card-x', sats: 592, date: 0, state: 'kept', at: Date.now() }];
+    t.W.cardOnline = () => false;
+    order.length = 0;
+    const r3 = returning(t);
+    await r3.app.setUpAfterReturn();
+    await sleep(80);
+    ok(order.indexOf('claim') < 0, 'nor with the wallet’s route not up', order.join(','));
+    Object.assign(t.W, { cardKeptWaiting: real.waiting, claimUnclaimed: real.claim, cardOnline: real.online, resumeSweeps: real.sweeps }); }
+
   // with the switch off, a return waits behind the screen as it used to
   { const t = boot({ offlineReady: true });
     t.w.localStorage.setItem('foxy.warned', String(Date.now()));

@@ -1612,23 +1612,31 @@
         walk = walk.then(function () {
           return t.ask(cardCommand(CARD_INS.dleq, two[0].i, '', 0, two.length > 1 ? two[1].i : 255));
         }).then(function (r) {
-          var h = r.sw === '9000' ? r.data : '', at = 0, list = [], whole = true;
-          two.forEach(function () {
-            var tag = h.substr(at, 2);
-            if (tag === '00') { list.push(null); at += 2; return; }
-            if (tag === '01' && h.length >= at + 194) {
-              list.push({ e: h.substr(at + 2, 64), s: h.substr(at + 66, 64), r: h.substr(at + 130, 64) });
-              at += 194;
-              return;
-            }
-            whole = false;
-          });
-          if (!whole || at !== h.length) list = two.map(function () { return null; });
+          var list = cardDleqParse(r.sw === '9000' ? r.data : '', two.length);
           two.forEach(function (x, k) { x.dleq = list[k]; if (list[k]) got += 1; });
         });
       })(want.slice(from, from + 2));
     }
     return walk.then(function () { return got; });
+  }
+
+  /* One answer to GET_DLEQ, for `n` places (one or two): for each, in order, `{ e, s, r }` as hex, or null where the card gave
+   * none (`00`). An answer that is not whole, or has anything after the last proof, is no proof for any of them. */
+  function cardDleqParse(hex, n) {
+    var h = String(hex || ''), at = 0, list = [], whole = true;
+    for (var k = 0; k < n; k++) {
+      var tag = h.substr(at, 2);
+      if (tag === '00') { list.push(null); at += 2; continue; }
+      if (tag === '01' && h.length >= at + 194) {
+        list.push({ e: h.substr(at + 2, 64), s: h.substr(at + 66, 64), r: h.substr(at + 130, 64) });
+        at += 194;
+        continue;
+      }
+      whole = false;
+      break;
+    }
+    if (!whole || at !== h.length) return Array.from({ length: n }, function () { return null; });
+    return list;
   }
 
   /* What the mint's proofs on a card show of its pieces, once they have been read (`cardProofsRead`): for each unspent piece the secret is
@@ -1700,6 +1708,79 @@
     }).then(null, function () { return 'unproven'; });
   }
 
+  /* The pieces a card is about to pay a phone with no route, proved before anything is asked of it: the mint's proof for each
+   * (NUT-12) read from the card with GET_DLEQ, two places to a command, for the places picked and no others, and checked here
+   * against the mint's keys this phone has kept. With no route the mint cannot be asked whether the pieces are its own, and
+   * this is the one thing that says so. It says nothing of whether they are spent: a copy of the card could spend them
+   * first, and the swap at the first connection is what finds that out (`cardKeptFailed`).
+   *
+   * Every piece is proved afresh, every time: the store of pieces known real (`cardRealSet`) is by nonce alone, and is not
+   * trusted for money taken with no route. Each piece's secret is the card's, locked to its key with the one-signature flag,
+   * and its date (which the mint's signature covers, being in the secret) is far enough off to be swapped before it.
+   *
+   * Resolves how many were proved. Rejects, before any PIN and before the card is asked to sign:
+   *   'fake'              a proof was read and does not verify: the card holds money the mint did not sign;
+   *   'offline-unproven'  a piece with no proof, keys not at hand for it, or an answer that was not whole;
+   *   'renew'             a piece nearer its date than a week, by the clock with the most evidence behind it (`cardOfflineNow`).
+   * A card that leaves rejects as it does in any read. One line in the log: counts and time, never a nonce or a point. */
+  function cardOfflineProve(t, card, picked, w) {
+    var CT = window.CashuTS;
+    var began = Date.now();
+    var list = (picked || []).filter(function (p) { return !!p; });
+    var read = [];
+    var walk = Promise.resolve();
+    for (var from = 0; from < list.length; from += 2) {
+      (function (two) {
+        walk = walk.then(function () {
+          if (!two.every(function (p) { return Number.isInteger(p.slot); })) return two.map(function () { return null; });
+          return t.ask(cardCommand(CARD_INS.dleq, two[0].slot, '', 0, two.length > 1 ? two[1].slot : 255)).then(function (r) {
+            return cardDleqParse(r.sw === '9000' ? r.data : '', two.length);
+          });
+        }).then(function (got) {
+          two.forEach(function (p, k) { read.push({ p: p, d: got[k] }); });
+        });
+      })(list.slice(from, from + 2));
+    }
+    return walk.then(function () {
+      var proven = 0, none = 0, away = 0, fake = 0, odd = 0, near = 0;
+      // (the card's own phone, being paid by it, holds it to its own margin, as `cardUsable` did)
+      var floor = cardOfflineNow(card, true) + (cardMine(card) ? CARD_OWN_MARGIN : CARD_DATE_MARGIN);
+      read.forEach(function (x) {
+        var p = x.p, d = cardDleqOf(x.d);
+        // none given, or an answer that was not whole: nothing says this piece is the mint's, and nothing says it is not
+        if (!d) { none += 1; return; }
+        var id = String(p.id), ks = null, key = '';
+        try {
+          ks = keysetFor(w, id);
+          key = (ks && ks.keys) ? String(ks.keys[String(satsOf(p.amount))] || '') : '';
+        } catch (e) { key = ''; }
+        if (!key) { away += 1; return; }
+        /* The lock is the card's own and the one signature's: that is what makes the signature to come this phone's alone.
+         * It and the date below cannot fail as the pieces are read today (the secret is made from the card's key, and
+         * `cardFill` held each place's date to the margin already); they are here so that a change to either of those
+         * cannot let a piece through unasked. */
+        var parts = cardSecretParts(p.secret);
+        if (!parts || parts.key !== card.key || parts.all !== true) { odd += 1; return; }
+        // the date the mint signed (it is in the secret), held to the margin again
+        if (parts.date && parts.date < floor) { near += 1; return; }
+        var good = false;
+        try { good = !!CT && CT.hasValidDleq({ id: id, amount: satsOf(p.amount), C: String(p.C), secret: String(p.secret), dleq: d }, ks, { require: true }) === true; }
+        catch (e2) { good = false; }
+        if (good) proven += 1; else fake += 1;
+      });
+      console.log('[foxy] card: offline, its pieces proved: ' + proven + ' of ' + read.length + ' proven, ' + none + ' with no proof, ' + away
+        + ' with no keys here, ' + odd + ' not locked as a card locks, ' + near + ' too near their date, ' + fake + ' that fail, in '
+        + (Date.now() - began) + ' ms (' + Math.ceil(read.length / 2) + ' more command(s) to the card)');
+      if (fake) throw cardError('fake', 'This card holds money the mint did not sign. Nothing was taken.');
+      if (near) throw cardError('renew', CARD_OFFLINE_NEAR, { stale: near });
+      if (proven !== list.length || !list.length) {
+        throw cardError('offline-unproven', 'This card cannot prove its money to a phone that is offline. Take this payment when this phone is online.',
+                        { proven: proven, none: none + away + odd });
+      }
+      return proven;
+    });
+  }
+
   /* ---- the cards this phone knows ---------------------------------------------
    *
    * A card this phone set up as recoverable has a key of this phone's on it:
@@ -1758,18 +1839,52 @@
    * after CARD_DUE_DAYS, when the receiver keeps it as before. */
   var CARD_DUE = 'foxy.flashcard.due';
   var CARD_DUE_DAYS = 30;
-  /* A year, for a piece on a recoverable card: after it, the key that loaded
-   * the card may take the piece back. A piece this close to its date is not
-   * taken in payment (some mints stop honouring the card's own key then). */
-  var CARD_DATE_AHEAD = 365 * 24 * 3600;
+  /* Thirty days, for a piece on a recoverable card: after it, the key that
+   * loaded the card may take the piece back. A piece this close to its date is
+   * not taken in payment (some mints stop honouring the card's own key then). */
+  var CARD_DATE_AHEAD = 30 * 24 * 3600;
+  /* A week: what a phone with no route needs left on a piece. It keeps what the
+   * card signed until it is online again, and has to reach the mint before the
+   * piece's date, when its loader may take it back. */
   var CARD_DATE_MARGIN = 7 * 24 * 3600;
-  /* The margin is a stranger's: it is what keeps a receiver from taking a
-   * piece its loader could take back days later. The phone that holds the
-   * card's refund key is that loader, and has nobody to guard against but the
-   * clock: ten minutes, so a swap begun before the date is not answered after
-   * it. Without this a holder could not empty or renew their own card in its
-   * last week, which is the week they are told to. */
+  /* A day: what a phone with a route needs. It swaps the pieces in at once, so
+   * the date only has to be far enough off that the swap is not answered after
+   * it. A week here would stop a card that only meets strangers from paying
+   * three weeks after its money went on, a week before its date. */
+  var CARD_ONLINE_MARGIN = 24 * 3600;
+  /* Those margins are a stranger's: they keep a receiver from taking a piece
+   * its loader could take back before the receiver's swap is made. The phone
+   * that holds the card's refund key is that loader, and has nobody to guard
+   * against but the clock: ten minutes, so a swap begun before the date is not
+   * answered after it. Without this a holder could not empty or renew their
+   * own card in its last days. */
   var CARD_OWN_MARGIN = 10 * 60;
+  /* Twenty days: a card its owner reads online with less than this left on its
+   * money is renewed for thirty days more (the owner's refresh, on the card's
+   * screen). A top-up keeps a date only while it has this much left too
+   * (CARD_DATE_REUSE), so it never joins money that is about to be renewed. */
+  var CARD_REFRESH_LEFT = 20 * 24 * 3600;
+
+  /* KEPT: a card's payment to this phone while it had no route, signed over to
+   * this phone and proved by the mint's own proofs, between the tap and the
+   * mint's swap (`cardKeepSigned`). One record a payment:
+   *   { id, at, state, card, format, software, mint, unit, sats, asked, fee, sum,
+   *     request: { inputs, outputs }, swap: { keyset, counter, amounts, digest },
+   *     dates: { first, last }, refundKey, proven, clock: { phone, used }, cacheAt,
+   *     tries, triedAt, why, endedAt, terms }
+   * `state` is kept, posting (the mint is being asked), or one that is over:
+   * settled, spent (the card's pieces were spent first, by a copy of it), retired
+   * (the mint will not take the swap now: its keys or its fee changed) or unwound
+   * (its date passed, and the money went back to the card's owner). The row in
+   * the unclaimed store is what counts it in the balance and what the walk on
+   * every connection swaps in (`claimUnclaimed`); this is what that walk is told
+   * about it, and the whole request again, should the row or the swap's own row
+   * (CARD_SWAPS) be lost. Records that are over are kept for CARD_KEPT_KEEP_MS,
+   * and the others for ever. */
+  var CARD_KEPT = 'foxy.flashcard.kept';
+  var CARD_KEPT_KEEP_MS = 60 * 24 * 3600 * 1000;
+  // how near its date a payment that has not settled is said to be late (once a session)
+  var CARD_KEPT_WARN = 2 * 24 * 3600;
 
   function cardStore(key) {
     var l = load(key, []);
@@ -3199,10 +3314,14 @@
   }
 
   /* Which of a card's pieces can pay, at this mint, now: of a keyset this
-   * mint has, and not within a week of its date. */
-  function cardUsable(card, w, own) {
-    var now = Math.floor(Date.now() / 1000);
-    var margin = own ? CARD_OWN_MARGIN : CARD_DATE_MARGIN;
+   * mint has, and not too near its date. Near is ten minutes for the card's
+   * owner, a day for a phone with a route, and a week for one with none
+   * (`offline`), which keeps what the card signs until it can reach the mint.
+   * `now` is in seconds, this phone's clock where it is not given; with no
+   * route it is `cardOfflineNow`. */
+  function cardUsable(card, w, own, now, offline) {
+    if (!(Number(now) > 0)) now = Math.floor(Date.now() / 1000);
+    var margin = own ? CARD_OWN_MARGIN : (offline ? CARD_DATE_MARGIN : CARD_ONLINE_MARGIN);
     var out = /** @type {{ pieces: any[], stale: number, foreign: number }} */ ({ pieces: [], stale: 0, foreign: 0 });
     card.pieces.forEach(function (x) {
       var id = cardFullId(w, x.keyset);
@@ -3219,6 +3338,26 @@
       out.pieces.push(proof);
     });
     return out;
+  }
+
+  /* The time a phone with no route holds a card's dates to, in seconds: the
+   * latest it has evidence for. Its own clock; the newest block header it has
+   * kept (whose time may run up to two hours ahead, which only makes this
+   * stricter); the card's own clock, from the headers it has been shown (a card
+   * that says a later time only gets itself refused); when this phone last had
+   * the mint's keys; and the newest card payment it has kept. A clock set back
+   * cannot pass a piece this phone has seen evidence is near its date; one set
+   * forward only refuses more. Which source was used is said in the log when it
+   * is not the phone's own clock (`quiet`: not again, for a tap that has said). */
+  function cardOfflineNow(card, quiet) {
+    var best = Math.floor(Date.now() / 1000), from = 'phone';
+    var seen = function (t, name) { t = Math.floor(Number(t) || 0); if (t > best) { best = t; from = name; } };
+    try { var h = headerKept(); if (h) seen(h.time, 'header'); } catch (e) {}
+    try { if (card && card.info && card.info.headers) seen(card.info.now, 'card'); } catch (e1) {}
+    try { seen((mintCacheFor(mintUrl) || {}).at, 'mint keys'); } catch (e2) {}
+    try { cardKeptAll().forEach(function (r) { if (r) seen((Number(r.at) || 0) / 1000, 'a kept payment'); }); } catch (e3) {}
+    if (from !== 'phone' && !quiet) console.log('[foxy] card: offline, its dates are held to the time from ' + from + ', ' + (best - Math.floor(Date.now() / 1000)) + ' s past this phone’s clock');
+    return best;
   }
 
   /* Whether this phone is the one that may take this card back: the refund
@@ -3709,8 +3848,8 @@
   var CARD_ALL_EASY = 32;
   // a swap signed with this phone's own key (a card taken back): no card's bound, only how many pieces a swap is asked to take
   var CARD_SWAP_MOST = 32;
-  // a top-up keeps the card's date while it is this far off, and takes a new one after
-  var CARD_DATE_REUSE = 90 * 24 * 3600;
+  // a top-up keeps the card's date while it is this far off, and takes a new one after: the line the owner's refresh renews at
+  var CARD_DATE_REUSE = 20 * 24 * 3600;
 
   function cardSwapRow(id) {
     return cardStore(CARD_SWAPS).filter(function (r) { return r && r.id === id; })[0] || null;
@@ -4187,10 +4326,10 @@
   }
 
   /* The date a top-up's pieces take. A card that signs for each piece is given
-   * a year from now, every time. A one-signature card keeps the date it
+   * thirty days from now, every time. A one-signature card keeps the date it
    * already has (on it, or owed to it) while that is CARD_DATE_REUSE off or
    * more, so that what is put on it today can be spent in one signature with
-   * what was put on it last month. */
+   * what was put on it last week. */
   function cardDateFor(card) {
     var now = Math.floor(Date.now() / 1000);
     var fresh = now + CARD_DATE_AHEAD;
@@ -4292,7 +4431,9 @@
        * is not known until it answers, and this row is what its next tap is
        * read against. */
       cardSwapWrite(plan, { card: card.key, proofs: plan.inputs, want: wantN,
-                            all: !!(note && note.all), memo: String((note && note.memo) || ''), at: Date.now() });
+                            all: !!(note && note.all), memo: String((note && note.memo) || ''), at: Date.now(),
+                            // its pieces proved with the mint's proofs before it was asked, with no route (`cardOfflineProve`)
+                            proved: !!(note && note.proved) });
       try { if (typeof progress === 'function') progress({ step: 'signing', i: 1, n: 1, all: true }); } catch (e) {}
       var asked = false;
       return t.want(cardCommand(CARD_INS.begin, 0, slots.map(cardByte).join(''), 4), 'to take the pieces of a payment').then(function (d) {
@@ -4797,36 +4938,54 @@
 
   /* ---- a till with no route -------------------------------------------------
    *
-   * Paid needs the mint's swap, and a phone with no route cannot ask. It can
-   * still be handed a card's pieces, signed, and keep them to swap in when it
-   * can, as it can be handed plain ecash and keep that on trust. The same risk
-   * is run and the same question put to the person first, in front of the amount
-   * (the HIGH RISK card): until this phone is online, the card's holder may still
-   * spend what they have just paid with, from a copy of the card or by any
-   * route to the mint, and the person who accepts it is the one who bears that.
+   * Paid needs the mint's swap, and a phone with no route cannot ask. A card of
+   * one signature (format 4) can still pay it: the swap is set out here from
+   * this phone's own seed (no mint is asked for that), the card signs it over,
+   * and the signature is good for those outputs and no others. Nobody but this
+   * phone can use it, and the phone keeps it whole and posts it the first time
+   * it is online.
    *
-   * It is the card's own decision, and a switch of its own: plain ecash between
-   * two offline phones stays as `OFFLINE_TO_OFFLINE` has it. One constant turns
-   * this off, and a till with no route then refuses a card as it did.
+   * What it takes, and when it refuses, all before the PIN and before the card
+   * is asked to sign:
+   *   - a card that keeps the mint's proofs (software 1.20), whose pieces prove
+   *     here, against the mint's keys this phone kept, that the mint signed them
+   *     (`cardOfflineProve`). An older card, or one that cannot prove its money,
+   *     is refused offline and can pay as ever once this phone is online;
+   *   - pieces with a week or more to their date by the latest clock this phone
+   *     has evidence for (`cardOfflineNow`): after the date the card's owner may
+   *     take them back, and this phone must reach the mint before that. Pieces
+   *     with no date (a card that is like cash) have nothing to race;
+   *   - an exact set (a till with no route cannot make change), and a payment,
+   *     never a withdrawal.
+   * No question is put to the person: the card proves its money, signs it to
+   * this phone, and burns its pieces as it signs. What is kept is a record of
+   * the whole swap (CARD_KEPT, `cardKeepSigned`) and a row of the unclaimed
+   * store, with an entry that says received at once, waiting for the mint, and
+   * counts in the balance. `claimUnclaimed` posts it on every connection until
+   * the mint answers (`cardKeptPost`, `cardKeptSettled`, `cardKeptFailed`).
    *
-   * What it takes: an exact set of pieces only (a till with no route cannot make
-   * change), a payment and not a withdrawal, and only when the person has said
-   * yes (`o.trusted === true`, which the screen sets after the question). The
-   * card's time and its day work as ever (the time is signed on this phone), and
-   * every signature the card gives is checked here before anything is kept. The
-   * pieces are kept as a trusted row of the unclaimed store, with a PENDING
-   * entry, and `claimUnclaimed` swaps them in when there is a route, or marks
-   * them taken back if the mint says they were spent. "Paid" is never said
-   * here. */
+   * The risk left is a copy of the card: its pieces are the mint's, and a copy
+   * could spend them first. The mint says so at the first connection, the
+   * payment is marked failed, and the person is told (`onCardKeptLost`).
+   *
+   * One switch: CARD_OFFLINE. Off, a till with no route refuses a card as it
+   * always did and does not speak to it. It does not touch what is already
+   * kept, which is settled whatever it says, nor the cards' dates, nor a till
+   * with a route. Plain ecash between two offline phones stays as
+   * `OFFLINE_TO_OFFLINE` has it. */
   var CARD_OFFLINE = true;
+  // the refusal of a piece too near its date, said where this phone has no route
+  var CARD_OFFLINE_NEAR = 'This card’s money runs out in less than 7 days, so this phone cannot take it while offline. Its owner renews it by tapping it on their phone.';
 
   function cardOffline(on) {
     if (on !== undefined) CARD_OFFLINE = !!on;
     return CARD_OFFLINE;
   }
 
-  /* The question, put to the person by the screen that registered for it
-   * (`onOfflineOffer`). No screen means no. Resolves true only for a yes. */
+  /* The question a card taken on trust was once asked under (the HIGH RISK
+   * card). No screen asks it now, since a card proves its money and signs it to
+   * this phone; it stays for a screen that still calls it. No screen means no.
+   * Resolves true only for a yes. */
   function cardOfflineAsk(sats) {
     var ask = FoxyWallet._onOfflineOffer;
     if (!CARD_OFFLINE || typeof ask !== 'function') return Promise.resolve(false);
@@ -4836,21 +4995,450 @@
     return Promise.resolve(asked).then(function (yes) { return yes === true; }, function () { return false; });
   }
 
-  /* The signed pieces, kept on trust. They are written down first as TAKEN, as
-   * for any payment (the card has burned them and this is the only copy), and
-   * moved into the unclaimed store; the row is struck off TAKEN once it is
-   * safely there. */
-  function cardKeepOnTrust(row, signed, card, w) {
+  /* The kept card payments, as stored (`CARD_KEPT`). */
+  function cardKeptAll() {
+    var l = load(CARD_KEPT, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.id === 'string'; }) : [];
+  }
+  function cardKeptRow(id) {
+    return cardKeptAll().filter(function (r) { return r.id === id; })[0] || null;
+  }
+  // a record whose payment is over, one way or the other
+  function cardKeptOver(r) { return !!r && r.state !== 'kept' && r.state !== 'posting'; }
+  /* One record written, in place of the one with its id. Records that are over
+   * and older than CARD_KEPT_KEEP_MS fall out as it is; one that is waiting
+   * never does. Throws where the write does not land. */
+  function cardKeptPut(rec) {
+    var old = Date.now() - CARD_KEPT_KEEP_MS;
+    var rest = cardKeptAll().filter(function (r) {
+      return r.id !== rec.id && !(cardKeptOver(r) && (Number(r.endedAt) || Number(r.at) || 0) < old);
+    });
+    mustSave(CARD_KEPT, rest.concat([rec]));
+  }
+  // the same, where a write that does not land is said and not thrown: the record is a note on the row, which carries on
+  function cardKeptNote(rec) {
+    try { cardKeptPut(rec); } catch (e) { console.warn('[foxy] card: a kept payment’s record could not be written:', (e && e.message) || e); }
+  }
+  /* One record, as a copy: what the screens may read and not change. */
+  function cardKept(id) {
+    var r = cardKeptRow(String(id || ''));
+    return r ? JSON.parse(JSON.stringify(r)) : null;
+  }
+  /* The card payments waiting for the mint: kept, or being posted. */
+  function cardKeptWaiting() {
+    return cardKeptAll().filter(function (r) { return !cardKeptOver(r); }).map(function (r) {
+      return { id: r.id, sats: Math.round(Number(r.sats) || 0), date: Number(r.dates && r.dates.first) || 0, state: r.state, at: Number(r.at) || 0 };
+    });
+  }
+
+  /* The signed pieces, kept for the mint. They were written down as TAKEN
+   * first, as for any payment (the card has burned them, and this is the only
+   * copy), and each step after that is written before the next:
+   *   1. the pieces are held to the mint's keys, as any ecash is (`dleqAudit`);
+   *   2. the record of the whole swap (CARD_KEPT);
+   *   3. the row of the unclaimed store, which counts it in the balance;
+   *   4. the entry, received and settled, as a held payment's is: the money is
+   *      this phone's alone now, and the swap at the next connection is
+   *      bookkeeping unless a copy of the card got there first;
+   *   5. what a wallet that holds dollars owes itself in dollars, where it does;
+   *   6. the TAKEN row struck off.
+   * Something that fails before 3 leaves the TAKEN row, which `cardSettle` posts
+   * as an ordinary card payment once there is a route: money is never lost. A
+   * record written at 2 whose row at 3 did not land is struck again before the
+   * error goes on, so that it does not wait for a row that will never come (and
+   * where even that does not land, `cardKeptTidy` finds it). Nothing after 3
+   * throws. The swap's own row (CARD_SWAPS) stays: it is what
+   * makes the signed pieces this phone's to post (`cardSwapFor`). */
+  function cardKeepSigned(row, signed, card, w, o) {
+    var opts = o || {};
     if (dleqAudit(w, signed).invalid) {
       throw cardError('bad-pieces', 'The card gave pieces the mint did not sign. Nothing was taken.', { id: row.id });
     }
-    var already = unclaimed()[row.id];
-    if (!already) keepUnclaimed(row.id, row.token, row.worth, true);
-    logTx({ dir: 'in', sats: row.sats, feeSats: 0, settled: false, state: 'pending', trusted: true,
-            memo: 'card, offline', card: card.key, hash: 'req-' + row.id }, 'req-' + row.id);
-    mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
-    console.log('[foxy] offline: ' + row.sats + ' sats signed by a card taken on trust, to be swapped in when there is a route');
-    return { sats: row.sats, hash: 'req-' + row.id };
+    var planId = String(row.id).slice(5);
+    var copy = row.swapCopy || null;
+    var spec = (copy && copy.spec) || cardSwapRow(planId);
+    var outs = (copy && Array.isArray(copy.outputs)) ? copy.outputs : null;
+    if (!spec) console.error('[foxy] card: a payment kept offline has no swap on file; it is kept, and its swap is the TAKEN row’s to find');
+    else if (!outs) console.warn('[foxy] card: a payment kept offline was kept without its outputs; the swap is set out again from its counter');
+    var first = 0, last = 0;
+    (signed || []).forEach(function (p) {
+      var parts = cardSecretParts(p && p.secret);
+      var d = parts ? Number(parts.date) || 0 : 0;
+      if (d && (!first || d < first)) first = d;
+      if (d > last) last = d;
+    });
+    var worth = Math.round(Number(row.worth) || 0);
+    if (worth !== Math.round(Number(row.sats) || 0)) {
+      console.warn('[foxy] card: a payment kept offline comes to ' + worth + ' sats for ' + row.sats + ' asked; ' + worth + ' is what this phone will hold');
+    }
+    var fee = swapFeeFor(w, signed);
+    var rec = {
+      id: row.id, at: Date.now(), state: 'kept',
+      card: card.key, format: card.info.format, software: String(card.info.version || ''),
+      mint: mintOf(w), unit: 'sat',
+      sats: worth, asked: Math.round(Number(row.sats) || 0), fee: (isFinite(fee) && fee > 0) ? fee : 0, sum: sumProofs(signed),
+      request: { inputs: signed, outputs: (outs || []).map(function (x) { return { amount: satsOf(x.amount), id: spec ? spec.keyset : '', B_: String(x.B_) }; }) },
+      swap: spec ? { keyset: spec.keyset, counter: Number(spec.counter), amounts: (spec.amounts || []).slice(), digest: spec.digest } : null,
+      dates: { first: first, last: last },
+      refundKey: (card.record && card.record.refundKey) || '',
+      proven: Math.round(Number(card.offlineProven) || 0),
+      clock: { phone: Math.floor(Date.now() / 1000), used: cardOfflineNow(card, true) },
+      cacheAt: (mintCacheFor(mintUrl) || {}).at || 0,
+      tries: 0, triedAt: 0, why: '', endedAt: 0,
+      terms: opts.terms || null,
+    };
+    cardKeptPut(rec);
+    try {
+      if (!unclaimed()[row.id]) keepUnclaimed(row.id, row.token, worth, false, false, 'sat', { card: card.key, cardKept: true, date: first });
+    } catch (eRow) {
+      try { mustSave(CARD_KEPT, cardKeptAll().filter(function (r) { return r.id !== row.id; })); }
+      catch (eStrike) { console.warn('[foxy] card: a kept payment’s record outlived its row; the next settling sets it right'); }
+      throw eRow;
+    }
+    try {
+      var entry = /** @type {any} */ ({ dir: 'in', sats: worth, feeSats: 0, settled: true, state: 'success', memo: 'card, offline', card: card.key,
+                                        cardKept: 'waiting', cardDate: first, hash: 'req-' + row.id });
+      // the dollars a dollar receive was asked in (08c-units.js)
+      if (opts.terms) Object.assign(entry, termsFields(opts.terms));
+      logTx(entry, 'req-' + row.id);
+    } catch (eLog) { console.warn('[foxy] card: a payment kept offline was not written into history:', (eLog && eLog.message) || eLog); }
+    try {
+      // a wallet that holds dollars takes this in dollars once it has settled (08c-units.js), and its entry says so, as a request's does
+      var p = { id: row.id, unit: 'sat', mint: mintOf(w), purpose: 'card-offline', terms: opts.terms || null };
+      if (convertDue(p) && convertOwe(p, worth)) amendTx('req-' + row.id, { convert: 'owed' });
+    } catch (eConv) { console.warn('[foxy] card: a payment kept offline was not set to be taken in dollars:', (eConv && eConv.message) || eConv); }
+    try { mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); })); }
+    catch (eT) { console.warn('[foxy] card: a payment kept offline is still in the TAKEN store; the first to post it settles it'); }
+    console.log('[foxy] card: offline, ' + worth + ' sats signed over to this phone and kept, ' + rec.proven + ' piece(s) proved; to be swapped in at the first connection');
+    return { sats: worth, hash: 'req-' + row.id, date: first };
+  }
+
+  /* ---- settling a kept card payment (from `claimUnclaimed`) -------------------
+   *
+   * The unclaimed row is walked as any other, and three calls tell this store
+   * what became of it. `cardKeptPost(id)`, before the swap is asked for:
+   * 'post' (the record now says `posting`, with one more try), or 'drop' for a
+   * row whose payment is over already, which the walk lets go of unposted. The
+   * swap's own row is put back first where it has gone, since `receiveToken`
+   * posts the pieces only for the outputs on it. Posting a record found in
+   * `posting` (a crash while the mint was asked) again is safe: the request is
+   * the same, and the mint either makes it or says the pieces are spent, which
+   * is then found to be this phone's own doing (`cardKeptFailed`). */
+  /* The order the walk takes unclaimed rows in, after those taken on trust: a
+   * card's kept payments first, the nearest date first (its owner may take it
+   * back after it), the undated after them, and every other row after those,
+   * which are locked to this phone and have no date to race. */
+  function cardKeptOrder(a, b) {
+    var ka = !!(a && a.cardKept), kb = !!(b && b.cardKept);
+    if (ka !== kb) return ka ? -1 : 1;
+    if (!ka) return 0;
+    var da = Number(a.date) || Infinity, db = Number(b.date) || Infinity;
+    return da === db ? 0 : (da < db ? -1 : 1);
+  }
+
+  function cardKeptPost(id) {
+    var rec = cardKeptRow(id);
+    if (!rec) return 'post';
+    if (cardKeptOver(rec)) return 'drop';
+    var planId = String(id).slice(5);
+    try {
+      if (rec.swap && !cardSwapRow(planId)) {
+        mustSave(CARD_SWAPS, cardStore(CARD_SWAPS).concat([{ id: planId, keyset: rec.swap.keyset, counter: rec.swap.counter,
+                                                              amounts: rec.swap.amounts, digest: rec.swap.digest, at: rec.at }]), true);
+        console.warn('[foxy] card: a payment kept offline had lost its swap’s row; put back from its record');
+      }
+    } catch (eS) { console.warn('[foxy] card: a kept payment’s swap could not be put back:', (eS && eS.message) || eS); }
+    rec.state = 'posting';
+    rec.tries = (Number(rec.tries) || 0) + 1;
+    rec.triedAt = Date.now();
+    cardKeptNote(rec);
+    return 'post';
+  }
+
+  /* The mint swapped it: this phone's money, and the entry that said waiting
+   * says settled. Its swap's row goes, if `receiveToken` has not let it go, and
+   * so does a TAKEN row of the same pieces left by a tap cut off before it was
+   * struck: posted, that would be the same money in a second entry.
+   *
+   * `claim`: found settled anywhere but the walk's own success block (an answer
+   * found again, a restore, a tidy), which is where a wallet that holds dollars
+   * otherwise claims what landed for the swap into dollars (20-helpers.js). */
+  function cardKeptSettled(id, got, claim) {
+    var rec = cardKeptRow(id);
+    if (rec) {
+      rec.state = 'settled';
+      rec.why = '';
+      rec.endedAt = Date.now();
+      cardKeptNote(rec);
+    }
+    try { amendTx('req-' + id, { cardKept: 'settled' }); } catch (e) {}
+    cardSwapDrop(String(id).slice(5));
+    cardKeptStrikeTaken(id);
+    if (claim) {
+      try {
+        var n = Math.round(Number(got) || 0) || Math.round(Number(rec && rec.sats) || 0);
+        if (convertClaimed(id, n, (rec && rec.mint) || mintUrl, null)) {
+          amendTx('req-' + id, Object.assign({}, (convertRec(id) || {}).ask || {}, { convert: 'claimed' }));
+          convertTell(id);
+        }
+      } catch (eC) { console.warn('[foxy] card: a kept payment settled, and its swap into dollars could not be set:', (eC && eC.message) || eC); }
+    }
+    console.log('[foxy] card: a payment kept offline is settled: ' + Math.round(Number(got) || 0) + ' sats');
+  }
+
+  /* A TAKEN row with a kept payment's id: the tap's own copy, which `cardKeepSigned` strikes as its last step. Found
+   * still there, the kept record is the payment's, and that copy is struck. */
+  function cardKeptStrikeTaken(id) {
+    try {
+      var all = cardStore(CARD_TAKEN);
+      if (all.some(function (x) { return x && x.id === id; })) {
+        mustSave(CARD_TAKEN, all.filter(function (x) { return !(x && x.id === id); }));
+        console.warn('[foxy] card: a kept payment’s TAKEN copy was still there; struck, the kept payment is the one');
+      }
+    } catch (e) { console.warn('[foxy] card: a kept payment’s TAKEN copy could not be struck:', (e && e.message) || e); }
+  }
+
+  /* Kept payments put right by what else is on file, where a step that should have moved them did not land (a page
+   * gone between two writes, a write refused): run before the walk that settles them and before TAKEN rows are posted.
+   *
+   *   A TAKEN row of the same id next to a kept payment that has its row, or that is over: the kept payment is the
+   *   one, and the TAKEN copy goes (posted, the same money would be in two entries).
+   *   Waiting with no row in the unclaimed store:
+   *     with its TAKEN row: it never got as far as its row, the TAKEN row is the payment, and the record goes;
+   *     its entry saying how it ended: the record follows the entry;
+   *     its pieces swapped by this phone (`takenBefore`): settled;
+   *     anything else: its row is put back from the record, which holds the whole request, and the walk settles it. */
+  function cardKeptTidy() {
+    var rows = unclaimed();
+    var taken = cardStore(CARD_TAKEN);
+    var log = load(K.log, []);
+    cardKeptAll().forEach(function (rec) {
+      var id = rec.id;
+      var hasTaken = taken.some(function (x) { return x && x.id === id; });
+      try {
+        if (cardKeptOver(rec) || rows[id]) { if (hasTaken) cardKeptStrikeTaken(id); return; }
+        if (hasTaken) {
+          mustSave(CARD_KEPT, cardKeptAll().filter(function (r) { return r.id !== id; }));
+          console.warn('[foxy] card: a kept payment never got its row; its TAKEN row is the payment, and settles as one');
+          return;
+        }
+        var entry = (Array.isArray(log) ? log : []).filter(function (x) { return x && x.hash === 'req-' + id; })[0] || null;
+        var said = entry ? String(entry.cardKept || '') : '';
+        if (said === 'settled' || ((said === 'spent' || said === 'retired' || said === 'unwound') && entry.state === 'failed')) {
+          rec.state = said;
+          rec.endedAt = rec.endedAt || Date.now();
+          cardKeptNote(rec);
+          console.warn('[foxy] card: a kept payment’s record had not been told it was ' + said + '; it is now');
+          return;
+        }
+        var inputs = (rec.request && rec.request.inputs) || [];
+        var mine = takenBefore(inputs);
+        if (mine) { cardKeptSettled(id, mine.sats || rec.sats, true); return; }
+        if (!inputs.length) return;
+        keepUnclaimed(id, encodeToken(rec.mint || mintUrl, inputs, 'sat'), Math.round(Number(rec.sats) || 0), false, false, 'sat',
+                      { card: rec.card, cardKept: true, date: Number(rec.dates && rec.dates.first) || 0 });
+        console.warn('[foxy] card: a kept payment had lost its row; put back from its record, to be settled');
+      } catch (e) { console.warn('[foxy] card: a kept payment could not be put right:', (e && e.message) || e); }
+    });
+  }
+
+  // which kept payments have been said to be late in this session
+  var cardKeptLate = /** @type {Object<string, boolean>} */ ({});
+
+  /* Whether the mint has changed since the tap in a way the signed swap cannot
+   * follow: the keyset of its outputs gone, or a fee on its pieces other than
+   * the one it was set out with. Asked of a wallet that has the mint's own word
+   * (not one built from storage). */
+  function cardKeptChanged(rec, w) {
+    if (!w || !rec || !rec.request) return false;
+    try {
+      if (rec.swap && !keysetFor(w, rec.swap.keyset)) return true;
+      var fee = swapFeeFor(w, rec.request.inputs || []);
+      return isFinite(fee) && fee !== (Number(rec.fee) || 0);
+    } catch (e) { return false; }
+  }
+
+  /* Whether the swap of a kept payment was made at the mint after all, by
+   * this phone (an answer lost) or by anybody holding a copy of the request:
+   * the outputs it was signed for are this phone's, from its seed, and are
+   * asked for by their counters (NUT-09). Where the mint has signed every one
+   * of them it was made; those of them that are unspent and held nowhere here
+   * are put in the pile (none, where a restore has already done it). Resolves
+   * { made, sats }, and rejects where the mint could not be asked. */
+  function cardKeptFind(rec) {
+    var w = need();
+    var s = rec && rec.swap;
+    if (!s || !Array.isArray(s.amounts) || !s.amounts.length) return Promise.resolve({ made: false, sats: 0, added: 0 });
+    return restoreRanges(w, [{ keysetId: s.keyset, start: Number(s.counter), count: s.amounts.length }], 'a card payment kept offline', 1000)
+      .then(function (rows) {
+        var found = [];
+        rows.forEach(function (r) { found = found.concat(r.proofs || []); });
+        if (found.length < s.amounts.length) return Promise.resolve({ made: false, sats: 0, added: 0 });
+        return liveUnheld(w, found).then(function (live) {
+          if (live.length) addProofs(live, mintOf(w), w, 'sat');
+          return { made: true, sats: sumProofs(found), added: sumProofs(live) };
+        });
+      });
+  }
+
+  /* The mint did not swap a kept payment. Resolves null; the walk goes on.
+   *
+   *   Not an answer about the pieces (no route, the mint silent or busy, a
+   *   request never sent): back to `kept`, tried again at the next connection,
+   *   and said once a session to be late when its date is near.
+   *   The swap cannot be set out as signed, on a wallet built from storage: the
+   *   same, until the mint has been asked for its keys.
+   *   The swap cannot be set out, or is refused, by a mint whose keys or fee
+   *   have changed since: `retired`. The mint will never take that signature.
+   *   The mint says the outputs' keyset is inactive or unknown: `retired`.
+   *   (Those words from this phone's own library, setting the swap out, are not
+   *   the mint's: they go with the two rules above.)
+   *   The pieces spent: first, whether that was this phone (a lost answer, or
+   *   a copy of the request posted elsewhere, which makes this phone's own
+   *   outputs): `settled`. Otherwise `spent`, or `unwound` from just before its
+   *   date, when the card's owner may take them back.
+   *   The mint refuses the card's signature: over (`unwound` from just before
+   *   its date, when some mints stop honouring the card's key, else `retired`),
+   *   said as the signature and not as the mint's keys or the owner.
+   * A payment that is over is written down (`cardKeptEnd`).
+   *
+   * A row with no record (the store lost) is held to the same rules with a
+   * record made from the row, so that it ends as any other does and is not
+   * counted in the balance for good. */
+  function cardKeptFailed(id, one, e, text) {
+    var rec = cardKeptRow(id);
+    var why = String((e && (e.message || e.detail)) || e || '');
+    if (!rec) {
+      var info = null;
+      try { info = FoxyWallet.tokenInfo(text); } catch (eT) { info = null; }
+      console.warn('[foxy] card: a payment kept offline has no record; one is made from its row (' + why.slice(0, 60) + ')');
+      rec = { id: id, at: Date.now(), state: 'kept', card: String((one && one.card) || ''), mint: (info && info.mint) || mintUrl, unit: 'sat',
+              sats: Math.round(Number(one && (one.amount || one.sats)) || 0), request: { inputs: (info && info.proofs) || [], outputs: [] },
+              swap: null, dates: { first: Number(one && one.date) || 0, last: Number(one && one.date) || 0 },
+              tries: 1, triedAt: Date.now(), why: '', endedAt: 0, terms: null };
+    }
+    var now = Math.floor(Date.now() / 1000);
+    var first = Number(rec.dates && rec.dates.first) || 0;
+    var code = Number(e && (e.code || (e.response && e.response.code))) || 0;
+    var late = function () {
+      rec.state = 'kept';
+      rec.why = why.slice(0, 120);
+      cardKeptNote(rec);
+      console.warn('[foxy] card: a payment kept offline is not settled yet (' + why.slice(0, 80) + '); tried ' + rec.tries + ' time(s)');
+      if (first && now >= first - CARD_KEPT_WARN && !cardKeptLate[id]) {
+        cardKeptLate[id] = true;
+        cardKeptTell({ id: id, sats: rec.sats, cause: 'late', date: first });
+      }
+      return null;
+    };
+    var ours = function (sats) {
+      cardKeptSettled(id, sats, true);
+      dropUnclaimed(id);
+      return null;
+    };
+    /* The swap was found at the mint as this request went unanswered, and restored: made, and this phone's. (Belt and
+     * braces: posted again, the same request is spent and found to be this phone's by `takenBefore` below; this only
+     * spares that round trip.) */
+    if (e && e.recovered) return Promise.resolve(ours(rec.sats));
+    var spent = /already spent|nothing to take|token already|already claimed/i.test(why) || code === 11001 || notIssued(e) || !!(e && e.foxyMine);
+    if (spent) {
+      var mine = takenBefore((rec.request && rec.request.inputs) || []);
+      if (mine) return Promise.resolve(ours(mine.sats || rec.sats));
+      return Promise.resolve().then(function () { return FoxyWallet.recoverSwaps(); }).then(null, function () { return null; })
+        .then(/** @returns {Promise<any>} */ function () {
+          var again = takenBefore((rec.request && rec.request.inputs) || []);
+          if (again) return Promise.resolve({ made: true, sats: again.sats || rec.sats });
+          return cardKeptFind(rec);
+        }).then(function (found) {
+          if (found && found.made) {
+            console.log('[foxy] card: the mint had made a kept payment’s swap already; it is this phone’s');
+            return ours(rec.sats);
+          }
+          var back = first > 0 && now >= first - CARD_OWN_MARGIN;
+          return cardKeptEnd(id, rec, back ? 'unwound' : 'spent', why);
+        }, function (eFind) {
+          // the mint could not say whose the swap was: nothing is decided on that
+          why = why + ' (and its outputs could not be asked about: ' + String((eFind && eFind.message) || eFind).slice(0, 60) + ')';
+          return late();
+        });
+    }
+    /* The mint's own answer, and not this phone's library failing to set the swap out (`noCounters`), whose words can
+     * name a keyset too ("Could not resolve unknown keyset"): only the mint's answer ends a payment by its words. The
+     * library says a mint's 12001 and 12002 as a stale keyset. */
+    var mintSaid = !(e && e.noCounters) && (code >= 10000 || mintRefused(e) || !!(e && e.name === 'StaleKeysetError'));
+    if (code === 12001 || code === 12002 || (mintSaid && (/stale keyset/i.test(why) || (/keyset/i.test(why) && /inactive|unknown|not found/i.test(why))))) {
+      return Promise.resolve(cardKeptEnd(id, rec, 'retired', why));
+    }
+    if (mintSaid && /signature|witness|locktime/i.test(why)) {
+      return Promise.resolve(cardKeptEnd(id, rec, (first > 0 && now >= first - CARD_OWN_MARGIN) ? 'unwound' : 'retired', 'signature: ' + why, 'signature'));
+    }
+    /* The mint's fee or keys changed since the tap. Not decided by a wallet built from storage, whose keys may be old: the
+     * real connect says. Seen either by this wallet's own keys (the swap could not be set out as signed, or the fee on the
+     * pieces is not what it was), or by the mint refusing the swap as not adding up, which a request whose pieces and
+     * outputs are both fixed by a signature never will again (NUT error 11002). */
+    var cached = false;
+    try { cached = FoxyWallet.fromCache(); } catch (eC) { cached = false; }
+    var unbalanced = code === 11002 || /do not balance|not balanced|unbalanced/i.test(why);
+    if (!cached && (unbalanced || (((e && e.noCounters) || mintRefused(e)) && cardKeptChanged(rec, wallet)))) {
+      return Promise.resolve(cardKeptEnd(id, rec, 'retired', 'the mint\u2019s keys or fee changed: ' + why));
+    }
+    return Promise.resolve(late());
+  }
+
+  /* A kept payment that is over without being settled: the record says how,
+   * the entry turns failed (it was received; it is not), the row, the swap's row
+   * and any TAKEN copy go, and the person is told.
+   *
+   * What the payment was counted for is undone with it. A wallet that holds
+   * dollars owed itself its swap into dollars: kept as it is, with why, since
+   * nothing came to swap. A share of a split bill it paid was ticked at the tap
+   * (its entry was received): open again, with nothing paid on it, and its
+   * invoice can be paid as before. `kind`: 'signature' where the mint refused
+   * the card's signature, which is said as that. */
+  function cardKeptEnd(id, rec, state, why, kind) {
+    var first = Number(rec.dates && rec.dates.first) || 0;
+    rec.state = state;
+    rec.why = String(why || '').slice(0, 160);
+    rec.endedAt = Date.now();
+    cardKeptNote(rec);
+    try {
+      var failed = /** @type {any} */ ({ dir: 'in', sats: rec.sats, feeSats: 0, settled: false, state: 'failed', memo: 'card, offline — not settled', card: rec.card,
+                                         cardKept: state, cardDate: first, hash: 'req-' + id });
+      if (kind) failed.cardWhy = kind;
+      logTx(failed, 'req-' + id);
+    } catch (e) {}
+    dropUnclaimed(id);
+    cardSwapDrop(String(id).slice(5));
+    cardKeptStrikeTaken(id);
+    try {
+      var cv = convertRec(id);
+      if (cv && cv.state === 'owed') {
+        cv.state = 'kept';
+        cv.why = state;
+        putConvert(cv);
+        amendTx('req-' + id, { convert: 'kept', convertWhy: state });
+      }
+    } catch (eC) { console.warn('[foxy] card: a kept payment that did not settle; its swap into dollars could not be let go:', (eC && eC.message) || eC); }
+    var shares = [];
+    try {
+      var bill = load(K.split, null);
+      if (bill && Array.isArray(bill.rows)) {
+        bill.rows.forEach(function (r, i) { if (r && r.card === 'req-' + id) { r.paid = false; delete r.card; shares.push(i); } });
+        if (shares.length) { delete bill.done; mustSave(K.split, bill); }
+      }
+    } catch (eS) { console.warn('[foxy] card: a kept payment that did not settle; the share of the bill it paid could not be opened again:', (eS && eS.message) || eS); }
+    console.warn('[foxy] card: a payment kept offline did not settle (' + state + (kind ? ', ' + kind : '') + '): ' + rec.sats + ' sats'
+      + (shares.length ? '; ' + shares.length + ' share(s) of the bill open again' : ''));
+    var told = /** @type {any} */ ({ id: id, sats: rec.sats, cause: state, date: first });
+    if (kind) told.why = kind;
+    if (shares.length) told.shares = shares;
+    cardKeptTell(told);
+    return null;
+  }
+
+  function cardKeptTell(info) {
+    if (typeof FoxyWallet._onCardKeptLost !== 'function') return;
+    try { FoxyWallet._onCardKeptLost(info); } catch (x) { console.warn('[foxy] card-kept-lost watcher:', x && x.message); }
   }
 
   /* A payment the card left part way through is HELD, not given back at once.
@@ -4926,13 +5514,17 @@
     /* `o.holdFor`: the card is paying out of this phone (SEND from the card's own screen, 26f-flashcard.js), and what it pays
      * is not this phone's to keep. It is read as a till reads it, and the pieces the swap gives this phone are kept to one side
      * (`cardOutHold`) for the payment they are about to make, and for nothing else. Only a payment, with a route to the mint:
-     * never all of a card, its owner's lifting of the limit, a tap held for a write after, or a payment taken on trust. */
-    if (o.holdFor && (o.all || o.lift || o.hold || o.trusted)) return Promise.reject(cardError('bad-amount', 'A card pays out of this phone only as a payment.'));
+     * never all of a card, its owner's lifting of the limit, a tap held for a write after, or a payment kept with no route. */
+    if (o.holdFor && (o.all || o.lift || o.hold || o.offline || o.trusted)) return Promise.reject(cardError('bad-amount', 'A card pays out of this phone only as a payment.'));
     var w;
-    /* No route: refused, as it always was, unless this is a payment the person
-     * has said yes to taking on trust (`cardKeepOnTrust`). */
+    /* No route: refused, as it always was, unless this is a payment the screen
+     * asked for with no route (`o.offline`; `o.trusted`, its old name, is the
+     * same), which a card of one signature proves and signs over to this phone
+     * (`cardOfflineProve`, `cardKeepSigned`). Never all of a card, its owner's
+     * taking-off, a tap held for a write after, or a payment out of this phone. */
     var offline = !routeOpen();
-    if (offline && !(CARD_OFFLINE && o.trusted === true && !o.lift && !o.all)) {
+    var offlineOk = CARD_OFFLINE && (o.offline === true || o.trusted === true) && !o.lift && !o.all && !o.holdFor && !o.hold;
+    if (offline && !offlineOk) {
       try { need(); } catch (e2) { return Promise.reject(e2); }
       return Promise.reject(cardError('no-route', 'There is no connection to the mint, so the card was not asked for anything.'));
     }
@@ -4971,6 +5563,11 @@
       if (o.only && card.key !== o.only) throw cardError('wrong-card', 'That is not the card on the screen. Nothing was taken from it.');
       var no = cardUnusable(card, w);
       if (no) throw no;
+      /* With no route, only a card that signs once for a payment and keeps the mint's proofs (software 1.20): the one
+       * signature is what makes the payment this phone's alone, and the proofs are what say the money is the mint's. */
+      if (offline && (!cardIsAll(card) || !(card.info && card.info.proofs))) {
+        throw cardError('offline-old', 'This card is too old to pay a phone that is offline. Take this payment when this phone is online.');
+      }
       all4 = cardIsAll(card);
       ownChange = all4 && cardOwnChange(card) && !o.all && !offline;
       shaped = ownChange && cardIsShaped(card);
@@ -4994,7 +5591,7 @@
               ? { id: id, token: token, sats: Math.max(0, sum - cost), worth: Math.max(0, sum - cost), over: 0, all: true, card: card.key,
                   memo: a.memo || memo, at: Date.now(), partial: true }
               : { id: id, token: token, sats: 0, worth: sum, over: sum, all: false, card: card.key, memo: 'card, not completed',
-                  at: Number(a.at) || Date.now(), refund: true, resume: { want: a.want }, cardChange: madeBy };
+                  at: Number(a.at) || Date.now(), refund: true, resume: { want: a.want, proved: !!a.proved }, cardChange: madeBy };
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([kept]));
             if (a.all && (o.all || o.lift) && !offline) moreRows.push(kept);
           }
@@ -5005,7 +5602,7 @@
       own = cardMine(card);
       // this phone's own card, read and proved: what is on it now is written down, as at any other read
       if (own && card.proved) cardRemember(card, card.pieces, true);
-      var usable = cardUsable(card, w, own);
+      var usable = offline ? cardUsable(card, w, own, cardOfflineNow(card), true) : cardUsable(card, w, own);
       var have = usable.pieces;
       /* What a till may take is what is left of the card's day, read here and
        * not found out half-way: the PIN is not sent to a card that cannot cover
@@ -5044,6 +5641,13 @@
        * held from such a card is whole, or it is not this payment. */
       if (held && all4 && rest > 0) { letGoAfter = held; held = null; heldProofs = []; heldWorth = 0; heldFee = 0; rest = want; }
       if (held) console.log('[foxy] card: taking up a payment it left part way through: ' + heldWorth + ' of ' + want + ' sats signed, the rest now');
+      /* With no route, a payment the card left part way through is taken up only where what it signed was proved here
+       * before it was asked to (`proved`, on the row it was asked by). One begun while this phone was online was never
+       * proved; what it signed stays held, and goes back to the card if it is not finished online. */
+      if (offline && held && !(held.resume && held.resume.proved)) {
+        throw cardError('offline-unproven', 'This card cannot prove to a phone that is offline what it signed before it was taken away. That goes back on it once this phone is online.',
+                        { proven: 0, none: heldProofs.length, held: true });
+      }
       /* A piece the card was signing as it left: it may have signed it and
        * marked it spent with the answer lost in the air. Then the piece is gone
        * from the card and its signature from everywhere: it can never be spent
@@ -5076,7 +5680,8 @@
         picked = choose(capSets, tapCap);
         /* A set chosen for the change it brings back has the cheapest set with it, for a card that would wait (`cardRefillPick`).
          * Not from 1.12: the wait is by what leaves the card, which is the same for both sets, and the cheapest makes change too. */
-        cheaper = ownChange ? null : ((picked && /** @type {any} */ (picked).fallback) || null);
+        // (never with no route: only the set that was proved may be signed)
+        cheaper = (ownChange || offline) ? null : ((picked && /** @type {any} */ (picked).fallback) || null);
       }
       /* Taken up, and the card cannot make the rest (often because of a piece
        * lost as it left): the payment cannot be finished with this card, and
@@ -5113,7 +5718,7 @@
           + want + ' sats. Pay an amount it can make, or pay when this phone is online.', { balance: card.balance });
       }
       /* A one-signature card that holds enough, in pieces of more than one
-       * date (it was topped up near the end of its year): one payment is of one
+       * date (it was topped up near the end of its thirty days): one payment is of one
        * date's pieces, and no date's alone will do. Said as what it can pay. */
       if (all4 && (!picked || !picked.length) && !offline && sumProofs(have) >= rest) {
         var most = cardDateGroups(have).reduce(function (n, g) { return Math.max(n, sumProofs(g)); }, 0);
@@ -5140,7 +5745,7 @@
         if (usable.stale > 0 && card.balance >= rest) {
           throw own
             ? cardError('past-date', 'This card\u2019s date has passed. Its money comes back to this phone with TAKE IT BACK, and needs no card.', { stale: usable.stale })
-            : cardError('renew', 'This card must be renewed by its owner before it can pay.', { stale: usable.stale });
+            : cardError('renew', offline ? CARD_OFFLINE_NEAR : 'This card must be renewed by its owner before it can pay.', { stale: usable.stale });
         }
         throw cardError('not-enough', 'The card holds ' + card.balance + ' sats.', { balance: card.balance });
       }
@@ -5215,8 +5820,12 @@
                             sheetText: CARD_PIN_SHEET });
         }
       }
-      // chosen from the brief listing: the pieces themselves are asked for now, before the PIN
-      return cardFill(t, card, picked, w);
+      // chosen from the brief listing: the pieces themselves are asked for now, before the PIN; with no route, proved after
+      /* A payment held from an earlier tap and whole already (`picked` empty) signs nothing new, so there is nothing new to
+       * prove: what it holds was proved before the card was asked for it (`proved` on its row, held to above). */
+      return cardFill(t, card, picked, w).then(function () {
+        return (offline && picked && picked.length) ? cardOfflineProve(t, card, picked, w).then(function (n) { card.offlineProven = n; }) : undefined;
+      }).then(function () { return undefined; });
     }).then(function (early) {
       // a payment that ended above (a held one let go) has its answer already
       if (early !== undefined) return early;
@@ -5233,9 +5842,14 @@
                      all: !!o.all, card: card.key, memo: memo, at: Date.now(), limited: !!(card.day && card.day.limited) };
         // paying out of this phone: what the swap gives is held for the payment (`cardSwapTaken`), and a late answer goes back to the card (`cardSettle`)
         if (o.holdFor) kept.send = true;
+        /* With no route: the outputs as they were signed for and the swap's row, for the kept payment's record (`cardKeepSigned`),
+         * which keeps the whole request. Not written with the TAKEN row: the record is made from this in memory. */
+        var swapCopy = offline ? { outputs: plan.outputs.map(function (x) { return { amount: x.amount, B_: x.B_ }; }),
+                                   spec: { id: plan.id, keyset: plan.keyset, counter: plan.counter, amounts: plan.amounts.slice(), digest: plan.digest } } : null;
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([kept]));
+        if (swapCopy) Object.defineProperty(kept, 'swapCopy', { value: swapCopy, enumerable: false });
         return kept;
-      }, { want: want, all: !!o.all, memo: memo, own: ownChange, exact: !!o.holdFor },
+      }, { want: want, all: !!o.all, memo: memo, own: ownChange, exact: !!o.holdFor, proved: offline },
       (cheaper && !o.all) ? { group: cheaper, fill: function () { return cardFill(t, card, cheaper, w); } } : null);
     }).then(function (answer) {
       // when the card had signed, to say in the log how long after it its sheet was told to go
@@ -5270,9 +5884,9 @@
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([row]));
       }
       if (offline) {
-        var kept = cardKeepOnTrust(row, signed, card, w);
+        var kept = cardKeepSigned(row, signed, card, w, o);
         on('done');
-        return { sats: kept.sats, hash: kept.hash, trusted: true, change: null };
+        return { sats: kept.sats, hash: kept.hash, kept: true, date: kept.date, change: null };
       }
       /* The card has done its part, and the mint's work takes as long as Tor
        * does: it is let go now, and the person is told so, and the rest is
@@ -5334,7 +5948,9 @@
         var keep = { id: 'card-' + piecesFingerprint(holding),
                      token: encodeToken(mintOf(w), holding, 'sat'),
                      sats: 0, worth: sumProofs(holding), over: sumProofs(holding), all: false, card: card.key,
-                     memo: 'card, not completed', at: Date.now(), refund: true, resume: { want: want, torn: torn } };
+                     memo: 'card, not completed', at: Date.now(), refund: true,
+                     // proved here with no route, all of it: this tap's pieces, and those held from before
+                     resume: { want: want, torn: torn, proved: !!(offline && (!heldProofs.length || (held && held.resume && held.resume.proved))) } };
         mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && held && x.id === held.id); }).concat([keep]));
         console.warn('[foxy] card: the card signed for ' + some.length + ' of ' + picked.length + ' pieces and left; '
           + sumProofs(holding) + ' of ' + want + ' sats are held for its next tap, which signs the rest');

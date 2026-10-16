@@ -248,6 +248,12 @@
     _onTrustLost: null,
     /** @type {?function(any): void} */
     _onTrustSettled: null,
+    /* A card's payment taken with no route that will not settle, or is late to: { id, sats, cause, date }, `cause` one of
+     * spent, retired, unwound (it is over, and out of the balance) or late (the mint has not answered and its date is near;
+     * said once a session). `date` is the pieces' date in seconds, 0 for none (08a-flashcard.js, `cardKeptFailed`). */
+    /** @type {?function(any): void} */
+    _onCardKeptLost: null,
+    onCardKeptLost: function (fn) { FoxyWallet._onCardKeptLost = fn; },
     onTrustSettled: function (fn) { FoxyWallet._onTrustSettled = fn; },
     /** @type {?function(any): void} */
     _onLateClaim: null,

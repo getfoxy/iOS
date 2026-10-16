@@ -131,6 +131,8 @@
         if (W.onChangeStuck) W.onChangeStuck((info) => this.changeStuckCard(info));
         if (W.onChangeMaking) W.onChangeMaking((info) => this.changeMaking(info));
         if (W.onTrustLost) W.onTrustLost((info) => this.trustLostCard(info));
+        // a card's payment taken offline that will not settle now, or is near its date unsettled (11-cards.js)
+        if (W.onCardKeptLost) W.onCardKeptLost((info) => this.cardKeptLostCard(info));
         if (W.onTrustSettled) W.onTrustSettled((info) => this.trustSettled(info));
         // the launch screen has gone: the tap may listen now (26d-tap.js)
         if (!this._gateDownHeard) {
@@ -342,6 +344,14 @@
       this.listenWallet();
       this.loadHistory();
       const swept = W.resumeSweeps ? W.resumeSweeps().catch(() => {}) : null;
+      /* A card's payment taken while this phone was offline is settled the moment it is back with a route: the sweeps of
+       * a return do not claim, and a payment kept that way must reach the mint before its date. Only for those rows, so a
+       * return with none is as it was. */
+      const cardKept = (() => { try { return !!(W.cardKeptWaiting && W.cardKeptWaiting().length && W.cardOnline && W.cardOnline()); } catch (e) { return false; } })();
+      if (cardKept && W.claimUnclaimed) {
+        Promise.resolve(swept).then(() => W.claimUnclaimed())
+          .then((took) => { if (took) { this.refreshBalance(); this.loadHistory(); } }, () => {});
+      }
       return Promise.race([
         Promise.resolve(this.resumeLoad()).catch(() => {}),
         new Promise(r => setTimeout(r, 20000)),

@@ -86,8 +86,8 @@
     done: 'Done.',
   };
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  // how near its date a card's own phone starts saying RENEW
-  FC_RENEW_DAYS = 30;
+  // how near its date a card's own phone starts saying RENEW: a card's money is good for thirty days, and is renewed with twenty left
+  FC_RENEW_DAYS = 20;
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
   /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
@@ -98,18 +98,19 @@
   FC_CHECK_ASKS = 12;
   // how long after a card screen has come down a confirmation waits to be sure the card flow has not gone straight on to its next screen
   FC_END_SETTLE_MS = 300;
-  /* Cards are cash, for now.
+  /* Every new card can be taken back.
    *
-   * The card and the wallet can do more: a card set up as recoverable names a
-   * key of the phone that loaded it, and that phone can take its money back
-   * a year later if the card is lost or blocked. It is switched off here, in
-   * the one place that offers it: a new card is set up as cash with nothing
-   * asked, the list of cards this phone could take back is not shown, and
-   * with no list there is no screen for a card that has not been tapped.
-   * True brings all three back as they were (tests/flashcard-screens.js runs
-   * both ways). A card set up as recoverable by anything else still reads
-   * and pays as what it is. */
-  FC_RECOVERABLE = false;
+   * A card set up here names a key of the phone that loaded it, and that phone
+   * can take its money back after the pieces' date (thirty days from when it
+   * was put on) if the card is lost or blocked. Set-up asks nothing about it:
+   * there is no "like cash" card to choose. This switch is the list that makes
+   * that true for a person: the cards this phone loaded are shown on the
+   * FLASHCARD screen, with TAKE BACK for any past its date, and the screen
+   * with no card on it is opened first, since a lost card cannot be tapped.
+   * False hides the list and that screen as they once were
+   * (tests/flashcard-screens.js runs both ways); a card is set up recoverable
+   * either way. A cash card set up before still reads and pays as what it is. */
+  FC_RECOVERABLE = true;
 
   fcW() {
     const W = window.FoxyWallet;
@@ -603,8 +604,10 @@
       'not-enough': () => ({ tone: 'warn', title: 'NOT ENOUGH ON THE CARD',
         reason: 'It holds ' + this.fcSats(e.balance) + '.' + safe }),
       'other-mint': () => ({ tone: 'warn', title: 'A DIFFERENT MINT', reason: said }),
+      /* Online, a card whose money is a day from its date; offline, one with under a week left, which the wallet says in
+       * its own words (the owner can take it back after the date, and a payment kept here must settle before then). */
       'renew': () => ({ tone: 'warn', title: 'CARD NEEDS RENEWING',
-        reason: 'Its owner must renew it with their own phone before it can pay.' }),
+        reason: /offline/.test(said) ? said + safe : 'Its owner must renew it with their own phone before it can pay.' }),
       'past-date': () => ({ tone: 'warn', title: 'ITS DATE HAS PASSED',
         reason: 'This phone can take this card’s money back with no card.',
         chip: 'FLASHCARD › CARDS YOU LOADED' }),
@@ -622,7 +625,7 @@
        * what to do about it, which is to charge it in parts. */
       'tap-limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S PER TAP LIMIT',
         reason: (e.left !== undefined ? this.fcTapRefusal(e) : said) + safe }),
-      /* A card topped up near the end of its year holds money of two dates,
+      /* A card topped up with under twenty days left on its money holds money of two dates,
        * and one signature is for one of them: said before the PIN was sent,
        * with the most it can pay at once. */
       'two-dates': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS',
@@ -672,6 +675,13 @@
       // offline, only an exact set of the card's pieces can be taken: said before the PIN, so nothing was taken
       'inexact': () => ({ tone: 'warn', title: 'NO CHANGE WHILE OFFLINE', reason: said + safe }),
       'bad-pieces': () => ({ tone: 'warn', title: 'THE CARD’S PIECES ARE NOT GOOD', reason: said }),
+      /* With no route, a card pays only with money it proves with the mint's own proofs (software 1.20, format 4): the
+       * card is too old for that, cannot prove it, or holds money the mint never signed. All three are said before the
+       * PIN, so nothing was taken; the first two can still pay this phone once it is online. */
+      'offline-old': () => ({ tone: 'warn', title: 'TOO OLD TO PAY OFFLINE', reason: said + safe }),
+      // (or what it signed before it left, which is not "nothing taken": that goes back on it once this phone is online)
+      'offline-unproven': () => ({ tone: 'warn', title: 'CANNOT PROVE ITS MONEY', reason: said + (e.held ? '' : safe) }),
+      'fake': () => ({ title: 'NOT THE MINT’S MONEY', reason: said }),
       /* The mint refused after the card had signed. The card burned the pieces
        * when it signed, so it has to be tapped again to have them put back (the
        * next tap clears the places and loads the same pieces). Its day stays
@@ -849,9 +859,9 @@
   }
 
   /* The entry that will pay a share of a split bill, noted on the share's row in the bill's ledger (`splitNoteCard`) as soon as it has a
-   * name: when the card has signed, before the mint has answered, or when a payment is taken on trust. However late that entry settles
-   * (the mint's answer after CHECKING was closed, found by the wallet's own settling, or a payment taken on trust once it is swapped),
-   * the ledger ticks the share then, and the screens follow it as they follow a share paid by its invoice (`spSyncPaid`). A failure to
+   * name: when the card has signed, before the mint has answered, or when the card has paid while this phone is offline. However late
+   * that entry settles (the mint's answer after CHECKING was closed, or found by the wallet's own settling; a card's payment taken
+   * offline is received at once), the ledger ticks the share then, and the screens follow it as they follow a share paid by its invoice (`spSyncPaid`). A failure to
    * note it does not stop the payment: the share is then ticked only if the mint answers while the screen is waiting (`fcShareMoved`). */
   fcShareNote(share, hash) {
     const W = this.fcW();
@@ -923,8 +933,11 @@
    * anything is asked of it), so the invoice the sats pay is one the same mint made. That is the common case of the mint
    * paying its own invoice, which it settles in its own books with no Lightning payment in between.
    *
-   * Offline there is no invoice to pay, and no way to make dollars: the bitcoin receive's offer to take the card on trust
-   * is not made, and the words are the ones a card payment with no connection always has.
+   * Offline there is no invoice to pay. Where this build can turn sats into dollars later (`W.convertOne`, a wallet with
+   * two balances), the card pays the sats the dollars asked come to at this phone's own last price, and that price is kept
+   * with the payment (`terms`) so the sats become dollars once the payment has settled with the mint. A price too old to
+   * work that out from is refused before the card is touched. Without that build, or with the card's switch off, the
+   * words are the ones a card payment with no connection always has.
    *
    * The invoice lives as long as the mint said it would (the clock on screen, `recvExpiresAt`), and a melt sent after
    * that is refused. A tap, a PIN and the mint's answer take seconds, so a code with less than a quarter of a minute left
@@ -932,6 +945,25 @@
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
+    if (W && W.cardOnline && !W.cardOnline()) {
+      if (!(W.cardOffline && W.cardOffline()) || !W.convertOne || !this.fcW()) { this.offlineNo('A card payment'); return; }
+      const cents = Math.round(Number(s.recvAmount) || 0);
+      const lp = (W.lastPrice && W.lastPrice()) || { rate: 0, at: 0, ageMs: 0 };
+      if (!(lp.rate > 0) || (W.priceTooOld && W.priceTooOld(lp.at))) {
+        this.blockedCard('priceTooOld', {
+          tone: 'warn', title: 'BITCOIN PRICE TOO OLD',
+          reason: (lp.rate > 0 ? 'This phone last saw the Bitcoin price ' + this.agoWords(lp.ageMs) + '. That is too old'
+            : 'This phone has not seen the Bitcoin price, so it has nothing') + ' to work out what to take from the card.',
+          chip: 'Nothing was taken. Get online once and Foxy has a new price.',
+        });
+        return;
+      }
+      if (!(cents > 0)) { this.toast('Enter an amount first.', true); return; }
+      const sats = Math.round(cents / 100 / lp.rate * 1e8);
+      // (no invoice to melt: `usd` stays null, and the sats are kept as bitcoin until they settle and convert)
+      this.fcPayStart(sats, true, null, null, null, { usd: cents, rate: lp.rate, ageMs: lp.ageMs, seenAt: lp.at, convert: true });
+      return;
+    }
     const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
     const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
     if (!(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
@@ -970,9 +1002,11 @@
 
   /* What the screen behind the card's sheet says the payment is: the dollars asked, with the sats the card pays under
    * them, for a dollar receive; and for every other payment what it always said. */
-  fcPayLook(sats, usd) {
-    if (!usd) return { amount: this.fcPrice(sats) };
-    return { amount: '$' + this.usd(Math.round(Number(usd.cents) || 0) / 100), amountSub: this.fcSats(sats) };
+  /* An offline dollar receive (`terms`, from `payUsdByCard`) is said the same way, in the dollars asked: it has no invoice. */
+  fcPayLook(sats, usd, terms) {
+    const cents = usd ? usd.cents : (terms && terms.usd > 0) ? terms.usd : null;
+    if (cents === null) return { amount: this.fcPrice(sats) };
+    return { amount: '$' + this.usd(Math.round(Number(cents) || 0) / 100), amountSub: this.fcSats(sats) };
   }
 
   /* The card's sats are this phone's: their entry is not a payment of its own to announce (the dollars are), and they pay
@@ -1107,13 +1141,14 @@
    * that left part way), so that it is the same share that is ticked when the mint says paid. */
   fcPayBegin(sats, share) {
     const W = this.fcW();
-    /* No route to the mint: the mint cannot say paid. The card may still be taken,
-     * as plain ecash is on trust, if the person says so, in front of the amount,
-     * before the PIN is asked for (the HIGH RISK card: until this phone is online,
-     * whoever gave it can still spend it). Only an exact set of the card's pieces
-     * is taken then, which the tap finds out before the PIN is sent. */
-    if (W.cardOnline && !W.cardOnline() && W.cardOffline && W.cardOffline()) {
-      W.cardOfflineAsk(sats).then((yes) => { if (yes) this.fcPayStart(sats, true, share); });
+    /* No route to the mint: a card still pays, with nothing asked of the person. The wallet takes it only from a card
+     * that proves its money with the mint's own proofs and has a week or more left on it, and only an exact set of its
+     * pieces; the card signs the swap over to this phone, which nobody else can use, and this phone settles it with the
+     * mint when it is online (08a-flashcard.js, `cardKeepSigned`). A card it cannot take so is refused before its PIN.
+     * The switch off (`cardOffline`), a card payment needs a connection, as any other does. */
+    if (W.cardOnline && !W.cardOnline()) {
+      if (W.cardOffline && W.cardOffline()) { this.fcPayStart(sats, true, share); return; }
+      this.offlineNo('A card payment');
       return;
     }
     if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
@@ -1123,51 +1158,52 @@
   /* The CARD button: the sheet comes up and the card is tapped at once, with no PIN asked for first. A card
    * with no PIN, or one whose no PIN limit covers the payment, pays in this tap. Any other says so (the sheet
    * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
-   * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
-   * it with no route. */
-  /* `usd`: a dollar receive this payment is for (`payUsdByCard`), carried as `share` and `send` are, or none. */
-  fcPayStart(sats, trusted, share, send, usd) {
-    this.fcPayRun(sats, '', trusted, false, share, send, usd);
+   * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `offline`: this phone has no route, and the card
+   * signs the payment over to it to be settled later (`fcPayBegin`). */
+  /* `usd`: a dollar receive this payment is for (`payUsdByCard`), carried as `share` and `send` are, or none. `terms`: an
+   * offline dollar receive's price, kept with the payment so its sats become dollars once it settles (`payUsdByCard`). */
+  fcPayStart(sats, offline, share, send, usd, terms) {
+    this.fcPayRun(sats, '', offline, false, share, send, usd, terms);
   }
 
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. */
-  fcPayAsk(sats, trusted, resuming, share, send, usd) {
+  fcPayAsk(sats, offline, resuming, share, send, usd, terms) {
     // a dollar receive: the dollars asked, with the sats the card pays after them
-    const figure = usd ? this.fcPayLook(sats, usd).amount + ' (' + this.fcSats(sats) + ')' : this.fcBoth(sats);
+    const figure = (usd || (terms && terms.usd > 0)) ? this.fcPayLook(sats, usd, terms).amount + ' (' + this.fcSats(sats) + ')' : this.fcBoth(sats);
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To pay ' + figure + '. The card\u2019s owner types its PIN here.',
       cta: 'TAP AGAIN',
-    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share, send, usd));
+    }, (pin) => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms));
   }
 
   /* A card payment is two taps, and is said as two every time, so a person
    * learns one way of paying: SEND (the card signs no more than two pieces and
    * is let go), VERIFY (this screen, while the mint swaps them), RECEIVE (the
    * change goes back on, with no PIN) and COMPLETE. Paid exactly, there is
-   * nothing to receive, and the payment is complete at once. Taken on trust
-   * with no route, it is one tap: only an exact set is taken then. */
+   * nothing to receive, and the payment is complete at once. With no route
+   * it is one tap: only an exact set is taken then. */
   /* `resuming`: the same payment, taken up again after the card left part way
    * through: the card signs only what it had not (08a-flashcard.js, `cardHeld`). `share`: the share of a split bill
    * this payment is for (`payShareByCard`), or none. `send`: the card paying out of this phone (SEND on the card's own
    * screen, `fcOutNext`): the tap is a till's in every way, and what the card pays is held for that payment (`fcOutPay`)
    * and is not this phone's; { to, key, inv | found, quote }. */
-  fcPayRun(sats, pin, trusted, resuming, share, send, usd) {
+  fcPayRun(sats, pin, offline, resuming, share, send, usd, terms) {
     const W = this.fcW();
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
     const opt = { paying: true, taken: true, share: share || null, send: send || null,
-                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share, send, usd) : this.fcPayStart(sats, trusted, share, send, usd)) };
+                  again: () => (pin ? this.fcPayAsk(sats, offline, false, share, send, usd, terms) : this.fcPayStart(sats, offline, share, send, usd, terms)) };
     // a dollar receive: when the mint has said paid, the sats pay its invoice (`fcMoved`, `fcUsdPay`)
     if (usd) opt.usd = usd;
-    const look = this.fcPayLook(sats, usd);
+    const look = this.fcPayLook(sats, usd, terms);
     /* A new payment: a confirmation still held for the one before (its change
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
     // (paying out of this phone, nobody here is being paid: no PAYMENT RECEIVED is held for it)
     const tapO = { amount: look.amount, lost: !!resuming,
-                   sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: !send,
+                   sheet: resuming ? 'Hold to finish paying' : '', warm: !offline, paying: !send,
                    /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                    again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
                      : (e && e.card === 'gone') ? 'Tap behind the phone.' : '' };
@@ -1188,18 +1224,24 @@
                    if (share && info && info.hash && (step === 'checking' || step === 'mint')) this.fcShareNote(share, info.hash);
                    on(step, info);
                  };
-                 return W.cardPay(link, Object.assign({ sats, pin, on: onPay, progress, trusted: !!trusted, keepSheet: !trusted },
-                                                      send ? { holdFor: true, only: send.key } : {}))
+                 return W.cardPay(link, Object.assign({ sats, pin, on: onPay, progress, offline: !!offline, keepSheet: !offline },
+                                                      send ? { holdFor: true, only: send.key } : {}, terms ? { terms } : {}))
                    .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
         // paying out of this phone: the card has paid this phone, and the payment it is for is made now
         if (send) { this.fcOutPay(r, send, sats); return; }
         this.haptic && this.haptic('success');
-        /* Taken on trust: kept, and not paid. The mint has not been asked, so
-         * nothing here says paid; it settles when this phone is online. A share of a bill has the entry noted on its
-         * row, and is ticked when that entry has been swapped and not before. */
-        if (r && r.trusted) { if (opt.share) this.fcShareNote(opt.share, r.hash); this.fcTrusted(r); return; }
+        /* With no route: the card proved its money and signed it over to this phone, which keeps what it signed and
+         * settles it with the mint when it is online. It is received now, and counts in the balance: the receive closes and
+         * the history pass says PAYMENT RECEIVED, as for any payment. A share of a bill has the entry noted on its row,
+         * and is ticked from it, since the entry is settled. */
+        if (r && r.kept) {
+          if (opt.share) this.fcShareNote(opt.share, r.hash);
+          this.fcMoved(opt);
+          this.toast('Paid by card while this phone is offline. Foxy settles it with the mint when it is online.');
+          return;
+        }
         /* The mint has given this phone its own pieces: a share of a bill is paid, and the bill's screens say so
          * before anything else is done with the payment, which is not announced on top of them. */
         if (opt.share) this.fcShareMoved(opt.share, r && r.hash);
@@ -1230,19 +1272,19 @@
         this.fcDropConfirm();
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share, send, usd); return; }
+        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, offline, resuming, share, send, usd, terms); return; }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
          * sheet comes up by itself instead, once iOS has taken the last down. */
         if (e && e.card === 'interrupted' && e.resumable) {
-          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share, send, usd); else this.fcResumeNow(sats, pin, trusted, share, send, usd);
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, offline, share, send, usd, terms); else this.fcResumeNow(sats, pin, offline, share, send, usd, terms);
           return;
         }
         // taken up, and the card could not make the rest: what it signed goes back, and why is said
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
-        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share, send, usd); return; }
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, offline, share, send, usd, terms); return; }
         this.fcFailed(e, opt);
       });
   }
@@ -1252,11 +1294,11 @@
    * payment is used again, as it is for every tap of the one payment. And a
    * settling once the hold could be stale, so one nobody came back for goes
    * back to the card even with Foxy left open. */
-  fcResumeNow(sats, pin, trusted, share, send, usd) {
+  fcResumeNow(sats, pin, offline, share, send, usd, terms) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share, send, usd), 2500);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, offline, true, share, send, usd, terms), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
-    const look = this.fcPayLook(sats, usd);
+    const look = this.fcPayLook(sats, usd, terms);
     this._fcTapO = { amount: look.amount, paying: !send, lost: true };
     if (look.amountSub) this._fcTapO.amountSub = look.amountSub;
     this.fcStage('reading');
@@ -1287,13 +1329,13 @@
 
   /* Held, and the tap to finish read no card: said, with the tap again, and
    * CANCEL, which gives back what the card signed (`fcLetGo`). */
-  fcHeldCard(sats, pin, trusted, share, send, usd) {
+  fcHeldCard(sats, pin, offline, share, send, usd, terms) {
     this.fcHeldClock();
     this.blockedCard('fc-held', {
       tone: 'warn', title: 'NOT PAID YET',
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
-      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share, send, usd),
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, offline, true, share, send, usd, terms),
       shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
     });
   }
@@ -1324,19 +1366,6 @@
         });
       }
     }, () => {});
-  }
-
-  fcTrusted(r) {
-    this.blockedCard('fc-trusted', {
-      tone: 'warn', title: 'TAKEN ON TRUST',
-      reason: this.fcSats(r.sats) + ' was taken from the card, but this phone is offline, so the mint has not been asked. '
-        + 'It is not paid until this phone is online and the mint has swapped it. Until then it waits in HISTORY, pending.',
-      chip: 'Whoever gave it can still spend it until then.',
-      shut: { label: 'OK', tap: () => { if (this.state.screen === 'confirm') this.closeReceive(); } },
-    });
-    // the pending entry is in HISTORY now, and the balance counts what is waiting
-    this.refreshBalance();
-    this.loadHistory();
   }
 
   /* The change for a payment could not be made (the mint did not make it):
@@ -1869,6 +1898,8 @@
         this.fcShow(card, open);
         // change a till never handed over has been fetched and put on: said in passing, as change put back always is
         if (card && card.owes && card.owes.wrote > 0) { this.haptic && this.haptic('success'); this.refreshBalance(); this.loadHistory(); }
+        // its owner, online, and its money near its date: the renewal is offered now
+        this.fcRefreshMaybe(card);
       }, (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
@@ -2075,8 +2106,9 @@
    * A card of software 1.16 and on is set up with no PIN and asked for none: SET UP, then one tap that writes its record and,
    * last, its owner, then the card's screen, with a line saying it is set up. A PIN is added later from that screen (ADD PIN,
    * `fcPinAdd`), whenever its owner wants one. A card before 1.16 cannot be without a PIN, nor can one that has a PIN already (a
-   * set-up cut short after it): those are asked for one first, typed twice, and the one tap writes it as well. Then, while
-   * FC_RECOVERABLE offers it, whether a lost card's money can come back; and nothing is read between the PIN and the tap and
+   * set-up cut short after it): those are asked for one first, typed twice, and the one tap writes it as well. Every card
+   * is set up so that this phone can take its money back if it is lost, with nothing asked about it (the question IF THE
+   * CARD IS LOST, `fcSetUpKind`, is no longer reached); and nothing is read between the PIN and the tap and
    * nothing after it (a notice that this phone becomes the owner, and one that
    * the card is cash, were two screens before a card that holds nothing; what
    * they said is in docs/CARD.md). No limit is asked for or suggested: a new
@@ -2097,14 +2129,14 @@
       subtitle: 'So a mistyped digit does not become the card’s PIN.',
     }, (b) => {
       if (a !== b) { first('Those did not match. Start again.'); return; }
-      if (this.FC_RECOVERABLE) this.fcSetUpKind(a); else this.fcSetUpRun(a, false);
+      this.fcSetUpRun(a, true);
     }));
     first('');
   }
 
   // the tap that sets a card up with no PIN: nothing is asked first
   fcSetUpNoPin() {
-    if (this.FC_RECOVERABLE) this.fcSetUpKind(''); else this.fcSetUpRun('', false);
+    this.fcSetUpRun('', true);
   }
 
   fcSetUpRun(pin, recoverable) {
@@ -3002,7 +3034,7 @@
     const fc = this.state.fc;
     this.fcPinOr({
       title: 'CARD PIN',
-      subtitle: 'To renew ' + this.fcBoth(fc.balance) + ' for another year.',
+      subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days: ' + this.fcBoth(fc.balance) + '.',
       cta: 'RENEW',
     }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance), warm: true },
       (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
@@ -3015,6 +3047,40 @@
         this.loadHistory();
         this.fcFailed(e, { again: () => this.fcRenew() });
       }));
+  }
+
+  /* Its owner's phone, online, reads a card whose money has under FC_RENEW_DAYS left: it is offered the renewal at once,
+   * since a card with under a week left is refused by a phone that is offline, and one a day from its date by any phone.
+   * RENEW is `fcRenew` (its PIN, then the tap); LATER leaves the line on the card's screen that offers it too. Asked once
+   * for a card in a session, so a card read again and again is not asked again and again. The whole card is renewed:
+   * one payment signs pieces of one date, and a card of two dates could pay only part of what it holds at once. Not for a
+   * card past its date (that is TAKE BACK), one at another mint, a locked one, or one with money still owed to it to be
+   * written, which its next tap puts on first. */
+  fcRefreshMaybe(card) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    if (!W || !card || !fc || fc.key !== card.key || this.state.screen !== 'flashcard') return;
+    this._fcRefreshAsked = this._fcRefreshAsked || {};
+    if (this._fcRefreshAsked[fc.key]) return;
+    if (!(W.cardOnline && W.cardOnline()) || this.offlineNow()) return;
+    // (a locked card cannot give its money up to be renewed until its owner has opened it)
+    if (!(fc.mine && fc.recoverable && fc.balance > 0) || fc.locked) return;
+    const now = Math.floor(Date.now() / 1000);
+    if (!(fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400 && fc.first > now + 600)) return;
+    const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!here || (there && there !== here)) return;
+    const owed = ((W.cardOwed && W.cardOwed()) || []).some((r) => r && r.card === fc.key);
+    const coming = !!(card.owes && card.owes.parts && card.owes.parts.some((x) => x && x.state !== 'put'));
+    if (owed || coming) return;
+    this._fcRefreshAsked[fc.key] = true;
+    console.log('[foxy] card: its money has ' + Math.floor((fc.first - now) / 86400) + ' days left; its owner is offered the renewal');
+    this.blockedCard('fc-renew-ask', {
+      tone: 'ask', title: 'RENEW THIS CARD',
+      reason: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days.',
+      retry: 'RENEW', go: () => this.fcRenew(),
+      shut: { label: 'LATER' },
+    });
   }
 
   /* ---- a lost card ---------------------------------------------------------- */
@@ -3641,7 +3707,7 @@
     /* The card's mint and what it holds are in the pill, as home's are, and
      * under what it holds how much of its limit is left. LIMITS is where
      * it is changed. */
-    // a card in the last month before its date: said where the money waiting for a card is said, and renewed from there
+    // a card with under FC_RENEW_DAYS left before its date: said where the money waiting for a card is said, and renewed from there
     if (on && fc && near && !past && fc.balance > 0) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }

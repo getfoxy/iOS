@@ -1058,6 +1058,8 @@
        * first, was then refused by the mint for ecash the first had just
        * taken. */
       if (claimingLate) return claimingLate;
+      // a card's payments kept with no route, put right first where a write between two of their steps did not land (08a-flashcard.js)
+      try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       var all = unclaimed(), ids = Object.keys(all);
       if (!ids.length) { claimHeldSaid = -1; return Promise.resolve(0); }
       /* With no route there is nobody to ask, so nobody is asked.
@@ -1112,7 +1114,7 @@
        * else can still spend, so they do not wait behind ecash that is locked
        * to this phone and safe where it is. */
       ids.sort(function (a, b) {
-        return (all[b] && all[b].trusted ? 1 : 0) - (all[a] && all[a].trusted ? 1 : 0);
+        return (all[b] && all[b].trusted ? 1 : 0) - (all[a] && all[a].trusted ? 1 : 0) || cardKeptOrder(all[a], all[b]);
       });
       var walk = ids.reduce(function (chain, id) {
         return chain.then(function () {
@@ -1132,7 +1134,8 @@
            * cannot be claimed by itself, now or later, so it is let go. No
            * entry changes for it: a payment waiting to be claimed is written
            * down net of the fee for claiming it, and this is that fee. */
-          try {
+          // (never a card's payment kept with no route: it is signed, and its swap never comes to nothing)
+          if (!one.cardKept) try {
             var rest = FoxyWallet.tokenInfo(claimText);
             if (rest && wallet && canonicalMint(String(rest.mint || '')) === mintOf(wallet)) {
               var worth = sumProofs(rest.proofs || []);
@@ -1168,6 +1171,9 @@
           /* Arriving while it is swapped in: counted in the balance as that,
            * not as kept, until the swap lands or fails (`arrivingHold`). */
           var ru = recordUnit(one);
+          // a card's payment kept with no route: its record is told it is being posted, or the row goes if it is over
+          // (posted anyway, the mint would call it spent and the walk would find that this phone's own: this spares the asking)
+          if (one.cardKept && cardKeptPost(id) === 'drop') { dropUnclaimed(id); return null; }
           arrivingHold(id, { amount: amountOfRecord(one), unit: ru, mint: unclaimedMint(one) || where, hash: 'req-' + id });
           walkCalling = true;
           try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
@@ -1210,6 +1216,8 @@
               console.log('[foxy] a payment for a request was claimed late: ' + said(got));
               /* Every one of them is said, so the screen can add them up:
                * what was waiting is now this phone's and nobody else's. */
+              // (a card's payment kept with no route: its record and entry say settled first, 08a-flashcard.js)
+              if (one.cardKept) cardKeptSettled(id, got);
               if (typeof FoxyWallet._onLateClaim === 'function') {
                 try { FoxyWallet._onLateClaim(Object.assign(inUnit(got), { trusted: !!one.trusted, id: id })); }
                 catch (x) { console.warn('[foxy] late-claim watcher:', x && x.message); }
@@ -1225,6 +1233,8 @@
                 }
               }
             }, function (e) {
+              // a card's payment kept with no route is its record's to settle, whatever the mint said (08a-flashcard.js)
+              if (one.cardKept) return cardKeptFailed(id, one, e, claimText);
               var why = String((e && e.message) || '');
               // never issued by this mint is gone too: it was never there (notIssued)
               var gone = /already spent|nothing to take/i.test(why) || notIssued(e);

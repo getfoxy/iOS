@@ -421,7 +421,11 @@
     _atRiskNote: function () {
       var n = 0;
       try { FoxyWallet.trustedWaiting().forEach(function (t) { n += Number(t.sats) || 0; }); } catch (e) { n = 0; }
-      return n > 0 ? ' Another ' + n + ' sats were accepted at risk and cannot be spent until this phone is online.' : '';
+      // and a card's payments kept with no route: in the balance, signed to this phone, and not to be handed on before they settle
+      var c = 0;
+      try { cardKeptWaiting().forEach(function (t) { c += Number(t.sats) || 0; }); } catch (e) { c = 0; }
+      return (n > 0 ? ' Another ' + n + ' sats were accepted at risk and cannot be spent until this phone is online.' : '')
+        + (c > 0 ? (n > 0 ? ' And ' : ' Another ') + c + ' sats a card paid while this phone was offline cannot be spent until the mint has settled them.' : '');
     },
 
     /* A token's note asking for change: { changeTo, asked }, or null. */

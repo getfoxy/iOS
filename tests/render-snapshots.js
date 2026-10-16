@@ -183,6 +183,10 @@ const TX_IN = { name: 'Alice', dir: 'in', time: '10:42', sats: 2100, fee: 0, has
 /* A payment accepted while both phones were offline and not yet swapped in. */
 const TX_AT_RISK = { name: 'Paid in person', dir: 'in', time: '14:20', sats: 4900, fee: 0,
   rail: 'CASHU', hash: 'req-atrisk', pending: true, atRisk: true, note: '' };
+/* Paid by a card while this phone was offline, and not settled with the mint yet: received, amber, with the day to be online by.
+ * Its date is fixed and far off, so the words do not turn on today's date. */
+const TX_CARD_KEPT = { name: 'From a card', dir: 'in', time: '14:31', sats: 592, fee: 0, rail: 'CASHU', hash: 'req-card-kept',
+  memo: 'card, offline', cardWaits: true, cardKept: 'waiting', cardDate: 4102444800, note: '' };
 const TX_OUT = { name: 'bob@example.com', dir: 'out', time: 'Yesterday', sats: 5000, fee: 12, pending: true, rail: 'LIGHTNING', hash: 'hash-out' };
 const TX_USD = { name: 'Stablenut', dir: 'in', time: 'Sep 3', unit: 'usd', amount: 250, feeAmount: 1 };
 const TX_CASH = { name: 'Carol', dir: 'out', time: 'Sep 2', usd: 4.5, sats: 7000 };
@@ -283,7 +287,7 @@ function representative(logic) {
   add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
   add('amount, money for a card from the send screen', at('amount', { flow: 'cardSend', amount: '5', unit: 'USD' }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
-  // cards are cash for now (FC_RECOVERABLE), so the list of cards to take back is not drawn: the money waiting is
+  // every card can be taken back (FC_RECOVERABLE): the list of cards this phone loaded is drawn, with the money waiting
   add('flashcard, cards loaded and money waiting for one', at('flashcard', {}, { wallet: CARDS({
     cardOwed: () => [{ id: 'o1', card: KEY_A, sats: 1000, kind: 'load' }, { id: 'o2', card: KEY_A, sats: 24, kind: 'change' }],
     cardsList: () => [
@@ -517,6 +521,14 @@ function representative(logic) {
     history: [{ label: 'TODAY', items: [TX_AT_RISK, Object.assign({}, TX_OUT, { pending: true })] }] },
     { wallet: Object.assign({}, OFFLINE, { trustedWaiting: () => [{ id: 'r1', sats: 4900, at: 1 }] }) }));
   add('txDetail, a payment at risk', at('txDetail', { tx: TX_AT_RISK }));
+  // a card's payment taken offline: in the list, its detail, and the amber ring on home while it waits
+  add('history, a card payment taken offline, waiting for the mint', at('history', {
+    history: [{ label: 'TODAY', items: [TX_CARD_KEPT, TX_IN] }] }, { wallet: { cardKeptWaiting: () => [{ id: 'card-kept', sats: 592, date: 4102444800, state: 'kept', at: 1 }] } }));
+  add('txDetail, a card payment taken offline, waiting for the mint', at('txDetail', { tx: TX_CARD_KEPT }));
+  add('txDetail, a card payment taken offline that did not settle', at('txDetail', { tx: Object.assign({}, TX_CARD_KEPT,
+    { cardWaits: false, cardKept: 'retired', failed: true, memo: 'card, offline \u2014 not settled' }) }));
+  add('home, a card payment waiting for the mint: the ring amber', at('home', { series: SERIES, range: '1D' },
+    { wallet: Object.assign({}, OFFLINE, { cardKeptWaiting: () => [{ id: 'card-kept', sats: 592, date: 4102444800, state: 'kept', at: 1 }] }) }));
   /* An over-payment and its change are one transaction: the list shows the net,
    * and this is where the arithmetic is kept. */
   add('txDetail, paid with change back', at('txDetail', { tx: {
@@ -936,8 +948,38 @@ function cards() {
   add('card: a different mint, adding funds, a card that holds money', (a) => { a.state.fc = THERE({ balance: 2048, count: 4 }); a.fcOtherMint('Adding funds'); });
   add('card: a different mint, adding funds, an empty card, on its owner\u2019s phone', (a) => { a.state.fc = THERE(); a.fcOtherMint('Adding funds'); });
   add('card: a different mint, adding funds, an empty card, on another phone', (a) => { a.state.fc = THERE({ ownedHere: false }); a.fcOtherMint('Adding funds'); });
-  // a till with no route: taken on trust and not paid, and the price a card cannot make exactly
-  add('card: taken on trust, a card payment with no route', (a) => a.fcTrusted({ sats: 592 }));
+  /* A till with no route: a card that cannot pay it (too old to prove its money, unable to, or holding money the mint never
+   * signed), and the price a card cannot make exactly. */
+  add('card: too old to pay offline', (a) => a.fcFailed({ card: 'offline-old', message: 'This card is too old to pay a phone that is offline. Take this payment when this phone is online.' }, { taken: true }));
+  add('card: cannot prove its money offline', (a) => a.fcFailed({ card: 'offline-unproven', message: 'This card cannot prove its money to a phone that is offline. Take this payment when this phone is online.' }, { taken: true }));
+  add('card: holds money the mint did not sign', (a) => a.fcFailed({ card: 'fake', message: 'This card holds money the mint did not sign. Nothing was taken.' }, { taken: true }));
+  add('card: under a week left, offline', (a) => a.fcFailed({ card: 'renew', message: 'This card\u2019s money runs out in less than 7 days, so this phone cannot take it while offline. Its owner renews it by tapping it on their phone.' }, { taken: true }));
+  // a card's payment taken offline that did not settle: spent twice, gone back to its owner, or refused by a mint that changed
+  add('card: a card payment went back', (a) => a.cardKeptLostCard({ id: 'card-1', sats: 592, cause: 'unwound', date: 4102444800 }));
+  add('card: a card payment not settled', (a) => a.cardKeptLostCard({ id: 'card-1', sats: 592, cause: 'spent', date: 4102444800 }));
+  add('card: a card payment not settled, the mint changed', (a) => a.cardKeptLostCard({ id: 'card-1', sats: 592, cause: 'retired', date: 4102444800 }));
+  // or the mint would not take the card's signature at all, and a share of a bill it paid is open again
+  add('card: a card payment not settled, its signature refused', (a) => a.cardKeptLostCard({ id: 'card-1', sats: 592, cause: 'retired', why: 'signature', date: 4102444800, shares: [0] }));
+  // a dollar receive by card with no route, and this phone's price too old to work out the sats from
+  add('card: the bitcoin price too old for a dollar receive by card', (a) => a.payUsdByCard(), { wallet: {
+    privacy: () => ({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, offline: true, orbot: 'none', vpn: false, orbotKey: false }),
+    cardSession: () => Promise.resolve(), cardOnline: () => false, cardOffline: () => true, convertOne: () => Promise.resolve(null),
+    lastPrice: () => ({ rate: 64000, at: 1, ageMs: 2 * 86400000 }), priceTooOld: () => true } });
+  // its owner's read, online, with under twenty days left: the renewal offered, and its PIN pad
+  const RENEW_FC = { key: '02' + 'a1'.repeat(30) + 'c3d4', balance: 2048, count: 12, room: 52, pin: 'set', locked: false, hasRecord: true, setUp: true,
+    pinSet: true, limit: 0, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800, check: 'ok',
+    // when the mint's word was had, far off and fixed, as the card screens' own views have it
+    checkedAt: 4102358400000 };
+  const RENEW_W = { cardSession: () => Promise.resolve(), cardOwed: () => [], cardsList: () => [], cardOnline: () => true };
+  const RENEW_AT = { wallet: RENEW_W, state: Object.assign({ screen: 'flashcard', stack: [], fc: RENEW_FC }, LIVE) };
+  add('card: renew this card, offered at its owner\u2019s read', (a, w) => {
+    a._fcRefreshAsked = {};
+    // nineteen days before its date, by the page's clock and the app's
+    const now = w.Date.now;
+    w.Date.now = () => (4102444800 - 19 * 86400) * 1000;
+    try { a.fcRefreshMaybe({ key: RENEW_FC.key }); } finally { w.Date.now = now; }
+  }, RENEW_AT);
+  add('overlay: the renewal\u2019s PIN pad, thirty days', (a) => { a._fcCard = { key: RENEW_FC.key, info: {}, pieces: [] }; a.fcRenew(); }, RENEW_AT);
   add('card: no change while offline', (a) => a.fcFailed({ card: 'inexact', message: 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly 1000 sats. Pay an amount it can make, or pay when this phone is online.' }, { taken: true }));
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
   // a card payment is two taps: SEND, then RECEIVE its change, then COMPLETE
@@ -968,7 +1010,8 @@ function cards() {
 
 // what a view leaves behind on the instance, cleared before the next
 const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQueue', '_pinEl', '_priceBar', '_priceOff', '_fcExplainer', '_fcCard',
-  '_meltEl', '_fcTapO', '_stuckShown', '_stuckOpen', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
+  // (and whether a card's renewal was offered this session, 26f-flashcard.js `fcRefreshMaybe`)
+  '_fcRefreshAsked', '_meltEl', '_fcTapO', '_stuckShown', '_stuckOpen', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
   // what the send confirmation has asked, and whether it waited (03-send.js `quoteSendFee`, `syncSend`)
   '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited',
   // which balance paid, and the quotes of both, at a mint with two (03-send.js)

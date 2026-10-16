@@ -146,6 +146,8 @@
         cardSpin: A.flagged.has(t) ? 'foxyEdge 1.6s linear infinite' : 'none',
         metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
           : t.failed ? 'Failed' : t.atRisk ? 'AT RISK \u00b7 not settled'
+          // paid by a card while this phone was offline: received, and settled with the mint the next time it is online
+          : t.cardWaits ? 'Paid by card \u00b7 settles online'
           // paid from a card (SEND on the card's screen), not from this phone's balance
           : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Flashcard'
           /* A payment that is "pending" has left: what is waiting is the other
@@ -153,11 +155,12 @@
            * yet. */
           : t.pending ? (t.dir === 'in' ? 'Pending' : 'Sent \u00b7 not yet claimed') : '',
         metaTime: t.time,
+        // (a card's payment waiting for the mint is amber, as a pending one is: it is in the balance, and not finished)
         metaColor: (t.failed || t.atRisk || A.flagged.has(t)) ? 'var(--bad)'
-          : t.pending ? 'var(--btc-ink)' : 'rgba(var(--ink-rgb),.5)',
-        tileBg: (t.failed || t.atRisk || A.flagged.has(t)) ? 'var(--bad)' : t.pending ? 'var(--btc-ink)' : 'var(--ok)',
+          : (t.pending || t.cardWaits) ? 'var(--btc-ink)' : 'rgba(var(--ink-rgb),.5)',
+        tileBg: (t.failed || t.atRisk || A.flagged.has(t)) ? 'var(--bad)' : (t.pending || t.cardWaits) ? 'var(--btc-ink)' : 'var(--ok)',
         stroke: A.flagged.has(t) ? 'transparent' : (t.failed || t.atRisk) ? 'rgba(var(--bad-rgb),.7)'
-          : t.pending ? 'var(--btc-ink)' : 'rgba(var(--ok-rgb),.7)',
+          : (t.pending || t.cardWaits) ? 'var(--btc-ink)' : 'rgba(var(--ok-rgb),.7)',
         amtColor: A.flagged.has(t) ? 'var(--bad)' : unfinished(t) ? 'rgba(var(--ink-rgb),.55)' : dirOf(t) === 'in' ? 'var(--ok-ink)' : 'var(--bad)',
         /* Dollars, and the dollars of the day it settled: `fiat` is written on
          * the entry then and never worked out again, so yesterday's coffee
@@ -387,7 +390,7 @@
        * then says what that means. "Pending" on its own is what a broadcast
        * says, and a broadcast cannot be taken away from anybody. */
       // FAILED before PENDING: a refused payment taken back is not settled, and is not waiting either
-      txStatus: tx.highRisk ? 'HIGH RISK' : tx.atRisk ? 'AT RISK' : tx.failed ? 'FAILED' : tx.pending ? 'PENDING' : 'COMPLETE',
+      txStatus: tx.highRisk ? 'HIGH RISK' : tx.atRisk ? 'AT RISK' : tx.failed ? 'FAILED' : tx.cardWaits ? 'SETTLES ONLINE' : tx.pending ? 'PENDING' : 'COMPLETE',
       txStatusInk: (tx.atRisk || tx.highRisk) ? 'var(--bad)' : 'var(--ink)',
       /* An over-payment and its change, which are one transaction.
        *
@@ -443,6 +446,26 @@
           + 'ecash and can still redeem it. It is in your balance and you can spend it, and Foxy swaps '
           + 'it for ecash nobody has seen as soon as it has a connection.'
         : '',
+      /* A card's payment taken while this phone was offline: what it is while it waits for the mint, and, where it did
+       * not settle, why, in one sentence (the card that said so at the time had more: 11-cards.js, `cardKeptLostCard`).
+       * Amber while it waits, red once it failed. No CLAIM NOW: the claim runs by itself whenever there is a route. */
+      txCardLine: tx.cardWaits
+        ? 'A card paid this while this phone was offline. The card signed it over to this phone, and Foxy settles it with '
+          + 'the mint the next time this phone is online.'
+          + (tx.cardDate > 0 && this.fcDay ? ' Be online before ' + this.fcDay(tx.cardDate) + ': after that the card\u2019s owner can take it back.' : '')
+        : (tx.failed && tx.cardWhy === 'signature' && /^(unwound|retired)$/.test(String(tx.cardKept || '')))
+        ? 'The mint would not take the card\u2019s signature, so it is not in your balance, and the money goes back to the card\u2019s owner.'
+        : (tx.failed && tx.cardKept === 'spent')
+        ? 'The mint said this card\u2019s money had already been spent before this phone could settle it, so it is not in your balance.'
+        : (tx.failed && tx.cardKept === 'unwound')
+        ? 'This phone could not settle it before its date, and the money went back to the card\u2019s owner.'
+        : (tx.failed && tx.cardKept === 'retired')
+        ? 'The mint changed its keys or its fee after the card paid, and would not take the card\u2019s signature, so it is not in your balance.'
+        : '',
+      txCardShow: !!(tx.cardWaits || (tx.failed && /^(spent|unwound|retired)$/.test(String(tx.cardKept || '')))),
+      txCardBg: tx.failed ? 'rgba(var(--bad-rgb),.1)' : 'rgba(247,147,26,.1)',
+      txCardEdge: tx.failed ? 'rgba(var(--bad-rgb),.45)' : 'rgba(247,147,26,.45)',
+      txCardInk: tx.failed ? 'var(--bad)' : 'var(--btc-ink)',
       /* RECLAIM is a swap that takes a token's proofs back, and offering it is
        * only safe while this phone can find out whether anybody has taken them.
        * Offline it cannot: the receiver may be holding that very payment on

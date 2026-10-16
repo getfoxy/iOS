@@ -125,8 +125,9 @@ async function run() {
     const noting = (share) => (step, info) => { if (info && info.hash && (step === 'checking' || step === 'mint')) w.splitNoteCard(share.hash, info.hash); };
     const owed = () => (JSON.parse(till.storage.getItem('foxy.split.pending') || 'null') || {}).rows || [];
     const log = () => JSON.parse(till.storage.getItem('foxy.cashu.log') || '[]');
-    const cardWith = async (sats) => {
-      const k = newCard(holder);
+    // `o.format`: 4 for a card that signs once and keeps the mint's proofs (1.20), the one that can pay with no route
+    const cardWith = async (sats, o) => {
+      const k = newCard(holder, undefined, o && o.format ? { format: o.format } : undefined);
       await holder.W.cardSetUp(k, { pin: '1234' });
       await binaryLoad(holder, k, sats);
       return k;
@@ -167,19 +168,20 @@ async function run() {
     ok(landed === before + 150 + 200 && (await w.splitReconcile()) === 1 && owed()[1].paid === true && owed()[2].paid === false,
       'the wallet’s own settling lands it, and the reconcile ticks the share, late, by that entry alone', String(landed - before));
 
-    // taken on trust, with no route: pending until it has been swapped, and ticked then
-    const exact = await cardWith(250);          // 128 64 32 16 8 2: exactly the third share, which is all a till with no route takes
+    /* With no route, a card that proves its money signs the share over to this phone: received at once, its entry settled, so the
+     * share is ticked by it straight away; the swap at the next connection changes nothing on the bill */
+    const exact = await cardWith(250, { format: 4 });          // 128 64 32 16 8 2: exactly the third share, which is all a till with no route takes
     offline();
     exact.tap();
-    const trusted = await w.cardPay(exact, { sats: shares[2].sats, pin: '1234', trusted: true });
-    w.splitNoteCard(shares[2].hash, trusted.hash);          // as the app does when the result says taken on trust
-    ok(trusted.trusted === true && owed()[2].card === trusted.hash && (await w.splitReconcile()) === 0 && owed()[2].paid === false && w.trustedWaiting().length === 1,
-      'taken on trust: named on its row, and not ticked, for it is pending and the mint has not been asked');
+    const kept = await w.cardPay(exact, { sats: shares[2].sats, pin: '1234', offline: true });
+    w.splitNoteCard(shares[2].hash, kept.hash);          // as the app does as a card's payment is made
+    ok(kept.kept === true && w.cardKeptWaiting().length === 1 && (await w.splitReconcile()) === 1 && owed().every((r) => r.paid) && w.splitRecord().done === true,
+      'kept with no route: received, and the share is ticked by its entry at once');
     online();
     await w.claimUnclaimed();
     await settle();
-    ok(w.trustedWaiting().length === 0 && (await w.splitReconcile()) === 1 && owed().every((r) => r.paid) && w.splitPending() === null && w.splitRecord().done === true,
-      'swapped once there is a route, it is vouched for, and the share is ticked', JSON.stringify(owed().map((r) => !!r.paid)));
+    ok(w.cardKeptWaiting().length === 0 && (await w.splitReconcile()) === 0 && owed().every((r) => r.paid) && w.splitPending() === null,
+      'swapped once there is a route, and nothing more is ticked', JSON.stringify(owed().map((r) => !!r.paid)));
 
     // the three shares, once each
     const sized = log().length;

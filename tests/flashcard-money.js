@@ -45,9 +45,9 @@ let L0 = null;
   ok(loadRow.sats === 2000 && loadRow.memo === 'to card' && loadRow.card === card.key, 'with one entry, to the card', JSON.stringify({ sats: loadRow.sats, memo: loadRow.memo }));
   ok(H.W.cardOwed().length === 0, 'and nothing left owed to it');
   {
-    const year = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
+    const month = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
     const dates = added.card.pieces.map((x) => x.date);
-    ok(dates.every((d) => Math.abs(d - year) < 600), 'each piece can be taken back by this phone a year from now', String(dates[0]));
+    ok(dates.every((d) => Math.abs(d - month) < 600), 'each piece can be taken back by this phone thirty days from now', String(dates[0]));
     const known = (H.W.cardsKnown()[card.key] || {}).pieces || {};
     ok(Object.keys(known).length === 32 && added.card.pieces.every((x) => known[x.nonce] && known[x.nonce].amount === x.amount),
        'and the phone has written down what it put there', String(Object.keys(known).length));
@@ -282,18 +282,16 @@ let L0 = null;
     ok(done.sats === 1791 && !R.W.cardHeldPayment(d.key) && d.balance() + R.W.cardOwed().filter((r) => r.card === d.key).reduce((n, r) => n + r.sats, 0) <= 1,
        'and the third tap finishes it, the card having paid it once', String(d.balance()));
 
-    // and offline, taken on trust: the next tap signs the rest of the exact set, and the whole is kept on trust
+    /* And offline: a card that signs for each piece is too old to pay a phone with no route (only a card of one
+     * signature that keeps the mint's proofs does: tests/flashcard-offline.js). Refused before its PIN, nothing held. */
     const e = await fresh(1536);
     R.W._privacy({ tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct' });
     e.tap();
-    e.leaveBefore('20', 2);
-    const offCut = await R.W.cardPay(e, { sats: 1536, pin: '1234', trusted: true }).then(() => null, (x) => x);
-    ok(offCut && offCut.resumable && R.W.cardHeldPayment(e.key) && R.W.cardHeldPayment(e.key).held === 1024, 'offline, a payment taken on trust is held the same way', JSON.stringify(offCut && { card: offCut.card, held: R.W.cardHeldPayment(e.key) }));
-    e.tap();
-    const offDone = await R.W.cardPay(e, { sats: 1536, pin: '1234', trusted: true });
+    e.sent.length = 0;
+    const offOld = await R.W.cardPay(e, { sats: 1536, pin: '1234', offline: true }).then(() => null, (x) => x);
     R.W._privacy({ tor: 'up', progress: 100, everUp: true, unprotected: false, transport: 'direct' });
-    ok(offDone.trusted === true && offDone.sats === 1536 && !R.W.cardHeldPayment(e.key) && e.balance() === 0,
-       'and the next tap signs the rest of the exact set, kept on trust as one payment', JSON.stringify(offDone));
+    ok(offOld && offOld.card === 'offline-old' && !R.W.cardHeldPayment(e.key) && e.balance() === 1536 && !e.sent.some((x) => /^b0(40|20)/.test(x)),
+       'offline, a card that signs for each piece is refused as too old, before its PIN, and nothing is held', JSON.stringify(offOld && { card: offOld.card }));
 
     /* A piece the card signs as it is taken away, its answer lost in the air: the card has marked it spent,
      * and its signature is nowhere. Taken up again, the card cannot make the rest, and says why. */

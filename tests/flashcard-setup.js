@@ -122,9 +122,17 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     ok(/INTERIM/.test(swift) && /clock/.test(swift), 'and the constant says plainly that it is interim, and as weak as trusting the receiver’s clock');
   }
 
-  /* ---- set-up, as cash --------------------------------------------------- */
+  /* ---- set-up, as cash ---------------------------------------------------
+   * Every card is set up recoverable unless the caller says `recoverable: false`, which no screen does: the first case
+   * here, with nothing said, is recoverable, and a card that is cash is made only by asking for it. */
+  {
+    const plain = newCard(P);
+    const c0 = await W.cardSetUp(plain, { pin: '0000' });
+    ok(/^0[23][0-9a-f]{64}$/.test(c0.record.refundKey) && !!W.cardsKnown()[plain.key],
+       'a card set up with nothing said is recoverable: its record names this phone’s key, and the phone keeps it', JSON.stringify({ refund: c0.record.refundKey.slice(0, 8) }));
+  }
   const cash = newCard(P);
-  const c2 = await W.cardSetUp(cash, { pin: '0000' });
+  const c2 = await W.cardSetUp(cash, { pin: '0000', recoverable: false });
   ok(c2.record.refundKey === '' && !W.cardsKnown()[cash.key], 'a card set up as cash carries no key of anybody’s, and nothing is kept about it', JSON.stringify(c2.record));
   ok(c2.mine === true, 'and the phone that set it up is its owner, as the card says when asked', String(c2.mine));
 

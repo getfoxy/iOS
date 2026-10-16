@@ -961,6 +961,74 @@
     });
   }
 
+  /* A card paid this phone while it was offline, and the payment is over without settling, or is close to its date
+   * (W.onCardKeptLost; 08a-flashcard.js, `cardKeptFailed`). `cause`:
+   *
+   *   spent     the mint says the card's pieces were spent before this phone posted them: a copy of the card paid twice;
+   *   unwound   its date passed first, and the card's owner took the money back;
+   *   retired   the mint's keys or fee changed, and it will not take the card's signature now; the owner gets it back
+   *             after the date;
+   *   late      not settled yet, the mint not answering, and within two days of its date: said in passing, once.
+   *
+   * The first three are out of the balance and failed in HISTORY by the time this is called; the screens catch up. */
+  cardKeptLostCard(info) {
+    const sats = Math.round(Number(info && info.sats) || 0);
+    const money = this.moneyIn(sats, 'sat');
+    const date = Number(info && info.date) || 0;
+    const day = date > 0 && this.fcDay ? this.fcDay(date) : '';
+    const cause = String((info && info.cause) || '');
+    // a share of a bill it had paid, open again on the bill's ledger: the bill's screen follows, and it is said
+    const shares = (info && Array.isArray(info.shares)) ? info.shares : [];
+    const open = shares.length ? ' The share of the bill it paid is open again.' : '';
+    // the balance and the list catch up behind whatever is said
+    setTimeout(() => {
+      try { this.refreshBalance(); if (this.loadHistory) this.loadHistory(); } catch (e) {}
+      if (shares.length) { try { this.spReopened(shares); } catch (e) {} }
+    }, 0);
+    if (cause === 'late') {
+      this.toast('A card payment of ' + money + ' is not settled yet: the mint is not answering.'
+        + (day ? ' It has to settle before ' + day + '.' : ''), true);
+      return;
+    }
+    /* The mint would not take the card's signature: nothing to do with its keys or its fee, and nothing its owner did.
+     * It cannot be settled here now, and the money is the card owner's again after its date. */
+    if (info && info.why === 'signature') {
+      const past = date > 0 && Date.now() / 1000 >= date;
+      this.blockedCard('cardKeptLost', {
+        tone: 'bad', title: 'CARD PAYMENT NOT SETTLED',
+        reason: 'The mint would not take the card\u2019s signature for the ' + money + ' it paid you while you were offline, '
+          + 'so this phone cannot settle it. It is not in your balance.'
+          + (day ? (past ? ' The money goes back to the card\u2019s owner.' : ' The money goes back to the card\u2019s owner after ' + day + '.') : '')
+          + open,
+      });
+      return;
+    }
+    if (cause === 'unwound') {
+      this.blockedCard('cardKeptLost', {
+        tone: 'bad', title: 'CARD PAYMENT WENT BACK',
+        reason: 'This phone could not settle the ' + money + ' a card paid while you were offline before its date'
+          + (day ? ', ' + day : '') + '. After that date the money goes back to the card\u2019s owner, and it has. '
+          + 'It is not in your balance, and the payment is marked failed in your history.' + open,
+      });
+      return;
+    }
+    if (cause === 'retired') {
+      this.blockedCard('cardKeptLost', {
+        tone: 'bad', title: 'CARD PAYMENT NOT SETTLED',
+        reason: 'The mint changed its keys or its fee after a card paid you ' + money + ' while you were offline, '
+          + 'and it will not take the card\u2019s signature now. It is not in your balance.'
+          + (day ? ' The money goes back to the card\u2019s owner after ' + day + '.' : '') + open,
+      });
+      return;
+    }
+    this.blockedCard('cardKeptLost', {
+      tone: 'bad', title: 'CARD PAYMENT NOT SETTLED',
+      reason: 'The mint says the ' + money + ' this card paid while you were offline was already spent before this phone '
+        + 'could settle it. That card, or a copy of it, spent the same money twice. It is not in your balance, and the '
+        + 'payment is marked failed in your history.' + open,
+    });
+  }
+
   /* YOU DON'T HAVE EXACT CHANGE, for a payment in dollars. */
   overpayCardUsd(info, asked, pay, over, back) {
     const m = (n) => this.moneyIn(n, 'usd');

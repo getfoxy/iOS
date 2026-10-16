@@ -812,6 +812,8 @@ function fakeMint(w, opts) {
     // the next n swaps refused as a mint too busy to take its database lock (or with `words`)
     lockRefuse: (count, words) => { lockLeft = Math.max(0, Math.round(Number(count) || 0)); lockWords = String(words || ''); },
     lockRefused: () => lockSaid,
+    // the input fee it charges from now on, in ppk (and says it charges, at /v1/keysets): a mint that changes its fee
+    feeIs: (ppk) => { o.feePpk = Math.max(0, Math.round(Number(ppk) || 0)); },
     /* A PENDING melt (o.meltPending) settles: 'paid' pays the invoice and keeps
      * the change for whoever asks; 'failed' gives the inputs back as unspent. */
     settleMelt: (quote, how) => {

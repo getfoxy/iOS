@@ -354,7 +354,9 @@
     catch (e) { return ((h % 12) || 12) + ':' + mm + (h < 12 ? ' AM' : ' PM'); }
   }
 
-  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card' };
+  // (a card's payment taken while this phone was offline is from a card as well, settled or not)
+  CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card',
+                 'card, offline': 'From a card', 'card, offline \u2014 not settled': 'From a card' };
 
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
@@ -461,6 +463,15 @@
            * the claim settles the same entry, and a settled one is ordinary
            * money (20-helpers.js, `trusted`). */
           atRisk: !!t.trusted && !t.settled && t.state !== 'failed',
+          /* Paid by a card while this phone was offline: received and counted, and the mint has still to swap what the
+           * card signed over (08a-flashcard.js, `cardKeepSigned`). Nobody else can take it, so it is amber and not red;
+           * `cardKept` is how it ended where it did not settle (spent, retired, unwound), and `cardDate` the date it must
+           * settle by (0: none). */
+          cardWaits: t.cardKept === 'waiting' && t.state !== 'failed',
+          cardKept: t.cardKept || '',
+          cardDate: Number(t.cardDate) || 0,
+          // 'signature' where the mint refused the card's signature, which is said as that
+          cardWhy: t.cardWhy || '',
           /* Refused over the link with nothing sent back, or locked to a
            * phone that then refused it: seen by them, not safe yet. */
           highRisk: !!t.highRisk,
