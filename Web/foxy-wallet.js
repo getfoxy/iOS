@@ -23299,12 +23299,134 @@
      * kind 'swap' with the swap's id. foxy.cashu.unitswap only says which two
      * belong together (`unitSwaps`). */
 
+    /* The last few quote pairs seen for each mint and direction, in memory
+     * only, newest first: [{ get, amount, fee, total, at }], keyed
+     * 'mint|from|to'. What a pair cost is the best guide to sizing the next
+     * one, fee and all, so a swap whose rate and fee are already known can
+     * land in one pair instead of two; two pairs of different sizes tell a
+     * fixed fee from a share. Never used to move money; a quote is always
+     * asked before that. */
+    _swapSeen: {},
+
+    /* One quote pair: an invoice in the TO unit for `get` (from `tw`), and
+     * what paying it from the FROM unit costs (from `fw`). Shared by the swap
+     * itself and the probe the SWAP screen sends ahead. Commits to nothing:
+     * neither quote is written down, and an unused one simply expires. */
+    _swapPass: function (tw, fw, get) {
+      return askQuote(tw, get, '').then(function (got) {
+        return withTimeout(askedAgain(fw, 'the mint’s fee quote', function (via) {
+          return via.createMeltQuoteBolt11(String(got.q.request));
+        }), 30000, 'the mint’s fee quote').then(function (won) {
+          var melt = won.got;
+          var amt = satsOf(melt.amount) || 0, fee = satsOf(melt.fee_reserve) || 0;
+          return { get: get, q: got.q, lock: got.lock, melt: melt, fw: won.w, amount: amt, fee: fee, total: amt + fee };
+        });
+      });
+    },
+
+    /* Quotes asked ahead of the person (`opts.paceMs` and `opts.perMin` on
+     * `swapQuote` and `swapProbe`) keep their pairs at least `paceMs` apart,
+     * second passes included, and wait while `perMin` pairs or more have gone
+     * in the last minute. Every pair counts towards both, the ones a person
+     * is waiting on too, though those are never held back themselves: a
+     * Nutshell mint answers twenty quote requests a minute per address on
+     * each quote route, and a pair is one on each, so a screen asking in the
+     * background must leave most of that minute to the questions a person
+     * is waiting on. `opts.hurry`, a promise, ends the wait early: the
+     * person has come to need that very answer. Resolves when this pair may
+     * go, and counts it as gone. */
+    _swapPairs: /** @type {number[]} */ ([]),
+    _swapPaceWait: function (ms, perMin) {
+      var now = Date.now();
+      var went = FoxyWallet._swapPairs = (FoxyWallet._swapPairs || []).filter(function (t) { return t > now - 60000; });
+      var wait = 0;
+      if (ms > 0 && went.length) wait = Math.max.apply(null, went) + ms - now;
+      if (perMin > 0 && went.length >= perMin) {
+        var sorted = went.slice().sort(function (a, b) { return a - b; });
+        wait = Math.max(wait, sorted[went.length - perMin] + 60000 - now);
+      }
+      return Math.max(0, wait);
+    },
+    _swapPaced: function (opts) {
+      var ms = Number(opts && opts.paceMs) || 0, perMin = Number(opts && opts.perMin) || 0;
+      var wait = FoxyWallet._swapPaceWait(ms, perMin);
+      var mark = { t: Date.now() + wait };
+      // the slot is taken now, so a second question asked ahead queues behind this one
+      FoxyWallet._swapPairs.push(mark.t);
+      if (!(wait > 0)) return Promise.resolve();
+      var timer = null;
+      var slept = new Promise(function (r) { timer = setTimeout(r, wait); });
+      var hurried = opts && opts.hurry && typeof opts.hurry.then === 'function' ? opts.hurry : null;
+      return (hurried ? Promise.race([slept, hurried]) : slept).then(function () {
+        clearTimeout(timer);
+        // gone now, not when it was booked for
+        var i = FoxyWallet._swapPairs.indexOf(mark.t);
+        if (i >= 0) FoxyWallet._swapPairs[i] = Date.now();
+      });
+    },
+
+    /* What a pair says, kept: its shape for sizing the next pass, and the
+     * mint's rate (the person's rate before the fee: cents against sats as
+     * the two quotes priced them) for the screens. Answers the rate, or 0. */
+    _swapNote: function (at, f, t, got) {
+      var m = canonicalMint(at);
+      if (got && got.get > 0 && got.amount > 0 && got.total > 0) {
+        var key = m + '|' + f + '|' + t;
+        var was = (FoxyWallet._swapSeen[key] || []).filter(function (p) { return p.get !== got.get; });
+        FoxyWallet._swapSeen[key] = [{ get: got.get, amount: got.amount, fee: got.fee, total: got.total, at: Date.now() }].concat(was).slice(0, 4);
+      }
+      var msat = 0;
+      try { msat = Number(FoxyWallet.msatOf(String(got.q.request))) || 0; } catch (e) { msat = 0; }
+      var usdPerBtc = f === 'usd' ? rateFrom(got.amount, got.get * 1000) : rateFrom(got.get, got.amount * 1000);
+      if (!(usdPerBtc > 0) && msat) usdPerBtc = f === 'usd' ? rateFrom(got.amount, msat) : rateFrom(got.get, msat);
+      if (usdPerBtc > 0 && m) mintRates[m] = { usdPerBtc: usdPerBtc, at: Date.now(), mint: m };
+      return usdPerBtc > 0 ? usdPerBtc : 0;
+    },
+
+    /* The mint's rate, asked ahead: one quote pair for a nominal amount
+     * (`amount` in the FROM unit, or a thousand sats' worth), so the amount
+     * screen can show the mint's own rate before anything is typed and the
+     * swap's first pass is sized from it. Needs no balance, since nothing is
+     * paid: the two quotes are left to expire. Keeps the rate (`mintRate`)
+     * and the pair's shape, and nothing else. `opts` paces it as
+     * `swapQuote`'s. Resolves { usdPerBtc, at }. */
+    swapProbe: function (from, to, amount, opts) {
+      var f = unitOf(from), t = unitOf(to);
+      var no = function (why) {
+        var e = /** @type {any} */ (new Error(why));
+        e.probe = true;
+        return Promise.reject(e);
+      };
+      if (!f || !t || !HANDLED_UNITS[f] || !HANDLED_UNITS[t] || f === t) return no('Pick two different balances.');
+      if (!wallet || !routeOpen()) return no('Swapping needs the mint.');
+      var at = mintOf(wallet);
+      if (!FoxyWallet.twoUnits(at)) return no('This mint issues only bitcoin.');
+      var view;
+      try { view = needNow(); } catch (e) { return no('Swapping needs the mint.'); }
+      var known = FoxyWallet.mintRate(at);
+      var rate = (known && known.usdPerBtc) || Number(FoxyWallet._rate) || 100000;
+      var give = Math.round(Number(amount));
+      if (!(give > 0)) give = f === 'sat' ? 1000 : Math.max(1, Math.round(1000 * rate / 1e6));
+      var get = f === 'usd' ? Math.floor(give / 100 / rate * 1e8) : Math.floor(give * rate / 1e8 * 100);
+      if (!(get > 0)) get = 1;
+      return Promise.all([unitWalletOn(view, t), unitWalletOn(view, f), FoxyWallet._swapPaced(opts)]).then(function (ws) {
+        return FoxyWallet._swapPass(ws[0], ws[1], get);
+      }).then(function (got) {
+        var r = FoxyWallet._swapNote(at, f, t, got);
+        return { usdPerBtc: r, at: Date.now() };
+      });
+    },
+
     /* The rate for swapping `amount` of `from` into `to`, held by the mint.
      * `amount` is what leaves, the mint's fee included; `opts.all` is the
-     * whole of the FROM balance. Two passes at most (four requests): the
-     * first at the rate last seen, the second sized from what the first
-     * said. Resolves { id, mint, from, to, total, amount, fee, get, rate,
-     * market, spread, spreadWarn, expiresAt, state: 'quoted' }. */
+     * whole of the FROM balance. The first pass is sized from the last pair
+     * this mint answered in this direction (the probe's, or an earlier
+     * quote's), else from the rate last seen, a little under; it is taken
+     * as it is when no larger figure in the TO unit would fit. Otherwise a
+     * second pass sized from what the first said, and a third if the rate
+     * moved between them (six requests at most). Resolves { id, mint, from,
+     * to, total, amount, fee, get, rate, market, spread, spreadWarn,
+     * expiresAt, state: 'quoted' }. */
     swapQuote: function (from, to, amount, opts) {
       var f = unitOf(from), t = unitOf(to);
       if (!f || !HANDLED_UNITS[f]) return Promise.reject(new Error('Foxy does not know the unit ' + String(from).slice(0, 20) + '.'));
@@ -23338,15 +23460,43 @@
       };
       // one pass: an invoice in TO for `get`, and what paying it from FROM costs
       var pass = function (get) {
-        return askQuote(tw, get, '').then(function (got) {
-          return withTimeout(askedAgain(fw, 'the mint’s fee quote', function (via) {
-            return via.createMeltQuoteBolt11(String(got.q.request));
-          }), 30000, 'the mint’s fee quote').then(function (won) {
-            var melt = won.got;
-            var amt = satsOf(melt.amount) || 0, fee = satsOf(melt.fee_reserve) || 0;
-            return { get: get, q: got.q, lock: got.lock, melt: melt, fw: won.w, amount: amt, fee: fee, total: amt + fee };
-          });
+        return FoxyWallet._swapPaced(opts).then(function () {
+          return FoxyWallet._swapPass(tw, fw, get);
+        }).then(function (got) {
+          FoxyWallet._swapNote(at, f, t, got);
+          return got;
         });
+      };
+      /* The first pass's size, from the pairs this mint answered this way in
+       * the last ten minutes (a rate older says little about now), aiming
+       * just under the amount. Two pairs far enough apart in size
+       * give the fee as a fixed part and a share; one pair is read both as
+       * a share and as fixed, and the smaller taken, so the guess errs
+       * under. The rate is taken from the largest pair, the one its rounding
+       * blurs least. None: 0, and the rate last seen sizes it, a little under. */
+      var fromSeen = function () {
+        var pts = (FoxyWallet._swapSeen[canonicalMint(at) + '|' + f + '|' + t] || []).filter(function (p) {
+          return p && Date.now() - p.at < 600000 && p.get > 0 && p.amount > 0 && p.total > 0;
+        });
+        if (!pts.length) return 0;
+        // the melt rounds what it asks up by half a unit on average, so a unit under lands in the middle
+        var aim = total - 1;
+        var big = pts.reduce(function (a, p) { return p.amount > a.amount ? p : a; }, pts[0]);
+        // a melt's amount is rounded up to the unit, so the middle of what it could have been
+        var per = Math.max(0.5, big.amount - 0.5) / big.get;
+        // the newest pair, and the one furthest from it in size
+        var far = pts.slice(1).reduce(function (a, p) {
+          return !a || Math.abs(p.amount - pts[0].amount) > Math.abs(a.amount - pts[0].amount) ? p : a;
+        }, null);
+        if (far && Math.abs(pts[0].amount - far.amount) >= Math.max(10, 0.1 * Math.max(pts[0].amount, far.amount))) {
+          var share = (pts[0].fee - far.fee) / (pts[0].amount - far.amount);
+          if (share >= 0 && share < 0.5) {
+            var fixed = pts[0].fee - share * pts[0].amount;
+            return Math.floor((aim - fixed) / (1 + share) / per);
+          }
+        }
+        var p0 = pts[0];
+        return Math.floor(Math.min(p0.get * aim / p0.total, p0.get * (aim - p0.fee) / p0.amount));
       };
       var refuseLow = function () { return new Error('That is too little to swap after the mint’s fee.'); };
       var mintRefusal = function (e) {
@@ -23355,10 +23505,16 @@
       };
       return Promise.all([unitWalletOn(view, t), unitWalletOn(view, f)]).then(function (ws) {
         tw = ws[0]; fw = ws[1];
-        var first = Math.max(1, Math.floor(convert(total, guess) * 0.97));
-        return pass(first);
+        var first = fromSeen() || Math.floor(convert(total, guess) * 0.97);
+        return pass(Math.max(1, first));
       }).then(function (one) {
         if (one.fee >= total || !(one.amount > 0)) throw refuseLow();
+        /* Close enough already: under the amount by less than one more unit
+         * of what arrives would cost (a cent of bitcoin is a dozen sats or so;
+         * a sat of dollars is under a cent, so one cent). No second pass could
+         * give the person more, so none is asked. */
+        var step = Math.max(1, Math.ceil(one.amount / one.get));
+        if (one.total <= total && total - one.total <= step) return one;
         // sized from the first answer, whether the fee is fixed or a share
         var byTotal = Math.floor(one.get * total / one.total);
         var byAmount = Math.floor(one.get * (total - one.fee) / one.amount);
@@ -23375,13 +23531,8 @@
           });
         });
       }, mintRefusal).then(function (got) {
-        var msat = 0;
-        try { msat = Number(FoxyWallet.msatOf(String(got.q.request))) || 0; } catch (e) { msat = 0; }
-        /* The rate the person gets, before the fee: cents against sats as
-         * the two quotes priced them. */
-        var usdPerBtc = f === 'usd' ? rateFrom(got.amount, got.get * 1000) : rateFrom(got.get, got.amount * 1000);
-        if (!(usdPerBtc > 0) && msat) usdPerBtc = f === 'usd' ? rateFrom(got.amount, msat) : rateFrom(got.get, msat);
-        if (usdPerBtc > 0) mintRates[canonicalMint(at)] = { usdPerBtc: usdPerBtc, at: Date.now(), mint: canonicalMint(at) };
+        // the rate the person gets, before the fee, kept as the mint's latest
+        var usdPerBtc = FoxyWallet._swapNote(at, f, t, got);
         var market = Number(FoxyWallet._rate) > 0 ? Number(FoxyWallet._rate) : null;
         // how far the mint's rate is from the market, against the person: buying bitcoin dear, or selling it cheap
         var spread = market && usdPerBtc > 0

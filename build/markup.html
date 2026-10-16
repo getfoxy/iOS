@@ -226,6 +226,9 @@ img[data-logo-lt]{display:none !important;}
 
 <div style="flex:none;padding:3px 24px 16px;font-size:22px;font-weight:600;letter-spacing:-0.005em;color:var(--ink);text-align:center">{{ amountSubtitle }}</div>
 <div style="flex:none;align-self:stretch;height:1px;background:rgba(var(--ink-rgb),.1);margin:0 24px 7px"></div>
+<sc-if value="{{ swapRateShown }}">
+<div style="flex:none;padding:2px 24px 6px;font-size:15px;font-weight:700;letter-spacing:0.02em;color:rgba(var(--ink-rgb),.55);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:stretch;min-width:0">{{ swapRateLine }}</div>
+</sc-if>
 <sc-if value="{{ gateWarnShown }}">
 <div sc-camel-on-click="{{ gateWarnTap }}" style="flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;margin:2px 0 10px;padding:9px 14px;border-radius:14px;background:{{ gateWarnBg }};font-family:Sora,system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.04em;color:#fff;text-align:center;cursor:pointer" style-active="opacity:0.7">{{ gateWarn }}</div>
 </sc-if>

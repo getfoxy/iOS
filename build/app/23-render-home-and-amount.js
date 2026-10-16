@@ -551,6 +551,9 @@
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
         : 'How much to send?',
+      // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
+      swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
+      swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
       hideSkip: true,
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no

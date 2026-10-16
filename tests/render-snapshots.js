@@ -670,7 +670,7 @@ function representative(logic) {
     spread: 0.0223, spreadWarn: true, state: 'quoted', get expiresAt() { return Date.now() + 67500; } }, over || {});
   add('two balances: SWAP, from dollars', at('swap', Object.assign({ swapFrom: 'usd', swapTo: 'sat' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
-    unit: 'SATS', amount: '12230' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
+    unit: 'SATS', amount: '12230' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786, at: Date.now() }) }) }));
   add('two balances: SWAP confirm, the market price far off', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
     swapAmount: 1000, swapQuote: SWAP_Q() }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SWAP confirm, a new rate', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
@@ -718,7 +718,13 @@ function representative(logic) {
     swapAmount: 1211, swapQuote: SWAP_Q({ from: 'sat', to: 'usd', total: 1211, amount: 1150, fee: 61, get: 95,
       rate: { usdPerBtc: 82601, by: 'forge.example.com' }, market: 82601, spread: 0, spreadWarn: false }) }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin in dollars', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
-    unit: 'USD', amount: '1.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 82601 }) }) }));
+    unit: 'USD', amount: '1.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 82601, at: Date.now() }) }) }));
+  /* The rate line under the question (26i-swap.js, `swapRateLine`): while the rate asked at the SWAP tap is out, and the
+   * market price, said to be the market's, from a mint that has given none. */
+  add('two balances: SET AMOUNT, a swap, checking the rate', at('amount', Object.assign({ flow: 'swap', swapFrom: 'usd', swapTo: 'sat',
+    unit: 'USD', amount: '', swapProbing: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => null }) }));
+  add('two balances: SET AMOUNT, a swap at the market price', at('amount', Object.assign({ flow: 'swap', swapFrom: 'usd', swapTo: 'sat',
+    unit: 'USD', amount: '' }, TWO_LIVE), { wallet: TWO({ mintRate: () => null }) }));
   /* The same address paid from a card (SEND on the card's screen): FROM / FLASHCARD in place of PAYING FROM, the fee's sats
    * under it, and NEXT, which reads the card for the amount and the reserve (26f-flashcard.js, `fcOcNext`). */
   add('ocConfirm, from a card: FROM FLASHCARD and NEXT', at('ocConfirm',

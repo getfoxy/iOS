@@ -110,7 +110,7 @@ async function mount() {
     mintUnits: () => ['sat', 'usd'], twoUnits: () => true,
     walletChoice: () => ({ hold: 'both', recv: '', send: '' }), setWalletChoice() {},
     balanceOf: (u) => (u === 'usd' ? st.usd : st.sat), heldIn: () => 0, recoveringIn: () => 0,
-    mintRate: () => (st.rate ? { usdPerBtc: st.rate } : null),
+    mintRate: () => (st.rate ? { usdPerBtc: st.rate, at: Date.now() } : null),
     unitSwapsPending: () => [],
     swapQuote(from, to, amount, opts) {
       asked.push([from, to, amount, !!(opts && opts.all)]);
@@ -408,6 +408,68 @@ async function mount() {
   A.setState({ screen: 'home', stack: [] });
   await wait(1200);
   ok(!A._swapClockT, 'every clock stopped at the end');
+
+  // ---- part C: the rate line on SET AMOUNT, as drawn ------------------------------------------------------
+  /* The probe at the SWAP tap (`swapProbe`): while it is out the line under the question says so; its answer is the
+   * mint's rate there, in the confirmation's words; a mint that has given none is the market's, said to be. A figure
+   * left still is quoted in the background, and NEXT on it opens the confirmation without asking again. */
+  {
+    const probe = { calls: 0, hold: null };
+    st.rate = 0;
+    st.host = 'forge.example.com';
+    w.FoxyWallet.swapProbe = () => {
+      probe.calls += 1;
+      return new Promise((r) => { probe.hold = () => { st.rate = 81500; r({ usdPerBtc: 81500, at: Date.now() }); }; });
+    };
+    A.setState({ screen: 'home', stack: [] });
+    A.goSwap();
+    A.renderVals().swapNextGo();
+    await settle();
+    ok(probe.calls === 1 && /How much to swap\? Checking the rate…/.test(text()), 'SET AMOUNT, the probe out: "Checking the rate…" under the question', text().slice(0, 200));
+    probe.hold();
+    await settle();
+    ok(/How much to swap\? FORGE’S RATE ₿ 1 = \$ 81,500/.test(text()), 'its answer: FORGE’S RATE ₿ 1 = $ 81,500 there', text().slice(0, 200));
+    // the probe refused, and the mint with no rate: the market price, said to be the market's
+    st.rate = 0;
+    w.FoxyWallet.swapProbe = () => { probe.calls += 1; return Promise.reject(new Error('the mint did not answer')); };
+    toasts.length = 0;
+    A.setState({ screen: 'home', stack: [] });
+    A.goSwap();
+    A.renderVals().swapNextGo();
+    await settle();
+    ok(/How much to swap\? MARKET PRICE ₿ 1 = \$ 82,601/.test(text()) && !toasts.length, 'a probe that failed: MARKET PRICE ₿ 1 = $ 82,601, and nothing said about it', text().slice(0, 200));
+    A.setState({ flow: '' });
+    ok(!A.renderVals().swapRateShown, 'and no rate line outside a swap');
+    A.setState({ flow: 'swap' });
+    // offline: no probe at all
+    st.rate = RATE;
+    const n0 = probe.calls;
+    const was = w.FoxyWallet.privacy;
+    w.FoxyWallet.privacy = () => Object.assign(was(), { offline: true });
+    A._swapProbed = {};
+    A.swapProbe('usd');
+    await settle();
+    ok(probe.calls === n0, 'offline, nothing is probed');
+    w.FoxyWallet.privacy = was;
+    // typed and left still: one quote in the background, and NEXT takes it without asking
+    delete w.FoxyWallet.swapProbe;
+    await toAmount('usd');
+    w.FoxyWallet._swapPairs = [];
+    const n1 = asked.length;
+    await type('250');
+    await wait(450);
+    ok(asked.length === n1, 'typed $ 2.50: nothing asked before it has stood still');
+    await wait(300);
+    await settle();
+    ok(asked.length === n1 + 1 && JSON.stringify(asked[asked.length - 1]) === '["usd","sat",250,false]', 'after 600 ms, its quote, once', JSON.stringify(asked.slice(n1)));
+    await next();
+    ok(A.state.screen === 'swapConfirm' && A.state.swapQuote && A.state.swapQuote.total === 250 && asked.length === n1 + 1,
+      'NEXT: the confirmation, filled, with no new question', String(asked.length - n1));
+    b0 = (A.confirmSpec().rows || [])[1] || {};
+    ok(b0.value === '$ 2.50 in DOLLARS' && A.confirmSpec().cta === 'SWAP', 'YOU ARE SPENDING $ 2.50 in DOLLARS, and SWAP', b0.value);
+    A.setState({ screen: 'home', stack: [] });
+    await wait(1200);
+  }
 
   console.log('');
   console.log(passed + ' passed, ' + failed + ' failed');

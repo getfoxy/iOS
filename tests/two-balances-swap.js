@@ -61,7 +61,9 @@ const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapToAmount() {
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
   'centsTyped() {', 'usd(v) {', 'group(n) {', 'twoUnitsOn() {', 'offlineNow() {', 'moneyBusy() {', 'heldPill() {',
-  'satUsd() {', 'recoveringSats() {', 'swapPx() {', 'centsOfSats(sats, px) {'];
+  'satUsd() {', 'recoveringSats() {', 'swapPx() {', 'centsOfSats(sats, px) {',
+  'swapProbe(fromGiven) {', 'swapAheadLater() {', 'swapAheadAsk() {', 'swapAheadLeft(a) {', 'swapAheadFor(a) {',
+  'swapAheadTake(a, from, to) {', 'swapRateLine() {', 'swapKeypad() {', 'swapMintHere() {', 'swapAheadMine() {'];
 
 // ---- a page at the mint (as tests/two-balances.js has it) ----------------------------------------
 function page(o) {
@@ -122,7 +124,8 @@ function appOn(ctx) {
   const log = { toasts: [], cards: [], settled: [], melts: [] };
   Object.assign(app, {
     log,
-    SWAP_MARGIN_MS: 15000, SWAP_REQUOTES: 3,
+    SWAP_MARGIN_MS: 15000, SWAP_REQUOTES: 3, SWAP_TYPED_MS: 600, SWAP_AHEAD_GAP_MS: 3000, SWAP_AHEAD_KEEP_S: 10,
+    SWAP_AHEAD_PER_MIN: 8, SWAP_RATE_FRESH_MS: 600000,
     state: { screen: 'home', stack: [], flow: '', unit: 'USD', amount: '', hidden: false, livePrice: 76900, satUsd: 76900 / 1e8 },
     setState(u) { Object.assign(app.state, typeof u === 'function' ? u(app.state) : u); },
     toast(m) { log.toasts.push(String(m)); },

@@ -11,7 +11,11 @@
    *                it, nothing converts; typed in the other, it converts at the
    *                mint's last rate, the one its confirmation will be valued
    *                at, so the dollars typed are the dollars it repeats
-   *                (`swapTyped`, `swapPx`)
+   *                (`swapTyped`, `swapPx`). Under the question, the mint's
+   *                rate, asked as SWAP was tapped (`swapProbe`,
+   *                `swapRateLine`); a figure left still is quoted in the
+   *                background, so NEXT opens the confirmation filled
+   *                (`swapAheadAsk`)
    *   swapConfirm  four blocks, as the owner laid them out: YOU ARE GETTING,
    *                YOU ARE SPENDING, FEE, and the mint's RATE with how long it
    *                is held for, then SWAP. A bitcoin figure is its dollar worth
@@ -45,6 +49,31 @@
    * the mint for a rate every minute for ever. */
   SWAP_REQUOTES = 3;
 
+  /* Asking ahead, so the wait is spent while the person is still deciding.
+   * At the SWAP tap one quote pair for a nominal amount (the probe) brings
+   * the mint's own rate to SET AMOUNT; then, once a typed figure has stood
+   * still this long, the real quote for it is asked in the background, so
+   * NEXT can open the confirmation already filled. */
+  SWAP_TYPED_MS = 600;
+
+  /* No closer together than this from the asking ahead, counted from any
+   * quote pair this phone asked the mint, the confirmation's included. */
+  SWAP_AHEAD_GAP_MS = 3000;
+
+  /* And never once this many pairs have gone in the last minute, whoever
+   * asked them: a Nutshell mint answers twenty quote requests a minute per
+   * address on each quote route, a pair is one on each, and most of that
+   * minute is kept for the questions a person is waiting on. */
+  SWAP_AHEAD_PER_MIN = 8;
+
+  /* The mint's rate is shown as the mint's on SET AMOUNT only while it is
+   * this fresh; an older one is not what the mint would quote now. */
+  SWAP_RATE_FRESH_MS = 600000;
+
+  /* A quote asked ahead is only used at NEXT with more than this many
+   * seconds of its hold still to run: less, and a fresh one is asked. */
+  SWAP_AHEAD_KEEP_S = 10;
+
   /* SWAP, from home's button or the menu's row (swapStart). Starts from the
    * balance that has something in it: dollars when both do, as drawn. */
   goSwap() {
@@ -52,18 +81,65 @@
     if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
     const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
     console.log('[foxy] swap: opened, from ' + this.unitWord(from).toLowerCase());
+    // a new screen: what was asked ahead for the last one is not this one's
+    this._swapAhead = null;
+    this._swapProbed = {};
+    this._swapProbeWanted = null;
+    clearTimeout(this._swapTypedT);
+    this._swapTypedT = null;
     this.setState(p => ({
       screen: 'swap', stack: p.stack.concat([p.screen]),
       swapFrom: from, swapTo: from === 'usd' ? 'sat' : 'usd',
       swapQuote: null, swapNewRate: false, swapAmount: 0, swapAll: false,
       swapErr: '', swapErrAmount: false, swapQuoting: false, swapBusy: false, swapResult: null,
-      swapRequotes: 0, swapLapsed: false,
+      swapRequotes: 0, swapLapsed: false, swapProbing: false,
     }));
+    this.swapProbe(from);
   }
 
-  /* The ⇅ on the seam: the other way round. */
+  /* The probe, at the SWAP tap: one quote pair for a nominal amount (the
+   * last swap's from this balance, else a thousand sats' worth), so that
+   * SET AMOUNT shows the mint's own rate before anything is typed and the
+   * swap's first pass is sized from it. Once per direction per screen
+   * opened (the ⇅ asks the other way's); never offline, at a one-unit mint,
+   * with a swap running, or beside another question to the mint from here
+   * (one asked while another is out goes when it is answered). It blocks
+   * nothing, and a failure is only logged: the market price stands in,
+   * labelled as such. */
+  swapProbe(fromGiven) {
+    const W = window.FoxyWallet;
+    const from = fromGiven === 'sat' ? 'sat' : 'usd';
+    const to = from === 'usd' ? 'sat' : 'usd';
+    if (!W || typeof W.swapProbe !== 'function' || (this._swapProbed && this._swapProbed[from])) return;
+    if (this.offlineNow() || !this.twoUnitsOn()) return;
+    if (this._swapRun || this._swapAskOut || this.state.swapBusy) return;
+    if (this._swapAheadOut) { this._swapProbeWanted = from; return; }
+    this._swapProbed = Object.assign({}, this._swapProbed || {}, { [from]: true });
+    const last = (this._swapLast && this._swapLast[from]) || 0;
+    const ask = this._swapAheadOut = Promise.resolve().then(() => W.swapProbe(from, to, last || undefined,
+      { paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN }));
+    this.setState({ swapProbing: true });
+    ask.then((r) => {
+      if (r && r.usdPerBtc > 0) console.log('[foxy] swap: the mint’s rate, asked ahead: ' + this.swapRateText(r.usdPerBtc));
+    }, (e) => {
+      console.log('[foxy] swap: the rate asked ahead did not come:', (e && e.message) || e);
+    }).then(() => {
+      if (this._swapAheadOut === ask) this._swapAheadOut = null;
+      this.setState({ swapProbing: false });
+      // a figure typed while the probe was out is asked for now; else the other way's probe, if one was wanted
+      const want = this._swapProbeWanted;
+      this._swapProbeWanted = null;
+      if (this._swapAheadWaiting) { this._swapAheadWaiting = false; this.swapAheadAsk(); }
+      else if (want) this.swapProbe(want);
+    });
+  }
+
+  /* The ⇅ on the seam: the other way round, and that way's rate asked, so
+   * its first quote is sized from a pair the mint answered that way. */
   swapFlip() {
+    const next = this.state.swapTo === 'sat' ? 'sat' : 'usd';
     this.setState(p => ({ swapFrom: p.swapTo === 'sat' ? 'sat' : 'usd', swapTo: p.swapFrom === 'sat' ? 'sat' : 'usd' }));
+    if (this.state.screen === 'swap') this.swapProbe(next);
   }
 
   /* The swap's two units, as they stand: never the same one. */
@@ -132,10 +208,119 @@
    * it (a key, or the ⇅) drops it, and an answer still on its way for the
    * old figure is not kept (`swapAsk` keeps only its own latest question). */
   swapForget() {
+    // the figure is changing: its own quote is asked once it stands still
+    this.swapAheadLater();
     const s = this.state;
     if (!s.swapQuote && !s.swapQuoting && !s.swapNewRate) return;
     this._swapAskRun = (this._swapAskRun || 0) + 1;
     this.setState({ swapQuote: null, swapQuoting: false, swapNewRate: false });
+  }
+
+  /* A key on SET AMOUNT: the figure's own quote, asked once it has stood
+   * still for SWAP_TYPED_MS. Each key starts the wait again. */
+  swapAheadLater() {
+    clearTimeout(this._swapTypedT);
+    this._swapTypedT = setTimeout(() => { this._swapTypedT = null; this.swapAheadAsk(); }, this.SWAP_TYPED_MS);
+  }
+
+  /* The quote for the figure on the keypad, asked in the background, so the
+   * confirmation can open with it (`swapNext`). One at a time: a figure
+   * that changes while one is out waits for it, then is asked only if it
+   * still differs. Paced as SWAP_AHEAD_GAP_MS and SWAP_AHEAD_PER_MIN say. A
+   * changed figure leaves the old quote to expire at the mint: nothing was
+   * committed by asking it. */
+  swapAheadAsk() {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    if (!W || !W.swapQuote || s.screen !== 'amount' || s.flow !== 'swap') return;
+    if (this.offlineNow() || !this.twoUnitsOn() || this._swapRun || s.swapBusy) return;
+    const { from, to } = this.swapUnits();
+    const amount = this.swapTyped();
+    if (!(amount > 0) || amount > this.unitBalance(from)) return;
+    const had = this.swapAheadMine();
+    if (had && (had.asking || this.swapAheadFor(had))) return;
+    if (this._swapAheadOut) { this._swapAheadWaiting = true; return; }
+    // the confirmation's own question still out (backed out of while it was asked): its answer first
+    const wait = this._swapAskOut ? this.SWAP_TYPED_MS
+      : (typeof W._swapPaceWait === 'function' ? W._swapPaceWait(this.SWAP_AHEAD_GAP_MS, this.SWAP_AHEAD_PER_MIN) : 0);
+    if (wait > 0) {
+      clearTimeout(this._swapTypedT);
+      this._swapTypedT = setTimeout(() => { this._swapTypedT = null; this.swapAheadAsk(); }, wait);
+      return;
+    }
+    let hurry = null;
+    const mine = {
+      from: from, to: to, amount: amount, keypad: this.swapKeypad(), mint: this.swapMintHere(),
+      asking: true, q: null, at: Date.now(),
+      // NEXT on this very figure: the person is waiting now, so its pace is let go (`_swapPaced`)
+      hurry: () => { if (hurry) hurry(); },
+    };
+    this._swapAhead = mine;
+    console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, from) + ' as it is typed');
+    const opts = { paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) };
+    const ask = this._swapAheadOut = W.swapQuote(from, to, amount, opts).then((q) => {
+      mine.q = q;
+      mine.asking = false;
+    }, (e) => {
+      // not said on screen: NEXT asks again and says why if it is refused there
+      mine.asking = false;
+      if (this._swapAhead === mine) this._swapAhead = null;
+      console.log('[foxy] swap: the rate asked ahead did not come:', (e && e.message) || e);
+    }).then(() => {
+      if (this._swapAheadOut === ask) this._swapAheadOut = null;
+      if (this._swapAheadWaiting) { this._swapAheadWaiting = false; this.swapAheadAsk(); }
+    });
+    mine.done = ask;
+  }
+
+  /* The keypad as it stands, unit and text: what a quote asked ahead is
+   * matched on. Not the figure it converts to, because typed in the other
+   * unit that moves with the mint's rate, and the quote's own answer moves
+   * the rate, so the same keys would no longer match their own quote. */
+  swapKeypad() {
+    return (this.state.unit === 'SATS' ? 'SATS' : 'USD') + ' ' + String(this.state.amount || '');
+  }
+
+  /* The mint swaps are asked at now, in one spelling, to tell a quote
+   * asked ahead at another mint from this one's. */
+  swapMintHere() {
+    const W = window.FoxyWallet;
+    return String((W && W.mintUrl) || '').trim().replace(/\/+$/, '').toLowerCase();
+  }
+
+  /* Seconds a quote asked ahead can still be taken for, as `swapLeft`
+   * counts them on the confirmation. */
+  swapAheadLeft(a) {
+    const q = a && a.q;
+    if (!q || q.state !== 'quoted' || !(Number(q.expiresAt) > 0)) return 0;
+    return Math.max(0, Math.floor((Number(q.expiresAt) - this.SWAP_MARGIN_MS - Date.now()) / 1000));
+  }
+
+  /* The quote asked ahead for the keypad as it stands, this way round and
+   * at this mint, whether still on its way or answered; else null. */
+  swapAheadMine() {
+    const a = this._swapAhead;
+    if (!a || a.from !== this.swapUnits().from || a.keypad !== this.swapKeypad()) return null;
+    const here = this.swapMintHere();
+    const at = a.q && a.q.mint ? String(a.q.mint).trim().replace(/\/+$/, '').toLowerCase() : a.mint;
+    return a.mint === here && at === here ? a : null;
+  }
+
+  /* That quote, answered and still held long enough to be taken, or null. */
+  swapAheadFor(a) {
+    return a && a.q && this.swapAheadLeft(a) > this.SWAP_AHEAD_KEEP_S ? a : null;
+  }
+
+  /* The confirmation, opened on a quote asked ahead. Its hold counts on
+   * from when it was asked; an answer still on its way to an older
+   * question is dropped (`swapAsk`'s run). */
+  swapAheadTake(a, from, to) {
+    this._swapAskRun = (this._swapAskRun || 0) + 1;
+    this._swapQuotedAt = a.at;
+    console.log('[foxy] swap: quoted ' + this.unitFigure(a.q.total, from) + ' for ' + this.unitFigure(a.q.get, to)
+      + ' (asked as it was typed)');
+    this.setState({ swapQuoting: false, swapQuote: a.q, swapNewRate: false });
+    this.swapClock();
   }
 
   /* NEXT on SET AMOUNT (or ALL OF IT): the confirmation, and the rate asked. */
@@ -143,18 +328,45 @@
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
     const have = this.unitBalance(from);
-    const amount = all ? have : this.swapTyped();
+    /* A quote asked ahead for these very keys is for the figure they meant
+     * when it was asked: that figure is the swap's, even though its answer
+     * has since moved the rate the keys would convert at. */
+    const mine = all ? null : this.swapAheadMine();
+    const amount = all ? have : mine ? mine.amount : this.swapTyped();
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
     if (amount > have) {
       this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ': you hold '
         + this.unitFigure(have, from) + '.', true);
       return;
     }
+    clearTimeout(this._swapTypedT);
+    this._swapTypedT = null;
+    const { to } = this.swapUnits();
+    const ahead = this.swapAheadFor(mine);
+    const coming = !ahead && mine && mine.asking ? mine : null;
     this.setState(p => ({
       screen: 'swapConfirm', stack: p.stack.concat([p.screen]),
       swapAmount: amount, swapAll: !!all, swapQuote: null, swapNewRate: false,
       swapErr: '', swapErrAmount: false, swapRequotes: 0, swapLapsed: false,
+      swapQuoting: !!coming,
     }));
+    // asked while it was typed, and still held: the confirmation opens filled
+    if (ahead) { this.swapAheadTake(ahead, from, to); return; }
+    /* Being asked for this very figure already: its answer is waited for
+     * rather than the same question asked twice. Too late or refused, the
+     * rate is asked as it always was. */
+    if (coming) {
+      const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
+      coming.hurry();
+      coming.done.then(() => {
+        if (run !== this._swapAskRun) return;
+        if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
+        const got = this._swapAhead === coming ? this.swapAheadFor(coming) : null;
+        if (got) this.swapAheadTake(got, from, to);
+        else this.swapAsk(false, amount, !!all);
+      });
+      return;
+    }
     // the amount handed over, not read back from state the same moment it was set
     this.swapAsk(false, amount, !!all);
   }
@@ -172,7 +384,10 @@
     const all = allGiven != null ? allGiven : !!s.swapAll;
     const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
     this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
-    W.swapQuote(from, to, amount, all ? { all: true } : {}).then(q => {
+    // out with the mint until it answers: nothing is asked ahead beside it (`swapProbe`, `swapAheadAsk`)
+    const asked = this._swapAskOut = W.swapQuote(from, to, amount, all ? { all: true } : {});
+    asked.then(() => {}, () => {}).then(() => { if (this._swapAskOut === asked) this._swapAskOut = null; });
+    asked.then(q => {
       // an answer for an older question is dropped; one for a screen that has gone only ends the wait
       if (run !== this._swapAskRun) return;
       if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
@@ -255,6 +470,8 @@
       this.hideMelt();
       this.refreshBalance();
       this.loadHistory();
+      // the next probe from this balance asks at this size, the likeliest next figure
+      this._swapLast = Object.assign({}, this._swapLast || {}, { [from]: Number(q.total) || 0 });
       if (r && r.state === 'done') {
         this.setState({ swapBusy: false, swapResult: r, screen: 'swapDone', stack: [] });
         return;
@@ -485,6 +702,24 @@
   /* The ink a balance's figure is drawn in on a dark screen: frost for
    * dollars, fur for bitcoin. */
   swapInk(unit) { return unit === 'usd' ? '#D6EEF7' : '#F2742B'; }
+
+  /* The rate line on SET AMOUNT for a swap, under the question: the mint's
+   * own rate in the words the confirmation uses (<MINT>’S RATE ₿ 1 = $ ...),
+   * "Checking the rate…" while the probe is out, and the market price,
+   * said to be the market's, when the mint has given none lately
+   * (SWAP_RATE_FRESH_MS). '' with no price at all. */
+  swapRateLine() {
+    if (this.state.swapProbing) return 'Checking the rate…';
+    const W = window.FoxyWallet;
+    let mint = 0;
+    try {
+      const r = W && W.mintRate ? W.mintRate() : null;
+      if (r && Date.now() - Number(r.at) < this.SWAP_RATE_FRESH_MS) mint = this.swapRateOf(r);
+    } catch (e) { mint = 0; }
+    if (mint > 0) return this.swapRateHead() + ' ' + this.swapRateText(mint);
+    const market = this.px() || 0;
+    return market > 0 ? 'MARKET PRICE ' + this.swapRateText(market) : '';
+  }
 
   /* The line under the keypad's figure, in the other unit, as a send has it.
    * Typed in the unit that leaves: about what the swap would give, at the
