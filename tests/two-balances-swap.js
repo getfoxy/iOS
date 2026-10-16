@@ -56,7 +56,7 @@ const method = (sig) => {
   return appSrc.slice(start + 3, i + 1);
 };
 const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
-  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapDoneClose() {',
+  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r) {', 'swapDoneClose() {',
   'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',

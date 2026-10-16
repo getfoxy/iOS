@@ -83,6 +83,9 @@ check "long exact set" 1 node tests/long-exact-set.js
 check "held swap"      1 node tests/held-swap.js
 check "kept token"     1 node tests/kept-token.js
 check "price terms"    1 node tests/price-terms.js
+check "price age"      1 node tests/price-age.js
+check "convert on return" 1 node tests/convert-on-return.js
+check "sats for dollars" 1 node tests/sats-for-dollars-tap.js
 check "hand-over rules" 1 node tests/handover-rules.js
 check "forward locked" 1 node tests/forward-locked.js
 check "offline ui"     1 node tests/offline-ui.js

@@ -219,6 +219,18 @@
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
     if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    /* Sats paid for dollars this phone asked for, to be swapped into
+     * dollars (`paidConvert`): the dollars asked are the headline, the sats
+     * that came under them, with how old the payer's price was, and where
+     * they go: bitcoin now, dollars once swapped. A payment agreed in dollars
+     * that stays bitcoin is shown as it always was. */
+    const asked = Math.round(Number(s.paidAsked) || 0);
+    if (two && !s.payOut && asked > 0 && s.paidConvert) {
+      const words = this.priceAgeWords ? this.priceAgeWords(Number(s.paidAskAgeMs) || 0) : '';
+      base.paidHeadline = this.unitFigure(asked, 'usd');
+      base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 THEIR PRICE ' + words : '');
+      base.paidAddedTo = 'BITCOIN, THEN DOLLARS';
+    }
     return base;
   }
 
@@ -268,7 +280,7 @@
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -600,7 +612,18 @@
     const usd = Number(q.usd) || 0;
     const theirs = Math.round(Number(q.theirRate) || 0);
     const pct = (q.differsPct == null) ? null : Number(q.differsPct);
-    const ago = this.agoWords ? this.agoWords(Number(q.myRateAgeMs) || 0) : '';
+    /* How old each price is, where it is more than a few minutes: theirs,
+     * which the amount is worked out from, and this phone's, which it is
+     * weighed against. A fresh price says nothing, as on home. */
+    const ageOf = (ms) => (this.priceAgeWords && ms != null ? this.priceAgeWords(Number(ms)) : '');
+    const theirWords = ageOf(q.theirAgeMs);
+    const myWords = Number(q.myRateAgeMs) > 0 ? ageOf(q.myRateAgeMs) : '';
+    // sats for this phone's request in dollars, swapped into dollars here afterwards (`convertOnReturn`)
+    const forUsd = q.forUnit === 'usd';
+    /* A receiver online is being paid by a payer that is not, at the payer's
+     * price: the price has not changed since it was last online, it is just
+     * not this phone's, and the swap into dollars follows at once. */
+    const online = forUsd && !!this.offlineNow && !this.offlineNow();
     /* Under a tenth of a percent is the same price as far as anybody reading
      * this is concerned, and "0.0% higher" reads as a warning about nothing. */
     const near = pct != null && Math.abs(pct) < 0.1;
@@ -621,8 +644,14 @@
     /* The layout: the price is the big figure, because
      * the price is what is being agreed; then the difference, what it does to
      * the sats, and the question, each on its own line down the middle. */
-    const intro = pct == null
+    const intro = (pct == null && q.myTooOld)
+      ? 'What you ' + verb + ' is based on the Bitcoin price. The one this phone last saw is too old to compare it with.'
+      : pct == null
       ? 'What you ' + verb + ' is based on the Bitcoin price. This phone has no earlier price to compare it with.'
+      : online && near
+      ? 'What you ' + verb + ' is based on their Bitcoin price, which is the same as the one this phone sees now.'
+      : online
+      ? 'What you ' + verb + ' is based on their Bitcoin price, which is not the one this phone sees now.'
       : near
       ? 'What you ' + verb + ' is based on the Bitcoin price, which is the same as when you were last online.'
       : 'What you ' + verb + ' is based on the Bitcoin price, which has changed since you were last online.';
@@ -633,14 +662,19 @@
     return {
       title: 'BITCOIN PRICE',
       subtitle: intro,
-      amountLabel: 'CURRENT BITCOIN PRICE',
+      // an old price is theirs to own: CURRENT is only what a price seen just now can be called
+      amountLabel: theirWords ? 'THEIR BITCOIN PRICE' : 'CURRENT BITCOIN PRICE',
       amount: '$ ' + this.group(theirs),
       amountSub: '',
       // the question is the buttons; a row asking it again was one too many
-      rows: [
+      rows: (forUsd ? [this.cfRow('YOU ASKED FOR', this.unitFigure(Math.round(Number(q.usd) || 0), 'usd'))] : []).concat([
         this.cfRow('DIFFERENCE', difference),
         this.cfRow('RESULT', result),
-      ].concat(said ? [this.cfRow('YOU AGREED TO THIS PRICE', 'Working out the rest with their phone\u2026')] : []),
+      ]).concat(theirWords ? [this.cfRow('THEIR PRICE SEEN', theirWords)] : [])
+        .concat(myWords ? [this.cfRow('YOUR PRICE SEEN', myWords)] : [])
+        .concat(forUsd ? [this.cfRow('THEN', online ? 'Foxy swaps it into dollars at the mint as soon as it is in.'
+          : 'Foxy swaps it into dollars at the mint as soon as you are online.')] : [])
+        .concat(said ? [this.cfRow('YOU AGREED TO THIS PRICE', 'Working out the rest with their phone\u2026')] : []),
       // answered: there is nothing left to reject, and the tap leg owns what happens next
       secondary: said ? null : { label: 'NO, CANCEL', go: () => this.priceAnswer(false) },
       close: said ? null : () => this.priceAnswer(false),
@@ -817,6 +851,19 @@
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
              : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND' : 'THEIR NOSTR INBOX, OVER TOR')
       : (req && !req.transports.length) ? 'A TOKEN TO SHOW THEM' : 'A TOKEN YOU SEND THEM';
+    /* Sats for dollars they asked for, at this phone's price, which they
+     * agreed to over the tap (`tapQuoteTheirDollars`): what the sats are for,
+     * and whose price made them, with its age where it is more than a few
+     * minutes. Only on the request that answered that price. */
+    const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
+    const agreedRows = () => {
+      const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
+      return [
+        this.cfRow('FOR', this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd')),
+        this.cfRow('BITCOIN PRICE', '$ ' + this.group(Math.round(Number(s.tapQuoteRate) || 0)),
+          { sub: words ? 'this phone\u2019s, seen ' + words.toLowerCase() : 'this phone\u2019s' }),
+      ];
+    };
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
       this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
@@ -826,7 +873,7 @@
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? fig(lack.fee).main
         : (usdReq || this.px()) ? '$ 0.00' : '\u20bf 0', { half: true }),
-    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : this.peerRateRow());
+    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -858,7 +905,7 @@
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
              + (lack && lack.fee > 0 ? ' with the fee' : ''),
-        cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null }),
+        cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
       };
     }
     return {
@@ -880,7 +927,7 @@
         if (req && req.viaTap && W && W.tapQuote) {
           W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
         }
-        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '' });
+        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
       },
       /* SEND over the link in your hand, PAY over Tor. Not one word for both:
        * over Tor it really is a payment going somewhere, and on a tap the two

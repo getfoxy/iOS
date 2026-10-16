@@ -95,7 +95,9 @@
     // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
     this.announcePayment(Object.assign({}, next.ev || {}, {
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
-    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {}));
+    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {},
+    // sats paid for dollars asked for, to be swapped into dollars: the dollars asked, and how old the payer's price was
+    Number(next.usdAsked) > 0 && next.convert ? { usdAsked: next.usdAsked, askAgeMs: next.askAgeMs, askConvert: true } : {}));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }

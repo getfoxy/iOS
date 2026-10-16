@@ -590,6 +590,14 @@
         function () { return false; });
     },
 
+    /* The terms a sat request of this phone's was agreed for, once a price
+     * was talked over: { usd, rate, ageMs, seenAt, from, convert }. Kept on
+     * the open request, read back with the payment that answers it, and
+     * written into that payment's history row (07-request-delivery.js,
+     * `noteRequestTerms`). True when kept; false when no sat request of that
+     * id is open here. */
+    noteRequestTerms: function (id, terms) { return noteRequestTerms(id, terms); },
+
     /* A Cashu payment request (NUT-18) for `sats` at the mint this wallet is
      * on, for a payer to answer with ecash instead of Lightning. No
      * description, and single use, so it says only the amount, the mint and,
@@ -777,17 +785,64 @@
       return !!(req && Number(req.usd) > 0 && !(Number(req.sats) > 0));
     },
 
+    /* How long a price is believed (`PRICE_TOO_OLD_MS`, a day). */
+    PRICE_TOO_OLD_MS: PRICE_TOO_OLD_MS,
+
+    /* Whether a bitcoin price is too old to work an amount out from.
+     *
+     * Two ways to ask, because two phones' prices are known differently. This
+     * phone's own is known by when it was seen (`at`, its own clock), and one
+     * more than five minutes in the future is too old as well: the clock and
+     * the price disagree, and neither can be believed. The other phone's is
+     * known only by how old it said it was (`ageMs`, with `at` null), which
+     * needs neither clock to be right. An age that is missing, not a number or
+     * below nothing is too old: a figure nobody will date is a guess. */
+    priceTooOld: function (at, ageMs) {
+      var now = Date.now();
+      if (at !== null && at !== undefined) {
+        var t = Number(at);
+        if (!(t > 0) || !isFinite(t)) return true;
+        return t > now + 300000 || now - t > PRICE_TOO_OLD_MS;
+      }
+      if (typeof ageMs !== 'number' || !isFinite(ageMs) || ageMs < 0) return true;
+      return ageMs > PRICE_TOO_OLD_MS;
+    },
+
     /* The payer's answer to one: this phone's price, when it saw it, and the
      * sats that makes. Null when there is no price to answer with — a payer
-     * without one has nothing to offer and should not pretend. */
+     * without one has nothing to offer and should not pretend.
+     *
+     * Two kinds of request are answered. One that asks in dollars and leaves
+     * the conversion open (`asksInDollars`), as before; and a request in
+     * dollar ecash (unit usd, its amount in cents) from a wallet that said it
+     * will take sats for it and swap them into dollars itself. The second is
+     * marked `forUnit: 'usd'`, so the receiver knows which question its
+     * answer is for.
+     *
+     * Null as well when this phone's own price is more than a day old. The
+     * screen refuses before it gets here; this is so nothing that calls it
+     * can work an amount out from a figure that old. */
     quoteFor: function (req) {
-      if (!FoxyWallet.asksInDollars(req)) return null;
+      if (!req) return null;
+      var cents = 0, forUnit = '';
+      if (FoxyWallet.asksInDollars(req)) {
+        cents = Number(req.usd);
+      } else if (unitOf(req.unit) === 'usd') {
+        cents = Math.round(satsOf(req.amount));
+        forUnit = 'usd';
+      } else {
+        return null;
+      }
+      if (!(cents > 0) || !isFinite(cents)) return null;
       var mine = FoxyWallet.lastPrice();
       if (!mine.rate) return null;
-      var sats = Math.round((Number(req.usd) / 100) / mine.rate * 1e8);
+      if (FoxyWallet.priceTooOld(mine.at)) return null;
+      var sats = Math.round((cents / 100) / mine.rate * 1e8);
       if (!(sats > 0)) return null;
-      return { id: String(req.id || ''), usd: Number(req.usd), rate: mine.rate,
-               at: mine.at, ageMs: mine.ageMs, sats: sats };
+      var quote = /** @type {any} */ ({ id: String(req.id || ''), usd: cents, rate: mine.rate,
+                                        at: mine.at, ageMs: mine.ageMs, sats: sats });
+      if (forUnit) quote.forUnit = forUnit;
+      return quote;
     },
 
     /* The payer's other answer: "I have no route, and my sats are at this mint."
@@ -864,9 +919,9 @@
      *
      * `differsPct` is signed: positive means their price is higher than the one
      * this phone last saw, which is the direction that makes the amount fewer
-     * sats. Null when this phone has never seen a price, and the person is then
-     * agreeing to a number with nothing to weigh it against — which the screen
-     * has to say. */
+     * sats. Null when this phone has never seen a price, or saw it more than
+     * a day ago, and the person is then agreeing to a number with nothing to
+     * weigh it against — which the screen has to say. */
     /* The payment reader, for the tests: what `_requestPaid` does first. */
     readPayment: function (body) { return readPayment(body, mintUrl); },
 
@@ -877,13 +932,36 @@
       var sats = Math.round(Number(got.sats));
       var rate = Number(got.rate);
       if (!(sats > 0) || !(rate > 0)) return null;
+      /* The sats have to be the dollars at the price it names, worked out as
+       * `quoteFor` works them out. The price is what this phone weighs and
+       * what can agree by itself; a quote naming this phone's own price and
+       * any number of sats would be agreed to without anyone being asked. */
+      var cents = Number(got.usd);
+      if (!(cents > 0) || !isFinite(cents) || sats !== Math.round((cents / 100) / rate * 1e8)) return null;
       var mine = FoxyWallet.lastPrice();
-      var differsPct = mine.rate ? ((rate - mine.rate) / mine.rate) * 100 : null;
+      /* How old their price is, as they said it: an age and not a time, so
+       * neither phone's clock has to be right. Missing or not a number is
+       * null, and null is too old (`priceTooOld`). Their `at` is never read. */
+      var theirAgeMs = typeof got.ageMs === 'number' && isFinite(got.ageMs) && got.ageMs >= 0 ? got.ageMs : null;
+      /* This phone's own price more than a day old is no yardstick: there is
+       * no fair comparison, so none is made, and with none the screen asks
+       * the person rather than agreeing by itself. It does not refuse. The
+       * payer's price sets the amount, and a receiver offline for days with
+       * a payer online is the case this has to work for. */
+      var myTooOld = mine.rate ? FoxyWallet.priceTooOld(mine.at) : false;
+      var differsPct = mine.rate && !myTooOld ? ((rate - mine.rate) / mine.rate) * 100 : null;
       return {
         id: String(got.id || ''), usd: Math.round(Number(got.usd)) || 0,
         sats: sats, theirRate: rate,
         myRate: mine.rate, myRateAgeMs: mine.rate ? mine.ageMs : 0,
         differsPct: differsPct,
+        theirAgeMs: theirAgeMs,
+        // when they saw it, on this phone's clock
+        theirSeenAt: theirAgeMs === null ? null : Date.now() - theirAgeMs,
+        tooOld: FoxyWallet.priceTooOld(null, theirAgeMs),
+        myTooOld: myTooOld,
+        // which question this answers: '' a request asking in dollars, 'usd' a request in dollar ecash
+        forUnit: got.forUnit === 'usd' ? 'usd' : '',
       };
     },
 
@@ -1009,6 +1087,8 @@
        * (tools/live/offline-cross-scenarios.js `one-side-b`). A visit, now. */
       var startedAt = canonicalMint(mintUrl || '');
       var carried = false;
+      // payments in the pile now that are to be swapped into dollars, told once the walk is over
+      var convertDueIds = [];
       /* Away from the first claim that is somewhere else until the phone is
        * home again, and for all of that nothing a person starts is done at
        * the mint being visited (`claimAway`, `homeFirst`). Settled whichever
@@ -1115,6 +1195,18 @@
               }
               dropUnclaimed(id);
               dropLockKey(id);
+              /* Sats owed to be swapped into dollars are in the pile now. Only
+               * one already owed moves (`convertClaimed`): this walk never
+               * decides that anything should be converted, it only says what
+               * landed. The app is told once the walk is over and the phone
+               * is home (`freeWalk`). */
+              /* With what it was agreed for, kept on the record: a payment
+               * whose own claim was cut off was written by this claim, with
+               * none of it. */
+              if (ru === 'sat' && convertClaimed(id, got, where || unclaimedMint(one), null)) {
+                amendTx('req-' + id, Object.assign({}, (convertRec(id) || {}).ask || {}, { convert: 'claimed' }));
+                convertDueIds.push(id);
+              }
               console.log('[foxy] a payment for a request was claimed late: ' + said(got));
               /* Every one of them is said, so the screen can add them up:
                * what was waiting is now this phone's and nobody else's. */
@@ -1169,6 +1261,14 @@
                   catch (x) { console.warn('[foxy] trust-lost watcher:', x && x.message); }
                 }
               }
+              /* Owed a swap into dollars and gone: in the pile already if this
+               * phone took it (and the page went before it said so), nowhere
+               * here if anyone else did (`convertGone`). */
+              if (gone && ru === 'sat') {
+                var goneOf = [];
+                try { goneOf = (FoxyWallet.tokenInfo(claimText) || {}).proofs || []; } catch (eGone) { goneOf = []; }
+                if (convertGone(id, goneOf, where || unclaimedMint(one))) convertDueIds.push(id);
+              }
               if (gone) { dropUnclaimed(id); dropLockKey(id); carryGone(id, true); return null; }
               /* Locked to a key no seed on this phone derives: written down, and
                * no longer counted as money in flight.
@@ -1204,7 +1304,12 @@
         return took;
       });
       claimingLate = walk;
-      var freeWalk = function () { claimingLate = null; arrive(); };
+      var freeWalk = function () {
+        claimingLate = null;
+        arrive();
+        // and now that nothing holds the wallet, what is due to be swapped into dollars is said
+        convertDueIds.splice(0).forEach(convertTell);
+      };
       walk.then(freeWalk, freeWalk);
       return walk;
     },
@@ -1322,12 +1427,19 @@
         console.log('[foxy] of ' + said(p.amount) + ', ' + said(kept) + ' is the payment and '
           + said(giveBack) + ' goes back as change');
       }
+      /* Sats paid to a dollars wallet, to be swapped into dollars once they
+       * are in the pile (08c-units.js, `convertDue`). Decided here, before
+       * anything is told, so the screen knows from the first word that this
+       * is a dollars wallet being paid in sats and not a person who chose
+       * bitcoin. Taken on trust, it is never converted (below). */
+      var convertable = convertDue(p);
       /* Told in the payment's unit: `amount` and `unit`, and `sats` as it
        * always was for a sat payment (0 for a dollar one). */
       var tell = function (stage, r) {
         var n = pu === 'sat' ? ((r && r.sats) || kept) : ((r && r.amount) || kept);
         FoxyWallet._requestPaidListeners.forEach(function (fn) {
-          try { fn({ stage: stage, unit: pu, amount: n, sats: pu === 'sat' ? n : 0, id: p.id, purpose: p.purpose, asked: p.asked, result: r }); }
+          try { fn({ stage: stage, unit: pu, amount: n, sats: pu === 'sat' ? n : 0, id: p.id, purpose: p.purpose, asked: p.asked, result: r,
+                     convert: convertable }); }
           catch (e) { console.warn('[foxy] request paid listener:', e && e.message); }
         });
       };
@@ -1598,6 +1710,18 @@
               console.log('[foxy] pay steps: a request was paid and is now swapped in');
               // this phone's, at their mint: written on its job before anybody is told
               if (pu === 'sat') carryPaid(p.id, kept);
+              /* What it was agreed for, on the row the swap just wrote. One
+               * that was held was written with it already. */
+              if (pu === 'sat' && !held && p.terms) {
+                var asked = termsFields(p.terms);
+                if (Object.keys(asked).length) amendTx(into, asked);
+              }
+              /* In the pile now, so it may be swapped into dollars: only this,
+               * a claim that landed, ever says so. */
+              if (pu === 'sat' && convertable && convertClaimed(p.id, kept, p.mint, p)) {
+                amendTx(into, { convert: 'claimed' });
+                convertTell(p.id);
+              }
               return r;
             }, function (e) {
               // not landed: kept again, as before (the callers below decide what else)
@@ -1621,6 +1745,9 @@
          * No `changeBack`: an over-payment was refused above, so there is none,
          * and making change offline is the thing that would double the loss. */
         if (trusted) {
+          /* Not this phone's to swap: anyone holding a copy can still spend
+           * it, and the claim that settles it is a question, not a sure thing. */
+          convertable = false;
           delete FoxyWallet._requestsBeingPaid[p.id];
           dropOpenRequest(p.id);
           answer(200, '');
@@ -1649,6 +1776,8 @@
           dropOpenRequest(p.id);
           answer(200, '');
           changeBack(p, over);
+          // to be swapped into dollars once it is in the pile: owed until a claim lands
+          var owes = pu === 'sat' && convertable && convertOwe(p, kept);
           /* In history at once, at the moment it arrived.
            *
            * Everything the receiving phone shows hangs off this entry: the
@@ -1661,7 +1790,10 @@
            * payer cannot take it back, and balanceSats already counts it. The
            * swap is bookkeeping and finishes this entry rather than adding
            * another. */
-          logTx(unitRow(pu, {
+          /* With what it was agreed for, when a price was talked over first
+           * (`termsFields`): the dollars asked, and the payer's price as the
+           * row's own, so its dollars are the dollars asked. */
+          logTx(unitRow(pu, Object.assign({
             dir: 'in', sats: kept, feeSats: 0, settled: true, state: 'success',
             /* One entry, with the breakdown inside it. An over-payment and the
              * change going back are two halves of one sale, and filing them as
@@ -1674,7 +1806,7 @@
             memo: 'ecash', hash: into,
             // the mint the request named and the payment is at (`readPayment`), wherever the phone is by now
             mint: p.mint,
-          }));
+          }, pu === 'sat' ? termsFields(p.terms) : {}, owes ? { convert: 'owed' } : {})));
           tell('paid', { sats: pu === 'sat' ? kept : 0, unit: pu, amount: kept });
           claim().catch(function (e) {
             /* Beaten to it, which is not an error.
@@ -1688,6 +1820,8 @@
              * taken; the list is cleared in case the claim that took it could
              * not write. */
             var gone = /already spent|nothing to take/i.test(String((e && e.message) || '')) || notIssued(e);
+            // owed a swap into dollars: taken by this phone's other claim, or by nobody here (`convertGone`)
+            if (gone && pu === 'sat' && convertGone(p.id, p.proofs, p.mint)) convertTell(p.id);
             if (gone) { dropUnclaimed(p.id); dropLockKey(p.id); return; }
             console.warn('[foxy] a payment for a request is still unclaimed:', e && e.message);
           });
@@ -1695,6 +1829,10 @@
         }
 
         arrive();
+        /* Owed from now, as a held one is: a claim cut off on the way and
+         * landed on a later connection (`claimUnclaimed`) is still a payment
+         * to be swapped into dollars. Only a claim that lands moves it on. */
+        if (pu === 'sat' && convertable) convertOwe(p, kept);
         return claim().then(function (r) {
           answer(200, '');
           changeBack(p, over);
@@ -1740,6 +1878,11 @@
           var unsure = !spent && !notIssued(e)
             && loadSwaps().some(function (r) { return r && r.into === into; });
           if (!spent && !notIssued(e) && !unsure) dropUnclaimed(p.id);
+          /* And its record: gone is for `convertGone` to read, nothing taken
+           * leaves nothing to swap, and unsure stays owed for the claim that
+           * finds out. */
+          if (pu === 'sat' && spent) { if (convertGone(p.id, p.proofs, p.mint)) convertTell(p.id); }
+          else if (pu === 'sat' && !unsure) convertForget(p.id);
           // and the job it was for: open again when nothing was taken, gone when the ecash was
           if (!unsure) carryGone(p.id, spent || notIssued(e));
           /* Said here, not only sent. This is the one refusal that reached the

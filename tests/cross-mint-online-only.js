@@ -70,12 +70,16 @@ function payer(o) {
     tapPayStop: () => { stops.push(Date.now()); return Promise.resolve('ok'); },
     tapQuote: (t) => { told.push(JSON.parse(t)); return Promise.resolve('ok'); },
     classify: (t) => (/^lnbc/i.test(t) ? 'invoice' : 'other'),
-    decodeRequest: (t) => ({ id: 'r1', mints: [/same/.test(t) ? MINE : THEIRS], sats: 116 }),
+    decodeRequest: (t) => (/usd/.test(t)
+      ? { id: 'r1', mints: [/same/.test(t) ? MINE : THEIRS], unit: 'usd', amount: 500, sats: null }
+      : { id: 'r1', mints: [/same/.test(t) ? MINE : THEIRS], sats: 116 }),
     asksInDollars: (r) => !!opts.dollars,
     balanceAt: (u) => (u === THEIRS ? (opts.heldThere || 0) : 5000),
   } };
   const a = Object.assign(lift(['tapStartPay() {', 'tapOfferOf(text) {', 'tapOfflineCross(offer) {', 'tapPaidKeys(offer, req) {',
     'tapPaidList() {', 'tapWasPaid(offer) {', 'tapGaveNothing(why) {']), {
+    // a dollars wallet taking sats for its dollar request is never reached across two mints (section 5)
+    tapSatsForDollars() { this.satsForDollars = (this.satsForDollars || 0) + 1; return true; },
     OFFLINE_CROSS: opts.allowed === true,
     state: { screen: 'home', sendPhase: null, reqBusy: false },
     setState(u) { Object.assign(this.state, typeof u === 'function' ? u(this.state) : u); },
@@ -307,6 +311,41 @@ async function run() {
     ok('with none, it goes to the payer as before', sent.length === 1 && sent[0].inv === INV && b._tapInvTold === INV, JSON.stringify(sent).slice(0, 80));
     b.syncTap();
     ok('once', sent.length === 1);
+  }
+
+  console.log('\n5. sats for dollars: the same mint only');
+  /* A wallet at Forge that holds dollars says it takes sats for its request
+   * in dollars (`sats4usd`). A payer at Minibits holding sats only is at
+   * another mint: with either phone offline nothing moves and no price is
+   * talked over, and online both, it is the dollar invoice over Lightning. */
+  {
+    const priced = (told) => told.some((w) => w && (w.rate != null || w.sats != null || w.usd != null));
+    for (const [what, o] of [['the receiver offline, the payer online', { offline: false, up: false }],
+                             ['the payer offline, the receiver online', { offline: true, up: true }]]) {
+      const p = payer({ offline: o.offline });
+      // an online receiver puts its dollar invoice beside the request; an offline one has none to give
+      await p.tap(offer(Object.assign({ up: o.up, sats4usd: 1, req: 'creqA-usd-forge' }, o.up ? { inv: INV } : {})));
+      ok(what + ': sats are never offered for their dollars', !p.a.satsForDollars && !p.priced.length && !p.paidOffers.length,
+         (p.a.satsForDollars || 0) + ' asked, ' + p.priced.length + ' priced, ' + p.paidOffers.length + ' on');
+      // with no invoice, dollars at a mint this phone does not use are refused as they read; with one, the two-mint gate ends it
+      if (o.up) ok(what + ': OFFLINE & DIFFERENT MINT', (p.cards[0] || {}).title === TITLE, JSON.stringify(p.cards.map((c) => c.title)));
+      ok(what + ': and no price crosses the link', !priced(p.told), JSON.stringify(p.told));
+      // and the gate itself, on the offer as this phone reads it once the mint is told apart
+      const q = payer({ offline: o.offline });
+      const read = { sameMint: false, mints: [THEIRS], theirRoute: o.up, satsForUsd: true, asksUsd: false,
+                     read: { id: 'r1', unit: 'usd', amount: 500, sats: null, mints: [THEIRS] } };
+      const ended = q.a.tapOfflineCross(read);
+      ok(what + ': the two-mint gate ends it, with its own card', ended === true && (q.cards[0] || {}).title === TITLE,
+         JSON.stringify(q.cards.map((c) => c.title)));
+      ok(what + ': and tells them only that both must be online', q.told.length === 1 && q.told[0].why === 'offline-cross'
+         && !priced(q.told) && Object.keys(q.told[0]).sort().join(',') === 'gaveUp,mint,why', JSON.stringify(q.told));
+      ok(what + ': and asks nothing of the price', !q.a.satsForDollars && !q.priced.length);
+    }
+    const p = payer();
+    await p.tap(offer({ up: true, sats4usd: 1, req: 'creqA-usd-forge', inv: INV }));
+    ok('both online at two mints: their invoice, as before, and no sats for dollars',
+       p.paidOffers.length === 1 && !p.a.satsForDollars && !p.priced.length && !p.cards.length && p.paidOffers[0].inv === INV,
+       p.paidOffers.length + ' on, ' + (p.a.satsForDollars || 0) + ' asked');
   }
 
   console.log('\n' + (R.fail ? R.fail + ' FAILED, ' : '') + R.pass + ' passed');

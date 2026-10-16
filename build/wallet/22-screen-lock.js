@@ -252,6 +252,13 @@
     /** @type {?function(any): void} */
     _onLateClaim: null,
     onLateClaim: function (fn) { FoxyWallet._onLateClaim = fn; },
+    /* Sats paid to a dollars wallet are in the pile and may be swapped now:
+     * told the request id, after the claim that put them there has finished.
+     * The app decides whether this is a moment for it (never while put away,
+     * nor with money moving) and asks `convertOne`. */
+    /** @type {?function(string): void} */
+    _onConvertDue: null,
+    onConvertDue: function (fn) { FoxyWallet._onConvertDue = typeof fn === 'function' ? fn : null; },
     // invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }]
     /** @type {?function(Array<any>): void} */
     _onSwept: null,

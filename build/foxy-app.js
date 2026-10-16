@@ -1901,6 +1901,9 @@ class Component extends DCLogic {
           window.addEventListener('foxy-gate-up', () => { if (this.syncPreview) this.syncPreview(); });
         }
         if (W.onLateClaim) W.onLateClaim((info) => this.moneyIsSafe(info));
+        /* Sats paid to a wallet that holds dollars are in the pile: swapped
+         * into dollars when nothing else is going on (26i-swap.js). */
+        if (W.onConvertDue) W.onConvertDue(() => this.convertOnReturn(true));
         /* Paid while Foxy was away, and claimed by the sweep a route coming up
          * ran: no connect or return is there to show the balance after it. */
         if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); });
@@ -2104,6 +2107,10 @@ class Component extends DCLogic {
         if (!quiet) G.holdVerify(false);
         // paid while away, or a melt that settled: the balance again once swept
         if (swept) swept.then(() => this.refreshBalance());
+        /* And sats paid to a dollars wallet that were in the pile before Foxy
+         * went away, or closed: swapped now, once the sweeps have finished
+         * whatever swap was still with the mint. */
+        Promise.resolve(swept).then(() => { if (this.convertOnReturn) this.convertOnReturn(); });
       });
     }).catch(() => { G.holdVerify(false); })
       .then(() => { this._returning = null; });
@@ -2224,6 +2231,8 @@ class Component extends DCLogic {
     W.claimUnclaimed().then((took) => {
       this._claimingOnRoute = false;
       if (took) { this.refreshBalance(); this.loadHistory(); }
+      // what it put in the pile for a dollars wallet is said by the wallet (`onConvertDue`); this is for what waited already
+      if (this.convertOnReturn) this.convertOnReturn();
     }, () => { this._claimingOnRoute = false; });
   }
 
@@ -2257,6 +2266,8 @@ class Component extends DCLogic {
         this.refreshBalance();
         this.loadHistory();
         this.offerQuarantine();
+        // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
+        if (this.convertOnReturn) this.convertOnReturn();
       }, (e) => {
         console.warn('[foxy] the connect behind the home screen failed, attempt', attempt + 1, '\u2014', W.reason(e));
         const still = W.fromCache && W.fromCache();
@@ -5764,8 +5775,18 @@ class Component extends DCLogic {
   }
 
   /* The age as the home screen says it: "37 MINUTES AGO", and nothing while
-   * the price is current. */
-  priceAgeWords() {
+   * the price is current.
+   *
+   * Given an age (`ms`), the same words for that age: another phone's price,
+   * or this phone's as it was when a payment was agreed. Nothing under three
+   * minutes, as on home, and no `livePrice` question: the age is a fact about
+   * that figure, not about whether this screen has a price of its own. */
+  priceAgeWords(ms) {
+    if (arguments.length) {
+      const n = Number(ms);
+      if (!isFinite(n) || n < PRICE_STANDS_MS) return '';
+      return this.agoWords(n).toUpperCase();
+    }
     if (!this.priceAgo()) return '';
     const W = window.FoxyWallet;
     return this.agoWords(Date.now() - ((W && Number(W._rateAt)) || 0)).toUpperCase();
@@ -7236,7 +7257,9 @@ class Component extends DCLogic {
   priceTermsCard(q) {
     /* The same price is not a question. Under a tenth of a percent there is
      * nothing to weigh, so it is agreed without asking.
-     * No earlier price at all is not "the same" and is still asked. */
+     * No earlier price at all is not "the same" and is still asked, and nor
+     * is one more than a day old: the wallet gives no comparison with it
+     * (`readQuote`), so there is nothing to call the same. */
     const pct = (q && q.differsPct != null) ? Number(q.differsPct) : null;
     if (pct != null && isFinite(pct) && Math.abs(pct) < 0.1) {
       console.log('[foxy] price: the same as this phone\u2019s, agreed without asking');
@@ -8137,7 +8160,12 @@ class Component extends DCLogic {
     if (split && ev.id) this.txIsNew('req-' + ev.id);
     /* Paid in dollars or in sats, the next receive starts in that balance, as
      * a dollar invoice paid does (`usdInvoiceUp`). */
-    if (!split && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
+    /* Not sats paid to a wallet that holds dollars: those are swapped into
+     * dollars as soon as they can be (`convertOnReturn`), and the person's
+     * next receive stays in the dollars they chose. */
+    const intoDollars = ev.unit === 'sat' && (!!ev.convert
+      || !!(this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars'));
+    if (!split && !intoDollars && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
       this.rememberWallet('receive', ev.unit);
     }
     /* Nor one that is still to be carried home: it is announced when it has
@@ -8998,6 +9026,12 @@ class Component extends DCLogic {
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,
+      /* Sats paid for dollars asked for, which are to be swapped into
+       * dollars: the dollars asked and how old the payer's price was, for
+       * the headline (`renderPaid`). Nothing on any other payment. */
+      paidAsked: !out && ev.askConvert && Number(ev.usdAsked) > 0 ? Math.round(Number(ev.usdAsked)) : 0,
+      paidAskAgeMs: !out && ev.askConvert && Number(ev.askAgeMs) >= 0 ? Number(ev.askAgeMs) : 0,
+      paidConvert: !out && !!ev.askConvert && Number(ev.usdAsked) > 0,
       payOut: out,
       paidTo: ev.to || (out ? p.recipient : ''),
       asset: 'BITCOIN',
@@ -9605,7 +9639,9 @@ class Component extends DCLogic {
     // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
     this.announcePayment(Object.assign({}, next.ev || {}, {
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
-    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {}));
+    }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {},
+    // sats paid for dollars asked for, to be swapped into dollars: the dollars asked, and how old the payer's price was
+    Number(next.usdAsked) > 0 && next.convert ? { usdAsked: next.usdAsked, askAgeMs: next.askAgeMs, askConvert: true } : {}));
     // the confirmation may not have landed; this is what notices
     this.queueLater();
   }
@@ -10680,6 +10716,18 @@ class Component extends DCLogic {
           preimage: t.preimage || '',
           // and on a receive, the payment hash of the invoice this phone made
           payHash: t.payHash || '',
+          /* Sats paid for dollars asked for: the dollars asked (cents), the
+           * payer's price and how old it was, and how the swap into dollars
+           * went (20-helpers.js, `termsFields`; 16b-two-balances.js,
+           * `convertOne`). For reading only; the books never look at them. */
+          usdAsked: Number(t.usdAsked) || 0,
+          askRate: Number(t.askRate) || 0,
+          askAgeMs: t.askAgeMs == null ? null : Number(t.askAgeMs),
+          askSeenAt: Number(t.askSeenAt) || 0,
+          convert: t.convert || '',
+          convertSwap: t.convertSwap || '',
+          convertUsd: t.convertUsd == null ? null : Number(t.convertUsd),
+          convertWhy: t.convertWhy || '',
         });
         // Anyone address-shaped is saved to the book on sight, once.
         //
@@ -14996,6 +15044,18 @@ class Component extends DCLogic {
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
     if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    /* Sats paid for dollars this phone asked for, to be swapped into
+     * dollars (`paidConvert`): the dollars asked are the headline, the sats
+     * that came under them, with how old the payer's price was, and where
+     * they go: bitcoin now, dollars once swapped. A payment agreed in dollars
+     * that stays bitcoin is shown as it always was. */
+    const asked = Math.round(Number(s.paidAsked) || 0);
+    if (two && !s.payOut && asked > 0 && s.paidConvert) {
+      const words = this.priceAgeWords ? this.priceAgeWords(Number(s.paidAskAgeMs) || 0) : '';
+      base.paidHeadline = this.unitFigure(asked, 'usd');
+      base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 THEIR PRICE ' + words : '');
+      base.paidAddedTo = 'BITCOIN, THEN DOLLARS';
+    }
     return base;
   }
 
@@ -15045,7 +15105,7 @@ class Component extends DCLogic {
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -15377,7 +15437,18 @@ class Component extends DCLogic {
     const usd = Number(q.usd) || 0;
     const theirs = Math.round(Number(q.theirRate) || 0);
     const pct = (q.differsPct == null) ? null : Number(q.differsPct);
-    const ago = this.agoWords ? this.agoWords(Number(q.myRateAgeMs) || 0) : '';
+    /* How old each price is, where it is more than a few minutes: theirs,
+     * which the amount is worked out from, and this phone's, which it is
+     * weighed against. A fresh price says nothing, as on home. */
+    const ageOf = (ms) => (this.priceAgeWords && ms != null ? this.priceAgeWords(Number(ms)) : '');
+    const theirWords = ageOf(q.theirAgeMs);
+    const myWords = Number(q.myRateAgeMs) > 0 ? ageOf(q.myRateAgeMs) : '';
+    // sats for this phone's request in dollars, swapped into dollars here afterwards (`convertOnReturn`)
+    const forUsd = q.forUnit === 'usd';
+    /* A receiver online is being paid by a payer that is not, at the payer's
+     * price: the price has not changed since it was last online, it is just
+     * not this phone's, and the swap into dollars follows at once. */
+    const online = forUsd && !!this.offlineNow && !this.offlineNow();
     /* Under a tenth of a percent is the same price as far as anybody reading
      * this is concerned, and "0.0% higher" reads as a warning about nothing. */
     const near = pct != null && Math.abs(pct) < 0.1;
@@ -15398,8 +15469,14 @@ class Component extends DCLogic {
     /* The layout: the price is the big figure, because
      * the price is what is being agreed; then the difference, what it does to
      * the sats, and the question, each on its own line down the middle. */
-    const intro = pct == null
+    const intro = (pct == null && q.myTooOld)
+      ? 'What you ' + verb + ' is based on the Bitcoin price. The one this phone last saw is too old to compare it with.'
+      : pct == null
       ? 'What you ' + verb + ' is based on the Bitcoin price. This phone has no earlier price to compare it with.'
+      : online && near
+      ? 'What you ' + verb + ' is based on their Bitcoin price, which is the same as the one this phone sees now.'
+      : online
+      ? 'What you ' + verb + ' is based on their Bitcoin price, which is not the one this phone sees now.'
       : near
       ? 'What you ' + verb + ' is based on the Bitcoin price, which is the same as when you were last online.'
       : 'What you ' + verb + ' is based on the Bitcoin price, which has changed since you were last online.';
@@ -15410,14 +15487,19 @@ class Component extends DCLogic {
     return {
       title: 'BITCOIN PRICE',
       subtitle: intro,
-      amountLabel: 'CURRENT BITCOIN PRICE',
+      // an old price is theirs to own: CURRENT is only what a price seen just now can be called
+      amountLabel: theirWords ? 'THEIR BITCOIN PRICE' : 'CURRENT BITCOIN PRICE',
       amount: '$ ' + this.group(theirs),
       amountSub: '',
       // the question is the buttons; a row asking it again was one too many
-      rows: [
+      rows: (forUsd ? [this.cfRow('YOU ASKED FOR', this.unitFigure(Math.round(Number(q.usd) || 0), 'usd'))] : []).concat([
         this.cfRow('DIFFERENCE', difference),
         this.cfRow('RESULT', result),
-      ].concat(said ? [this.cfRow('YOU AGREED TO THIS PRICE', 'Working out the rest with their phone\u2026')] : []),
+      ]).concat(theirWords ? [this.cfRow('THEIR PRICE SEEN', theirWords)] : [])
+        .concat(myWords ? [this.cfRow('YOUR PRICE SEEN', myWords)] : [])
+        .concat(forUsd ? [this.cfRow('THEN', online ? 'Foxy swaps it into dollars at the mint as soon as it is in.'
+          : 'Foxy swaps it into dollars at the mint as soon as you are online.')] : [])
+        .concat(said ? [this.cfRow('YOU AGREED TO THIS PRICE', 'Working out the rest with their phone\u2026')] : []),
       // answered: there is nothing left to reject, and the tap leg owns what happens next
       secondary: said ? null : { label: 'NO, CANCEL', go: () => this.priceAnswer(false) },
       close: said ? null : () => this.priceAnswer(false),
@@ -15594,6 +15676,19 @@ class Component extends DCLogic {
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
              : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND' : 'THEIR NOSTR INBOX, OVER TOR')
       : (req && !req.transports.length) ? 'A TOKEN TO SHOW THEM' : 'A TOKEN YOU SEND THEM';
+    /* Sats for dollars they asked for, at this phone's price, which they
+     * agreed to over the tap (`tapQuoteTheirDollars`): what the sats are for,
+     * and whose price made them, with its age where it is more than a few
+     * minutes. Only on the request that answered that price. */
+    const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
+    const agreedRows = () => {
+      const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
+      return [
+        this.cfRow('FOR', this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd')),
+        this.cfRow('BITCOIN PRICE', '$ ' + this.group(Math.round(Number(s.tapQuoteRate) || 0)),
+          { sub: words ? 'this phone\u2019s, seen ' + words.toLowerCase() : 'this phone\u2019s' }),
+      ];
+    };
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
       this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
@@ -15603,7 +15698,7 @@ class Component extends DCLogic {
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? fig(lack.fee).main
         : (usdReq || this.px()) ? '$ 0.00' : '\u20bf 0', { half: true }),
-    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : this.peerRateRow());
+    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -15635,7 +15730,7 @@ class Component extends DCLogic {
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
              + (lack && lack.fee > 0 ? ' with the fee' : ''),
-        cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null }),
+        cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
       };
     }
     return {
@@ -15657,7 +15752,7 @@ class Component extends DCLogic {
         if (req && req.viaTap && W && W.tapQuote) {
           W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
         }
-        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '' });
+        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
       },
       /* SEND over the link in your hand, PAY over Tor. Not one word for both:
        * over Tor it really is a payment going somewhere, and on a tap the two
@@ -16044,7 +16139,7 @@ class Component extends DCLogic {
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      }, two ? this.histRowTwo(t, tab, balOf, legFigure) : {})).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
@@ -16132,6 +16227,30 @@ class Component extends DCLogic {
        * bitcoin); an object with usdPerBtc is read the same way. */
       txSwapRate: (two && tx.kind === 'swap' && this.swapRateOf(tx.mintRate) > 0)
         ? '\u20bf 1 = $ ' + this.group(Math.round(this.swapRateOf(tx.mintRate))) : 'The mint\u2019s rate',
+      /* Sats paid for a dollar amount that was talked over first: what was
+       * asked, the payer's price it was worked out at and how old that was,
+       * and, when the sats are to be swapped into dollars here, what the
+       * swap gave or how it stands. */
+      txAskShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0,
+      txAsked: this.unitFigure(Math.round(Number(tx.usdAsked) || 0), 'usd'),
+      txAskPrice: Number(tx.askRate) > 0
+        ? '\u20bf 1 = $ ' + this.group(Math.round(Number(tx.askRate)))
+          + ((() => {
+            const words = (this.priceAgeWords && tx.askAgeMs != null) ? this.priceAgeWords(Number(tx.askAgeMs)) : '';
+            return words ? ', seen ' + words.toLowerCase() : '';
+          })())
+        : '\u2014',
+      txConvertShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0 && !!tx.convert,
+      txConverted: tx.convert === 'done'
+        ? (Number(tx.convertUsd) > 0 ? this.unitFigure(Math.round(Number(tx.convertUsd)), 'usd') : 'Dollars')
+        // owed waits for a connection; in the pile, it waits only for a quiet moment
+        : tx.convert === 'owed' ? 'Once online'
+        : tx.convert === 'claimed' ? 'Soon'
+        : tx.convert === 'swapping' ? 'Under way'
+        : tx.convert === 'failed' ? 'Not swapped, still bitcoin'
+        : (tx.convert === 'kept' && tx.convertWhy === 'small') ? 'Too little after the fee'
+        : (tx.convert === 'kept' && tx.convertWhy === 'spent') ? 'Spent first'
+        : tx.convert === 'kept' ? 'Kept as bitcoin' : '',
       txPaymentId: tx.hash || '',
       txHasPaymentId: !!tx.hash,
       /* The one identifier on this screen an explorer can find.
@@ -16383,7 +16502,7 @@ class Component extends DCLogic {
    * the figure in the row's own unit (sats big on the bitcoin tab, cents on
    * the dollar tab), the running balance in that unit, and for a swap the
    * other leg's figure under it with the words that say so. */
-  histRowTwo(t, tab, balOf, legFigure) {
+  histRowTwo(t, tab, balOf, legFigure, legOf) {
     if (!t) return {};
     const usd = t.unit === 'usd';
     const sign = t.dir === 'in' ? '+ ' : '- ';
@@ -16396,6 +16515,29 @@ class Component extends DCLogic {
         : usd ? '' : (this.money(amount, this.txFiat(t, amount)).usd != null ? '$ ' + this.usd(this.money(amount, this.txFiat(t, amount)).usd) : ''),
       balText: 'BAL ' + this.unitFigure(Math.max(0, balOf.get(t) || 0), tab === 'usd' ? 'usd' : 'sat'),
     };
+    /* Sats paid for dollars this phone asked for: the dollars asked under
+     * the sats, and how the swap into dollars went where it has something to
+     * say. What the swap gave is on the row once it has, or read from the
+     * swap's own dollar row. A payment that is failed or at risk says that
+     * instead, as every other row does. */
+    const asked = !usd && !swap ? Math.round(Number(t.usdAsked) || 0) : 0;
+    if (asked > 0) {
+      out.amtSub = 'Asked ' + this.unitFigure(asked, 'usd');
+      const leg = (t.convertSwap && legOf && legOf.get) ? legOf.get(t.convertSwap + '|usd') : null;
+      const gave = t.convertUsd != null && Number(t.convertUsd) > 0 ? Number(t.convertUsd) : leg ? Math.round(Number(leg.amount) || 0) : 0;
+      const said = t.convert === 'done' || (gave > 0 && t.convert === 'swapping' && !!leg)
+        ? (gave > 0 ? 'Swapped into ' + this.unitFigure(gave, 'usd') : 'Swapped into dollars')
+        : t.convert === 'owed' ? 'To be swapped into dollars once online'
+        // in the pile already, so only waiting for nothing else to be going on
+        : t.convert === 'claimed' ? 'To be swapped into dollars'
+        : t.convert === 'swapping' ? 'Being swapped into dollars'
+        : t.convert === 'failed' ? 'Not swapped. It stays bitcoin'
+        : (t.convert === 'kept' && t.convertWhy === 'small') ? 'Too little to swap after the mint\u2019s fee'
+        : (t.convert === 'kept' && t.convertWhy === 'spent') ? 'Spent before it was swapped'
+        : t.convert === 'kept' ? 'Kept as bitcoin'
+        : '';
+      if (said && !t.failed && !t.atRisk && !t.highRisk) out.metaRail = said;
+    }
     if (swap) {
       return Object.assign(out, {
         name: 'Swap', initial: 'S',
@@ -17463,6 +17605,20 @@ class Component extends DCLogic {
     const usdOffer = s.flow === 'receive' && !!(this.walletNow && this.walletNow('receive') === 'usd');
     const fresh = (!usdOffer && !this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
       ? Number(mine.rate) : 0;
+    /* A wallet that holds dollars takes sats for a request in dollars, and
+     * swaps them into dollars at the mint itself as soon as it is online
+     * (`convertOnReturn`, 26i-swap.js). Said on the offer so a payer with no
+     * dollars, or with no route to pay the dollar invoice from bitcoin, can
+     * offer sats instead of being turned away. Only a wallet that chose to
+     * hold dollars says it, and only for a request in dollar ecash: a wallet
+     * holding both, or bitcoin, and an older Foxy, say nothing, and payers
+     * refuse them as they always did. */
+    let satsForUsd = false;
+    if (usdOffer && req && this.twoUnitsOn && this.twoUnitsOn()
+        && this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars') {
+      const onAir = W.decodeRequest ? W.decodeRequest(req) : null;
+      satsForUsd = !!(onAir && onAir.unit === 'usd');
+    }
     const offer = !advertise ? ''
       : waiting ? '{}'
       /* `up`: whether this phone has a route, said by the phone that knows.
@@ -17485,6 +17641,8 @@ class Component extends DCLogic {
                           * only asks a phone that will answer; an older Foxy
                           * says nothing and is paid as before. */
                          ask: 1,
+                         // and sats taken for this dollar request, swapped into dollars here (above)
+                         sats4usd: satsForUsd ? 1 : undefined,
                          /* And this phone's bitcoin price, when it is current.
                           *
                           * A phone with no route has a price that may be hours
@@ -17910,6 +18068,8 @@ class Component extends DCLogic {
   tapGaveNothing(why) {
     this._pricedFor = null;      // the next tap agrees its own price
     this._crossReady = null;     // and asks its own crossing
+    // and no price talked over is left for a later confirmation to show (`requestSpec`)
+    if (this.state && this.state.tapQuoteFor) this.setState({ tapQuoteFor: '', tapQuoteRate: 0, tapQuoteAgeMs: 0 });
     if (!this._tapGot && !this._tapKeep) return;
     console.log('[foxy] tap: letting that one go \u2014 ' + (why || 'nothing came of it'));
     this._tapGot = false;
@@ -18790,7 +18950,7 @@ class Component extends DCLogic {
      * is refused in words. Sats and dollars are both paid (`tapUnitRule`). */
     const unitRead = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
     const notSats = this.tapUnitRule ? this.tapUnitRule(unitRead) : '';
-    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
     if (notSats) console.log('[foxy] tap: their request is not in sats; paying their invoice instead');
     if (req && !notSats && W.decodeRequest) {
       const r = W.decodeRequest(req);
@@ -18816,7 +18976,7 @@ class Component extends DCLogic {
     if (usdUnit && !sameMint && !inv) {
       return { notSats: 'That request asks for dollars at a mint you do not use, and has no invoice to pay instead.',
                inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false,
-               theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+               theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
     }
     console.log('[foxy] tap: they offered ' + (inv ? 'an invoice' : 'no invoice')
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
@@ -18840,7 +19000,10 @@ class Component extends DCLogic {
              mints: theirs, crossable: crossable, theirRoute: theirRoute,
              // whether they answer a question before the payment (`askFirst`)
              asks: o.ask === 1,
-             theirRate: theirRate, theirRateAt: theirRateAt };
+             theirRate: theirRate, theirRateAt: theirRateAt,
+             /* A dollars wallet that takes sats for this dollar request and
+              * swaps them itself (`sats4usd`); absent is no. */
+             satsForUsd: usdUnit && o.sats4usd === 1 };
   }
 
   /* Between two mints, both phones must be online.
@@ -18980,6 +19143,49 @@ class Component extends DCLogic {
       + this.group(Math.round(q.theirRate)) + ' per bitcoin'
       + (q.differsPct == null ? '; this phone has no price to compare'
          : '; ' + q.differsPct.toFixed(1) + '% from the one this phone last saw'));
+    const refuse = (why) => {
+      this._payerGaveUp = true;
+      const no = W.tapTerms ? W.tapTerms(JSON.stringify(Object.assign({ no: true }, why ? { why: why } : {}))) : Promise.resolve();
+      no.catch(() => {}).then(() => setTimeout(() => this.tapTalking(false), 2000));
+    };
+    /* Their price more than a day old, or of an age they will not say: the
+     * sats it works out are a guess, so it is refused, never taken with a
+     * warning. Only theirs: this phone's own being old does not refuse,
+     * because theirs is the figure the amount comes from, and a phone that
+     * has been offline for days has to be able to be paid by one that is
+     * online. With its own that old there is no comparison, and the screen
+     * asks rather than agreeing by itself (`priceTermsCard`). */
+    if (q.tooOld) {
+      console.log('[foxy] tap: their bitcoin price is too old to take a payment worked out from it; refused');
+      refuse('Their Bitcoin price is too old.');
+      this.blockedCard('priceTooOld', {
+        tone: 'warn',
+        title: 'BITCOIN PRICE TOO OLD',
+        reason: 'The payer’s phone last saw the Bitcoin price '
+          + (q.theirAgeMs == null ? 'at a time it did not say' : this.agoWords(q.theirAgeMs))
+          + '. Foxy does not take a payment worked out from a price that old.',
+        chip: 'Nothing was paid. Either of you can get online for a new price.',
+      });
+      return;
+    }
+    /* A price is only ever for the request on the air now, and for the
+     * dollars it asks: the payer's figure is never taken for what this phone
+     * asked. Sats offered for a request in dollar ecash only while this
+     * wallet still holds dollars and can swap the sats into them. Anything
+     * else is a price for some other question. */
+    let mine = null;
+    try { mine = W.decodeRequest(JSON.parse(this._tapOffer || '{}').req || ''); } catch (e) { mine = null; }
+    const asked = !mine ? 0
+      : q.forUnit === 'usd' ? (mine.unit === 'usd' ? Math.round(Number(mine.amount) || 0) : 0)
+      : (W.asksInDollars && W.asksInDollars(mine) ? Math.round(Number(mine.usd) || 0) : 0);
+    const fits = !!(mine && asked > 0 && mine.id === q.id && asked === q.usd
+      && (q.forUnit !== 'usd' || (this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars'
+                                  && this.twoUnitsOn && this.twoUnitsOn())));
+    if (!fits) {
+      console.warn('[foxy] tap: a price arrived for a request that is not the one on the air, or not for what it asks; refused');
+      refuse('That price is not for this request.');
+      return;
+    }
     /* From here until the answer has gone, this phone is in a conversation and
      * nothing may be torn down under it — not the radio, not the screen, not
      * the inbox. Set before the person is asked and cleared only once the
@@ -19018,6 +19224,18 @@ class Component extends DCLogic {
           return;
         }
         console.log('[foxy] tap: the price was accepted; sending the request for ' + q.sats + ' sats');
+        /* What it was agreed for, kept with the request and nowhere else:
+         * the dollars, the payer's price and its age, and for a request in
+         * dollars that the sats are to be swapped into dollars once they are
+         * in. A payment to this very request picks it up; history shows the
+         * figure asked next to what the swap gave. */
+        if (W.noteRequestTerms && W.decodeRequest) {
+          const agreed = W.decodeRequest(req);
+          if (agreed && agreed.id) {
+            W.noteRequestTerms(agreed.id, { usd: asked, rate: q.theirRate, ageMs: q.theirAgeMs, seenAt: q.theirSeenAt,
+                                            from: q.id, convert: q.forUnit === 'usd' });
+          }
+        }
         /* The hold STAYS. Sending the terms is not the end of the conversation,
          * it is the middle: the payment this phone just agreed to is what comes
          * next, over this same link.
@@ -19198,6 +19416,13 @@ class Component extends DCLogic {
     const other = unit === 'usd' ? 'sat' : 'usd';
     const word = unit === 'usd' ? 'dollars' : 'bitcoin';
     const otherWord = other === 'usd' ? 'dollars' : 'bitcoin';
+    /* A dollars wallet that said it takes sats for this request: paid in
+     * sats at this phone's price, which the receiver agrees to first, and
+     * swapped into dollars at their end (`tapSatsForDollars`). Only where
+     * the dollar invoice cannot be paid from bitcoin instead: this phone
+     * offline, or theirs. */
+    if (unit === 'usd' && offline && offer.satsForUsd && offer.sameMint && this.tapSatsForDollars
+        && this.tapSatsForDollars(offer)) return true;
     if (offline) {
       const why = held > 0 ? (lack && lack.why) || ('This needs ' + this.moneyIn(want, unit) + ' and you hold ' + this.moneyIn(held, unit) + '.')
         : 'This request is in ' + word + '. You hold no ' + word + ' here, and paying it from ' + otherWord + ' needs the mint.';
@@ -19211,6 +19436,8 @@ class Component extends DCLogic {
     try { otherHeld = two ? Math.max(0, Math.round(Number(W.balanceOf ? W.balanceOf(other) : 0) || 0)) : 0; } catch (e) { otherHeld = 0; }
     if (!(otherHeld > 0)) return false;
     if (offer.theirRoute === false) {
+      if (unit === 'usd' && offer.satsForUsd && offer.sameMint && this.tapSatsForDollars
+          && this.tapSatsForDollars(offer)) return true;
       console.log('[foxy] tap: their phone is offline, so there is no invoice to pay from ' + otherWord + '; not paid');
       this.tapRefuseUnit('This request is in ' + word + '. You hold no ' + word + ' here, and paying it from '
         + otherWord + ' needs both of you online.',
@@ -19219,6 +19446,49 @@ class Component extends DCLogic {
     }
     if (offer.inv) { this.tapConvertPay(offer.inv, other); return true; }
     this.tapAwaitUnitInvoice(offer, other);
+    return true;
+  }
+
+  /* A request in dollars, from a wallet that holds dollars and said it takes
+   * sats for it (`sats4usd`), paid by a phone that cannot pay it in dollars.
+   *
+   * The sats are worked out from this phone's price and offered first, as a
+   * request asking in dollars is (`tapQuoteTheirDollars`, M10 and M11): the
+   * receiver agrees to that price, or does not, and answers with a request
+   * in sats for exactly that. Nothing leaves here before. Their wallet swaps
+   * the sats into dollars at the mint as soon as it is online.
+   *
+   * Both phones offline is still no: nothing on either could settle it.
+   * Short of the sats with the fee, said here, before any price is talked
+   * over. Answers whether the tap was taken; false leaves it to the refusal
+   * that follows (no price here to work the sats out from). */
+  tapSatsForDollars(offer) {
+    const W = window.FoxyWallet;
+    if (!offer || !offer.read || !W) return false;
+    if (this.offlineNow() && offer.theirRoute === false && !(W._offlineToOffline && W._offlineToOffline())) {
+      console.log('[foxy] tap: they take sats for dollars, but both phones are offline; not paid');
+      this.tapRefuseUnit('You are both offline, so nothing here could settle this payment. One of you needs a connection.',
+        'You are both offline. One of you needs a connection.');
+      return true;
+    }
+    const mine = W.lastPrice ? W.lastPrice() : { rate: 0 };
+    // too old is said by the price talk itself (`tapQuoteTheirDollars`), with the age
+    const tooOld = !!(mine && Number(mine.rate) > 0 && W.priceTooOld && W.priceTooOld(mine.at));
+    const q = tooOld ? null : (W.quoteFor ? W.quoteFor(offer.read) : null);
+    if (!q && !tooOld) return false;
+    if (q) {
+      let lack = null;
+      try {
+        lack = W.sendShortfall ? W.sendShortfall(q.sats, { unit: 'sat', locked: !!(offer.read.lockTo && !this.offlineNow()) }) : null;
+      } catch (e) { lack = null; }
+      if (lack && lack.short) {
+        console.log('[foxy] tap: they take sats for dollars, and this phone holds too few sats for ' + q.sats + '; not paid');
+        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with its fee.'), this.shortForReceiver());
+        return true;
+      }
+    }
+    console.log('[foxy] tap: they hold dollars and take sats for them; offering sats at this phone’s price');
+    this.tapQuoteTheirDollars(offer);
     return true;
   }
 
@@ -20382,6 +20652,28 @@ class Component extends DCLogic {
    * words on screen come from Foxy rather than from a link that went quiet. */
   tapQuoteTheirDollars(offer) {
     const W = window.FoxyWallet;
+    /* A price more than a day old works out a figure that is a guess, so it
+     * is not offered. Said to them, so their screen does not wait, and here
+     * with the age, so the person knows what would fix it: a connection, once. */
+    const mine = W.lastPrice ? W.lastPrice() : null;
+    if (mine && Number(mine.rate) > 0 && W.priceTooOld && W.priceTooOld(mine.at)) {
+      console.log('[foxy] tap: this phone’s bitcoin price is too old to work the sats out from; not offered');
+      if (W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer’s Bitcoin price is too old to use.' })).catch(() => {});
+      this.tapGaveNothing('price too old');
+      /* Seen "in the future" is a clock that is wrong, not a price that is
+       * new, and saying it was seen a moment ago would contradict the title. */
+      const ahead = Number(mine.at) > Date.now() + 300000;
+      this.blockedCard('priceTooOld', {
+        tone: 'warn',
+        title: 'BITCOIN PRICE TOO OLD',
+        reason: ahead ? 'This phone’s clock and its Bitcoin price do not agree.'
+          : 'This phone last saw the Bitcoin price ' + this.agoWords(Number(mine.ageMs) || 0)
+          + '. That is too old to work out what they asked for.',
+        chip: 'Nothing was sent. Get online once and Foxy has a new price.',
+      });
+      this.back();
+      return;
+    }
     const quote = W.quoteFor ? W.quoteFor(offer.read) : null;
     if (!quote) {
       /* No price, nothing honest to offer. Their request names no sats, so
@@ -20444,6 +20736,20 @@ class Component extends DCLogic {
          * agreement to the offer, it is a different request. */
         const back = W.decodeRequest ? W.decodeRequest(String(said.req)) : null;
         const backSats = back ? Math.round(Number(back.sats) || 0) : 0;
+        /* For a request in dollars, the answer has to be a request in sats,
+         * at this phone's mint: that is what was offered, and the sats are
+         * paid here in ecash from this pile or not at all. */
+        const forUsd = !!(offer.read && offer.read.unit === 'usd');
+        const strip = (u) => String(u || '').replace(/\/+$/, '');
+        const atMine = !!(back && (back.mints || []).some(m => strip(m) === strip(W.mintUrl)));
+        if (forUsd && back && (back.unit !== 'sat' || !atMine)) {
+          console.warn('[foxy] tap: they answered sats for dollars with a request in ' + back.unit
+            + (atMine ? '' : ' at another mint') + '; nothing was sent');
+          this.toast('Their request is not for sats at this mint. Nothing was sent.', true);
+          this.back();
+          this.tapGaveNothing('their request was not for what was offered');
+          return;
+        }
         if (!back || backSats !== Math.round(Number(quote.sats) || 0)) {
           console.warn('[foxy] tap: they answered the price with a request for ' + backSats + ' sats, not the '
             + quote.sats + ' this phone offered; nothing was sent');
@@ -20453,10 +20759,20 @@ class Component extends DCLogic {
           return;
         }
         console.log('[foxy] tap: they agreed the price; the request is in sats now');
+        // the confirmation says what the sats are for, at whose price (`requestSpec`)
+        this.setState({ tapQuoteFor: String(back.id || ''), tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd,
+                        tapQuoteRate: quote.rate, tapQuoteAgeMs: quote.ageMs });
         /* The agreed request, on the offer it came from: the mints have not
          * changed — a receiver makes its request at its own mint either way —
          * so whether this is a same-mint payment or a transfer first is the
          * same question it was, now with a number in it. */
+        /* For a request in dollars, the sat request is read as what is paid
+         * now (`read`), and no longer as dollars: read as the dollar request
+         * it answered, the payment would come straight back here. */
+        if (forUsd) {
+          this.tapPayOffer(Object.assign({}, offer, { req: String(said.req), read: back, asksUsd: false, satsForUsd: false }), backSats);
+          return;
+        }
         this.tapPayOffer(Object.assign({}, offer, { req: String(said.req) }), backSats);
       });
     }
@@ -20466,12 +20782,22 @@ class Component extends DCLogic {
      * seconds at best, and a payer's phone with nothing on it reads as a broken
      * app — the same argument M9 exists for. CANCEL is real: nothing has left
      * this phone, so there is nothing to undo. */
+    /* What they are agreeing to: this phone's price, and how old it is when
+     * that is more than a few minutes. A receiver that is online asked in
+     * dollars because it holds dollars, not because it has no price. */
+    const seen = this.priceAgeWords ? this.priceAgeWords(Number(quote.ageMs) || 0) : '';
     this.waitingScreen('priceSent', {
       art: 'phone', title: 'Waiting<br>for receiver', dots: true,
-      body: 'This receiver is offline and must agree to the current Bitcoin price before continuing.',
+      /* Today's words unless the receiver said it is online: an older Foxy
+       * says nothing about its route, and only an offline one asks this way. */
+      body: (offer.theirRoute !== true
+        ? 'This receiver is offline and must agree to the current Bitcoin price before continuing.'
+        : 'They asked for dollars, and must agree to this phone’s Bitcoin price before continuing.')
+        + (seen ? ' This phone saw it ' + seen.toLowerCase() + '.' : ''),
       button: 'CANCEL', go: () => { if (done('cancelled')) this.back(); },
     });
-    this.setState({ tapQuoteWait: true, tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd });
+    this.setState({ tapQuoteWait: true, tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd,
+                    tapQuoteRate: quote.rate, tapQuoteAgeMs: quote.ageMs, tapQuoteFor: '' });
     console.log('[foxy] tap: quoting ' + quote.sats + ' sats for $'
       + (quote.usd / 100).toFixed(2) + ' at $ ' + this.group(Math.round(quote.rate)) + ' per bitcoin');
     this._tapQuoteT = setTimeout(() => {
@@ -25672,10 +25998,17 @@ class Component extends DCLogic {
   /* One half paid and the other not answered yet: the card, and home, where
    * the held pill names what is with the mint until the wallet finishes it. */
   swapStillGoing(r) {
-    const from = (r && r.from) || {};
-    const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
     this._preSettle = null;
     this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
+    this.swapPendingCard(r);
+  }
+
+  /* The card itself, wherever the person is: SWAP's own, and a swap into
+   * dollars Foxy started by itself (`convertOnReturn`), which puts it over
+   * home without taking anybody there. */
+  swapPendingCard(r) {
+    const from = (r && r.from) || {};
+    const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
     this.blockedCard('swapPending', {
       tone: 'warn',
       title: 'SWAP STILL GOING THROUGH',
@@ -25683,6 +26016,119 @@ class Component extends DCLogic {
         + 'the next time the mint answers.',
       chip: 'Nothing is lost. Your balance shows it as pending with the mint until then.',
     });
+  }
+
+  /* Sats paid to a wallet that holds dollars, swapped into dollars at the mint.
+   *
+   * A person who chose dollars and was paid in sats (a payer with no dollars,
+   * or with no route to pay the dollar invoice from bitcoin, by tap) is owed
+   * the swap they would have made themselves. The wallet keeps which payments
+   * those are and does the swap (`convertOne`, 16b-two-balances.js); this
+   * decides when. Nobody is waiting on it, so it waits for a moment nothing
+   * else is happening: online with the mint's own keys, not put away, no money
+   * moving, no tap under way. One at a time, and `_swapRun` holds it, so SWAP,
+   * a payment and a mint switch all wait for it as they wait for SWAP.
+   *
+   * Called when a claim puts such sats in the pile (`onConvertDue`), after the
+   * sweeps on a return or a launch, when a route comes back and claims what
+   * waited, and when a wallet built from storage connects for real. With money
+   * moving it tries again a little later, a few times; past that, the next of
+   * those moments picks it up. `due` is a fresh claim, which starts the count
+   * again. */
+  CONVERT_WAITS = 6;
+
+  convertOnReturn(due) {
+    const W = window.FoxyWallet;
+    if (!W || !W.convertOne || !W.convertsOwed) return;
+    if (due) this._convertWaits = 0;
+    if (this._converting) return;
+    clearTimeout(this._convertT);
+    this._convertT = null;
+    // with no route, put away, or on the keys from storage: a connect or a return brings it back here
+    if (this.offlineNow() || !W.connected || (W.fromCache && W.fromCache()) || this._putAway) return;
+    /* Nor in front of a person deciding to spend: on a confirmation, or on
+     * SET AMOUNT for a payment, the pile they are looking at would move
+     * under them, and SEND or SWAP would find it held. The small-change
+     * top-up waits for put-away for the same reason. */
+    const confirming = typeof CONFIRM_SCREENS !== 'undefined' ? CONFIRM_SCREENS : [];
+    const deciding = confirming.indexOf(this.state.screen) >= 0
+      || (this.state.screen === 'amount' && this.state.flow === 'send')
+      || ['sendHow', 'swapConfirm', 'swap'].indexOf(this.state.screen) >= 0;
+    if (this.moneyBusy() || this._tapTalking || this.state.tapArmed || deciding) { this.convertLater(); return; }
+    /* The rate is judged against this phone's own price, and an old one is
+     * no yardstick (`convertWantsPrice`): one is asked for first, once. */
+    if (W.convertWantsPrice && W.convertWantsPrice() && this.convertWaiting()) {
+      if (!this._convertPrice && W.rate) {
+        const ask = this._convertPrice = W.rate({ fresh: true }).then(() => {}, () => {});
+        ask.then(() => {
+          this._convertPrice = null;
+          if (W.convertWantsPrice()) this.convertLater(); else this.convertOnReturn();
+        });
+      }
+      return;
+    }
+    const said = (n) => this.unitFigure(Math.round(Number(n) || 0), 'sat');
+    const run = W.convertOne((stage, rec, q) => {
+      if (stage !== 'start') return;
+      this.toast('You chose dollars, so Foxy is swapping the ' + said((rec && rec.got) || (q && q.total))
+        + ' you were paid into dollars.');
+    });
+    this._swapRun = this._converting = run;
+    run.then((r) => {
+      if (this._swapRun === run) this._swapRun = null;
+      this._converting = null;
+      // nothing done: something held it (a swap with the mint, a top-up), or nothing is due
+      if (!r) { this.convertLater(); return; }
+      this._convertWaits = 0;
+      const home = this.state.screen === 'home';
+      if (r.outcome === 'done') {
+        this.refreshBalance();
+        this.loadHistory();
+        if (home) this.settleAnimate('both');
+      } else if (r.outcome === 'pending') {
+        this.refreshBalance();
+        this.loadHistory();
+        if (home) this.swapPendingCard(r);
+        else this.toast('The swap into dollars is still going through. Foxy finishes it by itself.', true);
+      } else if (r.outcome === 'failed') {
+        this.loadHistory();
+        // once for each payment, however many times it is tried
+        this._convertSaid = this._convertSaid || {};
+        if (!this._convertSaid[r.id]) {
+          this._convertSaid[r.id] = true;
+          const got = r.rec && Number(r.rec.got) > 0 ? r.rec.got : (r.from && r.from.amount);
+          this.toast('Foxy could not swap the ' + said(got) + ' into dollars just now. It stays as bitcoin.', true);
+        }
+      } else if (r.outcome === 'kept') {
+        this.loadHistory();
+      }
+      // the next one, if another payment is waiting and has not had its go yet
+      if (r.outcome !== 'offline' && this.convertWaiting()) {
+        this._convertT = setTimeout(() => { this._convertT = null; this.convertOnReturn(); }, 1000);
+      }
+    }, () => {
+      if (this._swapRun === run) this._swapRun = null;
+      this._converting = null;
+    });
+  }
+
+  // a payment in the pile, still to be swapped into dollars, that has not had its one go this launch
+  convertWaiting() {
+    const W = window.FoxyWallet;
+    try { return (W.convertsOwed() || []).some(r => r && r.state === 'claimed' && !r.tried); }
+    catch (e) { return false; }
+  }
+
+  /* Held by something else: a little later, a few times, longer each time.
+   * Not while put away (the return asks), and not when nothing is waiting. */
+  convertLater() {
+    if (this._putAway || this._convertT || !this.convertWaiting()) return;
+    const n = this._convertWaits = (this._convertWaits || 0) + 1;
+    if (n > this.CONVERT_WAITS) {
+      console.log('[foxy] sats to swap into dollars: still held after ' + this.CONVERT_WAITS + ' looks; left for the next connection');
+      return;
+    }
+    this._convertT = setTimeout(() => { this._convertT = null; this.convertOnReturn(); }, Math.min(2000 * Math.pow(2, n - 1), 60000));
   }
 
   /* SWAPPED, dismissed: home, and both pills count to their new figures. */

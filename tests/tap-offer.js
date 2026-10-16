@@ -555,6 +555,44 @@ function run(a) {
     (src.match(/this\.tapGaveNothing\(/g) || []).length + ' call sites');
 }
 
+/* ---- a wallet that holds dollars takes sats for a request in dollars --------
+ *
+ * Said on the offer (`sats4usd`), so a payer with no dollars, or with no route
+ * to pay the dollar invoice from bitcoin, can offer sats at its own price and
+ * the receiver swaps them into dollars once it is online. Only a wallet that
+ * chose to hold dollars says it, and only for a request in dollar ecash. */
+{
+  const offered = (o) => {
+    const a = app({ state: { flow: 'receive', invoice: '', recvRail: 'CASHU' } });
+    a.creq = o.unit === 'usd' ? 'creqA-usd' : 'creqA-sat';
+    a.centsTyped = () => 500;
+    a.offline = !!o.offline;
+    a.walletNow = () => o.recv || 'usd';
+    a.walletChoiceNow = () => ({ hold: o.hold, recv: o.recv || 'usd', send: 'usd' });
+    a.twoUnitsOn = () => o.two !== false;
+    global.window = { FoxyWallet: Object.assign(wallet(a), {
+      decodeRequest: (t) => ({ id: 'r1', unit: /usd/.test(t) ? 'usd' : 'sat', amount: 500, sats: /usd/.test(t) ? null : 500 }),
+      lastPrice: () => ({ rate: 80000, at: Date.now(), ageMs: 0 }),
+    }) };
+    a.syncTap();
+    const line = a.said.filter((x) => /^receive \{/.test(String(x))).pop() || 'receive {}';
+    return JSON.parse(line.slice(8));
+  };
+  const held = offered({ hold: 'dollars', unit: 'usd', offline: true });
+  check('a wallet holding dollars, offline, says it takes sats for its dollar request',
+    held.sats4usd === 1 && held.up === false && !held.rate, JSON.stringify(held));
+  check('and online too: the payer decides whether it needs to',
+    offered({ hold: 'dollars', unit: 'usd' }).sats4usd === 1, 'online dollars wallet');
+  check('a wallet holding both does not say it',
+    !('sats4usd' in offered({ hold: 'both', unit: 'usd', offline: true })), 'hold both');
+  check('nor one holding bitcoin, nor one that has not chosen',
+    !('sats4usd' in offered({ hold: 'bitcoin', unit: 'usd' })) && !('sats4usd' in offered({ hold: '', unit: 'usd' })), 'hold bitcoin or none');
+  check('nor a dollars wallet asking in sats',
+    !('sats4usd' in offered({ hold: 'dollars', unit: 'sat', recv: 'sat' })), 'a sat request');
+  check('nor a mint with one balance',
+    !('sats4usd' in offered({ hold: 'dollars', unit: 'usd', two: false })), 'one unit');
+}
+
 results.forEach((r) => console.log(r));
 const bad = results.filter((r) => r.indexOf('FAIL') === 0).length;
 console.log('');

@@ -715,6 +715,47 @@ function representative(logic) {
       // card mode needs the card's screen under the flow, a stack the other views do not have: no slide in or out of it (`syncSlide`)
       before: (a) => { a._fcCard = { key: KEY_A, info: {}, pieces: [] }; a._nav = { screen: 'ocConfirm', len: 1 }; },
       after: (a) => { a._nav = { screen: 'ocConfirm', len: 0 }; } }));
+  /* Sats paid to a wallet that holds dollars (build/app/26i-swap.js `convertOnReturn`): the PRICE screen for sats offered for a
+   * dollar request, with both prices' ages; the payer's confirmation of the request agreed, at its price two hours old; PAYMENT
+   * RECEIVED with the dollars asked; and history and a payment's detail, swapped and still to be swapped. */
+  const HOLDS_USD = TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }) });
+  // a receiver whose own price is that old has been offline, and is still
+  add('priceconfirm, sats for dollars, both prices aged', at('priceConfirm', Object.assign({ priceQ: { id: 'r1', sats: 6502, usd: 500,
+    theirRate: 76900, differsPct: null, myTooOld: true, myRateAgeMs: 30 * 3600 * 1000, theirAgeMs: 2 * 3600 * 1000, forUnit: 'usd' } }, TWO_LIVE),
+    { wallet: Object.assign({}, HOLDS_USD, OFFLINE) }));
+  // and one online, paid by a payer that is not, at the payer's price from 20 hours ago, 2% over its own
+  add('priceconfirm, sats for dollars, to a receiver online', at('priceConfirm', Object.assign({ priceQ: { id: 'r1', sats: 6375, usd: 500,
+    theirRate: 78438, differsPct: 2, myTooOld: false, myRateAgeMs: 60000, theirAgeMs: 20 * 3600 * 1000, forUnit: 'usd' } }, TWO_LIVE),
+    { wallet: Object.assign({}, HOLDS_USD, ONLINE) }));
+  add('reqOffer, sats for dollars agreed, this phone’s price two hours old', at('reqOffer', { req: { id: 'agreed-1', sats: 6502, unit: 'sat',
+    mints: ['https://mint.minibits.cash/Bitcoin'], transports: [], viaTap: true }, tapCode: '4242', tapQuoteFor: 'agreed-1', tapQuoteUsd: 500,
+    tapQuoteRate: 76900, tapQuoteAgeMs: 2 * 3600 * 1000 }));
+  add('two balances: paid, sats for the dollars asked', at('paid', Object.assign({ amount: '6502', unit: 'SATS', asset: 'BITCOIN', paidUnit: 'sat',
+    paidAmount: 6502, paidAsked: 500, paidAskAgeMs: 2 * 3600 * 1000, paidConvert: true, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE),
+    { wallet: HOLDS_USD }));
+  // agreed in dollars on the old path, and staying bitcoin: PAYMENT RECEIVED as it always was
+  add('two balances: paid, sats agreed in dollars that stay bitcoin', at('paid', Object.assign({ amount: '6502', unit: 'SATS', asset: 'BITCOIN',
+    paidUnit: 'sat', paidAmount: 6502, paidAsked: 500, paidAskAgeMs: 2 * 3600 * 1000, paidConvert: false, recvResolved: true, recv: { live: 'in' } },
+    TWO_LIVE), { wallet: TWO() }));
+  const ASKED = { name: 'Paid in person', dir: 'in', sats: 6502, fee: 0, rail: 'CASHU', rate: 76900, usdAsked: 500, askRate: 76900,
+    askAgeMs: 2 * 3600 * 1000, askSeenAt: 1 };
+  const CONV_DONE = Object.assign({ time: '09:20', hash: 'req-c1', convert: 'done', convertSwap: 'sw2', convertUsd: 493 }, ASKED);
+  const CONV_OWED = Object.assign({ time: '09:30', hash: 'req-c2', pending: true, convert: 'owed' }, ASKED);
+  const CONV_HIST = [{ label: 'TODAY', items: [CONV_OWED, CONV_DONE].concat(TWO_HIST[0].items) }];
+  add('two balances: history, BITCOIN, sats swapped into dollars and still to be', at('history', Object.assign({ history: CONV_HIST,
+    historyComplete: false, histUnit: 'sat' }, TWO_LIVE), { wallet: HOLDS_USD }));
+  add('two balances: a payment swapped into dollars, in detail', at('txDetail', Object.assign({ tx: Object.assign({ stamp: 'Today, 09:20' }, CONV_DONE) }, TWO_LIVE),
+    { wallet: HOLDS_USD }));
+  add('two balances: a payment still to be swapped into dollars, in detail', at('txDetail', Object.assign({ tx: Object.assign({ stamp: 'Today, 09:30' }, CONV_OWED) }, TWO_LIVE),
+    { wallet: HOLDS_USD }));
+  // in the pile and waiting only for a quiet moment, and one spent before it could be swapped
+  const CONV_CLAIMED = Object.assign({ time: '09:40', hash: 'req-c3', convert: 'claimed' }, ASKED);
+  const CONV_SPENT = Object.assign({ time: '09:50', hash: 'req-c4', convert: 'kept', convertWhy: 'spent' }, ASKED);
+  add('two balances: history, BITCOIN, sats in the pile to be swapped and sats spent first', at('history', Object.assign({
+    history: [{ label: 'TODAY', items: [CONV_SPENT, CONV_CLAIMED].concat(TWO_HIST[0].items) }], historyComplete: false, histUnit: 'sat' }, TWO_LIVE),
+    { wallet: HOLDS_USD }));
+  add('two balances: a payment in the pile to be swapped into dollars, in detail', at('txDetail', Object.assign({ tx: Object.assign({ stamp: 'Today, 09:40' }, CONV_CLAIMED) }, TWO_LIVE),
+    { wallet: HOLDS_USD }));
   return v;
 }
 
@@ -723,6 +764,20 @@ function cards() {
   const v = [];
   const add = (label, call, over) => v.push([label, Object.assign({ wallet: true, state: Object.assign({ screen: 'home', stack: [] }, LIVE), call }, over || {})]);
   for (const kind of ['sendFail', 'mintRefused', 'netLost', 'lnNoRoute', 'badAddress']) add('card: ' + kind, (a) => a.blockedCard(kind));
+  /* A bitcoin price too old to work dollars out from, on each side of a tap (26d-tap.js): the payer's own, two days old, and a
+   * payer's the receiver is offered. Each by the method that raises it. */
+  const TWO_DAYS = 2 * 24 * 3600 * 1000;
+  add('card: the payer’s bitcoin price too old', (a) => a.tapQuoteTheirDollars({ read: { id: 'r1', unit: 'usd', amount: 500, sats: null },
+    theirRoute: false, mints: [MINT], sameMint: true }), { wallet: { lastPrice: () => ({ rate: 76900, at: Date.now() - TWO_DAYS, ageMs: TWO_DAYS }),
+    priceTooOld: () => true, tapQuote: () => Promise.resolve('ok') } });
+  // stamped ahead of the phone's clock: the clock is what is wrong, and the card says that
+  add('card: the payer’s bitcoin price ahead of its clock', (a) => a.tapQuoteTheirDollars({ read: { id: 'r1', unit: 'usd', amount: 500, sats: null },
+    theirRoute: false, mints: [MINT], sameMint: true }), { wallet: { lastPrice: () => ({ rate: 76900, at: Date.now() + 600000, ageMs: 0 }),
+    priceTooOld: () => true, tapQuote: () => Promise.resolve('ok') } });
+  add('card: the receiver refuses a price too old', (a) => a.tapPriceOffered('{"id":"r1"}'), { wallet: {
+    readQuote: () => ({ id: 'r1', usd: 500, sats: 6502, theirRate: 76900, myRate: 0, myRateAgeMs: 0, differsPct: null,
+      theirAgeMs: TWO_DAYS, theirSeenAt: 1, tooOld: true, myTooOld: false, forUnit: 'usd' }),
+    tapTerms: () => Promise.resolve('ok') } });
   add('card: blocked, a retry and a second button', (a) => a.blockedCard('netLost', { retry: 'RETRY', go() {}, also: { label: 'LATER', tap() {} } }));
   // the tone that asks rather than reports: the Tor banner's card, and SECURE FOXY
   add('card: the Tor banner explains itself', (a) => a.blockedCard('torConnection', {

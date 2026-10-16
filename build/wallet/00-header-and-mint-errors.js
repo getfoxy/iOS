@@ -140,7 +140,18 @@
     recv: 'foxy.wallet.recv',
     send: 'foxy.wallet.send',
     unitSwap: 'foxy.cashu.unitswap',      // swaps between the two units at one mint, until both legs have landed
+    /* Sats paid to a dollars wallet, to be swapped into dollars once they are
+     * in the pile: one record per payment, by request id (08c-units.js,
+     * `convertOwe`). A choice carried out, not money: the sats are on their
+     * own row and in the pile, and this only says what is still to be done
+     * with them. */
+    convert: 'foxy.cashu.convert',
   };
+
+  /* A day. Bitcoin seldom moves more than a few percent in one; past that the
+   * figure is a guess, and a payment worked out from it is a guess at the
+   * amount (`priceTooOld`). */
+  var PRICE_TOO_OLD_MS = 24 * 60 * 60 * 1000;
 
   /* The price line kept for a launch with no route (`_keepLine`, `keptLine`).
    *

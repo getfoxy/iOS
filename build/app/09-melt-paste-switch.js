@@ -785,8 +785,18 @@
   }
 
   /* The age as the home screen says it: "37 MINUTES AGO", and nothing while
-   * the price is current. */
-  priceAgeWords() {
+   * the price is current.
+   *
+   * Given an age (`ms`), the same words for that age: another phone's price,
+   * or this phone's as it was when a payment was agreed. Nothing under three
+   * minutes, as on home, and no `livePrice` question: the age is a fact about
+   * that figure, not about whether this screen has a price of its own. */
+  priceAgeWords(ms) {
+    if (arguments.length) {
+      const n = Number(ms);
+      if (!isFinite(n) || n < PRICE_STANDS_MS) return '';
+      return this.agoWords(n).toUpperCase();
+    }
     if (!this.priceAgo()) return '';
     const W = window.FoxyWallet;
     return this.agoWords(Date.now() - ((W && Number(W._rateAt)) || 0)).toUpperCase();

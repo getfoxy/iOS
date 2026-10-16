@@ -177,6 +177,9 @@ async function run() {
       tapWrongMint() { sent.push({ wrongMint: true }); },
       acceptTarget() { sent.push({ lightning: true }); return true; },
       offlineNow: () => false,
+      /* The offer this receiver has on the air: its request in dollars. A
+       * price is only ever taken for that request and what it asks. */
+      _tapOffer: JSON.stringify({ v: 2, req: text, up: false, ask: 1 }),
       /* As the real one behaves, which is the whole point.
        *
        * `railRequest` answers '' for an amount it has not made a request for
@@ -580,6 +583,41 @@ async function run() {
       ok(order.indexOf('free') > order.indexOf('terms:no'),
          'and let go a beat later, once it has had time to leave',
          JSON.stringify(order));
+    }
+
+    /* ---- a price is for what this phone asked, and adds up ---------------
+     *
+     * The receiver weighs the payer's price against its own and can agree by
+     * itself when they are close. So the rest of the quote has to be checked
+     * here: the dollars are the dollars this request asks, for this request,
+     * and the sats are those dollars at the price named. A quote at this
+     * phone's own price for a dollar instead of five, or for one sat, would
+     * otherwise be agreed without anyone being asked. */
+    {
+      const said = [];
+      rx.W.tapTerms = (body) => { said.push(JSON.parse(body)); return Promise.resolve('ok'); };
+      const asked6 = [];
+      const rx6 = base(rx.W, { priceTermsCard: (q) => { asked6.push(q); return Promise.resolve(true); } });
+      const honest = JSON.parse(quoted[0]);
+      const lessUsd = Object.assign({}, honest, { usd: 100, sats: Math.round((100 / 100) / honest.rate * 1e8) });
+      await rx6.tapPriceOffered(JSON.stringify(lessUsd));
+      await new Promise((r) => setTimeout(r, 5));
+      ok(!asked6.length && said.length === 1 && said[0].no === true && /not for this request/.test(said[0].why || ''),
+         'a quote for fewer dollars than this request asks is refused, whatever its price', JSON.stringify(said));
+      said.length = 0;
+      await rx6.tapPriceOffered(JSON.stringify(Object.assign({}, honest, { id: 'some-other' })));
+      await new Promise((r) => setTimeout(r, 5));
+      ok(!asked6.length && said.length === 1 && said[0].no === true, 'and so is one for another request', JSON.stringify(said));
+      said.length = 0;
+      await rx6.tapPriceOffered(JSON.stringify(Object.assign({}, honest, { sats: 1 })));
+      await new Promise((r) => setTimeout(r, 5));
+      ok(!asked6.length && said.length === 1 && said[0].no === true && rx.W.readQuote(JSON.stringify(Object.assign({}, honest, { sats: 1 }))) === null,
+         'a quote whose sats are not its dollars at its price is not a quote', JSON.stringify(said));
+      ok(rx.W.readQuote(quoted[0]) !== null, 'while the honest one, worked out as the payer works it out, reads');
+      said.length = 0;
+      await rx6.tapPriceOffered(quoted[0]);
+      await new Promise((r) => setTimeout(r, 5));
+      ok(asked6.length === 1 && said.length === 1 && said[0].sats === honest.sats, 'and is asked about, and answered', JSON.stringify(said));
     }
 
     /* ---- the mint is worked out while they are deciding -------------------

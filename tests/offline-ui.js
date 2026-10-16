@@ -151,7 +151,8 @@ check('and with no price there is no age to claim', aged(50 * 3600 * 1000, null)
 /* On its own line under the price, in red. */
 check('the age line is built from the age, not just named',
   /priceAge: this\.priceAgeWords\(\)/.test(app)
-  && /priceAgeWords\(\) \{[\s\S]{0,120}?priceAgo\(\)/.test(app));
+  // given no age, the home line asks priceAgo(); given one (another phone's price), it says that age
+  && /priceAgeWords\(ms\) \{[\s\S]{0,800}?if \(!this\.priceAgo\(\)\) return '';/.test(app));
 check('and the age is red, under the price, in both the pill and the chart',
   (markup.match(/color:var\(--bad\)[^>]*>\{\{ priceAge \}\}/g) || []).length === 2);
 check('and both the pill and the chart use it',

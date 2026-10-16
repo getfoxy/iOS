@@ -290,10 +290,17 @@
   /* One half paid and the other not answered yet: the card, and home, where
    * the held pill names what is with the mint until the wallet finishes it. */
   swapStillGoing(r) {
-    const from = (r && r.from) || {};
-    const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
     this._preSettle = null;
     this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
+    this.swapPendingCard(r);
+  }
+
+  /* The card itself, wherever the person is: SWAP's own, and a swap into
+   * dollars Foxy started by itself (`convertOnReturn`), which puts it over
+   * home without taking anybody there. */
+  swapPendingCard(r) {
+    const from = (r && r.from) || {};
+    const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
     this.blockedCard('swapPending', {
       tone: 'warn',
       title: 'SWAP STILL GOING THROUGH',
@@ -301,6 +308,119 @@
         + 'the next time the mint answers.',
       chip: 'Nothing is lost. Your balance shows it as pending with the mint until then.',
     });
+  }
+
+  /* Sats paid to a wallet that holds dollars, swapped into dollars at the mint.
+   *
+   * A person who chose dollars and was paid in sats (a payer with no dollars,
+   * or with no route to pay the dollar invoice from bitcoin, by tap) is owed
+   * the swap they would have made themselves. The wallet keeps which payments
+   * those are and does the swap (`convertOne`, 16b-two-balances.js); this
+   * decides when. Nobody is waiting on it, so it waits for a moment nothing
+   * else is happening: online with the mint's own keys, not put away, no money
+   * moving, no tap under way. One at a time, and `_swapRun` holds it, so SWAP,
+   * a payment and a mint switch all wait for it as they wait for SWAP.
+   *
+   * Called when a claim puts such sats in the pile (`onConvertDue`), after the
+   * sweeps on a return or a launch, when a route comes back and claims what
+   * waited, and when a wallet built from storage connects for real. With money
+   * moving it tries again a little later, a few times; past that, the next of
+   * those moments picks it up. `due` is a fresh claim, which starts the count
+   * again. */
+  CONVERT_WAITS = 6;
+
+  convertOnReturn(due) {
+    const W = window.FoxyWallet;
+    if (!W || !W.convertOne || !W.convertsOwed) return;
+    if (due) this._convertWaits = 0;
+    if (this._converting) return;
+    clearTimeout(this._convertT);
+    this._convertT = null;
+    // with no route, put away, or on the keys from storage: a connect or a return brings it back here
+    if (this.offlineNow() || !W.connected || (W.fromCache && W.fromCache()) || this._putAway) return;
+    /* Nor in front of a person deciding to spend: on a confirmation, or on
+     * SET AMOUNT for a payment, the pile they are looking at would move
+     * under them, and SEND or SWAP would find it held. The small-change
+     * top-up waits for put-away for the same reason. */
+    const confirming = typeof CONFIRM_SCREENS !== 'undefined' ? CONFIRM_SCREENS : [];
+    const deciding = confirming.indexOf(this.state.screen) >= 0
+      || (this.state.screen === 'amount' && this.state.flow === 'send')
+      || ['sendHow', 'swapConfirm', 'swap'].indexOf(this.state.screen) >= 0;
+    if (this.moneyBusy() || this._tapTalking || this.state.tapArmed || deciding) { this.convertLater(); return; }
+    /* The rate is judged against this phone's own price, and an old one is
+     * no yardstick (`convertWantsPrice`): one is asked for first, once. */
+    if (W.convertWantsPrice && W.convertWantsPrice() && this.convertWaiting()) {
+      if (!this._convertPrice && W.rate) {
+        const ask = this._convertPrice = W.rate({ fresh: true }).then(() => {}, () => {});
+        ask.then(() => {
+          this._convertPrice = null;
+          if (W.convertWantsPrice()) this.convertLater(); else this.convertOnReturn();
+        });
+      }
+      return;
+    }
+    const said = (n) => this.unitFigure(Math.round(Number(n) || 0), 'sat');
+    const run = W.convertOne((stage, rec, q) => {
+      if (stage !== 'start') return;
+      this.toast('You chose dollars, so Foxy is swapping the ' + said((rec && rec.got) || (q && q.total))
+        + ' you were paid into dollars.');
+    });
+    this._swapRun = this._converting = run;
+    run.then((r) => {
+      if (this._swapRun === run) this._swapRun = null;
+      this._converting = null;
+      // nothing done: something held it (a swap with the mint, a top-up), or nothing is due
+      if (!r) { this.convertLater(); return; }
+      this._convertWaits = 0;
+      const home = this.state.screen === 'home';
+      if (r.outcome === 'done') {
+        this.refreshBalance();
+        this.loadHistory();
+        if (home) this.settleAnimate('both');
+      } else if (r.outcome === 'pending') {
+        this.refreshBalance();
+        this.loadHistory();
+        if (home) this.swapPendingCard(r);
+        else this.toast('The swap into dollars is still going through. Foxy finishes it by itself.', true);
+      } else if (r.outcome === 'failed') {
+        this.loadHistory();
+        // once for each payment, however many times it is tried
+        this._convertSaid = this._convertSaid || {};
+        if (!this._convertSaid[r.id]) {
+          this._convertSaid[r.id] = true;
+          const got = r.rec && Number(r.rec.got) > 0 ? r.rec.got : (r.from && r.from.amount);
+          this.toast('Foxy could not swap the ' + said(got) + ' into dollars just now. It stays as bitcoin.', true);
+        }
+      } else if (r.outcome === 'kept') {
+        this.loadHistory();
+      }
+      // the next one, if another payment is waiting and has not had its go yet
+      if (r.outcome !== 'offline' && this.convertWaiting()) {
+        this._convertT = setTimeout(() => { this._convertT = null; this.convertOnReturn(); }, 1000);
+      }
+    }, () => {
+      if (this._swapRun === run) this._swapRun = null;
+      this._converting = null;
+    });
+  }
+
+  // a payment in the pile, still to be swapped into dollars, that has not had its one go this launch
+  convertWaiting() {
+    const W = window.FoxyWallet;
+    try { return (W.convertsOwed() || []).some(r => r && r.state === 'claimed' && !r.tried); }
+    catch (e) { return false; }
+  }
+
+  /* Held by something else: a little later, a few times, longer each time.
+   * Not while put away (the return asks), and not when nothing is waiting. */
+  convertLater() {
+    if (this._putAway || this._convertT || !this.convertWaiting()) return;
+    const n = this._convertWaits = (this._convertWaits || 0) + 1;
+    if (n > this.CONVERT_WAITS) {
+      console.log('[foxy] sats to swap into dollars: still held after ' + this.CONVERT_WAITS + ' looks; left for the next connection');
+      return;
+    }
+    this._convertT = setTimeout(() => { this._convertT = null; this.convertOnReturn(); }, Math.min(2000 * Math.pow(2, n - 1), 60000));
   }
 
   /* SWAPPED, dismissed: home, and both pills count to their new figures. */

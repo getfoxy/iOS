@@ -419,7 +419,12 @@
     if (split && ev.id) this.txIsNew('req-' + ev.id);
     /* Paid in dollars or in sats, the next receive starts in that balance, as
      * a dollar invoice paid does (`usdInvoiceUp`). */
-    if (!split && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
+    /* Not sats paid to a wallet that holds dollars: those are swapped into
+     * dollars as soon as they can be (`convertOnReturn`), and the person's
+     * next receive stays in the dollars they chose. */
+    const intoDollars = ev.unit === 'sat' && (!!ev.convert
+      || !!(this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars'));
+    if (!split && !intoDollars && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
       this.rememberWallet('receive', ev.unit);
     }
     /* Nor one that is still to be carried home: it is announced when it has
@@ -1280,6 +1285,12 @@
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,
+      /* Sats paid for dollars asked for, which are to be swapped into
+       * dollars: the dollars asked and how old the payer's price was, for
+       * the headline (`renderPaid`). Nothing on any other payment. */
+      paidAsked: !out && ev.askConvert && Number(ev.usdAsked) > 0 ? Math.round(Number(ev.usdAsked)) : 0,
+      paidAskAgeMs: !out && ev.askConvert && Number(ev.askAgeMs) >= 0 ? Number(ev.askAgeMs) : 0,
+      paidConvert: !out && !!ev.askConvert && Number(ev.usdAsked) > 0,
       payOut: out,
       paidTo: ev.to || (out ? p.recipient : ''),
       asset: 'BITCOIN',

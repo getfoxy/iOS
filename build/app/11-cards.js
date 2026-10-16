@@ -725,7 +725,9 @@
   priceTermsCard(q) {
     /* The same price is not a question. Under a tenth of a percent there is
      * nothing to weigh, so it is agreed without asking.
-     * No earlier price at all is not "the same" and is still asked. */
+     * No earlier price at all is not "the same" and is still asked, and nor
+     * is one more than a day old: the wallet gives no comparison with it
+     * (`readQuote`), so there is nothing to call the same. */
     const pct = (q && q.differsPct != null) ? Number(q.differsPct) : null;
     if (pct != null && isFinite(pct) && Math.abs(pct) < 0.1) {
       console.log('[foxy] price: the same as this phone\u2019s, agreed without asking');

@@ -2263,6 +2263,38 @@
     saveOpenRequests();
   }
 
+  /* What a sat request was agreed for, when a price was talked over first:
+   * the dollars asked for (cents), the payer's price and how old it was, when
+   * that was on this phone's clock, the quote it answered, and whether the
+   * sats are to be swapped into dollars once they are in (`convert`).
+   *
+   * Kept on the open request and nowhere else, never put into the request
+   * itself, and read back with the payment that answers it (`readPayment`):
+   * so only a payment to this very request picks the terms up. Only a sat
+   * request that is still open takes them. Every field is checked here, so
+   * nothing downstream has to wonder what kind of thing it is holding.
+   * Answers whether they were kept. */
+  function noteRequestTerms(id, terms) {
+    var key = typeof id === 'string' ? id : '';
+    if (!key || !Object.prototype.hasOwnProperty.call(openRequests, key)) return false;
+    var open = openRequests[key];
+    if (!open || recordUnit(open) !== 'sat') return false;
+    var t = terms && typeof terms === 'object' ? terms : {};
+    var num = function (v) { return typeof v === 'number' && isFinite(v) && v >= 0 ? v : null; };
+    var usd = Math.round(Number(t.usd));
+    var rate = Number(t.rate);
+    open.terms = {
+      usd: usd > 0 && isFinite(usd) ? usd : 0,
+      rate: rate > 0 && isFinite(rate) ? rate : 0,
+      ageMs: num(t.ageMs),
+      seenAt: num(t.seenAt),
+      from: typeof t.from === 'string' ? t.from.slice(0, 64) : '',
+      convert: t.convert === true,
+    };
+    saveOpenRequests();
+    return true;
+  }
+
   /* The two rules every hand-over of ecash has to satisfy, in one place.
    *
    * They were true before this and enforced in three different functions, which
@@ -2461,6 +2493,8 @@
       ? j.changeTo.toLowerCase() : '';
     return { id: id, mint: mint, proofs: proofs, unit: unit, amount: amount, sats: unit === 'sat' ? amount : 0,
              inFee: inFee, purpose: open.purpose, asked: asked,
+             // what the request was agreed for, if a price was talked over first (`noteRequestTerms`)
+             terms: open.terms && typeof open.terms === 'object' ? open.terms : null,
              changeTo: changeTo,
              /* The payer saying they over-paid on purpose and expect nothing
               * back. Only ever widens what is accepted — an over-payment

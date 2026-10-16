@@ -495,6 +495,18 @@
           preimage: t.preimage || '',
           // and on a receive, the payment hash of the invoice this phone made
           payHash: t.payHash || '',
+          /* Sats paid for dollars asked for: the dollars asked (cents), the
+           * payer's price and how old it was, and how the swap into dollars
+           * went (20-helpers.js, `termsFields`; 16b-two-balances.js,
+           * `convertOne`). For reading only; the books never look at them. */
+          usdAsked: Number(t.usdAsked) || 0,
+          askRate: Number(t.askRate) || 0,
+          askAgeMs: t.askAgeMs == null ? null : Number(t.askAgeMs),
+          askSeenAt: Number(t.askSeenAt) || 0,
+          convert: t.convert || '',
+          convertSwap: t.convertSwap || '',
+          convertUsd: t.convertUsd == null ? null : Number(t.convertUsd),
+          convertWhy: t.convertWhy || '',
         });
         // Anyone address-shaped is saved to the book on sight, once.
         //

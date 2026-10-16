@@ -179,7 +179,7 @@
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      }, two ? this.histRowTwo(t, tab, balOf, legFigure) : {})).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
@@ -267,6 +267,30 @@
        * bitcoin); an object with usdPerBtc is read the same way. */
       txSwapRate: (two && tx.kind === 'swap' && this.swapRateOf(tx.mintRate) > 0)
         ? '\u20bf 1 = $ ' + this.group(Math.round(this.swapRateOf(tx.mintRate))) : 'The mint\u2019s rate',
+      /* Sats paid for a dollar amount that was talked over first: what was
+       * asked, the payer's price it was worked out at and how old that was,
+       * and, when the sats are to be swapped into dollars here, what the
+       * swap gave or how it stands. */
+      txAskShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0,
+      txAsked: this.unitFigure(Math.round(Number(tx.usdAsked) || 0), 'usd'),
+      txAskPrice: Number(tx.askRate) > 0
+        ? '\u20bf 1 = $ ' + this.group(Math.round(Number(tx.askRate)))
+          + ((() => {
+            const words = (this.priceAgeWords && tx.askAgeMs != null) ? this.priceAgeWords(Number(tx.askAgeMs)) : '';
+            return words ? ', seen ' + words.toLowerCase() : '';
+          })())
+        : '\u2014',
+      txConvertShown: tx.dir === 'in' && !tx.unit && Number(tx.usdAsked) > 0 && !!tx.convert,
+      txConverted: tx.convert === 'done'
+        ? (Number(tx.convertUsd) > 0 ? this.unitFigure(Math.round(Number(tx.convertUsd)), 'usd') : 'Dollars')
+        // owed waits for a connection; in the pile, it waits only for a quiet moment
+        : tx.convert === 'owed' ? 'Once online'
+        : tx.convert === 'claimed' ? 'Soon'
+        : tx.convert === 'swapping' ? 'Under way'
+        : tx.convert === 'failed' ? 'Not swapped, still bitcoin'
+        : (tx.convert === 'kept' && tx.convertWhy === 'small') ? 'Too little after the fee'
+        : (tx.convert === 'kept' && tx.convertWhy === 'spent') ? 'Spent first'
+        : tx.convert === 'kept' ? 'Kept as bitcoin' : '',
       txPaymentId: tx.hash || '',
       txHasPaymentId: !!tx.hash,
       /* The one identifier on this screen an explorer can find.
@@ -518,7 +542,7 @@
    * the figure in the row's own unit (sats big on the bitcoin tab, cents on
    * the dollar tab), the running balance in that unit, and for a swap the
    * other leg's figure under it with the words that say so. */
-  histRowTwo(t, tab, balOf, legFigure) {
+  histRowTwo(t, tab, balOf, legFigure, legOf) {
     if (!t) return {};
     const usd = t.unit === 'usd';
     const sign = t.dir === 'in' ? '+ ' : '- ';
@@ -531,6 +555,29 @@
         : usd ? '' : (this.money(amount, this.txFiat(t, amount)).usd != null ? '$ ' + this.usd(this.money(amount, this.txFiat(t, amount)).usd) : ''),
       balText: 'BAL ' + this.unitFigure(Math.max(0, balOf.get(t) || 0), tab === 'usd' ? 'usd' : 'sat'),
     };
+    /* Sats paid for dollars this phone asked for: the dollars asked under
+     * the sats, and how the swap into dollars went where it has something to
+     * say. What the swap gave is on the row once it has, or read from the
+     * swap's own dollar row. A payment that is failed or at risk says that
+     * instead, as every other row does. */
+    const asked = !usd && !swap ? Math.round(Number(t.usdAsked) || 0) : 0;
+    if (asked > 0) {
+      out.amtSub = 'Asked ' + this.unitFigure(asked, 'usd');
+      const leg = (t.convertSwap && legOf && legOf.get) ? legOf.get(t.convertSwap + '|usd') : null;
+      const gave = t.convertUsd != null && Number(t.convertUsd) > 0 ? Number(t.convertUsd) : leg ? Math.round(Number(leg.amount) || 0) : 0;
+      const said = t.convert === 'done' || (gave > 0 && t.convert === 'swapping' && !!leg)
+        ? (gave > 0 ? 'Swapped into ' + this.unitFigure(gave, 'usd') : 'Swapped into dollars')
+        : t.convert === 'owed' ? 'To be swapped into dollars once online'
+        // in the pile already, so only waiting for nothing else to be going on
+        : t.convert === 'claimed' ? 'To be swapped into dollars'
+        : t.convert === 'swapping' ? 'Being swapped into dollars'
+        : t.convert === 'failed' ? 'Not swapped. It stays bitcoin'
+        : (t.convert === 'kept' && t.convertWhy === 'small') ? 'Too little to swap after the mint\u2019s fee'
+        : (t.convert === 'kept' && t.convertWhy === 'spent') ? 'Spent before it was swapped'
+        : t.convert === 'kept' ? 'Kept as bitcoin'
+        : '';
+      if (said && !t.failed && !t.atRisk && !t.highRisk) out.metaRail = said;
+    }
     if (swap) {
       return Object.assign(out, {
         name: 'Swap', initial: 'S',

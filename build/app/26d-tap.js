@@ -192,6 +192,20 @@
     const usdOffer = s.flow === 'receive' && !!(this.walletNow && this.walletNow('receive') === 'usd');
     const fresh = (!usdOffer && !this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
       ? Number(mine.rate) : 0;
+    /* A wallet that holds dollars takes sats for a request in dollars, and
+     * swaps them into dollars at the mint itself as soon as it is online
+     * (`convertOnReturn`, 26i-swap.js). Said on the offer so a payer with no
+     * dollars, or with no route to pay the dollar invoice from bitcoin, can
+     * offer sats instead of being turned away. Only a wallet that chose to
+     * hold dollars says it, and only for a request in dollar ecash: a wallet
+     * holding both, or bitcoin, and an older Foxy, say nothing, and payers
+     * refuse them as they always did. */
+    let satsForUsd = false;
+    if (usdOffer && req && this.twoUnitsOn && this.twoUnitsOn()
+        && this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars') {
+      const onAir = W.decodeRequest ? W.decodeRequest(req) : null;
+      satsForUsd = !!(onAir && onAir.unit === 'usd');
+    }
     const offer = !advertise ? ''
       : waiting ? '{}'
       /* `up`: whether this phone has a route, said by the phone that knows.
@@ -214,6 +228,8 @@
                           * only asks a phone that will answer; an older Foxy
                           * says nothing and is paid as before. */
                          ask: 1,
+                         // and sats taken for this dollar request, swapped into dollars here (above)
+                         sats4usd: satsForUsd ? 1 : undefined,
                          /* And this phone's bitcoin price, when it is current.
                           *
                           * A phone with no route has a price that may be hours
@@ -639,6 +655,8 @@
   tapGaveNothing(why) {
     this._pricedFor = null;      // the next tap agrees its own price
     this._crossReady = null;     // and asks its own crossing
+    // and no price talked over is left for a later confirmation to show (`requestSpec`)
+    if (this.state && this.state.tapQuoteFor) this.setState({ tapQuoteFor: '', tapQuoteRate: 0, tapQuoteAgeMs: 0 });
     if (!this._tapGot && !this._tapKeep) return;
     console.log('[foxy] tap: letting that one go \u2014 ' + (why || 'nothing came of it'));
     this._tapGot = false;
@@ -1519,7 +1537,7 @@
      * is refused in words. Sats and dollars are both paid (`tapUnitRule`). */
     const unitRead = (req && W.decodeRequest) ? W.decodeRequest(req) : null;
     const notSats = this.tapUnitRule ? this.tapUnitRule(unitRead) : '';
-    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+    if (notSats && !inv) return { notSats: notSats, inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false, theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
     if (notSats) console.log('[foxy] tap: their request is not in sats; paying their invoice instead');
     if (req && !notSats && W.decodeRequest) {
       const r = W.decodeRequest(req);
@@ -1545,7 +1563,7 @@
     if (usdUnit && !sameMint && !inv) {
       return { notSats: 'That request asks for dollars at a mint you do not use, and has no invoice to pay instead.',
                inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false,
-               theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0 };
+               theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
     }
     console.log('[foxy] tap: they offered ' + (inv ? 'an invoice' : 'no invoice')
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
@@ -1569,7 +1587,10 @@
              mints: theirs, crossable: crossable, theirRoute: theirRoute,
              // whether they answer a question before the payment (`askFirst`)
              asks: o.ask === 1,
-             theirRate: theirRate, theirRateAt: theirRateAt };
+             theirRate: theirRate, theirRateAt: theirRateAt,
+             /* A dollars wallet that takes sats for this dollar request and
+              * swaps them itself (`sats4usd`); absent is no. */
+             satsForUsd: usdUnit && o.sats4usd === 1 };
   }
 
   /* Between two mints, both phones must be online.
@@ -1709,6 +1730,49 @@
       + this.group(Math.round(q.theirRate)) + ' per bitcoin'
       + (q.differsPct == null ? '; this phone has no price to compare'
          : '; ' + q.differsPct.toFixed(1) + '% from the one this phone last saw'));
+    const refuse = (why) => {
+      this._payerGaveUp = true;
+      const no = W.tapTerms ? W.tapTerms(JSON.stringify(Object.assign({ no: true }, why ? { why: why } : {}))) : Promise.resolve();
+      no.catch(() => {}).then(() => setTimeout(() => this.tapTalking(false), 2000));
+    };
+    /* Their price more than a day old, or of an age they will not say: the
+     * sats it works out are a guess, so it is refused, never taken with a
+     * warning. Only theirs: this phone's own being old does not refuse,
+     * because theirs is the figure the amount comes from, and a phone that
+     * has been offline for days has to be able to be paid by one that is
+     * online. With its own that old there is no comparison, and the screen
+     * asks rather than agreeing by itself (`priceTermsCard`). */
+    if (q.tooOld) {
+      console.log('[foxy] tap: their bitcoin price is too old to take a payment worked out from it; refused');
+      refuse('Their Bitcoin price is too old.');
+      this.blockedCard('priceTooOld', {
+        tone: 'warn',
+        title: 'BITCOIN PRICE TOO OLD',
+        reason: 'The payer’s phone last saw the Bitcoin price '
+          + (q.theirAgeMs == null ? 'at a time it did not say' : this.agoWords(q.theirAgeMs))
+          + '. Foxy does not take a payment worked out from a price that old.',
+        chip: 'Nothing was paid. Either of you can get online for a new price.',
+      });
+      return;
+    }
+    /* A price is only ever for the request on the air now, and for the
+     * dollars it asks: the payer's figure is never taken for what this phone
+     * asked. Sats offered for a request in dollar ecash only while this
+     * wallet still holds dollars and can swap the sats into them. Anything
+     * else is a price for some other question. */
+    let mine = null;
+    try { mine = W.decodeRequest(JSON.parse(this._tapOffer || '{}').req || ''); } catch (e) { mine = null; }
+    const asked = !mine ? 0
+      : q.forUnit === 'usd' ? (mine.unit === 'usd' ? Math.round(Number(mine.amount) || 0) : 0)
+      : (W.asksInDollars && W.asksInDollars(mine) ? Math.round(Number(mine.usd) || 0) : 0);
+    const fits = !!(mine && asked > 0 && mine.id === q.id && asked === q.usd
+      && (q.forUnit !== 'usd' || (this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars'
+                                  && this.twoUnitsOn && this.twoUnitsOn())));
+    if (!fits) {
+      console.warn('[foxy] tap: a price arrived for a request that is not the one on the air, or not for what it asks; refused');
+      refuse('That price is not for this request.');
+      return;
+    }
     /* From here until the answer has gone, this phone is in a conversation and
      * nothing may be torn down under it — not the radio, not the screen, not
      * the inbox. Set before the person is asked and cleared only once the
@@ -1747,6 +1811,18 @@
           return;
         }
         console.log('[foxy] tap: the price was accepted; sending the request for ' + q.sats + ' sats');
+        /* What it was agreed for, kept with the request and nowhere else:
+         * the dollars, the payer's price and its age, and for a request in
+         * dollars that the sats are to be swapped into dollars once they are
+         * in. A payment to this very request picks it up; history shows the
+         * figure asked next to what the swap gave. */
+        if (W.noteRequestTerms && W.decodeRequest) {
+          const agreed = W.decodeRequest(req);
+          if (agreed && agreed.id) {
+            W.noteRequestTerms(agreed.id, { usd: asked, rate: q.theirRate, ageMs: q.theirAgeMs, seenAt: q.theirSeenAt,
+                                            from: q.id, convert: q.forUnit === 'usd' });
+          }
+        }
         /* The hold STAYS. Sending the terms is not the end of the conversation,
          * it is the middle: the payment this phone just agreed to is what comes
          * next, over this same link.
@@ -1927,6 +2003,13 @@
     const other = unit === 'usd' ? 'sat' : 'usd';
     const word = unit === 'usd' ? 'dollars' : 'bitcoin';
     const otherWord = other === 'usd' ? 'dollars' : 'bitcoin';
+    /* A dollars wallet that said it takes sats for this request: paid in
+     * sats at this phone's price, which the receiver agrees to first, and
+     * swapped into dollars at their end (`tapSatsForDollars`). Only where
+     * the dollar invoice cannot be paid from bitcoin instead: this phone
+     * offline, or theirs. */
+    if (unit === 'usd' && offline && offer.satsForUsd && offer.sameMint && this.tapSatsForDollars
+        && this.tapSatsForDollars(offer)) return true;
     if (offline) {
       const why = held > 0 ? (lack && lack.why) || ('This needs ' + this.moneyIn(want, unit) + ' and you hold ' + this.moneyIn(held, unit) + '.')
         : 'This request is in ' + word + '. You hold no ' + word + ' here, and paying it from ' + otherWord + ' needs the mint.';
@@ -1940,6 +2023,8 @@
     try { otherHeld = two ? Math.max(0, Math.round(Number(W.balanceOf ? W.balanceOf(other) : 0) || 0)) : 0; } catch (e) { otherHeld = 0; }
     if (!(otherHeld > 0)) return false;
     if (offer.theirRoute === false) {
+      if (unit === 'usd' && offer.satsForUsd && offer.sameMint && this.tapSatsForDollars
+          && this.tapSatsForDollars(offer)) return true;
       console.log('[foxy] tap: their phone is offline, so there is no invoice to pay from ' + otherWord + '; not paid');
       this.tapRefuseUnit('This request is in ' + word + '. You hold no ' + word + ' here, and paying it from '
         + otherWord + ' needs both of you online.',
@@ -1948,6 +2033,49 @@
     }
     if (offer.inv) { this.tapConvertPay(offer.inv, other); return true; }
     this.tapAwaitUnitInvoice(offer, other);
+    return true;
+  }
+
+  /* A request in dollars, from a wallet that holds dollars and said it takes
+   * sats for it (`sats4usd`), paid by a phone that cannot pay it in dollars.
+   *
+   * The sats are worked out from this phone's price and offered first, as a
+   * request asking in dollars is (`tapQuoteTheirDollars`, M10 and M11): the
+   * receiver agrees to that price, or does not, and answers with a request
+   * in sats for exactly that. Nothing leaves here before. Their wallet swaps
+   * the sats into dollars at the mint as soon as it is online.
+   *
+   * Both phones offline is still no: nothing on either could settle it.
+   * Short of the sats with the fee, said here, before any price is talked
+   * over. Answers whether the tap was taken; false leaves it to the refusal
+   * that follows (no price here to work the sats out from). */
+  tapSatsForDollars(offer) {
+    const W = window.FoxyWallet;
+    if (!offer || !offer.read || !W) return false;
+    if (this.offlineNow() && offer.theirRoute === false && !(W._offlineToOffline && W._offlineToOffline())) {
+      console.log('[foxy] tap: they take sats for dollars, but both phones are offline; not paid');
+      this.tapRefuseUnit('You are both offline, so nothing here could settle this payment. One of you needs a connection.',
+        'You are both offline. One of you needs a connection.');
+      return true;
+    }
+    const mine = W.lastPrice ? W.lastPrice() : { rate: 0 };
+    // too old is said by the price talk itself (`tapQuoteTheirDollars`), with the age
+    const tooOld = !!(mine && Number(mine.rate) > 0 && W.priceTooOld && W.priceTooOld(mine.at));
+    const q = tooOld ? null : (W.quoteFor ? W.quoteFor(offer.read) : null);
+    if (!q && !tooOld) return false;
+    if (q) {
+      let lack = null;
+      try {
+        lack = W.sendShortfall ? W.sendShortfall(q.sats, { unit: 'sat', locked: !!(offer.read.lockTo && !this.offlineNow()) }) : null;
+      } catch (e) { lack = null; }
+      if (lack && lack.short) {
+        console.log('[foxy] tap: they take sats for dollars, and this phone holds too few sats for ' + q.sats + '; not paid');
+        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with its fee.'), this.shortForReceiver());
+        return true;
+      }
+    }
+    console.log('[foxy] tap: they hold dollars and take sats for them; offering sats at this phone’s price');
+    this.tapQuoteTheirDollars(offer);
     return true;
   }
 
@@ -3111,6 +3239,28 @@
    * words on screen come from Foxy rather than from a link that went quiet. */
   tapQuoteTheirDollars(offer) {
     const W = window.FoxyWallet;
+    /* A price more than a day old works out a figure that is a guess, so it
+     * is not offered. Said to them, so their screen does not wait, and here
+     * with the age, so the person knows what would fix it: a connection, once. */
+    const mine = W.lastPrice ? W.lastPrice() : null;
+    if (mine && Number(mine.rate) > 0 && W.priceTooOld && W.priceTooOld(mine.at)) {
+      console.log('[foxy] tap: this phone’s bitcoin price is too old to work the sats out from; not offered');
+      if (W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer’s Bitcoin price is too old to use.' })).catch(() => {});
+      this.tapGaveNothing('price too old');
+      /* Seen "in the future" is a clock that is wrong, not a price that is
+       * new, and saying it was seen a moment ago would contradict the title. */
+      const ahead = Number(mine.at) > Date.now() + 300000;
+      this.blockedCard('priceTooOld', {
+        tone: 'warn',
+        title: 'BITCOIN PRICE TOO OLD',
+        reason: ahead ? 'This phone’s clock and its Bitcoin price do not agree.'
+          : 'This phone last saw the Bitcoin price ' + this.agoWords(Number(mine.ageMs) || 0)
+          + '. That is too old to work out what they asked for.',
+        chip: 'Nothing was sent. Get online once and Foxy has a new price.',
+      });
+      this.back();
+      return;
+    }
     const quote = W.quoteFor ? W.quoteFor(offer.read) : null;
     if (!quote) {
       /* No price, nothing honest to offer. Their request names no sats, so
@@ -3173,6 +3323,20 @@
          * agreement to the offer, it is a different request. */
         const back = W.decodeRequest ? W.decodeRequest(String(said.req)) : null;
         const backSats = back ? Math.round(Number(back.sats) || 0) : 0;
+        /* For a request in dollars, the answer has to be a request in sats,
+         * at this phone's mint: that is what was offered, and the sats are
+         * paid here in ecash from this pile or not at all. */
+        const forUsd = !!(offer.read && offer.read.unit === 'usd');
+        const strip = (u) => String(u || '').replace(/\/+$/, '');
+        const atMine = !!(back && (back.mints || []).some(m => strip(m) === strip(W.mintUrl)));
+        if (forUsd && back && (back.unit !== 'sat' || !atMine)) {
+          console.warn('[foxy] tap: they answered sats for dollars with a request in ' + back.unit
+            + (atMine ? '' : ' at another mint') + '; nothing was sent');
+          this.toast('Their request is not for sats at this mint. Nothing was sent.', true);
+          this.back();
+          this.tapGaveNothing('their request was not for what was offered');
+          return;
+        }
         if (!back || backSats !== Math.round(Number(quote.sats) || 0)) {
           console.warn('[foxy] tap: they answered the price with a request for ' + backSats + ' sats, not the '
             + quote.sats + ' this phone offered; nothing was sent');
@@ -3182,10 +3346,20 @@
           return;
         }
         console.log('[foxy] tap: they agreed the price; the request is in sats now');
+        // the confirmation says what the sats are for, at whose price (`requestSpec`)
+        this.setState({ tapQuoteFor: String(back.id || ''), tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd,
+                        tapQuoteRate: quote.rate, tapQuoteAgeMs: quote.ageMs });
         /* The agreed request, on the offer it came from: the mints have not
          * changed — a receiver makes its request at its own mint either way —
          * so whether this is a same-mint payment or a transfer first is the
          * same question it was, now with a number in it. */
+        /* For a request in dollars, the sat request is read as what is paid
+         * now (`read`), and no longer as dollars: read as the dollar request
+         * it answered, the payment would come straight back here. */
+        if (forUsd) {
+          this.tapPayOffer(Object.assign({}, offer, { req: String(said.req), read: back, asksUsd: false, satsForUsd: false }), backSats);
+          return;
+        }
         this.tapPayOffer(Object.assign({}, offer, { req: String(said.req) }), backSats);
       });
     }
@@ -3195,12 +3369,22 @@
      * seconds at best, and a payer's phone with nothing on it reads as a broken
      * app — the same argument M9 exists for. CANCEL is real: nothing has left
      * this phone, so there is nothing to undo. */
+    /* What they are agreeing to: this phone's price, and how old it is when
+     * that is more than a few minutes. A receiver that is online asked in
+     * dollars because it holds dollars, not because it has no price. */
+    const seen = this.priceAgeWords ? this.priceAgeWords(Number(quote.ageMs) || 0) : '';
     this.waitingScreen('priceSent', {
       art: 'phone', title: 'Waiting<br>for receiver', dots: true,
-      body: 'This receiver is offline and must agree to the current Bitcoin price before continuing.',
+      /* Today's words unless the receiver said it is online: an older Foxy
+       * says nothing about its route, and only an offline one asks this way. */
+      body: (offer.theirRoute !== true
+        ? 'This receiver is offline and must agree to the current Bitcoin price before continuing.'
+        : 'They asked for dollars, and must agree to this phone’s Bitcoin price before continuing.')
+        + (seen ? ' This phone saw it ' + seen.toLowerCase() + '.' : ''),
       button: 'CANCEL', go: () => { if (done('cancelled')) this.back(); },
     });
-    this.setState({ tapQuoteWait: true, tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd });
+    this.setState({ tapQuoteWait: true, tapQuoteSats: quote.sats, tapQuoteUsd: quote.usd,
+                    tapQuoteRate: quote.rate, tapQuoteAgeMs: quote.ageMs, tapQuoteFor: '' });
     console.log('[foxy] tap: quoting ' + quote.sats + ' sats for $'
       + (quote.usd / 100).toFixed(2) + ' at $ ' + this.group(Math.round(quote.rate)) + ' per bitcoin');
     this._tapQuoteT = setTimeout(() => {

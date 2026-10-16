@@ -143,6 +143,9 @@
           window.addEventListener('foxy-gate-up', () => { if (this.syncPreview) this.syncPreview(); });
         }
         if (W.onLateClaim) W.onLateClaim((info) => this.moneyIsSafe(info));
+        /* Sats paid to a wallet that holds dollars are in the pile: swapped
+         * into dollars when nothing else is going on (26i-swap.js). */
+        if (W.onConvertDue) W.onConvertDue(() => this.convertOnReturn(true));
         /* Paid while Foxy was away, and claimed by the sweep a route coming up
          * ran: no connect or return is there to show the balance after it. */
         if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); });
@@ -346,6 +349,10 @@
         if (!quiet) G.holdVerify(false);
         // paid while away, or a melt that settled: the balance again once swept
         if (swept) swept.then(() => this.refreshBalance());
+        /* And sats paid to a dollars wallet that were in the pile before Foxy
+         * went away, or closed: swapped now, once the sweeps have finished
+         * whatever swap was still with the mint. */
+        Promise.resolve(swept).then(() => { if (this.convertOnReturn) this.convertOnReturn(); });
       });
     }).catch(() => { G.holdVerify(false); })
       .then(() => { this._returning = null; });
@@ -466,6 +473,8 @@
     W.claimUnclaimed().then((took) => {
       this._claimingOnRoute = false;
       if (took) { this.refreshBalance(); this.loadHistory(); }
+      // what it put in the pile for a dollars wallet is said by the wallet (`onConvertDue`); this is for what waited already
+      if (this.convertOnReturn) this.convertOnReturn();
     }, () => { this._claimingOnRoute = false; });
   }
 
@@ -499,6 +508,8 @@
         this.refreshBalance();
         this.loadHistory();
         this.offerQuarantine();
+        // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
+        if (this.convertOnReturn) this.convertOnReturn();
       }, (e) => {
         console.warn('[foxy] the connect behind the home screen failed, attempt', attempt + 1, '\u2014', W.reason(e));
         const still = W.fromCache && W.fromCache();
