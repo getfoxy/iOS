@@ -60,6 +60,14 @@
     /** @type {any} */
     _onchain: null,
 
+    /* Whether `onchainLimits` has this mint's own answer on file, so that its
+     * null means the mint does nothing on chain rather than that it could not
+     * be asked (a card's SEND says no to an address only on the first). */
+    onchainKnown: function () {
+      var at = String(mintUrl || '').replace(/\/+$/, '');
+      return !!(at && FoxyWallet._onchain && FoxyWallet._onchain.mint === at);
+    },
+
     /* An address to be paid into this wallet, kept on disk: a payment that
      * confirms tomorrow is still claimable after a restart, and this mint sets
      * no expiry, so Foxy sets its own watch window (ONCHAIN_WATCH_DAYS). */
@@ -319,10 +327,20 @@
      *
      * The mint takes the ecash and answers PENDING: it has the transaction to
      * broadcast, not a confirmation. So this resolves once the ecash is gone
-     * and the payment is followed afterwards (onchainSent). */
-    onchainPay: function (plan, feeIndex, onStage) {
+     * and the payment is followed afterwards (onchainSent).
+     *
+     * `opts.held`: paid from a card's pieces held for it (SEND on the card's own screen, 08a-flashcard.js `cardOutHold`), as
+     * a Lightning payment from a card is (`pay`). The card was charged for this quote's amount and reserve, so those pieces
+     * are what is melted, every one, with no split of the pile and nothing of the pile's added; they move from their hold
+     * to this payment's record before the melt, never in neither. The card is owed whatever comes back: the reserve the
+     * transaction did not use (the melt's change) and, if the mint does not take the payment, all of it. Both go back into
+     * a hold for the card here (`cardOutReturn`), outside this function's lock, and the caller makes them the card's
+     * (`cardOutBack`), as for any card payment that is not made; the connect's sweep does it if Foxy is closed first. */
+    onchainPay: function (plan, feeIndex, onStage, opts) {
       var stage = typeof onStage === 'function' ? onStage : function () {};
-      assertRoute();
+      /* A refusal is a rejection, never a throw: a caller that has already taken a card's pieces for this payment gives
+       * them back from its rejection handler, and a throw went past it with the pieces still held. */
+      try { assertRoute(); } catch (eR) { return Promise.reject(eR); }
       var w;
       try { w = onCircuit(need(), 'melt:' + (plan && plan.id)); } catch (e) { return Promise.reject(e); }
       if (!plan || !plan.quote) return Promise.reject(new Error('No quote to pay.'));
@@ -332,24 +350,42 @@
 
       var at = mintOf(w);
       var owed = plan.sats + pick.fee;
-      var have = proofs(at);
+      var heldId = (opts && typeof opts.held === 'string') ? opts.held : '';
+      var hold = heldId ? load(K.held, {})[heldId] : null;
+      var cardHold = hold ? { card: hold.card || '', forHash: hold.forHash || '', token: hold.token || '' } : null;
+      // refused before anything moves: the card's pieces stay in their hold, for the card
+      var unsent = function (message) {
+        var e = /** @type {any} */ (new Error(message));
+        e.unsent = true;
+        if (heldId) e.held = heldId;
+        return e;
+      };
+      if (heldId) {
+        if (!hold || hold.kind !== 'card out' || !(hold.proofs || []).length) return Promise.reject(unsent('The card’s pieces for this payment are not here any more. Nothing was paid.'));
+        if (canonicalMint(hold.mint) !== canonicalMint(at)) return Promise.reject(unsent('The card’s pieces are at another mint than this payment. Nothing was paid.'));
+        var heldWorth = sumProofs(hold.proofs) - feeForInputs(w, hold.proofs.length);
+        if (heldWorth < owed) return Promise.reject(unsent('The fee went up while the card was read, so the card’s ' + sumProofs(hold.proofs) + ' sats do not cover it. Nothing was paid.'));
+      }
+      var have = heldId ? hold.proofs.slice() : proofs(at);
       /* The one sum (`meltNeed`), as for a Lightning payment: the amount, the
        * reserve, this mint's fee for the split and its fee again on the
        * pieces the melt spends. The confirmation asks the same before it
        * offers SEND (`onchainNeed`), and this says it in the same words
        * (`notEnoughWords`). */
-      var mn = meltNeed(w, have, owed);
+      var mn = heldId ? { ok: true } : meltNeed(w, have, owed);
       if (!mn.ok) return Promise.reject(new Error(notEnoughWords(mn)));
       stage('quote');
-      var splitGuard = swapGuard(w, 'split', { inputs: have });
-      return splitGuard.run('on-chain split', function () {
+      // (a card's held pieces were never in the pile: nothing is split, and the pile is not touched)
+      var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have });
+      var splitting = heldId ? Promise.resolve({ send: have, keep: null }) : splitGuard.run('on-chain split', function () {
         return w.send(owed, have, { includeFees: true });
       }).catch(function (e) {
         return retryWithoutSpent(w, e);
-      }).then(function (split) {
-        setProofs(split.keep || [], at, w);
+      });
+      return splitting.then(function (split) {
+        if (!heldId) setProofs(split.keep || [], at, w);
         var spending = split.send || [];
-        var splitFee = Math.max(0, sumProofs(have) - sumProofs(split.keep || []) - sumProofs(spending));
+        var splitFee = heldId ? 0 : Math.max(0, sumProofs(have) - sumProofs(split.keep || []) - sumProofs(spending));
 
         /* Written before the melt, with the proofs in it.
          *
@@ -360,11 +396,12 @@
          * for sweepMelts; an on-chain quote must not go there, because that
          * sweep asks the bolt11 endpoint about every hold it finds. */
         var sending = load(K.onchainOut, []).filter(function (r) { return r.quote !== plan.id; });
-        sending.unshift({
+        sending.unshift(Object.assign({
           quote: plan.id, address: plan.address, sats: plan.sats,
           feeSats: 0, splitFee: splitFee, proofs: spending,
           at: Date.now(), mint: at, state: 'SENDING',
-        });
+        // a card's payment: whose pieces these are, so that whatever comes back goes back to that card and not into the pile
+        }, heldId ? { cardOut: heldId, card: (cardHold && cardHold.card) || '', cardHold: cardHold } : {}));
         /* The cap keeps the list small, but a record holding proofs is the
          * only copy of them: trimming by age alone pushed the oldest payout —
          * proofs and all — off the end once thirty settled ones had piled up
@@ -374,6 +411,16 @@
         var holding = sending.filter(function (r) { return ((r && r.proofs) || []).length; });
         var settled = sending.filter(function (r) { return !((r && r.proofs) || []).length; });
         mustSave(K.onchainOut, holding.concat(settled.slice(0, Math.max(0, 30 - holding.length))), true);
+        /* The card's pieces are this payment's now: out of their hold, once the record has them (never in neither). A hold that
+         * cannot be let go is a payment that is not sent: the record goes, and the pieces stay where they were. */
+        if (heldId) {
+          var heldAll = load(K.held, {});
+          delete heldAll[heldId];
+          try { mustSave(K.held, heldAll); } catch (eH) {
+            onchainForgetOut(plan.id);
+            return Promise.reject(unsent('Foxy could not write to this phone\u2019s storage (it may be full), so the payment was not sent. Nothing was paid.'));
+          }
+        }
         /* The split's record has done its job: the proofs it was insurance for
          * are on the payout record above, which is now the thing that holds
          * them. Left open, it sat in K.swaps until the next recoverSwaps —
@@ -396,6 +443,9 @@
         logTx({
           dir: 'out', sats: plan.sats, feeSats: splitFee, settled: false, state: 'pending',
           hash: entry, to: shortAddress(plan.address), network: 'ON-CHAIN', mint: at,
+          // paid with a card's pieces (SEND from the card's screen): said so on the entry, with the card, as a Lightning one is
+          memo: heldId ? 'paid from card' : undefined,
+          fromCard: heldId ? ((cardHold && cardHold.card) || undefined) : undefined,
         });
         /* History names the counterparty from the tags, not the entry — and it
          * keeps the whole address beside the short one.
@@ -411,7 +461,19 @@
         console.log('[foxy] on chain: holding', sumProofs(spending), 'sats against melt', plan.id);
 
         stage('paying');
-        return w.meltProofsOnchain(plan.quote, spending, feeIndex).then(function (out) {
+        /* The counters of the melt's change outputs, on the record as cashu-ts reserves them, as a Lightning melt's are on
+         * its hold (`noteMeltOutputs`). A mint that signs the change only once the transaction confirms, or an answer that
+         * never came, leaves the change to be restored from these when the follow reads PAID (`onchainFollow`). */
+        var meltOutputs = [];
+        var stopWatching = watchReserved(w, function (r) {
+          meltOutputs.push(r);
+          noteOnchainOut(plan.id, { outputs: meltOutputs.slice() });
+        });
+        var meltCall;
+        try { meltCall = Promise.resolve(w.meltProofsOnchain(plan.quote, spending, feeIndex)); }
+        catch (eM) { meltCall = Promise.reject(eM); }
+        meltCall.then(stopWatching, stopWatching);
+        return meltCall.then(function (out) {
           /* The mint's change is read the way every other answer is: as
            * something that may be any shape at all. `(out.change || [])` let a
            * string through `change.length` and into the pile, and threw inside
@@ -425,7 +487,13 @@
            * the reserve, so `owed` is short by exactly that — the balance fell
            * by one sat more than the payment said it cost (testnut, live
            * on-chain run). */
-          if (change.length) addProofs(change, at, w);
+          /* A card's: the reserve the transaction did not use is the card's, and goes into a hold of its own for it (the
+           * caller owes it to the card, `cardOutBack`), never into this phone's pile. */
+          var changeId = heldId ? heldId + '-change' : '';
+          if (change.length) {
+            if (heldId) cardOutReturn(changeId, change, at, Object.assign({}, cardHold || {}, { change: true, payment: entry }));
+            else addProofs(change, at, w);
+          }
           // a fee that cannot be counted is not a fee: never NaN into history
           var counted = sumProofs(spending) - plan.sats - sumProofs(change);
           var paidFee = (isFinite(counted) ? Math.max(0, counted) : 0) + splitFee;
@@ -435,8 +503,9 @@
           var state = raw ? String(raw).toUpperCase() : 'UNKNOWN';
           var gone = state === 'UNPAID' || state === 'FAILED';
           if (gone) {
-            // the mint refused it: the ecash is still good, so it goes back
-            addProofs(spending, at, w);
+            // the mint refused it: the ecash is still good, so it goes back (a card's, to its hold for the card)
+            if (heldId) cardOutReturn(heldId, spending, at, cardHold || {});
+            else addProofs(spending, at, w);
             onchainForgetOut(plan.id);
           } else {
             /* Only PAID is the end of it. PENDING means the mint holds the
@@ -447,9 +516,11 @@
              * them on anything but PAID left nothing to return, so a payout
              * the mint dropped was gone for good. onchainFollow has always
              * cleared them on PAID alone; this now agrees with it. */
-            noteOnchainOut(plan.id, state === 'PAID'
+            /* Change that came with the answer is in hand: the counters it was made at have nothing more to give, and a
+             * follow that restored them as well would find it again. */
+            noteOnchainOut(plan.id, Object.assign(state === 'PAID'
               ? { state: state, feeSats: paidFee, proofs: [] }
-              : { state: state, feeSats: paidFee });
+              : { state: state, feeSats: paidFee }, change.length ? { outputs: [] } : {}));
           }
           // on chain it is not done until the mint says the transaction confirmed
           amendTx(entry, {
@@ -457,16 +528,28 @@
             settled: state === 'PAID',
             state: gone ? 'failed' : state === 'PAID' ? 'success' : 'pending',
           });
-          if (gone) throw new Error('The mint did not take that payment. Your ecash is still here.');
+          if (heldId) cardOutDone(heldId);
+          if (gone) {
+            if (heldId) {
+              var back = /** @type {any} */ (new Error('The mint did not take that payment. Nothing was paid.'));
+              back.definite = true;
+              back.held = heldId;
+              throw back;
+            }
+            throw new Error('The mint did not take that payment. Your ecash is still here.');
+          }
           console.log('[foxy] on chain: handed over', plan.sats, 'sats, fee', paidFee, '\u2014', state);
-          return { sats: plan.sats, feeSats: paidFee, state: state, quote: plan.id,
-            outpoint: (out && out.outpoint) || '' };
+          return Object.assign({ sats: plan.sats, feeSats: paidFee, state: state, quote: plan.id,
+            outpoint: (out && out.outpoint) || '' },
+            // what of a card's payment came back, held for the card: the caller owes it to the card (`cardOutBack`)
+            heldId ? { card: (cardHold && cardHold.card) || '', cardChange: change.length ? { id: changeId, sats: sumProofs(change) } : null } : {});
         }, function (e) {
           /* The mint may still have taken it: a timeout is not a refusal. The
            * proofs stay in the record and onchainFollow decides, so nothing is
            * spent twice and nothing is silently lost. */
           console.warn('[foxy] on chain: the melt did not answer cleanly \u2014', (e && e.message) || e);
           noteOnchainOut(plan.id, { state: 'UNKNOWN' });
+          if (heldId) cardOutDone(heldId);
           // the entry is already on the history screen, pending, from before the melt
           throw e;
         });
@@ -538,8 +621,12 @@
             var live = candidates.filter(function (p, k) { return states[k] === 'UNSPENT'; });
             if (live.length) {
               // the pile first, the record after it: a write that fails leaves the way back (W6)
-              addProofs(live, hit.mint || at, w);
-              console.log('[foxy] on chain: the mint did not take it —', sumProofs(live), 'sats back');
+              /* A card's payment: they are the card's, and go back into a hold for it, aged so the next sweep for ones left
+               * behind owes them to the card at once (`cardOutsLeft`, which the caller runs outside this lock), never into this
+               * phone's pile. */
+              if (hit.cardOut) cardOutReturn(hit.cardOut, live, hit.mint || at, hit.cardHold || {}, 0);
+              else addProofs(live, hit.mint || at, w);
+              console.log('[foxy] on chain: the mint did not take it —', sumProofs(live), 'sats back' + (hit.cardOut ? ', for the card' : ''));
             }
             if (held.length && live.length < held.length) {
               console.warn('[foxy] on chain:', held.length - live.length,
@@ -551,50 +638,86 @@
             });
             save(K.log, log);
             onchainForgetOut(quoteId);
-            return { state: state, outpoint: '', sats: hit.sats || 0 };
+            return { state: state, outpoint: '', sats: hit.sats || 0, card: hit.card || '', held: hit.cardOut ? sumProofs(live) : 0 };
           });
         }
 
-        /* What it really cost, when the answer that would have said so was
-         * lost. The entry written from the melt's error path knows only the
-         * split's fee — the rest is read from the mint's answer, which is the
-         * thing that went missing — so a payout that cost 1,022 sats showed as
-         * 1,000 and one (live fault run f1). The proofs held are
-         * what went to the mint, and without the answer its change is gone
-         * with it, so the whole difference is the fee.
-         *
-         * Only when it was lost. A melt that answered wrote what the mint
-         * charged onto the record (`feeSats`) and put its change back in the
-         * pile, so the proofs held are no longer what the payment cost —
-         * correcting from them then charged the reserve twice, and a payout
-         * that cost 12 sats settled in history at 24 (the interleavings).
-         * A record still carrying no fee is one whose answer
-         * never arrived. */
-        if (state === 'PAID' && (hit.proofs || []).length && !(Number(hit.feeSats) > 0)) {
-          var went = sumProofs(hit.proofs);
-          var cost = Math.max(0, went - (Number(hit.sats) || 0)) + (Number(hit.splitFee) || 0);
-          var entries = load(K.log, []);
-          var told = false;
-          entries.forEach(function (e) {
-            if (e.hash === 'onchain-' + quoteId && (Number(e.feeSats) || 0) < cost) {
-              e.feeSats = cost;
-              told = true;
+        /* The change, where it never came with an answer: a mint that signs it only once the transaction confirms, or a
+         * melt whose answer was lost. Restored from the counters its outputs were made at (`outputs`, written as cashu-ts
+         * reserved them), as a Lightning melt's lost change is (`recoverMeltChange`), and only what the mint calls UNSPENT
+         * and nothing here holds. A card's goes into a hold of its own for the card, never this phone's pile, and the
+         * caller owes it to the card (`cardOutsLeft`); this phone's goes back to its pile. A restore that fails where the
+         * mint says it signed change leaves the record as it is, for the next follow: dropped, the counters were the only
+         * note of where it is. */
+        var restoring = state === 'PAID' && (hit.outputs || []).length
+          ? recoverMeltChange(w, hit.outputs, hit.mint || at).catch(function (e) {
+            if (((q && q.change) || []).length) throw e;
+            return [];
+          })
+          : Promise.resolve([]);
+        return restoring.then(function (change) {
+          var back = sumProofs(change || []);
+          if (back > 0) {
+            if (hit.cardOut) {
+              cardOutReturn(hit.cardOut + '-change', change, hit.mint || at,
+                            Object.assign({}, hit.cardHold || {}, { change: true, payment: 'onchain-' + quoteId }), 0);
+            } else {
+              addOwnProofs(change, hit.mint || at, w, 'sat', true);
             }
-          });
-          if (told) {
-            save(K.log, entries);
-            console.log('[foxy] on chain: the lost answer\u2019s payout really cost', cost, 'sats in fees');
+            console.log('[foxy] on chain: the change of a confirmed payment,', back, 'sats, restored' + (hit.cardOut ? ' for the card' : ''));
           }
-        }
-        /* An answer with no state says nothing; writing it over the record's
-         * last known state loses the little that was known. */
-        noteOnchainOut(quoteId, state === 'PAID' ? { state: state, proofs: [] }
-          : state ? { state: state } : {});
-        if (state === 'PAID') {
-          FoxyWallet.settleTx('onchain-' + quoteId);
-          console.log('[foxy] on chain: a payment confirmed');
-        }
-        return { state: state, outpoint: q.outpoint || '', sats: hit.sats || 0 };
+          /* What it really cost, when the answer that would have said so was
+           * lost. The entry written from the melt's error path knows only the
+           * split's fee — the rest is read from the mint's answer, which is the
+           * thing that went missing — so a payout that cost 1,022 sats showed as
+           * 1,000 and one (live fault run f1). The proofs held are
+           * what went to the mint, less any change restored above, and the rest
+           * of the difference is the fee.
+           *
+           * Only when it was lost. A melt that answered wrote what the mint
+           * charged onto the record (`feeSats`) and put its change back in the
+           * pile, so the proofs held are no longer what the payment cost —
+           * correcting from them then charged the reserve twice, and a payout
+           * that cost 12 sats settled in history at 24 (the interleavings).
+           * A record still carrying no fee is one whose answer
+           * never arrived. One that answered with no change counted the whole
+           * reserve as fee, and what was restored now comes off it. */
+          var lost = (hit.proofs || []).length && !(Number(hit.feeSats) > 0);
+          var cost = -1;
+          if (state === 'PAID' && (lost || back > 0)) {
+            var went = sumProofs(hit.proofs || []);
+            cost = lost
+              ? Math.max(0, went - (Number(hit.sats) || 0) - back) + (Number(hit.splitFee) || 0)
+              : Math.max(0, (Number(hit.feeSats) || 0) - back);
+            var entries = load(K.log, []);
+            var told = false;
+            entries.forEach(function (e) {
+              if (e.hash !== 'onchain-' + quoteId) return;
+              if (lost ? (Number(e.feeSats) || 0) < cost : (Number(e.feeSats) || 0) !== cost) {
+                e.feeSats = cost;
+                told = true;
+              }
+            });
+            if (told) {
+              save(K.log, entries);
+              console.log('[foxy] on chain: the payout really cost', cost, 'sats in fees');
+            }
+          }
+          /* An answer with no state says nothing; writing it over the record's
+           * last known state loses the little that was known. */
+          noteOnchainOut(quoteId, state === 'PAID' ? Object.assign({ state: state, proofs: [], outputs: [] }, cost >= 0 ? { feeSats: cost } : {})
+            : state ? { state: state } : {});
+          if (state === 'PAID') {
+            FoxyWallet.settleTx('onchain-' + quoteId);
+            console.log('[foxy] on chain: a payment confirmed');
+          }
+          return { state: state, outpoint: q.outpoint || '', sats: hit.sats || 0, card: hit.card || '',
+                   cardChange: hit.cardOut && back > 0 ? back : 0, changeBack: !hit.cardOut && back > 0 ? back : 0 };
+        }, function (e) {
+          console.warn('[foxy] on chain: a payment confirmed, but its change could not be restored yet \u2014',
+                       (e && e.message) || e, '\u2014 asked again at the next follow');
+          return { state: 'PENDING', outpoint: q.outpoint || '', sats: hit.sats || 0, card: hit.card || '' };
+        });
       });
     },
 

@@ -575,6 +575,8 @@
     setTimeout(() => this.passcodeNotice(), 1000);
     // and last, at a mint with two balances, what to hold (10-pin.js)
     setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
+    // and money a card is owed from a payment it made from this phone, until a tap puts it on (26f-flashcard.js)
+    setTimeout(() => { if (this.fcMoneyWaiting) this.fcMoneyWaiting(); }, 1500);
     // the concentration nudge waits past those, for a later refresh
     this._readyAt = Date.now();
     // A mint switch that paid but died before claiming leaves the money at the

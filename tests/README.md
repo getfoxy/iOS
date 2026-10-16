@@ -153,6 +153,25 @@ hold left behind all put the card's money back on it at its next tap; the
 card, the mint and the books are asked each time. It lifts the send flow's
 methods out of their files (`appOn(ctx, start, { send: true })`).
 
+**`flashcard-onchain.js`** holds SEND on a card's own screen to a bitcoin
+address, at a test mint that pays on chain (NUT-30): the phone's own on-chain
+confirmation with NETWORK ON-CHAIN, FROM / FLASHCARD, the fee's reserve in
+dollars over its sats and NEXT; the card read for the amount and the reserve;
+its pieces held, then melted on chain by the wallet's own `onchainPay`, PENDING
+and followed. The reserve the transaction did not use, a melt the mint answers
+UNPAID, one whose answer never came and later reads UNPAID, and a hold left by
+a closed Foxy are all owed back to the card: YOUR CARD HAS MONEY WAITING at
+launch, and the next tap puts it on (with its PIN, on a card that has one).
+Each is owed once, however often the retry, the sweep or the hold asks again.
+A wallet that refuses by throwing once the card has paid gives it all back at
+once, NOT PAID. Change held when Foxy closed is said when the connect's sweep
+ends. At a mint that signs the change only when the transaction confirms
+(`changeLater`), and after a lost answer, the watch restores the change from
+its counters at PAID: the card's to the card, the phone's to its pile, the fee
+brought down by it. Below the mint's floor the phone's own
+words refuse it; the per tap limit's wait applies to the whole read; the books
+add up at every step, and every timer the app starts is shown to stop.
+
 **`flashcard-usd-receive.js`** holds CARD on a receive into the dollar balance,
 at a test mint with two balances: CARD only once the mint has made the invoice,
 the card tapped for the invoice's own sats and no others (the PIN pad and the

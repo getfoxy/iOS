@@ -666,7 +666,7 @@
       sendOverShown: sendOver ? '1' : '0',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
-      ...((s.flow === 'cardWd' || (s.flow === 'send' && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
+      ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
       // a swap is out of one balance, and the line names it

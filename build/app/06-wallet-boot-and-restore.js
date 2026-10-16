@@ -187,10 +187,12 @@
          * until this is there, and a request taken before the page knew whether
          * it was locked would be acted on past the lock. */
         W._cardTapped = () => this.cardTapped();
-        if (W.onCaughtUp) W.onCaughtUp(() => {
+        if (W.onCaughtUp) W.onCaughtUp((info) => {
           console.log('[foxy] small change: connected and caught up; checking the pool');
           this.refreshBalance();
           if (this.tidyChangeLater) this.tidyChangeLater();
+          // and money the sweep made owed to a card, said as the launch says it (26f-flashcard.js)
+          if (this.fcCaughtUp) this.fcCaughtUp(info);
         });
         // the phone turned over: the invoice screen follows (syncFlip)
         if (W.onTurned) W.onTurned((on) => this.setState({ upsideDown: !!on }));

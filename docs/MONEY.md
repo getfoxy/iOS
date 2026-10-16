@@ -850,6 +850,39 @@ melt quote the mint keeps.
 read this key as well as `foxy.cashu.melting`, so a seed scan during a payout
 does not file them as balance again.
 
+**From a card (SEND on its screen), and what is owed back to it.** The card pays
+this phone the amount plus the fee option's reserve, and the swap's pieces are held
+for the payment (`foxy.cashu.held`, `cardout-…`: counted by the books, in no
+balance). `onchainPay(plan, fee, stage, { held })` melts exactly those: no split, so
+step 2 is skipped. The record (step 3) is written with them, naming the card
+(`cardOut`, `card`), and then the hold is dropped, so the pieces are never in
+neither. Whatever comes back is the card's, never the pile's. The melt's change
+(the reserve the transaction did not use) goes into a hold of its own
+(`cardout-…-change`). The pieces of a melt answered UNPAID, or found UNPAID or
+FAILED by `onchainFollow`, go back into the payment's hold. The caller then makes
+either into pieces locked to the card and owes them to it (`cardOutBack` →
+`cardOweBack`, `outChange` for the change). This is outside the proof lock;
+`cardOutsLeft` at the next connect does it if Foxy was closed. The tap's entry
+keeps what came off the card less the change (`grossSats`, `changeSats`). The
+payment's entry carries its fee, and `changeState` `not handed` until the card's
+next tap writes it (`given back`). The books add up at each step: held (counted),
+record (on its way while the mint has not answered), change held (counted), owed
+(out of the books, off the tap's entry).
+
+**Change that does not come with the answer.** As cashu-ts reserves the
+counters of the melt's change outputs, their ranges are written to the record
+(`outputs`), as a Lightning melt's are to its hold (`noteMeltOutputs`). Change
+that came with the answer clears them. A mint that signs the change only once
+the transaction confirms, or a melt whose answer was lost, leaves them, and
+`onchainFollow` at PAID restores those ranges (`recoverMeltChange`: what the
+mint calls UNSPENT and nothing here holds). This phone's goes to its pile; a
+card's goes into `cardout-…-change` for the card, and the watch owes it
+(`cardOutsLeft`). The entry's fee comes down by what was restored. A restore
+that fails where the mint's answer says it signed change leaves the record for
+the next follow. The pile or hold, the entry's fee and the record's PAID are
+written in one turn, after the restore has answered: killed before it, the next
+follow asks again.
+
 ---
 
 ## 11. A request paid straight to this phone — `_requestPaid()`

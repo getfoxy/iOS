@@ -1945,10 +1945,12 @@ class Component extends DCLogic {
          * until this is there, and a request taken before the page knew whether
          * it was locked would be acted on past the lock. */
         W._cardTapped = () => this.cardTapped();
-        if (W.onCaughtUp) W.onCaughtUp(() => {
+        if (W.onCaughtUp) W.onCaughtUp((info) => {
           console.log('[foxy] small change: connected and caught up; checking the pool');
           this.refreshBalance();
           if (this.tidyChangeLater) this.tidyChangeLater();
+          // and money the sweep made owed to a card, said as the launch says it (26f-flashcard.js)
+          if (this.fcCaughtUp) this.fcCaughtUp(info);
         });
         // the phone turned over: the invoice screen follows (syncFlip)
         if (W.onTurned) W.onTurned((on) => this.setState({ upsideDown: !!on }));
@@ -5552,6 +5554,8 @@ class Component extends DCLogic {
     setTimeout(() => this.passcodeNotice(), 1000);
     // and last, at a mint with two balances, what to hold (10-pin.js)
     setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
+    // and money a card is owed from a payment it made from this phone, until a tap puts it on (26f-flashcard.js)
+    setTimeout(() => { if (this.fcMoneyWaiting) this.fcMoneyWaiting(); }, 1500);
     // the concentration nudge waits past those, for a later refresh
     this._readyAt = Date.now();
     // A mint switch that paid but died before claiming leaves the money at the
@@ -8691,16 +8695,15 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
-    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address. A
-     * bitcoin address and a Cashu payment request are said no to here, before anything moves, and the person is left where
-     * they were. */
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
+     * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
+     * request is said no to here, before anything moves, and the person is left where they were. */
     const cardOut = !!(this.fcOutMode && this.fcOutMode());
-    if (cardOut && (kind === 'address' || kind === 'request')) {
+    if (cardOut && kind === 'address') { this.fcOutAddress(t); return true; }
+    if (cardOut && kind === 'request') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: kind === 'address'
-          ? 'A Flashcard pays Lightning invoices and addresses, not bitcoin addresses: a payment on chain takes many minutes to settle, and the card\u2019s money cannot wait that long. WITHDRAW it to this phone, then pay from there.'
-          : 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        reason: 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -13948,7 +13951,7 @@ class Component extends DCLogic {
      * as adding to a card is. */
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
     // paying from a card (SEND on its screen, `fcOutMode`): out of what the card holds, and not this phone's balance
-    const cardOut = s.flow === 'send' && !!(this.fcOutMode && this.fcOutMode());
+    const cardOut = (s.flow === 'send' || s.flow === 'onchain') && !!(this.fcOutMode && this.fcOutMode());
     /* At a mint with two balances a send is capped by the balance that pays,
      * when one was picked by hand, and otherwise by the larger: a payment the
      * remembered balance cannot cover goes from the other (`keypadWallet`), so
@@ -14727,7 +14730,7 @@ class Component extends DCLogic {
       sendOverShown: sendOver ? '1' : '0',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
-      ...((s.flow === 'cardWd' || (s.flow === 'send' && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
+      ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
       // a swap is out of one balance, and the line names it
@@ -16205,7 +16208,8 @@ class Component extends DCLogic {
       txChange: (tx.unit === 'usd' ? this.moneyIn(tx.changeAmount, 'usd')
         : this.money(Number(tx.changeSats) || 0, this.txFiat(tx, Number(tx.changeSats) || 0)).main)
         + (tx.changeState === 'never came' || tx.changeState === 'never sent' ? ' expected'
-           : tx.changeState === 'not handed' ? ' owed to them'
+           : tx.changeState === 'not handed' ? (tx.fromCard ? ' owed to the card' : ' owed to them')
+           : (tx.changeState === 'given back' && tx.fromCard) ? ' put back on the card'
            : tx.changeState === 'owed' || tx.changeState === 'making' ? ' due'
            : tx.changeState === 'collected' ? ' collected later'
            : tx.dir === 'in' ? ' given back' : ' back'),
@@ -16213,6 +16217,11 @@ class Component extends DCLogic {
         + (tx.unit === 'usd' ? this.moneyIn(tx.amount, 'usd') : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
       txChangeState: tx.changeState === 'never came' ? 'The change never arrived.'
         : tx.changeState === 'never sent' ? 'The change could not be sent, so it was all kept.'
+        /* Paid from a card on chain: the reserve the transaction did not use
+         * is the card's, made into pieces for it and put on at its next tap. */
+        : (tx.changeState === 'not handed' && tx.fromCard)
+          ? 'The fee the payment did not use is waiting for the card it was paid from. Tap that card to put it back on.'
+        : (tx.changeState === 'given back' && tx.fromCard) ? 'The fee the payment did not use is back on the card.'
         : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))
           ? 'Their change was made and is waiting for their card. It is locked to that card: '
             + 'MENU \u203a FLASHCARD, and tap the card, to put it back.'
@@ -16640,6 +16649,11 @@ class Component extends DCLogic {
    * options — each a fee and a rough wait — to choose from. A payout is not
    * done when it leaves: the mint broadcasts and it is followed until the mint
    * says it confirmed.
+   *
+   * From a card (SEND on the card's screen, 26f-flashcard.js `fcOutMode`):
+   * the same screens, held to what the card holds, with FROM FLASHCARD and
+   * NEXT, which reads the card (`fcOcNext`); the payout is this phone's own,
+   * made with the card's pieces, and followed the same way.
    */
 
   /* What this mint does on chain, kept in state so the screens can ask. */
@@ -16727,6 +16741,15 @@ class Component extends DCLogic {
       this.toast(this.mintName() + ' does not send on chain. Move your sats to a mint that does.', true);
       return;
     }
+    /* From a card, an address that carries its amount is held to the mint's
+     * limits here, in the words the keypad uses for them (`ocNext`), before
+     * the mint is asked for a fee: the card is read for nothing it cannot pay. */
+    if (read.sats && this.fcOutMode && this.fcOutMode()) {
+      const floor = limits && limits.send ? limits.send.min : 0;
+      const ceiling = limits && limits.send ? limits.send.max : 0;
+      if (floor && read.sats < floor) { this.toast('This mint sends at least ' + this.group(floor) + ' sats on chain.', true); return; }
+      if (ceiling && read.sats > ceiling) { this.toast('This mint sends at most ' + this.group(ceiling) + ' sats on chain.', true); return; }
+    }
     this.setState(p => ({
       ocTo: read.address, ocSats: read.sats || 0, ocPlan: null, ocErr: '', ocFee: null,
       screen: read.sats ? 'ocConfirm' : 'amount',
@@ -16748,7 +16771,10 @@ class Component extends DCLogic {
      * for a fee: the confirmation said so only after its quote, a screen
      * later. The fee comes on top and is still
      * checked there. */
-    if (sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
+    // from a card, what the card holds (26f-flashcard.js, `fcOutMode`), and not this phone's balance
+    const fromCard = !!(this.fcOutMode && this.fcOutMode()) && !!this.state.fc;
+    if (fromCard && sats > (Number(this.state.fc.balance) || 0)) { this.toast('That is more than the card holds.', true); return; }
+    if (!fromCard && sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
     const limits = this.state.ocLimits;
     const floor = limits && limits.send ? limits.send.min : 0;
     const ceiling = limits && limits.send ? limits.send.max : 0;
@@ -16862,15 +16888,22 @@ class Component extends DCLogic {
     const plan = s.ocPlan;
     const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
     const short = String(s.ocTo || '');
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): the
+     * card it is paid from in a row of its own after NETWORK, where PAYING
+     * FROM would name this phone's mint, the fee's sats under its dollars, and
+     * NEXT, which reads the card (`fcOcNext`). */
+    const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
+    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', short.slice(0, 12) + '…' + short.slice(-8)),
-      this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      out ? null : this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'ON-CHAIN', { half: true }),
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
-        { half: true }),
-    ];
+        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub } : { half: true }),
+    ].filter(Boolean);
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
     /* Once the quote is in: can the balance cover the payout and its fees?
      *
@@ -16885,13 +16918,24 @@ class Component extends DCLogic {
      * failing to say, and then SEND is there as it was: `onchainPay` refuses. */
     let covers = null;
     try {
-      covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+      /* From a card, the card pays: the amount, the reserve, and the mint's
+       * fee on the pieces they are cut into, against what the card holds
+       * (`cardOutTotal`, the very figure NEXT reads off it). */
+      if (out && pick && W && W.cardOutTotal) {
+        const total = W.cardOutTotal(plan.sats, pick.fee);
+        covers = total > cardHas
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          : { ok: true };
+      } else {
+        covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+      }
     } catch (e) { covers = null; }
     if (covers && !covers.ok) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.money(s.ocSats).main, amountSub: this.money(s.ocSats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        // (what this phone holds with the mint is no part of what a card holds)
+        warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         secondary: many ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true } : undefined,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
@@ -16915,14 +16959,20 @@ class Component extends DCLogic {
       secondary: many
         ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true }
         : { label: 'CANCEL', go: () => this.ocCancel() },
-      cta: s.ocBusy ? 'SENDING…' : pick ? 'SEND ' + this.money(s.ocSats).main : 'CHECKING THE FEE…',
+      cta: s.ocBusy ? 'SENDING…' : !pick ? 'CHECKING THE FEE…' : out ? 'NEXT' : 'SEND ' + this.money(s.ocSats).main,
       ctaTone: 'go',
       ctaBusy: !!s.ocBusy || !pick,
-      go: () => { if (pick && !s.ocBusy) this.ocPay(); },
+      go: () => { if (pick && !s.ocBusy) { if (out) this.fcOcNext(); else this.ocPay(); } },
     };
   }
 
   ocCancel() {
+    // from a card, back to the card's screen it was paid from; from this phone, home
+    const at = (this.fcOutMode && this.fcOutMode()) ? (this.state.stack || []).lastIndexOf('flashcard') : -1;
+    if (at >= 0) {
+      this.setState(p => ({ screen: 'flashcard', stack: p.stack.slice(0, at), sendFrom: '', ocPlan: null, ocTo: '', ocSats: 0, ocErr: '' }));
+      return;
+    }
     this.setState({ screen: 'home', stack: [], ocPlan: null, ocTo: '', ocSats: 0, ocErr: '' });
   }
 
@@ -17000,7 +17050,30 @@ class Component extends DCLogic {
         if (answer.state === 'PAID') {
           this.loadHistory();
           this.toast('Your ' + this.group(record.sats) + ' sat payment confirmed on chain');
+          // change the mint signed only now, restored by the follow: this phone's is in the balance
+          if (answer.changeBack > 0) this.refreshBalance();
+          /* A card's is held for the card (onchainFollow) and owed to it here,
+           * outside the follow's lock, as a refused one is just below; its next
+           * tap puts it on. */
+          if (answer.cardChange > 0 && answer.card) {
+            return (W.cardOutsLeft ? W.cardOutsLeft() : Promise.resolve()).catch(() => {}).then(() => {
+              this.refreshBalance();
+              this.loadHistory();
+              if (this.fcMoneyWaiting) this.fcMoneyWaiting();
+            });
+          }
           return;
+        }
+        /* A card's payment, refused or never sent: the pieces are the card's,
+         * held for it (onchainFollow), and owed to it here (`cardOutsLeft`),
+         * outside the follow's lock; its next tap puts them on. */
+        if ((answer.state === 'UNPAID' || answer.state === 'FAILED') && answer.card) {
+          return (W.cardOutsLeft ? W.cardOutsLeft() : Promise.resolve()).catch(() => {}).then(() => {
+            this.refreshBalance();
+            this.loadHistory();
+            this.toast('That on-chain payment did not go. Nothing was paid from the card.', true);
+            if (this.fcMoneyWaiting) this.fcMoneyWaiting();
+          });
         }
         // refused or never sent: the ecash has been put back (onchainFollow)
         if (answer.state === 'UNPAID' || answer.state === 'FAILED') {
@@ -24173,10 +24246,18 @@ class Component extends DCLogic {
    * made with them. Made: PAYMENT SENT as ever. Not made: they go back on the card at its next tap, as a till's refusal
    * does, and the screen says NOT PAID.
    *
+   * A bitcoin address is paid on chain the same way, where the mint pays on chain (`fcOutAddress`): the phone's own
+   * on-chain confirmation (26b-onchain.js) with the FROM FLASHCARD row and NEXT, the card read for the amount and the fee
+   * option's reserve (`fcOcNext`), and the phone's own on-chain melt made with the held pieces (`fcOcPay`). PENDING is then
+   * the phone's to follow, for as long as it follows any payment on chain. What comes back after the card has gone (the
+   * reserve the transaction did not use, or all of it where the mint does not take it) is the card's, owed to it and put
+   * on at its next tap; until then each launch says so (`fcMoneyWaiting`).
+   *
    * Card mode is `sendFrom: 'card'` in the state, set by SEND and by nothing else, and true only while the card's screen
    * is under the flow (`fcOutMode`). Leaving the flow by any way (back past SEND MONEY, home, another screen) ends it
-   * (`syncCardOut`). A bitcoin address and a Cashu request are said no to (12-receive.js, `acceptTarget`). */
-  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone'];
+   * (`syncCardOut`). A Cashu request is said no to (12-receive.js, `acceptTarget`), and a bitcoin address at a mint that
+   * does not pay on chain. */
+  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone', 'ocConfirm'];
 
   fcOutMode() {
     const s = this.state;
@@ -24187,7 +24268,7 @@ class Component extends DCLogic {
   syncCardOut() {
     const s = this.state;
     if (s.sendFrom !== 'card') return;
-    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && s.flow === 'send'));
+    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && (s.flow === 'send' || s.flow === 'onchain')));
     if (!on) this.setState({ sendFrom: '' });
   }
 
@@ -24268,6 +24349,8 @@ class Component extends DCLogic {
       });
       return;
     }
+    // a bitcoin address: paid on chain, on the confirmation it was read on
+    if (send.onchain) { this.fcOcPay(o, send); return; }
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
     this.startSendNow(send.to, o);
@@ -24312,6 +24395,128 @@ class Component extends DCLogic {
     if (!paid) return;
     if (o.change > 0 && this.fcOwedAfterPaying()) this.fcChangeWaiting(o.change);
     else if (o.changeLater > 0) this.fcChangeLater(o.changeLater, 0);
+  }
+
+  /* A bitcoin address read in card mode (12-receive.js, `acceptTarget`). Whether this mint pays on chain at all is asked of it
+   * first (its NUT-30 melt, `onchainLimits`, once a mint): one that does not is said in the card's words, and nothing moves.
+   * A mint that could not be asked has not said no: the address goes to the confirmation, which asks it for the fee and
+   * says what it answers. */
+  fcOutAddress(text) {
+    const W = this.fcW();
+    if (!W || !W.connected) { this.offlineNo('Paying from the card'); return; }
+    Promise.resolve(W.onchainLimits ? W.onchainLimits() : null).then((limits) => {
+      // left card mode while the mint was asked: nothing to do
+      if (!this.fcOutMode()) return;
+      const known = !!(W.onchainKnown && W.onchainKnown());
+      if (known) this.setState({ ocLimits: limits || null });
+      if (known && !(limits && limits.send)) {
+        this.blockedCard('fcOutNot', {
+          tone: 'warn', title: 'THAT WON\u2019T WORK',
+          reason: this.mintName() + ' does not pay bitcoin addresses, so a Flashcard cannot pay one from here. '
+            + 'Ask them for a Lightning invoice, or WITHDRAW to this phone and pay from a mint that does.',
+          chip: 'Nothing was taken from the card.',
+        });
+        return;
+      }
+      this.payOnchain(text);
+    }, () => this.payOnchain(text));
+  }
+
+  /* NEXT on the on-chain confirmation in card mode, as `fcOutNext` is for Lightning: what can be said before the card is
+   * touched is said here. The card is then read for the amount and the reserve of the fee option chosen, with the mint's fee
+   * on the pieces they are cut into (`cardOutTotal`), as a till reads it: the PIN, the per tap limit and its wait, all as
+   * they are for any payment. */
+  fcOcNext() {
+    const W = this.fcW();
+    const s = this.state;
+    if (!W || !this.fcOutMode()) { this.back(); return; }
+    if (!W.connected) { this.offlineNo('Paying from the card'); return; }
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = s.fc;
+    const plan = s.ocPlan;
+    const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
+    if (!plan || !pick) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
+    // this one already handed to the mint: it is followed, and not paid twice
+    if (s.ocBusy || (W.onchainSending && W.onchainSending().some(r => r && r.quote === plan.id))) { this.showPayPending(); return; }
+    const total = W.cardOutTotal ? W.cardOutTotal(plan.sats, pick.fee) : plan.sats + pick.fee;
+    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance }, { taken: true }); return; }
+    const send = { to: plan.address, key: fc.key, onchain: { plan, fee: pick.index } };
+    const G = window.FoxyGate;
+    const fresh = (G && G.recheck) ? G.recheck() : null;
+    Promise.resolve(fresh).then((ok) => {
+      if (fresh && !ok) { this.offlineNo('Paying from the card'); return; }
+      this.fcPayRun(total, '', false, false, null, send);
+    });
+  }
+
+  /* The card has paid this phone the total, and its pieces are held: they are handed to the mint on chain by the phone's own
+   * on-chain payment (`onchainPay`, with them), on the screen the phone's own is handed over on, and said as it says it.
+   * Whatever the mint gives back of the reserve is owed to the card now (`cardOutBack`), and said (`fcMoneyWaiting`). Not
+   * made with the pieces still held (refused before the melt, or by the mint at once): back to the card, NOT PAID, as for
+   * Lightning (`fcOutBack`). A melt whose answer did not come is the mint's to say: followed as any payment on chain is. */
+  fcOcPay(o, send) {
+    const W = this.fcW();
+    const plan = send.onchain.plan;
+    this.setState({ ocBusy: true });
+    this.showMelt('Handing it to the mint\u2026');
+    /* Asked inside a promise: the card has paid by now, and a wallet that refused by throwing (no route, say) went past
+     * both handlers below, with the card's pieces left held, nothing owed to the card and the overlay up. */
+    Promise.resolve()
+      .then(() => W.onchainPay(plan, send.onchain.fee, (stage) => { if (stage === 'paying') this.meltSays('Sending it on chain\u2026'); },
+                               { held: o.held, card: o.card }))
+      .then((done) => {
+        this.hideMelt();
+        this.setState({ ocBusy: false, ocPlan: null, ocTo: '', ocSats: 0 });
+        this.refreshBalance();
+        this.loadHistory();
+        this.onchainWatchLater();
+        const txid = this.ocTxidOf(done.outpoint);
+        if (txid) W.tag('onchain-' + done.quote, { txid: txid });
+        // the card's own change from the tap, as after a Lightning payment
+        this.fcOutSettled(o, true);
+        if (done.state === 'UNKNOWN') this.showPayPending();
+        else this.announcePayment({ dir: 'out', sats: done.sats, hash: 'onchain-' + done.quote, to: 'a bitcoin address', force: true });
+        const back = done.cardChange;
+        if (!(back && back.sats > 0)) return null;
+        return W.cardOutBack(back.id).then(() => null, () => null).then(() => {
+          this.refreshBalance();
+          this.loadHistory();
+          this.fcMoneyWaiting();
+        });
+      }, (e) => {
+        this.hideMelt();
+        this.setState({ ocBusy: false });
+        if (this.fcOutStillHeld(o)) { this.fcOutBack(o, e); return; }
+        o.done = true;
+        this.refreshBalance();
+        this.loadHistory();
+        this.onchainWatchLater();
+        this.showPayPending();
+      });
+  }
+
+  /* The connect's sweep is over (06-wallet-boot-and-restore.js, `onCaughtUp`). Where it made money owed to a card that was
+   * not here (a payment's change left in its hold when Foxy closed, or a payment found never to have gone), it is said now:
+   * the launch's own word came before the sweep had made it, and found nothing. */
+  fcCaughtUp(info) {
+    if (info && Number(info.cardOwed) > 0) this.fcMoneyWaiting();
+  }
+
+  /* Money owed to a card from a payment it made out of this phone, whose card was gone by the time it was owed: an on-chain
+   * payment's unused reserve, or the whole of one the mint did not take. Said at every launch until it is on the card, and
+   * when it comes to be owed; one button, the tap that puts it on (`fcWriteAsk`). It is also on the card's own screen, in
+   * the line for money waiting for a card. Answers whether it said anything. */
+  fcMoneyWaiting() {
+    const W = this.fcW();
+    const owed = ((W && W.cardOwed && W.cardOwed()) || []).filter((r) => r && r.out);
+    const sats = owed.reduce((n, r) => n + (Number(r.sats) || 0), 0);
+    if (!(sats > 0)) return false;
+    this.blockedCard('fc-money-waiting', {
+      tone: 'warn', title: 'YOUR CARD HAS MONEY WAITING',
+      reason: 'Tap your card to put ' + this.fcSats(sats) + ' back on it.',
+      retry: 'TAP CARD', go: () => this.fcWriteAsk({}),
+    });
+    return true;
   }
 
   /* flashcard: the card that was tapped, or the invitation to tap one. */

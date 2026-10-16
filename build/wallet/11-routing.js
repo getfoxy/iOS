@@ -337,6 +337,17 @@
         mintCacheSave(u, w);
         checkKeysetsElsewhere(u, w, 0);
         if (firstTimeHere) probeMintNodeNow(u, w); else probeMintNode(u, w);
+        /* Money this sweep made owed to a card that is not here (a payment's change, or a payment that never went), for the
+         * app to say: the launch's own word on it came before the sweep had made it. Read off the list before and after,
+         * because more than one step makes it (the held melts' sweep gives a card's holds back too). */
+        var owedOut = function () {
+          var ids = {};
+          try {
+            FoxyWallet.cardOwed().forEach(function (r) { if (r && r.out) ids[r.id] = Math.max(0, Math.round(Number(r.sats) || 0)); });
+          } catch (e) { /* no card list: nothing to say */ }
+          return ids;
+        };
+        var owedBefore = owedOut();
         /* Anything paid while the app was away is still sitting at the mint;
          * then any melt whose outcome was never learned, and any swap whose
          * answer was lost after the mint made it. One after another, each after
@@ -369,7 +380,9 @@
            * what there is to break. */
           .then(function () {
             if (typeof FoxyWallet._onCaughtUp === 'function') {
-              try { FoxyWallet._onCaughtUp(); } catch (x) {}
+              var owedNow = owedOut(), cardOwed = 0;
+              Object.keys(owedNow).forEach(function (id) { if (!(id in owedBefore)) cardOwed += owedNow[id]; });
+              try { FoxyWallet._onCaughtUp({ cardOwed: cardOwed }); } catch (x) {}
             }
           });
         /* Sent tokens are not asked about here. Every connect used to ask the

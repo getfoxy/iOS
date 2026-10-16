@@ -381,7 +381,8 @@
       txChange: (tx.unit === 'usd' ? this.moneyIn(tx.changeAmount, 'usd')
         : this.money(Number(tx.changeSats) || 0, this.txFiat(tx, Number(tx.changeSats) || 0)).main)
         + (tx.changeState === 'never came' || tx.changeState === 'never sent' ? ' expected'
-           : tx.changeState === 'not handed' ? ' owed to them'
+           : tx.changeState === 'not handed' ? (tx.fromCard ? ' owed to the card' : ' owed to them')
+           : (tx.changeState === 'given back' && tx.fromCard) ? ' put back on the card'
            : tx.changeState === 'owed' || tx.changeState === 'making' ? ' due'
            : tx.changeState === 'collected' ? ' collected later'
            : tx.dir === 'in' ? ' given back' : ' back'),
@@ -389,6 +390,11 @@
         + (tx.unit === 'usd' ? this.moneyIn(tx.amount, 'usd') : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
       txChangeState: tx.changeState === 'never came' ? 'The change never arrived.'
         : tx.changeState === 'never sent' ? 'The change could not be sent, so it was all kept.'
+        /* Paid from a card on chain: the reserve the transaction did not use
+         * is the card's, made into pieces for it and put on at its next tap. */
+        : (tx.changeState === 'not handed' && tx.fromCard)
+          ? 'The fee the payment did not use is waiting for the card it was paid from. Tap that card to put it back on.'
+        : (tx.changeState === 'given back' && tx.fromCard) ? 'The fee the payment did not use is back on the card.'
         : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))
           ? 'Their change was made and is waiting for their card. It is locked to that card: '
             + 'MENU \u203a FLASHCARD, and tap the card, to put it back.'

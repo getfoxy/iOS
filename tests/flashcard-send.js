@@ -398,14 +398,16 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(books().length === 0, 'the books add up', books().join(' / '));
   }
 
-  /* ---- 12: on chain, a Cashu request and an invoice with no amount are said no to --------------------------------------------------------- */
+  /* ---- 12: on chain at a mint that pays no address, a Cashu request and an invoice with no amount are said no to ----------------------
+   * (A mint that pays on chain is paid from the card there: tests/flashcard-onchain.js.) */
   {
     await toCard();
     vals(holder).fcSend();
     update();
     holder.acceptTarget('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq');
-    ok(card(holder) && /WON.T WORK/.test(card(holder).title) && /bitcoin address/.test(card(holder).reason) && holder.state.screen === 'sendHow',
-       'a bitcoin address read in card mode: THAT WON’T WORK, with the reason, and nothing moves', card(holder) && card(holder).reason);
+    await until('the mint to be asked whether it pays on chain', () => !!card(holder));
+    ok(card(holder) && /WON.T WORK/.test(card(holder).title) && /does not pay bitcoin addresses/.test(card(holder).reason) && holder.state.screen === 'sendHow',
+       'a bitcoin address read in card mode, at a mint with no on-chain payments: THAT WON’T WORK, saying so, and nothing moves', card(holder) && card(holder).reason);
     holder.dismissCard(holder._blockedKind);
     holder.acceptTarget('creqA' + 'b'.repeat(40));
     ok(card(holder) && /WON.T WORK/.test(card(holder).title) && /Cashu payment request/.test(card(holder).reason) && holder.state.screen === 'sendHow',

@@ -742,13 +742,16 @@
     // how long an owner's tap waits for the mint's word on the change a card is owed, in milliseconds; the suites set it short
     _cardFetchWait: CARD_FETCH_WAIT,
 
-    /* What is waiting to be written onto cards: [{ id, card, sats, kind, mint }]. Not what cannot be: a card's
-     * own change (1.12) that its card no longer has the means to finish (`cardStuck`) is kept, and not promised. */
+    /* What is waiting to be written onto cards: [{ id, card, sats, kind, mint, out, payment }]. Not what cannot be: a card's
+     * own change (1.12) that its card no longer has the means to finish (`cardStuck`) is kept, and not promised. `out`: it
+     * came of a payment the card made out of this phone (SEND on its screen), whose card was gone by the time it was owed;
+     * `payment`, that payment's entry where it is its change. */
     cardOwed: function () {
       return cardStore(CARD_OWED).filter(function (r) { return r && !r.stuck; }).map(function (r) {
         var at = r.mint || '';
         if (!at && r.token) { try { at = (FoxyWallet.tokenInfo(r.token) || {}).mint || ''; } catch (e) { at = ''; } }
-        return { id: r.id, card: r.card, sats: r.sats, kind: r.kind, forHash: r.forHash || '', mint: at ? canonicalMint(at) : '' };
+        return { id: r.id, card: r.card, sats: r.sats, kind: r.kind, forHash: r.forHash || '', mint: at ? canonicalMint(at) : '',
+                 out: !!(r.outBack || r.outChange), payment: r.payment || '' };
       });
     },
     /* The card's own change that could not be finished and is kept: [{ id, card, sats, forHash, why, blind }], `blind`

@@ -198,7 +198,7 @@ function loadReal(opts) {
  * behind the wallet's back; `rebook(ctx)` after doing so, to carry on being
  * judged from there. FOXY_BOOKS=0 turns the question off. */
 const BOOK_KEYS = { log: 'foxy.cashu.log', proofs: 'foxy.cashu.proofs.', held: 'foxy.cashu.held',
-                    melting: 'foxy.cashu.melting', fees: 'foxy.cashu.topupfees' };
+                    melting: 'foxy.cashu.melting', fees: 'foxy.cashu.topupfees', onchainOut: 'foxy.cashu.onchain.out' };
 const bookMint = (u) => String(u || '').replace(/\/+$/, '');
 const watched = [];
 function stored(ctx, key, dflt) {
@@ -244,6 +244,14 @@ function books(ctx) {
     if (!h) return;
     add(holds, h.unit && h.unit !== 'sat' ? bookMint(h.mint) + '@' + h.unit : h.mint, sum(h.proofs));
   });
+  /* A payout on chain whose melt the mint has not answered (SENDING, UNKNOWN): its proofs are in its record until the mint
+   * says what it did (16a-onchain.js). Its entry has already said the amount went and no more, so what of the record is
+   * more than the amount (the reserve, and the mint's fee on the pieces) is still here: counted, so an entry that says the
+   * wrong amount while the mint is silent is still caught. */
+  (stored(ctx, BOOK_KEYS.onchainOut, []) || []).forEach((r) => {
+    if (!r || !/^(SENDING|UNKNOWN)$/.test(String(r.state)) || !(r.proofs || []).length) return;
+    add(holds, r.mint, sum(r.proofs) - (Number(r.sats) || 0));
+  });
   const out = {};
   new Set([...says.keys(), ...holds.keys()]).forEach((mint) => {
     const a = says.get(mint) || 0, b = holds.get(mint) || 0;
@@ -260,6 +268,7 @@ function limbo(ctx) {
     // and a payment taken and still being swapped in, which is counted as arriving rather than kept
     arriving: n(() => (W.arrivingIn ? W.arrivingIn('sat') + W.arrivingIn('usd') : 0)),
     recovering: n(() => W.recoveringSats()),
+    // (a payout on chain whose melt is unanswered is not here: its record is counted by `books`)
     melts: (stored(ctx, BOOK_KEYS.melting, []) || []).length || 0,
     move: n(() => (W.pendingMove && W.pendingMove() ? 1 : 0)),
   };
@@ -392,6 +401,10 @@ function fakeMint(w, opts) {
   const witnesses = {};
   // addresses paid into this wallet, and payouts on their way out (NUT-30)
   const chainIn = {}, chainOut = {};
+  /* o.onchainChangeLater (or `changeLater(true)`): a payout's change is signed only when its transaction confirms, and said
+   * on the quote then, not in the melt's answer. Until then the blanks wait here: { outputs, back } by quote. */
+  let changeLater = !!o.onchainChangeLater;
+  const chainChange = {};
   /* o.quoteFrom: the number this mint's quotes start from. Two mints in one
    * test must not hand out the same quote id — Foxy keys a history entry by
    * the quote alone, and a real mint's are UUIDs, so a collision here is the
@@ -762,7 +775,8 @@ function fakeMint(w, opts) {
       record(body.outputs);
       // the reserve is a ceiling: the transaction costs half of it and the rest comes back
       const fee = Math.ceil(pick.fee_reserve / 2);
-      const sigs = changeFor(body.outputs, paidIn - q.amount - fee);
+      if (changeLater) chainChange[q.quote] = { outputs: body.outputs, back: paidIn - q.amount - fee };
+      const sigs = changeLater ? [] : changeFor(body.outputs, paidIn - q.amount - fee);
       change.push(...sigs);
       /* PENDING, not PAID. The mint has the ecash and a transaction to
        * broadcast; whether it confirms is what onchainConfirm below decides. */
@@ -826,8 +840,18 @@ function fakeMint(w, opts) {
       const q = chainOut[quote];
       if (!q || q.state !== 'PENDING') return false;
       q.state = 'PAID';
+      // the change of a mint that signs it only now (o.onchainChangeLater), on the quote as such a mint says it
+      const later = chainChange[quote];
+      if (later) {
+        delete chainChange[quote];
+        const sigs = changeFor(later.outputs, later.back);
+        change.push(...sigs);
+        q.change = sigs;
+      }
       return true;
     },
+    // from now on, a payout's change is signed only when it confirms (o.onchainChangeLater), or with the answer again
+    changeLater: (on) => { changeLater = !!on; },
   };
 }
 

@@ -981,16 +981,15 @@
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
-    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address. A
-     * bitcoin address and a Cashu payment request are said no to here, before anything moves, and the person is left where
-     * they were. */
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
+     * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
+     * request is said no to here, before anything moves, and the person is left where they were. */
     const cardOut = !!(this.fcOutMode && this.fcOutMode());
-    if (cardOut && (kind === 'address' || kind === 'request')) {
+    if (cardOut && kind === 'address') { this.fcOutAddress(t); return true; }
+    if (cardOut && kind === 'request') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: kind === 'address'
-          ? 'A Flashcard pays Lightning invoices and addresses, not bitcoin addresses: a payment on chain takes many minutes to settle, and the card\u2019s money cannot wait that long. WITHDRAW it to this phone, then pay from there.'
-          : 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        reason: 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
         chip: 'Nothing was taken from the card.',
       });
       return false;

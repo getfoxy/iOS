@@ -822,7 +822,7 @@
  "ocConfirm, a quote that fits": {
   "file": "383-occonfirm-a-quote-that-fits.html",
   "markup": "c68f256a0680c9af0a562bfd6840d5ce2666b509670801234c6f0e3d1e5cec7a",
-  "vals": "b529cfca133c9861f6577c87020fdeb5c5eb2a4cdf42d3dddc0d6526c40c4509"
+  "vals": "430f2782580cda58667b41c2fce02cffa6d95d314fecd87dba280b42381fc8e6"
  },
  "depConfirm, by card": {
   "file": "098-depconfirm-by-card.html",
@@ -1409,6 +1409,11 @@
   "markup": "0e3c912269c85e1d9e76cac4f93d275df5a6041a0592addefdaff3cdf933ae82",
   "vals": "5ee3503752304a39690fd8c0fd68ab214455f21eb36758c1b64e4e8f6d0c83c1"
  },
+ "ocConfirm, from a card: FROM FLASHCARD and NEXT": {
+  "file": "442-occonfirm-from-a-card-from-flashcard-and-next.html",
+  "markup": "69c234c616071aa9158ee4171975c69f0ddcdadb22b9c7d3c6fc7987de143406",
+  "vals": "e3eec13c6dedceb97e0a59d6150aa34d971460b3083a461259dfa930b250e76a"
+ },
  "card: sendFail": {
   "file": "161-card-sendfail.html",
   "markup": "d5c5e4080cf0e8c31860125052330b1eb33d82911ea0057363ff0ee14dab7022",
@@ -1938,5 +1943,10 @@
   "file": "197-importseed-on-the-phone-a-finished-scan.html",
   "markup": "3e54af43feb36a06b23b3cd6d515a13922e2ef370a5b2aae3492ffbdb78ed6dd",
   "vals": "448540132212a3cd1015b47e545aa7a7042e445997d2c168316720a50330add8"
+ },
+ "card: your card has money waiting": {
+  "file": "443-card-your-card-has-money-waiting.html",
+  "markup": "7a90f2c3f3c5e37f921da6f126c3eca52d8e17069123c11c5bb50f9b8d22eb45",
+  "vals": "69bc3c305ddada00af8dce24923cacfa802256fdf8a71a53c821ce57db51657c"
  }
 }

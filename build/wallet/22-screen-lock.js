@@ -279,8 +279,9 @@
     _onAtRisk: null,
     onAtRisk: function (fn) { FoxyWallet._onAtRisk = fn; },
     onSendRebuilt: function (fn) { FoxyWallet._onSendRebuilt = fn; },
-    // connected, and everything that was waiting for a route has been dealt with
-    /** @type {?function(): void} */
+    /* connected, and everything that was waiting for a route has been dealt with: { cardOwed }, the sats that sweep made
+     * into money owed to cards that were not here */
+    /** @type {?function(any): void} */
     _onCaughtUp: null,
     /* Set by the app. `_putAway(true)` is the phone saying Foxy has left the
      * screen; `_tidying` is true while a small-change top-up is waiting or
@@ -290,7 +291,7 @@
     _tidying: false,
     /** @type {any} */
     _topUp: null,
-    /** @param {function(): void} fn */
+    /** @param {function(any): void} fn */
     onCaughtUp: function (fn) { FoxyWallet._onCaughtUp = fn; },
     onTrustLost: function (fn) { FoxyWallet._onTrustLost = fn; },
 

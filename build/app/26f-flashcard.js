@@ -3274,10 +3274,18 @@
    * made with them. Made: PAYMENT SENT as ever. Not made: they go back on the card at its next tap, as a till's refusal
    * does, and the screen says NOT PAID.
    *
+   * A bitcoin address is paid on chain the same way, where the mint pays on chain (`fcOutAddress`): the phone's own
+   * on-chain confirmation (26b-onchain.js) with the FROM FLASHCARD row and NEXT, the card read for the amount and the fee
+   * option's reserve (`fcOcNext`), and the phone's own on-chain melt made with the held pieces (`fcOcPay`). PENDING is then
+   * the phone's to follow, for as long as it follows any payment on chain. What comes back after the card has gone (the
+   * reserve the transaction did not use, or all of it where the mint does not take it) is the card's, owed to it and put
+   * on at its next tap; until then each launch says so (`fcMoneyWaiting`).
+   *
    * Card mode is `sendFrom: 'card'` in the state, set by SEND and by nothing else, and true only while the card's screen
    * is under the flow (`fcOutMode`). Leaving the flow by any way (back past SEND MONEY, home, another screen) ends it
-   * (`syncCardOut`). A bitcoin address and a Cashu request are said no to (12-receive.js, `acceptTarget`). */
-  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone'];
+   * (`syncCardOut`). A Cashu request is said no to (12-receive.js, `acceptTarget`), and a bitcoin address at a mint that
+   * does not pay on chain. */
+  FC_OUT_SCREENS = ['sendHow', 'sendType', 'contacts', 'sendConfirm', 'sendDone', 'ocConfirm'];
 
   fcOutMode() {
     const s = this.state;
@@ -3288,7 +3296,7 @@
   syncCardOut() {
     const s = this.state;
     if (s.sendFrom !== 'card') return;
-    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && s.flow === 'send'));
+    const on = this.fcOutMode() && (this.FC_OUT_SCREENS.indexOf(s.screen) >= 0 || (s.screen === 'amount' && (s.flow === 'send' || s.flow === 'onchain')));
     if (!on) this.setState({ sendFrom: '' });
   }
 
@@ -3369,6 +3377,8 @@
       });
       return;
     }
+    // a bitcoin address: paid on chain, on the confirmation it was read on
+    if (send.onchain) { this.fcOcPay(o, send); return; }
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
     this.startSendNow(send.to, o);
@@ -3413,6 +3423,128 @@
     if (!paid) return;
     if (o.change > 0 && this.fcOwedAfterPaying()) this.fcChangeWaiting(o.change);
     else if (o.changeLater > 0) this.fcChangeLater(o.changeLater, 0);
+  }
+
+  /* A bitcoin address read in card mode (12-receive.js, `acceptTarget`). Whether this mint pays on chain at all is asked of it
+   * first (its NUT-30 melt, `onchainLimits`, once a mint): one that does not is said in the card's words, and nothing moves.
+   * A mint that could not be asked has not said no: the address goes to the confirmation, which asks it for the fee and
+   * says what it answers. */
+  fcOutAddress(text) {
+    const W = this.fcW();
+    if (!W || !W.connected) { this.offlineNo('Paying from the card'); return; }
+    Promise.resolve(W.onchainLimits ? W.onchainLimits() : null).then((limits) => {
+      // left card mode while the mint was asked: nothing to do
+      if (!this.fcOutMode()) return;
+      const known = !!(W.onchainKnown && W.onchainKnown());
+      if (known) this.setState({ ocLimits: limits || null });
+      if (known && !(limits && limits.send)) {
+        this.blockedCard('fcOutNot', {
+          tone: 'warn', title: 'THAT WON\u2019T WORK',
+          reason: this.mintName() + ' does not pay bitcoin addresses, so a Flashcard cannot pay one from here. '
+            + 'Ask them for a Lightning invoice, or WITHDRAW to this phone and pay from a mint that does.',
+          chip: 'Nothing was taken from the card.',
+        });
+        return;
+      }
+      this.payOnchain(text);
+    }, () => this.payOnchain(text));
+  }
+
+  /* NEXT on the on-chain confirmation in card mode, as `fcOutNext` is for Lightning: what can be said before the card is
+   * touched is said here. The card is then read for the amount and the reserve of the fee option chosen, with the mint's fee
+   * on the pieces they are cut into (`cardOutTotal`), as a till reads it: the PIN, the per tap limit and its wait, all as
+   * they are for any payment. */
+  fcOcNext() {
+    const W = this.fcW();
+    const s = this.state;
+    if (!W || !this.fcOutMode()) { this.back(); return; }
+    if (!W.connected) { this.offlineNo('Paying from the card'); return; }
+    if (!this.fcReady('Paying from the card')) return;
+    const fc = s.fc;
+    const plan = s.ocPlan;
+    const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
+    if (!plan || !pick) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
+    // this one already handed to the mint: it is followed, and not paid twice
+    if (s.ocBusy || (W.onchainSending && W.onchainSending().some(r => r && r.quote === plan.id))) { this.showPayPending(); return; }
+    const total = W.cardOutTotal ? W.cardOutTotal(plan.sats, pick.fee) : plan.sats + pick.fee;
+    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance }, { taken: true }); return; }
+    const send = { to: plan.address, key: fc.key, onchain: { plan, fee: pick.index } };
+    const G = window.FoxyGate;
+    const fresh = (G && G.recheck) ? G.recheck() : null;
+    Promise.resolve(fresh).then((ok) => {
+      if (fresh && !ok) { this.offlineNo('Paying from the card'); return; }
+      this.fcPayRun(total, '', false, false, null, send);
+    });
+  }
+
+  /* The card has paid this phone the total, and its pieces are held: they are handed to the mint on chain by the phone's own
+   * on-chain payment (`onchainPay`, with them), on the screen the phone's own is handed over on, and said as it says it.
+   * Whatever the mint gives back of the reserve is owed to the card now (`cardOutBack`), and said (`fcMoneyWaiting`). Not
+   * made with the pieces still held (refused before the melt, or by the mint at once): back to the card, NOT PAID, as for
+   * Lightning (`fcOutBack`). A melt whose answer did not come is the mint's to say: followed as any payment on chain is. */
+  fcOcPay(o, send) {
+    const W = this.fcW();
+    const plan = send.onchain.plan;
+    this.setState({ ocBusy: true });
+    this.showMelt('Handing it to the mint\u2026');
+    /* Asked inside a promise: the card has paid by now, and a wallet that refused by throwing (no route, say) went past
+     * both handlers below, with the card's pieces left held, nothing owed to the card and the overlay up. */
+    Promise.resolve()
+      .then(() => W.onchainPay(plan, send.onchain.fee, (stage) => { if (stage === 'paying') this.meltSays('Sending it on chain\u2026'); },
+                               { held: o.held, card: o.card }))
+      .then((done) => {
+        this.hideMelt();
+        this.setState({ ocBusy: false, ocPlan: null, ocTo: '', ocSats: 0 });
+        this.refreshBalance();
+        this.loadHistory();
+        this.onchainWatchLater();
+        const txid = this.ocTxidOf(done.outpoint);
+        if (txid) W.tag('onchain-' + done.quote, { txid: txid });
+        // the card's own change from the tap, as after a Lightning payment
+        this.fcOutSettled(o, true);
+        if (done.state === 'UNKNOWN') this.showPayPending();
+        else this.announcePayment({ dir: 'out', sats: done.sats, hash: 'onchain-' + done.quote, to: 'a bitcoin address', force: true });
+        const back = done.cardChange;
+        if (!(back && back.sats > 0)) return null;
+        return W.cardOutBack(back.id).then(() => null, () => null).then(() => {
+          this.refreshBalance();
+          this.loadHistory();
+          this.fcMoneyWaiting();
+        });
+      }, (e) => {
+        this.hideMelt();
+        this.setState({ ocBusy: false });
+        if (this.fcOutStillHeld(o)) { this.fcOutBack(o, e); return; }
+        o.done = true;
+        this.refreshBalance();
+        this.loadHistory();
+        this.onchainWatchLater();
+        this.showPayPending();
+      });
+  }
+
+  /* The connect's sweep is over (06-wallet-boot-and-restore.js, `onCaughtUp`). Where it made money owed to a card that was
+   * not here (a payment's change left in its hold when Foxy closed, or a payment found never to have gone), it is said now:
+   * the launch's own word came before the sweep had made it, and found nothing. */
+  fcCaughtUp(info) {
+    if (info && Number(info.cardOwed) > 0) this.fcMoneyWaiting();
+  }
+
+  /* Money owed to a card from a payment it made out of this phone, whose card was gone by the time it was owed: an on-chain
+   * payment's unused reserve, or the whole of one the mint did not take. Said at every launch until it is on the card, and
+   * when it comes to be owed; one button, the tap that puts it on (`fcWriteAsk`). It is also on the card's own screen, in
+   * the line for money waiting for a card. Answers whether it said anything. */
+  fcMoneyWaiting() {
+    const W = this.fcW();
+    const owed = ((W && W.cardOwed && W.cardOwed()) || []).filter((r) => r && r.out);
+    const sats = owed.reduce((n, r) => n + (Number(r.sats) || 0), 0);
+    if (!(sats > 0)) return false;
+    this.blockedCard('fc-money-waiting', {
+      tone: 'warn', title: 'YOUR CARD HAS MONEY WAITING',
+      reason: 'Tap your card to put ' + this.fcSats(sats) + ' back on it.',
+      retry: 'TAP CARD', go: () => this.fcWriteAsk({}),
+    });
+    return true;
   }
 
   /* flashcard: the card that was tapped, or the invitation to tap one. */

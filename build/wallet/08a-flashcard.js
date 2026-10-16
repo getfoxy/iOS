@@ -2667,6 +2667,8 @@
             if (prep.stuck.length) return;
             // written: marked on the token's own note, so it is never taken for one that was not (`cardAdopt`). A payment put back has no note, nor has the card's own change
             if (row.kind !== 'putback' && !row.blind) { try { FoxyWallet.tag(row.id, { carded: Date.now() }); } catch (x0) {} }
+            // a payment's change out of this phone: its own entry says it is back on the card as well
+            if (row.kind === 'change' && row.payment) { try { amendTx(row.payment, { changeState: 'given back' }); } catch (xP) {} }
             if (row.kind === 'change' && row.forHash) { try { amendTx(row.forHash, { changeState: 'given back', changeKept: true }); } catch (x) {} }
             // change this phone fetched for a payment it does not know the entry of (`cardOwnerChange`)
             else if (row.fetched) { try { cardFetchedNote(row); } catch (x2) {} }
@@ -5520,10 +5522,14 @@
      * whole (`cardOutBack`). Its entry has said what the card made of its own change already, which is no reason to keep this:
      * only a put-back already filed for it is. */
     var outBack = !!row.outBack;
-    var already = cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === row.id && (!outBack || r.outBack); });
+    /* `row.outChange`: the change of a payment a card made out of this phone (the reserve an on-chain payment did not use), owed
+     * to the card the same way. The payment was made, so its entries say change and not "not completed"; and its own is
+     * filed apart from the card's own change for the same tap, which this neither stands for nor is stood for by. */
+    var outChange = !!row.outChange;
+    var already = cardOwedFor(row.id, outChange, outBack);
     var entry = null;
     try { entry = (load(K.log, []) || []).filter(function (e) { return e && e.hash === row.id; })[0] || null; } catch (x0) { entry = null; }
-    var settledState = !outBack && entry && /^(not handed|given back|never came|never sent|came back)$/.test(String(entry.changeState || ''));
+    var settledState = !outBack && !outChange && entry && /^(not handed|given back|never came|never sent|came back)$/.test(String(entry.changeState || ''));
     // a retry (`opts.retry`) is of change that was never sent, and is made now (the card's own change, owed beside it, has said 'not handed' already)
     if (settledState && o.retry && (entry.changeState === 'never sent' || viaCard > 0)) settledState = false;
     if (already || settledState) return Promise.resolve({ sats: 0, owed: owed, kept: false });
@@ -5554,6 +5560,13 @@
        * back now, so it is taken off what the entry says stayed (and the card's own list says it is going back on). */
       if (outBack) amendTx(row.id, { memo: 'card, not completed', changeState: 'making', changeSats: owed, grossSats: owed,
                                      sats: Math.max(0, Math.round(Number(entry && entry.sats) || 0) - owed) });
+      /* Its change, going back: what came off the card stays what it was (`grossSats`), and what this phone kept of it is less
+       * the change, which is added to any the card already had back from the same tap. */
+      else if (outChange) {
+        var was = Math.round(Number(entry && entry.sats) || 0);
+        amendTx(row.id, { changeState: 'making', changeSats: Math.round(Number(entry && entry.changeState && entry.changeSats) || 0) + owed,
+                          grossSats: Math.round(Number(entry && entry.grossSats) || 0) || was, sats: Math.max(0, was - owed) });
+      }
       else amendTx(row.id, refundRow ? { memo: 'card, not completed', changeState: 'making', changeSats: owed + viaCard, grossSats: owed + viaCard, sats: 0 }
                                 : { changeState: 'making', sats: Math.max(0, Math.round(Number(row.sats) || 0)),
                                     grossSats: Math.max(0, Math.round(Number(row.worth) || 0)), changeSats: owed + viaCard });
@@ -5568,8 +5581,17 @@
         if (card) cardPiecesOf(made.token, card);
         mustSave(CARD_OWED, cardStore(CARD_OWED).concat([{ id: made.hash, card: key, token: made.token, sats: made.sats,
                                                            kind: refundRow ? 'refund' : 'change', forHash: row.id, at: Date.now(),
-                                                           outBack: outBack || undefined }]));
+                                                           outBack: outBack || undefined, outChange: outChange || undefined,
+                                                           payment: (outChange && row.payment) || undefined }]));
         try { amendTx(row.id, { changeState: 'not handed' }); } catch (x3) {}
+        // and the payment's own entry says what of it is going back to the card, until it is on it (`cardWrite`)
+        if (outChange && row.payment) {
+          try {
+            var paid = (load(K.log, []) || []).filter(function (e) { return e && e.hash === row.payment; })[0];
+            if (paid) amendTx(row.payment, { changeSats: owed, changeState: 'not handed',
+                                             grossSats: Math.round(Number(paid.sats) || 0) + Math.max(0, Math.round(Number(paid.feeSats) || 0)) + owed });
+          } catch (x6) {}
+        }
         return { sats: made.sats, owed: owed, kept: false, made: made };
       }, function (e) {
         /* The payment is made; its change could not be. This phone holds it, its
@@ -5584,6 +5606,17 @@
         cardDueNote(row, owed);
         return { sats: 0, owed: owed, kept: true, unmade: true, due: true };
       });
+  }
+
+  /* Is what a card's row owes it filed already? Asked before anything is made for it, by the tap and its later settle
+   * (`cardOweBack`) and by the retry of what could not be made (`cardDueRetry`), in one place so the two cannot disagree.
+   * Three kinds are filed apart for one payment: the price of one out of this phone that was not made (`outBack`), the
+   * change of one that was (`outChange`), and the change of a tap (neither), which the first stands for and the second
+   * does not. */
+  function cardOwedFor(forHash, outChange, outBack) {
+    return cardStore(CARD_OWED).some(function (r) {
+      return r && !r.blind && r.forHash === forHash && (outChange ? !!r.outChange : outBack ? !!r.outBack : !r.outChange);
+    });
   }
 
   /* The entry of a payment whose change the card made for itself says it is owed to the card and not yet back on it
@@ -5602,10 +5635,12 @@
    * phone could not make; it is asked for (`cardChangeOwe`), and the two are noted apart, for a payment may owe both. */
   function cardDueNote(row, owed, blind) {
     var due = cardStore(CARD_DUE);
-    if (due.some(function (d) { return d && d.forHash === row.id && !!d.blind === !!blind && !!d.outBack === !!(!blind && row.outBack); })) return;
+    if (due.some(function (d) { return d && d.forHash === row.id && !!d.blind === !!blind && !!d.outBack === !!(!blind && row.outBack)
+                                       && !!d.outChange === !!(!blind && row.outChange); })) return;
     mustSave(CARD_DUE, due.concat([{ forHash: row.id, card: row.card, token: row.token, sats: row.sats, worth: row.worth,
                                      owed: blind ? Math.round(Number(row.cardChange) || 0) : owed, refund: !!row.refund,
                                      outBack: (!blind && row.outBack) || undefined,
+                                     outChange: (!blind && row.outChange) || undefined, payment: (!blind && row.outChange && row.payment) || undefined,
                                      blind: !!blind, cardChange: Math.round(Number(row.cardChange) || 0), at: Date.now() }]));
   }
 
@@ -5627,7 +5662,7 @@
     return due.reduce(function (chain, d) {
       return chain.then(function () {
         if (!d || !d.forHash) return null;
-        var drop = function () { mustSave(CARD_DUE, cardStore(CARD_DUE).filter(function (x) { return !(x && x.forHash === d.forHash && !!x.blind === !!d.blind && !!x.outBack === !!d.outBack); })); };
+        var drop = function () { mustSave(CARD_DUE, cardStore(CARD_DUE).filter(function (x) { return !(x && x.forHash === d.forHash && !!x.blind === !!d.blind && !!x.outBack === !!d.outBack && !!x.outChange === !!d.outChange); })); };
         // the card's own change, which the mint signed and this phone did not hear: asked of the mint by the blinded messages
         if (d.blind) {
           if (cardStore(CARD_OWED).some(function (r) { return r && r.blind && r.forHash === d.forHash; })) { drop(); return null; }
@@ -5642,11 +5677,12 @@
             out.push({ forHash: d.forHash, state: made ? 'made' : 'kept', sats: made ? made.sats : 0 });
           }, function () { out.push({ forHash: d.forHash, state: 'waiting', sats: 0 }); });
         }
-        if (cardStore(CARD_OWED).some(function (r) { return r && !r.blind && r.forHash === d.forHash && (!d.outBack || r.outBack); })) { drop(); return null; }
+        if (cardOwedFor(d.forHash, !!d.outChange, !!d.outBack)) { drop(); return null; }
         var tags = {};
         try { tags = FoxyWallet.tagsFor(d.forHash) || {}; } catch (x) { tags = {}; }
         // the recovery puts the change it found on the payment's entry, as a code to hand over (`owedChangeOnEntry`)
-        var found = String(tags.changeToken || (tags.owedChange ? tags.token : '') || '');
+        // (not a payment's change out of this phone: that was never a code of a till's, and is made below)
+        var found = d.outChange ? '' : String(tags.changeToken || (tags.owedChange ? tags.token : '') || '');
         if (found) {
           var made = 0;
           try { made = sumProofs((FoxyWallet.tokenInfo(found) || {}).proofs || []); } catch (x1) { made = 0; }
@@ -5672,7 +5708,7 @@
           return null;
         }
         var row = { id: d.forHash, token: d.token, sats: d.sats, worth: d.worth, over: d.owed, all: false, card: d.card, refund: !!d.refund,
-                    cardChange: Math.round(Number(d.cardChange) || 0), outBack: !!d.outBack };
+                    cardChange: Math.round(Number(d.cardChange) || 0), outBack: !!d.outBack, outChange: !!d.outChange, payment: d.payment || '' };
         return cardOweBack(row, w, null, null, d.refund ? { sats: d.owed } : null, { retry: true }).then(function (r) {
           if (r && r.made) { drop(); out.push({ forHash: d.forHash, state: 'made', sats: r.sats }); return; }
           // too small to make after all: the payment keeps it, as a tap's would
@@ -5691,7 +5727,8 @@
    * does not ask for it by name). The payment then melts those pieces and no others (`pay`, `opts.held`). Every way it can
    * end leaves them somewhere:
    *
-   *   paid                    spent at the mint; what the fee reserve did not use comes back to this phone as melt change;
+   *   paid                    spent at the mint; over Lightning, what the fee reserve did not use comes back to this phone
+   *                           as melt change; on chain it is the card's (held as '<id>-change' and owed to it, `outChange`);
    *   refused, or never tried the payment puts them back in the hold, and `cardOutBack` makes them into pieces for the card,
    *                           owed to it, and its next tap puts them back on (no PIN, as after any payment);
    *   left behind             Foxy closed between the swap and the melt, or the melt's answer lost and then UNPAID: the
@@ -5752,8 +5789,12 @@
       released = true;
     }).then(function () {
       if (!released) return { sats: 0, made: false };
-      console.log('[foxy] card: a payment out of this phone was not made; ' + sats + ' sats go back to the card');
-      var row = { id: h.forHash, token: h.token, card: h.card, refund: true, outBack: true, worth: sats, sats: 0, over: sats, all: false, cardChange: 0 };
+      /* A hold of a payment's change (`h.change`: the reserve an on-chain payment did not use, 16a-onchain.js) is the card's
+       * as well, and goes the same road; only what its entries say differs: the payment was made (`outChange`). */
+      console.log('[foxy] card: ' + (h.change ? 'the change of a payment out of this phone; ' : 'a payment out of this phone was not made; ') + sats + ' sats go back to the card');
+      var row = h.change
+        ? { id: h.forHash, token: h.token, card: h.card, refund: false, outChange: true, payment: h.payment || '', worth: sats, sats: 0, over: sats, all: false, cardChange: 0 }
+        : { id: h.forHash, token: h.token, card: h.card, refund: true, outBack: true, worth: sats, sats: 0, over: sats, all: false, cardChange: 0 };
       return cardOweBack(row, w, null, null, { sats: sats }).then(function (r) {
         return { sats: (r && r.made) ? r.sats : sats, made: !!(r && r.made) };
       });

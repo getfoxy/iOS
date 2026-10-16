@@ -654,6 +654,67 @@ or two buttons. The ones a payment can end in:
 Every screen of the card flows has a render snapshot in `tests/snapshots/render`
 (the views named `flashcard…`, `card: …`, `stage: …`).
 
+## Paying from the card: SEND on its screen
+
+SEND on the card's own screen opens the phone's SEND MONEY in card mode
+(`fcOutMode`, 26f-flashcard.js): WITHDRAW, PASTE, CONTACTS and TYPE. What is read
+goes to the phone's own confirmation with a FROM / FLASHCARD row and NEXT for
+SEND. NEXT reads the payment's total off the card exactly as a till reads it
+(the PIN, the per tap limit and its wait, the card's own change), and the pieces
+the card pays are held for that payment alone (`cardOutHold`, K.held
+`cardout-…`). The phone then pays with those pieces and no others. Not paid, they
+are made into pieces for the card and owed to it (`cardOutBack`), and its next tap
+puts them back. Tests: `tests/flashcard-send.js`.
+
+**On chain.** A bitcoin address goes to the phone's own on-chain confirmation
+(26b-onchain.js). It shows NETWORK ON-CHAIN, the amount, FROM FLASHCARD, the
+reserve of the fee option chosen as FEE (dollars, the sats under them) and the
+phone's line `A payment on chain is not instant. It is done when it confirms.`
+NEXT (`fcOcNext`) reads the card for the amount plus that reserve, with the
+mint's fee on the pieces they are cut into (`cardOutTotal`). The held pieces are
+then handed over by the phone's own NUT-30 melt (`onchainPay` with `held`): no
+split, nothing of the phone's pile, and the pieces move from their hold to the
+payment's record before the melt. PENDING is the phone's from there: the on-chain
+watch follows it to PAID, and the screen says it is on its way as for a payout
+from the phone.
+
+What comes back after the card has gone belongs to the card:
+
+- the reserve the transaction did not use, which comes back as the melt's change;
+- all of it, where the mint answers UNPAID, or a melt whose answer never came
+  later reads UNPAID.
+
+It goes into a hold for the card (`cardOutReturn`) and is owed to it by the same
+road as a refused Lightning payment (`cardOutBack`, CARD_OWED, CARD_DUE if the
+making fails). A mint that signs the change only once the transaction confirms,
+or a melt whose answer was lost, leaves it to the on-chain watch: at PAID the
+change is restored from the counters its outputs were made at, and goes to the
+card the same way.
+
+The two card payments differ here. On chain, the unused reserve is the card's.
+Over Lightning it still comes back to this phone as melt change, as it did
+before; whether that should go to the card as well is left to the owner. Each launch, and the moment it becomes owed, the card YOUR CARD HAS
+MONEY WAITING says `Tap your card to put ₿N back on it.`, with TAP CARD. Money
+the connect's sweep makes owed after launch is said when the sweep ends. It is
+also the line for money waiting on the card's own screen. The payment's history
+entry is the on-chain payment, `Paid from card`, with the change `owed to the
+card` and then `put back on the card`. A mint whose info has no on-chain melt is
+said no to (THAT WON'T WORK: the mint does not pay bitcoin addresses). An address
+below the mint's floor is refused in the keypad's words, `This mint sends at least
+N sats on chain.`, before the card is touched. Tests:
+`tests/flashcard-onchain.js`.
+
+**The per tap limit is not changed by this.** An on-chain payment is usually
+larger than a till's, and the whole read (amount plus reserve) is what the card
+waits on. Take $300 against a $20 limit. That is fifteen limits' worth, sixteen
+once the reserve is in. A card of 1.18 asks ten askings for the first limit's
+worth over and four for each after: 10 + 4 × 13 = 62 askings, about 50 s, or 66
+and about 53 s with the reserve. Either way it is past the 40 s a till asks
+anyone to hold a card, so it is refused before the PIN with OVER THE CARD'S PER
+TAP LIMIT, and nothing is taken. At a $20 limit one tap carries at most twelve
+limits' worth, $240 with the fee (50 askings, about 40 s). Larger payments are
+WITHDRAWn to the phone and paid from there, or need a higher limit.
+
 ## A tap cut short is taken up again
 
 A card held to a phone for a second or two is sometimes taken away too soon.

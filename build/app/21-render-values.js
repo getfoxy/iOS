@@ -514,7 +514,7 @@
      * as adding to a card is. */
     const capped = s.flow === 'send' || s.flow === 'onchain' || s.flow === 'cardAdd' || s.flow === 'cardSend' || s.flow === 'cardWd';
     // paying from a card (SEND on its screen, `fcOutMode`): out of what the card holds, and not this phone's balance
-    const cardOut = s.flow === 'send' && !!(this.fcOutMode && this.fcOutMode());
+    const cardOut = (s.flow === 'send' || s.flow === 'onchain') && !!(this.fcOutMode && this.fcOutMode());
     /* At a mint with two balances a send is capped by the balance that pays,
      * when one was picked by hand, and otherwise by the larger: a payment the
      * remembered balance cannot cover goes from the other (`keypadWallet`), so

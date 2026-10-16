@@ -10,6 +10,11 @@
    * options — each a fee and a rough wait — to choose from. A payout is not
    * done when it leaves: the mint broadcasts and it is followed until the mint
    * says it confirmed.
+   *
+   * From a card (SEND on the card's screen, 26f-flashcard.js `fcOutMode`):
+   * the same screens, held to what the card holds, with FROM FLASHCARD and
+   * NEXT, which reads the card (`fcOcNext`); the payout is this phone's own,
+   * made with the card's pieces, and followed the same way.
    */
 
   /* What this mint does on chain, kept in state so the screens can ask. */
@@ -97,6 +102,15 @@
       this.toast(this.mintName() + ' does not send on chain. Move your sats to a mint that does.', true);
       return;
     }
+    /* From a card, an address that carries its amount is held to the mint's
+     * limits here, in the words the keypad uses for them (`ocNext`), before
+     * the mint is asked for a fee: the card is read for nothing it cannot pay. */
+    if (read.sats && this.fcOutMode && this.fcOutMode()) {
+      const floor = limits && limits.send ? limits.send.min : 0;
+      const ceiling = limits && limits.send ? limits.send.max : 0;
+      if (floor && read.sats < floor) { this.toast('This mint sends at least ' + this.group(floor) + ' sats on chain.', true); return; }
+      if (ceiling && read.sats > ceiling) { this.toast('This mint sends at most ' + this.group(ceiling) + ' sats on chain.', true); return; }
+    }
     this.setState(p => ({
       ocTo: read.address, ocSats: read.sats || 0, ocPlan: null, ocErr: '', ocFee: null,
       screen: read.sats ? 'ocConfirm' : 'amount',
@@ -118,7 +132,10 @@
      * for a fee: the confirmation said so only after its quote, a screen
      * later. The fee comes on top and is still
      * checked there. */
-    if (sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
+    // from a card, what the card holds (26f-flashcard.js, `fcOutMode`), and not this phone's balance
+    const fromCard = !!(this.fcOutMode && this.fcOutMode()) && !!this.state.fc;
+    if (fromCard && sats > (Number(this.state.fc.balance) || 0)) { this.toast('That is more than the card holds.', true); return; }
+    if (!fromCard && sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
     const limits = this.state.ocLimits;
     const floor = limits && limits.send ? limits.send.min : 0;
     const ceiling = limits && limits.send ? limits.send.max : 0;
@@ -232,15 +249,22 @@
     const plan = s.ocPlan;
     const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
     const short = String(s.ocTo || '');
+    /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): the
+     * card it is paid from in a row of its own after NETWORK, where PAYING
+     * FROM would name this phone's mint, the fee's sats under its dollars, and
+     * NEXT, which reads the card (`fcOcNext`). */
+    const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
+    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', short.slice(0, 12) + '…' + short.slice(-8)),
-      this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      out ? null : this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'ON-CHAIN', { half: true }),
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
-        { half: true }),
-    ];
+        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub } : { half: true }),
+    ].filter(Boolean);
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
     /* Once the quote is in: can the balance cover the payout and its fees?
      *
@@ -255,13 +279,24 @@
      * failing to say, and then SEND is there as it was: `onchainPay` refuses. */
     let covers = null;
     try {
-      covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+      /* From a card, the card pays: the amount, the reserve, and the mint's
+       * fee on the pieces they are cut into, against what the card holds
+       * (`cardOutTotal`, the very figure NEXT reads off it). */
+      if (out && pick && W && W.cardOutTotal) {
+        const total = W.cardOutTotal(plan.sats, pick.fee);
+        covers = total > cardHas
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          : { ok: true };
+      } else {
+        covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
+      }
     } catch (e) { covers = null; }
     if (covers && !covers.ok) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.money(s.ocSats).main, amountSub: this.money(s.ocSats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(covers.need - covers.have) || covers.why,
+        // (what this phone holds with the mint is no part of what a card holds)
+        warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         secondary: many ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true } : undefined,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
@@ -285,14 +320,20 @@
       secondary: many
         ? { label: 'CHANGE THE SPEED', go: () => this.ocPickFee(), filled: true }
         : { label: 'CANCEL', go: () => this.ocCancel() },
-      cta: s.ocBusy ? 'SENDING…' : pick ? 'SEND ' + this.money(s.ocSats).main : 'CHECKING THE FEE…',
+      cta: s.ocBusy ? 'SENDING…' : !pick ? 'CHECKING THE FEE…' : out ? 'NEXT' : 'SEND ' + this.money(s.ocSats).main,
       ctaTone: 'go',
       ctaBusy: !!s.ocBusy || !pick,
-      go: () => { if (pick && !s.ocBusy) this.ocPay(); },
+      go: () => { if (pick && !s.ocBusy) { if (out) this.fcOcNext(); else this.ocPay(); } },
     };
   }
 
   ocCancel() {
+    // from a card, back to the card's screen it was paid from; from this phone, home
+    const at = (this.fcOutMode && this.fcOutMode()) ? (this.state.stack || []).lastIndexOf('flashcard') : -1;
+    if (at >= 0) {
+      this.setState(p => ({ screen: 'flashcard', stack: p.stack.slice(0, at), sendFrom: '', ocPlan: null, ocTo: '', ocSats: 0, ocErr: '' }));
+      return;
+    }
     this.setState({ screen: 'home', stack: [], ocPlan: null, ocTo: '', ocSats: 0, ocErr: '' });
   }
 
@@ -370,7 +411,30 @@
         if (answer.state === 'PAID') {
           this.loadHistory();
           this.toast('Your ' + this.group(record.sats) + ' sat payment confirmed on chain');
+          // change the mint signed only now, restored by the follow: this phone's is in the balance
+          if (answer.changeBack > 0) this.refreshBalance();
+          /* A card's is held for the card (onchainFollow) and owed to it here,
+           * outside the follow's lock, as a refused one is just below; its next
+           * tap puts it on. */
+          if (answer.cardChange > 0 && answer.card) {
+            return (W.cardOutsLeft ? W.cardOutsLeft() : Promise.resolve()).catch(() => {}).then(() => {
+              this.refreshBalance();
+              this.loadHistory();
+              if (this.fcMoneyWaiting) this.fcMoneyWaiting();
+            });
+          }
           return;
+        }
+        /* A card's payment, refused or never sent: the pieces are the card's,
+         * held for it (onchainFollow), and owed to it here (`cardOutsLeft`),
+         * outside the follow's lock; its next tap puts them on. */
+        if ((answer.state === 'UNPAID' || answer.state === 'FAILED') && answer.card) {
+          return (W.cardOutsLeft ? W.cardOutsLeft() : Promise.resolve()).catch(() => {}).then(() => {
+            this.refreshBalance();
+            this.loadHistory();
+            this.toast('That on-chain payment did not go. Nothing was paid from the card.', true);
+            if (this.fcMoneyWaiting) this.fcMoneyWaiting();
+          });
         }
         // refused or never sent: the ecash has been put back (onchainFollow)
         if (answer.state === 'UNPAID' || answer.state === 'FAILED') {

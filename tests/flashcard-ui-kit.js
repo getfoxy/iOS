@@ -18,6 +18,10 @@
  * (`confirmSpec`, the fee asked of the mint, `quoteSendFee`), the payment itself (`startSend`, `startSendNow`), the keypad's
  * ceiling (`renderContext`) and the camera (`syncPreview`), for the suites that pay from a card (tests/flashcard-send.js).
  *
+ * The send flow carries the phone's own on-chain screens with it (26b-onchain.js, whole): a bitcoin address read in card
+ * mode is paid on chain from the card where the mint does that (tests/flashcard-onchain.js). `{ send: true, money: true }`
+ * also has the app's own `money` (03-send.js: dollars first, the sats under them) in place of the suites' sats-only one.
+ *
  * `appOn(ctx, start, { send: true, receive: true })` adds a receive into the dollar balance as well (12-receive.js: its
  * invoice, the watch that lands it and the code's minute; 24-render-receive-and-send.js: the receive screen's values), for
  * the suite that pays a dollar invoice with a card (tests/flashcard-usd-receive.js). */
@@ -51,7 +55,10 @@ const SEND_SIGS = {
   '21-render-values.js': ['renderContext() {'],
   '24-render-receive-and-send.js': ['renderSend(c) {'],
 };
-const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n');
+const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n')
+  // the phone's own on-chain screens, which a card in card mode pays a bitcoin address through
+  + '\n' + read(['26b-onchain.js']);
+const MONEY_PARTS = liftFrom(read(['03-send.js']), 'money(sats, fiatCents) {');
 const RECEIVE_SIGS = {
   '01-ui-basics.js': ['centsTyped() {'],
   '12-receive.js': ['wantedAmount() {', 'stopReceive() {', 'openUsdReceive(cents) {', 'usdInvoiceUp(inv, mine) {', 'recvClockTick(mine) {', 'recvRequote(mine) {'],
@@ -64,7 +71,7 @@ const RECEIVE_PARTS = Object.keys(RECEIVE_SIGS).map((f) => RECEIVE_SIGS[f].map((
  * helpers the parts call. */
 function appOn(ctx, start, o) {
   const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '')
-    + ((o && o.receive) ? '\n' + RECEIVE_PARTS : '');
+    + ((o && o.receive) ? '\n' + RECEIVE_PARTS : '') + ((o && o.money) ? '\n' + MONEY_PARTS : '');
   // (the split values keep a React ref in a field of the class: nothing here draws with it)
   const Parts = new Function('window', 'document', 'localStorage', 'React', 'navigator', 'CTA_INK', 'return class {\n' + body + '\n};')(
     ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) }, ctx.window.navigator, () => '#fff');
@@ -155,7 +162,19 @@ function appOn(ctx, start, o) {
     // the progress overlay over the sending screen, and the burst at its end, are the page's: none here
     a.settleAnimate = () => {};
     a.editSendNote = () => {};
+    // the on-chain screens' own helpers that are the app's elsewhere: what was announced, the speed sheet, the keypad's sats
+    a.announced = [];
+    a.announcePayment = (ev) => a.announced.push(ev);
+    a.chooseFrom = (title, rows) => { a.chose = { title, rows }; };
+    a.meltSays = (label) => a.melts.push(label);
+    a.amountInSats = () => {
+      const val = parseFloat(a.state.amount) || 0;
+      if (a.state.unit === 'SATS') return Math.round(val);
+      return a.px() ? Math.round(val / a.px() * 1e8) : 0;
+    };
   }
+  // the app's own money, dollars first with the sats under them, in place of the stand-in
+  if (o && o.money) delete a.money;
   return a;
 }
 

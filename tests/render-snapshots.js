@@ -704,6 +704,14 @@ function representative(logic) {
       rate: { usdPerBtc: 82601, by: 'forge.example.com' }, market: 82601, spread: 0, spreadWarn: false }) }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin in dollars', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
     unit: 'USD', amount: '1.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 82601 }) }) }));
+  /* The same address paid from a card (SEND on the card's screen): FROM / FLASHCARD in place of PAYING FROM, the fee's sats
+   * under it, and NEXT, which reads the card for the amount and the reserve (26f-flashcard.js, `fcOcNext`). */
+  add('ocConfirm, from a card: FROM FLASHCARD and NEXT', at('ocConfirm',
+    Object.assign({ ocPlan: OC_PLAN() }, OC, { sendFrom: 'card', fc: FC({ balance: 60000 }), stack: ['flashcard'] }),
+    { wallet: CARDS({ cardOutTotal: (amount, reserve) => amount + reserve }),
+      // card mode needs the card's screen under the flow, a stack the other views do not have: no slide in or out of it (`syncSlide`)
+      before: (a) => { a._fcCard = { key: KEY_A, info: {}, pieces: [] }; a._nav = { screen: 'ocConfirm', len: 1 }; },
+      after: (a) => { a._nav = { screen: 'ocConfirm', len: 0 }; } }));
   return v;
 }
 
@@ -894,6 +902,9 @@ function cards() {
       { host: 'partial.example.com', state: 'done', partial: true, sats: 100 },
     ],
   })]);
+  // money a card is owed from a payment it made from this phone, said at launch until a tap puts it on (26f-flashcard.js)
+  add('card: your card has money waiting', (a) => a.fcMoneyWaiting(),
+    { wallet: { cardSession: () => Promise.resolve(), cardOwed: () => [{ id: 'o1', card: '02' + 'a1'.repeat(31), sats: 32, kind: 'change', out: true, payment: 'onchain-q1' }] } });
   return v;
 }
 
