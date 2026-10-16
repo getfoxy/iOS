@@ -494,7 +494,7 @@
    * handed on, rows for another mint, and rows nothing here can open are left
    * out: `[{ id, sats, token }]`, largest first. */
   function lockedPieces() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -530,7 +530,7 @@
    * and of a row that has already given some up — less any piece this phone
    * has signed away, which is the one thing that must never go out twice. */
   function lockedProofsFlat() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -819,7 +819,7 @@
   function holdChange(hash, sats, at) {
     var n = Math.round(Number(sats) || 0);
     if (!hash || !(n > 0)) return;
-    changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || mintUrl || '')) };
+      changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || currentSourceId() || '')) };
   }
 
   /* Idempotent: every way out of making change calls it, and only one of
@@ -1225,7 +1225,7 @@
     return out;
   }
   function atRiskSats() {
-    var here = canonicalMint(mintUrl || '');
+    var here = canonicalMint(currentSourceId() || '');
     return atRiskGroups().reduce(function (n, g) { return n + (canonicalMint(g.mint) === here ? g.sats : 0); }, 0);
   }
   /* A payment the receiver heard and refused, with nothing sent back: its
@@ -1242,7 +1242,7 @@
         return keep;
       });
       if (!list.length || lockedProofs(list).length) return Promise.resolve(0);
-      var at = canonicalMint(String((info && info.mint) || mintUrl || ''));
+      var at = canonicalMint(String((info && info.mint) || currentSourceId() || ''));
       var all = atRiskAll();
       all[made.hash] = { secrets: list.map(function (pr) { return pr.secret; }), sats: sumProofs(list),
                          at: Date.now(), req: reqId || '', mint: at, why: String(why || '').slice(0, 200) };

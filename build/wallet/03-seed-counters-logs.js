@@ -1636,7 +1636,7 @@
       var list = load(K.audit, []);
       var rec = /** @type {any} */ (Object.assign({
         at: Math.floor(Date.now() / 1000),
-        mint: String(mintUrl || '').replace(/\/+$/, ''),
+        mint: String(currentSourceId() || '').replace(/\/+$/, ''),
       }, entry));
       // what left this wallet, by the values the mint knows it by
       if (!rec.ys) rec.ys = (rec.inputs || []).map(lookupOf).filter(Boolean);
@@ -1685,7 +1685,7 @@
      * Written once here, and once more when an entry that was waiting
      * settles (`amendTx`). */
     var first = { at: Math.floor(Date.now() / 1000),
-                  mint: String(mintUrl || '').replace(/\/+$/, '') };
+                  mint: String(currentSourceId() || '').replace(/\/+$/, '') };
     if (rateNow()) first.rate = rateNow();
     list.unshift(Object.assign(first, entry));
     // five hundred, so the history screen's audit reaches the start

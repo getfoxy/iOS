@@ -1408,7 +1408,7 @@
   }
 
   function proofKey(url, unit) {
-    var u = url === undefined ? mintUrl : url;
+    var u = url === undefined ? currentSourceId() : url;
     var n = unitOf(unit);
     if (!n) throw new Error('Foxy does not know the unit ' + String(unit).slice(0, 20) + '.');
     if (n === 'sat') return u ? K.proofs + '.' + u : K.proofs;
@@ -1509,7 +1509,7 @@
   /* The mint a wallet object talks to, in the form piles are keyed by. */
   function mintOf(w) {
     var u = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
-    return u ? canonicalMint(u) : mintUrl;
+    return u ? canonicalMint(u) : currentSourceId();
   }
 
   /* ---- DLEQ (NUT-12) ----------------------------------------------------
@@ -1592,7 +1592,7 @@
     if (!fresh.length) return;
     var r = dleqAudit(ww, fresh);
     fresh.forEach(function (p) { if (p.dleq && keysetFor(ww, p.id)) dleqSeen[p.secret] = 1; });
-    var host = hostOf(mintOf(ww) || mintUrl || '');
+    var host = hostOf(mintOf(ww) || currentSourceId() || '');
     if (r.invalid) {
       reportInvalidDleq(host, r.invalid, where);
     } else if (r.missing && !dleqQuiet[host]) {
@@ -1673,7 +1673,7 @@
      * again next time there is room. */
     mustSave(proofKey(), legacy);
     try { localStorage.removeItem(K.proofs); } catch (e) {}
-    console.log('[foxy] moved', legacy.length, 'proofs under', mintUrl);
+    console.log('[foxy] moved', legacy.length, 'proofs under', currentSourceId());
   }
 
   /* Every mint that has ever connected, in the order they were first used.
@@ -1751,7 +1751,7 @@
       // the lightning address it was fetched for, if any, lowercased for matching
       payee: payee ? String(payee).trim().toLowerCase() : undefined,
       at: Math.floor(Date.now() / 1000),
-      mint: at || mintUrl,
+      mint: at || currentSourceId(),
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],
@@ -3889,7 +3889,7 @@
       var list = load(K.audit, []);
       var rec = /** @type {any} */ (Object.assign({
         at: Math.floor(Date.now() / 1000),
-        mint: String(mintUrl || '').replace(/\/+$/, ''),
+        mint: String(currentSourceId() || '').replace(/\/+$/, ''),
       }, entry));
       // what left this wallet, by the values the mint knows it by
       if (!rec.ys) rec.ys = (rec.inputs || []).map(lookupOf).filter(Boolean);
@@ -3938,7 +3938,7 @@
      * Written once here, and once more when an entry that was waiting
      * settles (`amendTx`). */
     var first = { at: Math.floor(Date.now() / 1000),
-                  mint: String(mintUrl || '').replace(/\/+$/, '') };
+                  mint: String(currentSourceId() || '').replace(/\/+$/, '') };
     if (rateNow()) first.rate = rateNow();
     list.unshift(Object.assign(first, entry));
     // five hundred, so the history screen's audit reaches the start
@@ -7147,7 +7147,7 @@
    * handed on, rows for another mint, and rows nothing here can open are left
    * out: `[{ id, sats, token }]`, largest first. */
   function lockedPieces() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -7183,7 +7183,7 @@
    * and of a row that has already given some up — less any piece this phone
    * has signed away, which is the one thing that must never go out twice. */
   function lockedProofsFlat() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -7472,7 +7472,7 @@
   function holdChange(hash, sats, at) {
     var n = Math.round(Number(sats) || 0);
     if (!hash || !(n > 0)) return;
-    changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || mintUrl || '')) };
+      changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || currentSourceId() || '')) };
   }
 
   /* Idempotent: every way out of making change calls it, and only one of
@@ -7878,7 +7878,7 @@
     return out;
   }
   function atRiskSats() {
-    var here = canonicalMint(mintUrl || '');
+    var here = canonicalMint(currentSourceId() || '');
     return atRiskGroups().reduce(function (n, g) { return n + (canonicalMint(g.mint) === here ? g.sats : 0); }, 0);
   }
   /* A payment the receiver heard and refused, with nothing sent back: its
@@ -7895,7 +7895,7 @@
         return keep;
       });
       if (!list.length || lockedProofs(list).length) return Promise.resolve(0);
-      var at = canonicalMint(String((info && info.mint) || mintUrl || ''));
+      var at = canonicalMint(String((info && info.mint) || currentSourceId() || ''));
       var all = atRiskAll();
       all[made.hash] = { secrets: list.map(function (pr) { return pr.secret; }), sats: sumProofs(list),
                          at: Date.now(), req: reqId || '', mint: at, why: String(why || '').slice(0, 200) };
