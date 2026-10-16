@@ -123,6 +123,7 @@ check "wallet watch loops" 1 node tests/watch-loop.js
 check "address vectors" 1 node tests/address-vectors.js
 check "inbox payments"  1 node tests/inbox-payment.js
 check "pay this mint"   1 node tests/pay-this-mint.js
+check "source interface" 1 node tests/source-interface.js
 check "animated QR"     1 node tests/animated-qr.js
 check "receive QR"      1 node tests/receive-qr.js
 check "QR readable"     1 node tests/qr-readable.js

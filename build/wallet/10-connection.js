@@ -4,6 +4,14 @@
 
     get connected() { return !!wallet; },
     get mintUrl() { return mintUrl; },
+
+    /* The current source's id — today the connected mint's URL, byte for byte
+     * (`09-source.js`). Identity, scope and key reads ask for this; `mintUrl`
+     * stays for the flows that keep a mint URL on purpose (visits, crosses). */
+    sourceId: function () { return currentSourceId(); },
+
+    /* The current source, through the one interface (`09-source.js`). */
+    source: function () { return cashuSource; },
     /* Whether a late claim has the wallet at another mint just now, and a
      * promise for when it is home (`claimAway`). For the screens: a balance
      * read in between is the other mint's. */
