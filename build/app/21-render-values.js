@@ -56,6 +56,9 @@
       card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
       // two arrows, one each way: one balance into the other
       swap: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
+      // home's RECEIVE and SEND arrows, so the rows that set them read as theirs
+      receive: 'M12 3.5v11m0 0-4.2-4.2M12 14.5l4.2-4.2M4.5 19.5h15',
+      send: 'M12 20.5v-11m0 0-4.2 4.2M12 9.5l4.2 4.2M4.5 4.5h15',
       // three coins of different sizes: the pieces themselves, not a wallet
       change: 'M8.5 7.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM15.5 4.5a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM16.5 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
     };
@@ -186,12 +189,14 @@
      *   TRANSFER (only with money at more than one mint)
      *   SWITCH · YOUR CHANGE
      *   SETTINGS, which opens and closes in place:
-     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches, SET PIN, RESTORE,
-     *     BACKUP, LOGS
+     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
+     *     SEND IN (only at a mint with two balances, holding both), each with
+     *     the balance it is set to; SET PIN, RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has
-     * to — which is what the REMOVE/STOP verbs were for. */
+     * to — which is what the REMOVE/STOP verbs were for. RECEIVE IN and SEND
+     * IN show their balance the same way, as a word at the end of the row. */
     const W22 = window.FoxyWallet;
     const verified = !!(W22 && W22.backedUp && W22.backedUp());
     const mintsWithMoney = (() => {
@@ -208,6 +213,28 @@
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const inSettings = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
+    /* The balance a receive and a send start in, at a mint with two balances.
+     * These are the same two values the flows remember (`rememberWallet`): a
+     * receive or a send that uses the other balance moves the word here, and
+     * a tap here is what the next flow starts in. Holding only dollars or
+     * only bitcoin sets both to that one and home shows one pill, so the rows
+     * would contradict WHAT YOU HOLD there, and are not shown. Never set reads
+     * ASK (the CURRENCY screen will), and a tap from there gives dollars
+     * first. Two choices, so a tap flips, and the drawer stays open to show
+     * it. */
+    const pickIn = twoHere && this.walletChoiceNow().hold === 'both';
+    const pickRow = (label, path, flow) => {
+      const unitNow = () => { const c = this.walletChoiceNow(); return flow === 'receive' ? c.recv : c.send; };
+      const unit = unitNow();
+      return { label, path, value: unit ? this.unitWord(unit) : 'ASK',
+        tap: () => {
+          /* From what is kept now, not what was drawn. */
+          const next = unitNow() === 'usd' ? 'sat' : 'usd';
+          try { W22.setWalletChoice(flow === 'receive' ? { recv: next } : { send: next }); }
+          catch (e) { console.warn('[foxy] the balance chosen could not be kept:', e && e.message); }
+          this.setState({ menuTick: (this.state.menuTick || 0) + 1 });
+        } };
+    };
     v.menuItems = /** @type {any[]} */ (verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
@@ -268,6 +295,10 @@
           this.confirmNoProtection();
         }),
       }, sw(faceOn)),
+    ]).concat(!pickIn ? [] : [
+      pickRow('RECEIVE IN', MENU_ICON.receive, 'receive'),
+      pickRow('SEND IN', MENU_ICON.send, 'send'),
+    ]).concat([
       /* The label is the tap, not the state: SET, REMOVE — a verb cannot be
        * read as a state. */
       {
@@ -307,7 +338,7 @@
       { label: 'LOGS', path: MENU_ICON.logs, tap: shut(() => this.goFieldLog(false)) },
     ]).map(inSettings)).map(m => Object.assign({ glow: 'none', ringInk: 'transparent',
       ringInk2: 'transparent', ring: 'none', indent: '0px', hasSwitch: false, swBg: 'transparent',
-      swX: '0px', hasChev: false, chevRot: 'rotate(0deg)' }, m));
+      swX: '0px', value: '', hasChev: false, chevRot: 'rotate(0deg)' }, m));
     /* The page's own hash, quiet at the foot of the drawer.
      *
      * The native side hashes the files it staged at launch and sets

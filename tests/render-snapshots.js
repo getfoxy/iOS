@@ -625,6 +625,9 @@ function representative(logic) {
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
   add('two balances: home, the menu with SWAP', at('home', Object.assign({ balSats: 0, open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
+  // holding both, SETTINGS open: RECEIVE IN and SEND IN, one set and one not yet (ASK)
+  add('two balances: settings, receive in and send in', at('home', Object.assign({ open0: true, menuSettingsOpen: true }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: 'usd', send: '' }) }) }));
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));

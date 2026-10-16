@@ -111,7 +111,11 @@
     const W = window.FoxyWallet;
     const hold = this.state.holdPick;
     if (!hold) { this.toast('Pick one first.', true); return; }
-    try { W.setWalletChoice({ hold: hold }); } catch (e) {
+    /* Both again, from MENU › WHAT YOU HOLD, keeps the balances a receive and
+     * a send start in: writing it would clear them, and they may be the ones
+     * set in SETTINGS › RECEIVE IN and SEND IN. */
+    const again = hold === 'both' && this.walletChoiceNow().hold === 'both';
+    try { if (!again) W.setWalletChoice({ hold: hold }); } catch (e) {
       this.toast((W && W.reason) ? W.reason(e) : 'That could not be kept.', true);
       return;
     }
