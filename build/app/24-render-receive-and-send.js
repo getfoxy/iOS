@@ -24,10 +24,15 @@
       || (onchain ? ocCode() : cashu ? creq() : s.invoice));
     /* At a mint with two balances: the title between the round buttons, the
      * WALLET chip beside NETWORK, and for dollars the cents asked for, TAP (a
-     * request in dollars goes on the air beside the invoice), no card (a card
-     * holds bitcoin only), and on Lightning the minute the code lives counted
+     * request in dollars goes on the air beside the invoice), CARD once the
+     * invoice is there, and on Lightning the minute the code lives counted
      * down. A request in dollars (CASHU, and every dollar receive offline)
-     * does not run out, so it has no clock. */
+     * does not run out, so it has no clock.
+     * A card holds bitcoin, and a dollar invoice is a Lightning invoice for a
+     * number of sats at the mint's rate: the card pays those sats, and they pay
+     * the invoice (26f-flashcard.js, `payUsdByCard`). Until the mint has made
+     * the invoice there is no number of sats to pay, so there is no CARD; and
+     * offline there is no invoice at all. */
     const two = !!(this.twoUnitsOn && this.twoUnitsOn());
     const usdIn = two && this.walletNow('receive') === 'usd';
     const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
@@ -42,7 +47,7 @@
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      recvCardShown: !usdIn,
+      recvCardShown: !usdIn || (!!s.invoice && !s.invoiceIsAddress),
       recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has

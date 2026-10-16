@@ -153,6 +153,20 @@ hold left behind all put the card's money back on it at its next tap; the
 card, the mint and the books are asked each time. It lifts the send flow's
 methods out of their files (`appOn(ctx, start, { send: true })`).
 
+**`flashcard-usd-receive.js`** holds CARD on a receive into the dollar balance,
+at a test mint with two balances: CARD only once the mint has made the invoice,
+the card tapped for the invoice's own sats and no others (the PIN pad and the
+screen behind the sheet say the dollars with the sats under them), those sats
+paying the invoice so that its own watch lands the cents, the bitcoin balance
+left as it was, the code kept while the card pays it, a refusal over the card's
+daily limit leaving the invoice unpaid, a mint's fee for the payment taken from
+this phone's bitcoin (and PAID IN BITCOIN, in plain words and with no melt sent,
+where there is none to pay it), a code with under fifteen seconds left swapped
+for a new one before any card is asked, a code that runs out while the PIN is
+typed kept as bitcoin with no melt sent, a payment still with the mint holding
+the code until it answers, and a bitcoin receive's CARD as it was. It lifts the receive's methods out of their
+files (`appOn(ctx, start, { send: true, receive: true })`).
+
 **`deep-links.js`** holds what a link from outside Foxy may do. The first half is the
 Debug-only `foxy://` hashes. The second is the one link a Release build takes, a
 card's address (`https://getfoxy.io/card`, raised by a card's tag and handed over by

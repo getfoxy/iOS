@@ -16,7 +16,11 @@
  * `appOn(ctx, start, { send: true })` adds the app's own SEND MONEY flow, lifted out of its files by each method's first line:
  * the send screen's values (`renderSend`), what a scan or a paste is taken as (`acceptTarget`), the confirmation
  * (`confirmSpec`, the fee asked of the mint, `quoteSendFee`), the payment itself (`startSend`, `startSendNow`), the keypad's
- * ceiling (`renderContext`) and the camera (`syncPreview`), for the suites that pay from a card (tests/flashcard-send.js). */
+ * ceiling (`renderContext`) and the camera (`syncPreview`), for the suites that pay from a card (tests/flashcard-send.js).
+ *
+ * `appOn(ctx, start, { send: true, receive: true })` adds a receive into the dollar balance as well (12-receive.js: its
+ * invoice, the watch that lands it and the code's minute; 24-render-receive-and-send.js: the receive screen's values), for
+ * the suite that pays a dollar invoice with a card (tests/flashcard-usd-receive.js). */
 const fs = require('fs');
 const path = require('path');
 
@@ -48,12 +52,19 @@ const SEND_SIGS = {
   '24-render-receive-and-send.js': ['renderSend(c) {'],
 };
 const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n');
+const RECEIVE_SIGS = {
+  '01-ui-basics.js': ['centsTyped() {'],
+  '12-receive.js': ['wantedAmount() {', 'stopReceive() {', 'openUsdReceive(cents) {', 'usdInvoiceUp(inv, mine) {', 'recvClockTick(mine) {', 'recvRequote(mine) {'],
+  '24-render-receive-and-send.js': ['renderReceive(c) {'],
+};
+const RECEIVE_PARTS = Object.keys(RECEIVE_SIGS).map((f) => RECEIVE_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n');
 
 /* The parts as a class over this page's window, and an app of it with
  * the rest of the app class stood in for: state, navigation, and the few
  * helpers the parts call. */
 function appOn(ctx, start, o) {
-  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '');
+  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '')
+    + ((o && o.receive) ? '\n' + RECEIVE_PARTS : '');
   // (the split values keep a React ref in a field of the class: nothing here draws with it)
   const Parts = new Function('window', 'document', 'localStorage', 'React', 'navigator', 'CTA_INK', 'return class {\n' + body + '\n};')(
     ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) }, ctx.window.navigator, () => '#fff');

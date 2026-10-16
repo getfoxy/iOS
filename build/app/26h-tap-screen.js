@@ -296,6 +296,19 @@
       amount.textContent = o.amount || '';
       amount.style.display = o.amount ? '' : 'none';
     }
+    /* A dollar receive paid by a card: the sats the card pays, under the dollars asked, as every bitcoin figure is shown
+     * beside its dollars. Made only when there is such a line, so every other tap's screen is as it always was. */
+    let sub = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount-sub]'));
+    if (o.amountSub && !sub && amount && amount.parentNode) {
+      sub = document.createElement('div');
+      sub.setAttribute('data-tap-amount-sub', '1');
+      sub.style.cssText = 'margin-top:-8px;font-weight:600;font-size:19px;letter-spacing:-.01em;opacity:.6';
+      amount.parentNode.insertBefore(sub, amount.nextSibling);
+    }
+    if (sub) {
+      sub.textContent = o.amountSub || '';
+      sub.style.display = o.amountSub ? '' : 'none';
+    }
     this.fcTapTitle(root, k);
     const btn = /** @type {HTMLElement | null} */ (root.querySelector('[data-stage-button]'));
     if (btn) { btn.style.visibility = k.cancel ? 'visible' : 'hidden'; btn.style.color = g.ink; btn.style.borderColor = g.ink; }

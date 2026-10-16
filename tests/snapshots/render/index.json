@@ -1206,8 +1206,8 @@
  },
  "two balances: RECEIVE INVOICE in dollars": {
   "file": "400-two-balances-receive-invoice-in-dollars.html",
-  "markup": "8a5661b03a1e79947472b9f321f1ada2706cd6d2c393971b7b50e4499b7cc9b1",
-  "vals": "6f622fc5b12fb6e080f1feebd78c0bc19f44c9dc677f02811188619f8e9c0d24"
+  "markup": "540896dc06116c5b8baf89b161d18640afa174b7b7321dd1b1412e3e736c37f0",
+  "vals": "ea5de7488c5a63484a4379e44b557ed03a883bebc58ae2c0d5ce896137e50269"
  },
  "two balances: RECEIVE INVOICE in bitcoin": {
   "file": "401-two-balances-receive-invoice-in-bitcoin.html",

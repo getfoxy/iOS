@@ -467,7 +467,11 @@ this phone's balance alone, as it was.
 
 ## Paying at a till
 
-On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP. A split bill has the same **CARD** on each payer's own
+On the receiver's phone: RECEIVE, an amount, then **CARD**, beside TAP. A receive into the dollar balance (a mint with two
+balances) has the same **CARD** once the mint has made its invoice: the card pays the sats that invoice names, never a figure
+priced on the phone, and those sats pay the invoice, so the dollars land as they would from any payer. The invoice lives as
+long as the mint says: with under fifteen seconds of it left, CARD asks for a new code first; and where it runs out while the
+card is read, no payment of it is sent and the card's sats stay as bitcoin (PAID IN BITCOIN). A split bill has the same **CARD** on each payer's own
 screen, in the row beside SHARE, COPY and SCAN (four, as the receive invoice screen's row; the Bluetooth tap sits in the QR), for that payer's share: one share to a tap, ticked (and the screen moved on
 to the next payer) when the mint has given this phone its pieces, as *Paid* below says, and not before. The share's row in the
 bill's ledger names the payment's entry from the moment the card has signed, so a payment the mint answers late (CHECKING closed

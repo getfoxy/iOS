@@ -362,7 +362,9 @@ function fakeMint(w, opts) {
    * unit, marks that invoice paid: the two legs of a swap between units.
    * With o.quotesUnpaid an invoice waits for that (or `payQuote`) rather than
    * being paid as it is made. o.meltTtl: the seconds a melt quote lives (3600),
-   * as short as a real mint's melt of a sixty-second invoice. */
+   * as short as a real mint's melt of a sixty-second invoice.
+   * o.satFeeReserve: the reserve a melt in sats names (10), and 0 for a mint
+   * that charges nothing to pay an invoice it made itself. */
   const units = Array.isArray(o.units) && o.units.length ? o.units : ['sat'];
   const hasUsd = units.indexOf('usd') >= 0;
   const usdPair = hasUsd ? C.createNewMintKeys(16, new w.Uint8Array(64).fill((o.fill || 7) + 100), { versionByte: o.versionByte || 0 }) : null;
@@ -663,7 +665,8 @@ function fakeMint(w, opts) {
     if (p === '/v1/melt/quote/bolt11') {
       const unit = String(body.unit || 'sat');
       if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
-      const q = { quote: quoteId(), amount: priceIn(body.request, unit), fee_reserve: unit === 'usd' ? (Number(o.usdFeeReserve) >= 0 && o.usdFeeReserve !== undefined ? Number(o.usdFeeReserve) : 2) : 10,
+      const satReserve = o.satFeeReserve !== undefined && Number(o.satFeeReserve) >= 0 ? Number(o.satFeeReserve) : 10;
+      const q = { quote: quoteId(), amount: priceIn(body.request, unit), fee_reserve: unit === 'usd' ? (Number(o.usdFeeReserve) >= 0 && o.usdFeeReserve !== undefined ? Number(o.usdFeeReserve) : 2) : satReserve,
                   state: 'UNPAID', expiry: now() + (Number(o.meltTtl) > 0 ? Number(o.meltTtl) : 3600), request: body.request, unit: unit, payment_preimage: null };
       melts[q.quote] = q;
       return ok(q);

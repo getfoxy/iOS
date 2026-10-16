@@ -796,7 +796,9 @@
    *
    * Beside it, on the air, a Cashu request in dollars (`unit: 'usd'`, the
    * cents): another Foxy at this mint pays it in dollar ecash by a tap, with
-   * no price anywhere (`tapOffering`).
+   * no price anywhere (`tapOffering`). And CARD: a card held to this phone
+   * pays the invoice's own sats, which then pay it (26f-flashcard.js,
+   * `payUsdByCard`), and the dollars land here as for any other payer.
    *
    * Offline there is no invoice: the mint makes those. The request is this
    * phone's own, so it is the code (NETWORK CASHU), with no minute to count
@@ -888,7 +890,9 @@
       this._recvClockT = null;
       return;
     }
-    if (Date.now() >= s.recvExpiresAt) { this.recvRequote(mine); return; }
+    /* A card paying this very code (26f-flashcard.js, `fcUsdHolds`) keeps it: its sats are on their way to it, and a
+     * new code would be one nobody pays while this one goes unwatched. The clock stays at nought until the card is done. */
+    if (Date.now() >= s.recvExpiresAt && !(this.fcUsdHolds && this.fcUsdHolds(s.invoiceHash))) { this.recvRequote(mine); return; }
     this.setState({ recvTick: Date.now() });
   }
 

@@ -417,13 +417,20 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(v.recvHeadTwo && v.recvChipsTwo && !v.recvChipsOne, 'the title between the round buttons; WALLET and NETWORK chips');
     eq([v.recvWalletWord, v.confirmNetwork], ['USD', 'LIGHTNING'], 'WALLET USD, NETWORK LIGHTNING');
     eq([v.confirmAmount, v.showSats], ['$ 5.00', false], 'the amount is the cents, with no sats line');
-    ok(v.recvTapShown === true && v.recvCardShown === false, 'TAP and no CARD on a dollar invoice (a card holds bitcoin only)');
+    ok(v.recvTapShown === true && v.recvCardShown === true, 'TAP and CARD on a dollar invoice (the card pays the invoice’s sats: tests/flashcard-usd-receive.js)');
+    {
+      // the same screen a moment earlier, before the mint had made the invoice: no sats to pay yet, so no CARD
+      const was = A.state;
+      A.state = Object.assign({}, was, { invoice: '', invoiceHash: '' });
+      const before = V();
+      A.state = was;
+      eq([before.recvTapShown, before.recvCardShown], [true, false], 'and before the invoice is there, TAP and no CARD');
+    }
     eq(A.tapOffering(), { inv: W.rec.invoices[0].inv.bolt11, req: '', waiting: false },
       'the dollar invoice goes on the air (its request in dollars beside it is tests/usd-tap-screens.js)');
     ok(v.recvClockShown && /^NEW CODE IN 0:0\d$/.test(v.recvClock), 'the code’s minute counted down under it (' + v.recvClock + ')');
     const t = textOf(w);
-    ok(/RECEIVE INVOICE/.test(t) && /WALLET/.test(t) && /USD/.test(t) && !/>CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it');
-    ok(!/CARD/.test(t.replace(/CARD[A-Z]/g, '')), 'no CARD button drawn');
+    ok(/RECEIVE INVOICE/.test(t) && /WALLET/.test(t) && /USD/.test(t) && />CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it, CARD with it');
     // the networks a dollar invoice cannot use are greyed
     A.ocCan = () => true;
     V().pickNetwork();
@@ -700,9 +707,28 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(A.tapUnitRule({ unit: 'eur', amount: 500, sats: null }), 'That request asks for EUR, which Foxy cannot pay over tap.', 'any other unit is refused in words');
     const offer = A.tapOfferOf(JSON.stringify({ v: 2, req: 'creqA-usd' }));
     ok(!!(offer && !offer.notSats && offer.sameMint && !offer.asksUsd), 'a tap offering a dollar request at this mint is paid in dollars, with no price asked');
-    A.setState({ screen: 'confirm', flow: 'receive', recvUnit: 'usd', wallet: 'usd', invoice: 'lnbcusd9' });
+    /* CARD on a dollar invoice: the card is tapped for the invoice's own sats (6,112 here), and never for a figure
+     * priced on this phone; the whole flow is tests/flashcard-usd-receive.js. */
+    const runs = [];
+    const start0 = A.fcPayStart;
+    A.fcPayStart = (...a) => { runs.push(a); };
+    W.cardSession = () => Promise.reject(new Error('no card in this suite'));
+    const off0 = A.offlineNow;
+    A.offlineNow = () => false;
+    A.setState({ screen: 'confirm', flow: 'receive', recvUnit: 'usd', wallet: 'usd', invoice: 'lnbcusd9', invoiceHash: 'q-usd9', recvAmount: 500 });
     A.payByCard();
-    eq(toasts.pop(), 'The card holds bitcoin; this asks for dollars.', 'CARD on a dollar invoice is refused');
+    eq(runs.map((a) => [a[0], a[4] && a[4].bolt11, a[4] && a[4].cents]), [[6112, 'lnbcusd9', 500]],
+      'CARD on a dollar invoice taps the card for the invoice’s own 6,112 sats, for the 500 cents asked');
+    A.setState({ invoice: 'not an invoice' });
+    A.payByCard();
+    eq([runs.length, toasts.pop()], [1, 'The invoice is still being made.'], 'and with no sats named on the code, the card is not tapped');
+    A.offlineNow = () => true;
+    A.setState({ invoice: 'lnbcusd9' });
+    A.payByCard();
+    ok(runs.length === 1 && /^A card payment needs a connection/.test(toasts.pop() || ''), 'offline, a card payment needs a connection, as in bitcoin');
+    A.fcPayStart = start0;
+    A.offlineNow = off0;
+    delete W.cardSession;
     A.setState({ screen: 'home', stack: [], wallet: 'usd' });
     A.payThisMintWithToken(2100);
     ok(/Dollars need the mint/.test(toasts.pop() || ''), 'offline token to this mint from dollars: "Dollars need the mint"');

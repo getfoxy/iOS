@@ -796,6 +796,7 @@
       }
       if (how === 'paid') {
         if (opt.share) this.fcShareMoved(opt.share, id);
+        if (opt.usd) this.fcUsdHush(id);
         this.fcMoved(opt);
         // the mint's answer came late, and the change it made waits for the card's second tap (RECEIVE)
         if (opt.paying && row && row.change > 0 && !row.refund) this.fcReceiveNow(row.change, row.sats);
@@ -836,6 +837,9 @@
    * by the flow that made it (16-history-lists.js keeps the pass quiet). */
   fcMoved(o) {
     const opt = o || {};
+    /* A dollar receive is not over when the card has paid: the receive screen stays, watching its invoice, and the sats
+     * pay that invoice (`fcUsdPay`). */
+    if (opt.usd) { this.fcUsdPay(opt.usd); return; }
     if (opt.paying && this.state.screen === 'confirm') this.closeReceive();
     if (opt.paying && this.noteReceived) this.noteReceived();
     this.refreshBalance();
@@ -896,17 +900,187 @@
 
   payByCard() {
     const s = this.state;
-    /* A card holds bitcoin. A receive into the dollar balance hides CARD, and
-     * this holds if anything else reaches it. */
-    if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') {
-      this.toast('The card holds bitcoin; this asks for dollars.', true);
-      return;
-    }
+    // a receive into the dollar balance: the card pays the dollar invoice's sats (`payUsdByCard`)
+    if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') { this.payUsdByCard(); return; }
     const W = this.fcW();
     if (!W) return;
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
     this.fcPayBegin(sats);
+  }
+
+  /* ---- a dollar receive, paid by a card -----------------------------------------------------------------------------
+   *
+   * A card holds bitcoin, and the dollar invoice on the receive screen is a Lightning invoice the mint made for the cents
+   * asked, naming its own number of sats at the mint's rate. The card pays exactly that number, read off the invoice as
+   * every invoice's amount is read (`amountOf`), and never a figure this phone works out at its own price: a till that
+   * converted would take the wrong amount whenever its price and the mint's differ. The tap is the bitcoin receive's in
+   * every way (the sheet, the PIN, the limits, the refusals, the change), and then the sats it brought pay the dollar
+   * invoice, from this phone, as any payment is made (`fcUsdPay`). The mint says that invoice is paid, and the dollars land
+   * exactly as they land for a dollar invoice paid from anywhere else (12-receive.js, `usdInvoiceUp`).
+   *
+   * The card's money is always at this phone's own mint (one at another mint is refused as A DIFFERENT MINT before
+   * anything is asked of it), so the invoice the sats pay is one the same mint made. That is the common case of the mint
+   * paying its own invoice, which it settles in its own books with no Lightning payment in between.
+   *
+   * Offline there is no invoice to pay, and no way to make dollars: the bitcoin receive's offer to take the card on trust
+   * is not made, and the words are the ones a card payment with no connection always has.
+   *
+   * The invoice lives as long as the mint said it would (the clock on screen, `recvExpiresAt`), and a melt sent after
+   * that is refused. A tap, a PIN and the mint's answer take seconds, so a code with less than a quarter of a minute left
+   * is not handed to a card: a new one is asked for first, and CARD pressed again pays that. */
+  payUsdByCard() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
+    const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
+    if (!(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
+    if (!this.fcW()) return;
+    if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
+    const ends = Number(s.recvExpiresAt) || 0;
+    if (ends && ends - Date.now() < 15000) {
+      this.toast('This code has almost run out. A new one is being made; press CARD when it is up.', true);
+      if (this.recvRequote) this.recvRequote(this._invoiceRun);
+      return;
+    }
+    const usd = { bolt11, hash: String(s.invoiceHash || ''), cents: Math.round(Number(s.recvAmount) || 0), sats, run: this._invoiceRun, ends };
+    // the code on screen is kept while the card pays it (`fcUsdHolds`), and not replaced when its minute runs out
+    this._fcUsd = usd;
+    this.fcPayStart(sats, false, null, null, usd);
+  }
+
+  /* Whether the dollar code `hash` is being paid by a card at this moment: tapped, its PIN asked for, waiting for the
+   * mint, or its sats on their way to the invoice. The receive screen does not swap it for a new code meanwhile
+   * (12-receive.js, `recvClockTick`), which would leave the sats paying a code nobody is watching. */
+  fcUsdHolds(hash) {
+    const u = this._fcUsd;
+    if (!u || !hash || u.hash !== hash || u.done) return false;
+    /* Its sats' payment with the mint, unanswered: the code is the one being paid, and stays until the mint answers
+     * (the wallet's own asking settles it). Answered, the screen's watch is asked at once, and has its twenty seconds. */
+    if (u.pending) {
+      if (this.fcUsdInFlight(u)) return true;
+      u.pending = false;
+      u.landingUntil = Date.now() + 20000;
+      this.fcUsdLand(u);
+    }
+    // paid, and the watch about to say so: twenty seconds for the mint's answer, before a new code may be asked for
+    if (u.landingUntil && Date.now() < u.landingUntil) return true;
+    return !!u.melting || this.cardFlowBusy() || !!(this.stageUp && this.stageUp('cardChecking'));
+  }
+
+  /* What the screen behind the card's sheet says the payment is: the dollars asked, with the sats the card pays under
+   * them, for a dollar receive; and for every other payment what it always said. */
+  fcPayLook(sats, usd) {
+    if (!usd) return { amount: this.fcPrice(sats) };
+    return { amount: '$' + this.usd(Math.round(Number(usd.cents) || 0) / 100), amountSub: this.fcSats(sats) };
+  }
+
+  /* The card's sats are this phone's: their entry is not a payment of its own to announce (the dollars are), and they pay
+   * the dollar invoice. */
+  fcUsdHush(hash) {
+    const entry = String(hash || '');
+    if (!entry) return;
+    this.txIsNew(entry);
+    this._paidQueue = (this._paidQueue || []).filter((q) => !(q && q.hash === entry));
+    if (this._heldConfirm && this._heldConfirm.hash === entry) this._heldConfirm = null;
+  }
+
+  /* The sats the card paid, paying the dollar invoice it was tapped for. The fee is asked first so that the payment's own
+   * entry is known before it is written, and is not announced as a payment sent: it is the other half of the dollars
+   * arriving. Paid, the receive screen's own watch of the invoice says PAYMENT RECEIVED in dollars. Not paid, the sats are
+   * in the bitcoin balance, and said so. */
+  fcUsdPay(usd) {
+    const W = this.fcW();
+    this.refreshBalance();
+    this.loadHistory();
+    if (!W || usd.melting || usd.done) return;
+    console.log('[foxy] card: ' + usd.sats + ' sats taken; they pay the dollar invoice on screen');
+    /* The code ran out while the card was read (a PIN, a card held, a tap finished later), or has too few seconds left
+     * for the fee's question and the melt to reach the mint in time: the mint refuses a melt of it, so none is sent, and
+     * the sats are this phone's bitcoin. The screen moves on to a new code. */
+    if (usd.ends && usd.ends - Date.now() < 5000) {
+      usd.done = true;
+      this.fcUsdKept(usd, null, 'The code ran out while the card paid.');
+      return;
+    }
+    usd.melting = true;
+    const end = (paid) => {
+      usd.melting = false;
+      if (paid) usd.landingUntil = Date.now() + 20000; else usd.done = true;
+      this.refreshBalance();
+      this.loadHistory();
+    };
+    // with the mint and unanswered: the code is held until it answers (`fcUsdHolds`), and the dollars may yet land
+    const waiting = () => {
+      usd.melting = false;
+      usd.pending = true;
+      this.refreshBalance();
+      this.loadHistory();
+      this.fcUsdWaiting();
+    };
+    /* The mint's fee is paid from this phone's bitcoin, beside the card's sats. Where that cannot cover it, nothing is
+     * sent, and the reason is said in plain words rather than as the wallet's sum of sats needed and held. */
+    const noFee = 'This phone\u2019s bitcoin could not cover the mint\u2019s fee.';
+    const quote = W.quoteFee ? W.quoteFee(usd.bolt11, { unit: 'sat' }) : Promise.resolve(null);
+    Promise.resolve(quote).then((q) => {
+      if (q && q.quote && q.quote.quote) this.txIsNew(String(q.quote.quote));
+      const need = (q && W.payNeed) ? W.payNeed(q.amount, q.feeReserve, { unit: 'sat' }) : null;
+      if (need && !need.ok) { const e = /** @type {any} */ (new Error(noFee)); e.plain = noFee; throw e; }
+      return W.pay(usd.bolt11, () => {}, q ? { unit: 'sat', quote: q } : { unit: 'sat' });
+    }).then((paid) => {
+      if (paid && paid.hash) this.txIsNew(String(paid.hash));
+      if (paid && paid.pending) { waiting(); return; }
+      end(true);
+      this.fcUsdLand(usd);
+    }, (e) => {
+      /* Not refused: with the mint, its answer not in (the payment is held, and the wallet's own asking settles it). The
+       * sats are not in the bitcoin balance to be said to be, and the dollars may yet land. */
+      if ((e && e.pending) || this.fcUsdInFlight(usd)) { waiting(); return; }
+      end();
+      this.fcUsdKept(usd, e, e && e.plain);
+    });
+  }
+
+  // whether the wallet still holds a melt of this dollar invoice whose outcome the mint has not given
+  fcUsdInFlight(usd) {
+    const W = window.FoxyWallet;
+    const want = String((usd && usd.bolt11) || '').toLowerCase();
+    if (!want || !W || !W.pendingMelts) return false;
+    return W.pendingMelts().some((m) => m && m.bolt11 && String(m.bolt11).toLowerCase() === want);
+  }
+
+  // the sats' payment of the dollar invoice is with the mint, unanswered: the dollars land when it answers
+  fcUsdWaiting() {
+    console.log('[foxy] card: the dollar invoice’s payment is pending with the mint');
+    this.toast('The mint has not answered yet. The dollars land when it does.', true);
+  }
+
+  /* The invoice is paid: the receive screen's watch of it is asked now rather than at its next turn. Where the watch has
+   * ended (the card took longer than the code's minute and a quarter), the same watch is begun again for it, while the
+   * screen still shows that code; otherwise the wallet's own asking claims it, and HISTORY says so. */
+  fcUsdLand(usd) {
+    const W = this.fcW();
+    if (W && W.watchKick && W.watchKick(usd.hash, 20000)) return;
+    const s = this.state;
+    /* The code has run out by now, so its clock counts the watch's own twenty seconds rather than a minute it does not
+     * have; then a new code is asked for. */
+    if (s.screen === 'confirm' && s.recvUnit === 'usd' && s.invoiceHash === usd.hash && usd.run === this._invoiceRun && this.usdInvoiceUp) {
+      this.usdInvoiceUp({ hash: usd.hash, bolt11: usd.bolt11, amount: usd.cents, expiresIn: 20, expiresAt: Date.now() + 20000 }, usd.run);
+    }
+  }
+
+  // the card paid and the dollar invoice did not take its sats: they are this phone's bitcoin
+  fcUsdKept(usd, e, plain) {
+    const W = this.fcW();
+    const said = String(plain || (e ? (W && W.reason ? W.reason(e) : e.message) : '') || '').trim();
+    console.log('[foxy] card: the dollar invoice was not paid; the card’s sats stay in bitcoin — ' + said);
+    this.haptic && this.haptic('error');
+    this.blockedCard('fc-usd-kept', {
+      tone: 'warn', title: 'PAID IN BITCOIN',
+      reason: 'The card paid ' + this.fcSats(usd.sats) + ', and the mint did not turn it into dollars.'
+        + (said ? ' ' + said.replace(/\.?$/, '.') : '') + ' It is in your bitcoin balance.',
+      shut: { label: 'OK' },
+    });
   }
 
   /* CARD on a payer's own screen of a split bill: that payer's share, taken as the receive screen's CARD takes an
@@ -951,18 +1125,21 @@
    * ends with "Enter the card\u2019s PIN"; software before 1.16 always does), and the PIN pad comes up for a
    * second tap (`fcPayAsk`, from the rejection in `fcPayRun`). `trusted`: the person has said yes to taking
    * it with no route. */
-  fcPayStart(sats, trusted, share, send) {
-    this.fcPayRun(sats, '', trusted, false, share, send);
+  /* `usd`: a dollar receive this payment is for (`payUsdByCard`), carried as `share` and `send` are, or none. */
+  fcPayStart(sats, trusted, share, send, usd) {
+    this.fcPayRun(sats, '', trusted, false, share, send, usd);
   }
 
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. */
-  fcPayAsk(sats, trusted, resuming, share, send) {
+  fcPayAsk(sats, trusted, resuming, share, send, usd) {
+    // a dollar receive: the dollars asked, with the sats the card pays after them
+    const figure = usd ? this.fcPayLook(sats, usd).amount + ' (' + this.fcSats(sats) + ')' : this.fcBoth(sats);
     this.fcAskPin({
       title: 'CARD PIN',
-      subtitle: 'To pay ' + this.fcBoth(sats) + '. The card\u2019s owner types its PIN here.',
+      subtitle: 'To pay ' + figure + '. The card\u2019s owner types its PIN here.',
       cta: 'TAP AGAIN',
-    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share, send));
+    }, (pin) => this.fcPayRun(sats, pin, trusted, resuming, share, send, usd));
   }
 
   /* A card payment is two taps, and is said as two every time, so a person
@@ -976,21 +1153,27 @@
    * this payment is for (`payShareByCard`), or none. `send`: the card paying out of this phone (SEND on the card's own
    * screen, `fcOutNext`): the tap is a till's in every way, and what the card pays is held for that payment (`fcOutPay`)
    * and is not this phone's; { to, key, inv | found, quote }. */
-  fcPayRun(sats, pin, trusted, resuming, share, send) {
+  fcPayRun(sats, pin, trusted, resuming, share, send, usd) {
     const W = this.fcW();
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
     const opt = { paying: true, taken: true, share: share || null, send: send || null,
-                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share, send) : this.fcPayStart(sats, trusted, share, send)) };
+                  again: () => (pin ? this.fcPayAsk(sats, trusted, false, share, send, usd) : this.fcPayStart(sats, trusted, share, send, usd)) };
+    // a dollar receive: when the mint has said paid, the sats pay its invoice (`fcMoved`, `fcUsdPay`)
+    if (usd) opt.usd = usd;
+    const look = this.fcPayLook(sats, usd);
     /* A new payment: a confirmation still held for the one before (its change
      * tap never ended in anything this screen heard of) is not this one's, and
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
     // (paying out of this phone, nobody here is being paid: no PAYMENT RECEIVED is held for it)
-    this.fcTap({ amount: this.fcPrice(sats), lost: !!resuming,
-                 sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: !send,
-                 /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
-                 again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
-                   : (e && e.card === 'gone') ? 'Tap behind the phone.' : '' },
+    const tapO = { amount: look.amount, lost: !!resuming,
+                   sheet: resuming ? 'Hold to finish paying' : '', warm: !trusted, paying: !send,
+                   /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
+                   again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
+                     : (e && e.card === 'gone') ? 'Tap behind the phone.' : '' };
+    // the sats under the dollars, for a dollar receive (26h-tap-screen.js)
+    if (look.amountSub) tapO.amountSub = look.amountSub;
+    this.fcTap(tapO,
                (link, on, progress) => {
                  /* A tap to feel the moment the card has signed and may be lifted: the
                   * phone's own sheet takes about three seconds to go after it is told
@@ -1020,6 +1203,8 @@
         /* The mint has given this phone its own pieces: a share of a bill is paid, and the bill's screens say so
          * before anything else is done with the payment, which is not announced on top of them. */
         if (opt.share) this.fcShareMoved(opt.share, r && r.hash);
+        // a dollar receive: the card's sats are not announced; the dollars they buy are
+        if (opt.usd) this.fcUsdHush(r && r.hash);
         const ch = r && r.change;
         const receiving = !!(ch && !ch.written && !ch.unmade && ch.sats > 0);
         // the change went back in the same sheet: the payment is whole, and its PAYMENT RECEIVED goes up now
@@ -1045,19 +1230,19 @@
         this.fcDropConfirm();
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share, send); return; }
+        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, trusted, resuming, share, send, usd); return; }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
          * sheet comes up by itself instead, once iOS has taken the last down. */
         if (e && e.card === 'interrupted' && e.resumable) {
-          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share, send); else this.fcResumeNow(sats, pin, trusted, share, send);
+          if (e.sheetClosed) this.fcHeldCard(sats, pin, trusted, share, send, usd); else this.fcResumeNow(sats, pin, trusted, share, send, usd);
           return;
         }
         // taken up, and the card could not make the rest: what it signed goes back, and why is said
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, sats); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
-        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share, send); return; }
+        if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, trusted, share, send, usd); return; }
         this.fcFailed(e, opt);
       });
   }
@@ -1067,11 +1252,13 @@
    * payment is used again, as it is for every tap of the one payment. And a
    * settling once the hold could be stale, so one nobody came back for goes
    * back to the card even with Foxy left open. */
-  fcResumeNow(sats, pin, trusted, share, send) {
+  fcResumeNow(sats, pin, trusted, share, send, usd) {
     clearTimeout(this._fcResumeT);
-    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share, send), 2500);
+    this._fcResumeT = setTimeout(() => this.fcPayRun(sats, pin, trusted, true, share, send, usd), 2500);
     // TAP AGAIN stays up through the pause, with nothing to press
-    this._fcTapO = { amount: this.fcPrice(sats), paying: !send, lost: true };
+    const look = this.fcPayLook(sats, usd);
+    this._fcTapO = { amount: look.amount, paying: !send, lost: true };
+    if (look.amountSub) this._fcTapO.amountSub = look.amountSub;
     this.fcStage('reading');
     this.fcHeldClock();
   }
@@ -1100,13 +1287,13 @@
 
   /* Held, and the tap to finish read no card: said, with the tap again, and
    * CANCEL, which gives back what the card signed (`fcLetGo`). */
-  fcHeldCard(sats, pin, trusted, share, send) {
+  fcHeldCard(sats, pin, trusted, share, send, usd) {
     this.fcHeldClock();
     this.blockedCard('fc-held', {
       tone: 'warn', title: 'NOT PAID YET',
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(sats) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
-      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share, send),
+      retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, trusted, true, share, send, usd),
       shut: { label: 'CANCEL', tap: () => this.fcLetGo() },
     });
   }

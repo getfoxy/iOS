@@ -112,8 +112,9 @@ function page(o) {
     // versionByte 1: a mint whose keysets have the long names (NUT-02's second kind)
     before: (w) => {
       phone.attach(w);
-      // `units`: ['sat', 'usd'] for a mint that issues dollars as well (fakeMint), as a mint with two balances does
-      mint = opts.sharedMint || fakeMint(w, { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte, dleq: opts.dleq, units: opts.units });
+      // `units`: ['sat', 'usd'] for a mint that issues dollars as well (fakeMint), as a mint with two balances does; `mintOpts`: any other of its options
+      mint = opts.sharedMint || fakeMint(w, Object.assign({}, opts.mintOpts || {},
+        { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte, dleq: opts.dleq, units: opts.units }));
       // keys and quote numbers of its own, as two real mints have
       if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2 });
     },
