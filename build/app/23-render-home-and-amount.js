@@ -245,6 +245,9 @@
     return {
       homeOneMint: !two,
       homeTwo: two,
+      /* The card is headed by the mint's name alone, with no MINT under it and no chevron after it, so the
+       * card is shorter and the price line above gets the height. The name is still the tap that switches
+       * mints; before a mint is known it reads MINT, so the tap is never on an empty heading. */
       homeMintName: String(this.mintName() || 'MINT').toUpperCase(),
       goMintHeading: () => this.goSwitchMint(),
       homePillRows: this.homePills().map(pill)

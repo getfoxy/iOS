@@ -268,7 +268,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(v.homePillRows[0].ink === '#10161B' && v.homePillRows[1].ink === '#FFFFFF', 'frost has dark ink, fur white');
     eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE', 'SWAP'], 'two pills: SCAN / PASTE / SWAP');
     const t = textOf(w);
-    ok(t.indexOf(v.homeMintName) >= 0 && /MINT/.test(t) && /42\.05/.test(t) && /50,000/.test(t) && /SWAP/.test(t), 'the page draws the heading, both pills and SWAP');
+    ok(t.indexOf(v.homeMintName) >= 0 && !/\bMINT\b/.test(t) && /42\.05/.test(t) && /50,000/.test(t) && /SWAP/.test(t), 'the page draws the heading (the mint’s name alone, no MINT under it), both pills and SWAP');
     ok(!/YOUR MONEY/.test(t), 'YOUR MONEY is gone at a mint with two balances');
     eq(v.priceTopPad, 8, 'BITCOIN PRICE level with the round buttons');
     // hidden

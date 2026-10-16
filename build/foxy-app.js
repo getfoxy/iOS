@@ -14309,6 +14309,9 @@ class Component extends DCLogic {
     return {
       homeOneMint: !two,
       homeTwo: two,
+      /* The card is headed by the mint's name alone, with no MINT under it and no chevron after it, so the
+       * card is shorter and the price line above gets the height. The name is still the tap that switches
+       * mints; before a mint is known it reads MINT, so the tap is never on an empty heading. */
       homeMintName: String(this.mintName() || 'MINT').toUpperCase(),
       goMintHeading: () => this.goSwitchMint(),
       homePillRows: this.homePills().map(pill)
@@ -24693,9 +24696,9 @@ class Component extends DCLogic {
       fcNotes: notes,
       fcHasRows: rows.length > 0,
       fcRows: rows,
-      /* Home's own money card, for a card that has a mint: headed by the card's mint, by the name this phone
-       * knows it by, over MINT (the card's own, from its record, which need not be this phone's), and home's
-       * bitcoin pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
+      /* Home's own money card, for a card that has a mint: headed by the card's mint alone, by the name this
+       * phone knows it by (the card's own, from its record, which need not be this phone's), and home's bitcoin
+       * pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
        * CARD BALANCE. */
       fcPill: !!fc && !!fc.hasRecord,
       fcPillMint: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '') : '',

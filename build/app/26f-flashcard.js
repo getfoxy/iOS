@@ -3721,9 +3721,9 @@
       fcNotes: notes,
       fcHasRows: rows.length > 0,
       fcRows: rows,
-      /* Home's own money card, for a card that has a mint: headed by the card's mint, by the name this phone
-       * knows it by, over MINT (the card's own, from its record, which need not be this phone's), and home's
-       * bitcoin pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
+      /* Home's own money card, for a card that has a mint: headed by the card's mint alone, by the name this
+       * phone knows it by (the card's own, from its record, which need not be this phone's), and home's bitcoin
+       * pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
        * CARD BALANCE. */
       fcPill: !!fc && !!fc.hasRecord,
       fcPillMint: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '') : '',

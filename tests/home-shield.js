@@ -292,8 +292,29 @@ const STATES = [
     ok(/foxy-fur\.webp/.test(p.bg) && p.ink === '#FFFFFF', 'in the fox fur, with white ink, exactly as at a mint with two');
     const t = text();
     const head = w.document.querySelector('[aria-label="Switch mint"]');
-    ok(!/YOUR MONEY/.test(t) && !!head && head.children.length === 2 && head.children[0].textContent === 'MINIBITS' && head.children[1].textContent === 'MINT',
-      'YOUR MONEY is gone: the card is headed MINIBITS over MINT', head ? head.textContent : 'no heading');
+    ok(!/YOUR MONEY/.test(t) && !!head && head.children.length === 1 && head.textContent === 'MINIBITS',
+      'YOUR MONEY is gone: the card is headed MINIBITS, the name alone', head ? head.textContent : 'no heading');
+    ok(!!head && !/\bMINT\b/.test(head.textContent) && !head.querySelector('svg') && !/M3 3l8 8-8 8/.test(markup),
+      'with no MINT under the name and no chevron after it', head ? head.innerHTML : 'no heading');
+    ok(!!head && head.getAttribute('role') === 'button' && head.getAttribute('aria-label') === 'Switch mint'
+      && /goSwitchMint/.test(String(V().goMintHeading)),
+      'the name is still a labeled button that switches mints');
+    {
+      /* jsdom lays nothing out, so the height is read from the styles: the heading is one 26px line (it was that
+       * line, 5px, and a 13px MINT line under it), and with the price line open the money card is as tall as
+       * what it holds while the price line, its sibling in the same column, takes the rest, so every pixel the
+       * heading gave up goes to the price line and nothing under the card moves. */
+      const line = head.firstElementChild;
+      const card = [...w.document.querySelectorAll('div')].find((d) => d.contains(head) && /^34px 34px 0/.test(d.style.borderRadius));
+      const price = card && [...card.parentElement.children].find((d) => d !== card && d.style.flex === V().priceFlex && /isolation/.test(d.getAttribute('style')));
+      ok(!!line && line.style.fontSize === '26px' && line.style.lineHeight === '1' && line.children.length === 1
+        && !head.querySelector('[style*="margin-top"]') && head.style.marginBottom === '4px',
+        'the heading is one 26px line, 4px above the rule: 26px tall where it was 26 + 5 + a MINT line', head.innerHTML);
+      ok(!!card && !!price && V().moneyFlex === '0 0 auto' && card.style.flex === '0 0 auto' && price.style.flex === '1 1 0%'
+        && card.parentElement === price.parentElement,
+        'and with the price line open the card takes only its height, so the price line gets what the heading gave up',
+        card ? card.style.flex + ' / ' + (price ? price.style.flex : 'no price line') : 'no card');
+    }
     ok(v.homeMintName === String(A.mintName()).toUpperCase(), 'by the mint’s short name', v.homeMintName);
     ok(markup.indexOf('{{ pillLetter }}') < 0 && markup.indexOf('YOUR MONEY') < 0, 'and the mint-letter pill is no longer in the markup');
     eq(v.homeButtonsTwo, [], 'the row under it is still the one-balance row: no SWAP');
@@ -389,10 +410,14 @@ const STATES = [
       && name.style.whiteSpace === 'nowrap' && name.style.overflow === 'hidden' && head.style.padding === '0px 40px'
       && head.firstElementChild.style.maxWidth === '100%',
       'home: the name runs to an ellipsis inside a heading kept 40px clear of the shield on both sides', head ? head.getAttribute('style') : 'no heading');
-    ok(head.querySelector('svg').style.flex === '0 0 auto' || head.querySelector('svg').style.flex === 'none', 'and the chevron after it keeps its size');
+    ok(!head.querySelector('svg') && head.children.length === 1 && head.firstElementChild.children.length === 1,
+      'and nothing but the name shares its line');
     const fcHead = markup.slice(markup.indexOf('<sc-if value="{{ fcMintShown }}">'), markup.indexOf('{{ fcMintName }}'));
     ok(/padding:0 40px/.test(fcHead) && /data-mint-name style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap/.test(fcHead),
       'the card’s screen: its mint’s name does the same');
+    const fcBlock = markup.slice(markup.indexOf('<sc-if value="{{ fcMintShown }}">'), markup.indexOf('</sc-if>', markup.indexOf('{{ fcMintName }}')));
+    ok(!/>MINT</.test(fcBlock) && !/<svg/.test(fcBlock) && (fcBlock.match(/<div/g) || []).length === 2,
+      'and is headed by the name alone, with no MINT under it and no chevron', fcBlock);
   }
 
   const real = errors.filter((e) => !/Not implemented|navigation/i.test(e));

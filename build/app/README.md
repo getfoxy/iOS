@@ -29,7 +29,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `20-split-values.js` | 393 | `spEven`, `spSharesArr`, `spSlots`, `spPaidArr`, `spNextUnpaid`, `spInitials`, `splitVals`, `goSendScanFromSplit` |
 | `21-render-values.js` | 572 | `renderVals`, `renderValsBase`, `renderFieldLog`, `renderContext` |
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
-| `23-render-home-and-amount.js` | 675 | `renderHome`, `renderHomeTwo`, `goHistoryIn`, `swapStart`, `usdKeypad`, `keypadWallet`, `torBannerVals`, `shieldVals`, `shieldWatch`, `renderAmount` |
+| `23-render-home-and-amount.js` | 678 | `renderHome`, `renderHomeTwo`, `goHistoryIn`, `swapStart`, `usdKeypad`, `keypadWallet`, `torBannerVals`, `shieldVals`, `shieldWatch`, `renderAmount` |
 | `24-render-receive-and-send.js` | 897 | `renderReceive`, `renderPaid`, `renderPaidBase`, `renderSend`, `renderSent`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
 | `25-render-confirm-and-blocked.js` | 191 | `renderConfirmShell`, `renderBlocked`, `renderCurrency` |
 | `26-render-history-and-contacts.js` | 616 | `renderHistory`, `renderTxDetail`, `histRowTwo`, `renderContacts` |
