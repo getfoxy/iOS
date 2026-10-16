@@ -236,6 +236,25 @@ gone (the card, home's held pill, and the next connect finishing it). Every
 page's books close per unit. The second part mounts the real page on a stand-in
 wallet and reads what it draws, down to both pills glowing on home.
 
+**`swap-run.js`** counts what a swap between units asks the mint once SWAP
+is pressed, on a real wallet at the harness's two-unit mint (which says it runs
+Nutshell and settles its own invoices at no routing cost, as Nutshell does):
+the melt and the claim and nothing else when the pieces the cut would spend go
+to the melt whole and the rest comes back as its change, or when the pile holds
+exact pieces; the cut first, as before, where the change could not come back
+and for every payment that is not a swap; change on the melt only at a mint
+that says it does NUT-08 and runs Nutshell or CDK, and never more over than the
+need; a mint that kept part of the change said, its kept part in the fee, and
+marked so it is paid exactly from then on, across a relaunch and when the
+sweep settles the melt; a pending swap's pill naming all that is with the mint;
+no question about the invoice before its claim, the question again (with its
+full half minute after a slow refusal) when the mint answers "quote not paid",
+and the sweep for any other refusal; a claim's lost answer restored from its
+own ranges; a piece spent elsewhere met by the melt and taken out of the pile;
+the blanks cashu-ts sends counted against the rule that says the change fits;
+and a Lightning deposit still asked about before its claim. Every page's books
+close per unit.
+
 **`swap-dollars.js`** holds a swap's amount and its confirmation, on the real
 page and a stand-in wallet with a fixed rate. SET AMOUNT opens in dollars both
 ways round, and the ⇅ turns it to sats and back; what the swap moves is still

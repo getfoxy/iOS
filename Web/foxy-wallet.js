@@ -130,6 +130,7 @@
     onchain: 'foxy.cashu.onchain',        // addresses to be paid into this wallet (NUT-30), and what has been issued
     onchainOut: 'foxy.cashu.onchain.out', // payments handed to the mint to broadcast, until they confirm
     reserves: 'foxy.cashu.reserves',      // what each mint held back as a routing reserve last time
+    meltShort: 'foxy.cashu.melt.short',   // mints that once kept part of a melt's change: paid only the need there
     mintCache: 'foxy.cashu.mint.cache',   // each mint's keysets and info, so a phone with no route can still hold a wallet
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
     line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
@@ -5044,6 +5045,155 @@
     if (!asked) return { ok: held >= n + whole, need: n + whole, have: held, fee: whole };
     var need = can ? out + spend : Math.max(out + spend, held + 1);
     return { ok: can, need: need, have: held, fee: need - n };
+  }
+
+  /* Pieces of the pile that pay a swap's melt as they are, with no swap first.
+   *
+   * `pay` cuts the pile into exactly what the melt needs on every payment
+   * (`w.send`, which always swaps in a seeded wallet), a whole round trip to
+   * the mint before the payment itself. For a swap between units two cases
+   * need no cut:
+   *
+   *  - exact pieces: pieces that come to the invoice, the reserve and this
+   *    mint's fee on the pieces themselves (NUT-02), to the sat. The melt is
+   *    the one the cut would have sent.
+   *  - change on the melt: the pieces the cut would have spent,
+   *    `w.selectProofsToSend` as the cut picks them, handed to the melt whole.
+   *    What they come to over the melt's need comes back with the reserve's
+   *    own change (NUT-08). Only at a mint that can be trusted to hand it
+   *    back (`meltChangeTrusted`), only when every sum it can owe back fits
+   *    the blank outputs that go with the melt (`meltChangeFits`), and never
+   *    more over than the need itself, so a mint that kept what it owed could
+   *    never take most of a balance in one payment.
+   *
+   * Other payments are cut as they always were. Never past what the mint
+   * takes in one request (`mintArrayCap`). Returns { path: 'exact' | 'change',
+   * send, keep, over } (`keep` the pile less `send`, `over` what comes back
+   * beyond the reserve's change), or null: the pile is cut as before. */
+  function meltAsIs(w, pile, owed, quote) {
+    var all = (pile || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; });
+    if (!w || !all.length || !(owed > 0) || all.length !== (pile || []).length) return null;
+    // a piece locked to a key goes to no melt as it is: it would need a signature the melt does not carry
+    var stuck = lockedProofs(all);
+    var have = stuck.length ? all.filter(function (p) { return stuck.indexOf(p) < 0; }) : all;
+    if (!have.length) return null;
+    var cap = mintArrayCap(w);
+    var answer = function (path, send, over) {
+      var out = {};
+      send.forEach(function (p) { out[p.secret] = true; });
+      return { path: path, send: send, keep: all.filter(function (p) { return !out[p.secret]; }), over: over };
+    };
+    var exact = exactPieces(w, have, owed);
+    if (exact && exact.length && exact.length <= cap) return answer('exact', exact, 0);
+    if (typeof w.selectProofsToSend !== 'function' || !meltChangeTrusted(w)) return null;
+    var picked = [];
+    try { picked = (w.selectProofsToSend(have, owed, true) || {}).send || []; } catch (e) { picked = []; }
+    if (!picked.length || picked.length > cap) return null;
+    var fee = swapFeeFor(w, picked);
+    if (!isFinite(fee)) return null;
+    var over = sumProofs(picked) - fee - owed;
+    if (over < 0) return null;
+    if (over === 0) return answer('exact', picked, 0);
+    if (over > owed) return null;
+    // asked through FoxyWallet so a suite can stand in a library or mint whose blanks carry less
+    if (!FoxyWallet._meltChangeFits(w, sumProofs(picked), satsOf(quote && quote.amount), satsOf(quote && quote.fee_reserve), fee)) return null;
+    return answer('change', picked, over);
+  }
+
+  /* Whether a mint can be paid more than a melt needs and trusted to hand the
+   * rest back as change. All three must hold:
+   *
+   *  - it says it does NUT-08 (`"8": {"supported": true}` in its info). A mint
+   *    that does not ignores the blanks and keeps everything over the
+   *    invoice.
+   *  - it says it runs Nutshell or CDK (`version`, NUT-06). Both sign every
+   *    blank they are sent, largest first, with all they owe back; that is
+   *    read in their code, and NUT-08 does not require it of a mint, which
+   *    may fill only the blanks the reserve alone would need and keep the
+   *    rest without a word.
+   *  - it has never kept part of such change before (`meltChangeShortAt`).
+   *
+   * Info that cannot be read answers no. */
+  function meltChangeTrusted(w) {
+    var info = null;
+    try { info = w.getMintInfo(); } catch (e) { return false; }
+    if (!info) return false;
+    var nut8 = false;
+    try { nut8 = !!(info.isSupported(8) || {}).supported; } catch (e) { nut8 = false; }
+    if (!nut8) return false;
+    var version = '';
+    try { version = String(info.version || (info.cache && info.cache.version) || ''); } catch (e) { version = ''; }
+    if (!/^(nutshell|cdk-mintd)\//i.test(version)) return false;
+    return !meltChangeShortAt(mintOf(w));
+  }
+
+  /* Mints that once handed back less change than a melt paid over its need
+   * was owed: in memory, and kept in storage so a launch does not forget. */
+  var meltShortHere = {};
+  function meltChangeShortAt(mint) {
+    var m = canonicalMint(mint || '');
+    if (!m) return true;
+    if (meltShortHere[m]) return true;
+    var all = load(K.meltShort, {});
+    return !!(all && typeof all === 'object' && all[m]);
+  }
+
+  /* What came back from a melt paid with more than it needed, against what the
+   * mint owed: the inputs, less the invoice, less their own input fee
+   * (NUT-02). Nothing is taken off for routing: a swap's melt pays this
+   * mint's own invoice, which Nutshell and CDK settle inside the melt at no
+   * cost, handing back the whole reserve. Short of that, the mint kept some
+   * of what it owed: said, and this mint is paid only exactly from then on.
+   * The books still close, as the shortfall is in the payment's fee. True
+   * when all came back. */
+  function noteMeltChangeBack(w, mint, sent, amount, change, unit, quoteId) {
+    var owedBack = sumProofs(sent || []) - satsOf(amount) - swapFeeFor(w, sent || []);
+    var back = sumProofs(change || []);
+    if (!(owedBack > 0) || back >= owedBack) return true;
+    console.warn('[foxy] melt ' + String(quoteId || '').slice(0, 12) + '\u2026: the mint gave back '
+      + formatAmount(back, unit) + ' of the ' + formatAmount(owedBack, unit) + ' it owed; '
+      + 'from now on it is paid only what a melt needs');
+    var m = canonicalMint(mint || '');
+    if (!m) return false;
+    meltShortHere[m] = true;
+    var all = load(K.meltShort, {});
+    if (!all || typeof all !== 'object') all = {};
+    all[m] = Math.floor(Date.now() / 1000);
+    save(K.meltShort, all);
+    return false;
+  }
+
+  /* Can the mint hand back, in the melt's blank outputs, every sum it may
+   * owe for these inputs?
+   *
+   * The blanks are cashu-ts's (4.11.0, `prepareMelt`, the count
+   * `legacyChangeCount` mirrors and docs/MONEY.md §2 records):
+   * max(ceil(log2(over)), 1) of them, `over` being the inputs less the
+   * quote's amount. Each blank carries one piece of the mint's choosing:
+   * Nutshell and CDK split what they owe into powers of two and fill the
+   * blanks largest first, and what does not fit is kept by the mint
+   * (NUT-08). So a sum fits when it has no more set bits than there are
+   * blanks and no bit above the keyset's largest piece.
+   *
+   * What the mint owes is the inputs, less the amount, less their input fee
+   * (NUT-02), less what routing cost: anything from nothing to the whole
+   * reserve, so every one of those sums is asked about, and a keyset whose
+   * largest piece cannot be read answers no. Past a few thousand sums, the
+   * bound that holds for all of them at once: nothing below 2^blanks has
+   * more set bits than that. */
+  /** @param {number=} count the blanks, when not cashu-ts's own count (the suites) */
+  function meltChangeFits(w, inputs, amount, reserve, inputFee, count) {
+    var blanks = count === undefined ? legacyChangeCount(inputs - amount) : Math.floor(Number(count) || 0);
+    var biggest = cardMaxPiece(w);
+    var most = inputs - amount - inputFee;
+    if (most === 0) return true;
+    if (!(blanks > 0) || !(biggest > 0) || most < 0) return false;
+    if (most >= 2 * biggest) return false;
+    var least = Math.max(0, most - Math.max(0, reserve));
+    if (most - least > 4096) return most < Math.pow(2, blanks);
+    var bits = function (v) { var n = 0; while (v > 0) { n += v & 1; v = Math.floor(v / 2); } return n; };
+    for (var c = least; c <= most; c++) if (bits(c) > blanks) return false;
+    return true;
   }
 
   /* What is said of a payment the pile cannot cover. One sentence in one
@@ -17421,10 +17571,24 @@
    * paid, then claimed. Every two seconds, for half a minute at most
    * (`_swapClaimWaitMs`), slowed by a mint that has said "too many". True
    * once the claim has landed; false leaves it to `sweepQuotes`, which finds
-   * the record on the next connect or return. */
-  function swapClaim(tw, quoteId) {
-    var until = Date.now() + (Number(FoxyWallet._swapClaimWaitMs) >= 0 && FoxyWallet._swapClaimWaitMs !== undefined
-      ? Number(FoxyWallet._swapClaimWaitMs) : 30000);
+   * the record on the next connect or return.
+   *
+   * `paidHere`: the swap's own melt has just answered PAID for this very
+   * invoice, at this same mint. A mint settles a payment between two of its
+   * own quotes inside the melt, so the invoice is paid by the time the melt
+   * answers, and asking first only cost a round trip over Tor. The claim is
+   * then made at once. Only a refusal that says the quote is not paid yet
+   * (`quoteNotPaidYet`) goes back to asking, as above; anything else is left
+   * to the sweep, as a failed claim always was. Nothing about the claim
+   * itself changes: its counter ranges are on the invoice's record before
+   * the request leaves (`_claimOnce`), so a lost answer reads ISSUED at the
+   * sweep and `recoverIssued` restores exactly those. */
+  function swapClaim(tw, quoteId, paidHere) {
+    var wait = function () {
+      return Date.now() + (Number(FoxyWallet._swapClaimWaitMs) >= 0 && FoxyWallet._swapClaimWaitMs !== undefined
+        ? Number(FoxyWallet._swapClaimWaitMs) : 30000);
+    };
+    var until = wait();
     var every = Number(FoxyWallet._swapPollMs) > 0 ? Number(FoxyWallet._swapPollMs) : 2000;
     var ask = function () {
       if (!routeOpen()) return Promise.resolve(false);
@@ -17446,7 +17610,31 @@
         return false;
       });
     };
-    return ask();
+    if (!paidHere) return ask();
+    if (!routeOpen()) return Promise.resolve(false);
+    return FoxyWallet.claim(quoteId).then(function () { return true; }, function (e) {
+      if (quoteNotPaidYet(e)) {
+        console.log('[foxy] swap: the mint has not marked its invoice paid yet (' + FoxyWallet.reason(e) + ') — asking until it has');
+        // the half minute starts now: a slow refusal over Tor does not eat into it
+        until = wait();
+        return ask();
+      }
+      console.warn('[foxy] swap: the invoice could not be claimed yet —', FoxyWallet.reason(e), '— left for the sweep');
+      return false;
+    });
+  }
+
+  /* A mint's refusal to issue for a quote it has not been paid for yet, or
+   * whose payment is still going through: NUT-04's 20001 ("quote not paid")
+   * and 20005 ("quote is pending"), or their words from a mint that sends no
+   * code. "Invoice already paid or pending" (CDK's 20006 on used counters,
+   * `mintSaysPaidOrPending`) is not one of them. */
+  function quoteNotPaidYet(e) {
+    var code = Number(e && (e.code || (e.response && e.response.code)));
+    if (code === 20001 || code === 20005) return true;
+    var m = String((e && (e.message || e.detail)) || e || '');
+    if (/already paid/i.test(m)) return false;
+    return /\bnot (yet )?paid\b|\bunpaid\b|not been paid|quote (is )?pending/i.test(m);
   }
 
   /* ---- money paid in the other unit: foxy.cashu.convert ----
@@ -21126,6 +21314,8 @@
                  * reconcile set it aside as if no restore could bring it back,
                  * where it removes this wallet's own spent proofs. */
                 if (change.length) addOwnProofs(change, here, mw, unit, restored);
+                // a swap's melt paid over its need: did all it was owed come back (`noteMeltChangeBack`)
+                if (entry.changeOnMelt) noteMeltChangeBack(mw, here, entry.proofs, entry.amount, change, unit, entry.quote);
                 logTx(unitRow(unit, swapMarks(entry, {
                   dir: 'out',
                   sats: satsOf(entry.amount) || 0,
@@ -21408,15 +21598,31 @@
         var mn = heldId ? { ok: true } : meltNeed(w, have, owed);
         if (!mn.ok) throw new Error(notEnoughWords(mn, unit));
 
+        /* A swap between units pays its melt with pieces of the pile as they
+         * are, when it can (`meltAsIs`): exact pieces, or the pieces the split
+         * would have spent with the rest back as the melt's change. Either
+         * way no split, so one round trip fewer before the payment. Every
+         * other payment is split as it always was. */
+        var asIs = (heldId || !swapId) ? null : meltAsIs(w, have, owed, quote);
+        var path = heldId ? 'card' : asIs ? (asIs.path === 'exact' ? 'exact pieces' : 'change on the melt') : 'shaped';
+        if (!heldId) {
+          console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: ' + path + ', '
+            + (asIs ? formatAmount(sumProofs(asIs.send), unit) + ' in ' + asIs.send.length + ' piece(s)'
+              + (asIs.over ? ', ' + formatAmount(asIs.over, unit) + ' over, back as change' : '')
+              : formatAmount(owed, unit) + ' cut from ' + formatAmount(sumProofs(have), unit))
+            + ' for ' + formatAmount(owed, unit) + ' with the reserve');
+        }
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
-        var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
-        var splitting = heldId ? Promise.resolve({ send: have, keep: null }) : splitGuard.run('payment split', function () {
-          return w.send(owed, have, { includeFees: true });
-        }).catch(function (e) {
-          // some of that ecash was spent elsewhere: out of the pile, and made again
-          return retryWithoutSpent(w, e);
-        });
+        var splitGuard = (heldId || asIs) ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
+        var splitting = heldId ? Promise.resolve({ send: have, keep: null })
+          : asIs ? Promise.resolve({ send: asIs.send, keep: asIs.keep })
+          : splitGuard.run('payment split', function () {
+            return w.send(owed, have, { includeFees: true });
+          }).catch(function (e) {
+            // some of that ecash was spent elsewhere: out of the pile, and made again
+            return retryWithoutSpent(w, e);
+          });
         return splitting.then(function (split) {
           /* The pile and the hold are written before the split's record is
            * cleared. The record used to go first, so a pile that could not be
@@ -21446,7 +21652,9 @@
           try {
             holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee, unit,
                      heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold }
-                       : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null);
+                       : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
+                         // paid over its need: what comes back is checked when the sweep settles it too
+                         changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
             /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
              * that cannot be let go is a melt that is not sent: the pieces stay where they were. */
             if (heldId) {
@@ -21499,6 +21707,11 @@
              * instead of removing it. */
             addOwnProofs(change || [], at, w, unit, restored);
             dropMelt(quote.quote);
+            /* Paid with more than it needed: a mint that gave back less than
+             * it owed is said, and paid only what a melt needs from then on
+             * (`noteMeltChangeBack`). What it kept is in the fee below, so the
+             * books still close. */
+            if (asIs && asIs.path === 'change') noteMeltChangeBack(w, at, split.send, quote.amount, change, unit, quote.quote);
             /* Everything the payment cost beyond its amount: the proofs it spent,
              * and the split's fee, less the change kept. This was the fee
              * reserve less the change, which left out the melt inputs' own fee
@@ -21568,6 +21781,8 @@
           try { meltCall = Promise.resolve(w.meltProofsBolt11(quote, split.send)); }
           catch (e) { stopWatching(); throw e; }
           meltCall.then(stopWatching, stopWatching);
+          // the mint's own refusal of the melt, for pieces it says were spent (below)
+          var refusedWith = /** @type {any} */ (null);
           var meltRace = Promise.race([
             // no retry: a melt pays; but a refusal for used outputs still moves the counters on
             meltCall.catch(function (e) {
@@ -21616,6 +21831,7 @@
           }).catch(function (e) {
             // the payment may still have gone through; its change could not be verified
             if (badSignatures(e)) reportBadSignatures(hostOf(at), 'pay');
+            if (e && !e.definite && !e.unsent) refusedWith = e;
             /* Storage refused a write. `unsent`: the melt's change counters were
              * not stored, so cashu-ts never sent it, and the proofs go back.
              * Otherwise the mint answered and the pile could not take what came
@@ -21684,9 +21900,27 @@
                   throw stillHeld();
                 }, function () { throw stillHeld(); });
               });
+          }).catch(function (x) {
+            /* Pieces paid as they are meet the mint first in the melt rather
+             * than in the split, so a piece spent elsewhere (the words restored
+             * in another wallet) is refused here. They are back in the pile by
+             * now (`notSent`); the spent ones come out of it, as the split's own
+             * refusal does (`retryWithoutSpent`). The swap is not made again:
+             * its rate was for this melt, and the screen asks for a new one. */
+            if (!asIs || !(x && x.definite) || !inputsSpent(refusedWith)) throw x;
+            return dropSpentInputs(w, split.send || []).then(function () { throw x; }, function () { throw x; });
           });
         });
       });
+    },
+
+    /* Whether a melt of these inputs can hand back all it may owe in the
+     * blanks that go with it (`meltChangeFits`, 04-lost-answers.js). Here so
+     * that `meltAsIs` asks it by name, and a suite can ask it directly or
+     * stand in a smaller answer. */
+    /** @param {number=} count */
+    _meltChangeFits: function (w, inputs, amount, reserve, inputFee, count) {
+      return meltChangeFits(w, inputs, amount, reserve, inputFee, count);
     },
 
     /* A lightning address or LNURL, asked for an invoice of `sats`, and every
@@ -23235,7 +23469,13 @@
         var fee = Number(paid && paid.fee) || 0;
         stage('paid');
         stage('claiming');
-        return swapClaim(q._tw, mq.quote).then(function (ok) {
+        /* The melt paid this mint's own invoice for the swap, so the mint has
+         * marked it paid already: claimed at once, without asking first
+         * (`swapClaim`). Only for that melt, answered PAID, at the mint the
+         * invoice came from. */
+        var paidHere = !!(paid && paid.hash === melt.quote)
+          && canonicalMint(mintOf(q._w)) === canonicalMint(mintOf(q._tw));
+        return swapClaim(q._tw, mq.quote, paidHere).then(function (ok) {
           if (!ok) { q.state = 'pending'; return result('pending', spent, fee); }
           q.state = 'done';
           stage('done');
@@ -23269,7 +23509,7 @@
        * done: either is dropped here, or it said "pending with the mint" for
        * good. A swap this page started is left to finish itself. */
       var held = {};
-      load(K.melting, []).forEach(function (e) { if (e && e.quote) held[e.quote] = true; });
+      load(K.melting, []).forEach(function (e) { if (e && e.quote) held[e.quote] = sumProofs(e.proofs || []) || true; });
       var all = unitSwaps();
       var live = all.filter(function (r) {
         if (swapsGone[r.id]) return true;
@@ -23278,7 +23518,12 @@
       });
       all.forEach(function (r) { if (live.indexOf(r) < 0) dropUnitSwap(r.id); });
       return live.map(function (r) {
-        return { id: r.id, at: Number(r.at) || 0, from: { unit: recordUnit({ unit: r.from }), amount: Number(r.total) || 0 },
+        /* What is out of the pile for it: its need, or everything its melt
+         * was paid with while that is held, which is more when the melt was
+         * paid over its need with the rest to come back as change. So the
+         * pile and the pill always add up to what there was. */
+        var out = Math.max(Number(r.total) || 0, (r.meltQuote && typeof held[r.meltQuote] === 'number') ? held[r.meltQuote] : 0);
+        return { id: r.id, at: Number(r.at) || 0, from: { unit: recordUnit({ unit: r.from }), amount: out },
                  to: { unit: recordUnit({ unit: r.to }), amount: Number(r.get) || 0 } };
       });
     },

@@ -555,10 +555,24 @@
    * paid, then claimed. Every two seconds, for half a minute at most
    * (`_swapClaimWaitMs`), slowed by a mint that has said "too many". True
    * once the claim has landed; false leaves it to `sweepQuotes`, which finds
-   * the record on the next connect or return. */
-  function swapClaim(tw, quoteId) {
-    var until = Date.now() + (Number(FoxyWallet._swapClaimWaitMs) >= 0 && FoxyWallet._swapClaimWaitMs !== undefined
-      ? Number(FoxyWallet._swapClaimWaitMs) : 30000);
+   * the record on the next connect or return.
+   *
+   * `paidHere`: the swap's own melt has just answered PAID for this very
+   * invoice, at this same mint. A mint settles a payment between two of its
+   * own quotes inside the melt, so the invoice is paid by the time the melt
+   * answers, and asking first only cost a round trip over Tor. The claim is
+   * then made at once. Only a refusal that says the quote is not paid yet
+   * (`quoteNotPaidYet`) goes back to asking, as above; anything else is left
+   * to the sweep, as a failed claim always was. Nothing about the claim
+   * itself changes: its counter ranges are on the invoice's record before
+   * the request leaves (`_claimOnce`), so a lost answer reads ISSUED at the
+   * sweep and `recoverIssued` restores exactly those. */
+  function swapClaim(tw, quoteId, paidHere) {
+    var wait = function () {
+      return Date.now() + (Number(FoxyWallet._swapClaimWaitMs) >= 0 && FoxyWallet._swapClaimWaitMs !== undefined
+        ? Number(FoxyWallet._swapClaimWaitMs) : 30000);
+    };
+    var until = wait();
     var every = Number(FoxyWallet._swapPollMs) > 0 ? Number(FoxyWallet._swapPollMs) : 2000;
     var ask = function () {
       if (!routeOpen()) return Promise.resolve(false);
@@ -580,7 +594,31 @@
         return false;
       });
     };
-    return ask();
+    if (!paidHere) return ask();
+    if (!routeOpen()) return Promise.resolve(false);
+    return FoxyWallet.claim(quoteId).then(function () { return true; }, function (e) {
+      if (quoteNotPaidYet(e)) {
+        console.log('[foxy] swap: the mint has not marked its invoice paid yet (' + FoxyWallet.reason(e) + ') — asking until it has');
+        // the half minute starts now: a slow refusal over Tor does not eat into it
+        until = wait();
+        return ask();
+      }
+      console.warn('[foxy] swap: the invoice could not be claimed yet —', FoxyWallet.reason(e), '— left for the sweep');
+      return false;
+    });
+  }
+
+  /* A mint's refusal to issue for a quote it has not been paid for yet, or
+   * whose payment is still going through: NUT-04's 20001 ("quote not paid")
+   * and 20005 ("quote is pending"), or their words from a mint that sends no
+   * code. "Invoice already paid or pending" (CDK's 20006 on used counters,
+   * `mintSaysPaidOrPending`) is not one of them. */
+  function quoteNotPaidYet(e) {
+    var code = Number(e && (e.code || (e.response && e.response.code)));
+    if (code === 20001 || code === 20005) return true;
+    var m = String((e && (e.message || e.detail)) || e || '');
+    if (/already paid/i.test(m)) return false;
+    return /\bnot (yet )?paid\b|\bunpaid\b|not been paid|quote (is )?pending/i.test(m);
   }
 
   /* ---- money paid in the other unit: foxy.cashu.convert ----

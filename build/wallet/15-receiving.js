@@ -1166,6 +1166,8 @@
                  * reconcile set it aside as if no restore could bring it back,
                  * where it removes this wallet's own spent proofs. */
                 if (change.length) addOwnProofs(change, here, mw, unit, restored);
+                // a swap's melt paid over its need: did all it was owed come back (`noteMeltChangeBack`)
+                if (entry.changeOnMelt) noteMeltChangeBack(mw, here, entry.proofs, entry.amount, change, unit, entry.quote);
                 logTx(unitRow(unit, swapMarks(entry, {
                   dir: 'out',
                   sats: satsOf(entry.amount) || 0,

@@ -702,6 +702,155 @@
     return { ok: can, need: need, have: held, fee: need - n };
   }
 
+  /* Pieces of the pile that pay a swap's melt as they are, with no swap first.
+   *
+   * `pay` cuts the pile into exactly what the melt needs on every payment
+   * (`w.send`, which always swaps in a seeded wallet), a whole round trip to
+   * the mint before the payment itself. For a swap between units two cases
+   * need no cut:
+   *
+   *  - exact pieces: pieces that come to the invoice, the reserve and this
+   *    mint's fee on the pieces themselves (NUT-02), to the sat. The melt is
+   *    the one the cut would have sent.
+   *  - change on the melt: the pieces the cut would have spent,
+   *    `w.selectProofsToSend` as the cut picks them, handed to the melt whole.
+   *    What they come to over the melt's need comes back with the reserve's
+   *    own change (NUT-08). Only at a mint that can be trusted to hand it
+   *    back (`meltChangeTrusted`), only when every sum it can owe back fits
+   *    the blank outputs that go with the melt (`meltChangeFits`), and never
+   *    more over than the need itself, so a mint that kept what it owed could
+   *    never take most of a balance in one payment.
+   *
+   * Other payments are cut as they always were. Never past what the mint
+   * takes in one request (`mintArrayCap`). Returns { path: 'exact' | 'change',
+   * send, keep, over } (`keep` the pile less `send`, `over` what comes back
+   * beyond the reserve's change), or null: the pile is cut as before. */
+  function meltAsIs(w, pile, owed, quote) {
+    var all = (pile || []).filter(function (p) { return p && p.secret && satsOf(p.amount) > 0; });
+    if (!w || !all.length || !(owed > 0) || all.length !== (pile || []).length) return null;
+    // a piece locked to a key goes to no melt as it is: it would need a signature the melt does not carry
+    var stuck = lockedProofs(all);
+    var have = stuck.length ? all.filter(function (p) { return stuck.indexOf(p) < 0; }) : all;
+    if (!have.length) return null;
+    var cap = mintArrayCap(w);
+    var answer = function (path, send, over) {
+      var out = {};
+      send.forEach(function (p) { out[p.secret] = true; });
+      return { path: path, send: send, keep: all.filter(function (p) { return !out[p.secret]; }), over: over };
+    };
+    var exact = exactPieces(w, have, owed);
+    if (exact && exact.length && exact.length <= cap) return answer('exact', exact, 0);
+    if (typeof w.selectProofsToSend !== 'function' || !meltChangeTrusted(w)) return null;
+    var picked = [];
+    try { picked = (w.selectProofsToSend(have, owed, true) || {}).send || []; } catch (e) { picked = []; }
+    if (!picked.length || picked.length > cap) return null;
+    var fee = swapFeeFor(w, picked);
+    if (!isFinite(fee)) return null;
+    var over = sumProofs(picked) - fee - owed;
+    if (over < 0) return null;
+    if (over === 0) return answer('exact', picked, 0);
+    if (over > owed) return null;
+    // asked through FoxyWallet so a suite can stand in a library or mint whose blanks carry less
+    if (!FoxyWallet._meltChangeFits(w, sumProofs(picked), satsOf(quote && quote.amount), satsOf(quote && quote.fee_reserve), fee)) return null;
+    return answer('change', picked, over);
+  }
+
+  /* Whether a mint can be paid more than a melt needs and trusted to hand the
+   * rest back as change. All three must hold:
+   *
+   *  - it says it does NUT-08 (`"8": {"supported": true}` in its info). A mint
+   *    that does not ignores the blanks and keeps everything over the
+   *    invoice.
+   *  - it says it runs Nutshell or CDK (`version`, NUT-06). Both sign every
+   *    blank they are sent, largest first, with all they owe back; that is
+   *    read in their code, and NUT-08 does not require it of a mint, which
+   *    may fill only the blanks the reserve alone would need and keep the
+   *    rest without a word.
+   *  - it has never kept part of such change before (`meltChangeShortAt`).
+   *
+   * Info that cannot be read answers no. */
+  function meltChangeTrusted(w) {
+    var info = null;
+    try { info = w.getMintInfo(); } catch (e) { return false; }
+    if (!info) return false;
+    var nut8 = false;
+    try { nut8 = !!(info.isSupported(8) || {}).supported; } catch (e) { nut8 = false; }
+    if (!nut8) return false;
+    var version = '';
+    try { version = String(info.version || (info.cache && info.cache.version) || ''); } catch (e) { version = ''; }
+    if (!/^(nutshell|cdk-mintd)\//i.test(version)) return false;
+    return !meltChangeShortAt(mintOf(w));
+  }
+
+  /* Mints that once handed back less change than a melt paid over its need
+   * was owed: in memory, and kept in storage so a launch does not forget. */
+  var meltShortHere = {};
+  function meltChangeShortAt(mint) {
+    var m = canonicalMint(mint || '');
+    if (!m) return true;
+    if (meltShortHere[m]) return true;
+    var all = load(K.meltShort, {});
+    return !!(all && typeof all === 'object' && all[m]);
+  }
+
+  /* What came back from a melt paid with more than it needed, against what the
+   * mint owed: the inputs, less the invoice, less their own input fee
+   * (NUT-02). Nothing is taken off for routing: a swap's melt pays this
+   * mint's own invoice, which Nutshell and CDK settle inside the melt at no
+   * cost, handing back the whole reserve. Short of that, the mint kept some
+   * of what it owed: said, and this mint is paid only exactly from then on.
+   * The books still close, as the shortfall is in the payment's fee. True
+   * when all came back. */
+  function noteMeltChangeBack(w, mint, sent, amount, change, unit, quoteId) {
+    var owedBack = sumProofs(sent || []) - satsOf(amount) - swapFeeFor(w, sent || []);
+    var back = sumProofs(change || []);
+    if (!(owedBack > 0) || back >= owedBack) return true;
+    console.warn('[foxy] melt ' + String(quoteId || '').slice(0, 12) + '\u2026: the mint gave back '
+      + formatAmount(back, unit) + ' of the ' + formatAmount(owedBack, unit) + ' it owed; '
+      + 'from now on it is paid only what a melt needs');
+    var m = canonicalMint(mint || '');
+    if (!m) return false;
+    meltShortHere[m] = true;
+    var all = load(K.meltShort, {});
+    if (!all || typeof all !== 'object') all = {};
+    all[m] = Math.floor(Date.now() / 1000);
+    save(K.meltShort, all);
+    return false;
+  }
+
+  /* Can the mint hand back, in the melt's blank outputs, every sum it may
+   * owe for these inputs?
+   *
+   * The blanks are cashu-ts's (4.11.0, `prepareMelt`, the count
+   * `legacyChangeCount` mirrors and docs/MONEY.md §2 records):
+   * max(ceil(log2(over)), 1) of them, `over` being the inputs less the
+   * quote's amount. Each blank carries one piece of the mint's choosing:
+   * Nutshell and CDK split what they owe into powers of two and fill the
+   * blanks largest first, and what does not fit is kept by the mint
+   * (NUT-08). So a sum fits when it has no more set bits than there are
+   * blanks and no bit above the keyset's largest piece.
+   *
+   * What the mint owes is the inputs, less the amount, less their input fee
+   * (NUT-02), less what routing cost: anything from nothing to the whole
+   * reserve, so every one of those sums is asked about, and a keyset whose
+   * largest piece cannot be read answers no. Past a few thousand sums, the
+   * bound that holds for all of them at once: nothing below 2^blanks has
+   * more set bits than that. */
+  /** @param {number=} count the blanks, when not cashu-ts's own count (the suites) */
+  function meltChangeFits(w, inputs, amount, reserve, inputFee, count) {
+    var blanks = count === undefined ? legacyChangeCount(inputs - amount) : Math.floor(Number(count) || 0);
+    var biggest = cardMaxPiece(w);
+    var most = inputs - amount - inputFee;
+    if (most === 0) return true;
+    if (!(blanks > 0) || !(biggest > 0) || most < 0) return false;
+    if (most >= 2 * biggest) return false;
+    var least = Math.max(0, most - Math.max(0, reserve));
+    if (most - least > 4096) return most < Math.pow(2, blanks);
+    var bits = function (v) { var n = 0; while (v > 0) { n += v & 1; v = Math.floor(v / 2); } return n; };
+    for (var c = least; c <= most; c++) if (bits(c) > blanks) return false;
+    return true;
+  }
+
   /* What is said of a payment the pile cannot cover. One sentence in one
    * place, for the confirmation that says it before SEND (`payNeed`) and for
    * the payment that refuses it (`pay`), so the two are never in different

@@ -184,15 +184,31 @@
         var mn = heldId ? { ok: true } : meltNeed(w, have, owed);
         if (!mn.ok) throw new Error(notEnoughWords(mn, unit));
 
+        /* A swap between units pays its melt with pieces of the pile as they
+         * are, when it can (`meltAsIs`): exact pieces, or the pieces the split
+         * would have spent with the rest back as the melt's change. Either
+         * way no split, so one round trip fewer before the payment. Every
+         * other payment is split as it always was. */
+        var asIs = (heldId || !swapId) ? null : meltAsIs(w, have, owed, quote);
+        var path = heldId ? 'card' : asIs ? (asIs.path === 'exact' ? 'exact pieces' : 'change on the melt') : 'shaped';
+        if (!heldId) {
+          console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: ' + path + ', '
+            + (asIs ? formatAmount(sumProofs(asIs.send), unit) + ' in ' + asIs.send.length + ' piece(s)'
+              + (asIs.over ? ', ' + formatAmount(asIs.over, unit) + ' over, back as change' : '')
+              : formatAmount(owed, unit) + ' cut from ' + formatAmount(sumProofs(have), unit))
+            + ' for ' + formatAmount(owed, unit) + ' with the reserve');
+        }
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
-        var splitGuard = heldId ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
-        var splitting = heldId ? Promise.resolve({ send: have, keep: null }) : splitGuard.run('payment split', function () {
-          return w.send(owed, have, { includeFees: true });
-        }).catch(function (e) {
-          // some of that ecash was spent elsewhere: out of the pile, and made again
-          return retryWithoutSpent(w, e);
-        });
+        var splitGuard = (heldId || asIs) ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
+        var splitting = heldId ? Promise.resolve({ send: have, keep: null })
+          : asIs ? Promise.resolve({ send: asIs.send, keep: asIs.keep })
+          : splitGuard.run('payment split', function () {
+            return w.send(owed, have, { includeFees: true });
+          }).catch(function (e) {
+            // some of that ecash was spent elsewhere: out of the pile, and made again
+            return retryWithoutSpent(w, e);
+          });
         return splitting.then(function (split) {
           /* The pile and the hold are written before the split's record is
            * cleared. The record used to go first, so a pile that could not be
@@ -222,7 +238,9 @@
           try {
             holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee, unit,
                      heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold }
-                       : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null);
+                       : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
+                         // paid over its need: what comes back is checked when the sweep settles it too
+                         changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
             /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
              * that cannot be let go is a melt that is not sent: the pieces stay where they were. */
             if (heldId) {
@@ -275,6 +293,11 @@
              * instead of removing it. */
             addOwnProofs(change || [], at, w, unit, restored);
             dropMelt(quote.quote);
+            /* Paid with more than it needed: a mint that gave back less than
+             * it owed is said, and paid only what a melt needs from then on
+             * (`noteMeltChangeBack`). What it kept is in the fee below, so the
+             * books still close. */
+            if (asIs && asIs.path === 'change') noteMeltChangeBack(w, at, split.send, quote.amount, change, unit, quote.quote);
             /* Everything the payment cost beyond its amount: the proofs it spent,
              * and the split's fee, less the change kept. This was the fee
              * reserve less the change, which left out the melt inputs' own fee
@@ -344,6 +367,8 @@
           try { meltCall = Promise.resolve(w.meltProofsBolt11(quote, split.send)); }
           catch (e) { stopWatching(); throw e; }
           meltCall.then(stopWatching, stopWatching);
+          // the mint's own refusal of the melt, for pieces it says were spent (below)
+          var refusedWith = /** @type {any} */ (null);
           var meltRace = Promise.race([
             // no retry: a melt pays; but a refusal for used outputs still moves the counters on
             meltCall.catch(function (e) {
@@ -392,6 +417,7 @@
           }).catch(function (e) {
             // the payment may still have gone through; its change could not be verified
             if (badSignatures(e)) reportBadSignatures(hostOf(at), 'pay');
+            if (e && !e.definite && !e.unsent) refusedWith = e;
             /* Storage refused a write. `unsent`: the melt's change counters were
              * not stored, so cashu-ts never sent it, and the proofs go back.
              * Otherwise the mint answered and the pile could not take what came
@@ -460,9 +486,27 @@
                   throw stillHeld();
                 }, function () { throw stillHeld(); });
               });
+          }).catch(function (x) {
+            /* Pieces paid as they are meet the mint first in the melt rather
+             * than in the split, so a piece spent elsewhere (the words restored
+             * in another wallet) is refused here. They are back in the pile by
+             * now (`notSent`); the spent ones come out of it, as the split's own
+             * refusal does (`retryWithoutSpent`). The swap is not made again:
+             * its rate was for this melt, and the screen asks for a new one. */
+            if (!asIs || !(x && x.definite) || !inputsSpent(refusedWith)) throw x;
+            return dropSpentInputs(w, split.send || []).then(function () { throw x; }, function () { throw x; });
           });
         });
       });
+    },
+
+    /* Whether a melt of these inputs can hand back all it may owe in the
+     * blanks that go with it (`meltChangeFits`, 04-lost-answers.js). Here so
+     * that `meltAsIs` asks it by name, and a suite can ask it directly or
+     * stand in a smaller answer. */
+    /** @param {number=} count */
+    _meltChangeFits: function (w, inputs, amount, reserve, inputFee, count) {
+      return meltChangeFits(w, inputs, amount, reserve, inputFee, count);
     },
 
     /* A lightning address or LNURL, asked for an invoice of `sats`, and every

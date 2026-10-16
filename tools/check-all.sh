@@ -172,6 +172,7 @@ check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
 check "two balances, screens" 1 node tests/two-balances-screens.js
 check "two balances, swap" 1 node tests/two-balances-swap.js
+check "swap, its requests" 1 node tests/swap-run.js
 check "receive in, send in" 1 node tests/default-currency-settings.js
 check "swap in dollars" 1 node tests/swap-dollars.js
 check "dollar taps, two pages" 1 node tests/usd-tap-screens.js

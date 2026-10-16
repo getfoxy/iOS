@@ -264,7 +264,35 @@ Current design:
 
 1. Get a melt quote (amount + fee reserve), with a 30-second deadline.
 2. Split the local proofs into exactly what the melt needs and the rest
-   (`w.send`, which may swap at the mint; retried on used counters, §1).
+   (`w.send`, which swaps at the mint in a seeded wallet; retried on used
+   counters, §1). A swap between units does without the split when the pile
+   can pay as it is (`meltAsIs`); every other payment, a move between mints
+   and an LNURL payment among them, is split as it always was.
+   - Exact pieces (the invoice, the reserve and the mint's input fee on the
+     pieces, to the sat) go to the melt as they are.
+   - Otherwise the pieces the split would have spent go whole, and what they
+     come to over the need comes back with the reserve's change (NUT-08).
+     Only at a mint that says it does NUT-08 (`"8": {"supported": true}`),
+     that says it runs Nutshell or CDK (`version`; both sign every blank they
+     are sent, largest first, which NUT-08 does not require of a mint), and
+     that has never kept part of such change (`meltChangeTrusted`). Never
+     more over than the need itself. And only when every sum the mint can
+     owe back fits the blanks that go with the melt (`meltChangeFits`):
+     cashu-ts 4.11.0 sends max(ceil(log2(inputs − amount)), 1) of them, so a
+     sum fits when it has no more set bits than there are blanks and no bit
+     above the keyset's largest piece.
+   - What such a melt owed back is the inputs less the invoice less their
+     input fee: a swap pays the mint's own invoice, settled inside the melt
+     at no routing cost. Change short of that, in the answer or at the sweep
+     (`changeOnMelt` on the hold), is said in the log and marks the mint in
+     `foxy.cashu.melt.short`; from then on it is paid exactly
+     (`noteMeltChangeBack`). What it kept is in the payment's fee, so the
+     books close.
+   - A piece spent elsewhere then meets the mint in the melt: the pieces come
+     back, the spent ones come out of the pile (`dropSpentInputs`), and the
+     screen asks for a new rate.
+   - The log says which way each melt went: exact pieces, change on the
+     melt, or shaped.
 3. **Write** the rest to `foxy.cashu.proofs.<mint>`, and in the same tick
    **write** the proofs to be spent to `foxy.cashu.melting`, keyed by quote,
    with the amount, fee reserve, invoice and mint. A payment to a lightning
@@ -1698,9 +1726,16 @@ backends up.
   already run, or no route. Then, in this order: the swap's record
   (`foxy.cashu.unitswap`), the invoice's record in TO (`unit`, `swap`), the
   payment from FROM (`pay` with `swap`, so its hold and its row carry the
-  swap), and the claim of the invoice, asked every two seconds for half a
-  minute. Each leg's row is `kind: 'swap'` with the swap's id and the mint's
-  rate, one in each unit's history.
+  swap), and the claim of the invoice. A melt answered PAID for the swap's
+  own invoice at the same mint has paid it already (the mint settles a
+  payment between two of its own quotes inside the melt), so the claim is
+  made at once; only a refusal that says the quote is not paid yet (NUT-04's
+  20001 or 20005, `quoteNotPaidYet`) has it asked about every two seconds for
+  half a minute, and anything else is left to the sweep. The claim's counter
+  ranges are on the invoice's record before it goes, so a lost answer reads
+  ISSUED at the sweep and `recoverIssued` restores them. The half minute of
+  asking starts once the refusal has come. Each leg's row is `kind: 'swap'`
+  with the swap's id and the mint's rate, one in each unit's history.
 - Killed or unanswered anywhere, a swap is a held melt in FROM and an invoice
   record in TO, and the sweeps that finish those finish it: `sweepMelts` logs
   the payment (or gives the pieces back, and the swap is dropped), and

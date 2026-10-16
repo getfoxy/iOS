@@ -597,7 +597,13 @@
         var fee = Number(paid && paid.fee) || 0;
         stage('paid');
         stage('claiming');
-        return swapClaim(q._tw, mq.quote).then(function (ok) {
+        /* The melt paid this mint's own invoice for the swap, so the mint has
+         * marked it paid already: claimed at once, without asking first
+         * (`swapClaim`). Only for that melt, answered PAID, at the mint the
+         * invoice came from. */
+        var paidHere = !!(paid && paid.hash === melt.quote)
+          && canonicalMint(mintOf(q._w)) === canonicalMint(mintOf(q._tw));
+        return swapClaim(q._tw, mq.quote, paidHere).then(function (ok) {
           if (!ok) { q.state = 'pending'; return result('pending', spent, fee); }
           q.state = 'done';
           stage('done');
@@ -631,7 +637,7 @@
        * done: either is dropped here, or it said "pending with the mint" for
        * good. A swap this page started is left to finish itself. */
       var held = {};
-      load(K.melting, []).forEach(function (e) { if (e && e.quote) held[e.quote] = true; });
+      load(K.melting, []).forEach(function (e) { if (e && e.quote) held[e.quote] = sumProofs(e.proofs || []) || true; });
       var all = unitSwaps();
       var live = all.filter(function (r) {
         if (swapsGone[r.id]) return true;
@@ -640,7 +646,12 @@
       });
       all.forEach(function (r) { if (live.indexOf(r) < 0) dropUnitSwap(r.id); });
       return live.map(function (r) {
-        return { id: r.id, at: Number(r.at) || 0, from: { unit: recordUnit({ unit: r.from }), amount: Number(r.total) || 0 },
+        /* What is out of the pile for it: its need, or everything its melt
+         * was paid with while that is held, which is more when the melt was
+         * paid over its need with the rest to come back as change. So the
+         * pile and the pill always add up to what there was. */
+        var out = Math.max(Number(r.total) || 0, (r.meltQuote && typeof held[r.meltQuote] === 'number') ? held[r.meltQuote] : 0);
+        return { id: r.id, at: Number(r.at) || 0, from: { unit: recordUnit({ unit: r.from }), amount: out },
                  to: { unit: recordUnit({ unit: r.to }), amount: Number(r.get) || 0 } };
       });
     },

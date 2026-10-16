@@ -129,6 +129,7 @@
     onchain: 'foxy.cashu.onchain',        // addresses to be paid into this wallet (NUT-30), and what has been issued
     onchainOut: 'foxy.cashu.onchain.out', // payments handed to the mint to broadcast, until they confirm
     reserves: 'foxy.cashu.reserves',      // what each mint held back as a routing reserve last time
+    meltShort: 'foxy.cashu.melt.short',   // mints that once kept part of a melt's change: paid only the need there
     mintCache: 'foxy.cashu.mint.cache',   // each mint's keysets and info, so a phone with no route can still hold a wallet
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
     line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw

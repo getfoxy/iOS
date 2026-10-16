@@ -455,13 +455,22 @@ function fakeMint(w, opts) {
     });
     return true;
   }
+  /* What a melt's routing cost: 2 of the reserve. With o.internalFree, an
+   * invoice of this mint's own costs nothing, as Nutshell and CDK settle one
+   * inside the melt with no route and hand the whole reserve back. */
+  function routingFee(q, target) {
+    if (o.internalFree && target) return 0;
+    return Math.min(2, q.fee_reserve);
+  }
   /* The change a melt hands back: the largest denominations that fit, signed
-   * into as many of the wallet's blanks as there are (NUT-08). A wallet that
-   * sends fewer blanks than the change needs forfeits the rest, which is the
+   * into as many of the wallet's blanks as there are (NUT-08), largest first
+   * as Nutshell and CDK fill them. A wallet that sends fewer blanks than the
+   * change needs forfeits the rest, the smallest pieces of it, which is the
    * mint's own behaviour and shows up in its books as a sat it kept. */
   function changeFor(outs, back) {
     const amounts = [];
     for (let bit = 1; back > 0; bit *= 2) if (back & bit) { amounts.push(bit); back -= bit; }
+    amounts.reverse();
     const use = (outs || []).slice(0, amounts.length);
     return sign(use, amounts.slice(0, use.length));
   }
@@ -535,7 +544,10 @@ function fakeMint(w, opts) {
        * too: Foxy leaves the lock off a request such a mint would refuse. */
       if (o.p2pk) { nuts[10] = { supported: true }; nuts[11] = { supported: true }; }
       // a cap on inputs/outputs per request (NUT-06 max_array_length), when a test wants one
-      const info = { name: 'fake mint', pubkey: pubs['1'], version: 'fake/1', nuts: nuts };
+      // what the mint says it runs (NUT-06), when a test needs it to be a named implementation
+      const info = { name: 'fake mint', pubkey: pubs['1'], version: o.version || 'fake/1', nuts: nuts };
+      // a mint that does not hand back a melt's change (NUT-08), when a test wants one
+      if (o.noNut8) delete nuts[8];
       if (o.maxArray > 0) info.max_array_length = o.maxArray;
       return ok(info);
     }
@@ -708,7 +720,7 @@ function fakeMint(w, opts) {
       // the paying of the invoice: one of this mint's own, in either unit, is now paid
       const target = byInvoice[q.request];
       if (target && quotes[target] && quotes[target].state === 'UNPAID') quotes[target].state = 'PAID';
-      const sigs = changeFor(body.outputs, paidIn - q.amount - Math.min(2, q.fee_reserve));
+      const sigs = changeFor(body.outputs, paidIn - q.amount - routingFee(q, target));
       change.push(...sigs);
       Object.assign(q, { state: 'PAID', payment_preimage: o.preimage === undefined ? '00'.repeat(32) : o.preimage, change: sigs });
       if (dropNext === 'melt') { dropNext = ''; return '504\n{"detail":"the answer was lost on the way back"}'; }
@@ -824,7 +836,7 @@ function fakeMint(w, opts) {
       if (how === 'failed') { q.state = 'FAILED'; return true; }
       const target = byInvoice[q.request];
       if (target && quotes[target] && quotes[target].state === 'UNPAID') quotes[target].state = 'PAID';
-      const sigs = changeFor(held.outputs, held.inputs - q.amount - Math.min(2, q.fee_reserve));
+      const sigs = changeFor(held.outputs, held.inputs - q.amount - routingFee(q, target));
       change.push(...sigs);
       Object.assign(q, { state: 'PAID', payment_preimage: '00'.repeat(32), change: sigs });
       return true;
