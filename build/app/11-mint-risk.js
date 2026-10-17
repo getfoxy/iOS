@@ -91,7 +91,7 @@
     let rec = null;
     try { rec = JSON.parse(localStorage.getItem(this.SPREAD_KEY) || 'null'); } catch (e) {}
     const host = this.mintHost();
-    const sats = this.mintPile(W.mintUrl).sats;
+    const sats = this.mintPile(W.sourceId()).sats;
     // never over or ahead of something more pressing: another card, the PIN, the price card
     const busy = !!(this._blockedEl || (this._cardQueue || []).length || this._pinEl
       || (this._priceBar && this._priceBar.style.display !== 'none'));

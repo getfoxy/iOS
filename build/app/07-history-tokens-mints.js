@@ -1336,7 +1336,7 @@
      * the next WesternBTC token switch the wallet there and claim it, with no
      * say. Moving it home is the main choice; keeping it
      * at its own mint is asked for, never assumed. */
-    if (mint === String(W.mintUrl || '').replace(/\/+$/, '')) return false;
+    if (mint === String(W.sourceId() || '').replace(/\/+$/, '')) return false;
 
     /* No route, and ecash from a mint this phone is not on. Nothing about it
      * can be checked and it cannot be brought home, so it is refused at once

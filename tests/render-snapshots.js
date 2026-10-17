@@ -125,6 +125,7 @@ function wallet(over) {
   return Object.assign({
     connected: true,
     mintUrl: MINT,
+    sourceId: () => MINT,
     mintHost: () => 'mint.minibits.cash/Bitcoin',
     mints: () => [MINT, OTHER],
     qr: (text, o) => 'data:image/svg+xml;stub,' + encodeURIComponent(String(text).slice(0, 24)) + (o && o.ecc ? ';ecc=' + o.ecc : ''),

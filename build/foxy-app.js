@@ -1853,7 +1853,7 @@ class Component extends DCLogic {
     if (this._catchUpConnect) return;
     if (p.network === 'none') return;
     this._catchUpConnect = true;
-    const url = W.mintUrl;
+    const url = W.sourceId();
     console.log('[foxy] a route is up and this wallet came from storage \u2014 connecting to', url, 'for real');
     /* Behind whatever the person is doing. This went through `retryConnect`,
      * whose `walletReady` puts the home screen up and empties the back stack:
@@ -3506,7 +3506,7 @@ class Component extends DCLogic {
      * the next WesternBTC token switch the wallet there and claim it, with no
      * say. Moving it home is the main choice; keeping it
      * at its own mint is asked for, never assumed. */
-    if (mint === String(W.mintUrl || '').replace(/\/+$/, '')) return false;
+    if (mint === String(W.sourceId() || '').replace(/\/+$/, '')) return false;
 
     /* No route, and ecash from a mint this phone is not on. Nothing about it
      * can be checked and it cannot be brought home, so it is refused at once
@@ -4452,7 +4452,7 @@ class Component extends DCLogic {
      * ellipsis those words end with is dropped rather than shown twice. */
     const title = String(label || 'Verifying ecash').replace(/[\u2026.]+\s*$/, '');
     const sats = Number(opts.sats) > 0 ? this.group(Math.round(opts.sats)) : '';
-    const mintName = String(opts.mint || (this.mintNameOf && this.mintNameOf(W && W.mintUrl)) || '');
+    const mintName = String(opts.mint || (this.mintNameOf && this.mintNameOf(W && W.sourceId())) || '');
     const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     root.innerHTML = this.loaderVerifying()
       .replace('{{TITLE}}', esc(title))
@@ -4793,7 +4793,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const info = (W && W.tokenInfo) ? W.tokenInfo(text) : null;
     const strip = u => String(u || '').replace(/\/+$/, '');
-    if (!info || !info.mint || strip(info.mint) === strip(W.mintUrl)) return false;
+    if (!info || !info.mint || strip(info.mint) === strip(W.sourceId())) return false;
     return this.refuseSwitchWhileBusy();
   }
 
@@ -6900,7 +6900,7 @@ class Component extends DCLogic {
     let rec = null;
     try { rec = JSON.parse(localStorage.getItem(this.SPREAD_KEY) || 'null'); } catch (e) {}
     const host = this.mintHost();
-    const sats = this.mintPile(W.mintUrl).sats;
+    const sats = this.mintPile(W.sourceId()).sats;
     // never over or ahead of something more pressing: another card, the PIN, the price card
     const busy = !!(this._blockedEl || (this._cardQueue || []).length || this._pinEl
       || (this._priceBar && this._priceBar.style.display !== 'none'));
@@ -6969,7 +6969,7 @@ class Component extends DCLogic {
     if (!W || !W.paymentRequest) return '';
     const why = purpose || 'receive';
     const cents = Math.round(Number(usdCents) || 0);
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + cents;
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + why + '|$' + cents;
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.making) return '';
@@ -7044,7 +7044,7 @@ class Component extends DCLogic {
     const now = this.railRequest(sats, purpose, usdCents);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
       + '|$' + Math.round(Number(usdCents) || 0);
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
@@ -7074,7 +7074,7 @@ class Component extends DCLogic {
     if (!W || !W.paymentRequest) return '';
     const n = Math.max(0, Math.round(Number(sats) || 0));
     // a share of a split names itself, which is how `forgetRequests` tells them apart
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '');
+    const key = 'tap|' + W.sourceId() + '|' + n + (purpose ? '|' + purpose + '|' : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
@@ -7095,7 +7095,7 @@ class Component extends DCLogic {
   railRequestPending(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return false;
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
       + '|$' + Math.round(Number(usdCents) || 0);
     const have = (this._creqs || {})[key];
     return !!(have && have.making);
@@ -9371,7 +9371,7 @@ class Component extends DCLogic {
       // One mint at a time: a balance belongs to a mint, so its history should
       // too. Entries written before mints were recorded carry none, and show
       // everywhere rather than vanishing.
-      const here = String(W.mintUrl || '').replace(/\/+$/, '');
+      const here = String(W.sourceId() || '').replace(/\/+$/, '');
       const list = all.filter(x => !x.mint || x.mint === here);
 
       // history already showing money in counts, so the prompt survives a
@@ -10001,7 +10001,7 @@ class Component extends DCLogic {
       const t = String(text || '').trim();
       if (W.classify(t) !== 'token') { this.toast('That QR is not a Cashu token.', true); return; }
       const info = W.tokenInfo(t);
-      const here = String(W.mintUrl || '').replace(/\/+$/, '');
+      const here = String(W.sourceId() || '').replace(/\/+$/, '');
       if (!info || String(info.mint || '').replace(/\/+$/, '') !== here) {
         this.toast('That token is from ' + this.mintNameOf(info && info.mint) + '. Ask for one from '
           + this.mintName() + ', or for the invoice to be paid.', true);
@@ -14802,8 +14802,8 @@ class Component extends DCLogic {
   /* What this mint does on chain, kept in state so the screens can ask. */
   onchainAsk() {
     const W = window.FoxyWallet;
-    if (!W || !W.onchainLimits || this._ocAsked === W.mintUrl) return;
-    this._ocAsked = W.mintUrl;
+    if (!W || !W.onchainLimits || this._ocAsked === W.sourceId()) return;
+    this._ocAsked = W.sourceId();
     W.onchainLimits().then(limits => this.setState({ ocLimits: limits || null }), () => {});
   }
 
@@ -14819,7 +14819,7 @@ class Component extends DCLogic {
   ocReceiveAddress() {
     const W = window.FoxyWallet;
     if (!W || !W.onchainAddress) return '';
-    if (this._ocAddr && this._ocAddr.mint === W.mintUrl) return this._ocAddr.address;
+    if (this._ocAddr && this._ocAddr.mint === W.sourceId()) return this._ocAddr.address;
     if (this._ocMaking) return '';
     this._ocMaking = true;
     W.onchainAddress().then(made => {

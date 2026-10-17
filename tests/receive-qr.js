@@ -48,6 +48,7 @@ function screen(state, opts) {
   global.window = {
     FoxyWallet: {
       mintUrl: 'https://mint.test',
+      sourceId: () => 'https://mint.test',
       amountOf: (inv) => (inv === 'lnbc10' ? 10 : inv === 'lnbc750' ? 750 : 0),
       paymentRequest: (sats, opt) => {
         const cents = Math.round(Number(opt && opt.usd) || 0);

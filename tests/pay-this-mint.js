@@ -266,7 +266,7 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
     // split: a payer's token for exactly their share, from this mint, marks them paid
     const rows = [{ hash: 'q-2', sats: 2100, paid: false }, { hash: 'q-3', sats: 900, paid: false }];
     const mk = (over) => wallet(Object.assign({
-      mintUrl: 'https://mint.here', splitPending: () => ({ rows }),
+      mintUrl: 'https://mint.here', sourceId: () => 'https://mint.here', splitPending: () => ({ rows }),
       tokenInfo: () => ({ mint: 'https://mint.here', sats: 2100, unit: 'sat' }),
     }, over));
     const W = mk(), a = app(W, { screen: 'spPayer', spFromWaiting: true });
