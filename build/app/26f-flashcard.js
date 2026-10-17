@@ -2640,7 +2640,7 @@
   fcSetUpRun(pin, recoverable, unit) {
     const W = this.fcW();
     // (the unit only where one was chosen: a card set up at a mint with one balance is set up as every card was)
-    const how = Object.assign({ pin, recoverable, design: this.FC_SETUP_DESIGN }, unit ? { unit } : {});
+    const how = /** @type {any} */ (Object.assign({ pin, recoverable, design: this.FC_SETUP_DESIGN }, unit ? { unit } : {}));
     /* A card of 1.21 takes this phone as its owner only after about ten seconds of asking: each asking says Keep holding again. */
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {

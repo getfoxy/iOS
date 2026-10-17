@@ -2597,7 +2597,7 @@
     var wide = function (hex) { return CT.pointFromHex(String(hex)).toHex(false); };
     return (row.blind || []).reduce(function (chain, b) {
       return chain.then(function () {
-        var amount = satsOf(b.amount), short = cardShortId(b.id), hit = null;
+        var amount = satsOf(b.amount), short = cardShortId(b.id), hit = /** @type {any} */ (null);
         (openings || []).forEach(function (op) {
           if (!hit && op.B_ === String(b.B_).toLowerCase() && op.amount === amount && op.keyset === short) hit = op;
         });
