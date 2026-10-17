@@ -336,6 +336,8 @@
    * else connected the wallet, such as a mint switch. Set here, cleared when a
    * sweep really starts, and read when a route comes up (`_privacy`). */
   var quoteSweepHeld = false;
+  // the claim of payments that waited for a route, set when the route comes back in the same session (11-routing.js)
+  var claimOnReturnT = /** @type {any} */ (null);
 
   /* The same for `finishMove`: the launch, the resume and the app each ask,
    * and two walks would each claim the same quote. */
@@ -18342,8 +18344,12 @@
        * session): the payments that waited for a route are claimed now, a card's payment kept offline among them
        * (`claimUnclaimed`, which posts it). A connect does this itself, so a wallet built from storage is left to it.
        * Without this they waited for the next launch or return, and their entries spun all that while. */
+      // a route that goes again before the claim's moment leaves no timer behind
+      if (claimOnReturnT && !(privacy.tor === 'up' && routeOpen())) { clearTimeout(claimOnReturnT); claimOnReturnT = null; }
       if (!wasUp && privacy.tor === 'up' && wallet && !wallet.foxyFromCache) {
-        setTimeout(function () {
+        clearTimeout(claimOnReturnT);
+        claimOnReturnT = setTimeout(function () {
+          claimOnReturnT = null;
           if (!routeOpen()) return;
           Promise.resolve().then(function () { return FoxyWallet.claimUnclaimed(); }).then(null, function (e) {
             console.warn('[foxy] the payments waiting for a route, on its return:', e && e.message);

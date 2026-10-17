@@ -335,6 +335,8 @@
    * else connected the wallet, such as a mint switch. Set here, cleared when a
    * sweep really starts, and read when a route comes up (`_privacy`). */
   var quoteSweepHeld = false;
+  // the claim of payments that waited for a route, set when the route comes back in the same session (11-routing.js)
+  var claimOnReturnT = /** @type {any} */ (null);
 
   /* The same for `finishMove`: the launch, the resume and the app each ask,
    * and two walks would each claim the same quote. */
