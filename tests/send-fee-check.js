@@ -369,7 +369,7 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
  * (`syncSend`, `notOnlineCard`) runs on the real methods, with a route that
  * is coming and then is not. */
 const lifted = lift([
-  'startSend() {', 'startSendNow(to, o) {', 'toConfirm() {', 'toAmount() {', 'back() {',
+  'startSend() {', 'feeQuotesLeft() {', 'feeQuotesAgain() {', 'startSendNow(to, o) {', 'toConfirm() {', 'toAmount() {', 'back() {',
   'badSignatureCard(host, where, onClose) {', 'isBadSignatures(e) {',
   'typedSats() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'syncSend() {', 'notOnlineCard() {',
   'connecting() {', 'offlineNow() {', 'offlineInvoiceCard() {',

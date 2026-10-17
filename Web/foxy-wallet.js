@@ -512,28 +512,58 @@
    * Nor is a melt timed (`waitsOnLightning`): the mint holds it open while
    * the Lightning payment finds its way, which is how long Lightning took,
    * not how busy the mint is. A few payments would otherwise pace a mint
-   * that is not busy at all. */
+   * that is not busy at all.
+   *
+   * Each answer is kept with when it came, so the record also says whether
+   * the mint is up right now: a question that has said nothing for three
+   * seconds, at a mint that answered another in under two and a half within
+   * the last ten, is on a circuit that went nowhere, not waiting on the mint
+   * (`askAgainWait`, `first`). A launch asked a payment's two fee quotes on
+   * two fresh circuits; one answered in 2.3 seconds, and the other said
+   * nothing until it was asked again at five. */
   var ANSWER_TIMES_KEPT = 8;
   var ANSWER_TIMES_LEAST = 3;
+  var ASK_AGAIN_LEAST_MS = 5000;
   var ASK_AGAIN_MOST_MS = 20000;
-  var answerTimes = {};
+  var QUICK_ANSWER_MS = 2500;
+  var QUICK_WITHIN_MS = 10000;
+  var QUICK_AGAIN_MS = 3000;
+  var answerTimes = /** @type {Object<string, { ms: number, at: number }[]>} */ ({});
   function noteAnswerTime(u, ms) {
     var k = busyKey(u), t = Number(ms);
     if (!k || !isFinite(t) || t < 0) return;
     var list = answerTimes[k] || (answerTimes[k] = []);
-    list.push(t);
+    list.push({ ms: t, at: Date.now() });
     if (list.length > ANSWER_TIMES_KEPT) list.splice(0, list.length - ANSWER_TIMES_KEPT);
+  }
+  /* Whether `u`'s mint answered something in under two and a half seconds
+   * within the last ten. */
+  function answeredQuickly(u) {
+    var now = Date.now();
+    return (answerTimes[busyKey(u)] || []).some(function (a) {
+      return a.ms < QUICK_ANSWER_MS && now - a.at <= QUICK_WITHIN_MS;
+    });
   }
   /* The wait before asking `u`'s mint again: twice its middle answer time,
    * between `least` (five seconds unless said) and twenty seconds; `least`
-   * itself until the mint has answered three times. */
-  function askAgainWait(u, least) {
-    var floor = Number(least) > 0 ? Number(least) : 5000;
-    var list = (answerTimes[busyKey(u)] || []).slice().sort(function (a, b) { return a - b; });
-    if (list.length < ANSWER_TIMES_LEAST) return floor;
-    var n = list.length;
-    var middle = n % 2 ? list[(n - 1) / 2] : (list[n / 2 - 1] + list[n / 2]) / 2;
-    return Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
+   * itself until the mint has answered three times.
+   *
+   * `first`: the wait before the first asking again, which is three seconds
+   * where the mint is known to be up (`answeredQuickly`) and the wait would
+   * otherwise be the floor. Not at a mint whose own answers are slow, whose
+   * longer wait stands, nor at one that has just turned requests away as too
+   * many (`mintBusy`): asking it sooner is only more of what it refused. */
+  function askAgainWait(u, least, first) {
+    var floor = Number(least) > 0 ? Number(least) : ASK_AGAIN_LEAST_MS;
+    var list = (answerTimes[busyKey(u)] || []).map(function (a) { return a.ms; }).sort(function (a, b) { return a - b; });
+    var wait = floor;
+    if (list.length >= ANSWER_TIMES_LEAST) {
+      var n = list.length;
+      var middle = n % 2 ? list[(n - 1) / 2] : (list[n / 2 - 1] + list[n / 2]) / 2;
+      wait = Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
+    }
+    if (first && wait === floor && floor > QUICK_AGAIN_MS && !mintBusy(u) && answeredQuickly(u)) return QUICK_AGAIN_MS;
+    return wait;
   }
 
   /* A test mint's request mark: sixteen random hex characters, new for every
@@ -901,6 +931,15 @@
    * before the caller gives up. `FoxyWallet._askAgainMs` and `_askAgainMost`
    * set the wait and the count outright, for the tests.
    *
+   * The first asking again can come sooner, at three seconds, where the mint
+   * is known to be up (`askAgainWait`, `first`). That is looked at when the
+   * three seconds are over, not when the question leaves: in those seconds
+   * an answer to another question, the other balance's fee quote say, is
+   * what shows the mint answering while this circuit is not. Not up, and the
+   * asking waits out the rest of the usual wait. The askings after it keep
+   * their pace, and their number is what it was: the first only comes
+   * sooner.
+   *
    * An answer from any of them is the answer, and says which circuit gave it
    * (`w`), so what follows goes by the road that answered. A failure ends it
    * at once while only one has been asked, as it always did; once more have,
@@ -913,16 +952,21 @@
    * a mint's, a Lightning address's lookup (`lookupLnurl`), has no wallet
    * view to put on a circuit, and no mint to pace it by: it passes a maker of
    * fresh circuit labels (`newCircuitLabel`) for the request to carry, and is
-   * asked again every five seconds. */
+   * asked again every five seconds. An `another()` that gives nothing ends
+   * the asking again there: a fee quote whose asker has stopped listening
+   * (`quoteFee`, `opts.stop`). */
   function askedAgain(w, what, ask, another, within) {
     return new Promise(function (ok, no) {
       var settled = false, asked = 0, failed = 0, again = null;
       var began = Date.now();
       var allowed = Number(within) > 0 ? Number(within) : 30000;
       var at = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
-      var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : askAgainWait(at || '');
+      var set = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 0;
+      var ms = set || askAgainWait(at || '');
       var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
       most = Math.max(1, Math.min(most, Math.floor(allowed / ms) - 1));
+      // the first asking may come sooner: at a mint, whose wait is the five-second floor, with no wait set outright
+      var sooner = !set && !!at && ms === ASK_AGAIN_LEAST_MS;
       var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
       var stop = function () { settled = true; clearTimeout(again); again = null; };
       var yes = function (via) {
@@ -937,23 +981,28 @@
         asked += 1;
         Promise.resolve().then(function () { return ask(via); }).then(yes(via), bad);
       };
-      var askAgainLater = function () {
+      /* The next asking, `wait` from now. `early`, for the first only: looked
+       * at three seconds in, and asked then if the mint is up, or at the end
+       * of `wait` if not. */
+      var askAgainLater = function (wait, early) {
         again = null;
+        var look = early ? QUICK_AGAIN_MS : wait;
         // every extra circuit asked, or the next would go when the caller has given up: no timer at all
-        if (settled || asked > most || Date.now() - began + ms >= allowed) return;
+        if (settled || asked > most || Date.now() - began + look >= allowed) return;
         again = setTimeout(function () {
           again = null;
           if (settled) return;
+          if (early && askAgainWait(at, 0, true) !== QUICK_AGAIN_MS) { askAgainLater(wait - QUICK_AGAIN_MS); return; }
           var other;
           try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round((Date.now() - began) / 1000) + 's; asking again on another circuit');
           send(other);
-          askAgainLater();
-        }, ms);
+          askAgainLater(ms);
+        }, look);
       };
       send(w);
-      askAgainLater();
+      askAgainLater(ms, sooner);
     });
   }
 
@@ -1492,6 +1541,17 @@
   function rememberKeyBody(url, raw) {
     if (typeof raw !== 'string' || !raw) return;
     keyBodies[url] = { at: Date.now(), raw: raw };
+  }
+
+  /* The answer a GET of `url` was given on `circuit`, kept as well where a
+   * read with no circuit of its own looks, for the rest of its time. For a
+   * connect's keysets and keys (`loadMintOnOne`), which went with no circuit
+   * of their own until they shared the connect's, and which the next
+   * connect, and the reads of the mint's keys after it, found here. */
+  function shareKeyBody(url, circuit) {
+    var from = keyBodies[cacheableKeyUrl('GET', url, circuit)];
+    var to = cacheableKeyUrl('GET', url, '');
+    if (from && to) keyBodies[to] = { at: from.at, raw: from.raw };
   }
 
   /* Everything remembered about one mint, dropped. For a keyset error, where
@@ -3894,6 +3954,47 @@
   function sameCircuit(from, w) {
     var label = from && from.foxyCircuit;
     return label && w ? onLabel(w, label) : w;
+  }
+
+  /* A connect's first load of its new wallet (cashu-ts `loadMint`: the mint's
+   * info, its keysets and its keys), on one circuit between the three.
+   *
+   * They are public, the same for anybody who asks, and carry nothing of this
+   * phone's: no proof, no output, no quote. They went on three circuits, the
+   * info on the connect's view and the key chain's two unlabelled, which the
+   * phone gives one each. A launch with a payment pasted in its first seconds
+   * then had Tor build them beside the payment's two fee quotes, six at once
+   * on a guard that had just come up, and one quote's circuit went nowhere. So
+   * the three share one label, made for this load and nothing else: the next
+   * connect makes another, and every job after the connect has its own
+   * circuit as before. They still go side by side.
+   *
+   * cashu-ts's key chain asks the wallet's own mint, not the view `onLabel`
+   * makes, so the mint's own requests carry the label for the length of this
+   * load, and go back to carrying none when it is over. The wallet is the
+   * connect's new one, which nothing else holds yet.
+   *
+   * The keysets and keys are remembered where they were before, as answers
+   * to a read with no circuit (`shareKeyBody`): a connect within five minutes
+   * of the last one, a visit or a retry, takes them from there as it did and
+   * asks only for the info, and so do the later reads of the mint's keys. */
+  var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
+  function loadMintOnOne(w) {
+    var mint = w && w.mint;
+    if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
+    var label = newCircuitLabel();
+    mint._request = function (o) {
+      var u = String((o && o.endpoint) || '');
+      var shared = KEY_CHAIN_READ.test(u.split('?')[0]) ? cacheableKeyUrl(o.method, u, '') : '';
+      if (shared && cachedKeyBody(shared) !== null) return FoxyWallet.nativeRequest(o);
+      return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
+        if (shared) shareKeyBody(u, label);
+        return r;
+      });
+    };
+    var done = function () { mint._request = FoxyWallet.nativeRequest; };
+    return Promise.resolve().then(function () { return w.loadMint(); })
+      .then(function (r) { done(); return r; }, function (e) { done(); throw e; });
   }
 
   function onLabel(w, label) {
@@ -18390,10 +18491,11 @@
        *
        * 30 seconds rather than the 20 used elsewhere: loadMint over Tor is
        * genuinely slow, and a deadline that fires on a working mint is worse
-       * than no deadline at all. */
+       * than no deadline at all. Its three public reads go on one circuit
+       * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(onCircuit(w).loadMint(), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w), 30000, hostOf(u));
       return ready.then(function () {
         wallet = w;
         mintUrl = u;
@@ -23027,12 +23129,32 @@
     /* A Lightning invoice quoted from both balances at once, { sat, usd },
      * each what `quoteFee` answers or null. Melt quotes commit to nothing, so
      * the confirmation asks both and can switch to the balance that covers
-     * the payment. At a one-unit mint `usd` is null and nothing is asked. */
-    quoteFeeBoth: function (bolt11) {
+     * the payment. At a one-unit mint `usd` is null and nothing is asked.
+     *
+     * `onEach(unit, quote)`, when given, is told each one as it lands, not
+     * when both have: the confirmation lets its button go on the balance that
+     * pays as soon as that one's quote is in, and does not wait on the
+     * circuit carrying the other (03-send.js, `feeQuoteIn`). What this
+     * resolves with is the same either way.
+     *
+     * `stop()`, when given, says the confirmation has stopped asking (PAY
+     * pressed on the other's quote, or another question begun): a quote not
+     * in by then is asked no more on fresh circuits (`quoteFee`, `opts.stop`),
+     * which would only be built beside the payment for an answer nobody
+     * reads. */
+    quoteFeeBoth: function (bolt11, onEach, stop) {
       var two = FoxyWallet.twoUnits();
+      var told = function (unit) {
+        return function (q) {
+          if (typeof onEach === 'function') {
+            try { onEach(unit, q); } catch (e) { console.warn('[foxy] a fee quote could not be handed on as it came:', e && e.message); }
+          }
+          return q;
+        };
+      };
       return Promise.all([
-        FoxyWallet.quoteFee(bolt11, { unit: 'sat' }),
-        two ? FoxyWallet.quoteFee(bolt11, { unit: 'usd' }) : Promise.resolve(null),
+        FoxyWallet.quoteFee(bolt11, { unit: 'sat', stop: stop }).then(told('sat')),
+        (two ? FoxyWallet.quoteFee(bolt11, { unit: 'usd', stop: stop }) : Promise.resolve(null)).then(told('usd')),
       ]).then(function (both) { return { sat: both[0], usd: both[1] }; });
     },
 
@@ -30792,11 +30914,16 @@
       var inv = String(bolt11);
       var msat = 0;
       try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e) { msat = 0; }
+      /* `opts.stop()`: whoever asked has stopped listening (the confirmation,
+       * PAY pressed on the other balance's quote). No more circuits are
+       * built for this one then; the asking already out runs its course. */
+      var stop = opts && typeof opts.stop === 'function' ? opts.stop : null;
       return unitWalletOn(viewNow(wallet), unit).then(function (w) {
+        var another = function () { return (stop && stop()) ? null : onCircuit(w); };
         // asked again on another circuit after five seconds of nothing, longer at a slow mint (`askedAgain`), inside the twenty allowed
         return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
           return via.createMeltQuoteBolt11(String(bolt11));
-        }, null, 20000), 20000, 'the mint\u2019s fee quote');
+        }, another, 20000), 20000, 'the mint\u2019s fee quote');
       })
         .then(function (won) {
           var q = won.got;
@@ -31149,9 +31276,9 @@
     warmMint: function () { return warmSpare(); },
     /* For the tests: a mint host's recent answer times, newest last, and the
      * wait before asking it again (`askAgainWait`; `least` as statesOf's six
-     * seconds). */
-    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).slice(); },
-    _askAgainWait: function (u, least) { return askAgainWait(u, least); },
+     * seconds, `first` for the first asking again). */
+    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).map(function (a) { return a.ms; }); },
+    _askAgainWait: function (u, least, first) { return askAgainWait(u, least, first); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 

@@ -173,15 +173,19 @@
      * stated confidently is worse than UNKNOWN. */
     /* At a mint with two balances both are quoted, in parallel (a melt
      * quote is free), so the confirmation can say what each would cost and
-     * pay from the one that covers it (`autoWallet`). From a card, the one
-     * quote, in what the card holds (`cardSendNow`): a dollar card's in dollars. */
+     * pay from the one that covers it (`autoWallet`). Each is taken as it
+     * lands (`feeQuoteIn`), so the button waits on the balance that pays and
+     * not on the other. From a card, the one quote, in what the card holds
+     * (`cardSendNow`): a dollar card's in dollars. */
     const cardOut = !!(this.cardSendNow && this.cardSendNow());
     const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
     const cardUnit = (cardOut && this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : '';
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
-      if (two) this._feeQuotes = null;
+      // a question of two balances, and what was dropped of one, belongs to that question alone (a card's, say, has neither)
+      this._feeQuotes = null;
+      this._feeDropped = null;
       this.setState(Object.assign({ quotedFee: null, quotedAmt: null, sendFee: null }, two ? { feeQ: null } : {}, more));
     };
     if (!ask) {
@@ -200,12 +204,16 @@
     const run = this._askRun = (this._askRun || 0) + 1;
     const stale = () => run !== this._askRun;
     clear({ quotingFee: true });
+    // which balances' quotes have landed for this question: none yet (`feeQuoteIn`, `feeWaits`)
+    if (two) this._feeQuotes = {};
     // not called on this turn: a wallet that refuses at once (no route after all) must not throw out of an update
     Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv })).then(found => {
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
-      return two ? W.quoteFeeBoth(found.pr) : cardUnit ? W.quoteFee(found.pr, { unit: cardUnit }) : W.quoteFee(found.pr);
+      // a quote not yet in when PAY is pressed is asked no more (`feeQuotesLeft`): `stale` stops its askings again
+      return two ? W.quoteFeeBoth(found.pr, (unit, q) => stale() || this.feeQuoteIn(unit, q), stale)
+        : cardUnit ? W.quoteFee(found.pr, { unit: cardUnit }) : W.quoteFee(found.pr);
     }).then(q => {
       if (stale()) return;
       if (two) { this.feeQuotesIn(q || {}); return; }
@@ -216,23 +224,128 @@
       if (stale()) return;
       console.warn('[foxy] the send confirmation could not ask what the payment costs:', W.reason ? W.reason(e) : e);
       this.setState({ quotingFee: false });
+      // and no balance is left waiting on a quote that will not come
+      if (two) this.feeQuotesIn({});
     });
   }
 
-  /* Both balances' quotes for this payment, kept: whole for SEND (`pay`
-   * reuses the quote of the balance that pays), and in state without the
-   * wallet object for the screen (`feeQ`). The sat one is also what the
-   * confirmation's sat sums read, as at a mint with one balance. Then the
-   * balance that pays is switched if the remembered one cannot cover it. */
+  /* Both balances' quotes for this payment, once both are in: what a wallet
+   * that does not tell them one at a time says, and the last word of one that
+   * does. Each is taken as if it had just landed (`feeQuoteIn`), and one
+   * taken already is not taken twice. */
   feeQuotesIn(both) {
-    const slim = (q, unit) => (q ? { unit: q.unit || unit, amount: q.amount, feeReserve: q.feeReserve,
-      rate: q.rate || null, bolt11: q.bolt11 || '' } : null);
-    this._feeQuotes = { sat: both.sat || null, usd: both.usd || null };
-    const sat = both.sat || null;
-    this._feeQuote = sat && sat.quote ? sat : null;
-    this.setState({ quotingFee: false, quotedFee: sat ? sat.feeReserve : null, quotedAmt: sat ? sat.amount : null,
-      feeQ: { sat: slim(both.sat, 'sat'), usd: slim(both.usd, 'usd') } });
-    this.autoWallet(u => this.quoteFits(u));
+    const b = both || {};
+    this.feeQuoteIn('sat', b.sat);
+    this.feeQuoteIn('usd', b.usd);
+  }
+
+  /* One balance's quote for this payment, as it lands (`quoteFeeBoth`): kept
+   * whole for SEND (`pay` reuses the quote of the balance that pays), and in
+   * state without the wallet object for the screen (`feeQ`). The sat one is
+   * also what the confirmation's sat sums read, as at a mint with one
+   * balance. `q` is null where the mint gave none; a balance whose quote has
+   * not landed has none kept at all (undefined).
+   *
+   * The button waits on the balance that pays, not on both. A launch asked
+   * the two quotes on two fresh circuits; the sats one answered in two
+   * seconds and the dollars one in nearly nine, and SEND waited on dollars
+   * nobody had chosen. So CHECKING lets go as soon as the balance that pays
+   * has a quote it covers (`feeWaits`), and the other's fills in behind it
+   * for WALLET's picker, taking nothing away. Only when the balance that pays
+   * cannot cover it is the other's waited for, and then the payment is
+   * switched to the other where that one covers it (`autoWallet`), as it was
+   * when both were waited for. A balance the mint gave no quote for is not
+   * switched away from, as before: its fee reads UNKNOWN, and a quote that
+   * did not come (a circuit that went nowhere for twenty seconds) says
+   * nothing about what the balance holds. */
+  feeQuoteIn(unit, q) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const kept = this._feeQuotes || {};
+    if (kept[u] !== undefined) return;
+    this._feeQuotes = Object.assign({}, kept, { [u]: q || null });
+    const slim = q ? { unit: q.unit || u, amount: q.amount, feeReserve: q.feeReserve, rate: q.rate || null, bolt11: q.bolt11 || '' } : null;
+    const patch = { feeQ: Object.assign({ sat: null, usd: null }, this.state.feeQ || {}, { [u]: slim }) };
+    if (u === 'sat') {
+      this._feeQuote = q && q.quote ? q : null;
+      Object.assign(patch, { quotedFee: q ? q.feeReserve : null, quotedAmt: q ? q.amount : null });
+    }
+    this.setState(patch);
+    // the button was let go already: this one is only for the picker
+    if (!this.state.quotingFee) return;
+    const pick = this.walletNow('send') || 'sat';
+    if (this.feeWaits(pick)) return;
+    this.setState({ quotingFee: false });
+    const all = this._feeQuotes;
+    // both in: the other pays where the balance on WALLET is short and the other covers it
+    if (all.sat !== undefined && all.usd !== undefined) this.autoWallet(x => this.quoteFits(x));
+  }
+
+  /* Whether CONFIRM PAYMENT still waits on a fee quote before `unit` can
+   * pay: its own quote not in yet, or in and short while the other balance's
+   * is still to come. Not where the mint gave it none: nothing switches on
+   * that (`feeQuoteIn`), so the other's is nothing to wait for. Nothing waits
+   * once both are in, or where no question of two balances is out. */
+  feeWaits(unit) {
+    const k = this._feeQuotes;
+    if (!k) return false;
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    if (k[u] === undefined) return true;
+    if (k[u] === null || this.quoteFits(u) !== false) return false;
+    return k[u === 'usd' ? 'sat' : 'usd'] === undefined;
+  }
+
+  /* PAY pressed, at a mint with two balances: the question is over. The
+   * other balance's quote, if it is still on its way, is dropped as it lands
+   * (an answer to an older question, `quoteSendFee`): never paid with, shown
+   * or kept for the next payment, and not asked again on another circuit
+   * beside the payment (`quoteFee`, `opts.stop`). It is marked as not given,
+   * so nothing waits on it while the payment goes, and remembered as dropped:
+   * a send that does not go brings the person back to the confirmation, and
+   * there it is asked again (`feeQuotesAgain`). Left as not given, WALLET
+   * would offer it as if it covered the payment, and PAY would pay it with no
+   * figure ever shown. */
+  feeQuotesLeft() {
+    const k = this._feeQuotes;
+    if (!k) return;
+    this._askRun = (this._askRun || 0) + 1;
+    const was = this._feeDropped || [];
+    this._feeDropped = ['sat', 'usd'].filter(u => k[u] === undefined || was.indexOf(u) >= 0);
+    this._feeQuotes = { sat: k.sat === undefined ? null : k.sat, usd: k.usd === undefined ? null : k.usd };
+  }
+
+  /* Back on CONFIRM PAYMENT after a send that did not go (`toConfirm`: no
+   * connection, Tor reconnecting, the mint refusing), with a balance whose
+   * quote was dropped at PAY (`feeQuotesLeft`): that balance is asked again,
+   * it alone. The quote that was paid with is kept, for TRY AGAIN. Until the
+   * new one is in, that balance waits (CHECKING) if it is picked, and WALLET
+   * greys it once it is in and short, as before PAY.
+   *
+   * Called on every update (`syncSend`), so it is asked once the
+   * confirmation is showing again and there is a route, and not before. A
+   * new question asks both itself (`quoteSendFee`): a payment to an address,
+   * whose invoice was for that one attempt, and one whose price moved. */
+  feeQuotesAgain() {
+    const left = this._feeDropped;
+    if (!left || !left.length) return;
+    const W = window.FoxyWallet;
+    const k = this._feeQuotes;
+    const ask = this.sendAsk();
+    if (this.state.screen !== 'sendConfirm' || !k || !ask || this._quotedFor !== ask.key) return;
+    if (!W || !W.quoteFee || this.connecting() || this.offlineNow()) return;
+    const found = this._found;
+    const inv = ask.inv || ((found && found.addr === ask.addr && found.sats === ask.sats) ? found.pr : '');
+    this._feeDropped = null;
+    if (!inv) return;
+    const run = this._askRun;
+    const stale = () => run !== this._askRun;
+    const kept = Object.assign({}, k);
+    left.forEach(u => { delete kept[u]; });
+    this._feeQuotes = kept;
+    console.log('[foxy] two balances: back on the confirmation, asking again for the ' + left.join(' and ') + ' quote dropped at PAY');
+    left.forEach(u => {
+      Promise.resolve().then(() => W.quoteFee(inv, { unit: u, stop: stale })).then(q => q, () => null)
+        .then(q => { if (!stale()) this.feeQuoteIn(u, q); });
+    });
   }
 
   /* The send confirmation, kept up with the route. Called on every update
@@ -269,6 +382,7 @@
       if (lightning && this.offlineNow()) this.notOnlineCard();
     }
     this.quoteSendFee();
+    this.feeQuotesAgain();
   }
 
   /* A payment that needs a connection, when there is none and none is coming:
@@ -319,6 +433,8 @@
 
   startSend() {
     const onchain = this.state.recipientKind === 'address';
+    // the quote the confirmation showed is the one paid with; any other still on its way is dropped
+    this.feeQuotesLeft();
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: onchain ? 'onchain' : 'in', etaLeft: 600 }));
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
     if (onchain) {

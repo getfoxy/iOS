@@ -19,11 +19,19 @@
  *   B. a mint that answers in about a second is asked once
  *   C. one that answers in about twelve is asked again no sooner than twenty
  *      seconds, and one that answers in about five no sooner than ten, twice
- *   D. one that never answers is still asked again at the five-second floor
+ *   D. one that never answers is still asked again at the five-second floor,
+ *      the first time at three where the mint has just answered quickly (H)
  *   E. a proof check's second ask keeps its six-second floor and stretches
  *      the same way
  *   F. no timer of askedAgain outlives its question: gone when the answer
  *      comes, and gone by the time the caller gives up
+ *   H. the first asking again comes at three seconds where the mint is known
+ *      to be up: it, not another mint, answered something in under two and a
+ *      half seconds within the last ten, looked at when the three seconds are
+ *      over. Five where it
+ *      has not, the longer wait at a slow mint, and five at a mint that has
+ *      just turned requests away; the askings after it keep their pace and
+ *      their number, inside the caller's allowance
  *
  * Real timers, the longest scenarios side by side: about forty seconds.
  */
@@ -38,12 +46,13 @@ const ok = (good, name, detail) => {
 };
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* A page with a mint behind the bridge. `c.delay(m, path, n)` is how long the
+/* A page with a mint behind the bridge (`mintOpts` go to fakeMint: its units,
+ * say). `c.delay(m, path, n)` is how long the
  * n-th request to that path waits before it is answered (0 unless said), or
  * 'hang' for one never answered; `c.say(m, path, n)` answers in place of the
  * mint ('<code>\n<body>'), or `{ err }` for a request that never got one.
  * Every request is written down with when it left. */
-function page() {
+function page(mintOpts) {
   const phone = nativePhone({ words: PHONE_WORDS });
   let ctx = null, mint = null;
   const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
@@ -54,7 +63,9 @@ function page() {
         const path = new URL(m.url).pathname;
         const what = m.method + ' ' + path.replace(/\/[0-9a-f-]{12,}$/i, '/:id');
         const n = (count[what] = (count[what] || 0) + 1);
-        ctx.asked.push({ what, host: new URL(m.url).host, circuit: String(m.circuit || ''), at: Date.now() - ctx.t0 });
+        let unit = '';
+        try { unit = m.body ? String(JSON.parse(m.body).unit || '') : ''; } catch (e) { unit = ''; }
+        ctx.asked.push({ what, unit, host: new URL(m.url).host, circuit: String(m.circuit || ''), at: Date.now() - ctx.t0 });
         const wait = ctx.delay ? ctx.delay(m, path, n) : 0;
         if (wait === 'hang') return;
         return setTimeout(() => {
@@ -67,7 +78,7 @@ function page() {
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
     },
-    before: (w) => { phone.attach(w); mint = fakeMint(w, { p2pk: true }); },
+    before: (w) => { phone.attach(w); mint = fakeMint(w, Object.assign({ p2pk: true }, mintOpts || {})); },
   });
   ctx.asked = [];
   ctx.t0 = Date.now();
@@ -100,8 +111,8 @@ const meltQuotes = (c) => c.asked.filter((x) => x.what === 'POST /v1/melt/quote/
 const checks = (c) => c.asked.filter((x) => x.what === 'POST /v1/checkstate');
 const since = (list, t) => list.map((x) => x.at - t);
 
-async function connectedPage() {
-  const c = page();
+async function connectedPage(mintOpts) {
+  const c = page(mintOpts);
   await c.W.connect(MINT, null, null, { remember: true });
   await pause(20);
   return c;
@@ -270,7 +281,11 @@ async function partC12() {
   const inv = await c.W.invoice(100, '').then((x) => x, (e) => ({ err: e.message }));
   ok(!inv.err && quotes(c).length === 1, 'C. its twelve-second quote is asked once: no second circuit added to its load', quotes(c).length + ' asked');
   ok(c.timers.live() === 0, 'F. and the timer is gone with the answer', c.timers.live() + ' set');
-  // the first asking never answers: the second goes no sooner than twenty seconds, and there is no third
+  // the first asking never answers: the second goes no sooner than twenty seconds, and there is no third,
+  // even with a quick answer just before (H): a slow mint's wait is its own
+  await c.W.nativeRequest({ endpoint: MINT + '/v1/info', method: 'GET', foxyFresh: true });
+  ok(c.W._askAgainWait(MINT, 0, true) === 20000, 'H. a slow mint keeps its longer wait for the first asking again, a quick answer just now or not',
+     String(c.W._askAgainWait(MINT, 0, true)));
   const t = Date.now() - c.t0;
   const before = quotes(c).length;
   c.delay = (m, path, n) => (path === '/v1/mint/quote/bolt11' ? (n === before + 1 ? 'hang' : 0) : 0);
@@ -298,15 +313,25 @@ async function partC5() {
 }
 
 async function partD() {
-  // a mint that never answers, with a record of quick answers: the floor, five askings, then nothing
+  /* A mint that never answers, whose connect answered quickly a moment ago:
+   * the first asking again at three seconds (H), the rest at the five-second
+   * floor after it, five askings in all, then nothing. */
   const c = await connectedPage();
+  ok(c.W._askAgainWait(MINT, 0, true) === 3000 && c.W._askAgainWait(MINT) === 5000,
+     'H. a mint that has just answered quickly: three seconds before the first asking again, five before the others',
+     c.W._askAgainWait(MINT, 0, true) + ' / ' + c.W._askAgainWait(MINT));
+  // what one mint said is nothing to another: a mint never asked is not known to be up
+  ok(c.W._askAgainWait('https://other.test', 0, true) === 5000,
+     'H. and another mint, which has answered nothing, keeps five for its first asking again', String(c.W._askAgainWait('https://other.test', 0, true)));
   const t = Date.now() - c.t0;
   c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
   c.W.invoice(100, '').then(() => {}, () => {});
   await pause(26000);
   const at = since(quotes(c), t);
-  ok(at.length === 5 && at[1] >= 4900 && at[1] < 6500 && at[4] >= 19900 && at[4] < 22000,
-     'D. a mint that never answers is still asked again at the five-second floor, five askings in all', JSON.stringify(at));
+  const gaps = at.slice(2).map((x, i) => x - at[i + 1]);
+  ok(at.length === 5 && at[1] >= 2900 && at[1] < 4500 && gaps.every((g) => g >= 4900 && g < 6500) && at[4] >= 17900 && at[4] < 20500,
+     'D. a mint that never answers is asked again at three seconds, its connect having just answered, then every five: five askings in all, the count the floor allows',
+     JSON.stringify(at));
   ok(c.timers.live() === 0, 'F. and after the fifth no timer is left', c.timers.live() + ' set');
 }
 
@@ -320,8 +345,8 @@ async function partD2() {
   const live = c.timers.live();
   const took = Date.now() - c.t0 - t;
   const at = since(meltQuotes(c), t);
-  ok(fee.x === null && took >= 19900 && at.length === 4 && at[3] >= 14900,
-     'D. a fee quote nobody answers is asked four times inside its twenty seconds, and is given up at twenty as it always was',
+  ok(fee.x === null && took >= 19900 && took < 21500 && at.length === 4 && at[1] >= 2900 && at[1] < 4500 && at[3] >= 12900 && at[3] < 15000,
+     'D. a fee quote nobody answers is asked four times inside its twenty seconds (the first again at three, at a mint just seen answering), and is given up at twenty as it always was',
      JSON.stringify(fee) + ' after ' + took + ' ms, asked at ' + JSON.stringify(at));
   ok(live === 0, 'F. when the caller gives up, no ask-again timer is left', live + ' set');
 }
@@ -378,13 +403,68 @@ async function partF() {
   ok(at.length === 2 && at[1] < 1000, 'F. FoxyWallet._askAgainMs, when set, wins over the record (for the tests)', JSON.stringify(at));
 }
 
+async function partH() {
+  /* Nothing heard from the mint in the last ten seconds: nothing says it is
+   * up, so a question whose circuit goes nowhere is asked again at five
+   * seconds, as it always was. Looked at three seconds in, and left. */
+  const quiet = async () => {
+    const c = await connectedPage();
+    await pause(10500);
+    ok(c.W._askAgainWait(MINT, 0, true) === 5000, 'H. nothing heard from a quick mint in the last ten seconds: five seconds before the first asking again',
+       String(c.W._askAgainWait(MINT, 0, true)));
+    const t = Date.now() - c.t0;
+    c.delay = (m, path, n) => (path === '/v1/mint/quote/bolt11' && n === 1 ? 'hang' : 0);
+    const inv = await c.W.invoice(100, '').then((x) => x, (e) => ({ err: e.message }));
+    const at = since(quotes(c), t);
+    ok(!inv.err && at.length === 2 && at[1] >= 4900 && at[1] < 6500, 'H. and its quote, on a circuit that went nowhere, is asked again at five', JSON.stringify(at));
+    ok(c.timers.live() === 0, 'F. the answer on the second circuit leaves no timer', c.timers.live() + ' set');
+  };
+  /* What a launch did: a payment's two fee quotes on two fresh circuits, the
+   * sats one answered in a second and a half and the dollars one stuck. The
+   * mint was not known to be up when they left (nothing heard for ten
+   * seconds), and it is by the time three seconds are over: the stuck one is
+   * asked again then, not at five. */
+  const twoQuotes = async () => {
+    const c = await connectedPage({ units: ['sat', 'usd'] });
+    await pause(10500);
+    const t = Date.now() - c.t0;
+    let usdAsked = 0;
+    c.delay = (m, path) => {
+      if (path !== '/v1/melt/quote/bolt11') return 0;
+      if (JSON.parse(m.body).unit === 'usd') { usdAsked += 1; return usdAsked === 1 ? 'hang' : 0; }
+      return 1500;
+    };
+    const landed = {};
+    const both = await c.W.quoteFeeBoth(INVOICE, (u) => { landed[u] = Date.now() - c.t0 - t; });
+    const usd = since(meltQuotes(c).filter((x) => x.unit === 'usd'), t);
+    ok(both.sat && both.usd && usd.length === 2 && usd[1] >= 2900 && usd[1] < 4500 && landed.sat >= 1400 && landed.sat < 2500 && landed.usd < 4500,
+       'H. the sats quote answers in a second and a half, so the stuck dollar quote is asked again at three seconds, not five',
+       JSON.stringify({ usd, landed }));
+  };
+  await Promise.all([quiet(), twoQuotes()]);
+}
+
+/* A mint that has just turned a request away as too many is not asked
+ * sooner, however quickly it has answered: that is more of what it refused. */
+async function partHBusy() {
+  const c = await connectedPage();
+  const quick = c.W._askAgainWait(MINT, 0, true);
+  let turned = 0;
+  c.say = () => (turned++ === 0 ? '429\n{"detail":"Rate limit exceeded."}' : null);
+  await c.W.nativeRequest({ endpoint: MINT + '/v1/info', method: 'GET', foxyFresh: true }).then(() => {}, () => {});
+  c.say = null;
+  ok(quick === 3000 && c.W._askAgainWait(MINT, 0, true) === 5000 && c.W._answerTimes(MINT).slice(-1)[0] < 2500,
+     'H. a mint that has just said 429 is not asked again sooner, though it then answered quickly', quick + ' then ' + c.W._askAgainWait(MINT, 0, true));
+}
+
 async function run() {
   const t = Date.now();
   // the quick parts one after another, the long ones side by side
   await partA();
   await partF();
-  await Promise.all([partB(), partC12(), partC5(), partD(), partD2(), partE(), partG()]);
-  const order = (l) => 'ABCDEFG'.indexOf(l.slice(6, 7));
+  await partHBusy();
+  await Promise.all([partB(), partC12(), partC5(), partD(), partD2(), partE(), partG(), partH()]);
+  const order = (l) => 'ABCDEFGH'.indexOf(l.slice(6, 7));
   lines.sort((a, b) => order(a) - order(b)).forEach((l) => console.log(l));
   console.log('(' + Math.round((Date.now() - t) / 1000) + ' s)');
   console.log(failed ? '\n' + failed + ' ask-again-pace check(s) failed' : '\nall ask-again-pace checks pass');

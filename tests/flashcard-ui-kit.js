@@ -52,7 +52,8 @@ const SEND_SIGS = {
                       'centsTyped() {'],
   // whether the keypad types a dollar balance's own amount, which a dollar card's flows do
   '23-render-home-and-amount.js': ['usdKeypad() {'],
-  '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'feeQuotesIn(both) {', 'syncSend() {',
+  '03-send.js': ['shortId(v) {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {', 'feeQuotesIn(both) {',
+                 'feeQuoteIn(unit, q) {', 'feeWaits(unit) {', 'feeQuotesLeft() {', 'feeQuotesAgain() {', 'syncSend() {',
                  'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'startSend() {', 'showPayPending() {', 'checkSendPrice() {', 'startSendNow(to, o) {'],
   '12-receive.js': ['acceptTarget(text) {', 'offlineInvoiceCard() {'],
   '15-paid-wake-keyboard.js': ['syncPreview() {', 'pasteUncovered(el, box) {'],

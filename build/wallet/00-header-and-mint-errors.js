@@ -511,28 +511,58 @@
    * Nor is a melt timed (`waitsOnLightning`): the mint holds it open while
    * the Lightning payment finds its way, which is how long Lightning took,
    * not how busy the mint is. A few payments would otherwise pace a mint
-   * that is not busy at all. */
+   * that is not busy at all.
+   *
+   * Each answer is kept with when it came, so the record also says whether
+   * the mint is up right now: a question that has said nothing for three
+   * seconds, at a mint that answered another in under two and a half within
+   * the last ten, is on a circuit that went nowhere, not waiting on the mint
+   * (`askAgainWait`, `first`). A launch asked a payment's two fee quotes on
+   * two fresh circuits; one answered in 2.3 seconds, and the other said
+   * nothing until it was asked again at five. */
   var ANSWER_TIMES_KEPT = 8;
   var ANSWER_TIMES_LEAST = 3;
+  var ASK_AGAIN_LEAST_MS = 5000;
   var ASK_AGAIN_MOST_MS = 20000;
-  var answerTimes = {};
+  var QUICK_ANSWER_MS = 2500;
+  var QUICK_WITHIN_MS = 10000;
+  var QUICK_AGAIN_MS = 3000;
+  var answerTimes = /** @type {Object<string, { ms: number, at: number }[]>} */ ({});
   function noteAnswerTime(u, ms) {
     var k = busyKey(u), t = Number(ms);
     if (!k || !isFinite(t) || t < 0) return;
     var list = answerTimes[k] || (answerTimes[k] = []);
-    list.push(t);
+    list.push({ ms: t, at: Date.now() });
     if (list.length > ANSWER_TIMES_KEPT) list.splice(0, list.length - ANSWER_TIMES_KEPT);
+  }
+  /* Whether `u`'s mint answered something in under two and a half seconds
+   * within the last ten. */
+  function answeredQuickly(u) {
+    var now = Date.now();
+    return (answerTimes[busyKey(u)] || []).some(function (a) {
+      return a.ms < QUICK_ANSWER_MS && now - a.at <= QUICK_WITHIN_MS;
+    });
   }
   /* The wait before asking `u`'s mint again: twice its middle answer time,
    * between `least` (five seconds unless said) and twenty seconds; `least`
-   * itself until the mint has answered three times. */
-  function askAgainWait(u, least) {
-    var floor = Number(least) > 0 ? Number(least) : 5000;
-    var list = (answerTimes[busyKey(u)] || []).slice().sort(function (a, b) { return a - b; });
-    if (list.length < ANSWER_TIMES_LEAST) return floor;
-    var n = list.length;
-    var middle = n % 2 ? list[(n - 1) / 2] : (list[n / 2 - 1] + list[n / 2]) / 2;
-    return Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
+   * itself until the mint has answered three times.
+   *
+   * `first`: the wait before the first asking again, which is three seconds
+   * where the mint is known to be up (`answeredQuickly`) and the wait would
+   * otherwise be the floor. Not at a mint whose own answers are slow, whose
+   * longer wait stands, nor at one that has just turned requests away as too
+   * many (`mintBusy`): asking it sooner is only more of what it refused. */
+  function askAgainWait(u, least, first) {
+    var floor = Number(least) > 0 ? Number(least) : ASK_AGAIN_LEAST_MS;
+    var list = (answerTimes[busyKey(u)] || []).map(function (a) { return a.ms; }).sort(function (a, b) { return a - b; });
+    var wait = floor;
+    if (list.length >= ANSWER_TIMES_LEAST) {
+      var n = list.length;
+      var middle = n % 2 ? list[(n - 1) / 2] : (list[n / 2 - 1] + list[n / 2]) / 2;
+      wait = Math.min(ASK_AGAIN_MOST_MS, Math.max(floor, Math.round(2 * middle)));
+    }
+    if (first && wait === floor && floor > QUICK_AGAIN_MS && !mintBusy(u) && answeredQuickly(u)) return QUICK_AGAIN_MS;
+    return wait;
   }
 
   /* A test mint's request mark: sixteen random hex characters, new for every
@@ -900,6 +930,15 @@
    * before the caller gives up. `FoxyWallet._askAgainMs` and `_askAgainMost`
    * set the wait and the count outright, for the tests.
    *
+   * The first asking again can come sooner, at three seconds, where the mint
+   * is known to be up (`askAgainWait`, `first`). That is looked at when the
+   * three seconds are over, not when the question leaves: in those seconds
+   * an answer to another question, the other balance's fee quote say, is
+   * what shows the mint answering while this circuit is not. Not up, and the
+   * asking waits out the rest of the usual wait. The askings after it keep
+   * their pace, and their number is what it was: the first only comes
+   * sooner.
+   *
    * An answer from any of them is the answer, and says which circuit gave it
    * (`w`), so what follows goes by the road that answered. A failure ends it
    * at once while only one has been asked, as it always did; once more have,
@@ -912,16 +951,21 @@
    * a mint's, a Lightning address's lookup (`lookupLnurl`), has no wallet
    * view to put on a circuit, and no mint to pace it by: it passes a maker of
    * fresh circuit labels (`newCircuitLabel`) for the request to carry, and is
-   * asked again every five seconds. */
+   * asked again every five seconds. An `another()` that gives nothing ends
+   * the asking again there: a fee quote whose asker has stopped listening
+   * (`quoteFee`, `opts.stop`). */
   function askedAgain(w, what, ask, another, within) {
     return new Promise(function (ok, no) {
       var settled = false, asked = 0, failed = 0, again = null;
       var began = Date.now();
       var allowed = Number(within) > 0 ? Number(within) : 30000;
       var at = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
-      var ms = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : askAgainWait(at || '');
+      var set = Number(FoxyWallet._askAgainMs) > 0 ? Number(FoxyWallet._askAgainMs) : 0;
+      var ms = set || askAgainWait(at || '');
       var most = Number(FoxyWallet._askAgainMost) > 0 ? Number(FoxyWallet._askAgainMost) : 4;
       most = Math.max(1, Math.min(most, Math.floor(allowed / ms) - 1));
+      // the first asking may come sooner: at a mint, whose wait is the five-second floor, with no wait set outright
+      var sooner = !set && !!at && ms === ASK_AGAIN_LEAST_MS;
       var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
       var stop = function () { settled = true; clearTimeout(again); again = null; };
       var yes = function (via) {
@@ -936,23 +980,28 @@
         asked += 1;
         Promise.resolve().then(function () { return ask(via); }).then(yes(via), bad);
       };
-      var askAgainLater = function () {
+      /* The next asking, `wait` from now. `early`, for the first only: looked
+       * at three seconds in, and asked then if the mint is up, or at the end
+       * of `wait` if not. */
+      var askAgainLater = function (wait, early) {
         again = null;
+        var look = early ? QUICK_AGAIN_MS : wait;
         // every extra circuit asked, or the next would go when the caller has given up: no timer at all
-        if (settled || asked > most || Date.now() - began + ms >= allowed) return;
+        if (settled || asked > most || Date.now() - began + look >= allowed) return;
         again = setTimeout(function () {
           again = null;
           if (settled) return;
+          if (early && askAgainWait(at, 0, true) !== QUICK_AGAIN_MS) { askAgainLater(wait - QUICK_AGAIN_MS); return; }
           var other;
           try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round((Date.now() - began) / 1000) + 's; asking again on another circuit');
           send(other);
-          askAgainLater();
-        }, ms);
+          askAgainLater(ms);
+        }, look);
       };
       send(w);
-      askAgainLater();
+      askAgainLater(ms, sooner);
     });
   }
 

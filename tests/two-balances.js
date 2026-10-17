@@ -375,6 +375,11 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
       'the usd quote is in cents, reserve and all', JSON.stringify(both.usd && { unit: both.usd.unit, amount: both.usd.amount, fee: both.usd.feeReserve }));
     ok(both.usd && both.usd.rate && Math.abs(both.usd.rate.usdPerBtc - 77000) < 100, 'and says the mint’s rate', JSON.stringify(both.usd && both.usd.rate));
     ok(W.mintRate() && Math.abs(W.mintRate().usdPerBtc - 77000) < 100 && W.mintRate().mint === MINT, 'kept in memory as the mint’s rate');
+    // and told one at a time as each lands, when asked to be: the confirmation waits on the balance that pays, not both
+    const told = [];
+    const again = await W.quoteFeeBoth(FOREIGN, (u, q) => told.push(u + ' ' + (q && q.amount)));
+    ok(told.length === 2 && told.indexOf('sat 2000') >= 0 && told.indexOf('usd 154') >= 0 && again.sat.amount === 2000 && again.usd.amount === 154,
+      'each quote is told as it lands, and what both resolve to is the same', JSON.stringify(told));
     const need = W.payNeed(both.usd.amount, both.usd.feeReserve, { unit: 'usd' });
     ok(need && need.ok && need.unit === 'usd' && need.have === 1000 && need.need === 156, 'the need is in cents against the usd pile', JSON.stringify(need));
     const short = W.payNeed(990, 20, { unit: 'usd' });

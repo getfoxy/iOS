@@ -1476,8 +1476,9 @@ Two phones each showing an invoice, a hand's width apart, and a third to pay.
    after the return, and the invoice's request leaves on that circuit.
 3. **A slow circuit.** Hard to cause on purpose. In a diary where an invoice
    or a fee quote took more than five seconds: **Pass:** "has not answered in
-   5s; asking again on another circuit" is there, and the screen did not wait
-   a minute.
+   5s; asking again on another circuit" is there (3s where the mint had just
+   answered something else in under two and a half seconds), and the screen
+   did not wait a minute.
 4. **Backing out early.** RECEIVE, an amount, NEXT, and BACK within a second.
    Then MENU, the mint list, pick another mint. **Pass:** it switches; it
    does not say to wait for a payment to finish.
@@ -2202,7 +2203,18 @@ dark circle with the turning ring), and tap the shield where it says to tap the 
     the rows, when the balance would not cover the payment and its fee). In
     airplane mode the same invoice gets YOU'RE OFFLINE at once, as before; and
     with the radios turned off while CHECKING shows, the card comes up over
-    the confirmation then.
+    the confirmation then. At a mint with two balances the button waits on
+    the balance on its WALLET button: PAY comes when that one's fee is in,
+    whether or not the other's is, and the debug log's first lines after the
+    route comes up show the mint's info, keysets and keys "on circuit" the
+    same six characters, the fee quotes each on another. (Opened after a
+    minute away, the keysets and keys may not be there at all: a connect
+    within five minutes of the last takes them from memory and reads only the
+    info. About a second and a half after the connect the circuit kept ready
+    reads the keysets on six characters of its own, and a fee quote that
+    takes that circuit shows the same six: that one is not a connect's read.)
+    Press PAY before the other balance's fee is in: the log shows no "asking
+    again on another circuit" for that quote after the payment starts.
 
 #### 22n. A payer short by the mint's fee
 

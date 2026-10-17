@@ -338,14 +338,15 @@ sat more than asked and be paid.
 The resolving is its own function (`lookupLnurl`), because the confirmation
 screen does it when it opens, not when SEND is pressed: it looks the address
 up, quotes the fee on the invoice that comes back, and holds the button
-(CHECKING) until both have answered. Then `payNeed` asks the wallet the very
-sum `pay` refuses on (`meltNeed`: the amount, the fee reserve, and this
-mint's own fee for the split and for the pieces the melt spends) against what
-is held at the mint, and a payment the balance cannot cover holds the button
-at NOT ENOUGH, in the wallet's sentence. SEND pays that invoice, with that
-quote, while both are a minute old at most (`payLnurl`, `opts.found` and
-`opts.quote`); older, or for another address or amount, and the address is
-looked up anew. A refusal at the send itself, because the reserve moved
+(CHECKING) until both have answered (at a mint with two balances, the fee of
+the balance that pays: see "Pay a Lightning invoice from dollars" below).
+Then `payNeed` asks the wallet the very sum `pay` refuses on (`meltNeed`: the
+amount, the fee reserve, and this mint's own fee for the split and for the
+pieces the melt spends) against what is held at the mint, and a payment the
+balance cannot cover holds the button at NOT ENOUGH, in the wallet's
+sentence. SEND pays that invoice, with that quote, while both are a minute
+old at most (`payLnurl`, `opts.found` and `opts.quote`); older, or for another
+address or amount, and the address is looked up anew. A refusal at the send itself, because the reserve moved
 between the quote and the send, is the same sentence on a card that goes to
 the amount screen.
 
@@ -1690,7 +1691,25 @@ it would have the offline path pay a dollar invoice with sat ecash.
 is a usd melt quote: the invoice in cents, the reserve in cents, and the
 mint's price read off it (`rate`, `mintRate`, in memory only and never used to
 move money). `quoteFeeBoth` asks both units at once (melt quotes commit to
-nothing). `payNeed(amount, reserve, { unit })` is `meltNeed` against the usd
+nothing), and tells the confirmation each one as it lands. The confirmation
+waits on the balance that pays, not on both: its button turns from CHECKING
+to PAY as soon as that balance's quote is in and covers the payment, and the
+other's fills in behind it for the WALLET picker without taking the button
+away. Only when the balance that pays cannot cover the payment is the
+other's waited for; the payment then switches to the other if that one
+covers it ("Bitcoin was chosen for you"). A balance the mint gives no quote
+for is not switched away from, as before both were waited on: its fee reads
+UNKNOWN, PAY asks its own quote, and WALLET offers the other; a quote that
+did not come (a circuit silent for twenty seconds) says nothing of what the
+balance holds. A quote of the other balance still on its way at PAY is
+dropped: it is not paid with, shown, or kept for the next payment, and it is
+not asked again on fresh circuits beside the payment (`quoteFeeBoth`'s
+`stop`). A send that does not go brings the person back to the
+confirmation, and there that balance's quote, it alone, is asked again; the
+one paid with is kept for TRY AGAIN. Until it is in, that balance picked by
+hand reads CHECKING, never PAY with no figure (03-send.js `feeQuoteIn`,
+`feeWaits`, `feeQuotesLeft`, `feeQuotesAgain`).
+`payNeed(amount, reserve, { unit })` is `meltNeed` against the usd
 pile, said in dollars ("needs $ 10.02 and you hold $ 2.00"). `pay(bolt11,
 stage, { unit: 'usd', quote })` is `pay` with the usd wallet and pile: the split
 is recorded with its unit, the hold carries it, the change comes back to the

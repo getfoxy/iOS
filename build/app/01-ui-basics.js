@@ -665,13 +665,16 @@ class Component extends DCLogic {
    * (the mint's own rate, from its quote). The WALLET button is last: it says
    * which balance pays and opens the choice. Waiting and refusing are as in
    * `confirmSpec`: CHECKING while the fee is asked, NOT ENOUGH on the wallet's
-   * own sum, the two price sources for an amount typed in dollars. */
+   * own sum, the two price sources for an amount typed in dollars. The fee
+   * asked about is that of the balance on the WALLET button: CHECKING lets
+   * go once its quote is in and it covers the payment, whatever the other's
+   * is doing (03-send.js, `feeWaits`). */
   confirmTwoSpec() {
     const s = this.state;
     const W = window.FoxyWallet;
     const wallet = this.walletNow('send') || 'sat';
     const other = wallet === 'usd' ? 'sat' : 'usd';
-    const held = this.connecting() || !!s.quotingFee || this.sendToAsk();
+    const held = this.connecting() || this.sendToAsk() || (this._feeQuotes ? this.feeWaits(wallet) : !!s.quotingFee);
     const q = (s.feeQ || {})[wallet] || null;
     // the sats the payee is paid: the invoice's own, or what was agreed for an address
     const asked = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf)
@@ -718,7 +721,8 @@ class Component extends DCLogic {
       });
     }
     const fits = this.quoteFits(wallet);
-    if (fits === false) {
+    // short, with the other balance's quote still to come: CHECKING, since that one may pay it (`autoWallet`)
+    if (fits === false && !this.feeWaits(wallet)) {
       const both = this.quoteFits(other) !== true;
       const W2 = window.FoxyWallet;
       let why = '';

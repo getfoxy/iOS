@@ -155,12 +155,32 @@
     /* A Lightning invoice quoted from both balances at once, { sat, usd },
      * each what `quoteFee` answers or null. Melt quotes commit to nothing, so
      * the confirmation asks both and can switch to the balance that covers
-     * the payment. At a one-unit mint `usd` is null and nothing is asked. */
-    quoteFeeBoth: function (bolt11) {
+     * the payment. At a one-unit mint `usd` is null and nothing is asked.
+     *
+     * `onEach(unit, quote)`, when given, is told each one as it lands, not
+     * when both have: the confirmation lets its button go on the balance that
+     * pays as soon as that one's quote is in, and does not wait on the
+     * circuit carrying the other (03-send.js, `feeQuoteIn`). What this
+     * resolves with is the same either way.
+     *
+     * `stop()`, when given, says the confirmation has stopped asking (PAY
+     * pressed on the other's quote, or another question begun): a quote not
+     * in by then is asked no more on fresh circuits (`quoteFee`, `opts.stop`),
+     * which would only be built beside the payment for an answer nobody
+     * reads. */
+    quoteFeeBoth: function (bolt11, onEach, stop) {
       var two = FoxyWallet.twoUnits();
+      var told = function (unit) {
+        return function (q) {
+          if (typeof onEach === 'function') {
+            try { onEach(unit, q); } catch (e) { console.warn('[foxy] a fee quote could not be handed on as it came:', e && e.message); }
+          }
+          return q;
+        };
+      };
       return Promise.all([
-        FoxyWallet.quoteFee(bolt11, { unit: 'sat' }),
-        two ? FoxyWallet.quoteFee(bolt11, { unit: 'usd' }) : Promise.resolve(null),
+        FoxyWallet.quoteFee(bolt11, { unit: 'sat', stop: stop }).then(told('sat')),
+        (two ? FoxyWallet.quoteFee(bolt11, { unit: 'usd', stop: stop }) : Promise.resolve(null)).then(told('usd')),
       ]).then(function (both) { return { sat: both[0], usd: both[1] }; });
     },
 

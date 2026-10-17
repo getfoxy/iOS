@@ -144,6 +144,17 @@
     keyBodies[url] = { at: Date.now(), raw: raw };
   }
 
+  /* The answer a GET of `url` was given on `circuit`, kept as well where a
+   * read with no circuit of its own looks, for the rest of its time. For a
+   * connect's keysets and keys (`loadMintOnOne`), which went with no circuit
+   * of their own until they shared the connect's, and which the next
+   * connect, and the reads of the mint's keys after it, found here. */
+  function shareKeyBody(url, circuit) {
+    var from = keyBodies[cacheableKeyUrl('GET', url, circuit)];
+    var to = cacheableKeyUrl('GET', url, '');
+    if (from && to) keyBodies[to] = { at: from.at, raw: from.raw };
+  }
+
   /* Everything remembered about one mint, dropped. For a keyset error, where
    * what Foxy holds is by definition not what the mint will accept. */
   function forgetMintKeys(url) {

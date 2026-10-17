@@ -53,16 +53,34 @@ a payment and a receive in that window arrived from one exit. Each job now logs
 in to Tor's SOCKS port with its own label and gets its own circuit
 (THREAT-MODEL.md §4, "One circuit per job at a mint"). Requests that are linked
 anyway share one: an invoice's polls and its claim (the quote id), one
-payment's quote, swap and melt (the inputs). Test: "each job at a mint leaves
-on its own circuit, and connecting asks the mint about no proof and no sent
-token".
+payment's quote, swap and melt (the inputs). So do a connect's three reads of
+the mint's info, keysets and keys, which are public and carry nothing of this
+phone's: one circuit made for that connect and used for nothing else, rather
+than three built at once beside a payment's fee quotes (`loadMintOnOne`).
+They leave in the same moment, so a mint could join them by that already. The
+next connect makes a new one, for its info: the keysets and keys are
+remembered as they were when they went with no circuit of their own, so a
+connect within five minutes of the last reads only the info, as it did. The
+second look at the keysets from elsewhere
+(`checkKeysetsElsewhere`) and the circuit kept ready (`warmSpare`) keep
+circuits of their own. Tests: "each job at a mint leaves on its own circuit,
+and connecting asks the mint about no proof and no sent token", and "a
+connect's info, keysets and keys share one circuit made for it…".
 
 **N1a. A question asked twice — a small, chosen cost.** A circuit sometimes
 goes nowhere, and a request on it sits until its clock runs out: a minute for
 an invoice, on a phone standing beside one the same mint answered in two
 seconds. An invoice and a fee quote are asked again on a fresh circuit after
 five seconds of nothing, up to five askings, and the first answer is used
-(`askedAgain`); a proof check is asked again once, after six. At a mint whose
+(`askedAgain`); a proof check is asked again once, after six. The first asking
+again comes at three seconds instead where the mint is known to be up: it
+answered something in under two and a half seconds within the last ten, so
+the silence is the circuit's, not the mint's. That is looked at when the three
+seconds are over, so the other balance's fee quote answering in two seconds
+counts; the askings after it keep their pace and their number, and a mint that
+has just turned requests away (429) is not asked sooner. A fee quote nobody is
+waiting for any more, the other balance's once PAY is pressed on one, is asked
+no more: no circuit is built for it beside the payment. At a mint whose
 recent answers have been slow the wait stretches with them: twice the middle
 of its last eight answer times, never below five seconds (six for the proof
 check) nor above twenty, with fewer askings so that they still fit the thirty

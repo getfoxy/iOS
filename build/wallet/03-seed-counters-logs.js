@@ -1415,6 +1415,47 @@
     return label && w ? onLabel(w, label) : w;
   }
 
+  /* A connect's first load of its new wallet (cashu-ts `loadMint`: the mint's
+   * info, its keysets and its keys), on one circuit between the three.
+   *
+   * They are public, the same for anybody who asks, and carry nothing of this
+   * phone's: no proof, no output, no quote. They went on three circuits, the
+   * info on the connect's view and the key chain's two unlabelled, which the
+   * phone gives one each. A launch with a payment pasted in its first seconds
+   * then had Tor build them beside the payment's two fee quotes, six at once
+   * on a guard that had just come up, and one quote's circuit went nowhere. So
+   * the three share one label, made for this load and nothing else: the next
+   * connect makes another, and every job after the connect has its own
+   * circuit as before. They still go side by side.
+   *
+   * cashu-ts's key chain asks the wallet's own mint, not the view `onLabel`
+   * makes, so the mint's own requests carry the label for the length of this
+   * load, and go back to carrying none when it is over. The wallet is the
+   * connect's new one, which nothing else holds yet.
+   *
+   * The keysets and keys are remembered where they were before, as answers
+   * to a read with no circuit (`shareKeyBody`): a connect within five minutes
+   * of the last one, a visit or a retry, takes them from there as it did and
+   * asks only for the info, and so do the later reads of the mint's keys. */
+  var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
+  function loadMintOnOne(w) {
+    var mint = w && w.mint;
+    if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
+    var label = newCircuitLabel();
+    mint._request = function (o) {
+      var u = String((o && o.endpoint) || '');
+      var shared = KEY_CHAIN_READ.test(u.split('?')[0]) ? cacheableKeyUrl(o.method, u, '') : '';
+      if (shared && cachedKeyBody(shared) !== null) return FoxyWallet.nativeRequest(o);
+      return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
+        if (shared) shareKeyBody(u, label);
+        return r;
+      });
+    };
+    var done = function () { mint._request = FoxyWallet.nativeRequest; };
+    return Promise.resolve().then(function () { return w.loadMint(); })
+      .then(function (r) { done(); return r; }, function (e) { done(); throw e; });
+  }
+
   function onLabel(w, label) {
     var base = w.foxyBase || w;
     var mint = base.mint;

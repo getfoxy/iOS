@@ -216,6 +216,19 @@ dollar payment whose price moved (back to the confirmation, asked again),
 ADDED TO / FROM in each unit, UNCLAIMED ECASH per unit, history's DOLLARS /
 BITCOIN tab, and the refusals of what dollars cannot do yet.
 
+**`send-quote-first.js`** holds CONFIRM PAYMENT's wait at a mint with two
+balances to the balance that pays: PAY as soon as that balance's quote is in
+and covers the payment, the other's filling in behind it, and dropped and
+asked no more if it lands after PAY; the other's waited for, and the payment
+switched to it, only when the chosen balance is short, never because the mint
+gave it no quote; after a send that did not go (the mint refusing, Tor
+reconnecting and TRY AGAIN, an address with no connection), the dropped quote
+asked again on the confirmation, on the invoice already held, so the other
+balance is never PAY with no figure; a new question (the price moved) asking
+both afresh and nothing more; a mint with one balance and a card's payment as
+before. The app's own methods over a real wallet at the harness's mint, each
+balance's melt quote answered after a delay of its own.
+
 **`home-shield.js`** mounts the real page on a stand-in wallet and checks the
 round shield that took the Tor banner's place on the money card: each of the
 banner's states drawn with its colour, mark and label, its tap the banner's

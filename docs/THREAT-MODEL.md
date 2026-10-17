@@ -521,8 +521,10 @@ request now logs in to the SOCKS port with a label (`MintCircuit`,
 `ProxyConfiguration.applyCredential`), and Tor keeps different logins on
 different circuits (`IsolateSOCKSAuth`, on by default). The page labels a job:
 one payment's quote, swap and melt; one invoice's polls and claim; one sent
-token's checks; each held melt, swap record and invoice in a sweep. A request
-with no label gets a circuit of its own. The exceptions are questions that read
+token's checks; each held melt, swap record and invoice in a sweep; a
+connect's reads of the mint's info, keysets and keys, which are public and
+leave together (`loadMintOnOne`). A request with no label gets a circuit of
+its own. The exceptions are questions that read
 and change nothing, asked again on circuits of their own when one has gone
 silent (a fee quote, an invoice, a proof check), and a swap that has said nothing
 for twelve seconds, whose inputs are asked about on another circuit every five

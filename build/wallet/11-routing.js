@@ -282,10 +282,11 @@
        *
        * 30 seconds rather than the 20 used elsewhere: loadMint over Tor is
        * genuinely slow, and a deadline that fires on a working mint is worse
-       * than no deadline at all. */
+       * than no deadline at all. Its three public reads go on one circuit
+       * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(onCircuit(w).loadMint(), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w), 30000, hostOf(u));
       return ready.then(function () {
         wallet = w;
         mintUrl = u;

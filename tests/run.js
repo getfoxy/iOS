@@ -3542,7 +3542,7 @@ const eq = (got, want, what) =>
       await new Promise(r => setTimeout(r, 50));
       const asked = log.seen.slice(mark).filter(x => x.path === '/v1/checkstate');
       if (asked.length) return 'a connect asked the mint about ' + asked.map(x => x.body.Ys.length).join('+') + ' proof(s)';
-      // the keychain's own fetches of the mint's public keys go unlabelled: the phone gives each its own circuit
+      // the keychain's own fetches of the mint's public keys go unlabelled, the phone giving each its own circuit, except in a connect (the test after this)
       const unlabelled = log.seen.filter(x => !/^[0-9a-f]{32}$/.test(String(x.circuit || '')) && !/^\/v1\/(keys|keysets)(\/|$)/.test(x.path));
       if (unlabelled.length) return 'requests with no circuit label: ' + unlabelled.map(x => x.path).join(', ');
       const one = (path) => log.seen.find(x => x.path === path);
@@ -3552,6 +3552,57 @@ const eq = (got, want, what) =>
       const polls = log.seen.filter(x => x.path === '/v1/mint/quote/bolt11/' + inv.hash);
       if (!polls.length) return 'the invoice was never polled';
       if (polls.some(x => x.circuit !== claim.circuit)) return 'the invoice\'s checks and its claim left on different circuits';
+    });
+
+    /* A connect reads the mint's info, keysets and keys, which are public and
+     * carry nothing of this phone's, and they share one circuit made for that
+     * connect: three circuits built at once beside a payment's fee quotes left
+     * one quote on a circuit that went nowhere. A fee quote asked during the
+     * connect, and every job after it, keeps a circuit of its own, and the next
+     * connect makes a new one. The keysets and keys are remembered as they were
+     * when they went with no circuit of their own: the next connect within the
+     * five minutes asks only for the info, and a later read of the keys asks
+     * nothing. */
+    await test('a connect\'s info, keysets and keys share one circuit made for it; a quote beside it, a job after it and the next connect each have their own', async () => {
+      const log = onMintLog();
+      const P = nsPage({ onMint: log.onMint });
+      const W = P.W;
+      // the check of the keysets from elsewhere is a second circuit by design (`checkKeysetsElsewhere`): not in this window
+      W._keysetCheckDelay = [86400000, 86400000];
+      await W.seedReady();
+      const reads = (from) => log.seen.slice(from).filter(x => /^\/v1\/(info|keysets|keys)$/.test(x.path));
+      const label = (x) => String(x.circuit || '');
+      await W.connect(NS_MINT);
+      const first = reads(0);
+      const one = first.length ? label(first[0]) : '';
+      if (first.length !== 3 || !/^[0-9a-f]{32}$/.test(one) || first.some(x => label(x) !== one)) {
+        return 'the first connect\'s reads: ' + JSON.stringify(first.map(x => x.path + ' ' + label(x).slice(0, 6)));
+      }
+      if (Math.max(...first.map(x => x.at)) - Math.min(...first.map(x => x.at)) > 50) return 'the three reads went one after another, not side by side';
+      // the mint's keys read again with no circuit of its own, as the key chain does: from what the connect was told, nothing asked
+      const kept = log.seen.length;
+      const keysets = await W.nativeRequest({ endpoint: NS_MINT + '/v1/keysets', method: 'GET' });
+      const asked = log.seen.slice(kept).filter(x => x.path === '/v1/keysets' && !label(x));
+      if (!keysets || !Array.isArray(keysets.keysets) || asked.length) return 'a read of the keysets after the connect went to the mint: ' + JSON.stringify(asked.map(x => x.path));
+      // a payment pasted as the route comes up: the wallet connects again for real, and the confirmation quotes the fee beside it
+      const mark = log.seen.length;
+      const [, fee] = await Promise.all([W.connect(NS_MINT), W.quoteFee(NS_INVOICE)]);
+      const again = reads(mark);
+      const two = again.length ? label(again[0]) : '';
+      const quote = log.seen.slice(mark).find(x => x.path === '/v1/melt/quote/bolt11');
+      if (!fee || !quote) return 'the fee quote was not asked';
+      // the keysets and keys from what the first connect read, as before; the info asked on a circuit of the second's own
+      if (again.length !== 1 || again[0].path !== '/v1/info' || !/^[0-9a-f]{32}$/.test(two)) return 'the second connect\'s reads: ' + JSON.stringify(again.map(x => x.path + ' ' + label(x).slice(0, 6)));
+      if (two === one) return 'the second connect read on the first one\'s circuit';
+      if (!/^[0-9a-f]{32}$/.test(label(quote)) || label(quote) === two || label(quote) === one) return 'the fee quote shared a circuit with a connect\'s reads';
+      // the job after the connect: its own circuit, so the wallet's own requests were let go of the connect's label
+      const before = log.seen.length;
+      await W.invoice(300, '');
+      const made = log.seen.slice(before).find(x => x.path === '/v1/mint/quote/bolt11');
+      if (!made || !/^[0-9a-f]{32}$/.test(label(made)) || label(made) === two || label(made) === one) {
+        return 'the invoice after the connect left on ' + (made && label(made).slice(0, 6)) + ', a connect\'s circuit or none';
+      }
+      return null;
     });
 
     await test('a sent token is asked about on a circuit of its own, the same one each time', async () => {
@@ -4771,9 +4822,13 @@ const eq = (got, want, what) =>
 
     await test('a keyset shown to this wallet alone is reported, after a second look on another circuit', async () => {
       const log = onMintLog();
-      // the mint's listing, asked on a labelled circuit, leaves out the keyset the connect was given
+      /* The mint's listing, asked on any circuit but the connect's own, leaves out the keyset the connect was given.
+       * The connect's reads share one circuit, the one its info is asked on, which goes first (`loadMintOnOne`). */
+      let connectOn = null;
       const P = nsPage({ onMint: log.onMint, rewrite: (m, out) => {
-        if (!m.circuit || new URL(m.url).pathname !== '/v1/keysets') return out;
+        const at = new URL(m.url).pathname;
+        if (at === '/v1/info' && connectOn === null) connectOn = String(m.circuit || '');
+        if (at !== '/v1/keysets' || String(m.circuit || '') === connectOn) return out;
         return '200\n' + JSON.stringify({ keysets: [{ id: '00ffffffffffffff', unit: 'sat', active: true, input_fee_ppk: 0 }] });
       } });
       const W = P.W;
@@ -4782,7 +4837,8 @@ const eq = (got, want, what) =>
       await W.seedReady();
       await W.connect(NS_MINT);
       await new Promise(r => setTimeout(r, 60));
-      const asked = log.seen.filter(x => x.path === '/v1/keysets' && x.circuit);
+      if (!connectOn) return 'the connect\'s info was not asked on a circuit of its own';
+      const asked = log.seen.filter(x => x.path === '/v1/keysets' && x.circuit && x.circuit !== connectOn);
       if (asked.length !== 2) return asked.length + ' independent keyset lists asked for, wanted 2';
       if (asked[0].circuit === asked[1].circuit) return 'the second look used the same circuit';
       if (told.length !== 1 || told[0].keysetsUnseen !== 1) return 'reported: ' + JSON.stringify(told);
@@ -4794,7 +4850,8 @@ const eq = (got, want, what) =>
       await Q.W.seedReady();
       await Q.W.connect(NS_MINT);
       await new Promise(r => setTimeout(r, 60));
-      if (log2.seen.filter(x => x.path === '/v1/keysets' && x.circuit).length !== 1) return 'an honest mint was asked more than once';
+      const connect2 = String((log2.seen.find(x => x.path === '/v1/info') || {}).circuit || '');
+      if (log2.seen.filter(x => x.path === '/v1/keysets' && x.circuit && x.circuit !== connect2).length !== 1) return 'an honest mint was asked more than once';
       if (told2.length) return 'an honest mint was reported: ' + JSON.stringify(told2);
     });
 

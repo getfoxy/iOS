@@ -35,11 +35,16 @@
       var inv = String(bolt11);
       var msat = 0;
       try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e) { msat = 0; }
+      /* `opts.stop()`: whoever asked has stopped listening (the confirmation,
+       * PAY pressed on the other balance's quote). No more circuits are
+       * built for this one then; the asking already out runs its course. */
+      var stop = opts && typeof opts.stop === 'function' ? opts.stop : null;
       return unitWalletOn(viewNow(wallet), unit).then(function (w) {
+        var another = function () { return (stop && stop()) ? null : onCircuit(w); };
         // asked again on another circuit after five seconds of nothing, longer at a slow mint (`askedAgain`), inside the twenty allowed
         return withTimeout(askedAgain(w, 'the mint\u2019s fee quote', function (via) {
           return via.createMeltQuoteBolt11(String(bolt11));
-        }, null, 20000), 20000, 'the mint\u2019s fee quote');
+        }, another, 20000), 20000, 'the mint\u2019s fee quote');
       })
         .then(function (won) {
           var q = won.got;
@@ -392,9 +397,9 @@
     warmMint: function () { return warmSpare(); },
     /* For the tests: a mint host's recent answer times, newest last, and the
      * wait before asking it again (`askAgainWait`; `least` as statesOf's six
-     * seconds). */
-    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).slice(); },
-    _askAgainWait: function (u, least) { return askAgainWait(u, least); },
+     * seconds, `first` for the first asking again). */
+    _answerTimes: function (u) { return (answerTimes[busyKey(u)] || []).map(function (a) { return a.ms; }); },
+    _askAgainWait: function (u, least, first) { return askAgainWait(u, least, first); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
 
