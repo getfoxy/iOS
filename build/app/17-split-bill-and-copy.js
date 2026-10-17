@@ -379,7 +379,7 @@
       const t = String(text || '').trim();
       if (W.classify(t) !== 'token') { this.toast('That QR is not a Cashu token.', true); return; }
       const info = W.tokenInfo(t);
-      const here = String(W.mintUrl || '').replace(/\/+$/, '');
+      const here = String(W.sourceId() || '').replace(/\/+$/, '');
       if (!info || String(info.mint || '').replace(/\/+$/, '') !== here) {
         this.toast('That token is from ' + this.mintNameOf(info && info.mint) + '. Ask for one from '
           + this.mintName() + ', or for the invoice to be paid.', true);

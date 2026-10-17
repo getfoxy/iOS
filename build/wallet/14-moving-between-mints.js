@@ -2,7 +2,7 @@
 
     /* The host of the connected mint, for the interface to show. */
     mintHost: function () {
-      return String(mintUrl || '').replace(/^https?:\/\//, '');
+      return String(currentSourceId() || '').replace(/^https?:\/\//, '');
     },
 
     /* What it would cost to move everything here to another mint.

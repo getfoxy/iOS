@@ -253,7 +253,7 @@
   }
 
   function proofKey(url, unit) {
-    var u = url === undefined ? mintUrl : url;
+    var u = url === undefined ? currentSourceId() : url;
     var n = unitOf(unit);
     if (!n) throw new Error('Foxy does not know the unit ' + String(unit).slice(0, 20) + '.');
     if (n === 'sat') return u ? K.proofs + '.' + u : K.proofs;
@@ -354,6 +354,6 @@
   /* The mint a wallet object talks to, in the form piles are keyed by. */
   function mintOf(w) {
     var u = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
-    return u ? canonicalMint(u) : mintUrl;
+    return u ? canonicalMint(u) : currentSourceId();
   }
 

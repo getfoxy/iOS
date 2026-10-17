@@ -49,7 +49,7 @@
     if (!W || !W.paymentRequest) return '';
     const why = purpose || 'receive';
     const cents = Math.round(Number(usdCents) || 0);
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + cents;
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + why + '|$' + cents;
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.making) return '';
@@ -124,7 +124,7 @@
     const now = this.railRequest(sats, purpose, usdCents);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
       + '|$' + Math.round(Number(usdCents) || 0);
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
@@ -154,7 +154,7 @@
     if (!W || !W.paymentRequest) return '';
     const n = Math.max(0, Math.round(Number(sats) || 0));
     // a share of a split names itself, which is how `forgetRequests` tells them apart
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '');
+    const key = 'tap|' + W.sourceId() + '|' + n + (purpose ? '|' + purpose + '|' : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
@@ -175,7 +175,7 @@
   railRequestPending(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return false;
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
+    const key = W.sourceId() + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive')
       + '|$' + Math.round(Number(usdCents) || 0);
     const have = (this._creqs || {})[key];
     return !!(have && have.making);

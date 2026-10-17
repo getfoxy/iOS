@@ -53,7 +53,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 function wallet(over) {
   return Object.assign({
-    calls: [], depth: 0, mintUrl: HERE,
+    calls: [], depth: 0, mintUrl: HERE, sourceId: () => HERE,
     proofLockDepth() { return this.depth; },
     mintHost() { return 'mint.here'; },
     mints() { return [THERE]; },

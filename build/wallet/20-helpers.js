@@ -2293,7 +2293,7 @@
      * balance already counts it. The app asks before running a claim on a route
      * coming back, so an empty list costs nothing. */
     // change set aside for over-payments and not yet gone, at this mint (`holdChange`); for the suites
-    _changeLeavingSats: function () { return changeLeavingSats(mintUrl || ''); },
+    _changeLeavingSats: function () { return changeLeavingSats(currentSourceId() || ''); },
 
     unclaimedSats: function (at) {
       return unclaimedSats(at);

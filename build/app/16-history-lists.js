@@ -279,7 +279,7 @@
       // One mint at a time: a balance belongs to a mint, so its history should
       // too. Entries written before mints were recorded carry none, and show
       // everywhere rather than vanishing.
-      const here = String(W.mintUrl || '').replace(/\/+$/, '');
+      const here = String(W.sourceId() || '').replace(/\/+$/, '');
       const list = all.filter(x => !x.mint || x.mint === here);
 
       // history already showing money in counts, so the prompt survives a

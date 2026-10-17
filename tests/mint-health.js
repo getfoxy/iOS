@@ -168,7 +168,7 @@ const fails = (W, mint) => { const r = W.mintHealth(mint); return r ? r.failures
   const store = {};
   global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
   let downRec = null;
-  global.window = { FoxyWallet: { connected: true, mintUrl: 'https://mint.big.test', mintDown: () => downRec } };
+  global.window = { FoxyWallet: { connected: true, mintUrl: 'https://mint.big.test', sourceId: () => 'https://mint.big.test', mintDown: () => downRec } };
   const cards = [];
   const makeApp = (over) => Object.assign({
     SPREAD_MIN_SATS: field('SPREAD_MIN_SATS'),

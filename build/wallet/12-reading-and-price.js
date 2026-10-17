@@ -11,8 +11,8 @@
        * At this mint: what is waiting at another is that mint's balance. */
       /* Less change this phone is about to hand back for an over-payment:
        * the entry already says what stays, and so does this (`holdChange`). */
-      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
-                                         - changeLeavingSats(mintUrl || '')));
+      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(currentSourceId() || '')
+                                         - changeLeavingSats(currentSourceId() || '')));
     },
 
     /* Every pile that holds anything, in its own unit: [{ mint, unit, amount }].
@@ -39,7 +39,7 @@
     balanceIn: function (mint, unit) {
       var u = unitOf(unit);
       if (!u) return 0;
-      var m = (mint === undefined || mint === null || mint === '') ? mintUrl : canonicalMint(mint);
+      var m = (mint === undefined || mint === null || mint === '') ? currentSourceId() : canonicalMint(mint);
       if (!m) return 0;
       return sumProofs(proofs(m, u));
     },

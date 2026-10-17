@@ -15,8 +15,8 @@
   /* What this mint does on chain, kept in state so the screens can ask. */
   onchainAsk() {
     const W = window.FoxyWallet;
-    if (!W || !W.onchainLimits || this._ocAsked === W.mintUrl) return;
-    this._ocAsked = W.mintUrl;
+    if (!W || !W.onchainLimits || this._ocAsked === W.sourceId()) return;
+    this._ocAsked = W.sourceId();
     W.onchainLimits().then(limits => this.setState({ ocLimits: limits || null }), () => {});
   }
 
@@ -32,7 +32,7 @@
   ocReceiveAddress() {
     const W = window.FoxyWallet;
     if (!W || !W.onchainAddress) return '';
-    if (this._ocAddr && this._ocAddr.mint === W.mintUrl) return this._ocAddr.address;
+    if (this._ocAddr && this._ocAddr.mint === W.sourceId()) return this._ocAddr.address;
     if (this._ocMaking) return '';
     this._ocMaking = true;
     W.onchainAddress().then(made => {

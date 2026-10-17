@@ -194,7 +194,7 @@
      * that had never connected, offered the choice, and took it.
      * So the choice is not offered until it means something. */
     offlineReady: function () {
-      var at = canonicalMint(mintUrl || load(K.mint, '') || '');
+      var at = canonicalMint(currentSourceId() || load(K.mint, '') || '');
       if (!at || !mintCacheFor(at)) return false;
       return !!(Number(FoxyWallet._rate) > 0 && Number(FoxyWallet._rateAt) > 0);
     },

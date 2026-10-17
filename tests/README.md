@@ -60,6 +60,13 @@ ahead" and fails on one. The same mock is `tools/live/harness.js`'s phone.
 The mock tests each rule ("phone mock: …" in `run.js`); the rules come from the
 contract, not from Swift, and `FoxyTests` is where native itself is checked.
 
+**`source-interface.js`** pins the seam: one `source()` per wallet, its
+`sourceId()` byte-identical to the connected mint's URL, the twelve verbs
+present, and a verb through the source answering the wallet's own answer. A
+read of the current mint that a key, scope or record derives from spells it
+`sourceId()`; the flows that keep a mint URL on purpose (visits, crossings,
+tokens, cards) keep `mintUrl`.
+
 **`p2pk-round-trip.js`** runs a payment request's lock end to end with the real
 cashu-ts and the harness's mint: the lock goes into the request, a token is made
 against it, and only the right key opens it — with every NUT-11 shape that names

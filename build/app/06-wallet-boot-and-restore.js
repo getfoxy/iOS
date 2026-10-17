@@ -496,7 +496,7 @@
     if (this._catchUpConnect) return;
     if (p.network === 'none') return;
     this._catchUpConnect = true;
-    const url = W.mintUrl;
+    const url = W.sourceId();
     console.log('[foxy] a route is up and this wallet came from storage \u2014 connecting to', url, 'for real');
     /* Behind whatever the person is doing. This went through `retryConnect`,
      * whose `walletReady` puts the home screen up and empties the back stack:

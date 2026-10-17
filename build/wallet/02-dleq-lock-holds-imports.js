@@ -78,7 +78,7 @@
     if (!fresh.length) return;
     var r = dleqAudit(ww, fresh);
     fresh.forEach(function (p) { if (p.dleq && keysetFor(ww, p.id)) dleqSeen[p.secret] = 1; });
-    var host = hostOf(mintOf(ww) || mintUrl || '');
+    var host = hostOf(mintOf(ww) || currentSourceId() || '');
     if (r.invalid) {
       reportInvalidDleq(host, r.invalid, where);
     } else if (r.missing && !dleqQuiet[host]) {
@@ -159,7 +159,7 @@
      * again next time there is room. */
     mustSave(proofKey(), legacy);
     try { localStorage.removeItem(K.proofs); } catch (e) {}
-    console.log('[foxy] moved', legacy.length, 'proofs under', mintUrl);
+    console.log('[foxy] moved', legacy.length, 'proofs under', currentSourceId());
   }
 
   /* Every mint that has ever connected, in the order they were first used.
@@ -237,7 +237,7 @@
       // the lightning address it was fetched for, if any, lowercased for matching
       payee: payee ? String(payee).trim().toLowerCase() : undefined,
       at: Math.floor(Date.now() / 1000),
-      mint: at || mintUrl,
+      mint: at || currentSourceId(),
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],

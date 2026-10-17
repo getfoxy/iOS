@@ -1408,7 +1408,7 @@
   }
 
   function proofKey(url, unit) {
-    var u = url === undefined ? mintUrl : url;
+    var u = url === undefined ? currentSourceId() : url;
     var n = unitOf(unit);
     if (!n) throw new Error('Foxy does not know the unit ' + String(unit).slice(0, 20) + '.');
     if (n === 'sat') return u ? K.proofs + '.' + u : K.proofs;
@@ -1509,7 +1509,7 @@
   /* The mint a wallet object talks to, in the form piles are keyed by. */
   function mintOf(w) {
     var u = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
-    return u ? canonicalMint(u) : mintUrl;
+    return u ? canonicalMint(u) : currentSourceId();
   }
 
   /* ---- DLEQ (NUT-12) ----------------------------------------------------
@@ -1592,7 +1592,7 @@
     if (!fresh.length) return;
     var r = dleqAudit(ww, fresh);
     fresh.forEach(function (p) { if (p.dleq && keysetFor(ww, p.id)) dleqSeen[p.secret] = 1; });
-    var host = hostOf(mintOf(ww) || mintUrl || '');
+    var host = hostOf(mintOf(ww) || currentSourceId() || '');
     if (r.invalid) {
       reportInvalidDleq(host, r.invalid, where);
     } else if (r.missing && !dleqQuiet[host]) {
@@ -1673,7 +1673,7 @@
      * again next time there is room. */
     mustSave(proofKey(), legacy);
     try { localStorage.removeItem(K.proofs); } catch (e) {}
-    console.log('[foxy] moved', legacy.length, 'proofs under', mintUrl);
+    console.log('[foxy] moved', legacy.length, 'proofs under', currentSourceId());
   }
 
   /* Every mint that has ever connected, in the order they were first used.
@@ -1751,7 +1751,7 @@
       // the lightning address it was fetched for, if any, lowercased for matching
       payee: payee ? String(payee).trim().toLowerCase() : undefined,
       at: Math.floor(Date.now() / 1000),
-      mint: at || mintUrl,
+      mint: at || currentSourceId(),
       // the counter ranges the melt reserves for its change, filled in by
       // noteMeltOutputs as cashu-ts reserves them
       outputs: [],
@@ -3889,7 +3889,7 @@
       var list = load(K.audit, []);
       var rec = /** @type {any} */ (Object.assign({
         at: Math.floor(Date.now() / 1000),
-        mint: String(mintUrl || '').replace(/\/+$/, ''),
+        mint: String(currentSourceId() || '').replace(/\/+$/, ''),
       }, entry));
       // what left this wallet, by the values the mint knows it by
       if (!rec.ys) rec.ys = (rec.inputs || []).map(lookupOf).filter(Boolean);
@@ -3938,7 +3938,7 @@
      * Written once here, and once more when an entry that was waiting
      * settles (`amendTx`). */
     var first = { at: Math.floor(Date.now() / 1000),
-                  mint: String(mintUrl || '').replace(/\/+$/, '') };
+                  mint: String(currentSourceId() || '').replace(/\/+$/, '') };
     if (rateNow()) first.rate = rateNow();
     list.unshift(Object.assign(first, entry));
     // five hundred, so the history screen's audit reaches the start
@@ -7147,7 +7147,7 @@
    * handed on, rows for another mint, and rows nothing here can open are left
    * out: `[{ id, sats, token }]`, largest first. */
   function lockedPieces() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -7183,7 +7183,7 @@
    * and of a row that has already given some up — less any piece this phone
    * has signed away, which is the one thing that must never go out twice. */
   function lockedProofsFlat() {
-    var at = String(mintUrl || '').replace(/\/+$/, '');
+    var at = String(currentSourceId() || '').replace(/\/+$/, '');
     if (!at) return [];
     var all = unclaimed();
     var out = [];
@@ -7472,7 +7472,7 @@
   function holdChange(hash, sats, at) {
     var n = Math.round(Number(sats) || 0);
     if (!hash || !(n > 0)) return;
-    changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || mintUrl || '')) };
+      changeLeaving[hash] = { sats: n, mint: canonicalMint(String(at || currentSourceId() || '')) };
   }
 
   /* Idempotent: every way out of making change calls it, and only one of
@@ -7878,7 +7878,7 @@
     return out;
   }
   function atRiskSats() {
-    var here = canonicalMint(mintUrl || '');
+    var here = canonicalMint(currentSourceId() || '');
     return atRiskGroups().reduce(function (n, g) { return n + (canonicalMint(g.mint) === here ? g.sats : 0); }, 0);
   }
   /* A payment the receiver heard and refused, with nothing sent back: its
@@ -7895,7 +7895,7 @@
         return keep;
       });
       if (!list.length || lockedProofs(list).length) return Promise.resolve(0);
-      var at = canonicalMint(String((info && info.mint) || mintUrl || ''));
+      var at = canonicalMint(String((info && info.mint) || currentSourceId() || ''));
       var all = atRiskAll();
       all[made.hash] = { secrets: list.map(function (pr) { return pr.secret; }), sats: sumProofs(list),
                          at: Date.now(), req: reqId || '', mint: at, why: String(why || '').slice(0, 200) };
@@ -14968,12 +14968,78 @@
     if (FoxyWallet._headersOff) return;
     setTimeout(headerSoon, FoxyWallet._headerAfterMs === undefined ? 4000 : FoxyWallet._headerAfterMs);
   }
+    /* ---- the source interface -------------------------------------------
+     *
+     * Every money operation runs against a source. Today there is one kind —
+     * Cashu — and one source at a time: the mint the wallet is connected to.
+     * A source's id is therefore that mint's URL, byte for byte, and a key,
+     * scope or record that named the current mint reads the same string from
+     * sourceId() as it did from mintUrl. Nothing stored or shown changes by
+     * one character, and there is no second kind yet.
+     *
+     * The typedef is the contract a second kind (a federation) would keep.
+     * The adapter holds no state: its verbs call the wallet's own, which stay
+     * where they are with their words and their error paths, and its id reads
+     * the live connection. Flows that handle a mint URL as data — a visit and
+     * its restore, a crossing, a token, a card — keep asking for `mintUrl`:
+     * that is still the honest name for what they hold. */
+
+    /**
+     * @typedef {Object} MoneySource
+     * @property {'cashu'} kind — the only kind in the seam phase
+     * @property {() => string} sourceId — the current source's id ('' when none)
+     * @property {() => Promise<Object|null>} info — the mint's own record; null when not connected
+     * @property {() => Promise<number>} balance — 12-reading-and-price.js: balanceSats
+     * @property {(sats: number, memo?: string) => Promise<Object>} invoice — 15-receiving.js: invoice
+     * @property {(quoteId: string, onPaid: Function, opts?: Object) => *} watchInvoice — 15-receiving.js: watch
+     * @property {(bolt11: string) => Promise<Object|null>} payQuote — 22-screen-lock.js: quoteFee
+     * @property {(bolt11: string, onStage?: Function, opts?: Object) => Promise<Object>} pay — 16-sending.js: pay
+     * @property {(sats: number, opts?: Object) => Promise<Object>} sendEcash — 19-bill-split.js: sendToken
+     * @property {(text: string, opts?: Object) => Promise<Object>} receiveEcash — 19-bill-split.js: receiveToken
+     * @property {() => Promise<Object>} onchainAddress — 16a-onchain.js
+     * @property {(address: string, sats: number) => Promise<Object>} onchainQuote — 16a-onchain.js
+     * @property {(plan: Object, feeIndex: number, onStage?: Function) => Promise<Object>} onchainPay — 16a-onchain.js
+     * @property {(phrase: string, onEach?: Function) => Promise<Object>} recover — 13-restore.js: scanSeed, scoped to this source
+     */
+
+    /** The current source's id ('' when none). Today: the mint's own URL. */
+    function currentSourceId() { return mintUrl; }
+
+    /* The one adapter. Every verb delegates, resolved at call time. */
+    var cashuSource = {
+      kind: 'cashu',
+      sourceId: function () { return currentSourceId(); },
+      info: function () {
+        return Promise.resolve(wallet ? (wallet.mintInfo || (wallet.getMintInfo && wallet.getMintInfo()) || null) : null);
+      },
+      balance: function () { return FoxyWallet.balanceSats(); },
+      invoice: function (sats, memo) { return FoxyWallet.invoice(sats, memo); },
+      watchInvoice: function (quoteId, onPaid, opts) { return FoxyWallet.watch(quoteId, onPaid, opts); },
+      payQuote: function (bolt11) { return FoxyWallet.quoteFee(bolt11); },
+      pay: function (bolt11, onStage, opts) { return FoxyWallet.pay(bolt11, onStage, opts); },
+      sendEcash: function (sats, opts) { return FoxyWallet.sendToken(sats, opts); },
+      receiveEcash: function (text, opts) { return FoxyWallet.receiveToken(text, opts); },
+      onchainAddress: function () { return FoxyWallet.onchainAddress(); },
+      onchainQuote: function (address, sats) { return FoxyWallet.onchainQuote(address, sats); },
+      onchainPay: function (plan, feeIndex, onStage) { return FoxyWallet.onchainPay(plan, feeIndex, onStage); },
+      recover: function (phrase, onEach) {
+        return FoxyWallet.scanSeed(phrase, currentSourceId() ? [currentSourceId()] : [], onEach);
+      },
+    };
   var FoxyWallet = {
 
     /* ---- connection ---------------------------------------------------- */
 
     get connected() { return !!wallet; },
     get mintUrl() { return mintUrl; },
+
+    /* The current source's id — today the connected mint's URL, byte for byte
+     * (`09-source.js`). Identity, scope and key reads ask for this; `mintUrl`
+     * stays for the flows that keep a mint URL on purpose (visits, crosses). */
+    sourceId: function () { return currentSourceId(); },
+
+    /* The current source, through the one interface (`09-source.js`). */
+    source: function () { return cashuSource; },
     /* Whether a late claim has the wallet at another mint just now, and a
      * promise for when it is home (`claimAway`). For the screens: a balance
      * read in between is the other mint's. */
@@ -15245,7 +15311,7 @@
      * that had never connected, offered the choice, and took it.
      * So the choice is not offered until it means something. */
     offlineReady: function () {
-      var at = canonicalMint(mintUrl || load(K.mint, '') || '');
+      var at = canonicalMint(currentSourceId() || load(K.mint, '') || '');
       if (!at || !mintCacheFor(at)) return false;
       return !!(Number(FoxyWallet._rate) > 0 && Number(FoxyWallet._rateAt) > 0);
     },
@@ -15448,8 +15514,8 @@
        * At this mint: what is waiting at another is that mint's balance. */
       /* Less change this phone is about to hand back for an over-payment:
        * the entry already says what stays, and so does this (`holdChange`). */
-      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(mintUrl || '')
-                                         - changeLeavingSats(mintUrl || '')));
+      return Promise.resolve(Math.max(0, sumProofs(proofs()) + unclaimedSats(currentSourceId() || '')
+                                         - changeLeavingSats(currentSourceId() || '')));
     },
 
     /* Every pile that holds anything, in its own unit: [{ mint, unit, amount }].
@@ -15476,7 +15542,7 @@
     balanceIn: function (mint, unit) {
       var u = unitOf(unit);
       if (!u) return 0;
-      var m = (mint === undefined || mint === null || mint === '') ? mintUrl : canonicalMint(mint);
+      var m = (mint === undefined || mint === null || mint === '') ? currentSourceId() : canonicalMint(mint);
       if (!m) return 0;
       return sumProofs(proofs(m, u));
     },
@@ -16349,7 +16415,7 @@
 
     /* The host of the connected mint, for the interface to show. */
     mintHost: function () {
-      return String(mintUrl || '').replace(/^https?:\/\//, '');
+      return String(currentSourceId() || '').replace(/^https?:\/\//, '');
     },
 
     /* What it would cost to move everything here to another mint.
@@ -23933,7 +23999,7 @@
      * balance already counts it. The app asks before running a claim on a route
      * coming back, so an empty list costs nothing. */
     // change set aside for over-payments and not yet gone, at this mint (`holdChange`); for the suites
-    _changeLeavingSats: function () { return changeLeavingSats(mintUrl || ''); },
+    _changeLeavingSats: function () { return changeLeavingSats(currentSourceId() || ''); },
 
     unclaimedSats: function (at) {
       return unclaimedSats(at);

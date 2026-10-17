@@ -28,7 +28,7 @@
      * ellipsis those words end with is dropped rather than shown twice. */
     const title = String(label || 'Verifying ecash').replace(/[\u2026.]+\s*$/, '');
     const sats = Number(opts.sats) > 0 ? this.group(Math.round(opts.sats)) : '';
-    const mintName = String(opts.mint || (this.mintNameOf && this.mintNameOf(W && W.mintUrl)) || '');
+    const mintName = String(opts.mint || (this.mintNameOf && this.mintNameOf(W && W.sourceId())) || '');
     const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     root.innerHTML = this.loaderVerifying()
       .replace('{{TITLE}}', esc(title))
@@ -369,7 +369,7 @@
     const W = window.FoxyWallet;
     const info = (W && W.tokenInfo) ? W.tokenInfo(text) : null;
     const strip = u => String(u || '').replace(/\/+$/, '');
-    if (!info || !info.mint || strip(info.mint) === strip(W.mintUrl)) return false;
+    if (!info || !info.mint || strip(info.mint) === strip(W.sourceId())) return false;
     return this.refuseSwitchWhileBusy();
   }
 
