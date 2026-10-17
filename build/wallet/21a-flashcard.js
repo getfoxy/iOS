@@ -146,8 +146,8 @@
         /* A card with an owner is not open, set up or not: it is its owner's, and
          * only that owner's proof changes it. */
         if (card.info.owner) throw cardError('set-up', 'This card already belongs to a Foxy. Only that Foxy, or one restored from its seed phrase, can set it up again.');
-        // a card before 1.16 cannot be without a PIN: it would take no record and no owner
-        if (noPin && !card.info.noPinKnown) throw cardError('old-card', 'This card\u2019s software needs a PIN. It cannot be set up without one.');
+        // a card before 1.16 cannot be without a PIN: it would take no record and no owner; nor can a card from 1.21, which holds no money without one
+        if (noPin && (!card.info.noPinKnown || cardIs121(card))) throw cardError('old-card', 'This card needs a PIN. It cannot be set up without one.');
         // and a card that has a PIN already (a set-up cut off after it) cannot be set up without it: that PIN is not known here
         if (noPin && card.info.pinSet) throw cardError('has-pin', 'This card already has a PIN. Set it up with that PIN.');
         return cardOwnerPub(card.key);
@@ -166,7 +166,19 @@
         })).then(function () {
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
         }).then(function () {
-          return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
+          if (!cardIs121(card)) return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
+          /* From 1.21 the card takes an owner only after a held count of askings, each answered 6A98 ("keep holding") after real
+           * work, about ten seconds in all: a till that sees the PIN cannot make itself the owner in a moment. Each asking is told
+           * to the screen (`o.onHold`, the number asked so far), which says KEEP HOLDING. */
+          var ask = function (n) {
+            try { if (typeof o.onHold === 'function') o.onHold(n); } catch (e) {}
+            return t.ask(cardCommand(CARD_INS.setOwner, 0, ownerPub)).then(function (r) {
+              if (r.sw === '9000') return null;
+              if (r.sw === '6a98' && n < 40) return ask(n + 1);
+              throw cardRefused(r.sw, 'its owner');
+            });
+          };
+          return ask(1);
         });
       }).then(function () {
         console.log('[foxy] card: a new card is set up at ' + hostOf(mint) + ' in ' + balanceWord(unit) + (recoverable ? ', recoverable' : ', as cash') + ', with ' + (noPin ? 'no PIN and ' : '') + 'no limit');

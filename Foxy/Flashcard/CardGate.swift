@@ -48,6 +48,7 @@ enum CardGate {
         0x44,                                       // a nonce to answer with the owner's proof
         0x45,                                       // the owner's grant to load, in this tap, with no PIN
         0x51,                                       // reset the card to what it was in its packet (software 1.17), under the owner's proof
+        0x53,                                       // the card's own change loaded, the card taking its blinding factor off itself (software 1.21)
     ]
 
     /// A short command at its longest: four of header, a length, 255 of data

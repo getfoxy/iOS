@@ -56,6 +56,18 @@
       if (quoteSweepHeld && routeOpen()) {
         Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
       }
+      /* Tor has just come up on a wallet that was connected for real already (it went offline and came back in one
+       * session): the payments that waited for a route are claimed now, a card's payment kept offline among them
+       * (`claimUnclaimed`, which posts it). A connect does this itself, so a wallet built from storage is left to it.
+       * Without this they waited for the next launch or return, and their entries spun all that while. */
+      if (!wasUp && privacy.tor === 'up' && wallet && !wallet.foxyFromCache) {
+        setTimeout(function () {
+          if (!routeOpen()) return;
+          Promise.resolve().then(function () { return FoxyWallet.claimUnclaimed(); }).then(null, function (e) {
+            console.warn('[foxy] the payments waiting for a route, on its return:', e && e.message);
+          });
+        }, 1500);
+      }
       // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
       if (!wasUp && privacy.tor === 'up') warmSpareSoon();
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)

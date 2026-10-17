@@ -255,6 +255,13 @@
 
   /* Whether a card's software carries a design in its record (1.10 and on): a
    * card before that refuses a record with one, by its length. */
+  /* Software 1.21 and on: a PIN before any money, the card's own change bound to the mint's key when it is made and loaded by
+   * LOAD_CHANGE (the card takes its blinding factor off itself), and an owner claimed by a held count of askings (6A98). */
+  function cardIs121(card) {
+    var v = String((card && card.info && card.info.version) || '').split('.');
+    return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21);
+  }
+
   function cardCanDesign(card) {
     var v = String((card && card.info && card.info.version) || '').split('.');
     return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 10);
@@ -892,7 +899,7 @@
   var CARD_INS = { info: '01', key: '10', balance: '11', proof: '13', slots: '14', auth: '15', card: '16', pieces: '17', log: '18', getChange: '19',
                    /* 1a is GET_DLEQ (1.20 and on): the mint's proof kept with an unspent piece, for one place or two. */
                    dleq: '1a',
-                   spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', load: '30', clear: '31', setCard: '32', setLimit: '34',
+                   spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', loadChange: '53', load: '30', clear: '31', setCard: '32', setLimit: '34',
                    /* 35 is SET_TIME, a time under a signature, for a card of software 1.14 and before. From 1.15 the card's clock is
                     * the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
                    time: '35', header: '36', tell: '37',
@@ -2493,10 +2500,18 @@
       return t.want(cardCommand(CARD_INS.getChange, n, '', 0), 'to say what its change is made of').then(function (d) {
         var h = String(d || '').toLowerCase();
         var count = parseInt(h.substr(0, 2), 16);
-        if (!/^[0-9a-f]+$/.test(h) || !(count >= 0 && count <= CARD_CHANGE_PAGE) || h.length !== 2 + count * 160) {
+        /* 80 bytes a record up to 1.20 (amount, keyset, date, nonce, factor); 83 from 1.21, which never gives the factor or the nonce:
+         * its number, amount, keyset, date, the blinded message it answered and the mint's key it was bound to. */
+        var wide = !!(count > 0 && h.length === 2 + count * 166);
+        if (!/^[0-9a-f]+$/.test(h) || !(count >= 0 && count <= CARD_CHANGE_PAGE) || !(wide || h.length === 2 + count * 160)) {
           throw cardError('refused', 'The card did not say what its change is made of.', { sw: '' });
         }
         for (var k = 0; k < count; k++) {
+          if (wide) {
+            var q = h.substr(2 + k * 166, 166);
+            out.push({ number: parseInt(q.substr(0, 2), 16), amount: cardU32(q, 1), keyset: q.substr(10, 16), date: cardU32(q, 13), B_: q.substr(34, 66), K: q.substr(100, 66) });
+            continue;
+          }
           var o = h.substr(2 + k * 160, 160);
           out.push({ amount: cardU32(o, 0), keyset: o.substr(8, 16), date: cardU32(o, 12), nonce: o.substr(32, 64), r: o.substr(96, 64) });
         }
@@ -2511,6 +2526,7 @@
    * card answered this when it made the output; made again here, it is what
    * says which of its openings an output of ours is. '' for one that cannot be. */
   function cardOpeningB(card, op) {
+    if (op && op.B_) return String(op.B_).toLowerCase();
     try {
       var secret = cardSecret(op.nonce, card.key, op.date, card.record.refundKey, card.info && card.info.format);
       var bytes = new Uint8Array(secret.length);
@@ -2566,6 +2582,46 @@
       } catch (e) { stuck.push({ blind: b, why: 'signature' }); }
     });
     return { pieces: pieces, stuck: stuck };
+  }
+
+  /* The card's own change of one row written by LOAD_CHANGE (1.21): for each output, the card's opening with the same blinded
+   * message, and the mint's signature, its key (uncompressed, as the card takes points) and its proof sent to it. The card checks
+   * the key against the one it kept, checks the proof, takes its factor off and answers the place and the piece. Answers
+   * { pieces, stuck } as `cardBlindPieces` does, the pieces already on the card (`landed` is told each). An output whose opening is
+   * gone was written already, or is beyond reach, as there; one with no proof from the mint cannot be loaded at all. */
+  function cardLoadChange(t, card, row, openings, landed) {
+    var CT = window.CashuTS;
+    var date = Number(row.date) || 0, onIt = {}, pieces = [], stuck = [];
+    (card.pieces || []).forEach(function (x) { onIt[x.keyset + '|' + satsOf(x.amount) + '|' + (Number(x.date) || 0)] = true; });
+    var maybePaid = !!(card.info && Number(card.info.spent) > 0);
+    var wide = function (hex) { return CT.pointFromHex(String(hex)).toHex(false); };
+    return (row.blind || []).reduce(function (chain, b) {
+      return chain.then(function () {
+        var amount = satsOf(b.amount), short = cardShortId(b.id), hit = null;
+        (openings || []).forEach(function (op) {
+          if (!hit && op.B_ === String(b.B_).toLowerCase() && op.amount === amount && op.keyset === short) hit = op;
+        });
+        if (!hit) {
+          if (onIt[short + '|' + amount + '|' + date] || maybePaid) return null;
+          stuck.push({ blind: b, why: 'opening' });
+          return null;
+        }
+        if (!(b.dleq && b.dleq.e && b.dleq.s)) { stuck.push({ blind: b, why: 'no-proof' }); return null; }
+        var data;
+        try { data = wide(b.C_) + wide(b.K) + String(b.dleq.e).toLowerCase() + String(b.dleq.s).toLowerCase(); }
+        catch (e) { stuck.push({ blind: b, why: 'signature' }); return null; }
+        return t.ask(cardCommand(CARD_INS.loadChange, hit.number, data, 83)).then(function (r) {
+          if (r.sw === '6a80') { stuck.push({ blind: b, why: 'signature' }); return null; }
+          if (r.sw === '6a88') return null;
+          if (r.sw !== '9000' || !cardHexOk(r.data, 83)) throw cardRefused(r.sw === '9000' ? '' : r.sw, 'to take its change');
+          var h = String(r.data).toLowerCase();
+          var piece = { keyset: h.substr(4, 16), amount: cardU32(h, 10), nonce: h.substr(28, 64), C: h.substr(92, 66), date: cardU32(h, 79) };
+          pieces.push(piece);
+          try { landed(piece); } catch (e) {}
+          return null;
+        });
+      });
+    }, Promise.resolve()).then(function () { return { pieces: pieces, stuck: stuck }; });
   }
 
   /* The change a payment's card has made for itself and is owed, by the payment's entry (`forHash`): the rows, and what they come to. */
@@ -2680,6 +2736,9 @@
    * card's openings where they have been read in this tap already. */
   function cardWriteOwed(t, card, progress, only, known) {
     var mine = cardStore(CARD_OWED).filter(function (r) { return r && r.card === card.key && !r.stuck && (!Array.isArray(only) || only.indexOf(r.id) >= 0); });
+    /* From 1.21 the card's own change goes on with no PIN and anything else wants it: the change first, so that a refusal of a
+     * later row for want of the PIN never stops the change from going on. */
+    if (cardIs121(card)) mine = mine.filter(function (r) { return !!r.blind; }).concat(mine.filter(function (r) { return !r.blind; }));
     if (!mine.length) return Promise.resolve({ unit: (card.record && card.record.unit) || 'sat', amount: 0, sats: 0, back: 0, change: 0, refund: 0, done: [], left: [] });
     /* What is on the card already, by nonce, where the read gave nonces. A
      * short read gives none: then the card itself says which pieces it
@@ -2706,8 +2765,8 @@
     var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [];
     // its used places freed first, where it has any: a card with none is not asked
     var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
-      // a locked card frees nothing, and may still have room
-      if (!(e && e.card === 'locked')) throw e;
+      // a locked card frees nothing, and may still have room; nor does a 1.21 card with no PIN given in this tap
+      if (!(e && (e.card === 'locked' || e.card === 'pin-needed'))) throw e;
     });
     mine.forEach(function (row) {
       walk = walk.then(function () {
@@ -2730,7 +2789,12 @@
             throw cardError('wrong-unit', 'That money is in ' + balanceWord(ru) + ', and this card holds ' + balanceWord(cu) + '.', { cardUnit: cu, unit: ru });
           }
           // the card's own change is finished from its openings; any other row is the pieces its token holds
-          got = row.blind ? openingsOf().then(function (list) { return cardBlindPieces(row, card, list); })
+          got = row.blind ? openingsOf().then(function (list) {
+                              return cardIs121(card) ? cardLoadChange(t, card, row, list, function (piece) {
+                                onCard[piece.nonce] = true; written += 1; sentWith += 1; kept += 1; fresh.push(piece.nonce);
+                                tell({ step: 'writing', i: written, n: Math.max(toWrite, written) });
+                              }) : cardBlindPieces(row, card, list);
+                            })
                           : Promise.resolve({ pieces: cardPiecesOf(row.token, card), stuck: [] });
         } catch (e) { misfit = misfit || e; left.push(row.id); return null; }
         return got.then(function (prep) {
@@ -4691,7 +4755,16 @@
              * second of it over NFC): with several pieces that was seconds of a sheet that said nothing, and the holder
              * took the card away. */
             try { if (typeof progress === 'function') progress({ step: 'change', i: k + 1, n: plan.change.length }); } catch (e) {}
-            return t.ask(cardCommand(CARD_INS.change, 0, cardU32Hex(c.amount), 33));
+            /* From 1.21 the card is told the mint's key for the amount too, and keeps it: its change can then be loaded only as the
+             * mint's real signature under that key (LOAD_CHANGE). The key is the keyset's own, compressed. */
+            var data = cardU32Hex(c.amount);
+            if (cardIs121(card)) {
+              var ks = keysetFor(w, plan.keyset);
+              var K = ks && ks.keys ? String(ks.keys[String(c.amount)] || '').toLowerCase() : '';
+              if (!/^0[23][0-9a-f]{64}$/.test(K)) throw cardError('refused', 'The mint\u2019s key for this change is not known here.', { sw: '' });
+              data += K;
+            }
+            return t.ask(cardCommand(CARD_INS.change, 0, data, 33));
           }).then(function (r) {
             if (r.sw === '6a84') { var full = /** @type {any} */ (new Error('the card has no opening free for its change')); full.cardNoOpening = true; throw full; }
             if (r.sw !== '9000') throw cardRefused(r.sw, 'to make its change');

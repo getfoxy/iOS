@@ -24106,6 +24106,8 @@ class Component extends DCLogic {
       /* software 1.16 and on: the PIN is optional. `setUp`: the card has its record (and, before 1.16, a PIN); `pinSet`: it has a PIN (a blocked one does);
        * `noPinKnown`: its software can be without one and has the no PIN limit; `noPin`: that limit and what is left of it today (`known`, `set`, `limit`, `left`) */
       setUp: !!card.info.setUp, pinSet: !!card.info.pinSet, noPinKnown: !!card.info.noPinKnown, noPin: card.noPin || null,
+      // software 1.21 and on: a PIN before any money, every load under it, and the owner taken in a held claim
+      pinFirst: (() => { const v = String(card.info.version || '').split('.'); return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21); })(),
       limit: (card.record && card.record.limit) || 0,
       day: card.day || null,
       // the limit on one tap: { known, limited, limit, left, turns }; `known` false on a card whose software has none
@@ -24320,7 +24322,7 @@ class Component extends DCLogic {
   fcSetUpIn(unit) {
     const fc = this.state.fc;
     if (!fc) return;
-    if (fc.noPinKnown && !fc.pinSet) { this.fcSetUpNoPin(unit); return; }
+    if (fc.noPinKnown && !fc.pinSet && !fc.pinFirst) { this.fcSetUpNoPin(unit); return; }
     // no mint is asked: the card is told this phone's mint and given a key from this phone's words
     const first = (warn) => this.fcAskPin({
       title: 'CHOOSE A PIN',
@@ -24345,7 +24347,8 @@ class Component extends DCLogic {
     const W = this.fcW();
     // (the unit only where one was chosen: a card set up at a mint with one balance is set up as every card was)
     const how = Object.assign({ pin, recoverable, design: this.FC_SETUP_DESIGN }, unit ? { unit } : {});
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardSetUp(link, how); })
+    /* A card of 1.21 takes this phone as its owner only after about ten seconds of asking: each asking says Keep holding again. */
+    this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -24381,7 +24384,8 @@ class Component extends DCLogic {
    * till writes change. The daily limit is not touched by putting money on. */
   fcAddPin(sats) {
     const fc = this.state.fc;
-    if (fc && fc.ownedHere) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
+    // (from 1.21 every load wants the PIN, the owner's own included)
+    if (fc && fc.ownedHere && !fc.pinFirst) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
     this.fcAddAskPin(sats);
   }
 
@@ -24683,8 +24687,12 @@ class Component extends DCLogic {
     }
     this.blockedCard('fc-limit-warn', np ? {
       tone: 'warn', title: 'SET NO PIN LIMIT',
-      reason: 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
-        + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n'
+      // (from 1.21 the allowance is refilled each time the PIN is entered on the card, not by the day)
+      reason: (this.state.fc && this.state.fc.pinFirst
+        ? 'A \u201cNo PIN\u201d limit is how much this card can pay by tap alone before it asks for your PIN.\n\n'
+          + 'Once it is used up, the PIN is asked for, and entering it fills the limit again.\n\n'
+        : 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
+          + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.',
       retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
