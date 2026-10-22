@@ -7,6 +7,8 @@
       : (s.unit === 'SATS' ? landed / 1e8 * this.px() : landed);
     const cashu = s.recvRail === 'CASHU';
     const onchain = s.recvRail === 'ON-CHAIN';
+    // what this phone holds unsettled with no route, said on the receive screen only (26j-till-caps.js)
+    const tillNote = (sc === 'confirm' && !onchain && this.tillNoticeText) ? this.tillNoticeText() : '';
     // the same screen test as renderVals: no request unless this screen is up
     // (a dollar receive's request is in dollars, the one `cashuRequest` makes and the QR shows)
     const usdReq = !!(this.twoUnitsOn && this.twoUnitsOn() && this.walletNow('receive') === 'usd');
@@ -128,6 +130,11 @@
       recvNote: onchain ? this.ocReceiveNote() : '',
       recvNoteShown: onchain,
       recvNoteInk: 'rgba(var(--ink-rgb),.55)',
+      /* With no route, what this phone is holding and has not settled, at
+       * half its cap and at the cap (26j-till-caps.js), in the app's amber
+       * notice (the box with the warning sign). */
+      recvAmber: tillNote,
+      recvAmberShown: !!tillNote,
       /* No network to pick offline: Cashu is the only one this phone can offer
        * by itself, so the chooser says why rather than listing two rails that
        * cannot be made. */
@@ -679,9 +686,19 @@
     const result = pct == null ? 'There is nothing to compare it with.'
       : near ? 'You are ' + doing + ' the same in terms of sats.'
       : 'You are ' + doing + ' ' + size + '% ' + (pct > 0 ? 'less' : 'more') + ' in terms of sats.';
+    /* What their price makes of what this phone asked, at this phone's own
+     * price, under the price: for a request in dollars paid in sats, which
+     * crosses units (26k-price-line.js). Not on the payer's side of this
+     * screen, which is sats for sats; nor with no price here to weigh by. */
+    const diffLine = (!paying && pct != null && Number(q.usd) > 0 && this.priceDiffLine)
+      ? this.priceDiffLine({ askUnit: 'usd', askAmount: Math.round(Number(q.usd) || 0), payUnit: 'sat',
+                             askerRate: Number(q.myRate) || 0, askerAgeMs: Number(q.myRateAgeMs) || 0,
+                             payerRate: theirs, payerAgeMs: q.theirAgeMs, side: 'ask' })
+      : null;
     return {
       title: 'BITCOIN PRICE',
       subtitle: intro,
+      diffLine: diffLine,
       // an old price is theirs to own: CURRENT is only what a price seen just now can be called
       amountLabel: theirWords ? 'THEIR BITCOIN PRICE' : 'CURRENT BITCOIN PRICE',
       amount: '$ ' + this.group(theirs),
@@ -769,8 +786,9 @@
       code: this.state.tapCode || '',
       rows: [
         this.cfRow('RECEIVER GETS', m(net), { sub: d(net).trim() }),
-        this.cfRow('SWAP FEE', waiting ? 'WORKING IT OUT…' : m(fee),
-          { sub: waiting ? '' : d(fee).trim(), ink: 'var(--btc-ink)' }),
+        // the same FEE row, in the same words, as every payment that crosses mints or units (C16)
+        this.cfRow('FEE', waiting ? 'WORKING IT OUT…' : m(fee),
+          { sub: waiting ? '' : d(fee).trim(), ink: 'var(--btc-ink)', sub2: 'You pay the mint\u2019s fees' }),
         this.cfRow('THEIR MINT', String(c.them || '').toUpperCase(), { half: true }),
         this.cfRow('PAYING FROM', String(c.mine || '').toUpperCase(), { half: true }),
       ].concat(this.peerRateRow()),
@@ -876,6 +894,8 @@
      * and whose price made them, with its age where it is more than a few
      * minutes. Only on the request that answered that price. */
     const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
+    // the FEE row: while it is being checked, where the mint takes a fee for the pieces, or across units
+    const feeShown = held || !!(lack && lack.fee > 0) || agreed;
     const agreedRows = () => {
       const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
       return [
@@ -884,16 +904,30 @@
           { sub: words ? 'this phone\u2019s, seen ' + words.toLowerCase() : 'this phone\u2019s' }),
       ];
     };
+    /* Sats paying a request in dollars (`agreed`): the payment crosses units,
+     * so the big number is the sats this phone holds and pays, at its own
+     * price, and the dollars they asked for are under it (the owner's rule,
+     * 26k-price-line.js). The asker's price is not carried by a request in
+     * dollars, so there is no difference line here; their phone weighed this
+     * phone's price against its own before it answered (`priceSpec`). */
+    const head = (n) => (agreed && sats > 0
+      ? { main: '\u20bf ' + this.group(n), sub: this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') }
+      : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
       this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
-        { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
-      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? fig(lack.fee).main
-        : (usdReq || this.px()) ? '$ 0.00' : '\u20bf 0', { half: true }),
-    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
+        { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: feeShown }),
+    ]).concat(feeShown ? [
+      /* The owner's rule for fees (C16): paid in the unit asked, at the mint it
+       * is asked at, Foxy charges nothing and says nothing; a fee the mint
+       * itself takes for the pieces, or a payment across units, is the
+       * payer's, and the row says whose. */
+      this.cfRow('FEE', held ? 'CHECKING…' : fig(lack && lack.fee > 0 ? lack.fee : 0).main,
+        { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
+    ] : []).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -910,7 +944,7 @@
     if (lack && lack.short && this.requestHere(req)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : lack.need - lack.have) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
@@ -921,10 +955,10 @@
     if (short) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
-             + (lack && lack.fee > 0 ? ' with the fee' : ''),
+             + (lack && lack.fee > 0 ? ' with the mint\u2019s fees' : ''),
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
       };
     }
@@ -932,8 +966,8 @@
       title: 'CONFIRMATION',
       code: byTap ? s.tapCode : '',
       amountLabel: 'SENDING',
-      amount: sats ? fig(sats).main : 'ANY AMOUNT',
-      amountSub: sats ? fig(sats).sub : '',
+      amount: sats ? head(sats).main : 'ANY AMOUNT',
+      amountSub: sats ? head(sats).sub : '',
       rows: rows,
       /* The same pair the Lightning confirmation has: the note where the
        * second button goes, and the X at the top to back out. */
@@ -955,7 +989,7 @@
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
       cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
-        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + fig(sats).main
+        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
       ctaBusy: held || !!s.reqBusy,

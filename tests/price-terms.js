@@ -483,9 +483,10 @@ async function run() {
          && cs.amount === '$ 0.06' && cs.amountSub === '₿ 70',
          'the crossing screen leads with the total, which is what leaves',
          JSON.stringify({ title: cs.title, amount: cs.amount }));
-      ok(row(cs, 'RECEIVER GETS') === '$ 0.05' && row(cs, 'SWAP FEE') === '$ 0.01',
+      // the crossing's cost on the FEE row every crossing has, in its words (C16: the payer pays the mint's fees)
+      ok(row(cs, 'RECEIVER GETS') === '$ 0.05' && row(cs, 'FEE') === '$ 0.01',
          'and breaks it into what they get and what the crossing costs',
-         JSON.stringify({ gets: row(cs, 'RECEIVER GETS'), fee: row(cs, 'SWAP FEE') }));
+         JSON.stringify({ gets: row(cs, 'RECEIVER GETS'), fee: row(cs, 'FEE') }));
       ok(/^PAY \$ 0\.06/.test(cs.cta) && cs.secondary.label === 'CANCEL',
          'its button names the total, so pressing it is agreeing to that figure', cs.cta);
       ok(cs.rows.some((r) => r.label === 'THEIR MINT' && r.value === 'MINIBITS')

@@ -316,8 +316,9 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
    * that mint is connected to when the button is pressed, and what is held
    * there and charged there is known only then. It reads as it did. */
   const other = reqSpec(980, 979, lack(991, 979, 11), { req: { mints: ['https://other.example'] } });
-  ok(other.cta === 'CLOSE' && /short by ₿ 12 with the fee/.test(other.warn || ''),
-     'a request for another mint is refused as it was, in the words it was', other.cta + ' / ' + other.warn);
+  // in the words every fee is said in (C16): the mint's fees
+  ok(other.cta === 'CLOSE' && /short by ₿ 12 with the mint’s fees/.test(other.warn || ''),
+     'a request for another mint is refused as it was, the fee said as the mint’s', other.cta + ' / ' + other.warn);
   const fits = reqSpec(980, 5000, lack(991, 5000, 11), { req: { mints: ['https://other.example'] } });
   ok(fits.cta === 'GENERATE ECASH TOKEN', 'and one that fits is offered as it was', fits.cta);
   const none = reqSpec(980, 979, lack(991, 979, 11), { req: { mints: [] } });

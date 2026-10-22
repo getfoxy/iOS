@@ -379,6 +379,16 @@ function representative(logic) {
   add('confirm, working offline, cashu only', at('confirm',
     { flow: 'receive', amount: '2100', unit: 'SATS', asset: 'BITCOIN', network: 'LIGHTNING',
       recvRail: 'CASHU', invoice: 'lnbc2100n1stub' }, { wallet: OFFLINE }));
+  /* And holding past half of what it takes before it settles, then at all of it (26j-till-caps.js): the notice under the
+   * code, in amber, the second one firm. */
+  add('confirm, working offline, holding half the cap', at('confirm',
+    { flow: 'receive', amount: '2100', unit: 'SATS', asset: 'BITCOIN', network: 'LIGHTNING',
+      recvRail: 'CASHU', invoice: 'lnbc2100n1stub' },
+    { wallet: Object.assign({}, OFFLINE, { tillNotice: () => ({ level: 'prompt', heldSats: 211000, heldCents: 16240 }) }) }));
+  add('confirm, working offline, holding all the cap', at('confirm',
+    { flow: 'receive', amount: '2100', unit: 'SATS', asset: 'BITCOIN', network: 'LIGHTNING',
+      recvRail: 'CASHU', invoice: 'lnbc2100n1stub' },
+    { wallet: Object.assign({}, OFFLINE, { tillNotice: () => ({ level: 'full', heldSats: 390000, heldCents: 30010 }) }) }));
   add('sendtype, working offline', at('sendType', { flow: 'send' }, { wallet: OFFLINE }));
   /* The two decisions that used to be cards. Both are a person weighing
    * figures, which is what the confirmation shell is for, and the crossing one
@@ -640,6 +650,10 @@ function representative(logic) {
   // holding both, SETTINGS open: RECEIVE IN and SEND IN, one set and one not yet (ASK)
   add('two balances: settings, receive in and send in', at('home', Object.assign({ open0: true, menuSettingsOpen: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: 'usd', send: '' }) }) }));
+  // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
+  add('settings, what it takes offline', at('home', { open0: true, menuSettingsOpen: true },
+    { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
+  add('SET AMOUNT, what one payer may hand you offline', at('amount', { flow: 'tillCap', tillCapWhich: 'payer', unit: 'USD', amount: '40' }));
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));
@@ -651,6 +665,12 @@ function representative(logic) {
     recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
   add('two balances: CONFIRM PAYMENT from dollars, short', at('sendConfirm', Object.assign({ flow: 'send', wallet: 'usd', walletTapped: true,
     recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
+  /* Dollars paying a bitcoin invoice that came over a tap with the receiver's price on it, 3 % under the mint's: the
+   * line under the dollars, amber (26k-price-line.js). */
+  add('two balances: CONFIRM PAYMENT from dollars, their price 3 % off', at('sendConfirm', Object.assign({ flow: 'send', wallet: 'usd',
+    walletTapped: true, recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ,
+    askRate: 74600, get askRateAt() { return Date.now(); }, askRateFor: INVOICE_THIS_MINT }, TWO_LIVE),
+    { wallet: TWO({ payNeed: (a, r) => ({ ok: true, need: a + r, have: 4205, fee: r, unit: 'usd', why: '' }) }), before: asked }));
   add('two balances: WALLET, dollars short', at('walletPick', Object.assign({ flow: 'send', wallet: 'sat', walletAuto: true,
     recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
   add('two balances: paid, ADDED TO DOLLARS', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 500, recvResolved: true,

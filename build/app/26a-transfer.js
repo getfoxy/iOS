@@ -161,8 +161,9 @@
       this.cfRow('PAYING FROM', (this.mintNameOf(s.trFrom) || '').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', 'IN A MOMENT', { ink: 'var(--acc)', half: true }),
-      this.cfRow('FEE ON TOP', s.trErr ? 'UNKNOWN'
-        : fee == null ? 'CHECKING…' : 'UP TO ' + this.money(fee).main, { half: true }),
+      // between two mints: the mints' fees are this phone's to pay, said in the words every crossing uses (C16)
+      this.cfRow('FEE', s.trErr ? 'UNKNOWN'
+        : fee == null ? 'CHECKING…' : 'UP TO ' + this.money(fee).main, { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ];
     if (s.trErr) {
       /* Only the fee was in the way, and this is how much would go instead.

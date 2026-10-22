@@ -232,7 +232,7 @@ async function run() {
     let over = null;
     await V.transferQuote(FROM, 448).catch(e => { over = e; });
     check('all that is held cannot be moved, and the refusal says what is held',
-      !!over && /costs up to \d+ with the fee, and you hold 448 at from\.test/.test(over.message) && over.foxyHave === 448,
+      !!over && /costs up to \d+ with the mint’s fees, and you hold 448 at from\.test/.test(over.message) && over.foxyHave === 448,
       over ? over.message : 'it was quoted');
     const offered = over ? over.foxyFits : 0;
     check('and offers something that fits, and not the whole', offered > 0 && offered < 448, String(offered));

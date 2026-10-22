@@ -98,6 +98,8 @@ check "away claim"     1 node tests/away-claim.js
 check "carry cards"    1 node tests/carry-cards.js
 check "offline hostile" 1 node tests/offline-hostile.js
 check "counter refusal" 1 node tests/counter-refusal.js
+check "till caps"      1 node tests/till-caps.js
+check "price difference" 1 node tests/price-difference.js
 check "onchain keypad" 1 node tests/onchain-keypad.js
 check "mint busy"      1 node tests/mint-busy.js
 check "backup logic"   1 node tests/backup-logic.js

@@ -728,6 +728,8 @@
     if (req && opts && typeof opts.theirRoute === 'boolean') req.theirRoute = opts.theirRoute;
     // and whether it answers a question before the payment (`askFirst`), from the same offer
     if (req && opts && opts.asks) req.asks = true;
+    // and the till tag it gave with no route, for the payer's name to it (`payerTag`)
+    if (req && opts && opts.theirTill) req.theirTill = String(opts.theirTill);
     /* A request just opened is not one being paid.
      *
      * `reqBusy` is what makes the button say PAYING…, and a route that leaves

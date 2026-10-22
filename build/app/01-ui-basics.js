@@ -230,6 +230,7 @@ class Component extends DCLogic {
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
    *    titleUp?: boolean, wallet?: { word: string, go: () => void },
+   *    diffLine?: ?{ text: string, amber: boolean, pct: number },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -303,10 +304,12 @@ class Component extends DCLogic {
        * last payment's fee on the next payment's confirmation, three separate
        * times, each with a different patch. The value simply does not belong
        * on a screen shown before the payment — a quote or nothing. */
+      /* Whose fee it is, in the owner's words: a payment that leaves this mint
+       * pays the mint's fees, and the payer pays them (C16). */
       this.cfRow('FEE', s.quotedFee != null
         ? 'UP TO ' + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
-        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '' }),
+        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. A payment in the card's own
@@ -376,7 +379,7 @@ class Component extends DCLogic {
         const total = cardUsd ? W.cardOutTotal(s.quotedAmt, s.quotedFee, 'usd')
           : W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
         covers = total > cardHas
-          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + cfig(cardHas).main + '. This needs ' + cfig(total).main + ' with its fee.' }
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + cfig(cardHas).main + '. This needs ' + cfig(total).main + ' with the mint\u2019s fees.' }
           : { ok: true };
       } else {
         covers = (s.quotedFee != null && asks && W && W.payNeed)
@@ -689,7 +692,7 @@ class Component extends DCLogic {
         sub: wallet === 'usd' ? (asked ? bracket('₿ ' + this.group(asked)) : '') : bracket(q ? fig(q.amount).sub : ''),
       }),
       this.cfRow('FEE INCLUDED', q ? fig(q.feeReserve).main : held ? 'CHECKING…' : 'UNKNOWN',
-        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '' }),
+        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '', sub2: 'You pay the mint\u2019s fees' }),
       this.cfRow('NETWORK', 'LIGHTNING'),
     ];
     const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
@@ -699,8 +702,18 @@ class Component extends DCLogic {
         + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
     }
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    /* Dollars paying a bitcoin invoice that came over a tap with the asker's
+     * price on it: how far the mint's dollars are from what their price makes
+     * of the sats (26k-price-line.js). The dollars are the big number, as the
+     * unit that pays; the mint's rate is the one they are worked out at. */
+    const askRate = (wallet === 'usd' && s.askRateFor && s.askRateFor === s.recipient) ? Number(s.askRate) || 0 : 0;
+    const diffLine = (askRate > 0 && rate > 0 && asked > 0 && this.priceDiffLine)
+      ? this.priceDiffLine({ askUnit: 'sat', askAmount: asked, payUnit: 'usd', askerRate: askRate,
+                             askerAgeMs: Math.max(0, Date.now() - (Number(s.askRateAt) || Date.now())), payerRate: rate, payerAgeMs: 0,
+                             ownWord: 'the mint\u2019s', slackCents: 1 })
+      : null;
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
       wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid

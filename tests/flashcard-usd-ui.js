@@ -497,8 +497,9 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await tapDone(till, R);
     await settle();
     /* (the till reads its price once, to ask a bitcoin card for sats as well where it can: it cannot know before the tap which
-     * kind of card is held up; the dollar card's payment uses none of it) */
-    ok(till.toasts.indexOf('Paid by card while this phone is offline. Foxy settles it with the mint when it is online.') >= 0 && lastPrice <= 1,
+     * kind of card is held up; the dollar card's payment uses none of it. And once more, for the till cap, which holds what is
+     * unsettled in dollars and in sats against one figure (07-request-delivery.js, `tillRefusal`): never for the payment's own) */
+    ok(till.toasts.indexOf('Paid by card while this phone is offline. Foxy settles it with the mint when it is online.') >= 0 && lastPrice <= 2,
        'the card signed its cents over: received, and said so', String(lastPrice));
     const kept = R.W.cardKeptWaiting()[0];
     const keptRec = R.W.cardKept ? R.W.cardKept(kept.id) : null;

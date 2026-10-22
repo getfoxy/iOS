@@ -146,7 +146,7 @@
         var owed = satsOf(quote.amount) + satsOf(quote.fee_reserve);
         if (!reuse && shownMost > 0 && owed > shownMost) {
           var dearer = /** @type {any} */ (new Error('The mint’s price moved: this payment now needs ' + moneyWords(owed, unit)
-            + ' with its fee, not the ' + moneyWords(shownMost, unit) + ' you confirmed. Nothing was sent.'));
+            + ' with the mint\u2019s fees, not the ' + moneyWords(shownMost, unit) + ' you confirmed. Nothing was sent.'));
           dearer.definite = true;
           dearer.repriced = true;
           throw dearer;

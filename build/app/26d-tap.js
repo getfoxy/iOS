@@ -223,6 +223,13 @@
        * receiver refuse it. */
       : JSON.stringify({ v: 2, inv: inv || undefined, req: req || undefined,
                          up: !this.offlineNow(),
+                         /* With no route, this phone's till tag: a payer names
+                          * itself to this phone by it, in a name for this
+                          * phone alone, so what one payer hands over before it
+                          * settles can be counted (07-request-delivery.js,
+                          * `payerTag`, `tillRefusal`). Not said with a route,
+                          * where nothing is counted. */
+                         till: (this.offlineNow() && W.tillTag) ? W.tillTag() : undefined,
                          /* This phone answers "I am about to pay this" before
                           * any ecash is made (`askFirst`). Said here so a payer
                           * only asks a phone that will answer; an older Foxy
@@ -1578,13 +1585,15 @@
     /* Tri-state on purpose: true, false, and "they did not say". An older Foxy
      * says nothing, and nothing must not read as offline. */
     const theirRoute = typeof o.up === 'boolean' ? o.up : null;
+    // the till tag a receiver with no route gave, for the payer's name to it (`payerTag`)
+    const theirTill = (typeof o.till === 'string' && /^[0-9a-f]{16}$/.test(o.till)) ? o.till : '';
     /* Their bitcoin price, if they had a current one. A phone with no route of
      * its own is trusting this figure, so it is carried through to the screens
      * rather than quietly used for arithmetic. */
     const theirRate = Number(o.rate) > 0 ? Math.round(Number(o.rate)) : 0;
     const theirRateAt = Number(o.at) > 0 ? Math.round(Number(o.at)) * 1000 : 0;
     return { inv: inv, req: req, sameMint: sameMint, asksUsd: asksUsd, read: req0,
-             mints: theirs, crossable: crossable, theirRoute: theirRoute,
+             mints: theirs, crossable: crossable, theirRoute: theirRoute, theirTill: theirTill,
              // whether they answer a question before the payment (`askFirst`)
              asks: o.ask === 1,
              theirRate: theirRate, theirRateAt: theirRateAt,
@@ -1918,7 +1927,7 @@
      * needs the mint and is said so before anything moves; online it is paid
      * from the other balance through their invoice (`tapUnitHeld`). */
     if (offer.sameMint && this.tapUnitHeld && this.tapUnitHeld(offer, sats)) return;
-    if (offer.sameMint) { this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks }); return; }
+    if (offer.sameMint) { this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill }); return; }
     /* Their mint is not this phone's, and this phone has a route.
      *
      * Ecash is only ever worth what its own mint will honour, so a request at
@@ -2031,7 +2040,7 @@
       'They hold no ' + word + ' here, and paying from ' + otherWord + ' needs both of you online.');
       return true;
     }
-    if (offer.inv) { this.tapConvertPay(offer.inv, other); return true; }
+    if (offer.inv) { this.tapConvertPay(offer.inv, other, offer); return true; }
     this.tapAwaitUnitInvoice(offer, other);
     return true;
   }
@@ -2070,7 +2079,7 @@
       } catch (e) { lack = null; }
       if (lack && lack.short) {
         console.log('[foxy] tap: they take sats for dollars, and this phone holds too few sats for ' + q.sats + '; not paid');
-        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with its fee.'), this.shortForReceiver());
+        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with the mint\u2019s fees.'), this.shortForReceiver());
         return true;
       }
     }
@@ -2094,11 +2103,17 @@
    * scanned invoice, with WALLET set to the balance that pays. Not by way of
    * `acceptTarget`, which offers USE CASHU for an invoice of this mint's own:
    * that is the very payment this phone cannot make in their unit. */
-  tapConvertPay(inv, from) {
+  tapConvertPay(inv, from, offer) {
     const W = window.FoxyWallet;
     const sats = W.amountOf ? (W.amountOf(inv) || 0) : 0;
     console.log('[foxy] tap: paying their invoice from ' + (from === 'usd' ? 'dollars' : 'bitcoin') + ', at the mint\u2019s rate');
+    /* Their bitcoin price, where their offer carried one (a receive in bitcoin,
+     * with a current price): the asker's rate, which the confirmation weighs
+     * the mint's against (`priceDiffLine`). Tied to this invoice, so no other
+     * payment is shown it. */
+    const askRate = offer && Number(offer.theirRate) > 0 ? Math.round(Number(offer.theirRate)) : 0;
     this.setState(p => ({
+      askRate: askRate, askRateAt: askRate ? (Number(offer.theirRateAt) || Date.now()) : 0, askRateFor: askRate ? inv : '',
       wallet: from, walletAuto: true,
       screen: 'sendConfirm', stack: p.stack.concat([p.screen]), flow: 'send',
       asset: 'BITCOIN', network: 'LIGHTNING', recipientKind: 'invoice', recipient: inv,
@@ -2121,7 +2136,7 @@
       if (done) return;
       done = true;
       close();
-      if (inv) { this.tapConvertPay(inv, from); return; }
+      if (inv) { this.tapConvertPay(inv, from, offer); return; }
       console.log('[foxy] tap: no invoice came in five seconds; nothing was sent');
       this.tapRefuseUnit('They have no invoice for this yet. Nothing was sent.', 'The payer could not pay without an invoice.');
     };
@@ -2419,6 +2434,7 @@
         if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
         read.viaTap = true;
         if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+        if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
         this.setState({ req: read, reqBusy: false, crossBusy: false,
                         crossQ: null, note: '', noteDraft: '' });
@@ -2541,6 +2557,7 @@
       if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
       read.viaTap = true;
       if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+      if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
       this.setState({ req: read, reqBusy: false, crossBusy: false,
                       crossQ: null, note: '', noteDraft: '' });
@@ -3148,6 +3165,7 @@
            * agreed to IS this payment's confirmation. */
           read.viaTap = true;
           if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+          if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
           /* If they cannot bring it home, it comes back: the whole payment,
            * locked to this phone, over the link if it is still up. Noted so

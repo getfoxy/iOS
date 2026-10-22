@@ -744,13 +744,19 @@
           if (FoxyWallet.txSeen('req-' + fp) || takenBefore(tok.proofs)) {
             throw new Error('You have already been paid this ecash.');
           }
+          /* And within what this phone takes before it settles (`tillRefusal`),
+           * before the person is asked: a token names no payer, so it is
+           * counted with every other payment that names none. Refused, it is
+           * still theirs. */
+          var capNo = tillRefusal(tok.amount, unit, '', false);
+          if (capNo) throw new Error(capNo);
           // the HIGH RISK card is asked in the token's unit: `amount` and `unit`, `sats` only for sats
           return Promise.resolve(ask(Object.assign(inUnit(tok.amount), { id: fp, purpose: 'scan', scanned: true })))
             .then(function (yes) {
               if (yes !== true) {
                 throw new Error('This phone is offline and that ecash was not taken. It is still theirs.');
               }
-              keepUnclaimed(fp, FoxyWallet.unwrap(text), tok.amount, true, false, unit);
+              keepUnclaimed(fp, FoxyWallet.unwrap(text), tok.amount, true, false, unit, { payer: '' });
               logTx(unitRow(unit, {
                 dir: 'in', sats: tok.amount, feeSats: 0, settled: false, state: 'pending',
                 trusted: true, memo: 'ecash, offline', hash: 'req-' + fp,
@@ -824,7 +830,10 @@
         if (heldAlready(FoxyWallet.unwrap(text))) {
           throw new Error('This phone already has that ecash.');
         }
-        keepUnclaimed(id, FoxyWallet.unwrap(text), tok.amount, false, false, unit);
+        /* Locked to this phone, so already this phone's: taken whatever the till
+         * caps say (refusing it would only strand it), and counted toward them,
+         * as a payment that names no payer. */
+        keepUnclaimed(id, FoxyWallet.unwrap(text), tok.amount, false, false, unit, { payer: '' });
         markLockTaken(row, id);
         /* Received, not pending. It is locked to this phone alone: nobody else
          * can spend it and the giver cannot take it back, which is the whole of

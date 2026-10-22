@@ -147,6 +147,13 @@
      * own row and in the pile, and this only says what is still to be done
      * with them. */
     convert: 'foxy.cashu.convert',
+    /* What this phone takes with no route before it settles (07-request-delivery.js, `tillCaps`): the
+     * figures the person set, in sats. And the secret behind this phone's name as a payer, one name for each
+     * receiver with no route to count (`payerTag`). */
+    tillCaps: 'foxy.till.caps',
+    payerTag: 'foxy.payer.tag',
+    // this phone's own, as a receiver, on its offer while it has no route (`tillTag`)
+    tillTag: 'foxy.till.tag',
   };
 
   /* A day. Bitcoin seldom moves more than a few percent in one; past that the

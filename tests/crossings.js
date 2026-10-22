@@ -210,7 +210,7 @@ async function run() {
       const q = await W.transferQuote(THEIR, want, { to: HOME, land: true }).then((plan) => ({ plan }), (e) => ({ e }));
       if (q.plan) most = want; else refusal = { want, e: q.e };
     }
-    ok(most > 0 && !!refusal && /costs up to \d+ with the fee, and you hold \d+/.test(refusal.e.message), 'the largest amount a pile can move is found, and one more is refused with both figures',
+    ok(most > 0 && !!refusal && /costs up to \d+ with the mint’s fees, and you hold \d+/.test(refusal.e.message), 'the largest amount a pile can move is found, and one more is refused with both figures',
        most + ' of ' + have + '; ' + (refusal ? refusal.e.message : ''));
     ok(refusal && refusal.e.foxyFits === most, 'the amount the refusal offers is the one the quote then allows', refusal ? 'offers ' + refusal.e.foxyFits + ', allows ' + most : '');
     const plan = await W.transferQuote(THEIR, most, { to: HOME, land: true });

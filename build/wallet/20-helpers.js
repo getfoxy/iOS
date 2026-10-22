@@ -1647,7 +1647,10 @@
          * own words, not `mustSave`'s: that message says nothing is lost and it
          * is on record, and the record is the thing that failed. */
         try {
-          keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu);
+          /* With no route, who paid (`payer`: their `from`, '' when they named
+           * none), so the till caps can count it until it settles (`payerHeld`). */
+          keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu,
+                        routeOpen() ? null : { payer: p.from || '' });
         } catch (e) {
           console.error('[foxy] a payment arrived and could not be written down; refusing it:',
                         (e && e.message) || e);
@@ -1935,6 +1938,22 @@
       /* Both offline: ask, and let the answer decide. Nothing above this line
        * wrote anything down, so a refusal here leaves the payer holding their
        * own ecash, which is the whole point of asking before taking it. */
+      /* Over what this phone takes before it settles (`tillRefusal`): said as
+       * the refusals above are, with nothing written down, so the payer keeps
+       * their ecash. Only for ecash nobody has locked: ecash locked to this
+       * phone is already this phone's, and refusing it would only strand it
+       * (a Foxy payer was told no before it made anything, `answerIntent`). */
+      if (bothOffline) {
+        var capNo = tillRefusal(p.amount, pu, p.from, false);
+        if (capNo) {
+          delete FoxyWallet._requestsBeingPaid[p.id];
+          tell('failed');
+          answer(422, capNo);
+          return;
+        }
+      } else if (!routeOpen() && tillRefusal(p.amount, pu, p.from, false)) {
+        console.warn('[foxy] till cap: a payment locked to this phone is over a cap; it is taken, since refusing it would only strand it');
+      }
       if (bothOffline) {
         offlineOffer(p).then(function (yes) {
           if (yes) { takeIt(true); return; }
@@ -2155,6 +2174,9 @@
             return out;
           }) };
         if (req.id) payment.id = req.id;
+        // who is paying, to a receiver that said it is offline, in the name for that receiver alone (`payerTag`)
+        var fromName = req.theirRoute === false ? payerTag(req.theirTill) : '';
+        if (fromName) payment.from = fromName;
         /* A key for change to be locked to, when this payment might overpay.
          *
          * A payer with no route cannot swap, so an amount its pieces cannot make

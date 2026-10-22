@@ -262,7 +262,7 @@
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
-        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub } : { half: true }),
+        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub, sub2: 'You pay the mint\u2019s fees' } : { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
@@ -285,7 +285,7 @@
       if (out && pick && W && W.cardOutTotal) {
         const total = W.cardOutTotal(plan.sats, pick.fee);
         covers = total > cardHas
-          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with the mint\u2019s fees.' }
           : { ok: true };
       } else {
         covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;

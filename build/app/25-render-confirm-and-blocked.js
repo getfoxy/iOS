@@ -33,6 +33,14 @@
       cfAmountInk: cf.amountInk || 'var(--acc)',
       cfAmountSub: cf.amountSub || '',
       cfAmountSubShown: !!cf.amountSub,
+      /* A payment across units: the one line under the amount that says how far
+       * it is from what the ask would be at the asker's price, amber at 2 % or
+       * more between the prices (26k-price-line.js, `priceDiffLine`): then it
+       * is the app's amber notice, the box with the warning sign. */
+      cfDiff: (cf.diffLine && cf.diffLine.text) || '',
+      cfDiffShown: !!(cf.diffLine && cf.diffLine.text && !cf.diffLine.amber),
+      cfDiffAmberShown: !!(cf.diffLine && cf.diffLine.text && cf.diffLine.amber),
+      cfDiffInk: 'rgba(var(--ink-rgb),.55)',
       cfRows: cf.rows || [],
       cfChipBg: cf.warn ? 'rgba(255,92,92,.14)' : 'rgba(var(--acc-rgb),.12)',
       cfChipInk: cf.warn ? '#FF5C5C' : 'var(--acc-ink)',

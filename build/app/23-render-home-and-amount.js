@@ -550,6 +550,8 @@
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
+        // a till cap, from SETTINGS (26j-till-caps.js)
+        : s.flow === 'tillCap' ? (this.tillCapQuestion ? this.tillCapQuestion() : 'How much?')
         : 'How much to send?',
       // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
@@ -559,19 +561,27 @@
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap',
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0, s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
-        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')' : '',
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
+        : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
         else if (this.state.flow === 'swap') this.swapNext(true);
+        else if (this.state.flow === 'tillCap') this.tillCapSet(0);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
         if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
+        // a till cap, kept in sats (26j-till-caps.js)
+        if (this.state.flow === 'tillCap') {
+          if (val <= 0) { this.toast('Type an amount first.', true); return; }
+          this.tillCapSet(this.wantedSats());
+          return;
+        }
         // a swap's amount, in the balance it leaves (26i-swap.js)
         if (this.state.flow === 'swap') { if (!sendOver) this.swapNext(false); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }

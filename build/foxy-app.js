@@ -232,6 +232,7 @@ class Component extends DCLogic {
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
    *    titleUp?: boolean, wallet?: { word: string, go: () => void },
+   *    diffLine?: ?{ text: string, amber: boolean, pct: number },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -305,10 +306,12 @@ class Component extends DCLogic {
        * last payment's fee on the next payment's confirmation, three separate
        * times, each with a different patch. The value simply does not belong
        * on a screen shown before the payment — a quote or nothing. */
+      /* Whose fee it is, in the owner's words: a payment that leaves this mint
+       * pays the mint's fees, and the payer pays them (C16). */
       this.cfRow('FEE', s.quotedFee != null
         ? 'UP TO ' + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
-        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '' }),
+        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. A payment in the card's own
@@ -378,7 +381,7 @@ class Component extends DCLogic {
         const total = cardUsd ? W.cardOutTotal(s.quotedAmt, s.quotedFee, 'usd')
           : W.cardOutTotal(s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow(), s.quotedFee);
         covers = total > cardHas
-          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + cfig(cardHas).main + '. This needs ' + cfig(total).main + ' with its fee.' }
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + cfig(cardHas).main + '. This needs ' + cfig(total).main + ' with the mint\u2019s fees.' }
           : { ok: true };
       } else {
         covers = (s.quotedFee != null && asks && W && W.payNeed)
@@ -691,7 +694,7 @@ class Component extends DCLogic {
         sub: wallet === 'usd' ? (asked ? bracket('₿ ' + this.group(asked)) : '') : bracket(q ? fig(q.amount).sub : ''),
       }),
       this.cfRow('FEE INCLUDED', q ? fig(q.feeReserve).main : held ? 'CHECKING…' : 'UNKNOWN',
-        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '' }),
+        { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '', sub2: 'You pay the mint\u2019s fees' }),
       this.cfRow('NETWORK', 'LIGHTNING'),
     ];
     const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
@@ -701,8 +704,18 @@ class Component extends DCLogic {
         + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
     }
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    /* Dollars paying a bitcoin invoice that came over a tap with the asker's
+     * price on it: how far the mint's dollars are from what their price makes
+     * of the sats (26k-price-line.js). The dollars are the big number, as the
+     * unit that pays; the mint's rate is the one they are worked out at. */
+    const askRate = (wallet === 'usd' && s.askRateFor && s.askRateFor === s.recipient) ? Number(s.askRate) || 0 : 0;
+    const diffLine = (askRate > 0 && rate > 0 && asked > 0 && this.priceDiffLine)
+      ? this.priceDiffLine({ askUnit: 'sat', askAmount: asked, payUnit: 'usd', askerRate: askRate,
+                             askerAgeMs: Math.max(0, Date.now() - (Number(s.askRateAt) || Date.now())), payerRate: rate, payerAgeMs: 0,
+                             ownWord: 'the mint\u2019s', slackCents: 1 })
+      : null;
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
       wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid
@@ -3465,6 +3478,8 @@ class Component extends DCLogic {
     if (req && opts && typeof opts.theirRoute === 'boolean') req.theirRoute = opts.theirRoute;
     // and whether it answers a question before the payment (`askFirst`), from the same offer
     if (req && opts && opts.asks) req.asks = true;
+    // and the till tag it gave with no route, for the payer's name to it (`payerTag`)
+    if (req && opts && opts.theirTill) req.theirTill = String(opts.theirTill);
     /* A request just opened is not one being paid.
      *
      * `reqBusy` is what makes the button say PAYING…, and a route that leaves
@@ -13952,7 +13967,8 @@ class Component extends DCLogic {
      *   SETTINGS, which opens and closes in place:
      *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
      *     SEND IN (only at a mint with two balances, holding both), each with
-     *     the balance it is set to; SET PIN, RESTORE, BACKUP, LOGS
+     *     the balance it is set to; SET PIN; OFFLINE, ONE PAYER and OFFLINE,
+     *     IN ALL, each with its figure; RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has
@@ -14090,6 +14106,9 @@ class Component extends DCLogic {
           this.pinSetup(() => {});
         }),
       },
+      /* What this phone takes with no route before it settles: from one payer,
+       * and in all (26j-till-caps.js). Dollars, with the sats under. */
+    ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },
@@ -14099,7 +14118,7 @@ class Component extends DCLogic {
       { label: 'LOGS', path: MENU_ICON.logs, tap: shut(() => this.goFieldLog(false)) },
     ]).map(inSettings)).map(m => Object.assign({ glow: 'none', ringInk: 'transparent',
       ringInk2: 'transparent', ring: 'none', indent: '0px', hasSwitch: false, swBg: 'transparent',
-      swX: '0px', value: '', hasChev: false, chevRot: 'rotate(0deg)' }, m));
+      swX: '0px', value: '', valueSub: '', hasChev: false, chevRot: 'rotate(0deg)' }, m));
     /* The page's own hash, quiet at the foot of the drawer.
      *
      * The native side hashes the files it staged at launch and sets
@@ -14976,6 +14995,8 @@ class Component extends DCLogic {
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
+        // a till cap, from SETTINGS (26j-till-caps.js)
+        : s.flow === 'tillCap' ? (this.tillCapQuestion ? this.tillCapQuestion() : 'How much?')
         : 'How much to send?',
       // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
@@ -14985,19 +15006,27 @@ class Component extends DCLogic {
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap',
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0, s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
-        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')' : '',
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
+        : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
         else if (this.state.flow === 'swap') this.swapNext(true);
+        else if (this.state.flow === 'tillCap') this.tillCapSet(0);
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
         if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
+        // a till cap, kept in sats (26j-till-caps.js)
+        if (this.state.flow === 'tillCap') {
+          if (val <= 0) { this.toast('Type an amount first.', true); return; }
+          this.tillCapSet(this.wantedSats());
+          return;
+        }
         // a swap's amount, in the balance it leaves (26i-swap.js)
         if (this.state.flow === 'swap') { if (!sendOver) this.swapNext(false); return; }
         if (this.state.flow === 'onchain') { if (!sendOver) this.ocNext(); return; }
@@ -15122,6 +15151,8 @@ class Component extends DCLogic {
       : (s.unit === 'SATS' ? landed / 1e8 * this.px() : landed);
     const cashu = s.recvRail === 'CASHU';
     const onchain = s.recvRail === 'ON-CHAIN';
+    // what this phone holds unsettled with no route, said on the receive screen only (26j-till-caps.js)
+    const tillNote = (sc === 'confirm' && !onchain && this.tillNoticeText) ? this.tillNoticeText() : '';
     // the same screen test as renderVals: no request unless this screen is up
     // (a dollar receive's request is in dollars, the one `cashuRequest` makes and the QR shows)
     const usdReq = !!(this.twoUnitsOn && this.twoUnitsOn() && this.walletNow('receive') === 'usd');
@@ -15243,6 +15274,11 @@ class Component extends DCLogic {
       recvNote: onchain ? this.ocReceiveNote() : '',
       recvNoteShown: onchain,
       recvNoteInk: 'rgba(var(--ink-rgb),.55)',
+      /* With no route, what this phone is holding and has not settled, at
+       * half its cap and at the cap (26j-till-caps.js), in the app's amber
+       * notice (the box with the warning sign). */
+      recvAmber: tillNote,
+      recvAmberShown: !!tillNote,
       /* No network to pick offline: Cashu is the only one this phone can offer
        * by itself, so the chooser says why rather than listing two rails that
        * cannot be made. */
@@ -15794,9 +15830,19 @@ class Component extends DCLogic {
     const result = pct == null ? 'There is nothing to compare it with.'
       : near ? 'You are ' + doing + ' the same in terms of sats.'
       : 'You are ' + doing + ' ' + size + '% ' + (pct > 0 ? 'less' : 'more') + ' in terms of sats.';
+    /* What their price makes of what this phone asked, at this phone's own
+     * price, under the price: for a request in dollars paid in sats, which
+     * crosses units (26k-price-line.js). Not on the payer's side of this
+     * screen, which is sats for sats; nor with no price here to weigh by. */
+    const diffLine = (!paying && pct != null && Number(q.usd) > 0 && this.priceDiffLine)
+      ? this.priceDiffLine({ askUnit: 'usd', askAmount: Math.round(Number(q.usd) || 0), payUnit: 'sat',
+                             askerRate: Number(q.myRate) || 0, askerAgeMs: Number(q.myRateAgeMs) || 0,
+                             payerRate: theirs, payerAgeMs: q.theirAgeMs, side: 'ask' })
+      : null;
     return {
       title: 'BITCOIN PRICE',
       subtitle: intro,
+      diffLine: diffLine,
       // an old price is theirs to own: CURRENT is only what a price seen just now can be called
       amountLabel: theirWords ? 'THEIR BITCOIN PRICE' : 'CURRENT BITCOIN PRICE',
       amount: '$ ' + this.group(theirs),
@@ -15884,8 +15930,9 @@ class Component extends DCLogic {
       code: this.state.tapCode || '',
       rows: [
         this.cfRow('RECEIVER GETS', m(net), { sub: d(net).trim() }),
-        this.cfRow('SWAP FEE', waiting ? 'WORKING IT OUT…' : m(fee),
-          { sub: waiting ? '' : d(fee).trim(), ink: 'var(--btc-ink)' }),
+        // the same FEE row, in the same words, as every payment that crosses mints or units (C16)
+        this.cfRow('FEE', waiting ? 'WORKING IT OUT…' : m(fee),
+          { sub: waiting ? '' : d(fee).trim(), ink: 'var(--btc-ink)', sub2: 'You pay the mint\u2019s fees' }),
         this.cfRow('THEIR MINT', String(c.them || '').toUpperCase(), { half: true }),
         this.cfRow('PAYING FROM', String(c.mine || '').toUpperCase(), { half: true }),
       ].concat(this.peerRateRow()),
@@ -15991,6 +16038,8 @@ class Component extends DCLogic {
      * and whose price made them, with its age where it is more than a few
      * minutes. Only on the request that answered that price. */
     const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
+    // the FEE row: while it is being checked, where the mint takes a fee for the pieces, or across units
+    const feeShown = held || !!(lack && lack.fee > 0) || agreed;
     const agreedRows = () => {
       const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
       return [
@@ -15999,16 +16048,30 @@ class Component extends DCLogic {
           { sub: words ? 'this phone\u2019s, seen ' + words.toLowerCase() : 'this phone\u2019s' }),
       ];
     };
+    /* Sats paying a request in dollars (`agreed`): the payment crosses units,
+     * so the big number is the sats this phone holds and pays, at its own
+     * price, and the dollars they asked for are under it (the owner's rule,
+     * 26k-price-line.js). The asker's price is not carried by a request in
+     * dollars, so there is no difference line here; their phone weighed this
+     * phone's price against its own before it answered (`priceSpec`). */
+    const head = (n) => (agreed && sats > 0
+      ? { main: '\u20bf ' + this.group(n), sub: this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') }
+      : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
       this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
-        { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: true }),
-      this.cfRow('FEE', held ? 'CHECKING…' : lack && lack.fee > 0 ? fig(lack.fee).main
-        : (usdReq || this.px()) ? '$ 0.00' : '\u20bf 0', { half: true }),
-    ]).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
+        { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: feeShown }),
+    ]).concat(feeShown ? [
+      /* The owner's rule for fees (C16): paid in the unit asked, at the mint it
+       * is asked at, Foxy charges nothing and says nothing; a fee the mint
+       * itself takes for the pieces, or a payment across units, is the
+       * payer's, and the row says whose. */
+      this.cfRow('FEE', held ? 'CHECKING…' : fig(lack && lack.fee > 0 ? lack.fee : 0).main,
+        { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
+    ] : []).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -16025,7 +16088,7 @@ class Component extends DCLogic {
     if (lack && lack.short && this.requestHere(req)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : lack.need - lack.have) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
@@ -16036,10 +16099,10 @@ class Component extends DCLogic {
     if (short) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
-        amount: fig(sats).main, amountSub: fig(sats).sub, amountInk: '#FF5C5C', rows: rows,
+        amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
-             + (lack && lack.fee > 0 ? ' with the fee' : ''),
+             + (lack && lack.fee > 0 ? ' with the mint\u2019s fees' : ''),
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
       };
     }
@@ -16047,8 +16110,8 @@ class Component extends DCLogic {
       title: 'CONFIRMATION',
       code: byTap ? s.tapCode : '',
       amountLabel: 'SENDING',
-      amount: sats ? fig(sats).main : 'ANY AMOUNT',
-      amountSub: sats ? fig(sats).sub : '',
+      amount: sats ? head(sats).main : 'ANY AMOUNT',
+      amountSub: sats ? head(sats).sub : '',
       rows: rows,
       /* The same pair the Lightning confirmation has: the note where the
        * second button goes, and the X at the top to back out. */
@@ -16070,7 +16133,7 @@ class Component extends DCLogic {
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
       cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
-        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + fig(sats).main
+        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
       ctaBusy: held || !!s.reqBusy,
@@ -16112,6 +16175,14 @@ class Component extends DCLogic {
       cfAmountInk: cf.amountInk || 'var(--acc)',
       cfAmountSub: cf.amountSub || '',
       cfAmountSubShown: !!cf.amountSub,
+      /* A payment across units: the one line under the amount that says how far
+       * it is from what the ask would be at the asker's price, amber at 2 % or
+       * more between the prices (26k-price-line.js, `priceDiffLine`): then it
+       * is the app's amber notice, the box with the warning sign. */
+      cfDiff: (cf.diffLine && cf.diffLine.text) || '',
+      cfDiffShown: !!(cf.diffLine && cf.diffLine.text && !cf.diffLine.amber),
+      cfDiffAmberShown: !!(cf.diffLine && cf.diffLine.text && cf.diffLine.amber),
+      cfDiffInk: 'rgba(var(--ink-rgb),.55)',
       cfRows: cf.rows || [],
       cfChipBg: cf.warn ? 'rgba(255,92,92,.14)' : 'rgba(var(--acc-rgb),.12)',
       cfChipInk: cf.warn ? '#FF5C5C' : 'var(--acc-ink)',
@@ -17154,8 +17225,9 @@ class Component extends DCLogic {
       this.cfRow('PAYING FROM', (this.mintNameOf(s.trFrom) || '').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', 'IN A MOMENT', { ink: 'var(--acc)', half: true }),
-      this.cfRow('FEE ON TOP', s.trErr ? 'UNKNOWN'
-        : fee == null ? 'CHECKING…' : 'UP TO ' + this.money(fee).main, { half: true }),
+      // between two mints: the mints' fees are this phone's to pay, said in the words every crossing uses (C16)
+      this.cfRow('FEE', s.trErr ? 'UNKNOWN'
+        : fee == null ? 'CHECKING…' : 'UP TO ' + this.money(fee).main, { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ];
     if (s.trErr) {
       /* Only the fee was in the way, and this is how much would go instead.
@@ -17451,7 +17523,7 @@ class Component extends DCLogic {
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
-        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub } : { half: true }),
+        out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub, sub2: 'You pay the mint\u2019s fees' } : { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
@@ -17474,7 +17546,7 @@ class Component extends DCLogic {
       if (out && pick && W && W.cardOutTotal) {
         const total = W.cardOutTotal(plan.sats, pick.fee);
         covers = total > cardHas
-          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with its fee.' }
+          ? { ok: false, need: total, have: cardHas, why: 'The card holds ' + this.money(cardHas).main + '. This needs ' + this.money(total).main + ' with the mint\u2019s fees.' }
           : { ok: true };
       } else {
         covers = (pick && W && W.onchainNeed) ? W.onchainNeed(plan.sats, pick.fee) : null;
@@ -18006,6 +18078,13 @@ class Component extends DCLogic {
        * receiver refuse it. */
       : JSON.stringify({ v: 2, inv: inv || undefined, req: req || undefined,
                          up: !this.offlineNow(),
+                         /* With no route, this phone's till tag: a payer names
+                          * itself to this phone by it, in a name for this
+                          * phone alone, so what one payer hands over before it
+                          * settles can be counted (07-request-delivery.js,
+                          * `payerTag`, `tillRefusal`). Not said with a route,
+                          * where nothing is counted. */
+                         till: (this.offlineNow() && W.tillTag) ? W.tillTag() : undefined,
                          /* This phone answers "I am about to pay this" before
                           * any ecash is made (`askFirst`). Said here so a payer
                           * only asks a phone that will answer; an older Foxy
@@ -19361,13 +19440,15 @@ class Component extends DCLogic {
     /* Tri-state on purpose: true, false, and "they did not say". An older Foxy
      * says nothing, and nothing must not read as offline. */
     const theirRoute = typeof o.up === 'boolean' ? o.up : null;
+    // the till tag a receiver with no route gave, for the payer's name to it (`payerTag`)
+    const theirTill = (typeof o.till === 'string' && /^[0-9a-f]{16}$/.test(o.till)) ? o.till : '';
     /* Their bitcoin price, if they had a current one. A phone with no route of
      * its own is trusting this figure, so it is carried through to the screens
      * rather than quietly used for arithmetic. */
     const theirRate = Number(o.rate) > 0 ? Math.round(Number(o.rate)) : 0;
     const theirRateAt = Number(o.at) > 0 ? Math.round(Number(o.at)) * 1000 : 0;
     return { inv: inv, req: req, sameMint: sameMint, asksUsd: asksUsd, read: req0,
-             mints: theirs, crossable: crossable, theirRoute: theirRoute,
+             mints: theirs, crossable: crossable, theirRoute: theirRoute, theirTill: theirTill,
              // whether they answer a question before the payment (`askFirst`)
              asks: o.ask === 1,
              theirRate: theirRate, theirRateAt: theirRateAt,
@@ -19701,7 +19782,7 @@ class Component extends DCLogic {
      * needs the mint and is said so before anything moves; online it is paid
      * from the other balance through their invoice (`tapUnitHeld`). */
     if (offer.sameMint && this.tapUnitHeld && this.tapUnitHeld(offer, sats)) return;
-    if (offer.sameMint) { this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks }); return; }
+    if (offer.sameMint) { this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill }); return; }
     /* Their mint is not this phone's, and this phone has a route.
      *
      * Ecash is only ever worth what its own mint will honour, so a request at
@@ -19814,7 +19895,7 @@ class Component extends DCLogic {
       'They hold no ' + word + ' here, and paying from ' + otherWord + ' needs both of you online.');
       return true;
     }
-    if (offer.inv) { this.tapConvertPay(offer.inv, other); return true; }
+    if (offer.inv) { this.tapConvertPay(offer.inv, other, offer); return true; }
     this.tapAwaitUnitInvoice(offer, other);
     return true;
   }
@@ -19853,7 +19934,7 @@ class Component extends DCLogic {
       } catch (e) { lack = null; }
       if (lack && lack.short) {
         console.log('[foxy] tap: they take sats for dollars, and this phone holds too few sats for ' + q.sats + '; not paid');
-        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with its fee.'), this.shortForReceiver());
+        this.tapRefuseUnit(lack.why || ('This needs ' + this.moneyIn(q.sats, 'sat') + ' with the mint\u2019s fees.'), this.shortForReceiver());
         return true;
       }
     }
@@ -19877,11 +19958,17 @@ class Component extends DCLogic {
    * scanned invoice, with WALLET set to the balance that pays. Not by way of
    * `acceptTarget`, which offers USE CASHU for an invoice of this mint's own:
    * that is the very payment this phone cannot make in their unit. */
-  tapConvertPay(inv, from) {
+  tapConvertPay(inv, from, offer) {
     const W = window.FoxyWallet;
     const sats = W.amountOf ? (W.amountOf(inv) || 0) : 0;
     console.log('[foxy] tap: paying their invoice from ' + (from === 'usd' ? 'dollars' : 'bitcoin') + ', at the mint\u2019s rate');
+    /* Their bitcoin price, where their offer carried one (a receive in bitcoin,
+     * with a current price): the asker's rate, which the confirmation weighs
+     * the mint's against (`priceDiffLine`). Tied to this invoice, so no other
+     * payment is shown it. */
+    const askRate = offer && Number(offer.theirRate) > 0 ? Math.round(Number(offer.theirRate)) : 0;
     this.setState(p => ({
+      askRate: askRate, askRateAt: askRate ? (Number(offer.theirRateAt) || Date.now()) : 0, askRateFor: askRate ? inv : '',
       wallet: from, walletAuto: true,
       screen: 'sendConfirm', stack: p.stack.concat([p.screen]), flow: 'send',
       asset: 'BITCOIN', network: 'LIGHTNING', recipientKind: 'invoice', recipient: inv,
@@ -19904,7 +19991,7 @@ class Component extends DCLogic {
       if (done) return;
       done = true;
       close();
-      if (inv) { this.tapConvertPay(inv, from); return; }
+      if (inv) { this.tapConvertPay(inv, from, offer); return; }
       console.log('[foxy] tap: no invoice came in five seconds; nothing was sent');
       this.tapRefuseUnit('They have no invoice for this yet. Nothing was sent.', 'The payer could not pay without an invoice.');
     };
@@ -20202,6 +20289,7 @@ class Component extends DCLogic {
         if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
         read.viaTap = true;
         if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+        if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
         this.setState({ req: read, reqBusy: false, crossBusy: false,
                         crossQ: null, note: '', noteDraft: '' });
@@ -20324,6 +20412,7 @@ class Component extends DCLogic {
       if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
       read.viaTap = true;
       if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+      if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
       this.setState({ req: read, reqBusy: false, crossBusy: false,
                       crossQ: null, note: '', noteDraft: '' });
@@ -20931,6 +21020,7 @@ class Component extends DCLogic {
            * agreed to IS this payment's confirmation. */
           read.viaTap = true;
           if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+          if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
           /* If they cannot bring it home, it comes back: the whole payment,
            * locked to this phone, over the link if it is still up. Noted so
@@ -27604,6 +27694,159 @@ class Component extends DCLogic {
       swapDoneNote: !r ? '' : 'Fee ' + this.unitFigure(Math.max(0, Number(r.fee) || 0), feeUnit)
         + (rate > 0 ? ' · ' + this.swapRateText(rate) : ''),
       swapDoneGo: () => this.swapDoneClose(),
+    };
+  }
+  /* ---- what this phone takes offline before it settles ---------------------
+   *
+   * The owner's till caps (2026-10-16): $50 from one payer, $300 held in all,
+   * with a prompt at half of that. The wallet keeps and applies them
+   * (07-request-delivery.js, `tillCaps`, `tillRefusal`); these are the screens'
+   * half: two rows in SETTINGS, the amount typed on SET AMOUNT as every amount
+   * is, and the notice on the receive screen. */
+
+  /* The two SETTINGS rows, in the drawer's own row style: the figure in
+   * dollars, sats under it. A tap opens SET AMOUNT for it. `path` is the
+   * row's icon and `shut` the drawer's own closing (21-render-values.js). */
+  tillCapRows(path, shut) {
+    const W = window.FoxyWallet;
+    let caps = null;
+    try { caps = (W && W.tillCaps) ? W.tillCaps() : null; } catch (e) { caps = null; }
+    if (!caps) return [];
+    // with no price the dollar figure alone, which needs none (`tillCaps`)
+    const row = (label, which, sats, cents) => {
+      const m = sats > 0 ? this.money(sats) : cents > 0 ? { main: this.unitFigure(cents, 'usd'), sub: '' } : { main: '', sub: '' };
+      return { label, path, value: m.main, valueSub: m.sub,
+        tap: shut ? shut(() => this.tillCapAsk(which)) : () => this.tillCapAsk(which) };
+    };
+    return [
+      row('OFFLINE, ONE PAYER', 'payer', caps.payerSats, caps.payerCents),
+      row('OFFLINE, IN ALL', 'hold', caps.holdSats, caps.holdCents),
+    ];
+  }
+
+  // SET AMOUNT for one of them, dollars first as every amount is typed
+  tillCapAsk(which) {
+    this.setState(p => ({
+      screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'tillCap', tillCapWhich: which === 'payer' ? 'payer' : 'hold',
+      amount: '', unit: this.px() ? 'USD' : 'SATS',
+      asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
+    }));
+  }
+
+  tillCapQuestion() {
+    return this.state.tillCapWhich === 'payer'
+      ? 'How much may one payer hand you while you are offline?'
+      : 'How much may you hold while offline before it settles?';
+  }
+
+  /* The default, as SET AMOUNT's second answer: the owner's figure in dollars,
+   * which follows the price until a figure is set. */
+  tillCapDefaultLabel() {
+    return 'USE THE DEFAULT (' + (this.state.tillCapWhich === 'payer' ? '$ 50.00' : '$ 300.00') + ')';
+  }
+
+  // NEXT on SET AMOUNT: kept in sats (`wantedSats` turns typed dollars into sats at this phone's price); 0 is the default
+  tillCapSet(sats) {
+    const W = window.FoxyWallet;
+    const which = this.state.tillCapWhich === 'payer' ? 'payer' : 'hold';
+    if (!(sats >= 0) || !W || !W.setTillCap) return;
+    let caps = null;
+    try { caps = W.setTillCap(which, sats); }
+    catch (e) { this.toast('That could not be kept. Try again.', true); return; }
+    const now = which === 'payer' ? caps.payerSats : caps.holdSats;
+    this.setState(p => ({
+      screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1),
+      flow: 'receive', amount: '', unit: 'USD', menuTick: (p.menuTick || 0) + 1,
+    }));
+    this.toast(now > 0 ? 'Set to ' + this.money(now).main : 'Set to the default');
+  }
+
+  /* The receive screen's notice, with no route: '' under half the cap, the
+   * prompt at it, and the same words made firm at the cap. In the amber the
+   * amount screen's price warning uses. */
+  tillNoticeText() {
+    const W = window.FoxyWallet;
+    if (!(this.offlineNow && this.offlineNow())) return '';
+    let n = null;
+    try { n = (W && W.tillNotice) ? W.tillNotice() : null; } catch (e) { n = null; }
+    if (!n || !n.level) return '';
+    const held = n.heldCents > 0 ? this.unitFigure(n.heldCents, 'usd') : this.unitFigure(n.heldSats, 'sat');
+    return n.level === 'full'
+      ? 'You are holding ' + held + ' of payments that are not settled yet. Connect to settle them before you take more.'
+      : 'You are holding ' + held + ' of payments that are not settled yet. Connect to settle them.';
+  }
+  /* ---- a payment across units: the line under the big number -------------
+   *
+   * The owner's rule (2026-10-16): when a payment crosses units, a dollar
+   * holder paying an ask in sats or the other way round, the big number is
+   * the unit the payer holds, and under it one line says how far that is from
+   * what the ask would be at the asker's own bitcoin price, with how old each
+   * price is in the app's age words (`priceAgeWords`):
+   *
+   *   "$ 0.05 more than asked: their rate differs from yours, theirs from 3 hours ago"
+   *
+   * At a difference of 2 % or more between the two prices the line is the
+   * amber notice (the amount screen's price warning, in its colour). A
+   * payment in one unit shows none of this, and nor does one where the
+   * asker's price is not known: a request asking in dollars carries none (an
+   * offline phone does not tell a stranger when it was last online,
+   * 20-helpers.js `paymentRequest`), and a tap offer carries the receiver's
+   * only when it is current and the receive is in bitcoin (26d-tap.js,
+   * `tapOffering`).
+   *
+   * `o`: { askUnit, askAmount (in the ask's unit: sats, or cents), payUnit,
+   *        askerRate, askerAgeMs, payerRate, payerAgeMs, side, ownWord,
+   *        slackCents }.
+   * `side` is which of the two this phone is: 'pay' (the default) or 'ask'.
+   * "their" is always the other phone's price and "yours" this phone's, or
+   * `ownWord` where the price on this side is not the person's own ('the
+   * mint’s', when the mint converts a payer's dollars).
+   * `slackCents`: how much of the difference can be rounding and not price.
+   * The mint quotes dollars in whole cents, rounded up, so the rate worked
+   * out from its quote (`rateFrom`) is off by up to a cent of the payment: on
+   * 333 sats a 34¢ quote reads as a 2 % dearer price when the price is the
+   * same. That cent is taken off the difference before deciding whether to
+   * say anything, and the 2 % is of what is left; the sum named is the whole
+   * difference, which is what the payer pays over the ask.
+   * A difference that comes to less than a cent says nothing: there is no
+   * sum to name.
+   * Null, or { text, amber, pct }. */
+  priceDiffLine(o) {
+    if (!o) return null;
+    const askU = o.askUnit === 'usd' ? 'usd' : 'sat';
+    const payU = o.payUnit === 'usd' ? 'usd' : 'sat';
+    if (askU === payU) return null;
+    const ra = Number(o.askerRate) || 0;
+    const rp = Number(o.payerRate) || 0;
+    const n = Math.round(Number(o.askAmount) || 0);
+    if (!(ra > 0) || !(rp > 0) || !(n > 0)) return null;
+    const pct = ((rp - ra) / ra) * 100;
+    // under a tenth of a percent is the same price, as the BITCOIN PRICE screen reads it (`priceSpec`)
+    if (Math.abs(pct) < 0.1) return null;
+    /* In dollars, whichever way round. Sats for a dollar ask: the sats the
+     * payer's price makes of it, valued at the asker's, less what was asked.
+     * Dollars for a sat ask: the sats at the payer's price, less the same sats
+     * at the asker's. More is the payer paying more than the asker asked. */
+    const cents = askU === 'usd' ? n * (ra / rp - 1) : (n / 1e8) * (rp - ra) * 100;
+    const slack = Math.max(0, Number(o.slackCents) || 0);
+    const net = Math.abs(cents) - slack;
+    // said only when what is left past the rounding is a cent or more; and then the whole difference is named
+    if (!(Math.round(net) >= 1)) return null;
+    const size = Math.round(Math.abs(cents));
+    // the prices' difference, less the part rounding could make
+    const netPct = Math.abs(pct) * (net / Math.abs(cents));
+    if (netPct < 0.1) return null;
+    const ageOf = (ms) => (ms == null || !this.priceAgeWords ? '' : String(this.priceAgeWords(Number(ms)) || '').toLowerCase());
+    const asking = o.side === 'ask';
+    const theirAge = ageOf(asking ? o.payerAgeMs : o.askerAgeMs);
+    const ownAge = ageOf(asking ? o.askerAgeMs : o.payerAgeMs);
+    const own = o.ownWord || 'yours';
+    const ages = [theirAge ? 'theirs from ' + theirAge : '', ownAge ? own + ' from ' + ownAge : ''].filter(Boolean).join(', ');
+    return {
+      text: this.unitFigure(size, 'usd') + ' ' + (cents > 0 ? 'more' : 'less') + ' than asked: their rate differs from '
+        + own + (ages ? ', ' + ages : ''),
+      amber: netPct >= 2,
+      pct,
     };
   }
 

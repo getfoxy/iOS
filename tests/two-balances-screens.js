@@ -566,7 +566,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.pay = function (bolt11, onStage, popts) {
       if (refusals === 0) {
         refusals += 1;
-        const e = new Error('The mint’s price moved: this payment now needs $ 1.96 with its fee, not the $ 1.56 you confirmed. Nothing was sent.');
+        const e = new Error('The mint’s price moved: this payment now needs $ 1.96 with the mint’s fees, not the $ 1.56 you confirmed. Nothing was sent.');
         e.definite = true; e.repriced = true;
         return Promise.reject(e);
       }

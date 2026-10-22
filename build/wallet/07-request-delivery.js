@@ -694,6 +694,256 @@
     return total;
   }
 
+  /* ---- till caps: what this phone takes with no route before it settles ----
+   *
+   * The owner's numbers (2026-10-16): $50 from one payer this phone does not
+   * know, and $300 held in all, with a prompt at half of that ($150). Offline a
+   * payment between phones is the risky kind ("when phone pays it's risky"),
+   * and these bound how much of it one phone can be carrying when the route
+   * comes back.
+   *
+   * Kept in sats, at the phone's last bitcoin price when the person set them
+   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, IN ALL). Never set, each is its
+   * dollar default at the phone's last price, worked out when it is asked, so
+   * the default follows the price until somebody picks a figure.
+   *
+   * With no price at all (a phone that has never seen one) sats and dollars
+   * cannot be added up, so each unit is held to its own figure: dollars to the
+   * dollar figure, which needs no price ($50 and $300, or what was set, in the
+   * cents it came to when it was set: `payerCents`, `holdCents`), and sats to
+   * a figure set in sats, or to none when nothing was set (a default is a
+   * dollar figure, and there is no price to make sats of it).
+   *
+   * What is counted is the unclaimed store: every payment this phone holds and
+   * has not swapped in yet, in either unit (dollar rows at the last price),
+   * less rows no seed here opens (`strandUnclaimed`), which are not money in
+   * hand. A payment that has settled has left the store, so a payer whose
+   * earlier payments settled is not counted again.
+   *
+   * By payer, the identity the payment carries: `from` (`payerTag`), which a
+   * Foxy paying a phone that said it is offline puts on its question and its
+   * payment. A payment that names none (an older Foxy, another wallet, a token
+   * scanned off a screen) is counted with every other one that names none, as
+   * one payer. Known contacts raise nothing: whether a payer is known is a hint
+   * on a screen, never a larger cap (the owner's rule).
+   *
+   * A card's payment counts toward what is held in all, and not toward any one
+   * payer's cap ("when card pays, it's safe": the card proves its money and
+   * signs it to this phone), so a card row (`card`) is left out of `payerHeld`. */
+  var TILL_PAYER_CENTS = 5000;
+  var TILL_HOLD_CENTS = 30000;
+
+  function tillStored() {
+    var o = load(K.tillCaps, {});
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }
+
+  // dollars (cents) as sats at the phone's last price, or 0 with none
+  function lastRate() {
+    var p = FoxyWallet.lastPrice();
+    var r = Number(p && p.rate) || 0;
+    return r > 0 ? r : 0;
+  }
+  // `r`: the price, read once by the caller (`lastRate`), so one question reads it once
+  function centsAsSats(cents, r) {
+    return r > 0 ? Math.round((Number(cents) || 0) / 100 / r * 1e8) : 0;
+  }
+  function satsAsCents(sats, r) {
+    return r > 0 ? Math.round((Number(sats) || 0) / 1e8 * r * 100) : 0;
+  }
+
+  /* { payerSats, holdSats, promptSats, payerSet, holdSet, payerCents,
+   * holdCents }: the sats figures 0 where there is none (no price and none
+   * set), and then nothing in sats is held to it. The cents figures are what
+   * dollars are held to when there is no price: with a price, the sats
+   * figures at it; with none, the cents a set figure came to when it was set,
+   * or the owner's dollars. */
+  function tillCaps(rate) {
+    var r = rate === undefined ? lastRate() : rate;
+    var o = tillStored();
+    var set = function (n) { return Number.isInteger(n) && n > 0; };
+    var payer = set(o.payerSats) ? o.payerSats : centsAsSats(TILL_PAYER_CENTS, r);
+    var hold = set(o.holdSats) ? o.holdSats : centsAsSats(TILL_HOLD_CENTS, r);
+    var payerC = r > 0 ? satsAsCents(payer, r) : set(o.payerSats) && set(o.payerCents) ? o.payerCents : TILL_PAYER_CENTS;
+    var holdC = r > 0 ? satsAsCents(hold, r) : set(o.holdSats) && set(o.holdCents) ? o.holdCents : TILL_HOLD_CENTS;
+    return { payerSats: payer, holdSats: hold, promptSats: Math.floor(hold / 2),
+             payerSet: set(o.payerSats), holdSet: set(o.holdSats),
+             payerCents: payerC, holdCents: holdC };
+  }
+
+  /* One of them set, in sats ('payer' or 'hold'); null or 0 puts the default
+   * back. Throws where the write does not land, so the screen can say so. */
+  function setTillCap(which, sats) {
+    var key = which === 'payer' ? 'payerSats' : which === 'hold' ? 'holdSats' : '';
+    if (!key) throw new Error('No such setting.');
+    var cKey = which === 'payer' ? 'payerCents' : 'holdCents';
+    var o = tillStored();
+    var n = Math.round(Number(sats) || 0);
+    // and what it comes to in dollars now, for a later time with no price to say it (`tillCaps`)
+    var c = satsAsCents(n, lastRate());
+    if (n > 0) o[key] = n; else delete o[key];
+    if (n > 0 && c > 0) o[cKey] = c; else delete o[cKey];
+    mustSave(K.tillCaps, o);
+    return tillCaps();
+  }
+
+  /* A row's worth in `m`, the unit it is counted in: with a price, in sats
+   * ('sat'), a dollar row at the last price; with none, only a row in `m`
+   * counts, in its own unit (sats and dollars cannot be added up with no
+   * price, and each is held to its own figure, `tillCaps`). */
+  function rowIn(row, r, m) {
+    var n = amountOfRecord(row);
+    if (!(n > 0)) return 0;
+    var u = recordUnit(row) === 'usd' ? 'usd' : 'sat';
+    if (r > 0) return u === 'usd' ? centsAsSats(n, r) : n;
+    return u === (m === 'usd' ? 'usd' : 'sat') ? n : 0;
+  }
+
+  /* What this phone holds and has not settled: every row of the unclaimed
+   * store, in both units, in sats; with no price, the rows in `m` alone, in
+   * that unit (sats when `m` is not said). */
+  function unsettledHeld(rate, m) {
+    var r = rate === undefined ? lastRate() : rate;
+    var all = unclaimed(), total = 0;
+    Object.keys(all).forEach(function (id) {
+      var row = all[id];
+      if (!row || row.stranded) return;
+      total += rowIn(row, r, m);
+    });
+    return total;
+  }
+
+  /* What one payer has handed this phone and is not settled, in sats. `who`
+   * is their `from`, or '' for every payment that named none. Rows written
+   * before payers were kept say nothing about who paid and are not counted
+   * here (they are in `unsettledHeld`); nor is a card's. */
+  function payerHeld(who, rate, m) {
+    var r = rate === undefined ? lastRate() : rate;
+    var all = unclaimed(), total = 0, want = String(who || '');
+    Object.keys(all).forEach(function (id) {
+      var row = all[id];
+      if (!row || row.stranded || row.card || typeof row.payer !== 'string') return;
+      if (row.payer !== want) return;
+      total += rowIn(row, r, m);
+    });
+    return total;
+  }
+
+  // the shape a payer's identity has to have, or it is none
+  function payerIdOf(v) {
+    return (typeof v === 'string' && /^[0-9a-f]{16}$/.test(v)) ? v : '';
+  }
+
+  /* This phone's identity as a payer, to one receiver: sixteen hex characters
+   * of a hash of a secret this phone makes once and keeps (32 random bytes,
+   * nothing about the seed, the mint or the person) and that receiver's own
+   * till tag (`tillTag`, from its tap offer). So one receiver sees the same
+   * name from this payer every time, and can count it (`tillRefusal`), while
+   * two receivers see two names that cannot be joined: a phone that says it
+   * is offline only to collect names learns one that means nothing anywhere
+   * else. (Two receivers that agree to show the same till tag see the same
+   * name; that is as much as two shops sharing everything always learn.)
+   * '' when the receiver gave no till tag: then nothing is named, and the
+   * payment is counted with every other that names none. */
+  function payerTag(till) {
+    var t = payerIdOf(till);
+    if (!t) return '';
+    var secret = '';
+    try { secret = String(window.localStorage.getItem(K.payerTag) || ''); } catch (e) { secret = ''; }
+    if (!/^[0-9a-f]{64}$/.test(secret)) {
+      var b = new Uint8Array(32);
+      (window.crypto || window.msCrypto).getRandomValues(b);
+      secret = hexOf(b);
+      try { window.localStorage.setItem(K.payerTag, secret); } catch (e2) {}
+    }
+    var bytes = Array.prototype.slice.call(new TextEncoder().encode('foxy/payer/' + secret + '/' + t));
+    return hexOf(sha256(bytes)).slice(0, 16);
+  }
+
+  /* The room for the text of one "ask first" question over the tap: one
+   * sealed message of TapCrypto's `resultSize` (256 bytes), four of them its
+   * length (`askFirst`). */
+  var TAP_ASK_ROOM = 252;
+  function utf8Length(t) { return new TextEncoder().encode(String(t)).length; }
+
+  /* This phone's own till tag, as a receiver: sixteen random hex characters,
+   * made once and kept, put on its tap offer only while it has no route
+   * (26d-tap.js), so a payer can name itself to it and to no other
+   * (`payerTag`). */
+  function tillTag() {
+    var have = '';
+    try { have = String(window.localStorage.getItem(K.tillTag) || ''); } catch (e) { have = ''; }
+    if (payerIdOf(have)) return have;
+    var b = new Uint8Array(8);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    var made = hexOf(b);
+    try { window.localStorage.setItem(K.tillTag, made); } catch (e2) {}
+    return made;
+  }
+
+  /* Why this phone, with no route, cannot take `amount` (in `unit`) from
+   * `who`, or ''. One sentence, said to the payer before they make anything
+   * (`answerIntent`), or before a card is asked for anything. `card`: a card's
+   * payment, held to the total and not to a payer's cap. Asked only with no
+   * route: a phone that can settle at once is carrying nothing. */
+  function tillRefusal(amount, unit, who, card) {
+    if (routeOpen()) return '';
+    // the price once, for every figure in this question
+    var r = lastRate();
+    var caps = tillCaps(r);
+    var n = Math.round(Number(amount) || 0);
+    var u = (unitOf(unit) || 'sat') === 'usd' ? 'usd' : 'sat';
+    /* Counted in sats with a price; with none, in the payment's own unit,
+     * against that unit's figures (`tillCaps`): a dollar figure needs no price. */
+    var m = r > 0 ? 'sat' : u;
+    var amt = (r > 0 && u === 'usd') ? centsAsSats(n, r) : n;
+    if (!(amt > 0)) return '';
+    var holdCap = m === 'usd' ? caps.holdCents : caps.holdSats;
+    var payerCap = m === 'usd' ? caps.payerCents : caps.payerSats;
+    var held = unsettledHeld(r, m);
+    if (holdCap > 0 && held + amt > holdCap) {
+      console.warn('[foxy] till cap: ' + (held + amt) + ' ' + m + ' would be held unsettled, over ' + holdCap + '; refused');
+      return 'This phone is holding ' + tillMoney(holdCap, r, m) + ' of payments that are not settled yet, so it cannot take more until it connects.';
+    }
+    var theirs = card ? 0 : payerHeld(who, r, m);
+    if (!card && payerCap > 0 && theirs + amt > payerCap) {
+      console.warn('[foxy] till cap: one payer would have ' + (theirs + amt) + ' ' + m + ' unsettled here, over ' + payerCap + '; refused');
+      return 'This phone takes up to ' + tillMoney(payerCap, r, m) + ' from one payer while it is offline, so it cannot take this until it connects.';
+    }
+    if (!(holdCap > 0)) console.log('[foxy] till cap: no bitcoin price and no figure set in sats, so these sats are held to no cap');
+    return '';
+  }
+
+  /* A cap as a person reads it: dollars at the last price, or sats with none;
+   * a figure counted in dollars (`m`, with no price) is said in dollars. */
+  function tillMoney(n, r, m) {
+    if (m === 'usd') return moneyWords(n, 'usd');
+    var c = satsAsCents(n, r);
+    return c > 0 ? moneyWords(c, 'usd') : moneyWords(n, 'sat');
+  }
+
+  /* The receive screen's notice: '' under the prompt, 'prompt' at it, 'full'
+   * at the cap; with what is held, in sats and in cents at the last price. */
+  function tillNotice() {
+    var r = lastRate();
+    var caps = tillCaps(r);
+    var levelOf = function (held, cap) {
+      return cap > 0 && held >= cap ? 2 : cap > 0 && held >= Math.floor(cap / 2) ? 1 : 0;
+    };
+    var words = ['', 'prompt', 'full'];
+    if (r > 0) {
+      var held = unsettledHeld(r);
+      return { level: words[levelOf(held, caps.holdSats)], heldSats: held, heldCents: satsAsCents(held, r), caps: caps };
+    }
+    /* No price: each unit against its own figure, and the one further along
+     * is the one said (dollars, when both are as far). */
+    var heldC = unsettledHeld(r, 'usd');
+    var heldS = unsettledHeld(r, 'sat');
+    var lc = levelOf(heldC, caps.holdCents), ls = levelOf(heldS, caps.holdSats);
+    return ls > lc ? { level: words[ls], heldSats: heldS, heldCents: 0, caps: caps }
+                   : { level: words[lc], heldSats: 0, heldCents: lc ? heldC : 0, caps: caps };
+  }
+
   /* ---- money arriving ------------------------------------------------------
    *
    * A payment that has been accepted (PAID is on the screen) and whose swap at
@@ -1370,6 +1620,11 @@
           && (!keysetFor(wallet, x.keyset) || (keysetUnit(here, x.keyset, wallet) || 'sat') !== openUnit)) {
         return no('This phone is offline and cannot check ecash from that keyset. Try again when either phone is online.');
       }
+      /* And within what this phone takes before it settles (`tillRefusal`): from
+       * this payer, by the identity they name, and in all. Said here, before the
+       * payer makes anything, so a payer over a cap keeps every sat. */
+      var capNo = tillRefusal(amount, openUnit, payerIdOf(x.from), false);
+      if (capNo) return no(capNo);
     }
     return { intent: id, go: true };
   }
@@ -2503,6 +2758,8 @@
               * back. Only ever widens what is accepted — an over-payment
               * without it is refused exactly as it was. */
              overpaid: j.overpaid === true,
+             // who paid, as the payer names itself to a phone with no route (`payerTag`), or ''
+             from: payerIdOf(j.from),
              memo: typeof j.memo === 'string' ? j.memo.slice(0, 200) : '' };
   }
 

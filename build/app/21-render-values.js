@@ -193,7 +193,8 @@
      *   SETTINGS, which opens and closes in place:
      *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
      *     SEND IN (only at a mint with two balances, holding both), each with
-     *     the balance it is set to; SET PIN, RESTORE, BACKUP, LOGS
+     *     the balance it is set to; SET PIN; OFFLINE, ONE PAYER and OFFLINE,
+     *     IN ALL, each with its figure; RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has
@@ -331,6 +332,9 @@
           this.pinSetup(() => {});
         }),
       },
+      /* What this phone takes with no route before it settles: from one payer,
+       * and in all (26j-till-caps.js). Dollars, with the sats under. */
+    ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },
@@ -340,7 +344,7 @@
       { label: 'LOGS', path: MENU_ICON.logs, tap: shut(() => this.goFieldLog(false)) },
     ]).map(inSettings)).map(m => Object.assign({ glow: 'none', ringInk: 'transparent',
       ringInk2: 'transparent', ring: 'none', indent: '0px', hasSwitch: false, swBg: 'transparent',
-      swX: '0px', value: '', hasChev: false, chevRot: 'rotate(0deg)' }, m));
+      swX: '0px', value: '', valueSub: '', hasChev: false, chevRot: 'rotate(0deg)' }, m));
     /* The page's own hash, quiet at the foot of the drawer.
      *
      * The native side hashes the files it staged at launch and sets

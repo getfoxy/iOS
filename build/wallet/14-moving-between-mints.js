@@ -315,7 +315,7 @@
               owed = mn.need;
               /** @type {Error & { foxyFits?: number, foxyHave?: number }} */
               var short = new Error('Moving ' + want + ' sats costs up to ' + owed +
-                ' with the fee, and you hold ' + have + ' at ' + hostOf(from) + '.');
+                ' with the mint\u2019s fees, and you hold ' + have + ' at ' + hostOf(from) + '.');
               /* And what would fit, so the screen can offer it.
                *
                * The fee is only knowable by asking, and it is asked after the

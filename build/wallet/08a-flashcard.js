@@ -5923,6 +5923,13 @@
       if (offline && (!cardIsAll(card) || !(card.info && card.info.proofs))) {
         throw cardError('offline-old', 'This card is too old to pay a phone that is offline. Take this payment when this phone is online.');
       }
+      /* And within what this phone holds before it settles (`tillRefusal`), said before any PIN, BEGIN or signature. A
+       * card's payment counts toward what is held in all and toward no payer's own cap: the owner's rule is "when card
+       * pays, it's safe" (the card proves its money and signs it to this phone), so it is held to the total alone. */
+      if (offline && want > 0) {
+        var capNo = tillRefusal(want, cu, '', true);
+        if (capNo) throw cardError('till-full', capNo, { cardUnit: cu });
+      }
       all4 = cardIsAll(card);
       ownChange = all4 && cardOwnChange(card) && !o.all && !offline;
       shaped = ownChange && cardIsShaped(card);

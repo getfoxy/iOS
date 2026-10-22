@@ -340,6 +340,12 @@
                      mint: String((how && how.mint) || mintUrl || '').replace(/\/+$/, ''),
                      locked: !!(how && how.locked) });
       if (u === 'sat') intent.sats = amount;
+      /* Who is paying, to a phone that said it is offline: it counts what it
+       * holds from each payer before it settles (`tillRefusal`). A name for
+       * that phone alone (`payerTag`, from its till tag). Nothing to a phone
+       * with a route, or one that did not say. */
+      var from = (req && req.theirRoute === false) ? payerTag(req.theirTill) : '';
+      if (from) intent.from = from;
       try {
         if (wallet && !(how && how.mint)) {
           var ks = u === 'sat' ? String(wallet.keysetId || '') : unitKeysetId(u, mintOf(wallet), wallet);
@@ -360,7 +366,18 @@
           finish({ go: false, silent: true, why: 'They did not answer. Nothing was sent.' });
         }, Number(FoxyWallet._askWaitMs) || 6000);
         FoxyWallet._askWaiter = { id: id, done: finish };
-        FoxyWallet.tapQuote(JSON.stringify({ intend: intent })).catch(function (e) {
+        /* The question goes in one sealed message of one size (TapCrypto
+         * `resultSize`, 256 bytes, 252 of them the text). A long mint address
+         * and a long keyset id can fill it, and the payer's name is what can
+         * be left off: the question then names no payer, and is counted with
+         * every one that names none, rather than not asked at all. */
+        var said = JSON.stringify({ intend: intent });
+        if (intent.from && utf8Length(said) > TAP_ASK_ROOM) {
+          delete intent.from;
+          said = JSON.stringify({ intend: intent });
+          console.log('[foxy] ask first: no room for the payer’s name beside this mint address, so it is left off');
+        }
+        FoxyWallet.tapQuote(said).catch(function (e) {
           finish({ go: false, silent: true, why: (FoxyWallet.reason ? FoxyWallet.reason(e) : '') || 'That phone is no longer connected.' });
         });
       });
@@ -383,6 +400,20 @@
     atRiskSats: function () { return atRiskSats(); },
     // the same, in one unit at the connected mint: dollars are counted on their own
     atRiskIn: function (unit) { return atRiskIn(unit); },
+
+    /* What this phone takes with no route before it settles (07-request-delivery.js): the caps in sats
+     * { payerSats, holdSats, promptSats, payerSet, holdSet }, one of them set ('payer' or 'hold', in sats; 0 puts the
+     * default back), the receive screen's notice { level: ''|'prompt'|'full', heldSats, heldCents }, and, for the tests,
+     * what is held and the refusal itself. */
+    tillCaps: function () { return tillCaps(undefined); },
+    // this phone's till tag, for its tap offer while it has no route (`payerTag`)
+    tillTag: function () { return tillTag(); },
+    setTillCap: function (which, sats) { return setTillCap(which, sats); },
+    tillNotice: function () { return tillNotice(); },
+    // in sats; with no price, in `unit` alone ('usd' for cents, sats when not said)
+    unsettledHeld: function (unit) { return unsettledHeld(undefined, unit === 'usd' ? 'usd' : 'sat'); },
+    payerHeld: function (who, unit) { return payerHeld(who, undefined, unit === 'usd' ? 'usd' : 'sat'); },
+    tillRefusal: function (amount, unit, who, card) { return tillRefusal(amount, unit, payerIdOf(who), !!card); },
 
     tapPayStop: function () {
       return bridgeAsk('tapPayStop', {}, 5000).catch(function () {});
