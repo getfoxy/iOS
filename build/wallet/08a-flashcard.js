@@ -3692,8 +3692,14 @@
     if (cu !== 'sat' && cu !== 'usd') return cardError('not-a-card', 'That card holds something other than bitcoin or dollars.');
     var here = mintOf(w);
     if (canonicalMint(card.record.mint) !== here) {
-      return cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '. This phone is at ' + hostOf(here) + '.',
-                       { mint: canonicalMint(card.record.mint) });
+      /* With what a till needs to have the card pay it from there (26f-flashcard.js, `fcXmBegin`): the card's unit, its key, what it
+       * holds, and whether it will want its PIN. Said before any PIN, BEGIN or signature, as ever. */
+      var otherMint = cardError('other-mint', 'This card\u2019s money is at ' + hostOf(card.record.mint) + '. This phone is at ' + hostOf(here) + '.',
+                       { mint: canonicalMint(card.record.mint), cardUnit: cu === 'usd' ? 'usd' : 'sat', key: card.key || '', balance: card.balance || 0,
+                         pinSet: !!(card.info && card.info.pinSet), noPinLeft: (card.noPin && card.noPin.left) || 0 });
+      // and the card as read, in memory only, for what its mint will charge on the pieces it would pay with (`cardCrossQuote`)
+      try { Object.defineProperty(otherMint, 'cardRead', { value: card, enumerable: false }); } catch (eR) {}
+      return otherMint;
     }
     if (cu === 'usd' && unitsOf(here, w).indexOf('usd') < 0) {
       return cardError('no-dollars-here', hostOf(here) + ' does not issue dollars now, so this card cannot be used here.', { cardUnit: 'usd' });
@@ -5190,7 +5196,9 @@
     var told = { hash: row.id, memo: row.memo || 'card', holdAs: holdAs,
                  // what of the token went to outputs the card made for itself: not this phone's, and no fee
                  toCard: row.all ? undefined : (row.cardChange > 0 ? row.cardChange : undefined),
-                 noPrecheck: !again, now: !again };
+                 noPrecheck: !again, now: !again,
+                 // made on a card's visit to its mint, as part of it (`cardVisit`)
+                 cardVisit: !!cardAway || undefined };
     if (u === 'sat') { told.keptSats = kept; told.changeSats = over; told.grossSats = gross; }
     else { told.keptAmount = kept; told.changeAmount = over; told.grossAmount = gross; }
     // what this phone has of it, in the row's unit: `amount`, and `sats` for a bitcoin card only
@@ -5232,12 +5240,41 @@
           // what this phone has of it: the card's own change (1.12) was never in its pile
           return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
         }
+        /* Spent, asked again, with this phone's own record of the swap still waiting for its answer (`swapGuard`, `into` the
+         * row): the mint did this swap, and the answer is what was lost (it said nothing, then the pieces were spent). Not a
+         * refusal: the record is asked about now (`recoverSwaps`), which restores what the swap made onto this row's entry, and
+         * then it is the payment, made. A record that finds nothing yet is `waiting`, as an answer not had is; never "already
+         * spent", which left the money in this phone's pile as plain ecash and the card told it had paid nothing. */
+        if (again && spent && !(e && e.foxyMine) && cardSwapOpen(row.id)) {
+          return cardSwapAsk(row.id).then(function () {
+            if (!FoxyWallet.txSeen(row.id)) throw cardError('waiting', 'The card has signed and the mint has not said what became of its swap yet.', { id: row.id });
+            mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
+            try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x4) {}
+            try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x5) {}
+            return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
+          });
+        }
         // a restored answer is not a refusal: the mint did the swap, and the ecash is back in the pile
         var status = Number((e && (e.status || (e.response && e.response.status))) || 0);
         var busy = status === 408 || status === 425 || status === 429;      // asked too often, or too soon: not a "no" to the pieces
         if (spent || (mintRefused(e) && !(e && e.recovered) && !busy)) return cardRefusal(row, e, !!(e && e.foxyMine));
         throw cardError('waiting', 'The card has signed and the mint has not answered yet. ' + text, { id: row.id });
       });
+  }
+
+  // whether this phone's record of a swap for a card's row is still open (its answer not had: `swapGuard`, `into`)
+  function cardSwapOpen(id) {
+    try { return loadSwaps().some(function (r) { return r && r.into === id; }); } catch (e) { return false; }
+  }
+  /* That record asked about now, whatever its turn (`_recoverSwapsOnce` asks a record tried twice only every ten minutes): it is a
+   * person's payment waiting on it. */
+  function cardSwapAsk(id) {
+    try {
+      loadSwaps().forEach(function (r) {
+        if (r && r.into === id && (Number(r.tried) || 0) >= 2) { r.tried = 1; r.lastTry = 0; writeSwap(r); }
+      });
+    } catch (e) { /* asked in its turn, then */ }
+    return FoxyWallet.recoverSwaps().then(null, function () { return null; });
   }
 
   /* The mint's "no" to pieces a card has signed for. The card marked them spent
@@ -6221,6 +6258,12 @@
       if (groups.length > 1) {
         fee = groups.reduce(function (n, g) { var f = swapFeeFor(w, g); return n + ((isFinite(f) && f > 0) ? f : 0); }, 0);
       }
+      /* The most the mint's fee on the card's own pieces may be (`o.feeMost`): what a confirmation showed before the PIN (a card
+       * at another mint paying this phone from there, `cardCrossQuote`). More, and the card is not asked for anything. */
+      if (o.feeMost !== undefined && o.feeMost !== null && fee > Math.max(0, Number(o.feeMost) || 0)) {
+        throw cardError('fee-more', 'The card\u2019s mint charges ' + cardSaid(fee, cu) + ' on the pieces this card would pay with, more than was shown. Nothing was taken.',
+                        { fee: fee, shown: Math.max(0, Number(o.feeMost) || 0), cardUnit: cu });
+      }
       /* What the card will make this payment wait, known before its PIN is
        * sent: said to the screen, and where it is longer than anybody holds a
        * card, the payment is not begun and the most that can be taken is said.
@@ -6672,6 +6715,8 @@
     } catch (x1) {}
     try { if (typeof o.making === 'function') o.making(); } catch (x2) {}
     return FoxyWallet.sendToken(back, { unit: u, lockTo: key, lockUntil: dated ? date : undefined,
+                                        // (made on a card's visit to its mint, as part of it: `cardVisit`)
+                                        cardVisit: !!cardAway || undefined,
                                         refundTo: dated ? refundKey : undefined, sigAll: sigAll,
                                         denominations: cardChangeCut(w, back, card, signedNonces),
                                         purpose: 'change', forHash: row.id, owed: owed })
@@ -6763,9 +6808,14 @@
     try { w = need(); } catch (e) { return Promise.resolve([]); }
     if (!routeOpen()) return Promise.resolve([]);
     var out = [];
+    var hereDue = canonicalMint(mintOf(w));
     return due.reduce(function (chain, d) {
       return chain.then(function () {
         if (!d || !d.forHash) return null;
+        /* Due at another mint than this phone's (a card that paid this phone from its own mint, `cardAwayLeft`): made there, on a
+         * visit. Made here, it was made from this mint's pile, as ecash of a mint the card is not at. */
+        var dAt = cardRowMint(d);
+        if (dAt && dAt !== hereDue) { out.push(Object.assign({ forHash: d.forHash, state: 'waiting', away: dAt }, cardGot(cardRowUnit(d), 0))); return null; }
         var drop = function () { mustSave(CARD_DUE, cardStore(CARD_DUE).filter(function (x) { return !(x && x.forHash === d.forHash && !!x.blind === !!d.blind && !!x.outBack === !!d.outBack && !!x.outChange === !!d.outChange); })); };
         // the card's own change, which the mint signed and this phone did not hear: asked of the mint by the blinded messages
         if (d.blind) {
@@ -6868,6 +6918,210 @@
       total = Math.max(total, next);
     }
     return total;
+  }
+
+  /* A till at one mint paid by a card at another (26f-flashcard.js, `fcXmBegin`): what the card's mint asks to pay the till's own
+   * invoice, in the card's unit, asked before the card is touched and with this phone still at its own mint. A melt quote commits to
+   * nothing, so a wallet is made for that mint for the asking alone, with no seed in it. `total` is what the card pays: the amount,
+   * the reserve, and that mint's fee for spending the pieces they are cut into (as `cardOutTotal`, at that mint's keyset). The till
+   * receives the invoice's amount at its own mint, exactly. The quote is kept whole (`quote`), for `pay` to melt with once the
+   * phone is at that mint. Rejects with the mint's own words where it will not quote. */
+  /* `card`: the card as it was read at the tap that found it at another mint (`cardUnusable`'s `other-mint`, which carries it). With
+   * it, the fee that mint charges to swap the card's own pieces for this payment is counted in too (`cardFee`), worked out from the
+   * pieces the tap will pick, as `cardTake` picks them: shown before the PIN, and held to at the tap (`opts.feeMost`), so the card is
+   * never charged more than was shown. `want` is what the tap asks of the card for its hold (the amount, the reserve and the fee
+   * on the hold's own pieces); `total` is that and the card's own fee, the most that comes off it. */
+  function cardCrossQuote(at, bolt11, unit, card) {
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    var from = canonicalMint(at);
+    var u = unitOf(unit) || 'sat';
+    var inv = String(bolt11 || '').trim().replace(/^lightning:/i, '');
+    if (!from) return Promise.reject(new Error('No mint to pay from.'));
+    if (from === canonicalMint(mintUrl || '')) return Promise.reject(new Error('That card is at this phone\u2019s own mint.'));
+    if (!/^ln(bc|tb|bcrt)/i.test(inv)) return Promise.reject(new Error('There is no invoice to pay.'));
+    var w;
+    try { w = newWallet(from, u === 'sat' ? undefined : { unit: u }); } catch (e1) { return Promise.reject(e1); }
+    return withTimeout(w.loadMint(), 25000, hostOf(from)).then(function () {
+      if (u !== 'sat') {
+        var sets = [];
+        try { sets = (w.keyChain && w.keyChain.getKeysets) ? w.keyChain.getKeysets() : []; } catch (e2) { sets = []; }
+        if (!sets || !sets.length) throw new Error(hostOf(from) + ' does not issue ' + unitName(u) + ' ecash.');
+      }
+      return withTimeout(w.createMeltQuoteBolt11(inv), 25000, hostOf(from) + ' melt quote');
+    }).then(function (q) {
+      var amount = satsOf(q.amount) || 0;
+      var reserve = satsOf(q.fee_reserve) || 0;
+      if (!(amount > 0)) throw new Error(hostOf(from) + ' could not say what this invoice costs.');
+      var base = amount + reserve, total = base;
+      for (var i = 0; i < 6; i++) {
+        var next = base + feeForInputs(w, piecesFor(total));
+        if (next === total) break;
+        total = Math.max(total, next);
+      }
+      var want = total, cardFee = cardCrossFee(w, card, want);
+      total = want + cardFee;
+      console.log('[foxy] card: ' + hostOf(from) + ' quotes ' + cardSaid(amount, u) + ' and ' + cardSaid(reserve, u) + ' of reserve; the card pays at most ' + cardSaid(total, u)
+                  + (cardFee > 0 ? ', ' + cardSaid(cardFee, u) + ' of it the mint\u2019s fee on the card\u2019s own pieces' : ''));
+      // `quote` in the shape `pay` takes (`opts.quote`, as `quoteFee` gives it), with the wallet it was asked by
+      return { mint: from, unit: u, amount: amount, feeReserve: reserve, want: want, cardFee: cardFee, total: total, fee: total - amount,
+               quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, w: w, bolt11: inv, at: Date.now() } };
+    });
+  }
+
+  /* What the card's mint charges to swap the pieces a tap would pick from `card` for `want` (`cardTake`'s own choice, with no limit
+   * to pick under: a limit only narrows the choice, and a set that costs more than this is refused at the tap, `opts.feeMost`).
+   * 0 with no card, or no set. */
+  function cardCrossFee(w, card, want) {
+    if (!card || !Array.isArray(card.pieces) || !card.record || !(want > 0)) return 0;
+    try {
+      var have = cardUsable(card, w, false).pieces;
+      var pick = cardIsAll(card) ? cardPickAll(w, have, want, null, card, null, false, false) : cardPick(w, have, want, null, card, null);
+      if (!pick || !pick.length) return 0;
+      var f = swapFeeFor(w, pick);
+      return (isFinite(f) && f > 0) ? f : 0;
+    } catch (e) {
+      console.warn('[foxy] card: what its mint charges on its own pieces could not be worked out:', (e && e.message) || e);
+      return 0;
+    }
+  }
+
+  /* ---- a visit to a card's mint ---------------------------------------------------------------------------------------
+   *
+   * A card at another mint pays this phone from there (26f-flashcard.js, `fcXmGo`), and what that leaves at its mint is settled
+   * there (`cardAwayLeft`): both with this phone at the card's mint for as long as that takes, and home after. A visit, as a late
+   * claim's is (`claimAway`): never saved as this phone's mint, and what a person starts meanwhile (an invoice, a payment, a
+   * switch, the late-claim walk) waits for it to be home, where it used to be done at the card's mint. The visit's own calls say
+   * so (`cardVisit: true` in their options, 99-proof-lock-and-export.js). The way home is tried until it is made: a mint at home
+   * that does not answer once leaves this phone at the card's mint only until it does (`cardVisitHome`).
+   *
+   * One visit at a time; a second to the same mint joins it, and home is after the last of them ends. Resolves { end }, `end()`
+   * resolving when this phone is home. */
+  var cardAway = /** @type {any} */ (null);
+  var CARD_HOME_RETRY_MS = [1000, 2000, 4000, 8000, 15000];
+  function cardVisit(at) {
+    var to = canonicalMint(at);
+    if (!to) return Promise.reject(new Error('No mint to go to.'));
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    var handle = function (v) {
+      var ended = false;
+      return { mint: to, end: function () {
+        if (ended) return v ? v.finished : Promise.resolve();
+        ended = true;
+        return v ? cardVisitEnd(v) : Promise.resolve();
+      } };
+    };
+    // a visit on its way home, or to another mint, is waited for; and so is a late claim's walk, which goes where it likes
+    if (cardAway && (cardAway.homing || cardAway.mint !== to)) return cardAway.finished.then(function () { return cardVisit(at); });
+    if (cardAway) {
+      cardAway.uses += 1;
+      var joined = cardAway;
+      return joined.ready.then(function () { return handle(joined); }, function (e) { return cardVisitEnd(joined).then(function () { throw e; }); });
+    }
+    if (claimAway || claimingLate) {
+      return Promise.resolve(claimAway || claimingLate).then(null, function () { return null; }).then(function () { return cardVisit(at); });
+    }
+    var home = canonicalMint(mintUrl || '');
+    if (!home || home === to) return Promise.resolve(handle(null));
+    var done = /** @type {any} */ (null);
+    var finished = new Promise(function (res) { done = res; });
+    var v = /** @type {any} */ ({ mint: to, home: home, uses: 1, homing: false, finished: finished, done: done, ready: null });
+    cardAway = v;
+    claimAway = finished;
+    console.log('[foxy] card: this phone visits ' + hostOf(to) + ', where a card\u2019s money is; what is started meanwhile waits until it is back on ' + hostOf(home));
+    v.ready = FoxyWallet.connect(to, null, null, { remember: false, noSweep: true });
+    return v.ready.then(function () { return handle(v); }, function (e) {
+      // not there: still home (a failed connect leaves the wallet where it was), and the visit over
+      return cardVisitEnd(v).then(function () { throw e; });
+    });
+  }
+
+  function cardVisitEnd(v) {
+    v.uses -= 1;
+    if (v.uses > 0 || v.homing) return v.finished;
+    v.homing = true;
+    cardVisitHome(v, 0);
+    return v.finished;
+  }
+
+  function cardVisitHome(v, tries) {
+    var over = function () {
+      if (cardAway === v) cardAway = null;
+      if (claimAway === v.finished) claimAway = null;
+      v.done();
+    };
+    if (canonicalMint(mintUrl || '') === v.home) { over(); return; }
+    FoxyWallet.connect(v.home, null, null, { remember: false }).then(function () {
+      console.log('[foxy] card: back on ' + hostOf(v.home) + ' after a visit to ' + hostOf(v.mint));
+      over();
+    }, function (e) {
+      // (a test sets its own waits, `_cardHomeRetryMs`)
+      var waits = (Array.isArray(FoxyWallet._cardHomeRetryMs) && FoxyWallet._cardHomeRetryMs.length) ? FoxyWallet._cardHomeRetryMs : CARD_HOME_RETRY_MS;
+      var wait = Number(waits[Math.min(tries, waits.length - 1)]) || 2000;
+      console.warn('[foxy] card: could not get back to ' + hostOf(v.home) + ' yet (' + ((e && e.message) || e) + '); trying again in ' + Math.round(wait / 1000) + 's');
+      setTimeout(function () { cardVisitHome(v, tries + 1); }, wait);
+    });
+  }
+
+  /* The mints other than this phone's where a card's payment left something to settle: a hold out of a card that never went
+   * (`cardOutsLeft`), a signature whose answer was lost (`cardSettle`), or change due to a card that could not be made then
+   * (`cardDueRetry`). Each is visited, settled there, and this phone comes
+   * home (`cardVisit`). Asked at the end of a connect's sweep (11-routing.js), and by the screens when a payment from another
+   * mint ends unsettled. Not more than once a minute for one mint. Resolves the mints settled at. */
+  var cardAwayAsked = {};
+  function cardAwayMints() {
+    var here = canonicalMint(mintUrl || '');
+    var at = {};
+    var melting = load(K.melting, []) || [];
+    var held = load(K.held, {});
+    Object.keys(held).forEach(function (id) {
+      var h = held[id];
+      if (!h || h.kind !== 'card out' || cardOutInUse(id)) return;
+      if (melting.some(function (m) { return m && m.cardOut === id; })) return;
+      var m = canonicalMint(h.mint || '');
+      if (m && m !== here) at[m] = true;
+    });
+    cardStore(CARD_TAKEN).forEach(function (row) {
+      var m = cardRowMint(row);
+      if (m && m !== here) at[m] = true;
+    });
+    /* Change due to a card that could not be made then (too little to make at a mint that charges for it, often): asked again there,
+     * but not on every connect, which would be a visit to another mint at every launch for days. Marked 'due' for that. */
+    cardStore(CARD_DUE).forEach(function (row) {
+      var m = cardRowMint(row);
+      if (m && m !== here && !at[m]) at[m] = 'due';
+    });
+    return Object.keys(at).map(function (m) { return { mint: m, due: at[m] === 'due' }; });
+  }
+  /* `opts.skipDue`: not for change due alone (the screens' asking, just home from that mint, where it was tried a moment ago). */
+  function cardAwayLeft(opts) {
+    if (cardAway || !routeOpen()) return Promise.resolve([]);
+    var skipDue = !!(opts && opts.skipDue);
+    var mints = cardAwayMints().filter(function (x) { return !(skipDue && x.due) && !(Date.now() - (cardAwayAsked[x.mint] || 0) < (x.due ? 1800000 : 60000)); })
+      .map(function (x) { return x.mint; });
+    var out = /** @type {string[]} */ ([]);
+    return mints.reduce(function (chain, m) {
+      return chain.then(function () {
+        cardAwayAsked[m] = Date.now();
+        /* (counted from the asking, made or not: a card's mint that does not answer would otherwise hold what a person starts at
+         * every connect for as long as the visit takes to fail) */
+        return cardVisit(m).then(function (v) {
+          var settle = function () {
+            return FoxyWallet.recoverSwaps().then(null, function () { return null; })
+              .then(function () { return cardStore(CARD_TAKEN).length ? FoxyWallet.cardSettle() : null; }).then(null, function () { return null; })
+              .then(function () { return FoxyWallet.cardOutHeld().length ? cardOutsLeft() : null; }).then(null, function () { return null; })
+              .then(function () { return cardStore(CARD_DUE).length ? cardDueRetry() : null; }).then(null, function () { return null; });
+          };
+          return settle().then(function () { out.push(m); return v.end(); }, function () { return v.end(); });
+        }, function (e) {
+          console.warn('[foxy] card: could not visit ' + hostOf(m) + ' to settle what a card left there:', (e && e.message) || e);
+        });
+      });
+    }, Promise.resolve()).then(function () { return out; });
+  }
+
+  // the mint a card's TAKEN row's pieces are of
+  function cardRowMint(row) {
+    try { return canonicalMint(String(((FoxyWallet.tokenInfo(row && row.token)) || {}).mint || '')); } catch (e) { return ''; }
   }
 
   /* The hold of a payment that was not made, back to the card: into the pile (under the proof lock, as anything that writes

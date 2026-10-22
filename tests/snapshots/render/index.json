@@ -319,6 +319,31 @@
   "markup": "a0baa1894e94e03f6d2d30084d70613d6b2301bf8ec3f74c414e0b98de67406d",
   "vals": "46bc0836d34964f53986e3e84593b177f1450cfaaf25ebec76057e5a47dbae6e"
  },
+ "fcXmConfirm, asking the card’s mint what it costs": {
+  "file": "525-fcxmconfirm-asking-the-card-s-mint-what-it-costs.html",
+  "markup": "6aa932711f1bd59e045485c4cf18f20e29938d1d3fb11b664b402b379e541edd",
+  "vals": "42df1cc2b1856137fd9b7c3a773130fe100676b5998c3f2213182decc7284007"
+ },
+ "fcXmConfirm, with what the card pays": {
+  "file": "526-fcxmconfirm-with-what-the-card-pays.html",
+  "markup": "fb708da78a70d9f56e67825fa93b2649a594b0264036747c6ffa5be0c5d17ddd",
+  "vals": "1604cf9997b25efd69ea05c2c528e74bd20dfda899b9068af61c392f65b2ba09"
+ },
+ "fcXmConfirm, a dollar card, with what it pays": {
+  "file": "527-fcxmconfirm-a-dollar-card-with-what-it-pays.html",
+  "markup": "3cb590e6f8d244ee705495f3f7f1ef5e1b8e6a1b7fa989c0a00317248cdbe625",
+  "vals": "ac755a0ca4257a2546ff2e5e53080f1bd08e4d0ef8314de3be3627ea6f6560c4"
+ },
+ "fcXmConfirm, a card that does not hold enough": {
+  "file": "528-fcxmconfirm-a-card-that-does-not-hold-enough.html",
+  "markup": "3b76b2b49941a864fd04e4bf79d6a63713866476455965cabc71632b51f0ae6d",
+  "vals": "a3cb959a5105fc244b97791d9acbb012f7321dfccabb3141563e0fab0d971973"
+ },
+ "fcXmConfirm, the card’s mint would not say": {
+  "file": "529-fcxmconfirm-the-card-s-mint-would-not-say.html",
+  "markup": "1113d0413c00ebe7483f75addde15e64fe2ccfba297fa1851707f9d817dece2a",
+  "vals": "42312d313cfdb225623e91d6904938b4d4620be5de06186209329b8bd48b38dd"
+ },
  "amount, money for a card from the send screen": {
   "file": "347-amount-money-for-a-card-from-the-send-screen.html",
   "markup": "a5579101e9e1bf9a50b3e4451814837b5b44a32fdbafa0c156672f26ba6504f2",

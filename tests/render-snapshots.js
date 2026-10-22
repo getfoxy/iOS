@@ -285,6 +285,16 @@ function representative(logic) {
   add('fcMoveConfirm, asking what it costs', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE() }, { wallet: CARDS() }));
   add('fcMoveConfirm, with its cost', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE({ fee: 22, lands: 2026 }) }, { wallet: CARDS() }));
   add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
+  // a card at another mint paying this phone's invoice from there: the confirmation as its fee is asked, answered, and refused
+  const XM = (over) => Object.assign({ xm: true, mint: OTHER, home: MINT, payUnit: 'sat', key: KEY_A, pinSet: false, noPinLeft: 0, balance: 2048,
+                                        usdAsk: false, ask: { unit: 'sat', amount: 700 }, bolt11: 'lnbc7u1x', hash: 'h', ends: 0,
+                                        quote: null, pay: 0, fee: 0, err: '' }, over || {});
+  add('fcXmConfirm, asking the card\u2019s mint what it costs', at('fcXmConfirm', { fcXm: XM() }, { wallet: CARDS() }));
+  add('fcXmConfirm, with what the card pays', at('fcXmConfirm', { fcXm: XM({ quote: { quote: { quote: 'q' } }, pay: 710, fee: 10 }) }, { wallet: CARDS() }));
+  add('fcXmConfirm, a dollar card, with what it pays', at('fcXmConfirm', { fcXm: XM({ payUnit: 'usd', quote: { quote: { quote: 'q' } }, pay: 541, fee: 2 }) }, { wallet: CARDS() }));
+  add('fcXmConfirm, a card that does not hold enough', at('fcXmConfirm', { fcXm: XM({ quote: { quote: { quote: 'q' } }, pay: 710, fee: 10, short: true, balance: 500,
+    err: 'The card holds \u20bf500, and this needs \u20bf710 with its fee.' }) }, { wallet: CARDS() }));
+  add('fcXmConfirm, the card\u2019s mint would not say', at('fcXmConfirm', { fcXm: XM({ err: 'The card\u2019s mint could not say what this costs: it did not answer.' }) }, { wallet: CARDS() }));
   add('amount, money for a card from the send screen', at('amount', { flow: 'cardSend', amount: '5', unit: 'USD' }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
   // every card can be taken back (FC_RECOVERABLE): the list of cards this phone loaded is drawn, with the money waiting

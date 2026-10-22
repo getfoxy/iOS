@@ -116,8 +116,9 @@ function page(o) {
       // `units`: ['sat', 'usd'] for a mint that issues dollars as well (fakeMint), as a mint with two balances does; `mintOpts`: any other of its options
       mint = opts.sharedMint || fakeMint(w, Object.assign({}, opts.mintOpts || {},
         { p2pk: true, feePpk: opts.feePpk, versionByte: opts.versionByte, dleq: opts.dleq, units: opts.units }));
-      // keys and quote numbers of its own, as two real mints have (`units2`: the units it issues, as `units` for the first)
-      if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2, units: opts.units2 });
+      // keys and quote numbers of its own, as two real mints have (`units2`: the units it issues, as `units` for the first; `mintOpts2`: any other)
+      if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, Object.assign({}, opts.mintOpts2 || {},
+        { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2, units: opts.units2 }));
     },
   });
   ctx.deaf = !!opts.deaf;

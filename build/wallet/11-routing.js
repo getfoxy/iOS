@@ -354,6 +354,11 @@
         mintCacheSave(u, w);
         checkKeysetsElsewhere(u, w, 0);
         if (firstTimeHere) probeMintNodeNow(u, w); else probeMintNode(u, w);
+        /* A card's visit to its own mint (08a-flashcard.js, `cardVisit`) sweeps nothing on the way there: what it is for is said
+         * by whoever made it, and what is left at that mint is settled by `cardAwayLeft`, which asks for exactly that. */
+        if (opts && opts.noSweep) {
+          return { id: u, name: u.replace(/^https?:\/\//, ''), balanceSats: sumProofs(proofs()) };
+        }
         /* Money this sweep made owed to a card that is not here (a payment's change, or a payment that never went), for the
          * app to say: the launch's own word on it came before the sweep had made it. Read off the list before and after,
          * because more than one step makes it (the held melts' sweep gives a card's holds back too). */
@@ -387,6 +392,13 @@
           .then(function () {
             if (opts && opts.remember === false) return null;
             return FoxyWallet.crossingsWaiting() ? FoxyWallet.catchUpCrossings() : null;
+          })
+          /* And what a card at another mint left there when it paid this phone from it (a payment out of its hold that never
+           * went, a signature whose answer was lost): settled at that mint, on a visit, and this phone home again
+           * (08a-flashcard.js, `cardAwayLeft`). Not on a visit, nor on the way home from one. */
+          .then(function () {
+            if (opts && opts.remember === false) return null;
+            return FoxyWallet.cardAwayLeft().then(null, function () { return null; });
           })
           /* And then the page is told the wallet is connected and caught up,
            * whether or not anything was waiting. The small-change pool was

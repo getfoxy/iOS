@@ -892,7 +892,9 @@
    * left of it, and a new code asked for when it runs out. */
   recvClockTick(mine) {
     const s = this.state;
-    if (mine !== this._invoiceRun || s.screen !== 'confirm' || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
+    /* (The confirmation of a card at another mint paying this code is the receive's own, over it: the code is kept alive under it,
+     * 26f-flashcard.js `fcXmRenew`.) */
+    if (mine !== this._invoiceRun || (s.screen !== 'confirm' && s.screen !== 'fcXmConfirm') || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
       clearInterval(this._recvClockT);
       this._recvClockT = null;
       return;
@@ -915,10 +917,12 @@
     console.log('[foxy] receive: the dollar code ran out; asking for a new one');
     W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
       this._requoting = false;
-      if (mine !== this._invoiceRun || this.state.screen !== 'confirm' || this.state.recvUnit !== 'usd') return;
+      if (mine !== this._invoiceRun || (this.state.screen !== 'confirm' && this.state.screen !== 'fcXmConfirm') || this.state.recvUnit !== 'usd') return;
       if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
       this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash });
       this.usdInvoiceUp(inv, mine);
+      // under a card's confirmation from another mint: the card is asked to pay the new code instead (26f-flashcard.js)
+      if (this.state.screen === 'fcXmConfirm' && this.fcXmRenew) this.fcXmRenew();
     }, e => {
       this._requoting = false;
       console.warn('[foxy] receive: no new dollar code yet:', W.reason ? W.reason(e) : e);

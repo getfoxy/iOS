@@ -1095,6 +1095,13 @@
     // paying out of this phone from a card: what it costs, the way back, the ones left behind, and a payment done with its hold
     // (`unit`: the card's, whose keyset's fee it is; sats when not named)
     cardOutTotal: function (amount, reserve, unit) { return cardOutTotal(amount, reserve, unit); },
+    // a till paid by a card at another mint: what that mint asks for the till's invoice, in the card's unit (`cardCrossQuote`)
+    cardCrossQuote: function (at, bolt11, unit, card) { return cardCrossQuote(at, bolt11, unit, card); },
+    /* this phone at a card's mint for what is done there, and home after (`cardVisit`: resolves { end }, `end()` resolving once
+     * home); whether a card's visit has it away now; and what card payments left at other mints, settled there (`cardAwayLeft`) */
+    cardVisit: function (at) { return cardVisit(at); },
+    cardAwayNow: function () { return cardAway ? cardAway.mint : ''; },
+    cardAwayLeft: function (opts) { return cardAwayLeft(opts); },
     cardOutBack: function (id) { return cardOutBack(id); },
     // a hold for this phone's own invoice whose payment was not made: this phone's, into its pile (`cardOutKeep`)
     cardOutKeep: function (id) { return cardOutKeep(id); },
@@ -1265,8 +1272,15 @@
       /* A TAKEN row a card's payment kept with no route left behind (a tap cut off before its last step) is that payment's
        * copy, not another payment: struck here first, never posted (`cardKeptTidy`, 08a-flashcard.js). */
       try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
+      var here = '';
+      try { here = canonicalMint(mintOf(need())); } catch (eHere) { here = ''; }
       return cardStore(CARD_TAKEN).reduce(function (chain, row) {
         return chain.then(function () {
+          /* A row of a card at another mint than this phone's (one that paid this phone from there, 26f-flashcard.js `fcXmPay`)
+           * is settled at that mint, on a visit (`cardAwayLeft`): asked here, its pieces would be taken for this mint's, and what
+           * it owes the card made from this mint's pile. */
+          var rowAt = cardRowMint(row);
+          if (here && rowAt && rowAt !== here) { out.push(Object.assign({ id: row.id, state: 'waiting', away: rowAt }, cardGot(cardRowUnit(row), 0))); return null; }
           /* A payment the card left part way through, held for its next tap
            * (`cardHeld`): left alone while it is fresh, and given back once it
            * is not. */

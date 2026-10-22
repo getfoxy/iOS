@@ -9,7 +9,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm', 'fcXmConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -253,6 +253,8 @@ class Component extends DCLogic {
     if (s.screen === 'fcMoveConfirm') return this.fcMoveSpec();
     // a card's limit, before it is set (26f-flashcard.js)
     if (s.screen === 'fcLimitConfirm') return this.fcLimitSpec();
+    // a card at another mint paying this phone's invoice from there: what it pays, its fee in it (26f-flashcard.js)
+    if (s.screen === 'fcXmConfirm') return this.fcXmSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm
@@ -8883,7 +8885,9 @@ class Component extends DCLogic {
    * left of it, and a new code asked for when it runs out. */
   recvClockTick(mine) {
     const s = this.state;
-    if (mine !== this._invoiceRun || s.screen !== 'confirm' || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
+    /* (The confirmation of a card at another mint paying this code is the receive's own, over it: the code is kept alive under it,
+     * 26f-flashcard.js `fcXmRenew`.) */
+    if (mine !== this._invoiceRun || (s.screen !== 'confirm' && s.screen !== 'fcXmConfirm') || s.recvUnit !== 'usd' || !s.recvExpiresAt) {
       clearInterval(this._recvClockT);
       this._recvClockT = null;
       return;
@@ -8906,10 +8910,12 @@ class Component extends DCLogic {
     console.log('[foxy] receive: the dollar code ran out; asking for a new one');
     W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
       this._requoting = false;
-      if (mine !== this._invoiceRun || this.state.screen !== 'confirm' || this.state.recvUnit !== 'usd') return;
+      if (mine !== this._invoiceRun || (this.state.screen !== 'confirm' && this.state.screen !== 'fcXmConfirm') || this.state.recvUnit !== 'usd') return;
       if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
       this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash });
       this.usdInvoiceUp(inv, mine);
+      // under a card's confirmation from another mint: the card is asked to pay the new code instead (26f-flashcard.js)
+      if (this.state.screen === 'fcXmConfirm' && this.fcXmRenew) this.fcXmRenew();
     }, e => {
       this._requoting = false;
       console.warn('[foxy] receive: no new dollar code yet:', W.reason ? W.reason(e) : e);
@@ -21893,6 +21899,10 @@ class Component extends DCLogic {
   FC_CHECK_ASKS = 12;
   // what a mint's melt quote agreed to at a tap must still have before its expiry, for the card's payment of it (`fcQuoteFresh`)
   FC_QUOTE_LEFT_MS = 75000;
+  /* A card at another mint than this phone's pays from there, with this phone at that mint for the tap and the melt (`fcXmGo`). A tap
+   * left part way, or a mint that has not answered, keeps it there for the card's flows to finish; after this long with none of them
+   * running, it goes home whatever happened (`fcXmStay`). */
+  FC_XM_STAY_MS = 200000;
   // how long after a card screen has come down a confirmation waits to be sure the card flow has not gone straight on to its next screen
   FC_END_SETTLE_MS = 300;
   /* Every new card can be taken back.
@@ -22613,6 +22623,8 @@ class Component extends DCLogic {
       'nothing': () => ({ tone: 'warn', title: 'NOTHING WAS LEFT ON IT', reason: said }),
       // paying out of this phone from a card's screen, and another card was held to it (08a-flashcard.js, `o.only`)
       'wrong-card': () => ({ tone: 'warn', title: 'A DIFFERENT CARD', reason: said }),
+      // a card at another mint whose pieces cost more to spend there than its confirmation showed (`fcXmPay`): refused before it signed
+      'fee-more': () => ({ tone: 'warn', title: 'NOT PAID', reason: said }),
       /* Paying out of this phone from a card, and the payment was not made after the card had paid this phone for it: what it
        * paid goes back on it, as a till's refusal does, at its next tap (`fcOutBack`). With no route yet, once there is one. */
       'not-paid-out': () => (e.made ? {
@@ -22699,16 +22711,21 @@ class Component extends DCLogic {
       art: 'card', title: 'CHECKING',
       body: 'The card has signed and the mint has not answered yet.',
       dots: true, forMs: 70000, button: 'CLOSE',
-      go: () => clearTimeout(this._fcCheckT),
+      // (a card at another mint: the asking is over, and this phone goes home, `fcXmHome`)
+      go: () => { clearTimeout(this._fcCheckT); if (opt.xm) this.fcXmHome(); },
     });
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
+      /* A card at another mint: what the mint's answer comes to has been worked out there (`cardSettle`), and this phone goes home
+       * before it is said. Its pieces were held for this phone's invoice and never melted, so a late "paid" is the card's, back on
+       * it at its next tap, as a payment out of a card's own screen. */
+      if (opt.xm) this.fcXmHome();
       /* Paying out of this phone: the mint's answer came too late, and the payment it was for was never made. The wallet has
        * owed all of it back to the card (21a-flashcard.js, `cardSettle`), and its next tap puts it back. */
       /* The same for a dollar card's cents held for this phone's own bitcoin invoice (`opt.btc.holding`): the invoice was never
        * paid with them, so they went back to the card too, and are said so. */
-      const outKey = opt.send ? opt.send.key : (opt.btc && opt.btc.holding) ? opt.btc.key : '';
+      const outKey = opt.send ? opt.send.key : (opt.btc && opt.btc.holding) ? opt.btc.key : opt.xm ? opt.xm.key : '';
       if (how === 'paid' && outKey) {
         const mine = this.fcOwed().filter((x) => x.key === outKey);
         const owed = mine.reduce((n, x) => n + x.amount, 0);
@@ -22773,6 +22790,8 @@ class Component extends DCLogic {
     if (opt.usd && opt.usd.bolt11) { this.fcUsdPay(opt.usd); return; }
     // the mirror: a dollar card paid a bitcoin receive's invoice in cents, which pay that invoice (`fcBtcPay`)
     if (opt.btc && opt.btc.bolt11) { this.fcBtcPay(opt.btc); return; }
+    // a card at another mint: its pieces held there pay this phone's own invoice from there (`fcXmMelt`)
+    if (opt.xm && opt.xm.bolt11) { this.fcXmMelt(opt.xm); return; }
     if (opt.paying && this.state.screen === 'confirm') this.closeReceive();
     if (opt.paying && this.noteReceived) this.noteReceived();
     this.refreshBalance();
@@ -22861,8 +22880,8 @@ class Component extends DCLogic {
    * invoice is paid, and the dollars land exactly as they land for a dollar invoice paid from anywhere else (12-receive.js,
    * `usdInvoiceUp`).
    *
-   * The card's money is always at this phone's own mint (one at another mint is refused as A DIFFERENT MINT before
-   * anything is asked of it), so the invoice the sats pay is one the same mint made. That is the common case of the mint
+   * The card's money here is at this phone's own mint (one at another mint pays the code from its own mint instead, with the
+   * charge shown first: `fcXmBegin`), so the invoice the sats pay is one the same mint made. That is the common case of the mint
    * paying its own invoice, which it settles in its own books with no Lightning payment in between.
    *
    * Offline there is no invoice to pay. Where this build can turn sats into dollars later (`W.convertOne`, a wallet with
@@ -22924,6 +22943,9 @@ class Component extends DCLogic {
    * mint, or its sats on their way to the invoice. The receive screen does not swap it for a new code meanwhile
    * (12-receive.js, `recvClockTick`), which would leave the sats paying a code nobody is watching. */
   fcUsdHolds(hash) {
+    // a card at another mint paying this very code from there (`fcXmPay`): kept until that payment is over
+    const x = this._fcXmLive;
+    if (x && hash && x.hash === hash) return true;
     const u = this._fcUsd;
     if (!u || !hash || u.hash !== hash || u.done) return false;
     /* Its sats' payment with the mint, unanswered: the code is the one being paid, and stays until the mint answers
@@ -22946,6 +22968,13 @@ class Component extends DCLogic {
    * under the dollars. And a dollar card asked for sats (`fcOtherUnit`): the cents it pays, with the sats asked under them
    * and whose price made the one of the other, and the sheet saying what the hold pays. */
   fcPayLook(sats, usd, terms) {
+    // a card at another mint: what it pays from there, its fee in it (`fcXmPay`)
+    if (terms && terms.xm) {
+      const u = terms.payUnit === 'usd' ? 'usd' : 'sat';
+      const main = this.fcPrice(terms.pay, u);
+      return { amount: main, amountSub: (u === 'sat' && main.charAt(0) === '$' ? this.fcSats(terms.pay) + ', ' : '') + 'its fee included',
+               sheet: 'Hold to pay ' + main };
+    }
     if (terms && terms.payUnit === 'usd') {
       return {
         amount: this.fcFig(terms.pay, 'usd'),
@@ -22975,6 +23004,9 @@ class Component extends DCLogic {
   fcAsks(sats, usd, terms, send) {
     const n = Math.max(0, Math.round(Number(sats) || 0));
     if (send) return [{ unit: send.unit === 'usd' ? 'usd' : 'sat', amount: n }];
+    // a card at another mint pays the total its mint quoted, in its own unit (`fcXmPay`)
+    // (what the hold needs: the most it comes to with its mint's fee on the card's own pieces is `pay`, held to by `feeMost`)
+    if (terms && terms.xm) return [{ unit: terms.payUnit === 'usd' ? 'usd' : 'sat', amount: Math.max(0, Math.round(Number(terms.want || terms.pay) || 0)) }];
     if (terms && terms.payUnit === 'usd') {
       // (what the payment keeps of the agreement: the figures and whose price, not the mint's quote, which `fcBtcPay` keeps)
       const kept = { payUnit: 'usd', pay: terms.pay, sats: terms.sats, rate: terms.rate, ageMs: terms.ageMs, seenAt: terms.seenAt, own: terms.own, convert: terms.convert };
@@ -23154,8 +23186,10 @@ class Component extends DCLogic {
    * a dollar card is told the cents it pays, whatever else the till asked. */
   fcPayAsk(sats, offline, resuming, share, send, usd, terms, cardUnit) {
     let figure;
-    // a dollar card asked for sats, and the figure worked out for it: both, and whose price (`fcOtherUnit`)
-    if (terms && terms.payUnit === 'usd') {
+    // a card at another mint: the total it pays from there, its fee in it (`fcXmPay`)
+    if (terms && terms.xm) {
+      figure = this.fcBoth(terms.pay, terms.payUnit === 'usd' ? 'usd' : 'sat') + ', its fee included';
+    } else if (terms && terms.payUnit === 'usd') {
       figure = this.fcFig(terms.sats, 'sat') + ' for ' + this.fcFig(terms.pay, 'usd')
         + (terms.online ? ' at ' + this.fcRateWho() + ', its fee included' : ' at this phone’s price, seen ' + this.agoWords(terms.ageMs));
     } else if (cardUnit === 'usd') {
@@ -23171,6 +23205,8 @@ class Component extends DCLogic {
       title: 'CARD PIN',
       subtitle: 'To pay ' + figure + '. The card’s owner types its PIN here.',
       cta: 'TAP AGAIN',
+      // a card at another mint: backing out of the pad ends the visit to its mint (`fcXmHome`)
+      onBack: (terms && terms.xm) ? () => this.fcXmHome() : undefined,
     }, (pin) => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms));
   }
 
@@ -23189,7 +23225,19 @@ class Component extends DCLogic {
    * (`r.unit`), and its figures are in that unit: a dollar card's cents are `amount`, with `sats` 0. */
   fcPayRun(sats, pin, offline, resuming, share, send, usd, terms) {
     const W = this.fcW();
-    const cross = !!(terms && terms.payUnit === 'usd');
+    /* A card at another mint than this phone's, paying this phone's own invoice from there (`fcXmPay`): this phone goes to that mint
+     * first, for the tap and the melt, and comes home after (`fcXmGo`, `fcXmHome`). A quote that has run short is asked again before
+     * the card is touched, on the confirmation it was agreed on. */
+    const xm = !!(terms && terms.xm);
+    if (xm && !resuming && !this.fcQuoteFresh(terms.quote)) {
+      console.log('[foxy] card: the quote from the card’s mint is about to run out; asked again');
+      this.fcXmHome();
+      this.toast('The card’s mint gave a new fee. Check it and press PAY again.', true);
+      this.fcXmOpen(terms);
+      return;
+    }
+    if (xm && (!this._fcXmVisit || !this.fcXmThere(terms))) { this.fcXmGo(terms, () => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms)); return; }
+    const cross = !xm && !!(terms && terms.payUnit === 'usd');
     /* Online, the figure agreed is the mint's quote, which it honours until its own expiry: one that would be within
      * FC_QUOTE_LEFT_MS of it by the time the card has paid is asked for again, and the new figure agreed, before the card
      * is touched. Otherwise the payment would be refused at the melt and end in dollars. */
@@ -23204,6 +23252,9 @@ class Component extends DCLogic {
      * pays are held for this phone's invoice (`holdFor`) and are what is melted, and they are this phone's (`holdKeep`) if
      * that payment is not made (`fcBtcPay`). Only the card agreed with pays it (`only`). */
     const btcHold = !!(cross && terms.online && terms.key && !send);
+    /* A card at another mint: its pieces are held for this phone's invoice and melted at its mint (`fcXmMelt`), and they are the card's
+     * (not this phone's) if that payment is not made, back on it at its next tap, as a payment out of a card's own screen is. */
+    const xmHold = !!(xm && terms.key && !send);
     // (after a try with no PIN, trying again is the same: the card says whether it wants one)
     const opt = { paying: true, taken: true, share: share || null, send: send || null, offline: !!offline,
                   /* a dollar receive asks a bitcoin card for sats only where there are some to ask (`fcFailed` says why not),
@@ -23216,6 +23267,8 @@ class Component extends DCLogic {
     // a bitcoin receive paid by a dollar card online: its cents pay the receive's own invoice (`fcMoved`, `fcBtcPay`)
     if (cross && terms.online) opt.btc = terms;
     if (btcHold) terms.holding = true;
+    // a card at another mint: its pieces pay this phone's invoice from there (`fcMoved`, `fcXmMelt`)
+    if (xm) opt.xm = terms;
     const look = this.fcPayLook(sats, usd, terms);
     const asks = this.fcAsks(sats, usd, terms, send);
     /* A new payment: a confirmation still held for the one before (its change
@@ -23252,7 +23305,8 @@ class Component extends DCLogic {
                  };
                  return W.cardPay(link, Object.assign(asking, { pin, on: onPay, progress, offline: !!offline, keepSheet: !offline },
                                                       send ? { holdFor: true, only: send.key }
-                                                        : btcHold ? { holdFor: true, holdKeep: true, only: terms.key } : {}))
+                                                        : btcHold ? { holdFor: true, holdKeep: true, only: terms.key }
+                                                        : xmHold ? { holdFor: true, only: terms.key, feeMost: Math.max(0, Number(terms.cardFee) || 0) } : {}))
                    .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
@@ -23268,6 +23322,9 @@ class Component extends DCLogic {
         if (unit !== 'usd') opt.btc = null;
         // the pieces held for the invoice, which pay it (`fcBtcPay`)
         if (opt.btc) opt.btc.held = (r && r.held) || '';
+        /* A card at another mint: the pieces held at its mint pay this phone's invoice (`fcXmMelt`), and what came off the card is not a
+         * payment received here: the invoice, paid, is. */
+        if (opt.xm) { opt.xm.held = (r && r.held) || ''; this.fcUsdHush(r && r.hash); }
         /* With no route: the card proved its money and signed it over to this phone, which keeps what it signed and
          * settles it with the mint when it is online. It is received now, and counts in the balance: the receive closes and
          * the history pass says PAYMENT RECEIVED, as for any payment. A share of a bill has the entry noted on its row,
@@ -23308,6 +23365,17 @@ class Component extends DCLogic {
       }, (e) => {
         // not paid: nothing of this payment's is held back (a hold begun as the mint was asked is let go)
         this.fcDropConfirm();
+        /* A card at another mint than this phone's, at a receive (not a share of a bill, nor a card paying out of this phone): it pays
+         * this phone's own invoice from its mint, online, with the charge shown first (`fcXmBegin`); with no route it is refused. */
+        if (e && e.card === 'other-mint' && !send && !share && !xm) { this.fcXmBegin(e, sats, offline, usd); return; }
+        /* Paying from another mint, and not paid: home again, except where the card's own flows go on at that mint (a tap left part way,
+         * to be taken up there; a mint that has not answered, asked again there), which come home when they end (`fcXmStay`). */
+        /* (And the card wanting its PIN, whose pad comes up next: the tap after it is at the same mint, and backing out of the pad comes
+         * home, `fcPayAsk`.) */
+        if (xm) {
+          const goesOn = (e && e.card === 'interrupted' && e.resumable) || (e && e.card === 'waiting') || (e && e.card === 'pin-needed' && !pin);
+          if (goesOn) this.fcXmStay(); else this.fcXmHome();
+        }
         // the unit of the card read, for TRY AGAIN's pad: a dollar card is asked its PIN for the cents it pays
         if (e && e.cardUnit) opt.cardUnit = e.cardUnit;
         /* A dollar card asked for sats alone: nothing was asked of it but its read, and the phone being paid works out the
@@ -23383,7 +23451,13 @@ class Component extends DCLogic {
       reason: 'The card was taken away before it had signed for all of ' + this.fcSats(this.fcAskIn(u, sats, usd, terms, send), u) + '. Tap it again to finish paying.',
       chip: 'Nothing is paid until then. CANCEL puts back what it signed.',
       retry: 'TAP CARD', go: () => this.fcPayRun(sats, pin, offline, true, share, send, usd, terms),
-      shut: { label: 'CANCEL', tap: () => this.fcLetGo(cardKey) },
+      /* (a card at another mint: what it signed is let go at its mint, and then this phone goes home, `fcXmHome`) */
+      shut: { label: 'CANCEL', tap: () => {
+        if (!(terms && terms.xm)) { this.fcLetGo(cardKey); return; }
+        /* (at the card's mint, where what it signed was signed: a visit gone home meanwhile, `fcXmStay`, goes back there for it) */
+        const letGo = () => Promise.resolve(this.fcLetGo(cardKey)).then(() => this.fcXmHome(), () => this.fcXmHome());
+        if (this._fcXmVisit && this.fcXmThere(terms)) letGo(); else this.fcXmGo(terms, letGo);
+      } },
     });
   }
 
@@ -23583,6 +23657,291 @@ class Component extends DCLogic {
     });
   }
 
+  /* ---- a card at another mint ----------------------------------------------------------------------------------------
+   *
+   * A card's money is at the mint its record names, and a till at another mint cannot take it as it is: ecash of one mint is
+   * nothing at another. Online, the card pays the till's own invoice from its mint instead, as SEND on a card's screen pays an
+   * invoice (`fcOutNext`): the invoice on the receive screen (a mint quote this phone's own mint made for the amount asked) is
+   * quoted at the card's mint in the card's unit, the charge is shown on a confirmation before anything is asked of the card or
+   * its holder, and PAY taps the card for that total. Its pieces are held for the invoice at its mint and melted there; the till's
+   * mint then says the invoice is paid, and the receive screen's own watch lands it, PAYMENT RECEIVED, the amount asked exactly.
+   * The payer pays the fee: the quote's reserve and the card's mint's fee on the pieces are in the total. What of the reserve the
+   * Lightning payment does not use comes back as the melt's change, to this phone, at the card's mint (as every melt's does).
+   *
+   * A dollar card paying a bitcoin ask and a bitcoin card paying a dollar ask are the same: the invoice is in bitcoin as every
+   * invoice is, and the card's mint quotes it in the card's unit.
+   *
+   * This phone goes to the card's mint for the tap and the melt, and comes home after (`fcXmGo`, `fcXmHome`): a visit, never saved as
+   * its own mint, so a Foxy closed there opens at home. The card's change, and what goes back on it when the payment is not made,
+   * are a card payment's as ever (put on in the same sheet, or at the card's next tap here, from whatever mint this phone is at).
+   *
+   * Offline it is refused, before anything is asked of the card: between two mints, both must be online. */
+  fcMintKey(u) {
+    const m = /^(https?:\/\/[^/?#]+)(.*)$/i.exec(String(u || '').trim());
+    return m ? m[1].toLowerCase() + m[2].replace(/\/+$/, '') : String(u || '').trim().replace(/\/+$/, '');
+  }
+
+  // whether this phone is at the card's mint now
+  fcXmThere(x) {
+    const W = this.fcW();
+    return !!(W && x && this.fcMintKey(W.mintUrl) === this.fcMintKey(x.mint));
+  }
+
+  // the one sentence a card at another mint is refused with, with no route
+  fcXmOffline() {
+    this.haptic && this.haptic('error');
+    this.blockedCard('fc-xm-offline', { tone: 'warn', title: 'A DIFFERENT MINT', reason: 'Paying a card from another mint needs the connection.' });
+  }
+
+  /* The card was read, and its money is at another mint (`fcPayRun`, the wallet's `other-mint`, which says the card's unit, its key,
+   * what it holds and whether it wants its PIN). Nothing has been asked of it. The receive screen's own invoice is what it pays: a
+   * dollar receive's code (`usd`), or the bitcoin receive's. A code not up yet is waited for. */
+  fcXmBegin(e, sats, offline, usd) {
+    const W = this.fcW();
+    const s = this.state;
+    if (!W) return;
+    if (offline || this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
+    const bolt11 = usd ? String(usd.bolt11 || '') : (s.invoiceIsAddress ? '' : String(s.invoice || ''));
+    if (!bolt11) { this.toast('The invoice is still being made. Press CARD when it is up.', true); return; }
+    // the code on screen is paid by the card from its mint, not by sats from this phone (`fcUsdPay`)
+    if (usd) this._fcUsd = null;
+    const ask = usd ? { unit: 'usd', amount: Math.round(Number(usd.cents) || 0) }
+      : { unit: 'sat', amount: Math.round(Number((W.amountOf && W.amountOf(bolt11)) || sats) || 0) };
+    const x = {
+      xm: true, mint: this.fcMintKey(e.mint), home: this.fcMintKey(W.mintUrl), payUnit: e.cardUnit === 'usd' ? 'usd' : 'sat',
+      key: String(e.key || ''), pinSet: !!e.pinSet, noPinLeft: Math.round(Number(e.noPinLeft) || 0), balance: Math.round(Number(e.balance) || 0),
+      usdAsk: !!usd, ask, bolt11, hash: usd ? String(usd.hash || '') : String(s.invoiceHash || ''), ends: usd ? (Number(usd.ends) || 0) : 0,
+      quote: null, pay: 0, want: 0, cardFee: 0, fee: 0, err: '', short: false,
+    };
+    // the card as read, in memory only: what its mint charges on the pieces it would pay with is worked out from it (`cardCrossQuote`)
+    this._fcXmCard = e.cardRead || null;
+    // the card's pieces owed back to it at its mint go on from here, whatever mint this phone is at (`fcWriteAsk`)
+    this._fcXmAt = Object.assign({}, this._fcXmAt || {}, { [x.mint]: true });
+    console.log('[foxy] card: its money is at ' + x.mint + '; it is asked to pay this phone’s invoice from there');
+    this.fcXmOpen(x);
+  }
+
+  // the confirmation, for the agreement `x`: its figures asked of the card's mint afresh
+  fcXmOpen(x) {
+    const fresh = Object.assign({}, x, { quote: null, pay: 0, want: 0, cardFee: 0, fee: 0, err: '', short: false });
+    if (this.state.screen === 'fcXmConfirm') this.setState({ fcXm: fresh });
+    else this.setState(p => ({ screen: 'fcXmConfirm', stack: p.stack.concat([p.screen]), fcXm: fresh }));
+    this.fcXmQuote();
+  }
+
+  /* What the card's mint asks for this phone's invoice, in the card's unit (21a-flashcard.js, `cardCrossQuote`), asked with this
+   * phone at its own mint: a melt quote commits to nothing. */
+  fcXmQuote() {
+    const W = this.fcW();
+    const x0 = this.state.fcXm;
+    if (!W || !x0) return;
+    const run = (this._fcXmRun = (this._fcXmRun || 0) + 1);
+    const put = (more) => {
+      const x = this.state.fcXm;
+      if (run !== this._fcXmRun || !x || x.bolt11 !== x0.bolt11) return;
+      this.setState({ fcXm: Object.assign({}, x, more) });
+    };
+    put({ quote: null, err: '', pay: 0, want: 0, cardFee: 0, fee: 0, short: false });
+    /* `pay`: the most that comes off the card, its mint's fee on its own pieces in it (`cardFee`); `want`: what the tap asks it for, the
+     * hold that pays the invoice. A card that does not hold `pay` is `short`: nothing on the screen can change that. */
+    Promise.resolve().then(() => W.cardCrossQuote(x0.mint, x0.bolt11, x0.payUnit, this._fcXmCard || undefined)).then((q) => {
+      const short = q.total > x0.balance;
+      put({ quote: q.quote, pay: q.total, want: q.want || q.total, cardFee: Math.max(0, Number(q.cardFee) || 0), fee: q.fee, short, err: short
+        ? 'The card holds ' + this.fcSats(x0.balance, x0.payUnit) + ', and this needs ' + this.fcSats(q.total, x0.payUnit) + ' with its fee.' : '' });
+    }, (e) => {
+      put({ err: 'The card’s mint could not say what this costs: ' + String((W.reason ? W.reason(e) : (e && e.message)) || 'it did not answer').replace(/\.?$/, '.') });
+    });
+  }
+
+  // the receive screen's code was renewed under the confirmation (12-receive.js, `recvRequote`): the card pays the new one
+  fcXmRenew() {
+    const x = this.state.fcXm;
+    const s = this.state;
+    if (!x || !s.invoice || s.invoice === x.bolt11) return;
+    this.fcXmOpen(Object.assign({}, x, { bolt11: String(s.invoice), hash: String(s.invoiceHash || ''), ends: Number(s.recvExpiresAt) || 0 }));
+  }
+
+  /* The confirmation (confirmSpec): what the card pays, dollars first, before its PIN is asked or it is touched again. The rows: what
+   * this phone receives, the fee the card pays on top, and the two mints. */
+  fcXmSpec() {
+    const x = this.state.fcXm || { ask: { unit: 'sat', amount: 0 }, payUnit: 'sat' };
+    const u = x.payUnit === 'usd' ? 'usd' : 'sat';
+    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
+    const known = !!x.quote && x.pay > 0;
+    const gets = fig(x.ask.amount, x.ask.unit);
+    const rows = [
+      this.cfRow('YOU RECEIVE', gets.main, { sub: gets.sub }),
+      this.cfRow('FEE, PAID BY THE CARD', x.err && !known ? 'UNKNOWN' : known ? 'UP TO ' + fig(x.fee, u).main : 'CHECKING…',
+                 { sub: known ? fig(x.fee, u).sub : '', ink: 'var(--btc-ink)' }),
+      this.cfRow('THE CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
+      this.cfRow('YOUR MINT', String(this.mintNameOf(x.home) || '').toUpperCase(), { half: true }),
+    ];
+    const subtitle = 'This card’s money is at another mint. It pays your invoice from there, and pays the fee.'
+      + (known ? ' What the fee does not use goes back on the card.' : '');
+    /* A card that does not hold enough: said, with the PAY it would take greyed. Asking the mint again cannot change it; the way out is the
+     * round back button. */
+    if (x.err && x.short && known) {
+      return {
+        title: 'A CARD FROM ANOTHER MINT', amountLabel: 'THE CARD PAYS',
+        amount: fig(x.pay, u).main, amountSub: fig(x.pay, u).sub, amountInk: '#FF5C5C', rows,
+        subtitle, warn: x.err, cta: 'PAY ' + fig(x.pay, u).main, ctaTone: 'go', ctaBusy: true, go: () => {},
+      };
+    }
+    if (x.err) {
+      return {
+        title: 'A CARD FROM ANOTHER MINT', amountLabel: 'THE CARD PAYS',
+        amount: known ? fig(x.pay, u).main : gets.main + ' + fee', amountSub: known ? fig(x.pay, u).sub : '', amountInk: '#FF5C5C', rows,
+        subtitle, warn: x.err, cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.fcXmQuote(),
+      };
+    }
+    return {
+      title: 'A CARD FROM ANOTHER MINT', amountLabel: 'THE CARD PAYS',
+      amount: known ? fig(x.pay, u).main : gets.main + ' + fee', amountSub: known ? fig(x.pay, u).sub : '', rows, subtitle,
+      cta: known ? 'PAY ' + fig(x.pay, u).main : 'CHECKING THE FEE…', ctaTone: 'go', ctaBusy: !known,
+      go: () => { if (known) this.fcXmPay(); },
+    };
+  }
+
+  /* PAY on the confirmation: back to the receive screen, and the card tapped for the total, with its PIN first where it will want it
+   * (it has one, and what it pays without one does not cover the total). The tap is a till's in every way (`fcPayRun`). */
+  fcXmPay() {
+    const W = this.fcW();
+    const x = this.state.fcXm;
+    if (!W || !x || !x.quote || !(x.pay > 0) || x.short) return;
+    if (this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
+    // a dollar code with less than half a minute left is renewed first (12-receive.js), and the card pays the new one (`fcXmRenew`)
+    if (x.ends && x.ends - Date.now() < 30000) {
+      this.toast('This code has almost run out. A new one is being made, and the fee asked again.', true);
+      if (this.recvRequote) this.recvRequote(this._invoiceRun);
+      return;
+    }
+    if (!this.fcQuoteFresh(x.quote)) { this.fcXmOpen(x); return; }
+    const terms = Object.assign({}, x);
+    this.setState(p => ({ fcXm: null, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'confirm', stack: p.stack.slice(0, -1) }));
+    this._fcXmLive = terms;
+    /* The card is asked for the hold (`want`), and its mint's fee on its own pieces comes on top, up to what was shown (`cardFee`,
+     * `feeMost`): `pay`, the most it is charged, is what the screens say. */
+    const want = Math.max(0, Math.round(Number(x.want || x.pay) || 0));
+    if (x.pinSet && !(x.noPinLeft >= x.pay)) { this.fcPayAsk(want, false, false, null, null, null, terms, x.payUnit); return; }
+    this.fcPayStart(want, false, null, null, null, terms);
+  }
+
+  /* To the card's mint, for the tap and the melt: a visit (21a-flashcard.js, `cardVisit`), never saved as this phone's own, and with
+   * what else is started meanwhile (an invoice, a payment, the late claims) waiting for this phone to be home. `fcXmHome` ends it. */
+  fcXmGo(x, then) {
+    const W = this.fcW();
+    if (!W) return;
+    if (this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
+    clearTimeout(this._fcXmStayT);
+    this._fcXmLive = x;
+    const v = this._fcXmVisit;
+    if (v && this.fcMintKey(v.mint) === this.fcMintKey(x.mint) && this.fcXmThere(x)) { then(); return; }
+    Promise.resolve().then(() => W.cardVisit(x.mint)).then((visit) => {
+      // a visit already ended by the time this one is there (a back out of the pad meanwhile) ends this one too
+      if (this._fcXmLive !== x) { visit.end(); return; }
+      this._fcXmVisit = visit;
+      then();
+    }, (e) => {
+      console.warn('[foxy] card: the card’s mint could not be reached:', (W.reason ? W.reason(e) : (e && e.message)));
+      this._fcXmLive = null;
+      this.haptic && this.haptic('error');
+      this.blockedCard('fc-xm-away', { tone: 'warn', title: 'NOT PAID',
+        reason: 'Foxy could not reach ' + this.mintNameOf(x.mint) + ', where this card’s money is. Nothing was taken.' });
+    });
+  }
+
+  /* The visit is over, however the payment went: this phone goes home, and keeps trying until it is there (`cardVisit`). Resolves
+   * once it is home; what is said on the screen meanwhile does not wait for that. What the payment left at the card's mint is
+   * settled there by the wallet, on a visit of its own (`cardAwayLeft`), once home. */
+  fcXmHome() {
+    const W = this.fcW();
+    clearTimeout(this._fcXmStayT);
+    this._fcXmLive = null;
+    const v = this._fcXmVisit;
+    this._fcXmVisit = null;
+    if (!W || !v) return Promise.resolve();
+    return Promise.resolve(v.end()).then(() => {
+      this.refreshBalance();
+      this.loadHistory();
+      // and anything the payment left at the card's mint, settled there now that nothing else is (a minute's wait is the wallet's)
+      if (W.cardAwayLeft) W.cardAwayLeft({ skipDue: true }).then((at) => { if (at && at.length) { this.refreshBalance(); this.loadHistory(); if (this.fcMoneyWaiting) this.fcMoneyWaiting(); } }, () => {});
+    });
+  }
+
+  /* Kept at the card's mint for a flow that goes on there (a tap left part way, a mint that has not answered), which comes home when it
+   * ends; and home after FC_XM_STAY_MS whatever, once no card flow is running. */
+  fcXmStay() {
+    clearTimeout(this._fcXmStayT);
+    const wait = () => {
+      this._fcXmStayT = setTimeout(() => {
+        if (this.cardFlowBusy && this.cardFlowBusy()) { wait(); return; }
+        this.fcXmHome();
+      }, Number(this.FC_XM_STAY_MS) || 200000);
+    };
+    wait();
+  }
+
+  /* The card has paid this phone, and its pieces are held at its mint for this phone's own invoice: they are melted there, with the
+   * quote agreed (`pay`, `opts.held`), and this phone goes home. Paid, the receive screen's watch of the invoice is asked at once,
+   * and lands it. With the mint and unanswered, the wallet's own asking settles the melt, as any payment it is waiting on, and the
+   * invoice lands when it is paid. Not paid (refused, or the code ran out first), the pieces go back to the card: made into pieces
+   * for it at its mint and owed to it, put on at its next tap, with nothing taken (`cardOutBack`). */
+  fcXmMelt(xm) {
+    const W = this.fcW();
+    this.refreshBalance();
+    this.loadHistory();
+    if (!W || xm.melting || xm.done) return;
+    const held = String(xm.held || '');
+    // (said at once: the way home does not hold up what is said)
+    const back = (e, plain) => {
+      const said = String(plain || (e ? (W.reason ? W.reason(e) : e.message) : '') || 'The payment was not made.').trim().replace(/\.?$/, '.');
+      console.log('[foxy] card: the invoice was not paid from the card’s mint; what the card paid goes back to it — ' + said);
+      // made into pieces for the card while this phone is still at its mint (`cardOutBack`), then home
+      Promise.resolve(held && W.cardOutBack ? W.cardOutBack(held) : null).catch(() => null).then((r) => {
+        this.fcXmHome();
+        this.refreshBalance();
+        this.loadHistory();
+        this.fcFailed({ card: 'not-paid-out', message: said, amount: this.fcAmt(r) || xm.pay, unit: xm.payUnit, made: !!(r && r.made) }, { paying: true });
+      });
+    };
+    if (!held) { xm.done = true; back(null, 'The card’s pieces were not kept for this payment.'); return; }
+    // the code ran out while the card was read: the mint refuses a melt of it, so none is sent
+    if (xm.ends && xm.ends - Date.now() < 5000) { xm.done = true; back(null, 'The code ran out while the card paid.'); return; }
+    xm.melting = true;
+    console.log('[foxy] card: ' + xm.want + (xm.payUnit === 'usd' ? ' cents' : ' sats') + ' held at the card’s mint; they pay this phone’s invoice');
+    if (xm.quote && xm.quote.quote && xm.quote.quote.quote) this.txIsNew(String(xm.quote.quote.quote));
+    /* The mint has not said yet: the wallet's own asking settles the melt (from home as well), and the invoice lands when it is paid;
+     * the melt's change, and the whole of a melt found not to have gone, are the card's, owed to it at its mint (`cardAwayLeft`). */
+    const waiting = () => {
+      this.fcXmHome();
+      console.log('[foxy] card: the payment from the card’s mint is pending');
+      this.toast('The card’s mint has not answered yet. The payment lands when it does.', true);
+    };
+    /* The reserve the Lightning payment did not use is the card's (`changeToCard`), held for it and owed to it here, at its mint,
+     * before this phone goes home: it goes on at the card's next tap, as the change of a payment out of a card always does. */
+    Promise.resolve().then(() => W.pay(xm.bolt11, () => {}, { unit: xm.payUnit, quote: xm.quote, held, card: xm.key, changeToCard: true, cardVisit: true })).then((paid) => {
+      xm.melting = false;
+      xm.done = true;
+      if (paid && paid.hash) this.txIsNew(String(paid.hash));
+      if (paid && paid.pending) { waiting(); return; }
+      const ch = paid && paid.cardChange;
+      Promise.resolve(ch && this.fcAmt(ch) > 0 && W.cardOutBack ? W.cardOutBack(ch.id) : null).catch(() => null).then((r) => {
+        this.fcXmHome().then(() => this.fcBtcLand(xm));
+        // owed to the card now: its change tap, as after any till payment with change (TAP TO RECEIVE, no PIN)
+        if (r && r.made && this.fcAmt(r) > 0) {
+          this.refreshBalance();
+          this.loadHistory();
+          this.fcChangeWaiting(this.fcAmt(r), 0, xm.payUnit);
+        }
+      });
+    }, (e) => {
+      xm.melting = false;
+      xm.done = true;
+      if (e && e.pending) { waiting(); return; }
+      back(e, e && e.plain);
+    });
+  }
+
   /* The payment is given up: what the card signed for it is made into pieces
    * for the card again, and the sheet comes up by itself to put them back. With
    * no route to the mint they are made once there is one, and said so. */
@@ -23590,8 +23949,8 @@ class Component extends DCLogic {
    * (`also`), so a bitcoin card's sats and a dollar card's cents are never said as one figure. */
   fcLetGo(key) {
     const W = this.fcW();
-    if (!W || !W.cardHeldLetGo) return;
-    W.cardHeldLetGo(key || undefined).then((r) => {
+    if (!W || !W.cardHeldLetGo) return Promise.resolve();
+    return W.cardHeldLetGo(key || undefined).then((r) => {
       if (r && r.made && this.fcAmt(r) > 0) { this.fcReceiveNow(this.fcAmt(r), 0, { putBack: true, unit: this.fcUnitOf(r) }); return; }
       if (r && this.fcAmt(r) > 0) {
         this.blockedCard('fc-let-go', {
@@ -23714,7 +24073,10 @@ class Component extends DCLogic {
      * found out at the tap. */
     const W = this.fcW();
     const here = String((W && W.mintUrl) || '').replace(/\/+$/, '');
-    const away = ((W && W.cardOwed()) || []).filter(r => r.mint && here && r.mint !== here)[0];
+    /* (Not what is owed at the mint of a card that has just paid this phone from there, `fcXmPay`: a card's own pieces go on it from any
+     * phone, whatever mint the phone is at.) */
+    const xmAt = this._fcXmAt || {};
+    const away = ((W && W.cardOwed()) || []).filter(r => r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)])[0];
     if (away && !opt.here) {
       this.blockedCard('fc-other-mint', {
         tone: 'warn', title: 'A DIFFERENT MINT',

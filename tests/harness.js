@@ -714,7 +714,7 @@ function fakeMint(w, opts) {
       if (o.meltPending) {
         // the payment is still routing: the inputs are the mint's, no change yet (`settleMelt`)
         q.state = 'PENDING';
-        pendingOf[q.quote] = { inputs: paidIn, outputs: body.outputs };
+        pendingOf[q.quote] = { inputs: paidIn, outputs: body.outputs, proofs: body.inputs };
         return ok(q);
       }
       // the paying of the invoice: one of this mint's own, in either unit, is now paid
@@ -833,7 +833,22 @@ function fakeMint(w, opts) {
       const held = pendingOf[quote];
       if (!q || q.state !== 'PENDING' || !held) return false;
       delete pendingOf[quote];
-      if (how === 'failed') { q.state = 'FAILED'; return true; }
+      if (how === 'failed') {
+        q.state = 'FAILED';
+        // its inputs unspent again, as a mint gives back a payment that did not go
+        (held.proofs || []).forEach((p) => {
+          const y = yOf(p.secret);
+          if (!spent.has(y)) return;
+          spent.delete(y);
+          delete witnesses[y];
+          const i = spentSecrets.indexOf(String(p.secret));
+          if (i >= 0) spentSecrets.splice(i, 1);
+          const u = unitOfKeyset(p.id) || 'sat';
+          if (u === 'sat') taken -= Number(p.amount) || 0;
+          takenBy[u] -= Number(p.amount) || 0;
+        });
+        return true;
+      }
       const target = byInvoice[q.request];
       if (target && quotes[target] && quotes[target].state === 'UNPAID') quotes[target].state = 'PAID';
       const sigs = changeFor(held.outputs, held.inputs - q.amount - routingFee(q, target));

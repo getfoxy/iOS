@@ -237,7 +237,9 @@
           var meltOutputs = [];      // the change outputs the melt reserves, as cashu-ts reports them
           try {
             holdMelt(quote, split.send, inv, at, opts && opts.payee, splitFee, unit,
-                     heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold }
+                     heldId ? { cardOut: heldId, card: (opts && opts.card) || (cardHold && cardHold.card) || '', cardHold: cardHold,
+                                // the melt's change is the card's (`opts.changeToCard`), however late the melt is settled
+                                changeToCard: (opts && opts.changeToCard) || undefined }
                        : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
                          // paid over its need: what comes back is checked when the sweep settles it too
                          changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
@@ -291,7 +293,12 @@
              * in the answer or was restored after the answer was lost. Marked
              * imported, spending it elsewhere later had reconcile set it aside
              * instead of removing it. */
-            addOwnProofs(change || [], at, w, unit, restored);
+            /* A card paying this phone's invoice from another mint (`opts.changeToCard`, 26f-flashcard.js `fcXmMelt`): the reserve
+             * the payment did not use is the card's, and goes into a hold of its own for it (`<id>-change`, owed to it by the
+             * caller, `cardOutBack`), as an on-chain payment's does (16a-onchain.js); this phone receives the invoice and no more. */
+            var changeToCard = !!(heldId && opts && opts.changeToCard && (change || []).length);
+            if (changeToCard) cardOutReturn(heldId + '-change', change, at, Object.assign({}, cardHold || {}, { change: true, payment: quote.quote }));
+            else addOwnProofs(change || [], at, w, unit, restored);
             dropMelt(quote.quote);
             /* Paid with more than it needed: a mint that gave back less than
              * it owed is said, and paid only what a melt needs from then on
@@ -334,8 +341,10 @@
               outputs: (change || []).map(scrub),
             });
             if (swapId) unitSwapLanded(swapId, 'melt');
-            return { hash: quote.quote, unit: unit, amount: satsOf(quote.amount), fee: Math.max(0, feeSats),
-                     feeSats: unit === 'sat' ? Math.max(0, feeSats) : 0 };
+            return Object.assign({ hash: quote.quote, unit: unit, amount: satsOf(quote.amount), fee: Math.max(0, feeSats),
+                     feeSats: unit === 'sat' ? Math.max(0, feeSats) : 0 },
+                     // the card's change, held for it: the caller owes it to the card (`cardOutBack`)
+                     changeToCard ? { cardChange: { id: heldId + '-change', amount: sumProofs(change), sats: unit === 'sat' ? sumProofs(change) : 0, unit: unit } } : {});
           }
 
           /* It did not go: drop the hold and take the proofs back. */

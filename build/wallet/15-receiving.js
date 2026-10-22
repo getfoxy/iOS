@@ -1165,7 +1165,11 @@
                  * change restored from this seed's counters is not: spent later,
                  * reconcile set it aside as if no restore could bring it back,
                  * where it removes this wallet's own spent proofs. */
-                if (change.length) addOwnProofs(change, here, mw, unit, restored);
+                // (a card's payment from another mint: its change is the card's, held for it and owed to it, as `pay` holds it)
+                if (change.length && entry.cardOut && entry.changeToCard) {
+                  cardOutReturn(entry.cardOut + '-change', change, here,
+                                Object.assign({}, entry.cardHold || { card: entry.card || '', unit: unit }, { change: true, payment: entry.quote }), 0);
+                } else if (change.length) addOwnProofs(change, here, mw, unit, restored);
                 // a swap's melt paid over its need: did all it was owed come back (`noteMeltChangeBack`)
                 if (entry.changeOnMelt) noteMeltChangeBack(mw, here, entry.proofs, entry.amount, change, unit, entry.quote);
                 logTx(unitRow(unit, swapMarks(entry, {

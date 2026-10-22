@@ -1079,6 +1079,9 @@
        * first, was then refused by the mint for ecash the first had just
        * taken. */
       if (claimingLate) return claimingLate;
+      /* Not while a card's visit has this phone at the card's mint (08a-flashcard.js, `cardVisit`): the walk would set out from
+       * there, and come back to it. Once the phone is home. */
+      if (cardAway) return cardAway.finished.then(function () { return FoxyWallet.claimUnclaimed(); });
       // a card's payments kept with no route, put right first where a write between two of their steps did not land (08a-flashcard.js)
       try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       var all = unclaimed(), ids = Object.keys(all);

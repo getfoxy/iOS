@@ -51,6 +51,14 @@
       /* Read now, while the caller is still on the stack: the late-claim walk
        * marks its own call for exactly that long (`walkCalling`). */
       var own = walkCalling;
+      /* And a card's visit to its own mint (08a-flashcard.js, `cardVisit`) marks the calls it makes there itself (`cardVisit` in
+       * their options): the rest of what is started meanwhile waits for this phone to be home, as for a late claim's visit. */
+      if (!own && cardAway) {
+        for (var ai = 0; ai < args.length; ai++) {
+          var ao = args[ai];
+          if (ao && typeof ao === 'object' && ao.cardVisit === true) { own = true; break; }
+        }
+      }
       /* A payment that found some of its ecash spent elsewhere has taken it out
        * of the pile and says so with foxyAgain (retryWithoutSpent): it is made
        * again from what is left, inside the same turn of the lock. At most
