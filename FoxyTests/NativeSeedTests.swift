@@ -130,7 +130,7 @@ final class NativeSeedTests: XCTestCase {
         }
         // whole requests: each label, a value of its shape
         let whole: [(String, String)] = [("change-pin", "31323334"), ("change-pin", "3132333435363738"), ("set-limit", "00000000"),
-                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"), ("set-owner", owner), ("set-card", record), ("load", ""), ("reset", "")]
+                                         ("set-limit", "FFFFFFFF"), ("set-limit", "0000000000001388"), ("set-limit", "000000000000138800002710"), ("set-owner", owner), ("set-card", record), ("load", ""), ("reset", ""), ("reset", "03")]
         for (label, value) in whole {
             switch FoxyBridge.cardOwnerSignCheck(body(label, value)) {
             case .ok(let request):
@@ -150,7 +150,7 @@ final class NativeSeedTests: XCTestCase {
             XCTAssertEqual(FoxyBridge.cardOwnerSignCheck(body(label, "")), .refuse("bad request"), "label \(label)")
         }
         // a value of another label's shape, or not hex, or not text
-        let wrong: [(String, Any)] = [("load", "00"), ("reset", "00"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
+        let wrong: [(String, Any)] = [("load", "00"), ("reset", "08"), ("reset", "0003"), ("change-pin", "313233"), ("change-pin", "3132333a"), ("change-pin", "313233343536373839"),
                                       ("set-limit", "000000"), ("set-limit", "0000000000"), ("set-owner", String(owner.dropFirst(2))),
                                       ("set-owner", "02" + String(owner.dropFirst(2))), ("set-card", String(record.dropLast(2))),
                                       ("set-card", record + "6d"), ("set-card", ""), ("change-pin", "31323334 "), ("change-pin", "0x31323334"),

@@ -282,7 +282,11 @@
      * the history is kept on this phone. Resolves the card with `log`, `receipts`, `tap` and `guest: true`. Rejects, with `card`:
      * `bad-pin`, `wrong-pin` (with `tries`), `blocked`, `no-pin` (a card with no PIN has no history to hold for), `has-owner` (its
      * history is its owner's phone's to read), `old-card` (software before 1.22), `paid-here` (the card paid in this tap: 6985),
-     * `keep-holding` (the card stopped answering keep holding before it answered), `gone`. */
+     * `keep-holding` (the card stopped answering keep holding before it answered), `gone`.
+     *
+     * A card owed change (software 1.22) has it looked into in the same held tap (`cardGuestChange`): what the mint signed for it goes
+     * on, a piece a till bound to a key of its own included, since the PIN and the hold are its holder's say; `card.owes` says where it
+     * stands, and nothing of it is kept here either. `opts.on` is told 'mint' and 'writing' as `cardLook`'s owner's read tells them. */
     cardGuestLook: function (link, opts) {
       var o = opts || {};
       var pin;
@@ -300,7 +304,148 @@
         return cardGuestRead(t, card, o.onHold);
       }).then(function (c) {
         console.log('[foxy] card: read as a guest: ' + c.log.last.length + ' tap(s) of its log, ' + c.receipts.list.length + ' receipt(s), kept nowhere');
-        return c;
+        /* Change owed to it, in the same held tap: what the mint signed goes on, an opening a till bound to a key of its own
+         * included (the PIN and the hold are the holder's say), and nothing of it is kept here (`cardGuestChange`). */
+        if (!c.info.changeDue) return c;
+        return cardGuestChange(t, c, { on: o.on }).then(function (owes) {
+          if (owes) { c.owes = owes; c.balance = (Number(c.balance) || 0) + (Number(owes.wrote) || 0); }
+          return c;
+        }, function (e) {
+          if (e && e.card === 'gone') throw e;
+          return c;
+        });
+      });
+    },
+
+    /* The change a till bound to a key that is not the mint's, mended (software 1.22): the mint's answer for the opening's blinded
+     * message (NUT-09 restore, as the owner's read fetches change) goes on under the mint's own key, which the card takes only under
+     * the PIN given in this tap (`opts.pin`), in a tap that has paid nothing, and with the holder's say: on a card with an owner this
+     * phone's grant (ALLOW_LOAD), on one with none the history held for (GET_LOG asked until it answers, `opts.onHold(n)` told each
+     * asking). Every other piece of the card's own change that can go on goes on with it. One tap: VERIFY_PIN, ALLOW_LOAD or the held
+     * GET_LOG, GET_CHANGE, then LOAD_CHANGE for each opening.
+     *
+     * Resolves { card, amount, unit, refused, owes }: the card as it reads after, `amount` what went on (in its unit), `refused` how
+     * many of the card's openings it would not take under the mint's key (the mint's answer does not fit it: it can only be given up,
+     * `cardGiveUp`), and `owes` where the card's change stands now. Rejects, with `card`: `bad-pin`, `old-card` (software before
+     * 1.22: "This card’s software cannot do that."), `locked`, `no-pin`, `blocked`, `wrong-pin`, `not-owner`, `paid-here`, `gone`. */
+    cardMend: function (link, opts) {
+      var o = opts || {};
+      var pin;
+      try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      var t = cardTalk(link);
+      var card;
+      return cardLook(link, { short: true }).then(function (c) {
+        card = c;
+        if (!card.info.guests) throw cardError('old-card', 'This card\u2019s software cannot do that.');
+        if (card.info.locked) throw cardRefused('6986');
+        if (!card.info.pinSet) throw cardRefused('6984');
+        if (card.info.pin === 'blocked') throw cardRefused('6983');
+        return cardVerify(t, card, pin);
+      }).then(function () {
+        if (card.info.owner) {
+          return cardGrant(t, card.key).then(function (yes) {
+            if (!yes) throw cardRefused('6a91');
+            card.mine = true;
+          });
+        }
+        return cardHoldOn(t, cardCommand(CARD_INS.log, 0, '', 0), o.onHold, 'its history').then(function () { card.guest = true; }, function (e) {
+          if (e && e.sw === '6985') throw cardError('paid-here', 'This card has just paid, so it does not take this change in the same tap. Take it away from the phone and tap it again.');
+          throw e;
+        });
+      }).then(function () {
+        return card.info.owner ? cardOwnerChange(t, card, { mend: true, on: o.on, progress: o.progress }) : cardGuestChange(t, card, { on: o.on });
+      }).then(function (owes) {
+        if (owes && owes.error && owes.error.card === 'gone' && !(owes.wrote > 0)) throw owes.error;
+        if (owes && owes.error && owes.error.card === 'paid-here') throw owes.error;
+        var amount = owes ? Number(owes.wrote) || 0 : 0;
+        console.log('[foxy] card: mended: ' + amount + ' of its change went on' + (owes && owes.refused ? ', ' + owes.refused + ' refused by the card' : ''));
+        var unit = (card.record && card.record.unit) || 'sat';
+        var after = amount > 0 ? cardLook(link, card.info.owner ? { mine: true, short: true } : { short: true }).then(null, function () {
+          card.balance = (Number(card.balance) || 0) + amount;
+          return card;
+        }) : Promise.resolve(card);
+        return after.then(function (fresh) {
+          fresh.owes = owes || null;
+          if (!card.info.owner) fresh.guest = true;
+          return { card: fresh, amount: amount, unit: unit, refused: owes ? Number(owes.refused) || 0 : 0, owes: owes || null };
+        });
+      });
+    },
+
+    /* One opening of the card's own change given up (software 1.22, RESET_CARD with P1 = 1 and P2 = its number, `opts.number`): its
+     * piece is never loaded, and its money is gone. For an opening nothing can load: a till bound it to a key that is not the mint's
+     * and the mint has no answer for it, or the card would not take the one it has. On a card with an owner, this phone's proof over
+     * "FoxyCard/reset", a nonce the card gives and the number, then the number (and the PIN on a locked card); on one with none, the
+     * PIN (`opts.pin`) and the history held for (`opts.onHold(n)`), then the number alone. The card writes it in its log (bit 4 of the
+     * tap's flags). What this phone held toward that opening is dropped.
+     *
+     * The opening is named by its number and by its blinded message (`opts.B_`, as the read that offered it had it), and nothing is sent
+     * for it unless the card's opening of that number is still that one: numbers are used again once an opening is closed, and a screen
+     * left open must not give up the change of a later payment.
+     *
+     * Resolves { card, amount, unit, number }: the card as it reads after, and what the opening was worth (in its unit). Rejects, with
+     * `card`: `old-card` ("This card’s software cannot do that.": said of a card before 1.22 before anything is sent, and of a card
+     * that answers 6B00), `nothing-owed` (the opening waits for nothing now, or is another's), `on-card` (its piece is on the card already: nothing was lost), `bad-pin`, `wrong-pin`, `blocked`, `no-pin`,
+     * `not-owner`, `locked`, `paid-here`, `gone`. */
+    cardGiveUp: function (link, opts) {
+      var o = opts || {};
+      var n = Number(o.number);
+      var named = String(o.B_ || '').toLowerCase();
+      if (!(n >= 0 && n <= 7 && Math.floor(n) === n) || !/^0[23][0-9a-f]{64}$/.test(named)) return Promise.reject(cardError('refused', 'That is not change owed to the card.'));
+      var pin = '';
+      if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
+      var t = cardTalk(link);
+      var card, op;
+      var cannot = function () { return cardError('old-card', 'This card\u2019s software cannot do that.'); };
+      return cardLook(link, { short: true }).then(function (c) {
+        card = c;
+        // 1.22 and on: a card before it has no let-go, and is sent nothing for one
+        if (!card.info.ownChange || !cardIs121(card) || !card.info.guests) throw cannot();
+        if (card.info.owner) return card.info.locked && pin ? cardVerify(t, card, pin) : null;
+        // a card with no owner: its holder's PIN and the held history
+        if (!card.info.pinSet) throw cardRefused('6984');
+        if (card.info.pin === 'blocked') throw cardRefused('6983');
+        if (!pin) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
+        return cardVerify(t, card, pin).then(function () {
+          return cardHoldOn(t, cardCommand(CARD_INS.log, 0, '', 0), o.onHold, 'its history');
+        }).then(null, function (e) {
+          if (e && e.sw === '6985') throw cardError('paid-here', 'This card has just paid, so it gives up nothing in the same tap. Take it away from the phone and tap it again.');
+          throw e;
+        });
+      }).then(function () {
+        return cardOpenings(t);
+      }).then(function (list) {
+        op = list.filter(function (x) { return x.number === n; })[0];
+        // the opening the screen showed, and not one that has taken its number since
+        if (!op || String(op.B_ || '').toLowerCase() !== named || (o.amount !== undefined && o.amount !== op.amount)) throw cardError('nothing-owed', 'That change is not owed to the card any more.');
+        if (!card.info.owner) return t.ask(cardCommand(CARD_INS.reset, 1, cardByte(n), undefined, n));
+        // the owner's proof over the reset's label, the nonce and the number, then the number
+        return cardOwned(t, card.key, 'reset', cardByte(n)).then(function (data) {
+          return t.ask(cardCommand(CARD_INS.reset, 1, data, undefined, n));
+        });
+      }).then(function (r) {
+        if (r.sw === '6b00') throw cannot();
+        if (r.sw === '6a88') throw cardError('nothing-owed', 'That change is not owed to the card any more.');
+        if (r.sw === '6a94') throw cardError('on-card', 'That change is on the card already.');
+        if (r.sw === '6982' && card.info.owner) throw cardError('locked', 'This card is locked. Its change can be given up only with its PIN.');
+        if (r.sw === '6985') throw cardError('paid-here', 'This card has just paid, so it gives up nothing in the same tap. Take it away from the phone and tap it again.');
+        if (r.sw !== '9000') throw cardRefused(r.sw, 'to give up its change');
+        // what this phone held toward that opening is nobody's now
+        var gone = String(op.B_ || '').toLowerCase();
+        if (gone) {
+          var rows = cardStore(CARD_OWED).map(function (row) {
+            if (!(row && row.card === card.key && Array.isArray(row.blind))) return row;
+            var keep = row.blind.filter(function (b) { return !(b && String(b.B_).toLowerCase() === gone); });
+            if (keep.length === row.blind.length) return row;
+            return keep.length ? Object.assign({}, row, { blind: keep }, cardFig(cardRowUnit(row), keep.reduce(function (m, b) { return m + satsOf(b.amount); }, 0))) : null;
+          }).filter(function (row) { return row !== null; });
+          mustSave(CARD_OWED, rows);
+        }
+        console.log('[foxy] card: an opening of its change, ' + op.amount + ', is given up');
+        return cardLook(link, card.info.owner ? { mine: true, short: true } : { short: true }).then(null, function () { return card; });
+      }).then(function (fresh) {
+        if (!card.info.owner) fresh.guest = true;
+        return { card: fresh, amount: op.amount, unit: (card.record && card.record.unit) || 'sat', number: n };
       });
     },
 

@@ -16,7 +16,9 @@
  *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; the swipe between home and
  *                       the card; and no daily limit anywhere on the card's screen.
  *
- * No card of 1.21 or 1.22 in this suite makes change (the model has no LOAD_CHANGE): every payment here is of exact pieces. */
+ * And the set-up's wheels in the card's own money: a dollar card's in dollars only, a bitcoin card's in dollars or sats by the switch
+ * above them, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
+ * exact pieces (the change these cards make for themselves, mended or given up, is tests/flashcard-mend.js). */
 const { funded, newCard, why, OTHER_WORDS } = require('./flashcard-kit');
 const { appOn, until, pad, card, vals, settle, keyIn } = require('./flashcard-ui-kit');
 
@@ -352,6 +354,91 @@ function wheel(a) {
     ok(card(holder) && /when this phone last saw it/.test(card(holder).reason) && card(holder).title === holder.fcName(n.key),
        'RESTORE on a card this phone set up: its row of CARDS YOU LOADED, saying what it held and when it can be taken back', card(holder) && card(holder).all);
     card(holder).press('CLOSE');
+  }
+
+  /* ---- the wheels' unit, by what the card holds (the owner's rule of 2026-10-22) --------------------------------------------
+   * A dollar card's limits are chosen in dollars and nothing else; a bitcoin card's in dollars or in sats, by a DOLLARS / SATS switch
+   * above the wheel, the other unit under each figure; what the card is sent is what it takes (cents, or sats) either way. */
+  {
+    const a = appOn(H);
+    a.price = 60000;
+    const units = () => {
+      const sw = a._fcWheelEl && a._fcWheelEl.querySelector('[data-wheel-units]');
+      return sw ? Array.from(sw.children).map((x) => x.textContent + (x.getAttribute('aria-pressed') ? '*' : '')).join(' ') : '';
+    };
+    const switchTo = (key) => {
+      const seg = a._fcWheelEl.querySelector('[data-wheel-unit="' + key + '"]');
+      seg.dispatchEvent(new (seg.ownerDocument.defaultView.Event)('click', { bubbles: true }));
+    };
+    // a bitcoin card: the switch, dollars first; SATS turns both wheels into sats, their dollars under them
+    let chose = null;
+    a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
+    pad(a).type('2580'); pad(a).type('2580');
+    card(a).press('YES');
+    ok(units() === 'DOLLARS* SATS' && wheel(a).mains[wheel(a).chosen] === '$2.00' && wheel(a).rows[wheel(a).chosen] === '$2.00₿ 3,333',
+       'a bitcoin card’s wheel has DOLLARS / SATS above it, in dollars first with the sats under each', units() + ' | ' + wheel(a).rows[wheel(a).chosen]);
+    switchTo('sat');
+    let w = wheel(a);
+    ok(units() === 'DOLLARS SATS*' && w.mains[0] === '₿ 0' && w.mains[w.mains.length - 1] === '₿ 20,000' && w.mains[w.chosen] === '₿ 2,000'
+       && w.rows[w.chosen] === '₿ 2,000$1.20' && w.cta === 'SET ₿ 2,000', 'SATS: the wheel’s steps in sats, standing at 2,000, its dollars under each, and SET ₿ 2,000', w.rows[w.chosen]);
+    w.set();
+    card(a).press('YES');
+    w = wheel(a);
+    ok(units() === 'DOLLARS SATS*' && w.mains[w.chosen] === '₿ 10,000' && w.line === 'It will take 13 seconds to pay ₿ 40,000.',
+       'the choice stands for the limit on one payment, and its seconds line is in sats', units() + ' | ' + w.line);
+    w.pick('₿ 20,000');
+    ok(wheel(a).line === 'It will take 13 seconds to pay ₿ 80,000.' && wheel(a).cta === 'SET ₿ 20,000', 'turned, the line follows in sats', wheel(a).line);
+    switchTo('usd');
+    ok(units() === 'DOLLARS* SATS' && wheel(a).line === 'It will take 13 seconds to pay $40.00.', 'and DOLLARS turns it back, the line in dollars', wheel(a).line);
+    switchTo('sat');
+    wheel(a).pick('₿ 50,000');
+    wheel(a).set();
+    ok(chose && chose.noPin === 2000 && chose.noPinUsd === 0 && chose.tapLimit === 50000 && chose.tapUsd === 0,
+       'what the card is sent is the sats chosen, and no dollars are kept for figures chosen in sats', JSON.stringify(chose));
+    // a dollar card: dollars and nothing else, with nothing under them, price or not
+    chose = null;
+    a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
+    pad(a).type('2580'); pad(a).type('2580');
+    card(a).press('YES');
+    w = wheel(a);
+    ok(units() === '' && w.mains[w.chosen] === '$2.00' && w.rows.every((r) => /^\$[0-9.]+$/.test(r)), 'a dollar card’s wheel is in dollars only: no switch, and no sats under any figure', w.rows.slice(0, 3).join(' '));
+    w.set();
+    card(a).press('YES');
+    w = wheel(a);
+    ok(w.line === 'It will take 13 seconds to pay $40.00.' && units() === '', 'its limit too, its seconds line in dollars', w.line);
+    w.set();
+    ok(chose && chose.noPin === 200 && chose.tapLimit === 1000 && chose.noPinUsd === 0 && chose.tapUsd === 0, 'and the card is sent cents', JSON.stringify(chose));
+    a.price = 0;
+    a.fcSetUpSteps({ unit: 'usd', run: () => {} });
+    pad(a).type('2580'); pad(a).type('2580');
+    card(a).press('YES');
+    ok(units() === '' && wheel(a).mains[wheel(a).chosen] === '$2.00' && wheel(a).rows.every((r) => /^\$/.test(r)), 'with no Bitcoin price a dollar card is still in dollars, never sats', wheel(a).rows.slice(0, 2).join(' '));
+    wheel(a).back();
+    card(a).press('NO');
+    card(a).press('NO');
+    // LIMITS takes its figure on the SET AMOUNT keypad: a dollar card's in dollars with no swap, a bitcoin card's in dollars with the swap to sats
+    {
+      const k = appOn(H, { screen: 'flashcard', fc: { unit: 'usd', key: 'x' } }, { send: true });
+      k.price = 60000;
+      k.fcAmount('cardLimit');
+      const usdPad = k.state.unit === 'USD' && k.usdKeypad() === true;
+      k.setState({ screen: 'flashcard', stack: [], fc: { unit: 'sat', key: 'y' } });
+      k.fcAmount('cardLimit');
+      const satPad = k.state.unit === 'USD' && k.usdKeypad() === false;
+      k.price = 0;
+      k.setState({ screen: 'flashcard', stack: [] });
+      k.fcAmount('cardLimit');
+      ok(usdPad && satPad && k.state.unit === 'SATS', 'LIMITS: a dollar card’s keypad is dollars with no swap; a bitcoin card’s is dollars with its swap to sats, and sats with no price',
+         JSON.stringify([usdPad, satPad, k.state.unit]));
+    }
+    // a bitcoin card with no price: sats alone, as dollars cannot be turned into the sats it holds
+    a.fcSetUpSteps({ unit: 'sat', run: () => {} });
+    pad(a).type('2580'); pad(a).type('2580');
+    card(a).press('YES');
+    ok(units() === '' && wheel(a).mains[wheel(a).chosen] === '₿ 2,000' && wheel(a).rows[wheel(a).chosen] === '₿ 2,000', 'a bitcoin card with no price: sats, no switch, nothing under them', wheel(a).rows[wheel(a).chosen]);
+    wheel(a).back();
+    card(a).press('NO');
+    card(a).press('NO');
   }
 
   /* ---- B6: SEND > FLASHCARD to a new card: this phone sets it up for its holder, and does not own it -------------------- */

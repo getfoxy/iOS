@@ -1393,8 +1393,8 @@ function nativePhone(opts) {
           && ((value[99] <= 80 && value.length === 100 + value[99]) || (value[99] <= 77 && design(value.subarray(100 + value[99]))))
           && (value[34] === 4 || value.subarray(34, 99).every((b) => b === 0)),
         'load': value.length === 0,
-        // RESET (card software 1.17): the proof is over the label and a nonce alone
-        'reset': value.length === 0,
+        // RESET (card software 1.17): the proof is over the label and a nonce alone; and its let-go (1.22): over the number of one opening, 0 to 7
+        'reset': value.length === 0 || (value.length === 1 && value[0] <= 7),
       }[m.label];
       if (!shaped) return no(SAYS.bad);
       if (!words()) return no(SAYS.noSeed);

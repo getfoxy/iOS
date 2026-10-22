@@ -141,6 +141,14 @@ question asked first, with nothing crossing the link; and **`amount-entry.js`**,
 the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
 check; the line under the figure; NEXT).
 
+**`flashcard-mend.js`** holds the change a till bound to a key that is not the mint's (card
+software 1.22), against the model taught LOAD_CHANGE and RESET_CARD's let-go: LOAD_CHANGE under the
+bound key from anyone, another key refused 6A80 with no PIN, 6982 with no grant or hold, 6985 in a
+tap that paid and taken with them; the let-go's every refusal and bit 4 of the log; the owner's
+phone mending at its next tap (`cardMend`), VIEW AS GUEST mending in its held tap, `cardGiveUp` by
+the owner's proof and under the PIN and the hold, 1.21's "This card’s software cannot do that.", and
+the card screen's FINISH THIS CHANGE and GIVE UP THIS CHANGE, the second only where an opening is stuck.
+
 **`flashcard-holder.js`** holds the card of a holder with no phone (card software 1.22)
 and the set-up's own screens, against the model of the card taught 1.21 and 1.22
 (`software: 21`, `software: 22` in `flashcard-card.js`). Of the card: SELECT's 01 15 and

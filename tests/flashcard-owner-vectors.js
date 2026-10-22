@@ -61,10 +61,21 @@ const N = BigInt('0x' + V.n);
     const sig = asked && !asked[1] ? JSON.parse(asked[0]) : {};
     ok(Object.keys(sig).join() === 'sig' && p256Verify(c.pub, Buffer.from(s.message, 'hex'), sig.sig), 'cardOwnerSign answers a signature the file’s key accepts, and nothing else');
     for (const bad of [{ label: 'lock' }, { label: 'time' }, { label: 'FoxyCard/load' }, { label: 'change-pin', value: '313233' }, { label: 'set-limit', value: '00' },
-                       { label: 'load', value: '00' }, { label: 'reset', value: '00' }, { label: 'set-owner', value: '04' }, { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
+                       { label: 'load', value: '00' }, { label: 'reset', value: '08' }, { label: 'reset', value: '0003' }, { label: 'set-owner', value: '04' }, { nonce: 'ab' }, { key: '04' + c.cardKey.slice(2) }]) {
       const body = Object.assign({ action: 'cardOwnerSign', key: c.cardKey, label: 'load', nonce: s.nonce, value: '' }, bad);
       const r = await Promise.resolve(phone.answer(null, body));
       ok(r && r[1] === 'bad request' && r[0] === null, 'and refuses what is not one of the six, or not shaped as that one is: ' + JSON.stringify(bad), r && String(r[1]));
+    }
+    /* RESET's let-go (card software 1.22): the proof over the reset's label, the nonce and the number of one opening, 0 to 7 (CardOwner.Label.reset) */
+    {
+      const goes = [];
+      for (const n of ['00', '03', '07']) {
+        const r = await Promise.resolve(phone.answer(null, { action: 'cardOwnerSign', key: c.cardKey, label: 'reset', nonce: s.nonce, value: n }));
+        const sig = r && !r[1] ? JSON.parse(r[0]).sig : '';
+        const message = Buffer.concat([Buffer.from('FoxyCard/reset'), Buffer.from(s.nonce, 'hex'), Buffer.from(n, 'hex')]);
+        if (sig && p256Verify(c.pub, message, sig)) goes.push(n);
+      }
+      ok(goes.join() === '00,03,07', 'reset is signed with nothing after the nonce, or with the number of one opening of change, 0 to 7 (the let-go)', goes.join());
     }
     /* A card's record (set-card), as native takes it (CardOwner.Label.setCard, held to the same shapes in FoxyTests/NUT13Tests.swift):
      * 100 bytes and the mint, and then nothing, or the design a card of software 1.10 and on keeps there, three capital letters or

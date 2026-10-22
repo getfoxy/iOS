@@ -500,7 +500,11 @@ final class NUT13Tests: XCTestCase {
         XCTAssertNil(CardOwner.signRequest(sign(nil, "")), "no label")
         // a value that is not that label's, or not hex at all
         XCTAssertNil(CardOwner.signRequest(sign("load", "00")), "load takes nothing")
-        XCTAssertNil(CardOwner.signRequest(sign("reset", "00")), "reset takes nothing")
+        // reset takes nothing, or the number of one opening of change (the let-go, card software 1.22), 0 to 7
+        XCTAssertNotNil(CardOwner.signRequest(sign("reset", "00")), "the let-go of opening 0")
+        XCTAssertNotNil(CardOwner.signRequest(sign("reset", "07")), "the let-go of opening 7")
+        XCTAssertNil(CardOwner.signRequest(sign("reset", "08")), "no opening 8")
+        XCTAssertNil(CardOwner.signRequest(sign("reset", "0000")), "one number at a time")
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "313233")), "three digits")
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "3132333g")))
         XCTAssertNil(CardOwner.signRequest(sign("change-pin", "313233343")), "odd")

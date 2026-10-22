@@ -11,6 +11,11 @@
    *                      how much (the no-PIN allowance)
    *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES turns the wheel for the limit on one payment,
    *                      with the line "It will take N seconds to pay $X." under it
+   *
+   * Both wheels are in the card's own money, as the owner asked: a dollar card's in dollars and nothing else; a bitcoin card's in
+   * dollars or in sats, by a DOLLARS / SATS switch above the wheel (dollars first where this phone has a price; sats alone where it
+   * has none, since dollars could not be turned into the sats the card holds), the other shown under each figure. What the card is
+   * sent is what it takes, whichever is chosen: cents for a dollar card, sats for a bitcoin card.
    *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
    *
    * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
@@ -23,9 +28,10 @@
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
 
-  /* The wheel's figures. In dollars for a bitcoin card where there is a price (its sats at that price, under each) and for a dollar
-   * card (its cents); in sats for a bitcoin card where there is none. The no-PIN amount is $0 to $20, $2 unless turned; the limit on
-   * one payment is $1 to $100, $10 unless turned. */
+  /* The wheel's figures. A dollar card's in dollars (its cents), with nothing under them. A bitcoin card's in the unit chosen on the
+   * switch: dollars, with their sats at this phone's price under each, or sats, with their dollars under each where there is a price.
+   * The no-PIN amount is $0 to $20, $2 unless turned (or 0 to 20,000 sats, 2,000); the limit on one payment is $1 to $100, $10 unless
+   * turned (or 1,000 to 100,000 sats, 10,000). */
   FC_WHEEL = {
     noPin: { usd: [0, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 7.5, 10, 12.5, 15, 20], usdAt: 2,
              sat: [0, 250, 500, 1000, 2000, 3000, 5000, 10000, 20000], satAt: 2000 },
@@ -120,14 +126,18 @@
   fcSuWheel(which, back, next) {
     const su = this._fcSu;
     if (!su) return;
-    const rows = this.fcWheelRows(which, this.fcSuUnitNow());
+    const rows = this.fcWheelRows(which, this.fcSuUnitNow(), su.as);
     const tap = which === 'tap';
+    /* A bitcoin card's figures in dollars or in sats, by the switch (where this phone has a price to turn dollars into sats); the
+     * choice stands for the other wheel of the same set-up. A dollar card has no switch: dollars and nothing else. */
+    const both = rows.unit === 'sat' && ((this.px && this.px()) || 0) > 0;
     this.fcWheel({
       title: tap ? 'MAX PER TAP' : 'NO PIN AMOUNT',
       question: tap ? 'The most the card pays in one tap straight away. More than this waits, and the card is held longer.'
         : 'Up to this much, the card pays with a tap and no PIN.',
       rows: rows.list, at: rows.at,
-      line: tap ? (r) => this.fcWaitLine(r.amount, rows.unit) : null,
+      units: both ? { at: rows.as, pick: (as) => { su.as = as; this.fcSuWheel(which, back, next); } } : null,
+      line: tap ? (r) => this.fcWaitLine(r.amount, rows.unit, rows.as) : null,
       cta: (r) => 'SET ' + r.main,
       back,
       done: (r) => {
@@ -137,32 +147,40 @@
     });
   }
 
-  /* The wheel's rows for `which` on a card that holds `unit`: [{ amount (the card's unit), usd (the dollars it was chosen in, for a
-   * bitcoin card; 0 otherwise), main, sub }], and where it stands at first. */
-  fcWheelRows(which, unit) {
+  /* The wheel's rows for `which` on a card that holds `unit`, its figures in `as` ('usd' or 'sat', a bitcoin card's choice on the
+   * switch; dollars where none is made and there is a price): [{ amount (the card's unit), usd (the dollars it was chosen in, for a
+   * bitcoin card; 0 otherwise, so a figure chosen in sats is not kept at any dollars), main, sub }], where it stands at first, and
+   * `as`, the unit its figures are in. A dollar card's are dollars and nothing else, whatever the price. */
+  fcWheelRows(which, unit, as) {
     const spec = this.FC_WHEEL[which];
     const px = (this.px && this.px()) || 0;
-    if (unit === 'usd' || px > 0) {
-      const list = spec.usd.map((d) => {
-        const sats = px > 0 ? Math.round(d / px * 1e8) : 0;
-        return { amount: unit === 'usd' ? Math.round(d * 100) : sats, usd: unit === 'usd' ? 0 : d,
-                 main: '$' + this.usd(d), sub: px > 0 ? '₿ ' + this.group(sats) : '' };
-      });
-      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit };
+    if (unit === 'usd') {
+      const list = spec.usd.map((d) => ({ amount: Math.round(d * 100), usd: 0, main: '$' + this.usd(d), sub: '' }));
+      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit, as: 'usd' };
     }
-    const list = spec.sat.map((n) => ({ amount: n, usd: 0, main: '₿ ' + this.group(n), sub: '' }));
-    return { list, at: Math.max(0, spec.sat.indexOf(spec.satAt)), unit };
+    if (px > 0 && as !== 'sat') {
+      const list = spec.usd.map((d) => {
+        const sats = Math.round(d / px * 1e8);
+        return { amount: sats, usd: d, main: '$' + this.usd(d), sub: '₿ ' + this.group(sats) };
+      });
+      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit, as: 'usd' };
+    }
+    // in sats: chosen so, or with no price to say dollars at; their dollars under them where there is one
+    const list = spec.sat.map((n) => ({ amount: n, usd: 0, main: '₿ ' + this.group(n), sub: px > 0 ? '$' + this.usd(n / 1e8 * px) : '' }));
+    return { list, at: Math.max(0, spec.sat.indexOf(spec.satAt)), unit, as: 'sat' };
   }
 
   /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
    * for the askings of the card's software (`fcWaitOver`, `fcWaitMore`): the first limit's worth over, and two more after it. A
-   * round figure above the limit, so that the line says something. */
+   * round figure above the limit, so that the line says something. In the unit the figure was chosen in (`as`): "₿ 40,000" for a
+   * bitcoin card's limit chosen in sats. */
   FC_WAIT_EXAMPLE = 4;
-  fcWaitLine(limit, unit) {
+  fcWaitLine(limit, unit, as) {
     if (!(limit > 0)) return '';
     const units = this.FC_WAIT_EXAMPLE;
     const askings = this.fcWaitOver() + this.fcWaitMore() * (units - 2);
-    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + this.fcPrice(limit * units, unit) + '.';
+    const pay = (unit !== 'usd' && as === 'sat') ? '₿ ' + this.group(Math.round(limit * units)) : this.fcPrice(limit * units, unit);
+    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + pay + '.';
   }
 
   // the end of the questions: the tap
@@ -194,8 +212,9 @@
   /* A wheel of amounts to turn, for a figure the owner asked to be chosen this way ("price is right"): one figure in the band at
    * the middle, dollars first and their sats under them, turned by a finger or chosen by a tap. The round back button at the top
    * left, as on every screen; one button under it that says what it sets ("SET $2.00"). `o`: { title, question, rows, at, line,
-   * cta, back, done } — `rows` [{ main, sub, ... }], `at` the row it stands at first, `line(row)` the words under the wheel or
-   * null, `cta(row)` the button's words, `done(row)` on the button, `back()` on back. */
+   * cta, back, done, units } — `rows` [{ main, sub, ... }], `at` the row it stands at first, `line(row)` the words under the wheel or
+   * null, `cta(row)` the button's words, `done(row)` on the button, `back()` on back, and `units` { at, pick(as) } for a bitcoin
+   * card's DOLLARS / SATS switch above the wheel ('usd' or 'sat'), or null for none. */
   fcWheel(o) {
     this.fcWheelDismiss();
     const el = (style, text) => {
@@ -211,6 +230,24 @@
     root.appendChild(el('font-size:26px;font-weight:800;letter-spacing:-0.02em;color:var(--ink,#F5F1EC);text-align:center', o.title || ''));
     root.appendChild(el('margin-top:10px;font-size:17px;font-weight:500;line-height:1.4;color:rgba(245,241,236,.6);text-align:center;text-wrap:pretty',
       o.question || ''));
+    /* The switch between dollars and sats, in the pill the screens' chips are drawn in: the unit chosen filled, the other plain. A tap
+     * on the other turns the wheel into it. */
+    if (o.units) {
+      const sw = el('margin-top:18px;flex:none;display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--frost-chip,rgba(245,241,236,.08));'
+        + 'border:1px solid var(--frost-chip-edge,rgba(245,241,236,.16));box-sizing:border-box');
+      sw.setAttribute('data-wheel-units', '1');
+      [['usd', 'DOLLARS'], ['sat', 'SATS']].forEach(([key, label]) => {
+        const on = o.units.at === key;
+        const seg = el('padding:8px 18px;border-radius:999px;font-size:15px;font-weight:800;letter-spacing:0.04em;cursor:pointer;'
+          + (on ? 'background:var(--ink,#F5F1EC);color:var(--bg,#050505)' : 'color:rgba(245,241,236,.6)'), label);
+        seg.setAttribute('data-wheel-unit', key);
+        seg.setAttribute('role', 'button');
+        if (on) seg.setAttribute('aria-pressed', 'true');
+        seg.addEventListener('click', () => { if (!on) { this.haptic && this.haptic('light'); o.units.pick(key); } });
+        sw.appendChild(seg);
+      });
+      root.appendChild(sw);
+    }
     const frame = el('position:relative;margin-top:30px;width:100%;max-width:336px;height:' + (ROW * SHOW) + 'px;flex:none');
     frame.appendChild(el('position:absolute;left:0;right:0;top:' + (ROW * Math.floor(SHOW / 2)) + 'px;height:' + ROW + 'px;border-radius:20px;'
       + 'background:rgba(245,241,236,.08);border:1.5px solid rgba(242,128,46,.65);box-sizing:border-box;pointer-events:none'));

@@ -750,6 +750,9 @@
       // software 1.21: a card with no PIN takes nothing; 1.22: a card that paid in this tap shows no history in it, and one with an owner none to a guest
       'pin-first': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'paid-here': () => ({ tone: 'warn', title: 'THE CARD HAS JUST PAID', reason: said }),
+      // software 1.22: the card would not take change a till bound to another key, under the mint's (`fcMendRun`); and what is given up
+      'mend-refused': () => ({ tone: 'warn', title: 'CHANGE NOT PUT ON', reason: said }),
+      'nothing-owed': () => ({ tone: 'warn', title: 'NOTHING TO GIVE UP', reason: said }),
       'has-owner': () => ({ tone: 'warn', title: 'THIS CARD HAS AN OWNER', reason: said }),
       'keep-holding': () => Object.assign({ tone: 'warn', title: 'HOLD IT LONGER', reason: said }, again),
       // software 1.16: a card with no PIN has no limit for payments without one; a card that has a PIN cannot be given another
@@ -2805,7 +2808,8 @@
       above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
       // the change it made for itself that no till has handed back, as its owner's read left it (08a-flashcard.js, `cardOwnerChange`)
       // (in the card's own unit: `amount`, which is the sats of a bitcoin card's and the cents of a dollar card's)
-      owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts } : null,
+      // (and each opening by its number on the card, with whether it may be given up: `fcGiveUp`)
+      owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts, openings: card.owes.openings || [] } : null,
     } });
     this.fcOwesLater(card);
     this.fcNoteCard(card);
@@ -2824,6 +2828,8 @@
     away: 'AT ANOTHER MINT',
     silent: 'THE MINT DID NOT ANSWER',
     stuck: 'CANNOT BE FINISHED',
+    // software 1.22: a till bound it to a key that is not the mint's; the mint's answer goes on with the card's PIN (`fcMend`)
+    mend: 'NEEDS THE CARD\u2019S PIN',
   };
 
   /* The mint was still being asked for the card's change when its owner's tap went on: when it has answered, the line
@@ -2833,8 +2839,97 @@
     if (!later || typeof later.then !== 'function') return;
     later.then((o) => {
       if (!o || !o.parts || !this.state.fc || this.state.fc.key !== card.key || this._fcCard !== card) return;
-      this.setState({ fc: Object.assign({}, this.state.fc, { owes: { amount: this.fcAmt(o), parts: o.parts } }) });
+      this.setState({ fc: Object.assign({}, this.state.fc, { owes: { amount: this.fcAmt(o), parts: o.parts, openings: o.openings || [] } }) });
     }, () => {});
+  }
+
+  /* ---- change a till bound to a key of its own (software 1.22) -------------------------------------------------------
+   *
+   * A till names the mint's key for each piece of change the card makes for itself, and the card keeps the key with the opening.
+   * One that named another made change the mint's answer can never be loaded under. The owner's read sees it (the key the card
+   * kept is not the mint's) and fetches the mint's answer all the same, and the line under the card says the change NEEDS THE
+   * CARD'S PIN: FINISH THIS CHANGE asks for it, and one tap puts the mint's answer on under the mint's own key, which the card
+   * takes only with the PIN and its owner's say (on a card with no owner, the history held for), in a tap that paid nothing.
+   *
+   * What the mint has no answer for, or what the card would not take, cannot be finished, and is the owner's to give up: GIVE UP
+   * THIS CHANGE, for that opening, with one sentence first that its money is gone. */
+
+  // what the change NEEDS THE CARD'S PIN comes to, from the card's last read
+  fcMendAmount(fc) {
+    const p = ((fc && fc.owes && fc.owes.parts) || []).filter((x) => x && x.state === 'mend')[0];
+    return p ? this.fcAmt(p) : 0;
+  }
+
+  fcMend() {
+    const fc = this.state.fc;
+    const amt = this.fcMendAmount(fc);
+    if (!fc || !(amt > 0)) return;
+    this.fcAskPin({
+      title: 'CARD PIN',
+      subtitle: 'To put ' + this.fcBoth(amt, fc.unit) + ' of change on the card.' + (fc.owner ? '' : ' Hold the card still for a few seconds when you tap it.'),
+      cta: 'FINISH ' + this.fcPrice(amt, fc.unit),
+    }, (pin) => this.fcMendRun(pin));
+  }
+
+  fcMendRun(pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on, progress) => { on('writing'); return W.cardMend(link, { pin, onHold: () => on('writing'), on, progress }); })
+      .then((r) => {
+        this.fcShow(r.card);
+        if (r.amount > 0) {
+          this.haptic && this.haptic('success');
+          this.toast(this.fcSats(r.amount, r.unit) + ' went onto the card.');
+          this.refreshBalance && this.refreshBalance();
+        }
+        // the card's own refusal: the mint's answer does not fit the opening, which can now only be given up
+        if (r.refused > 0) this.fcFailed({ card: 'mend-refused', message: 'The card would not take this change.' });
+      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin) }));
+  }
+
+  /* GIVE UP THIS CHANGE, for one opening (`x`: { number, amount }): one sentence that its money is gone, then the tap. The owner's
+   * phone gives it up with its proof; a card with no owner, under its PIN, held. */
+  fcGiveUp(x) {
+    const fc = this.state.fc;
+    if (!fc || !x) return;
+    // a card before 1.22 cannot give change up: said at once, with no warning first and nothing sent
+    if (!fc.guests) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software cannot do that.' }); return; }
+    const price = this.fcPrice(x.amount, fc.unit);
+    const cta = 'GIVE UP ' + price;
+    this.blockedCard('fc-give-up', {
+      tone: 'warn', title: 'GIVE UP THIS CHANGE?',
+      reason: 'The ' + this.fcBoth(x.amount, fc.unit) + ' of this change will be gone for good: nothing can put it on the card.',
+      retry: cta,
+      go: () => (fc.owner ? this.fcGiveUpRun(x, '') : this.fcAskPin({
+        title: 'CARD PIN',
+        subtitle: 'To give up ' + this.fcBoth(x.amount, fc.unit) + ' of change. Hold the card still for a few seconds when you tap it.',
+        cta,
+      }, (pin) => this.fcGiveUpRun(x, pin))),
+    });
+  }
+
+  fcGiveUpRun(x, pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); })
+      .then((r) => {
+        // what the screen said of the card's change, without the one given up
+        const card = Object.assign({}, r.card, { owes: this.fcOwesWithout(this.state.fc && this.state.fc.owes, x.number) });
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.toast('The change is given up.');
+      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin) }));
+  }
+
+  // the change the card is owed, as the screen has it, less the opening `n`
+  fcOwesWithout(owes, n) {
+    const list = ((owes && owes.openings) || []).filter((o) => o && o.number !== n);
+    const parts = [];
+    Object.keys(this.FC_OWES).forEach((state) => {
+      const of = list.filter((o) => o.state === state);
+      if (of.length) parts.push({ state, amount: of.reduce((m, o) => m + (Number(o.amount) || 0), 0), count: of.length });
+    });
+    return { amount: list.reduce((m, o) => m + (Number(o.amount) || 0), 0), parts, openings: list };
   }
 
   /* Whether the pieces on a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs the
@@ -3508,6 +3603,10 @@
     const line = (x) => {
       const said = [];
       const put = x.loaded > 0 || x.loads > 0;
+      /* An opening of the card's own change given up in the tap (software 1.22, bit 4 of its flags): a line of its own, after the
+       * tap's other line where it had anything else. */
+      const gaveUp = x.letGo ? when(x) + ': change owed to the card given up' : '';
+      if (gaveUp && !(x.sats > 0 || x.pieces > 0 || put || x.refused || x.noPin || x.waited || x.tamper || x.clock)) return gaveUp;
       // what it signed for (which is the pieces, and may be more than the price), unless the tap only put money on
       if (x.sats > 0 || x.pieces > 0 || !put) said.push(this.fcPrice(x.sats, U) + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : ''));
       if (put) said.push(this.fcPrice(x.loaded, U) + ' put on');
@@ -3515,7 +3614,7 @@
       if (x.waited) said.push('over the per tap limit');
       if (x.refused) said.push(x.refused + ' refused');
       return when(x) + ': ' + said.join(', ')
-        + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '');
+        + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '') + (gaveUp ? '\n' + gaveUp : '');
     };
     const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
       ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.since.sats, U) + ' signed for'
@@ -4346,7 +4445,8 @@
   fcGuestRun(pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing') }))
+    // (`on`: the sheet says what the card is held for when its change is looked into in the same tap)
+    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing'), on }))
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -5056,6 +5156,12 @@
       // and under those, the change it is owed
       fcOwesShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0,
       fcOwesLines: owes.map((p) => ({ text: 'CHANGE OWED TO THIS CARD \u00b7 ' + this.fcBoth(this.fcAmt(p), U) + ' \u2014 ' + (this.FC_OWES[p.state] || '') })),
+      /* And under those, what can be done about it (software 1.22): FINISH THIS CHANGE where a till's key kept it off the card and the
+       * mint's answer is here, and GIVE UP THIS CHANGE for each opening that cannot be finished, and only for those. */
+      fcChangeRows: (!!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0) ? [].concat(
+        this.fcMendAmount(fc) > 0 ? [{ name: 'FINISH THIS CHANGE (' + this.fcPrice(this.fcMendAmount(fc), U) + ')', sub: 'With the card\u2019s PIN', text: '', ink: 'var(--ink)', tap: () => this.fcMend() }] : [],
+        ((fc.owes && fc.owes.openings) || []).filter((x) => x && x.giveUp).map((x) => ({
+          name: 'GIVE UP THIS CHANGE (' + this.fcPrice(x.amount, U) + ')', sub: '', text: '', ink: 'var(--ink)', tap: () => this.fcGiveUp(x) }))) : [],
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // what has been done with this card, on this phone: from the round button at the top left, and from its pill; only for a card that is one

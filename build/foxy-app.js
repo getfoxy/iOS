@@ -22556,6 +22556,9 @@ class Component extends DCLogic {
       // software 1.21: a card with no PIN takes nothing; 1.22: a card that paid in this tap shows no history in it, and one with an owner none to a guest
       'pin-first': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'paid-here': () => ({ tone: 'warn', title: 'THE CARD HAS JUST PAID', reason: said }),
+      // software 1.22: the card would not take change a till bound to another key, under the mint's (`fcMendRun`); and what is given up
+      'mend-refused': () => ({ tone: 'warn', title: 'CHANGE NOT PUT ON', reason: said }),
+      'nothing-owed': () => ({ tone: 'warn', title: 'NOTHING TO GIVE UP', reason: said }),
       'has-owner': () => ({ tone: 'warn', title: 'THIS CARD HAS AN OWNER', reason: said }),
       'keep-holding': () => Object.assign({ tone: 'warn', title: 'HOLD IT LONGER', reason: said }, again),
       // software 1.16: a card with no PIN has no limit for payments without one; a card that has a PIN cannot be given another
@@ -24611,7 +24614,8 @@ class Component extends DCLogic {
       above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
       // the change it made for itself that no till has handed back, as its owner's read left it (08a-flashcard.js, `cardOwnerChange`)
       // (in the card's own unit: `amount`, which is the sats of a bitcoin card's and the cents of a dollar card's)
-      owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts } : null,
+      // (and each opening by its number on the card, with whether it may be given up: `fcGiveUp`)
+      owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts, openings: card.owes.openings || [] } : null,
     } });
     this.fcOwesLater(card);
     this.fcNoteCard(card);
@@ -24630,6 +24634,8 @@ class Component extends DCLogic {
     away: 'AT ANOTHER MINT',
     silent: 'THE MINT DID NOT ANSWER',
     stuck: 'CANNOT BE FINISHED',
+    // software 1.22: a till bound it to a key that is not the mint's; the mint's answer goes on with the card's PIN (`fcMend`)
+    mend: 'NEEDS THE CARD\u2019S PIN',
   };
 
   /* The mint was still being asked for the card's change when its owner's tap went on: when it has answered, the line
@@ -24639,8 +24645,97 @@ class Component extends DCLogic {
     if (!later || typeof later.then !== 'function') return;
     later.then((o) => {
       if (!o || !o.parts || !this.state.fc || this.state.fc.key !== card.key || this._fcCard !== card) return;
-      this.setState({ fc: Object.assign({}, this.state.fc, { owes: { amount: this.fcAmt(o), parts: o.parts } }) });
+      this.setState({ fc: Object.assign({}, this.state.fc, { owes: { amount: this.fcAmt(o), parts: o.parts, openings: o.openings || [] } }) });
     }, () => {});
+  }
+
+  /* ---- change a till bound to a key of its own (software 1.22) -------------------------------------------------------
+   *
+   * A till names the mint's key for each piece of change the card makes for itself, and the card keeps the key with the opening.
+   * One that named another made change the mint's answer can never be loaded under. The owner's read sees it (the key the card
+   * kept is not the mint's) and fetches the mint's answer all the same, and the line under the card says the change NEEDS THE
+   * CARD'S PIN: FINISH THIS CHANGE asks for it, and one tap puts the mint's answer on under the mint's own key, which the card
+   * takes only with the PIN and its owner's say (on a card with no owner, the history held for), in a tap that paid nothing.
+   *
+   * What the mint has no answer for, or what the card would not take, cannot be finished, and is the owner's to give up: GIVE UP
+   * THIS CHANGE, for that opening, with one sentence first that its money is gone. */
+
+  // what the change NEEDS THE CARD'S PIN comes to, from the card's last read
+  fcMendAmount(fc) {
+    const p = ((fc && fc.owes && fc.owes.parts) || []).filter((x) => x && x.state === 'mend')[0];
+    return p ? this.fcAmt(p) : 0;
+  }
+
+  fcMend() {
+    const fc = this.state.fc;
+    const amt = this.fcMendAmount(fc);
+    if (!fc || !(amt > 0)) return;
+    this.fcAskPin({
+      title: 'CARD PIN',
+      subtitle: 'To put ' + this.fcBoth(amt, fc.unit) + ' of change on the card.' + (fc.owner ? '' : ' Hold the card still for a few seconds when you tap it.'),
+      cta: 'FINISH ' + this.fcPrice(amt, fc.unit),
+    }, (pin) => this.fcMendRun(pin));
+  }
+
+  fcMendRun(pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on, progress) => { on('writing'); return W.cardMend(link, { pin, onHold: () => on('writing'), on, progress }); })
+      .then((r) => {
+        this.fcShow(r.card);
+        if (r.amount > 0) {
+          this.haptic && this.haptic('success');
+          this.toast(this.fcSats(r.amount, r.unit) + ' went onto the card.');
+          this.refreshBalance && this.refreshBalance();
+        }
+        // the card's own refusal: the mint's answer does not fit the opening, which can now only be given up
+        if (r.refused > 0) this.fcFailed({ card: 'mend-refused', message: 'The card would not take this change.' });
+      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin) }));
+  }
+
+  /* GIVE UP THIS CHANGE, for one opening (`x`: { number, amount }): one sentence that its money is gone, then the tap. The owner's
+   * phone gives it up with its proof; a card with no owner, under its PIN, held. */
+  fcGiveUp(x) {
+    const fc = this.state.fc;
+    if (!fc || !x) return;
+    // a card before 1.22 cannot give change up: said at once, with no warning first and nothing sent
+    if (!fc.guests) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software cannot do that.' }); return; }
+    const price = this.fcPrice(x.amount, fc.unit);
+    const cta = 'GIVE UP ' + price;
+    this.blockedCard('fc-give-up', {
+      tone: 'warn', title: 'GIVE UP THIS CHANGE?',
+      reason: 'The ' + this.fcBoth(x.amount, fc.unit) + ' of this change will be gone for good: nothing can put it on the card.',
+      retry: cta,
+      go: () => (fc.owner ? this.fcGiveUpRun(x, '') : this.fcAskPin({
+        title: 'CARD PIN',
+        subtitle: 'To give up ' + this.fcBoth(x.amount, fc.unit) + ' of change. Hold the card still for a few seconds when you tap it.',
+        cta,
+      }, (pin) => this.fcGiveUpRun(x, pin))),
+    });
+  }
+
+  fcGiveUpRun(x, pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); })
+      .then((r) => {
+        // what the screen said of the card's change, without the one given up
+        const card = Object.assign({}, r.card, { owes: this.fcOwesWithout(this.state.fc && this.state.fc.owes, x.number) });
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.toast('The change is given up.');
+      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin) }));
+  }
+
+  // the change the card is owed, as the screen has it, less the opening `n`
+  fcOwesWithout(owes, n) {
+    const list = ((owes && owes.openings) || []).filter((o) => o && o.number !== n);
+    const parts = [];
+    Object.keys(this.FC_OWES).forEach((state) => {
+      const of = list.filter((o) => o.state === state);
+      if (of.length) parts.push({ state, amount: of.reduce((m, o) => m + (Number(o.amount) || 0), 0), count: of.length });
+    });
+    return { amount: list.reduce((m, o) => m + (Number(o.amount) || 0), 0), parts, openings: list };
   }
 
   /* Whether the pieces on a card of software 1.20 are real, which the mint's word that they are unspent does not say: the mint's proofs the
@@ -25314,6 +25409,10 @@ class Component extends DCLogic {
     const line = (x) => {
       const said = [];
       const put = x.loaded > 0 || x.loads > 0;
+      /* An opening of the card's own change given up in the tap (software 1.22, bit 4 of its flags): a line of its own, after the
+       * tap's other line where it had anything else. */
+      const gaveUp = x.letGo ? when(x) + ': change owed to the card given up' : '';
+      if (gaveUp && !(x.sats > 0 || x.pieces > 0 || put || x.refused || x.noPin || x.waited || x.tamper || x.clock)) return gaveUp;
       // what it signed for (which is the pieces, and may be more than the price), unless the tap only put money on
       if (x.sats > 0 || x.pieces > 0 || !put) said.push(this.fcPrice(x.sats, U) + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : ''));
       if (put) said.push(this.fcPrice(x.loaded, U) + ' put on');
@@ -25321,7 +25420,7 @@ class Component extends DCLogic {
       if (x.waited) said.push('over the per tap limit');
       if (x.refused) said.push(x.refused + ' refused');
       return when(x) + ': ' + said.join(', ')
-        + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '');
+        + (x.tamper ? ' — TAMPER' : '') + (x.clock ? ' — TOLD A FALSE TIME' : '') + (gaveUp ? '\n' + gaveUp : '');
     };
     const since = (log.since && (log.since.taps > 0 || log.since.refused > 0))
       ? 'Since this phone last looked: ' + n(log.since.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.since.sats, U) + ' signed for'
@@ -26152,7 +26251,8 @@ class Component extends DCLogic {
   fcGuestRun(pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing') }))
+    // (`on`: the sheet says what the card is held for when its change is looked into in the same tap)
+    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing'), on }))
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -26862,6 +26962,12 @@ class Component extends DCLogic {
       // and under those, the change it is owed
       fcOwesShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0,
       fcOwesLines: owes.map((p) => ({ text: 'CHANGE OWED TO THIS CARD \u00b7 ' + this.fcBoth(this.fcAmt(p), U) + ' \u2014 ' + (this.FC_OWES[p.state] || '') })),
+      /* And under those, what can be done about it (software 1.22): FINISH THIS CHANGE where a till's key kept it off the card and the
+       * mint's answer is here, and GIVE UP THIS CHANGE for each opening that cannot be finished, and only for those. */
+      fcChangeRows: (!!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0) ? [].concat(
+        this.fcMendAmount(fc) > 0 ? [{ name: 'FINISH THIS CHANGE (' + this.fcPrice(this.fcMendAmount(fc), U) + ')', sub: 'With the card\u2019s PIN', text: '', ink: 'var(--ink)', tap: () => this.fcMend() }] : [],
+        ((fc.owes && fc.owes.openings) || []).filter((x) => x && x.giveUp).map((x) => ({
+          name: 'GIVE UP THIS CHANGE (' + this.fcPrice(x.amount, U) + ')', sub: '', text: '', ink: 'var(--ink)', tap: () => this.fcGiveUp(x) }))) : [],
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // what has been done with this card, on this phone: from the round button at the top left, and from its pill; only for a card that is one
@@ -28361,6 +28467,11 @@ class Component extends DCLogic {
    *                      how much (the no-PIN allowance)
    *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES turns the wheel for the limit on one payment,
    *                      with the line "It will take N seconds to pay $X." under it
+   *
+   * Both wheels are in the card's own money, as the owner asked: a dollar card's in dollars and nothing else; a bitcoin card's in
+   * dollars or in sats, by a DOLLARS / SATS switch above the wheel (dollars first where this phone has a price; sats alone where it
+   * has none, since dollars could not be turned into the sats the card holds), the other shown under each figure. What the card is
+   * sent is what it takes, whichever is chosen: cents for a dollar card, sats for a bitcoin card.
    *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
    *
    * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
@@ -28373,9 +28484,10 @@ class Component extends DCLogic {
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
 
-  /* The wheel's figures. In dollars for a bitcoin card where there is a price (its sats at that price, under each) and for a dollar
-   * card (its cents); in sats for a bitcoin card where there is none. The no-PIN amount is $0 to $20, $2 unless turned; the limit on
-   * one payment is $1 to $100, $10 unless turned. */
+  /* The wheel's figures. A dollar card's in dollars (its cents), with nothing under them. A bitcoin card's in the unit chosen on the
+   * switch: dollars, with their sats at this phone's price under each, or sats, with their dollars under each where there is a price.
+   * The no-PIN amount is $0 to $20, $2 unless turned (or 0 to 20,000 sats, 2,000); the limit on one payment is $1 to $100, $10 unless
+   * turned (or 1,000 to 100,000 sats, 10,000). */
   FC_WHEEL = {
     noPin: { usd: [0, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 7.5, 10, 12.5, 15, 20], usdAt: 2,
              sat: [0, 250, 500, 1000, 2000, 3000, 5000, 10000, 20000], satAt: 2000 },
@@ -28470,14 +28582,18 @@ class Component extends DCLogic {
   fcSuWheel(which, back, next) {
     const su = this._fcSu;
     if (!su) return;
-    const rows = this.fcWheelRows(which, this.fcSuUnitNow());
+    const rows = this.fcWheelRows(which, this.fcSuUnitNow(), su.as);
     const tap = which === 'tap';
+    /* A bitcoin card's figures in dollars or in sats, by the switch (where this phone has a price to turn dollars into sats); the
+     * choice stands for the other wheel of the same set-up. A dollar card has no switch: dollars and nothing else. */
+    const both = rows.unit === 'sat' && ((this.px && this.px()) || 0) > 0;
     this.fcWheel({
       title: tap ? 'MAX PER TAP' : 'NO PIN AMOUNT',
       question: tap ? 'The most the card pays in one tap straight away. More than this waits, and the card is held longer.'
         : 'Up to this much, the card pays with a tap and no PIN.',
       rows: rows.list, at: rows.at,
-      line: tap ? (r) => this.fcWaitLine(r.amount, rows.unit) : null,
+      units: both ? { at: rows.as, pick: (as) => { su.as = as; this.fcSuWheel(which, back, next); } } : null,
+      line: tap ? (r) => this.fcWaitLine(r.amount, rows.unit, rows.as) : null,
       cta: (r) => 'SET ' + r.main,
       back,
       done: (r) => {
@@ -28487,32 +28603,40 @@ class Component extends DCLogic {
     });
   }
 
-  /* The wheel's rows for `which` on a card that holds `unit`: [{ amount (the card's unit), usd (the dollars it was chosen in, for a
-   * bitcoin card; 0 otherwise), main, sub }], and where it stands at first. */
-  fcWheelRows(which, unit) {
+  /* The wheel's rows for `which` on a card that holds `unit`, its figures in `as` ('usd' or 'sat', a bitcoin card's choice on the
+   * switch; dollars where none is made and there is a price): [{ amount (the card's unit), usd (the dollars it was chosen in, for a
+   * bitcoin card; 0 otherwise, so a figure chosen in sats is not kept at any dollars), main, sub }], where it stands at first, and
+   * `as`, the unit its figures are in. A dollar card's are dollars and nothing else, whatever the price. */
+  fcWheelRows(which, unit, as) {
     const spec = this.FC_WHEEL[which];
     const px = (this.px && this.px()) || 0;
-    if (unit === 'usd' || px > 0) {
-      const list = spec.usd.map((d) => {
-        const sats = px > 0 ? Math.round(d / px * 1e8) : 0;
-        return { amount: unit === 'usd' ? Math.round(d * 100) : sats, usd: unit === 'usd' ? 0 : d,
-                 main: '$' + this.usd(d), sub: px > 0 ? '₿ ' + this.group(sats) : '' };
-      });
-      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit };
+    if (unit === 'usd') {
+      const list = spec.usd.map((d) => ({ amount: Math.round(d * 100), usd: 0, main: '$' + this.usd(d), sub: '' }));
+      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit, as: 'usd' };
     }
-    const list = spec.sat.map((n) => ({ amount: n, usd: 0, main: '₿ ' + this.group(n), sub: '' }));
-    return { list, at: Math.max(0, spec.sat.indexOf(spec.satAt)), unit };
+    if (px > 0 && as !== 'sat') {
+      const list = spec.usd.map((d) => {
+        const sats = Math.round(d / px * 1e8);
+        return { amount: sats, usd: d, main: '$' + this.usd(d), sub: '₿ ' + this.group(sats) };
+      });
+      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit, as: 'usd' };
+    }
+    // in sats: chosen so, or with no price to say dollars at; their dollars under them where there is one
+    const list = spec.sat.map((n) => ({ amount: n, usd: 0, main: '₿ ' + this.group(n), sub: px > 0 ? '$' + this.usd(n / 1e8 * px) : '' }));
+    return { list, at: Math.max(0, spec.sat.indexOf(spec.satAt)), unit, as: 'sat' };
   }
 
   /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
    * for the askings of the card's software (`fcWaitOver`, `fcWaitMore`): the first limit's worth over, and two more after it. A
-   * round figure above the limit, so that the line says something. */
+   * round figure above the limit, so that the line says something. In the unit the figure was chosen in (`as`): "₿ 40,000" for a
+   * bitcoin card's limit chosen in sats. */
   FC_WAIT_EXAMPLE = 4;
-  fcWaitLine(limit, unit) {
+  fcWaitLine(limit, unit, as) {
     if (!(limit > 0)) return '';
     const units = this.FC_WAIT_EXAMPLE;
     const askings = this.fcWaitOver() + this.fcWaitMore() * (units - 2);
-    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + this.fcPrice(limit * units, unit) + '.';
+    const pay = (unit !== 'usd' && as === 'sat') ? '₿ ' + this.group(Math.round(limit * units)) : this.fcPrice(limit * units, unit);
+    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + pay + '.';
   }
 
   // the end of the questions: the tap
@@ -28544,8 +28668,9 @@ class Component extends DCLogic {
   /* A wheel of amounts to turn, for a figure the owner asked to be chosen this way ("price is right"): one figure in the band at
    * the middle, dollars first and their sats under them, turned by a finger or chosen by a tap. The round back button at the top
    * left, as on every screen; one button under it that says what it sets ("SET $2.00"). `o`: { title, question, rows, at, line,
-   * cta, back, done } — `rows` [{ main, sub, ... }], `at` the row it stands at first, `line(row)` the words under the wheel or
-   * null, `cta(row)` the button's words, `done(row)` on the button, `back()` on back. */
+   * cta, back, done, units } — `rows` [{ main, sub, ... }], `at` the row it stands at first, `line(row)` the words under the wheel or
+   * null, `cta(row)` the button's words, `done(row)` on the button, `back()` on back, and `units` { at, pick(as) } for a bitcoin
+   * card's DOLLARS / SATS switch above the wheel ('usd' or 'sat'), or null for none. */
   fcWheel(o) {
     this.fcWheelDismiss();
     const el = (style, text) => {
@@ -28561,6 +28686,24 @@ class Component extends DCLogic {
     root.appendChild(el('font-size:26px;font-weight:800;letter-spacing:-0.02em;color:var(--ink,#F5F1EC);text-align:center', o.title || ''));
     root.appendChild(el('margin-top:10px;font-size:17px;font-weight:500;line-height:1.4;color:rgba(245,241,236,.6);text-align:center;text-wrap:pretty',
       o.question || ''));
+    /* The switch between dollars and sats, in the pill the screens' chips are drawn in: the unit chosen filled, the other plain. A tap
+     * on the other turns the wheel into it. */
+    if (o.units) {
+      const sw = el('margin-top:18px;flex:none;display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--frost-chip,rgba(245,241,236,.08));'
+        + 'border:1px solid var(--frost-chip-edge,rgba(245,241,236,.16));box-sizing:border-box');
+      sw.setAttribute('data-wheel-units', '1');
+      [['usd', 'DOLLARS'], ['sat', 'SATS']].forEach(([key, label]) => {
+        const on = o.units.at === key;
+        const seg = el('padding:8px 18px;border-radius:999px;font-size:15px;font-weight:800;letter-spacing:0.04em;cursor:pointer;'
+          + (on ? 'background:var(--ink,#F5F1EC);color:var(--bg,#050505)' : 'color:rgba(245,241,236,.6)'), label);
+        seg.setAttribute('data-wheel-unit', key);
+        seg.setAttribute('role', 'button');
+        if (on) seg.setAttribute('aria-pressed', 'true');
+        seg.addEventListener('click', () => { if (!on) { this.haptic && this.haptic('light'); o.units.pick(key); } });
+        sw.appendChild(seg);
+      });
+      root.appendChild(sw);
+    }
     const frame = el('position:relative;margin-top:30px;width:100%;max-width:336px;height:' + (ROW * SHOW) + 'px;flex:none');
     frame.appendChild(el('position:absolute;left:0;right:0;top:' + (ROW * Math.floor(SHOW / 2)) + 'px;height:' + ROW + 'px;border-radius:20px;'
       + 'background:rgba(245,241,236,.08);border:1.5px solid rgba(242,128,46,.65);box-sizing:border-box;pointer-events:none'));

@@ -34,6 +34,8 @@ const TAP = 10;
 const MINT_MAX = 80;
 // the order of secp256k1: a blinding factor is under it and not zero
 const CURVE_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+// its generator, compressed
+const CURVE_G = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 const ascii = (t) => Buffer.from(t, 'ascii');
 const hex = (bytes) => Buffer.from(bytes).toString('hex');
 const u32 = (n) => ('00000000' + (n >>> 0).toString(16)).slice(-8);
@@ -122,13 +124,20 @@ function makeCard(opts) {
    *        holder's numbers on a card with no owner: the limit on one payment, and with eight bytes the no-PIN allowance (6A91 once it has
    *        an owner, 6A8D with anything on it or owed to it); the allowance fills again when the PIN is given and counts a payment's pieces
    *        whole; SPEND_ALL_CHANGE is the amount and the mint's key for it (37 bytes); GET_INFO's byte 29 says change is owed. A card with
-   *        no owner takes no load (6A90). LOAD_CHANGE (0x53) is not modelled: a suite on these cards pays exact amounts.
+   *        no owner takes no load (6A90). GET_CHANGE says each opening as 1.21 does (its number, amount, keyset, date, the blinded message
+   *        and the mint's key it was bound to: 83 bytes) and LOAD_CHANGE (0x53) takes the mint's answer under the bound key from anyone,
+   *        checks its proof (NUT-12) against that key and the opening's own blinded message, takes the blinding off and writes the piece
+   *        with the proof kept, letting the opening go.
    *   1.22 (`GUESTS`): a card with a PIN and no owner is set up (SET_CARD), loaded (LOAD_PROOF) and freed (CLEAR_SPENT) under the PIN given
    *        in this tap; SET_CARD on a card with no PIN at all is open while it is empty, as in 1.21; once its log has a tap in it, its record, its PIN form of the limit
    *        and a new PIN want the history held for in the tap (6982; 6985 in a tap that paid); its history (GET_LOG, the log and the
    *        receipts as one) wants the PIN and is held for: nine askings in a row answer 6A98, the tenth answers, never in a tap that paid
    *        (6985), and once answered it is open to the PIN for the rest of the tap and no payment is signed in it (6985); the limit on one
-   *        payment is said in GET_INFO to the PIN in a tap that read the history. A card with an owner is 1.21's. */
+   *        payment is said in GET_INFO to the PIN in a tap that read the history. A card with an owner is 1.21's. And the opening a till
+   *        bound to a key that is not the mint's: LOAD_CHANGE takes another key under the PIN given in this tap, in a tap that paid nothing
+   *        (6985), with the holder's say (the owner's grant, or with no owner the history held for: 6982), and refuses it with no PIN (6A80);
+   *        RESET_CARD with P1 = 1 and P2 = an opening's number gives that opening up (the owner's proof over "FoxyCard/reset", the nonce and
+   *        the number; with no owner the number alone under the PIN and the hold), writing bit 4 (0x10) of the tap's log flags. */
   const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22);
   const GUESTS = PIN_FIRST && o.software === 22;
   // the askings a claim and a history are held for (the applet's CLAIM_ASKINGS and HISTORY_ASKINGS)
@@ -605,7 +614,10 @@ function makeCard(opts) {
           if (x.state !== 'pending') continue;
           if (held(x.nonce)) { s.openings[k] = { state: 'empty' }; continue; }
           if (skip > 0) { skip -= 1; continue; }
-          said += u32(x.amount) + x.keyset + u32(x.date) + x.nonce + x.r;
+          /* 1.21: its number (LOAD_CHANGE's P1), the amount, the keyset, the date, the blinded message and the mint's key it was bound to, 83
+           * bytes; never the nonce or the factor. Up to 1.20 the amount, keyset, date, nonce and factor, 80. */
+          said += PIN_FIRST ? ('0' + k.toString(16)).slice(-2) + u32(x.amount) + x.keyset + u32(x.date) + x.B + x.K
+            : u32(x.amount) + x.keyset + u32(x.date) + x.nonce + x.r;
           n += 1;
         }
         return ('0' + n.toString(16)).slice(-2) + said + '9000';
@@ -684,7 +696,8 @@ function makeCard(opts) {
         const amount = data.readUInt32BE(0);
         // the change, with this, may not come to more than the pieces: what leaves the card cannot be less than nothing
         const made = s.all.change + amount;
-        if (amount === 0 || made > 4294967295 || made > s.all.total) { s.all = null; return '6a80'; }
+        // (1.21: and the key a compressed point's first byte, 02 or 03; the card cannot tell whether it is the mint's)
+        if (amount === 0 || made > 4294967295 || made > s.all.total || (PIN_FIRST && data[4] !== 2 && data[4] !== 3)) { s.all = null; return '6a80'; }
         const which = s.openings.findIndex((x) => x.state === 'empty');
         if (which < 0) { s.all = null; return '6a84'; }
         // the opening's keyset and date are the payment's, as every piece of it has them
@@ -693,6 +706,8 @@ function makeCard(opts) {
         nextChange = null;
         const point = blinded(secretFor(own.nonce, dateOf(first)), own.r);
         s.openings[which] = { state: 'draft', amount, keyset: first.data.substr(0, 16), date: dateOf(first), nonce: own.nonce, r: own.r };
+        // 1.21: the mint's key the opening is bound to, and the blinded message it answered, kept with it
+        if (PIN_FIRST) { s.openings[which].K = hex(data.subarray(4, 37)); s.openings[which].B = point; }
         s.all.change = made;
         s.all.changes += 1;
         s.all.text += String(amount) + point;
@@ -1144,13 +1159,43 @@ function makeCard(opts) {
          * its clock (`now`, and the last header's hash; the ratchet, the hardest difficulty taken, goes to nothing, as a new record
          * does it) and its software. */
         if (!RESET) return '6d00';
+        /* 1.22, the let-go: P1 = 1, P2 = an opening's number. That opening is given up with its piece never loaded, and nothing else is
+         * reset. With an owner, the owner's proof over "FoxyCard/reset", the nonce and the number, then the number (and on a locked card the
+         * PIN given in this tap); with none, the number alone under the PIN given in this tap and the history held for in it. In the
+         * applet's order: 6A83; with an owner 6A91 and 6982 (locked, no PIN); with none 6A97, 6982 (no PIN), 6985 (a tap that paid), 6982
+         * (no hold); 6700, 6B00 (a number that is not P2), 6A88, 6A94 (its piece is on the card: let go, and nothing in the log). The tap's
+         * log entry carries bit 4 (0x10). A card of 1.21 has no let-go: 6B00. */
+        if (GUESTS && p1 === 1) {
+          if (p2 >= CHANGE_MOST) return '6a83';
+          let value = data;
+          if (s.owner) {
+            const got = ownerProof('FoxyCard/reset', data);
+            if (got.sw) return got.sw;
+            if (s.locked && !s.verified) return '6982';
+            value = got.value;
+          } else {
+            if (s.pinState === 0) return '6a97';
+            if (!pinGiven()) return '6982';
+            if (s.tapPaid) return '6985';
+            if (!s.tapRead) return '6982';
+          }
+          if (value.length !== 1) return '6700';
+          if (value[0] !== p2) return '6b00';
+          const x = s.openings[p2];
+          if (x.state !== 'pending') return '6a88';
+          if (s.slots.some((y) => y.status !== 0 && y.data.substr(24, 64) === x.nonce)) { s.openings[p2] = { state: 'empty' }; return '6a94'; }
+          logEntry().flags |= 0x10;
+          s.openings[p2] = { state: 'empty' };
+          return '9000';
+        }
         if (p1 !== 0 || p2 !== RESET_CONFIRM) return '6b00';
         if (!s.owner) return '6a90';
         const got = ownerProof('FoxyCard/reset', data);
         if (got.sw) return got.sw;
         if (got.value.length !== 0) return '6700';
         if (s.locked && !s.verified) return '6982';
-        if (unspent()) return '6a8d';
+        // (1.21: change owed to the card is owed: requireNothingOwed)
+        if (PIN_FIRST ? owed() : unspent()) return '6a8d';
         s.slots.forEach((x) => { x.status = 0; x.data = ''; });
         s.pin = null; s.pinState = 0; s.tries = 3; s.verified = false; s.locked = false;
         s.owner = null; s.nonce = null; s.grant = false; s.changeGrant = false; s.changeDue = false;
@@ -1171,6 +1216,53 @@ function makeCard(opts) {
         nextKey = null;
         pub = hex(CT.getPubKeyFromPrivKey(own(Buffer.from(priv, 'hex'))));
         return '9000';
+      }
+      case 0x53: {
+        /* LOAD_CHANGE (1.21): one opening of the card's own change made into its piece. The data is the mint's answer for the opening's
+         * blinded message: C_ (65, 04 || x || y), the mint's key K for the amount (65, the same), e (32) and s (32). K must be the key the
+         * opening was bound to at SPEND_ALL_CHANGE, from anyone and with no PIN; another K (1.22) only under the PIN given in this tap, in a
+         * tap that paid nothing, with the holder's say: the owner's grant, or with no owner the history held for. The proof is checked
+         * under the K given (R1 = s*G - e*K, R2 = s*B_ - e*C_, e = SHA-256 of the four points' uncompressed hex), the blinding taken off
+         * (C = C_ - r*K) and the piece written as LOAD_PROOF writes one, with e, s and r as its proof; the opening is let go. Answers the
+         * place, 01 or 00 for the proof kept, and the piece (83 bytes). In the applet's order: 6A97, 6A83, 6A88, 6A94, 6A84, 6700, 6A80 (a K
+         * not 04, or another K with no PIN), 6985, 6982, 6A80 (a point that is none, or a proof that does not hold). */
+        if (!PIN_FIRST) return '6d00';
+        if (s.pinState === 0) return '6a97';
+        if (p1 >= CHANGE_MOST) return '6a83';
+        const x = s.openings[p1];
+        if (x.state !== 'pending') return '6a88';
+        if (s.slots.some((y) => y.status !== 0 && y.data.substr(24, 64) === x.nonce)) { s.openings[p1] = { state: 'empty' }; return '6a94'; }
+        const at = s.slots.findIndex((y) => y.status === 0);
+        if (at < 0) return '6a84';
+        if (data.length !== 194) return '6700';
+        const K = data.subarray(65, 130);
+        if (K[0] !== 4) return '6a80';
+        const bound = x.K === ((K[64] & 1) ? '03' : '02') + hex(K.subarray(1, 33));
+        if (!bound) {
+          // 1.21 takes the bound key and no other; 1.22 another under the PIN, in a tap that paid nothing, with the holder's say
+          if (!GUESTS || !pinGiven()) return '6a80';
+          if (s.tapPaid) return '6985';
+          if (s.owner ? !s.grant : !s.tapRead) return '6982';
+        }
+        let C;
+        try {
+          const P = (h) => CT.pointFromHex(h);
+          const Kp = P(hex(K)), Cp = P(hex(data.subarray(0, 65))), Bp = P(x.B), G = P(CURVE_G);
+          const e = BigInt('0x' + hex(data.subarray(130, 162))) % CURVE_N, sv = BigInt('0x' + hex(data.subarray(162, 194)));
+          const R1 = G.multiply(sv).subtract(Kp.multiply(e)), R2 = Bp.multiply(sv).subtract(Cp.multiply(e));
+          const text = [R1, R2, Kp, Cp].map((q) => q.toHex(false).toLowerCase()).join('');
+          if (hex(sha256(Buffer.from(text, 'utf8'))) !== hex(data.subarray(130, 162))) return '6a80';
+          C = Cp.subtract(Kp.multiply(BigInt('0x' + x.r))).toHex(true).toLowerCase();
+        } catch (err) { return '6a80'; }
+        // a piece with a date names the refund key, which a cash card has none of (loadOne's 6A8E)
+        if (x.date !== 0 && s.record.refund.slice(0, 2) === '00') return '6a8e';
+        const piece = x.keyset + u32(x.amount) + x.nonce + C + u32(x.date);
+        if (s.dleq) s.dleq[at] = hex(data.subarray(130, 194)) + x.r;
+        s.slots[at] = { status: 1, data: piece };
+        s.openings[p1] = { state: 'empty' };
+        if (QUICK) { const le = logEntry(); le.loaded = stop((le.loaded || 0) + x.amount); le.loads = Math.min(255, (le.loads || 0) + 1); }
+        s.mended = (s.mended || 0) + (bound ? 0 : 1);
+        return ('0' + at.toString(16)).slice(-2) + (s.dleq ? '01' : '00') + piece + '9000';
       }
       case 0x52: {
         /* SET_TAG (1.19): the owner switches the card's NFC tag off (P1 = 1) or on (P1 = 0). The owner's proof over "FoxyCard/tag", the nonce just

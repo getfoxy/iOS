@@ -391,7 +391,8 @@ enum CardOwner {
         case setCard = "set-card"
         case load
         /// RESET, card software 1.17: the card is given back to what it was in its packet, with a new key. The owner's proof is over
-        /// the label and the nonce, and no value, as for load.
+        /// the label and the nonce, and no value, as for load. And its let-go, card software 1.22 (RESET_CARD with P1 = 1): one opening
+        /// of the card's own change given up, the proof over the label, the nonce and that opening's number, one byte from 0 to 7.
         case reset
 
         /// Whether `value` has the shape this label's command takes, which is
@@ -409,7 +410,7 @@ enum CardOwner {
         ///    on reads there, after a mint of 77 bytes at the most. A record with no
         ///    design clears the card's, so a card that has one is sent it again;
         ///  - load: nothing;
-        ///  - reset: nothing.
+        ///  - reset: nothing, or (the let-go) one byte, the number of an opening of change, 0 to 7.
         func accepts(_ value: [UInt8]) -> Bool {
             switch self {
             case .changePin:
@@ -426,8 +427,10 @@ enum CardOwner {
                 guard (1...77).contains(mint), value.count == 103 + mint else { return false }
                 let design = value[(100 + mint)...]
                 return design.allSatisfy { $0 == 0 } || design.allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) }
-            case .load, .reset:
+            case .load:
                 return value.isEmpty
+            case .reset:
+                return value.isEmpty || (value.count == 1 && value[0] <= 7)
             }
         }
     }
