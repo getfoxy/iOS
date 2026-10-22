@@ -104,7 +104,7 @@ const POINT = (n) => '02' + sha('point ' + n);
 
 // a card that is ready to be paid with: an owner, a record, a PIN and a time
 function newCard(opts) {
-  const card = makeCard(Object.assign({ window: ctx.window, format: 4 }, opts));
+  const card = makeCard(Object.assign({ window: ctx.window, format: 4, noPhoneClock: true }, opts));
   Object.assign(card.state, { owner: '04' + '11'.repeat(64), pinState: 1, pin: '31323334', now: T0, windowStart: T0 });
   card.state.record = { set: true, unit: 0, limit: 0, refund: REFUND, timeKey: '04' + '22'.repeat(64), mint: 'https://mint.test', design: '' };
   return card;

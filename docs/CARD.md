@@ -175,8 +175,7 @@ payment (`THREAT-MODEL.md` §1).
    **ADD PIN** on that screen (*The PIN*, below). A card of an earlier software cannot be without a PIN, so it is asked for
    one first: **CHOOSE A PIN**, four to eight digits, then **TYPE IT AGAIN** (the PIN pad is the lock screen's; the second
    pad takes the first one's place in the same turn and with no fade, so the card's screen is never seen between the two).
-4. One tap writes the PIN (none, for a card of 1.16 and on), then the card's record (this phone's mint, and for
-   a card before 1.15 the time key), and last the owner key. The owner goes in last so that no step
+4. One tap writes the PIN (none, for a card of 1.16 and on), then the card's record (this phone's mint, with zeros where a time key once was), and last the owner key. The owner goes in last so that no step
    needs a proof; a set-up cut off anywhere is finished by the next set-up tap.
 5. The card's screen, with a line: `The card is set up.` (with a PIN and with none alike; back from it is where the person
    was). Nothing is read between the pad (or, for a card of 1.16 and on, the button)
@@ -1520,31 +1519,19 @@ nothing answers `6A92` (never told the time) any more.
   trusts the work in a header and no source for it, so who a header came from
   is of no account, and neither is any key.
 
-**Before 1.15, the time was told under a signature, and was weak.** A card
-before 1.15 keeps the latest time it has been told, and accepts a time only if
-it carries a signature by the card's **time key**, which is written to the card
-at set-up. The clock only moves forward. Every tap tells the card the time once,
-before anything that depends on the day is read. Such a card is still told the
-time that way, and set up with that key, until the last of them is gone.
-
-**For those cards the time is the receiving phone's own clock, signed by a key
-that is inside the app.** Its private half is a constant named `InterimCardTime`
-in `Foxy/Flashcard/CardTime.swift`, and it is in this repository, in every copy
-of the app, and in the tests. That is on purpose and is documented where it is
-used. It makes the daily limit **as weak as trusting the receiver's clock** (the
-limit on one tap asks no clock, and is not weakened by this):
-
-- an honest receiver cannot be talked into taking more than a day's limit by
-  accident, and the holder's own spending is held to the day;
-- a terminal built to cheat can sign any time it likes, day after day in one
-  tap, and with the card and the PIN take everything the PIN reaches. Against
-  it the limit is no better than having none;
-- a clock set far ahead on an honest phone signs that time too, and the card
-  never takes an earlier one, so its day is frozen. The way out is for the owner
-  to write the card a different time key while the card is empty.
-
-No screen says that the limit stops an attacker, because on those cards it does
-not.
+**Before 1.15, the time was told under a signature, and was weak. The app no longer does it.**
+A card before 1.15 kept the latest time it was told, and accepted a time only if
+it carried a signature by a **time key** written to the card at set-up. The key
+that signed was built into the app, in the clear, so it was only as good as
+trusting the receiving phone's own clock. That key, its signer
+(`Foxy/Flashcard/CardTime.swift`), the bridge action that asked for it
+(`cardTime`) and the command that carried it (0x35, SET_TIME, which a card of
+1.15 and on answers 6D00) are gone from the app, and set-up writes zeros where a
+time key was. No card before 1.15 is in use. `tools/check-keys.sh` (part of
+`sh tools/check-all.sh`) scans the tracked sources for private key material so a
+key like it cannot come back. The card model in the tests (`tests/flashcard-card.js`)
+still answers SET_TIME for software before 1.15, because the recordings of those
+cards replay through it, and takes its clock from the test phone's at each SELECT.
 
 ## Paying with no connection
 
@@ -1572,8 +1559,7 @@ those outputs and no others. Nobody but this phone can use it.
   (a card set up like cash, which no screen does now) have nothing to race;
 - only an exact set of pieces; an offline till cannot make change. A card that has
   none for the price is refused before the PIN is sent (NO CHANGE WHILE OFFLINE);
-- the card's clock needs no connection: the phone tells it the time (a note, or
-  before 1.15 a signed time) and shows it the newest header it has kept (1.15
+- the card's clock needs no connection: the phone tells it the time (a note) and shows it the newest header it has kept (1.15
   and on), and the daily limit is looked at as ever, by the clock the card has;
 - the whole request is kept (`foxy.flashcard.kept`: the signed pieces, the outputs,
   their counters and digest, the dates, how many pieces proved), with a row of the
@@ -1734,8 +1720,8 @@ other phone draws it as FL1. This phone sets up its cards as FX1.
 The card repository's `FOXY-CARD-SPEC.md` §10 has the full list. The ones that
 matter to a person:
 
-- **A terminal built to cheat**, on a card before 1.15, whose time is interim
-  (above). A card of 1.15 cannot be told a time it has to believe, but one that
+- **A terminal built to cheat**, on a card before 1.15, whose time was interim
+  (above; no such card is in use). A card of 1.15 cannot be told a time it has to believe, but one that
   is never shown a newer block keeps its day where it was.
 - **A receiver's phone that shows one amount and asks the card for more.** The
   limit does not check a payment, and nothing on the card can. Looking at the
@@ -1770,12 +1756,12 @@ matter to a person:
 - Screens: `build/app/26f-flashcard.js`, and the FLASHCARD block of
   `build/markup.html`.
 - The wallet's side: `build/wallet/08a-flashcard.js` (reading, signing, pieces,
-  the clock a tap gives a card, the interim time key of the cards before 1.15),
+  the clock a tap gives a card),
   `build/wallet/08b-block-headers.js` (the block headers that clock is made of,
   fetched over Tor and checked) and `build/wallet/21a-flashcard.js` (set-up,
   adding and taking money, the owner's proofs).
 - Native: `Foxy/Flashcard/` (`CardLink.swift`, the NFC session; `CardGate.swift`,
-  which commands may pass; `CardTime.swift`, the interim time of the cards before 1.15;
+  which commands may pass;
   `CardAddress.swift`, the card's address and the one message the page is told about it;
   `CardTapDelivery.swift`, which keeps that message until the page can take it and
   tells it once), and `Foxy/Bridge/FoxyBridge+Flashcard.swift`. The bridge actions are in

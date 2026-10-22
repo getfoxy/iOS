@@ -21743,11 +21743,6 @@ class Component extends DCLogic {
    * its day forward, and a screen of ours says the block its clock reads
    * ("Block #970809", under the title). The phone's own time is only a note the card
    * writes in its log and receipts, and the log shows it beside the block's.
-   * An older card is told the time by the phone that taps it, under a signature
-   * whose key is built into the app (build/wallet/08a-flashcard.js,
-   * CARD_TIME_KEY): there the limit bounds an honest receiver and the holder's
-   * own overspending, and nothing is said anywhere on these screens about
-   * stopping an attacker.
    *
    * Three things here are not this app's to draw. The sheet that slides up
    * while the phone looks for a card is the phone's own, and one line of text
@@ -22467,7 +22462,6 @@ class Component extends DCLogic {
       'no-owner-key': () => ({ tone: 'warn', title: 'NO SEED PHRASE', reason: said }),
       'wrong-signer': () => ({ title: 'NOT A FOXY CARD', reason: said }),
       'no-time': () => ({ tone: 'warn', title: 'THE CARD HAS NO TIME', reason: said }),
-      'no-time-source': () => ({ tone: 'warn', title: 'NO TIME TO TELL THE CARD', reason: said }),
       'gone': () => Object.assign({ tone: 'warn', title: 'THE CARD LEFT TOO SOON',
         reason: 'Hold it still until the phone says to remove it.' + safe }, again),
       /* The card left part-way through signing: nothing moved, and what it did

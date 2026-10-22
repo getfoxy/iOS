@@ -86,14 +86,14 @@ const total = (l) => l.reduce((a, b) => a + b, 0);
     ok(held === 32 && seen.balance === 2000, 'a card holding thirty-two pieces (2,000 sats cut like a cash drawer) is read', JSON.stringify(seen.pieces.map((x) => x.amount)));
     ok(count(card, CMD.pieces) === pagesFor && count(card, CMD.slots) === 0 && count(card, CMD.proof) === 0,
        'in ' + pagesFor + ' pages, three pieces to a page, and no read of the states or of any piece by itself', card.sent.map((a) => a.slice(0, 6)).join(' '));
-    ok(card.sent.length === 6 + pagesFor, 'a look at it is ' + (6 + pagesFor) + ' commands: select, time, info, key, proof of the key, record and the pages', String(card.sent.length));
+    ok(card.sent.length === 5 + pagesFor, 'a look at it is ' + (5 + pagesFor) + ' commands: select, info, key, proof of the key, record and the pages (and no time: the app has no signed time to tell)', String(card.sent.length));
 
     // an applet that does not know the command: the reads before it, and the same card
     card.tap();
     card.sent.length = 0;
     const old = { send: (a) => card.send(a).then((r) => (a.slice(0, 4) === CMD.pieces ? '6d00' : r)) };
     const read = await H.W.cardLook(old);
-    ok(count(card, CMD.slots) === 1 && count(card, CMD.proof) === held && card.sent.length === 8 + held,
+    ok(count(card, CMD.slots) === 1 && count(card, CMD.proof) === held && card.sent.length === 7 + held,
        'an older applet is read the old way: the command it does not know, and then ' + (1 + held) + ' for the same ' + held + ' pieces', String(card.sent.length));
     ok(JSON.stringify(read.pieces) === JSON.stringify(seen.pieces) && read.balance === seen.balance, 'and the card read is the same card');
 

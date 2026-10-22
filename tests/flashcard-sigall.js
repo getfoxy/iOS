@@ -753,16 +753,15 @@ async function world(feePpk, sats, make) {
     await settle();
   }
 
-  /* ---- 17: receipts, and a false time (a card of software 1.14) ----------------
+  /* ---- 17: receipts (a card of software 1.14) ----------------
    * For each payment the card keeps when, how much, the hash of what it signed
    * and the first output the money went into, and gives them to its owner's
    * phone and to no other. The output is the receiver's own (made from its
-   * seed): it is in the swap the till itself sent. And the card's clock: told
-   * twice in one tap, far apart, the card writes it down; ahead of this
-   * phone's, this phone says so.
+   * seed): it is in the swap the till itself sent.
    *
-   * That last is a card whose clock is a time it is told under a signature,
-   * which is software 1.14 and before. A card of 1.15 is shown block headers
+   * (A card whose clock was a time told under a signature, software 1.14 and before, marked a time
+   * told twice, far apart, and this phone said when its clock was ahead of its own. The app tells no
+   * signed time any more, so that is not shown here.) A card of 1.15 is shown block headers
    * and cannot be told a false time, so it has no such mark: its receipts (77
    * bytes, with the time the terminal told it beside its own clock), its log
    * (20) and what the screens make of them are in tests/flashcard-clock.js. */
@@ -804,45 +803,18 @@ async function world(feePpk, sats, make) {
     const again = await X.H.W.cardLook(X.card, { mine: true });
     ok(again.receipts.fresh === 0 && X.card.sent.filter((a) => /^b01801/.test(a)).length === 1, 'with nothing new, one command says so', X.card.sent.filter((a) => /^b01801/.test(a)).length + ' command');
 
-    // told the time twice in one tap, three hours apart, with nothing signed in it
-    X.card.tap();
-    const ringBefore = JSON.stringify(X.card.state.log.ring), marksBefore = X.card.state.log.tampers;
-    await X.H.W.cardLook(X.card);
-    X.H.phone.clockMs = () => Date.now() + 3 * 3600 * 1000;
-    await X.H.W.cardLook(X.card);
-    X.H.phone.clockMs = () => Date.now();
-    ok(X.card.state.log.tampers === marksBefore + 1 && JSON.stringify(X.card.state.log.ring) === ringBefore,
-       'a card told the time twice in one tap, hours apart, counts it, and its taps are not pushed out of its log by it', 'marked ' + X.card.state.log.tampers);
-    // its holder's screen, at the next reading
+    // (a card of 1.14 told the time twice in one tap, hours apart, marked it: the app tells no signed time now, so no card is shown that here)
     const holder = appOn(X.H);
     holder.price = 100000;
     X.H.nfc = X.card;
     holder.goFlashcard();
     await until('the card to be read', () => !!holder.state.fc && !!holder.state.fc.log);
-    ok(holder.state.fc.clockAhead > 3 * 3600 - 600 && holder.state.fc.clockAhead < 3 * 3600 + 600 && holder.state.fc.log.since.tampers === 1,
-       'its owner’s phone sees that the card’s clock is ahead of its own, and that the card has marked something since it last looked', holder.state.fc.clockAhead + ' seconds');
-    const noteText = vals(holder).fcNotes.map((x) => x.text).join(' | ');
-    ok(/TAMPER: this card has been told a false time/.test(noteText), 'the card’s screen says so under its balance', noteText.slice(0, 120));
-    holder.fcLogCard();
-    const lc = uiCard(holder);
-    ok(lc && lc.title === 'TAMPER ON THIS CARD' && /told this card the time twice in one tap/.test(lc.reason) && /clock is 3 hours ahead of this phone/.test(lc.reason),
-       'and its log says TAMPER, and why: told the time twice, and a clock that is ahead', lc && lc.reason.replace(/\n+/g, ' | ').slice(0, 300));
-    lc.press('CLOSE');
-    // and where the same tap goes on to pay, the payment's own line is marked
-    X.card.tap();
-    await X.R.W.cardLook(X.card);
-    X.R.phone.clockMs = () => Date.now() + 9 * 3600 * 1000;
-    await X.R.W.cardPay(X.card, { sats: 5, pin: '1234' });
-    X.R.phone.clockMs = () => Date.now();
-    if (X.R.W.cardOwed().length) { X.card.tap(); await X.R.W.cardWrite(X.card, { pin: '1234' }); }
-    X.card.tap();
-    const marked = await X.H.W.cardLook(X.card, { mine: true });
-    ok(marked.log.last.some((x) => x.clock === true && x.sats >= 5), 'a tap in which the clock was moved twice and something was then signed for has its own line marked');
+    ok(!holder.state.fc.clockAhead && holder.state.fc.log.since.tampers === 0, 'its owner’s phone reads the card with nothing marked and no clock ahead', String(holder.state.fc.clockAhead));
     holder.fcCopyReceipts = holder.fcCopyReceipts.bind(holder);
     let copied = '';
     holder.copySecret = (t) => { copied = t; return true; };
     holder.fcCopyReceipts();
-    ok(/^Foxy card receipts\ncard 0[23][0-9a-f]{64}\n/.test(copied) && copied.split('\n').length === 3 + 20 && /^#1, \d{4}-\d\d-\d\dT[\d:]+Z, 700, [0-9a-f]{64}, 0[23][0-9a-f]{64}$/m.test(copied),
+    ok(/^Foxy card receipts\ncard 0[23][0-9a-f]{64}\n/.test(copied) && copied.split('\n').length === 3 + 19 && /^#1, \d{4}-\d\d-\d\dT[\d:]+Z, 700, [0-9a-f]{64}, 0[23][0-9a-f]{64}$/m.test(copied),
        'COPY RECEIPTS copies them as text: the card, and each payment’s number, time, sats, hash and first output', copied.split('\n').slice(0, 4).join(' / ').slice(0, 260));
     await settle();
   }

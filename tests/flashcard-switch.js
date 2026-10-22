@@ -101,8 +101,8 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
   await W.connect(MINT2, null, null, { remember: false });
   card.tap();
   const on = await W.cardWrite(card, { owner: true });
-  ok(card.state.record.limit === 700 && card.state.record.timeKey === W.cardTimeKey,
-     'the card’s limit is what it was before it was emptied, and moving it kept its time key: the second tap changed its mint and nothing else', String(card.state.record.limit));
+  ok(card.state.record.limit === 700,
+     'the card’s limit is what it was before it was emptied, and the second tap changed its mint and nothing else', String(card.state.record.limit));
   ok(on.sats === 1990 && on.left === 0 && on.card.record.mint === MINT2 && on.card.balance === 1990 && card.balance() === 1990 && W.cardOwed().length === 0,
      'the second tap tells the card its new mint, then writes the money onto it', on.card.record.mint + ' ' + on.card.balance);
   const check = await W.cardCheck(on.card);

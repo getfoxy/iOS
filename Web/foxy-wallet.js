@@ -9986,26 +9986,6 @@
   var CARD_MINT_MAX = 77;   // 80 before the design (card software 1.10): the proof, the record, the mint and it in one APDU
   var CARD_DAY = 86400;
 
-  /* ---- INTERIM: the key a card of software 1.14 and before checks the time against ----
-   *
-   * (A card of 1.15 and on has no time key: its clock is Bitcoin block headers, 08b-block-headers.js.
-   * Everything below is for the cards before it, and goes when the last of them does.)
-   *
-   * A card keeps a clock of its own and a daily limit counted against it. The
-   * clock is told the time under a signature, which the card checks against the
-   * time key in its record, and this is that key's public half: set-up writes it
-   * to every card. Its private half is built into this app (Foxy/Flashcard/
-   * CardTime.swift), because there is no server yet.
-   *
-   * That is exactly as weak as trusting the receiving phone's own clock, and no
-   * stronger. Anyone can take the private half out of the app and sign any time
-   * they like, so a terminal built to cheat can tell a card it is a day later,
-   * again and again in one tap. The limit bounds an honest receiver and the
-   * holder's own overspending, and nothing else. A real signer replaces this by
-   * provisioning: cards are given its public key instead (an owner does it, with
-   * a card that is empty), and the card's code does not change. */
-  var CARD_TIME_KEY = '04403d6dc56a7e17ce887410e510f6214ff8699d5e09bf43dbbbb4159a9856cd0fe0737a186bbc8cbdaa924c49c3e5bc390968348d30c1c5406ba530a040fb17f8';
-
   function cardHexOk(s, bytes) {
     return typeof s === 'string' && s.length === bytes * 2 && /^[0-9a-f]*$/.test(s);
   }
@@ -10162,7 +10142,6 @@
     if (h.length !== (106 + mintLen) * 2 && !withDesign) throw new Error('The card’s record could not be read.');
     var refund = h.substr(14, 66);
     var clocked = !!(info && info.headers);
-    var timeKey = clocked ? '' : h.substr(80, 130);
     var headerBits = clocked ? h.substr(80, 8) : '', headerHash = clocked ? h.substr(88, 64) : '';
     var mint = '';
     for (var i = 0; i < mintLen; i++) mint += String.fromCharCode(parseInt(h.substr(212 + i * 2, 2), 16));
@@ -10174,7 +10153,7 @@
     // the unit byte: 00 bitcoin, 01 dollars (`cardUnitByte`); anything else is a card this phone does not use
     var unitByte = parseInt(h.substr(4, 2), 16);
     return { format: parseInt(h.substr(0, 2), 16), set: h.substr(2, 2) === '01', unit: unitByte === 0 ? 'sat' : unitByte === 1 ? 'usd' : 'other',
-             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, timeKey: /^0+$/.test(timeKey) ? '' : timeKey, mint: mint,
+             limit: cardU32(h, 3), refundKey: /^0+$/.test(refund) ? '' : refund, mint: mint,
              design: design, designKnown: withDesign,
              // from 1.15: the hardest difficulty taken and the last header's hash ('' for none)
              headerBits: /^0*$/.test(headerBits) ? '' : headerBits, headerHash: /^0*$/.test(headerHash) ? '' : headerHash };
@@ -10846,9 +10825,9 @@
                    /* 1a is GET_DLEQ (1.20 and on): the mint's proof kept with an unspent piece, for one place or two. */
                    dleq: '1a',
                    spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', loadChange: '53', load: '30', clear: '31', setCard: '32', setLimit: '34',
-                   /* 35 is SET_TIME, a time under a signature, for a card of software 1.14 and before. From 1.15 the card's clock is
-                    * the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
-                   time: '35', header: '36', tell: '37',
+                   /* 35 was SET_TIME, a time under a signature, for cards of software 1.14 and before, and is gone (a card answers 6d00).
+                    * The card's clock is the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
+                   header: '36', tell: '37',
                    verify: '40', setPin: '41', changePin: '42', setOwner: '43', nonce: '44', allowLoad: '45',
                    /* 50 is LOCK_CARD, which this phone never sends (a lock is for ever, and the owner's key cannot be asked to sign for it).
                     * 51 is RESET (1.17 and on): the owner's proof over "FoxyCard/reset" and P2 = CARD_RESET_CONFIRM. */
@@ -11097,32 +11076,6 @@
     });
   }
 
-  /* The card told the time, under the phone's signature of its own clock
-   * (`cardTime`: INTERIM, see CARD_TIME_KEY). Resolves the card's clock as it
-   * stands. A card that has no record yet has no time key to check against and
-   * says so: it is read as it was, and the answer is 0. A card at another signer
-   * is not a card this Foxy can use. For a card of software 1.14 and before: a card
-   * of 1.15 and on is not told a time under a signature, and takes none (`cardClock`). */
-  function cardTold(t) {
-    return nativeJson('cardTime', {}, 20000).then(function (j) {
-      var time = Number(j && j.time);
-      var sig = String((j && j.sig) || '').toLowerCase();
-      if (!(time > 0 && time <= 4294967295 && Math.floor(time) === time) || !/^(?:[0-9a-f]{2}){8,72}$/.test(sig)) throw new Error('not a time');
-      return { time: time, sig: sig };
-    }).then(function (signed) {
-      // this phone's own clock, as it has just told the card: what the card's is held to (`cardLook`, `clockAhead`)
-      t.phoneTime = signed.time;
-      return t.ask(cardCommand(CARD_INS.time, 0, cardU32Hex(signed.time) + cardByte(signed.sig.length / 2) + signed.sig, 4)).then(function (r) {
-        if (r.sw === '6a8c' || r.sw === '6d00') return 0;
-        if (r.sw !== '9000') throw cardRefused(r.sw, 'the time');
-        return cardU32(r.data, 0);
-      });
-    }, function (e) {
-      if (e && e.card) throw e;
-      throw cardError('no-time-source', 'This phone could not sign the time for the card.');
-    });
-  }
-
   /* A card whose clock is block headers (software 1.15 and on) is told two things at a tap, and neither is a signature.
    *
    * The phone's own time (TELL_TIME), once in each time in the field (`link.one.told`; a card that left and came
@@ -11178,7 +11131,7 @@
 
   /* The card's limit set to `sats` with the owner's proof, in this tap (zero is
    * no limit). No PIN: the owner's phone does not know it. A card that has
-   * never been told the time takes none but zero (`cardTold` first). Rejects
+   * never been shown a block header takes none but zero. Rejects
    * `not-owner` where this phone's words are not the ones the card was set up
    * with, and `no-owner` where it has none. */
   /* `tapSats`, where given, sets the limit on one tap in the same command (the
@@ -11314,8 +11267,7 @@
   /* Read everything a card says with no PIN: what it is, its key (and that it
    * holds that key), its record, and every piece on it. The card is told the
    * time first (every tap does), so what it says of its day is what it will act
-   * on: a card of software 1.14 and before in a time under a signature
-   * (`cardTold`), a card of 1.15 and on in the newest block header this phone
+   * on: in the newest block header this phone
    * has, if the card's clock is behind it, and in the phone's own time as a note
    * (`cardClock`), after it has said what its clock reads.
    *
@@ -11363,8 +11315,7 @@
       mark('chosen');
       // its software, as it said on being chosen: from 1.15 its clock is block headers, and it is told after it has said what it reads (below)
       clocked = parseInt(r.data.substr(0, 2), 16) > 1 || (parseInt(r.data.substr(0, 2), 16) === 1 && parseInt(r.data.substr(2, 2), 16) >= 15);
-      if (clocked || o.noTime || (one && one.told)) return 0;
-      return cardTold(t).then(function (x) { if (one) one.told = true; return x; });
+      return 0;
     }).then(function () {
       mark('time');
       // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
@@ -11467,13 +11418,8 @@
         card.clockAhead = (newest && card.info.now > Number(newest.time) + HEADER_SKEW) ? card.info.now - Number(newest.time) : 0;
         if (card.clockAhead) console.warn('[foxy] card: its clock is ' + card.clockAhead + ' seconds ahead of the newest block header this phone has');
       } else {
-        /* A card's clock that is ahead of this phone's: somebody has told it a
-         * time that had not come. The card cannot know, and takes any later
-         * time it is told; this phone can, by its own. Five minutes is allowed
-         * for a phone whose clock is a little out. */
-        var here = Number(t.phoneTime) || Math.floor(Date.now() / 1000);
-        card.clockAhead = (card.info.now > here + 300) ? card.info.now - here : 0;
-        if (card.clockAhead) console.warn('[foxy] card: its clock is ' + card.clockAhead + ' seconds ahead of this phone\u2019s: it has been told a time that had not come');
+        // a card of 1.14 or before took its time from whoever signed it; this app tells none, and has nothing to compare
+        card.clockAhead = 0;
       }
       if (!o.mine || !card.info.owner || card.info.locked) return said(card);
       /* Whether this phone is the owner, and a limit it lifted and did not put back */
@@ -13312,16 +13258,13 @@
   /* The record a card is given (SET_CARD): its unit, the key that may take
    * its pieces back or none, the key its time is signed by, and its mint's
    * address as text. Throws where the address is one a card cannot hold.
-   * `timeKey` is the card's own where it has one (a card moved to another mint
-   * keeps its clock), and otherwise the interim key. A card of software 1.15 and on
-   * (`headers`) has no time key and reads none: the 65 bytes where it was are zeros.
+   * The 65 bytes where a card of 1.14 and before kept its time key are zeros: a card reads none.
    * `unit`: 'sat' (or none) or 'usd', the one byte the record starts with (`cardUnitByte`);
    * a card moved keeps the one it has. */
-  function cardRecordHex(refundKey, mint, timeKey, design, headers, unit) {
+  function cardRecordHex(refundKey, mint, design, unit) {
     var at = String(mint || '');
     if (!at || at.length > CARD_MINT_MAX || /[^\x20-\x7e]/.test(at)) throw cardError('bad-mint', 'This mint\u2019s address is too long for a card.');
-    var key = headers ? new Array(131).join('0') : String(timeKey || CARD_TIME_KEY).toLowerCase();
-    if (!headers && !/^04[0-9a-f]{128}$/.test(key)) throw cardError('bad-key', 'That is not a key a card can check a time against.');
+    var key = new Array(131).join('0');
     var hex = '';
     for (var i = 0; i < at.length; i++) hex += cardByte(at.charCodeAt(i));
     // the design after the mint, only for a card whose software takes it (`cardCanDesign`): a code of three characters
@@ -13339,8 +13282,7 @@
    * refuses to change mints under unspent pieces, and it is not asked to. So
    * a card never holds ecash of a mint it does not name, and a move cut short
    * before its second tap is finished by any later one. The record is the
-   * owner's to change, with the owner's proof and no PIN, and it keeps the
-   * time key the card has, so its clock stays. Answers whether it changed. */
+   * owner's to change, with the owner's proof and no PIN, and  Answers whether it changed. */
   function cardRepointFor(t, card) {
     var w = wallet;
     if (!w || !card || !card.record) return Promise.resolve(false);
@@ -13358,7 +13300,7 @@
       return Promise.reject(cardError('no-dollars-here', hostOf(here) + ' does not issue dollars. RESET this card and set it up again to hold bitcoin there.'));
     }
     var record;
-    try { record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '', card.info.headers, card.record.unit); } catch (e) { return Promise.reject(e); }
+    try { record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', card.record.unit); } catch (e) { return Promise.reject(e); }
     return cardOwned(t, card.key, 'set-card', record).then(function (data) {
       return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
     }).then(function () {
@@ -29712,10 +29654,6 @@
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
                  noPin: cardNoPinOf, tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
-    /* The key a card of software 1.14 and before checks its time against, which set-up writes to such a card (INTERIM: see
-     * 08a-flashcard.js). A card of 1.15 and on has none. */
-    cardTimeKey: CARD_TIME_KEY,
-
     /* The clock of a card of software 1.15 and on is the newest Bitcoin block header it has been shown, and this phone keeps
      * the newest it can get, from two block explorers over Tor (08b-block-headers.js). A tap uses what is kept and never
      * waits for the fetch. `headerKept` is { hex, time, hash, bits, at } or null; `headerRefresh` fetches if what is kept is
@@ -29866,7 +29804,7 @@
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
         // a card that names a design already (written at the factory, or by hand) keeps it; else the one this phone chose
         var design = cardCanDesign(card) ? String((card.record && card.record.design) || o.design || '') : '';
-        var record = cardRecordHex(refund, mint, undefined, design, card.info.headers, unit);
+        var record = cardRecordHex(refund, mint, design, unit);
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         return (noPin ? Promise.resolve() : cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
@@ -30545,7 +30483,7 @@
           throw cardError('no-dollars-here', hostOf(here) + ' does not issue dollars. RESET this card and set it up again to hold bitcoin there.');
         }
         if (!card.info.owner) throw cardRefused('6a90');
-        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '', card.info.headers, card.record.unit);
+        var record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', card.record.unit);
         return cardOwned(t, card.key, 'set-card', record).then(function (data) {
           return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {

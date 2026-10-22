@@ -40,7 +40,6 @@ enum CardGate {
         0x26,                                       // one output of a payment's change, which the card makes for itself (software 1.12)
         0x30, 0x31, 0x32,                           // write a piece, free used places, its record
         0x34,                                       // set the card's daily limit (the owner's proof, no PIN)
-        0x35,                                       // tell a card of software 1.14 and before the time, signed (CardTime.swift)
         0x36,                                       // show a card of software 1.15 and on a Bitcoin block header: its clock is the time in the newest it has taken
         0x37,                                       // tell a card of 1.15 and on this phone's own time, a note it keeps for the tap and trusts for nothing
         0x40, 0x41, 0x42,                           // its PIN: check, set, change

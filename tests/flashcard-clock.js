@@ -142,7 +142,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     ok(fresh.version === '1.20' && fresh.headers === true && fresh.now === 0 && fresh.headerTime === 0 && fresh.windowStart === 0 && fresh.format === 4,
        'and reads as a card whose clock is block headers, at no time yet', JSON.stringify({ v: fresh.version, now: fresh.now }));
     const blank = await recordOf(c);
-    ok(blank.headerBits === '' && blank.headerHash === '' && blank.timeKey === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));
+    ok(blank.headerBits === '' && blank.headerHash === '', 'its record names no header yet', JSON.stringify([blank.headerBits, blank.headerHash]));
     // no PIN, no owner, no record: a header is taken by a card in any state
     ok((await read(c, headerCmd(GENESIS.hex))).sw === '6a93', 'the first block there was has real work and far too little: refused 6A93, under the floor');
     ok((await infoOf(c)).now === 0, 'and the clock stays where it was');
@@ -669,17 +669,16 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       brief.leaveBefore('36', 1);
       ok((await why(HW.cardLook(brief))) === 'gone', 'a card that leaves as the header is sent has gone: the tap fails as it does for any command');
     }
-    // 1.14 is as it was: told the time under a signature, before GET_INFO, and no header
+    // 1.14 is not told a time under a signature any more (the app has no signer): no 35, no header, no note, and the page never asks the phone
     {
-      const old = newCard(H, undefined, { format: 4, floorBits: CHEAP, software: 14 });
+      const old = newCard(H, undefined, { format: 4, floorBits: CHEAP, software: 14, noPhoneClock: true });
       await HW.cardSetUp(old, { pin: '1234', recoverable: true });
-      ok(old.state.record.timeKey === HW.cardTimeKey, 'a card of 1.14 is set up with the interim time key in its record, as ever');
+      ok(old.state.record.timeKey === '00'.repeat(65), 'a card of 1.14 is set up with zeros where its time key was: the app has no key to write');
       old.tap(); old.sent.length = 0;
       const readOld = await HW.cardLook(old);
-      ok(insOf(old).slice(0, 3).join(' ') === '35 01 10' && count(old, '36') === 0 && count(old, '37') === 0 && readOld.info.version === '1.14' && !readOld.info.headers
-         && readOld.info.now > 1700000000,
-         'a card of 1.14 is told the time as it was: signed, before it says what it is; no header, no note', insOf(old).join(' '));
-      ok(H.phone.asks.some((a) => a.action === 'cardTime'), 'and the page asked the phone to sign it');
+      ok(count(old, '35') === 0 && count(old, '36') === 0 && count(old, '37') === 0 && readOld.info.version === '1.14' && !readOld.info.headers && readOld.info.now === 0,
+         'a card of 1.14 is told no time: no signed time, no header, no note', insOf(old).join(' '));
+      ok(!H.phone.asks.some((a) => a.action === 'cardTime'), 'and the page never asked the phone to sign one');
     }
 
     // a tap does not wait for the fetch
@@ -816,11 +815,10 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     const rec = '04' + '01' + '00' + '00000000' + '02' + '11'.repeat(32) + 'f01e0217' + TIP.hash + '00'.repeat(29) + '0e' + Buffer.from('https://m.test', 'latin1').toString('hex') + '000000';
     const info15 = { headers: true };
     const parsed = W.cardParse.record(rec, info15);
-    ok(parsed.headerBits === 'f01e0217' && parsed.headerHash === TIP.hash && parsed.timeKey === '' && parsed.mint === 'https://m.test',
+    ok(parsed.headerBits === 'f01e0217' && parsed.headerHash === TIP.hash && parsed.mint === 'https://m.test',
        'the record of a card of 1.15 is read with its difficulty and its last hash where the time key was', JSON.stringify([parsed.headerBits, parsed.headerHash.slice(0, 12)]));
     const old = W.cardParse.record(rec, { headers: false });
-    ok(old.timeKey.length === 130 && old.headerBits === '' && old.headerHash === '', 'and the same bytes are a time key to a card before it, which knows no better');
-    ok(W.cardParse.record(rec).timeKey.length === 130, 'and with no word of the card’s software the old layout is read, as it always was');
+    ok(old.headerBits === '' && old.headerHash === '' && old.timeKey === undefined, 'and the same bytes are no clock to a card before it: the app reads no time key');
     const zeros = W.cardParse.record(rec.replace('f01e0217' + TIP.hash + '00'.repeat(29), '00'.repeat(65)), info15);
     ok(zeros.headerBits === '' && zeros.headerHash === '', 'a card that has taken no header says zeros, which read as none');
     // the log: twenty bytes an entry

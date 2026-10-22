@@ -976,20 +976,15 @@ function p2pkAt(parent, index) {
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
 }
 
-/* ---- the owner key and the time key (P-256) --------------------------------
+/* ---- the owner key (P-256) --------------------------------
  *
- * What the phone's native side does for a card, as Foxy/Keychain (CardOwner) and
- * Foxy/Flashcard/CardTime.swift do it, with Node's own crypto, and held to the
+ * What the phone's native side does for a card, as Foxy/Keychain (CardOwner) does it, with Node's own crypto, and held to the
  * same fixture (tests/fixtures/card-owner-vectors.json). A card's owner key is
  * derived per card from the seed and never leaves native; the page gets the
  * public half and signatures, and that is what these answer. */
 const P256_ORDER = BigInt('0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551');
 /* The labels native signs for, and no others (never "lock", never "time"). */
 const CARD_LABELS = ['change-pin', 'set-limit', 'set-owner', 'set-card', 'load', 'reset'];
-/* INTERIM: the private half of the key a card's time is signed by. It is built into the app, so it is no secret
- * (Foxy/Flashcard/CardTime.swift holds the same value, and tests/flashcard-daily.js holds the two together). */
-const INTERIM_TIME_PRIVATE = '5d3aa8864437b69bc699905ded587014b3d1f7e0de402684e5eec162d540b2ca';
-
 function cardOwnerScalar(seed, cardKeyHex) {
   for (let counter = 0; ; counter++) {
     const message = Buffer.concat([Buffer.from('FoxyCard/owner', 'utf8'), Buffer.from([0]), Buffer.from(cardKeyHex, 'hex'),
@@ -1043,7 +1038,7 @@ function nativePhone(opts) {
     screen: null,               // the seed screen open or queued: { close }
     faceIdCancelledAt: null,
     now: () => Date.now(),
-    /* The phone's own clock, in milliseconds, which `cardTime` signs: the real one unless a test sets `clockMs`. */
+    /* The phone's own clock, in milliseconds: the real one unless a test sets `clockMs`. */
     clockMs: () => Date.now(),
     page: null,
     hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null },
@@ -1124,6 +1119,10 @@ function nativePhone(opts) {
   };
 
   phone.attach = (w) => {
+    /* TEST MODEL ONLY. The model of a card of software 1.14 and before (tests/flashcard-card.js, the cards the tests use unless
+     * they ask for 1.15 or on) keeps a clock that was once told by a signed time. The app no longer sends one (no key for it
+     * exists), so the model reads this phone's clock itself at each SELECT, standing in for what the signed time did. */
+    w.__foxyTestPhoneClockMs = () => phone.clockMs();
     // before the page wraps or replaces its libraries: the phone's own copy of each
     const B = w.FoxyBip39;
     phone.toSeed = B.mnemonicToSeedSync;
@@ -1388,13 +1387,6 @@ function nativePhone(opts) {
       const message = Buffer.concat([Buffer.from('FoxyCard/' + m.label, 'ascii'), Buffer.from(m.nonce, 'hex'), value]);
       return ok({ sig: p256Sign(cardOwnerScalar(seedNow(), key), message) });
     },
-    /* handleCardTime, CardTime.swift: the phone's own clock, signed by the INTERIM
-     * time key over "FoxyCard/time" || the time (4 bytes, big-endian). No seed. */
-    cardTime() {
-      const time = Math.floor(phone.clockMs() / 1000);
-      const message = Buffer.concat([Buffer.from('FoxyCard/time', 'ascii'), Buffer.from([time >>> 24, (time >>> 16) & 255, (time >>> 8) & 255, time & 255])]);
-      return ok({ time, sig: p256Sign(BigInt('0x' + INTERIM_TIME_PRIVATE), message) });
-    },
     // handleSeedShow, SeedScreens: one screen at a time, and none within 10 s of a cancelled Face ID
     seedShow(m) {
       if (phone.screen) return no(SAYS.screenOpen);
@@ -1502,4 +1494,4 @@ function nativePhone(opts) {
 }
 
 module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
-                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, INTERIM_TIME_PRIVATE, CARD_LABELS };
+                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS };

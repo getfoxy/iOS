@@ -61,7 +61,7 @@ function keyObjects(d, pub) {
 const G = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 const MINUS_G = '03' + G.slice(2);
 const A_CARD = '02fa05ed0a3649886270bacec5ddc1a3643009a759bee996f9a6ac060c9992a82e';
-/* the interim time key's public half (Foxy/Flashcard/CardTime.swift), a P-256 point, as the card's time key */
+/* a P-256 point (public) as a card's time key, which a record of 1.14 and before carried; a record may still hold one */
 const TIME_KEY = '04403d6dc56a7e17ce887410e510f6214ff8699d5e09bf43dbbbb4159a9856cd0fe0737a186bbc8cbdaa924c49c3e5bc390968348d30c1c5406ba530a040fb17f8';
 
 const MNEMONIC_1 = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';

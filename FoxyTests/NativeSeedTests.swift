@@ -35,10 +35,9 @@ final class NativeSeedTests: XCTestCase {
             "cardOwnerKey", "cardOwnerSign",
         ])
         XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 21)
-        // the draft's action that handed the page a secret is gone, and the time needs no seed
+        // the draft's action that handed the page a secret is gone, and so is the signed time
         XCTAssertNil(FoxyBridge.handlers["cardOwner"])
-        XCTAssertFalse(FoxyBridge.nativeSeedActions.contains("cardTime"))
-        XCTAssertNotNil(FoxyBridge.handlers["cardTime"])
+        XCTAssertNil(FoxyBridge.handlers["cardTime"])
         // No switch since stage 4: the test host is launched with no arguments,
         // and every seed action runs its handler, as in a Release build.
         for action in FoxyBridge.nativeSeedActions {

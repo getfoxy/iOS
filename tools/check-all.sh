@@ -47,6 +47,9 @@ check "joined sources" 1 python3 tools/join-sources.py --check
 # from a clean git export of HEAD: the three generated files regenerate byte for
 # byte (under a second). It checks the commit, not uncommitted edits.
 check "shipped files"  1 sh tools/verify-shipped.sh
+# no private key material in the tracked sources (its own self-test first, so a scan that finds nothing is known to look)
+check "key scan self-test" 1 sh tools/check-keys.sh --selftest
+check "key scan"       1 sh tools/check-keys.sh
 check "smoke"          3 python3 tools/smoke.py
 check "types"          1 node node_modules/typescript/bin/tsc -p tests/types --pretty false --listEmittedFiles
 check "app types"      1 node node_modules/typescript/bin/tsc -p tests/types/tsconfig.app.json --pretty false --listEmittedFiles

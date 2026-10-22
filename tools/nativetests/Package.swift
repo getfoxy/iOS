@@ -16,11 +16,6 @@
 // whose replies must hold no words, and the rules the phone mock answers by
 // (tests/fixtures/native-rules.json) against the Swift that holds them.
 //
-// Foxy/Flashcard/CardTime.swift, the card's interim time signer, is its own module,
-// FoxyCardTime, linked file by file (Sources/FoxyCardTime): it needs nothing of the
-// app, and the rest of Foxy/Flashcard needs NFC, which a Mac does not have. Its
-// tests, CardTimeTests, import it as FoxyCardTime here and as Foxy in the app.
-//
 // Foxy/Debug/NetDiary.swift and LogRedaction.swift, the connection diary's lines, the
 // test mint's request mark and what the field log takes out of every line, are a module
 // too, FoxyNetDiary: they need nothing of the app. NetDiaryTests imports it as
@@ -64,10 +59,6 @@ let package = Package(
             exclude: ["bip39-english.txt"]
         ),
         .target(
-            name: "FoxyCardTime",
-            path: "Sources/FoxyCardTime"
-        ),
-        .target(
             name: "FoxyCardTap",
             path: "Sources/FoxyCardTap"
         ),
@@ -77,7 +68,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTime", "FoxyCardTap", "FoxyNetDiary"],
+            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -96,7 +87,6 @@ let package = Package(
                 "SeedMigrationWindowTests.swift",
                 "SeedVaultTests.swift",
                 "SeedActionsTests.swift",
-                "CardTimeTests.swift",
                 "CardAddressTests.swift",
                 "CardTapDeliveryTests.swift",
                 "NetDiaryTests.swift",

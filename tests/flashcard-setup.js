@@ -18,7 +18,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { cardOwnerScalar, p256Public, INTERIM_TIME_PRIVATE } = require('./harness');
+const { cardOwnerScalar, p256Public } = require('./harness');
 const { funded, newCard, why, MINT, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 
 let failed = 0;
@@ -40,10 +40,10 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
   const seen = await W.cardLook(card);
   ok(seen.key === card.key && seen.info.pin === 'none' && !seen.info.hasRecord && seen.balance === 0 && seen.info.slots === 64,
      'a new card says it is new: no PIN, no record, nothing on it', JSON.stringify(seen.info));
-  ok(seen.info.format === 3 && seen.info.limit === 0 && !seen.info.owner && seen.info.now === 0 && seen.info.windowStart === 0 && seen.info.spentToday === 0,
-     'in format 3, with no limit, no owner, and no clock', JSON.stringify(seen.info));
+  ok(seen.info.format === 3 && seen.info.limit === 0 && !seen.info.owner && seen.info.windowStart === 0 && seen.info.spentToday === 0,
+     'in format 3, with no limit and no owner', JSON.stringify(seen.info));
   ok(card.sent.some((a) => a.slice(2, 4) === '15'), 'and is made to prove it holds its key');
-  ok(insOf(card)[0] === '35', 'every tap tells the card the time before it reads it: the first command after SELECT is SET_TIME', insOf(card).join());
+  ok(!insOf(card).includes('35'), 'and no tap sends it SET_TIME: the app has no signed time to tell', insOf(card).join());
 
   /* ---- not a card, or not the card it says ------------------------------- */
   ok((await why(W.cardLook({ send: () => Promise.resolve('6a82') }))) === 'not-a-card', 'something that does not answer to the card’s name is not a card');
@@ -70,8 +70,8 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
      'a card set up has its PIN and says which mint it is for', JSON.stringify(mine.record));
   ok(mine.info.owner === true && mine.info.limit === 0 && mine.record.limit === 0,
      'and an owner, and no limit: set-up asks for none and a new card has none', JSON.stringify({ owner: mine.info.owner, limit: mine.info.limit }));
-  ok(mine.record.timeKey === W.cardTimeKey && /^04[0-9a-f]{128}$/.test(mine.record.timeKey),
-     'and the key its time is checked against, written at set-up', mine.record.timeKey.slice(0, 12));
+  ok(mine.record.timeKey === undefined && !Object.prototype.hasOwnProperty.call(W, 'cardTimeKey'),
+     'and no key to check a time against: the wallet has none to write, and the record read has none');
   {
     // the owner goes in last, so that no step before it needs a proof, and no limit is set: one tap
     const ins = insOf(card);
@@ -90,7 +90,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     ok(!heard.includes(scalar) && !heard.includes(raw) && !heard.includes(seed.toString('hex')), 'no answer the phone gave the page holds the owner’s private key, the secret it came from, or the seed');
     ok(!P.phone.said.some((x) => /"(secret|priv|privkey|seed)"/.test(String(x.text)) && x.action.indexOf('card') === 0), 'and no answer of a card action has a field for one');
     const asked = new Set(P.phone.asks.map((a) => a.action).filter((a) => /^card/.test(a)));
-    ok([...asked].every((a) => ['cardOwnerKey', 'cardOwnerSign', 'cardTime'].includes(a)), 'the page asked native for a card’s owner key, a signature and the time, and for nothing else', [...asked].join());
+    ok([...asked].every((a) => ['cardOwnerKey', 'cardOwnerSign'].includes(a)), 'the page asked native for a card’s owner key and a signature, and for nothing else', [...asked].join());
     ok(!P.phone.asks.some((a) => a.action === 'cardOwner'), 'and the action that once handed it a secret is not asked');
   }
   const known = W.cardsKnown()[card.key] || {};
@@ -111,15 +111,10 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
   card.tap();
   ok((await why(W.cardSetUp(card, { pin: '1234', recoverable: true }))) === 'set-up', 'a card that has an owner is not set up again');
 
-  /* ---- the interim time key ---------------------------------------------------- */
+  /* ---- the signed time is gone ---------------------------------------------------- */
   {
-    // the public half the wallet writes to cards and the private half the phone signs with are one pair, and are where the Swift has them
-    const swift = fs.readFileSync(path.join(__dirname, '..', 'Foxy', 'Flashcard', 'CardTime.swift'), 'utf8');
-    const hexIn = (name) => ((swift.match(new RegExp(name + '\\s*(?::\\s*String\\s*)?=\\s*"([0-9a-f]+)"')) || [])[1] || '');
-    ok(hexIn('privateKeyHex') === INTERIM_TIME_PRIVATE, 'the private half the tests sign with is the one in Foxy/Flashcard/CardTime.swift');
-    ok(hexIn('publicKeyHex') === W.cardTimeKey && p256Public(BigInt('0x' + INTERIM_TIME_PRIVATE)) === W.cardTimeKey,
-       'and the public half the wallet writes to a card is that key’s public half');
-    ok(/INTERIM/.test(swift) && /clock/.test(swift), 'and the constant says plainly that it is interim, and as weak as trusting the receiver’s clock');
+    ok(!fs.existsSync(path.join(__dirname, '..', 'Foxy', 'Flashcard', 'CardTime.swift')), 'the app has no signer of a card’s time: no private key for one is built into it');
+    ok(!P.phone.asks.some((a) => a.action === 'cardTime'), 'and the page never asks the phone for one');
   }
 
   /* ---- set-up, as cash ---------------------------------------------------
@@ -138,7 +133,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
 
   /* ---- a set-up cut off: every step is allowed again while the card has no owner -- */
   const half = newCard(P);
-  half.leaveAfter(7);     // the six commands of a look of an empty card (select, time, info, key, proof, record) and SET_PIN, then gone before the PIN is checked
+  half.leaveAfter(6);     // the five commands of a look of an empty card (select, info, key, proof, record) and SET_PIN, then gone before the PIN is checked
   const gap = await why(W.cardSetUp(half, { pin: '5555' }));
   ok(gap === 'gone' && half.state.pinState === 1 && !half.state.owner && !half.state.record.set, 'a card taken away right after its PIN was set has a PIN, and no record and no owner', gap);
   half.tap();
@@ -146,7 +141,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
   ok(resumed.info.pin === 'set' && resumed.info.hasRecord && resumed.info.owner && half.state.pin === hexOfPin('6666'),
      'tapped again, the set-up goes on from there, with whatever PIN is typed then: an open card has nobody’s PIN to protect');
   const cut = newCard(P);
-  cut.leaveAfter(9);      // a look, SET_PIN, VERIFY_PIN and SET_CARD, then gone before the owner is given
+  cut.leaveAfter(8);      // a look, SET_PIN, VERIFY_PIN and SET_CARD, then gone before the owner is given
   const first = await why(W.cardSetUp(cut, { pin: '4321', recoverable: true }));
   ok(first === 'gone' && cut.state.pinState === 1 && !cut.state.owner && cut.state.record.set, 'a card taken away before its owner was given has its PIN and its record and no owner', first);
   cut.tap();

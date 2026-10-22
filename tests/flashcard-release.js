@@ -114,11 +114,11 @@ const JSONERR = (code, detail) => '400\n' + JSON.stringify({ code, detail });
     R.trace.length = 0;
     one.sent.length = 0;
     const got = await tap(R, one, (link) => R.W.cardPay(link, { sats: 1024, pin: '1234' }));
-    const names = { '00a404': 'select', b03500: 'time', b00100: 'info', b01000: 'key', b01600: 'record', b01700: 'pieces', b04000: 'pin', b02000: 'sign' };
+    const names = { '00a404': 'select', b00100: 'info', b01000: 'key', b01600: 'record', b01700: 'pieces', b04000: 'pin', b02000: 'sign' };
     const cmds = one.sent.map((a) => names[a.slice(0, 6)] || a.slice(0, 6));
     const signs = cmds.filter((x) => x === 'sign').length;
     const secs = (cmds.length - signs) * 0.06 + signs * 0.74;
-    ok(got.sats === 1024 && cmds.length === 8 && signs === 1 && !cmds.includes('auth'),
+    ok(got.sats === 1024 && cmds.length === 7 && signs === 1 && !cmds.includes('auth'),
        'a payment of one piece holds the card for ' + cmds.length + ' commands and one signature', cmds.join(' '));
     console.log('      held: ' + cmds.length + ' commands, one signature: about ' + secs.toFixed(1) + ' s of the card’s work (0.06 s a command, 0.74 s a signature), and then the sheet ends');
   }

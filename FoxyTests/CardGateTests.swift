@@ -33,10 +33,10 @@ final class CardGateTests: XCTestCase {
     }
 
     func testOnlyTheInstructionsThePageUsesAreCarried() {
-        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these thirty-one
+        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these thirty
         let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "18", "19", "1a", "20", "22", "23", "24", "25", "26",
-                       "30", "31", "32", "34", "35", "36", "37", "40", "41", "42", "43", "44", "45", "51"]
-        XCTAssertEqual(carried.count, 31)
+                       "30", "31", "32", "34", "36", "37", "40", "41", "42", "43", "44", "45", "51"]
+        XCTAssertEqual(carried.count, 30)
         XCTAssertEqual(CardGate.instructions, Set(carried.map { UInt8($0, radix: 16)! }), "exactly these, and the table says so")
         for ins in carried {
             XCTAssertNotNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins)")
@@ -59,7 +59,7 @@ final class CardGateTests: XCTestCase {
         XCTAssertEqual(CardGate.read(bytes("b01a020700")), .applet(0x1A), "the proofs of places 2 and 7")
         XCTAssertEqual(CardGate.read(bytes("b0300100" + "b1" + String(repeating: "ab", count: 177) + "02")), .applet(0x30), "one piece with the mint's proof for it, 177 bytes, and its place and whether the proof was kept expected back")
         XCTAssertNil(CardGate.read(bytes("b0300100" + "b1" + String(repeating: "ab", count: 176))), "a length that says 177 and carries 176")
-        XCTAssertEqual(CardGate.read(bytes("b035000006" + "01020304" + "00" + "00")), .applet(0x35), "the time, signed (a card of 1.14 and before)")
+        XCTAssertNil(CardGate.read(bytes("b035000006" + "01020304" + "00" + "00")), "a time under a signature (0x35, gone) is not carried")
         // a card of software 1.15 and on: a block header (80 bytes, and the clock expected back), and the phone's own time as a note (4 bytes, nothing back)
         XCTAssertEqual(CardGate.read(bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04")), .applet(0x36), "a block header")
         XCTAssertEqual(CardGate.read(bytes("b0370000" + "04" + "6ac9dc75")), .applet(0x37), "the phone's own time, as a note")

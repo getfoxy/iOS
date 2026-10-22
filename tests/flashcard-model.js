@@ -66,7 +66,7 @@ async function replay(T, format, places, software) {
     const minor = chosen ? parseInt(chosen.data.substr(2, 2), 16) : 0;
     if (minor > 0 && minor < 20) software = minor;
   }
-  const card = makeCard({ window: ctx.window, format, places, software });
+  const card = makeCard({ window: ctx.window, format, places, software, noPhoneClock: true });
   let exact = 0, verified = 0;
   // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
   const recorded = (T.find((x) => x.kind === 'key') || {}).data;
@@ -223,7 +223,7 @@ async function replay(T, format, places, software) {
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras
-  const c2 = makeCard({ window: ctx.window });
+  const c2 = makeCard({ window: ctx.window, noPhoneClock: true });
   await c2.send('00a4040009f0464f58594341524400');
   c2.leaveAfter(1);
   await c2.send('b001000000');
@@ -236,7 +236,7 @@ async function replay(T, format, places, software) {
    * switch (SET_TAG is 6D00 to it, and GET_INFO with P1 = 2 gives it the thirty bytes, where a card of 1.19 and 1.20 give the forty-two and
    * the tag's state). The version is the one thing the three forms of GET_INFO differ in. */
   {
-    const play = async (software) => { const c = makeCard({ window: ctx.window, format: 4, software }); await c.send('00a4040009f0464f58594341524400'); return c; };
+    const play = async (software) => { const c = makeCard({ window: ctx.window, format: 4, software, noPhoneClock: true }); await c.send('00a4040009f0464f58594341524400'); return c; };
     const latest = await play(undefined), v19 = await play(19), v18 = await play(18);
     const bytes = async (c, p1) => ((await c.send('b001' + ('0' + p1).slice(-2) + '0000')).length - 4) / 2;
     ok((await latest.send('b01a00ff00')) === '009000' && (await v19.send('b01a00ff00')) === '6d00' && (await v18.send('b01a00ff00')) === '6d00',

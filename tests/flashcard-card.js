@@ -386,6 +386,15 @@ function makeCard(opts) {
       s.changeGrant = s.changeDue;
       // and a payment begun and not signed for is given up
       s.all = null;
+      /* TEST MODEL ONLY. A card of 1.14 or before had its clock told by a signed time (SET_TIME, 0x35, kept below because the
+       * recordings of those cards in tests/fixtures replay through it), which the app no longer sends: no key for it exists. The
+       * phone-driven tests of these cards (every card but format 4, and `software` before 15) have their clock follow the test
+       * phone's, read at each SELECT (tests/harness.js `__foxyTestPhoneClockMs`). `noPhoneClock: true` leaves it to SET_TIME. */
+      if (!HEADERS && !o.noPhoneClock) {
+        const f = o.window.__foxyTestPhoneClockMs;
+        const t = Math.floor((f ? f() : Date.now()) / 1000);
+        if (t > s.now && t <= 4294967295) s.now = t;
+      }
       return '01' + ('0' + VERSION.toString(16)).slice(-2) + '9000';
     }
     if (!s.selected) return '6999';
@@ -813,7 +822,8 @@ function makeCard(opts) {
         else if (refund[0] !== 2 && refund[0] !== 3) return '6a80';
         // bytes 34 to 98 held a time signer's key until 1.15 and are not read by a card of it (a phone of an earlier software still sends one, a later one zeros)
         const timeKey = rec.subarray(34, 99);
-        if (!HEADERS && timeKey[0] !== 4) return '6a80';
+        // the app writes zeros there now; a card of 1.14 or before still refuses a first byte that is neither 04 nor all zeros
+        if (!HEADERS && timeKey[0] !== 4 && timeKey.some((v) => v !== 0)) return '6a80';
         const newKey = !HEADERS && hex(timeKey) !== s.record.timeKey;
         // 1.20: the room for the mint's proofs is reserved here, by the first SET_CARD that gets this far, once (a card that is refused it works as a card with none)
         if (PROOFS && s.dleq === null && o.proofRoom !== false) s.dleq = Array.from({ length: SLOTS }, () => '');

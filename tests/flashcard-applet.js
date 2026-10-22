@@ -92,10 +92,10 @@ function wire(port) {
   const made = await H.W.cardSetUp(link, { pin: '1234', recoverable: true });
   ok(made.info.pin === 'set' && made.info.hasRecord && made.record.mint === 'https://m.test' && H.W.cardIsMine(made),
      'set up: a PIN, this phone’s mint, and this phone’s refund key', made.record.mint);
-  // a card of 1.15 has no time key: its record has zeros where one was, and its clock is Bitcoin block headers; one before it was given the interim key
+  // a card has no time key: its record has zeros where one was, and its clock is Bitcoin block headers
   ok(made.info.owner === true && made.info.limit === 0 && fresh.info.owner === false && fresh.info.limit === 0
-     && (made.info.headers ? made.record.timeKey === '' && made.record.headerBits === '' && made.record.headerHash === '' : made.record.timeKey === H.W.cardTimeKey),
-     made.info.headers ? 'and an owner and no limit, and no time key (the applet reads none): its clock is block headers, and it has been shown none' : 'and an owner, no limit, and the time key, which the applet kept: the new card had none of them');
+     && (made.info.headers ? made.record.headerBits === '' && made.record.headerHash === '' : true),
+     'and an owner and no limit, and no time key (the applet reads none): its clock is block headers, and it has been shown none');
   await tap();
   ok((await why(H.W.cardSetUp(link, { pin: '1234', recoverable: true }))) === 'set-up', 'and it will not be set up twice');
 

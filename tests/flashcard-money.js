@@ -396,8 +396,8 @@ let L0 = null;
     T0.sent.length = 0;
     const put = await L.H.W.cardAdd(T0, { sats: 100, owner: true });
     ok(put.sats === 100 && T0.balance() === 100 && !ins(T0).includes('40'), 'the owner’s phone adds 100 sats with no PIN: none was sent', ins(T0).join(' '));
-    ok(ins(T0).slice(ins(T0).indexOf('35')).join(' ').indexOf('35') === 0 && ins(T0).indexOf('45') > ins(T0).indexOf('44') && ins(T0).indexOf('30') > ins(T0).indexOf('45'),
-       'it tells the card the time, asks for a nonce, is allowed to load, and loads, in that order', ins(T0).join(' '));
+    ok(!ins(T0).includes('35') && ins(T0).indexOf('45') > ins(T0).indexOf('44') && ins(T0).indexOf('30') > ins(T0).indexOf('45'),
+       'it tells the card no signed time, asks for a nonce, is allowed to load, and loads, in that order', ins(T0).join(' '));
     // and the card for the limit is cut the old way, so its pieces are large (1024, 512, 256, 128, 64 and 16): a day is charged what they are worth
     const loaded = await binaryLoad(L.H, L.card, 2000);
     ok(loaded.sats === 2000 && L.card.balance() === 2000, 'a card of its own with 2,000 sats on it, in large pieces');

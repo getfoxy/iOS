@@ -1,0 +1,4 @@
+# tools/check-keys-allow.txt — hits of tools/check-keys.sh that are public values, not keys.
+# One entry per line:  <sha256 of the hit text> | reason     or     <path>:<text the hit contains> | reason
+# A line with no reason is an error. Lines starting with # are notes.
+tools/vendor/verify-secp256k1.sh:KEY_SHA256= | the SHA-256 digest of the vendored libsecp256k1 source archive, checked by the script; a digest, not a key

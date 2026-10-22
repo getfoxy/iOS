@@ -5,10 +5,6 @@
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
                  noPin: cardNoPinOf, tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
-    /* The key a card of software 1.14 and before checks its time against, which set-up writes to such a card (INTERIM: see
-     * 08a-flashcard.js). A card of 1.15 and on has none. */
-    cardTimeKey: CARD_TIME_KEY,
-
     /* The clock of a card of software 1.15 and on is the newest Bitcoin block header it has been shown, and this phone keeps
      * the newest it can get, from two block explorers over Tor (08b-block-headers.js). A tap uses what is kept and never
      * waits for the fetch. `headerKept` is { hex, time, hash, bits, at } or null; `headerRefresh` fetches if what is kept is
@@ -159,7 +155,7 @@
         // the design chosen for it (`o.design`) goes in the record where the card's software takes one (1.10), and on this phone's file either way
         // a card that names a design already (written at the factory, or by hand) keeps it; else the one this phone chose
         var design = cardCanDesign(card) ? String((card.record && card.record.design) || o.design || '') : '';
-        var record = cardRecordHex(refund, mint, undefined, design, card.info.headers, unit);
+        var record = cardRecordHex(refund, mint, design, unit);
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         return (noPin ? Promise.resolve() : cardFirstPin(t, card, pin).then(function () {
           return cardVerify(t, card, pin);
@@ -838,7 +834,7 @@
           throw cardError('no-dollars-here', hostOf(here) + ' does not issue dollars. RESET this card and set it up again to hold bitcoin there.');
         }
         if (!card.info.owner) throw cardRefused('6a90');
-        var record = cardRecordHex(card.record.refundKey, here, card.record.timeKey, cardCanDesign(card) ? card.record.design : '', card.info.headers, card.record.unit);
+        var record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', card.record.unit);
         return cardOwned(t, card.key, 'set-card', record).then(function (data) {
           return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {
