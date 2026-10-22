@@ -141,6 +141,19 @@ question asked first, with nothing crossing the link; and **`amount-entry.js`**,
 the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
 check; the line under the figure; NEXT).
 
+**`flashcard-holder.js`** holds the card of a holder with no phone (card software 1.22)
+and the set-up's own screens, against the model of the card taught 1.21 and 1.22
+(`software: 21`, `software: 22` in `flashcard-card.js`). Of the card: SELECT's 01 15 and
+01 16, 6A97 on a card with no PIN, a load on a card with no owner (6A90 on 1.21, under
+the PIN on 1.22), the claim's six askings, SET_LIMIT's PIN form, the history held for
+nine askings and answered at the tenth, refused in a tap that paid and no payment after
+it. Of the wallet: set-up with the holder's two numbers, set-up for somebody else (no
+owner, no key of this phone's), VIEW AS GUEST (nothing kept) and TIE OWNERSHIP. Of the
+screens: CREATE A PIN and RE-ENTER PIN, YES and NO and the wheel with its seconds line,
+SEND > FLASHCARD to a new card that this phone sets up and does not own, VIEW AS GUEST
+and TIE OWNERSHIP TO THIS PHONE, RESTORE LOST CARD, the swipe between home and the card,
+and no daily limit on the card's screen.
+
 **`flashcard-send.js`** holds SEND on a card's own screen: the card's tiles
 RECEIVE and SEND, SEND MONEY in card mode (WITHDRAW, PASTE, CONTACTS and TYPE,
 the camera as ever, and card mode gone however the flow is left), the

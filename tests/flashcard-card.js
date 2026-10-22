@@ -9,7 +9,8 @@
  * had under jCardSim and compares every answer.
  *
  *     const card = makeCard({ window, key });  // window: the page's (its CashuTS signs); key: 64 hex
- *     makeCard({ window, format: 4 })            // the card that signs once for a payment: the latest software, 1.20 (`software: 19` and before are the cards before it)
+ *     makeCard({ window, format: 4 })            // the card that signs once for a payment: software 1.20 (`software: 19` and before are the cards before it)
+ *     makeCard({ window, format: 4, software: 22 })   // 1.22, the card of a holder with no phone (`software: 21` is 1.21): see PIN_FIRST and GUESTS
  *     makeCard({ window, format: 4, proofRoom: false })   // the card of 1.20 that was refused the room for the mint's proofs: it stores a piece and keeps no proof
  *     makeCard({ window, format: 4, floorBits: 0x207fffff })   // the least work a block header must show: the real floor unless a test mines its own headers
  *     const answer = await card.send('b001000000');
@@ -111,7 +112,28 @@ function makeCard(opts) {
    * GET_DLEQ (0x1A) gives the proof of an unspent place, or of two. The store is reserved by the first SET_CARD that goes through (`s.dleq` is null until
    * then, and for good on a card made with `proofRoom: false`, which the chip may refuse). `software: 19` is the card before it. */
   const PROOFS = TAG && o.software !== 19;
-  const VERSION = FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  /* 1.21 and 1.22, asked for by name (`software: 21`, `software: 22`): the card with no `software` stays 1.20, since the suites
+   * before these were written for it. What is modelled is what the screens of a card with no owner need ("1.21 in one place" and
+   * "1.22 in one place" in the card repository's docs/FOXY-CARD-DAILY-LIMIT.md):
+   *   1.21 (`PIN_FIRST`): a card with no PIN answers 6A97 to a load, CLEAR_SPENT, a payment's commands and an owner's claim; every load
+   *        and CLEAR_SPENT wants the PIN given in this tap (6982: not the owner's grant, not the tap after a payment); the owner of a card
+   *        with none is claimed under the PIN by six askings in a row, the first five answered 6A98 (keep holding), never in a tap that
+   *        paid (6985), only of an empty card (6A8D), and no payment follows a claim in its tap (6985); SET_LIMIT's PIN form (0x33) is the
+   *        holder's numbers on a card with no owner: the limit on one payment, and with eight bytes the no-PIN allowance (6A91 once it has
+   *        an owner, 6A8D with anything on it or owed to it); the allowance fills again when the PIN is given and counts a payment's pieces
+   *        whole; SPEND_ALL_CHANGE is the amount and the mint's key for it (37 bytes); GET_INFO's byte 29 says change is owed. A card with
+   *        no owner takes no load (6A90). LOAD_CHANGE (0x53) is not modelled: a suite on these cards pays exact amounts.
+   *   1.22 (`GUESTS`): a card with a PIN and no owner is set up (SET_CARD), loaded (LOAD_PROOF) and freed (CLEAR_SPENT) under the PIN given
+   *        in this tap; SET_CARD on a card with no PIN at all is open while it is empty, as in 1.21; once its log has a tap in it, its record, its PIN form of the limit
+   *        and a new PIN want the history held for in the tap (6982; 6985 in a tap that paid); its history (GET_LOG, the log and the
+   *        receipts as one) wants the PIN and is held for: nine askings in a row answer 6A98, the tenth answers, never in a tap that paid
+   *        (6985), and once answered it is open to the PIN for the rest of the tap and no payment is signed in it (6985); the limit on one
+   *        payment is said in GET_INFO to the PIN in a tap that read the history. A card with an owner is 1.21's. */
+  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22);
+  const GUESTS = PIN_FIRST && o.software === 22;
+  // the askings a claim and a history are held for (the applet's CLAIM_ASKINGS and HISTORY_ASKINGS)
+  const CLAIM_ASKINGS = 6, HISTORY_ASKINGS = 10;
+  const VERSION = GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -173,6 +195,10 @@ function makeCard(opts) {
      * not with a SELECT. From 1.13 the next payment signed in it waits as one over the limit does, unless the owner's grant
      * (`grant`, which a SELECT takes away) is in the tap. */
     tapPaid: false,
+    /* 1.21 and 1.22: an owner claimed in this time in the field (TAP_CLAIMED) and the history of a card with no owner read in it (TAP_READ),
+     * both gone with the power and not with a SELECT, and the held count in hand: what it is counting ('claim' or 'log'), how many askings
+     * in a row, and the key a claim is for. Any other command, a SELECT among them, begins it again. */
+    tapClaimed: false, tapRead: false, held: { what: '', n: 0, key: '' },
     slots: Array.from({ length: SLOTS }, () => ({ status: 0, data: '' })),   // data: 81 bytes as hex
     /* The openings of the change the card has made for itself (1.12), kept from the moment it is made until the piece is
      * written back: { state, amount, keyset (16 hex), date, nonce (64 hex), r (64 hex) }. A state is 'empty', 'draft' (made
@@ -376,6 +402,12 @@ function makeCard(opts) {
     const cla = b[0], ins = b[1], p1 = b[2], p2 = b[3];
     // the data field, where there is one: Lc, then that many bytes, then perhaps Le
     const data = b.length > 5 ? b.subarray(5, 5 + b[4]) : Buffer.alloc(0);
+    /* A held tap is the same command asked again and again: anything else, a SELECT among it, begins the count again, and an asking of a
+     * claim begins a history's count afresh, and the other way round (1.21, 1.22: the applet's `process`). */
+    if (PIN_FIRST) {
+      const asLog = cla === 0xb0 && ins === 0x18, asClaim = cla === 0xb0 && ins === 0x43;
+      if (asClaim ? s.held.what === 'log' : !(asLog && s.held.what === 'log')) s.held = { what: '', n: 0, key: '' };
+    }
 
     if (cla === 0x00 && ins === 0xa4) {
       if (!data.length || AID.indexOf(hex(data)) !== 0) return '6a82';
@@ -406,6 +438,22 @@ function makeCard(opts) {
     const strictWrite = () => s.pinState === 1 && s.verified;      // requirePinSetAndVerified (the pre-owner limit, the lock)
     const mayWrite = () => strictWrite() || (NOPIN && s.pinState === 0 && !s.owner);   // the record of a card with no owner: requirePinIfSet
     const mayLoad = () => (s.pinState === 1 && (s.verified || s.grant || s.changeGrant)) || (NOPIN && s.pinState === 0);   // requireLoadAuthority: a card with no PIN is loaded by whoever holds it
+    // 1.21: the PIN given in this tap and nothing else, and a card with no PIN takes nothing (6A97 before this is asked)
+    const pinGiven = () => s.pinState === 1 && s.verified;
+    // anything unspent, or change owed to the card (1.21's requireNothingOwed)
+    const owed = () => unspent() || (PIN_FIRST && s.openings.some((x) => x.state === 'pending'));
+    /* 1.22: what rewrites a card with no owner once it has been used (its log has a tap in it) wants the history held for in this tap: 6985
+     * in a tap that paid, 6982 in one that was not held (`requireHeldIfTaken`). '' where it may go on. */
+    const heldIfTaken = () => {
+      if (!GUESTS || s.owner || s.log.taps === 0) return '';
+      if (s.tapPaid) return '6985';
+      return s.tapRead ? '' : '6982';
+    };
+    // 1.21: the payment commands of a card with no PIN, or of a tap that claimed an owner or (1.22) read a history
+    if (PIN_FIRST && ins >= 0x22 && ins <= 0x26) {
+      if (s.pinState === 0) return '6a97';
+      if (s.tapClaimed || s.tapRead) return '6985';
+    }
     // 1.16: SPEND_ALL_BEGIN, _OUTPUTS and _CHANGE ask for no PIN of a card that has one, blocked or not: its signature is where the PIN or the allowance is looked at
     const gatedBegin = () => !NOPIN && s.pinState !== 0 && !s.verified;
 
@@ -414,12 +462,14 @@ function makeCard(opts) {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
         return [1, VERSION, SLOTS, n(1), n(2), n(0), SEALED ? 255 : MANY ? 127 : WIDE ? 63 : QUICK ? 31 : PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
-          + u32(s.now) + u32(s.windowStart) + u32(s.spent) + (s.changeGrant ? '01' : '00')
+          // (1.21: byte 29 says change is owed to the card, which any reader may write back; up to 1.20, the tap after a payment)
+          + u32(s.now) + u32(s.windowStart) + u32(s.spent) + ((PIN_FIRST ? s.openings.some((x) => x.state === 'pending') : s.changeGrant) ? '01' : '00')
           // P1 = 1 asks for the tap as well: twelve bytes more, and the thirty before them as they are without it
           // the quicker card says its limit on one payment to its owner only (the grant, in this tap): zeros to anyone else
           // 1.16: the allowance and what is spent of it, to anybody (a till needs them to know whether to ask for the PIN); before it, zeros
           // 1.19: P1 = 2 is those forty-two bytes and then the NFC tag's state, to anyone; P1 = 1 and 0 are what they were, whatever it is, and any other P1 is the thirty bytes
-          + ((p1 === 1 || (TAG && p1 === 2)) ? u32(QUICK && !s.grant ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
+          // (1.22: and to the PIN of a card with no owner, in a tap that read its history)
+          + ((p1 === 1 || (TAG && p1 === 2)) ? u32(QUICK && !s.grant && !(GUESTS && !s.owner && s.verified && s.tapRead) ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
           + (TAG && p1 === 2 ? (s.tagOff ? '01' : '00') : '') + '9000';
       }
       case 0x10: return pub + '9000';
@@ -450,9 +500,24 @@ function makeCard(opts) {
       case 0x18: {
         // GET_LOG: for the PIN verified in this tap or the owner's grant; the four counts, then the taps the ring holds, newest first
         const byte = (v) => ('0' + (v & 0xff).toString(16)).slice(-2);
+        /* 1.22: the history of a card with a PIN and no owner, the log and the receipts as one, is the PIN's and is held for: never in a
+         * tap that paid, the first nine askings in a row answered 6A98, the tenth answered, and then open for the rest of the tap. */
+        let guest = false;
+        if (GUESTS && !s.owner && s.pinState !== 0) {
+          if (p1 !== 0 && p1 !== 1) return '6a86';
+          if (!s.verified) return '6982';
+          if (s.tapPaid) return '6985';
+          if (!s.tapRead) {
+            const n = (s.held.what === 'log' ? s.held.n : 0) + 1;
+            if (n < HISTORY_ASKINGS) { s.held = { what: 'log', n, key: '' }; s.askedHistory = (s.askedHistory || 0) + 1; return '6a98'; }
+            s.held = { what: '', n: 0, key: '' };
+            s.tapRead = true;
+          }
+          guest = true;
+        }
         if (QUICK && p1 === 1) {
           // the receipts: the count of every payment signed, then up to three, newest first, from P2 back. The owner's grant and nothing less
-          if (s.pinState !== 0 && !s.grant) return '6982';
+          if (s.pinState !== 0 && !s.grant && !guest) return '6982';
           const n = s.receipts.count, kept = n < 16 ? n : 16, last = (((n & 0xff) - 1) & 15);
           let said = u32(n);
           for (let k = p2; k < kept && k < p2 + 3; k++) {
@@ -614,7 +679,8 @@ function makeCard(opts) {
          * blinded message. Every refusal after a payment is begun gives the payment up. */
         if (!OWN_CHANGE) return '6d00';
         if (!s.all) return '6985';
-        if (data.length !== 4) { s.all = null; return '6700'; }
+        // 1.21: the amount and the mint's key for it (33, compressed), which the card keeps with the opening
+        if (data.length !== (PIN_FIRST ? 37 : 4)) { s.all = null; return '6700'; }
         const amount = data.readUInt32BE(0);
         // the change, with this, may not come to more than the pieces: what leaves the card cannot be less than nothing
         const made = s.all.change + amount;
@@ -652,7 +718,8 @@ function makeCard(opts) {
              * over a limit, not a tamper). Asked before the limits, so that a reader with no PIN writes nothing in the log. */
             if (s.pinState !== 0 && !s.verified) {
               const counted = s.now >= s.windowStart + DAY ? 0 : s.noPinSpent;
-              if (s.pinState !== 1 || s.noPinLimit === 0 || counted + net > s.noPinLimit) { s.all = null; return '6a94'; }
+              // (1.21: a payment counts as the whole of its pieces, change and all)
+              if (s.pinState !== 1 || s.noPinLimit === 0 || counted + (PIN_FIRST ? pay.total : net) > s.noPinLimit) { s.all = null; return '6a94'; }
               pay.noPin = true;
             }
           }
@@ -678,7 +745,7 @@ function makeCard(opts) {
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
         if (dayBegins) { s.windowStart = s.now; s.spent = 0; if (NOPIN) s.noPinSpent = 0; }
         if (s.record.limit !== 0) s.spent = s.spent + net;
-        if (NOPIN && pay.noPin) s.noPinSpent = stop(s.noPinSpent + net);
+        if (NOPIN && pay.noPin) s.noPinSpent = stop(s.noPinSpent + (PIN_FIRST ? pay.total : net));
         pay.list.forEach((i) => { s.slots[i].status = 2; });
         // a payment in this time in the field: the next one in it is slowed, unless the owner's grant is in its tap (1.13)
         s.tapPaid = true;
@@ -744,8 +811,10 @@ function makeCard(opts) {
       }
       case 0x30: {
         if (s.locked) return '6986';
-        if (!mayLoad()) return '6982';
-        if (!s.owner) return '6a90';
+        if (PIN_FIRST && s.pinState === 0) return '6a97';
+        if (!(PIN_FIRST ? pinGiven() : mayLoad())) return '6982';
+        // 1.22: a card with a PIN and no owner is loaded under the PIN, as one with an owner is
+        if (!s.owner && !GUESTS) return '6a90';
         if (!s.record.set) return '6a8c';
         if (!HEADERS && s.now === 0) return '6a92';
         if (s.slots.findIndex((x) => x.status === 0) < 0) return '6a84';
@@ -788,7 +857,8 @@ function makeCard(opts) {
       }
       case 0x31: {
         if (s.locked) return '6986';
-        if (s.pinState !== 0 && !s.verified && !s.grant && !s.changeGrant) return '6982';
+        if (PIN_FIRST && s.pinState === 0) return '6a97';
+        if (PIN_FIRST ? !pinGiven() : (s.pinState !== 0 && !s.verified && !s.grant && !s.changeGrant)) return '6982';
         // 1.16: a card with no PIN is freed by whoever holds it, as it is loaded
         let freed = 0;
         s.slots.forEach((x) => { if (x.status === 2) { x.status = 0; x.data = ''; freed += 1; } });
@@ -797,6 +867,8 @@ function makeCard(opts) {
       case 0x32: {
         if (s.locked) return '6986';
         const owned = !!s.owner;
+        /* A card with no owner: the PIN, if it has one, given in this tap (requirePinIfSet; a card with no PIN at all is open, empty, as in
+         * 1.21); then nothing owed; then, 1.22, a used one in a tap held for its history (the applet's order: 6A8D before 6982/6985). */
         if (!owned && !mayWrite()) return '6982';
         let rec = data;
         if (owned) {
@@ -804,7 +876,11 @@ function makeCard(opts) {
           if (got.sw) return got.sw;
           rec = got.value;
         }
-        if (unspent()) return '6a8d';
+        if (owed()) return '6a8d';
+        if (!owned) {
+          const held = heldIfTaken();
+          if (held) return held;
+        }
         if (rec.length < 101) return '6700';
         const mintLen = rec[99];
         const withDesign = DESIGN && rec.length === 103 + mintLen;
@@ -839,6 +915,18 @@ function makeCard(opts) {
         if (s.locked) return '6986';
         if (!strictWrite()) return '6982';
         if (s.owner) return '6a91';
+        if (PIN_FIRST) {
+          /* 1.21: the holder's numbers on a card with no owner, under the PIN: the limit on one payment, and with eight bytes the no-PIN
+           * allowance, whose count begins at nothing. The daily limit is not the PIN's to set. */
+          // nothing owed before the hold, as the applet asks them (requireNothingOwed, then requireHeldIfTaken)
+          if (owed()) return '6a8d';
+          const held = heldIfTaken();
+          if (held) return held;
+          if (data.length !== 4 && data.length !== 8) return '6700';
+          s.tapLimit = data.readUInt32BE(0);
+          if (data.length === 8) { s.noPinLimit = data.readUInt32BE(4); s.noPinSpent = 0; }
+          return '9000';
+        }
         if (unspent()) return '6a8d';
         if (data.length !== 4 && data.length !== 8) return '6700';
         return writeLimit(data);
@@ -928,11 +1016,14 @@ function makeCard(opts) {
           if (!pinOnly) return '6700';
           if (hex(pinOnly) !== s.pin) return failPin();
           s.tries = 3; s.verified = true;
+          // 1.21: the PIN given fills the no-PIN allowance again
+          if (PIN_FIRST) s.noPinSpent = 0;
           return '9000';
         }
         if (data.length < 4 || data.length > 8) return '6700';
         if (hex(data) !== s.pin) return failPin();
         s.tries = 3; s.verified = true;
+        if (PIN_FIRST) s.noPinSpent = 0;
         return '9000';
       }
       case 0x41: {
@@ -942,7 +1033,13 @@ function makeCard(opts) {
          * then holding money is no bar: the PIN is the point of it. A card with no owner is as it always was (set-up). */
         const adding = NOPIN && s.owner && s.pinState === 0 && s.grant;
         if (s.owner && !adding) return '6a91';
-        if (!adding && unspent()) return '6a8d';
+        // 1.22: a card with no owner that is set up has a PIN that is its holder's: replaced under itself, and a used one in a held tap
+        if (GUESTS && !s.owner && s.pinState === 1 && s.record.set) {
+          if (!pinGiven()) return '6982';
+          const held = heldIfTaken();
+          if (held) return held;
+        }
+        if (!adding && owed()) return '6a8d';
         let first = data;
         if (SEALED && p1 === 1) {
           const got = unseal(0x41, data, true);
@@ -952,6 +1049,13 @@ function makeCard(opts) {
           if (!first) return '6700';
         }
         if (first.length < 4 || first.length > 8) return '6700';
+        // 1.22: a blocked PIN replaced on a card with no owner takes its history with it
+        if (GUESTS && s.pinState === 2) {
+          s.log = { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
+                    ring: Array.from({ length: 8 }, () => ({ time: 0, sats: 0, pieces: 0, refused: 0, flags: 0, told: 0 })) };
+          s.receipts = { count: 0, ring: Array.from({ length: 16 }, () => ({ time: 0, told: 0, sats: 0, hash: '00'.repeat(32), out: '00'.repeat(33) })) };
+        }
+        if (PIN_FIRST && s.pinState === 0) s.noPinLimit = 0;
         s.pin = hex(first); s.pinState = 1; s.tries = 3; s.verified = false;
         return '9000';
       }
@@ -981,10 +1085,22 @@ function makeCard(opts) {
           const got = ownerProof('FoxyCard/set-owner', data);
           if (got.sw) return got.sw;
           key = got.value;
+        } else if (PIN_FIRST) {
+          // 1.21: a claim, under the PIN given in this tap, never in a tap that paid
+          if (s.pinState === 0) return '6a97';
+          if (!pinGiven()) return '6982';
+          if (s.tapPaid) return '6985';
         }
         if (unspent()) return '6a8d';
         if (key.length !== 65) return '6700';
         if (key[0] !== 4) return '6a80';
+        if (PIN_FIRST && !s.owner) {
+          // six askings in a row with the same key: the first five are 6A98, keep holding; another key begins the count again
+          const n = (s.held.what === 'claim' && s.held.key === hex(key) ? s.held.n : 0) + 1;
+          if (n < CLAIM_ASKINGS) { s.held = { what: 'claim', n, key: hex(key) }; s.askedClaim = (s.askedClaim || 0) + 1; return '6a98'; }
+          s.held = { what: '', n: 0, key: '' };
+          s.tapClaimed = true;
+        }
         s.owner = hex(key);
         return '9000';
       }
@@ -1099,15 +1215,15 @@ function makeCard(opts) {
       return Promise.resolve(answer(a));
     },
     /* The card is taken away and brought back: nothing of the last tap is left (but the note that it paid, which is permanent). */
-    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.tapPaid = false; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; s.told = 0; },
+    tap() { gone = false; leaveIn = -1; leaveAt = null; loseAt = null; s.verified = false; s.nonce = null; s.grant = false; s.changeGrant = false; s.selected = false; s.tapOpen = false; s.tapPaid = false; s.tapClaimed = false; s.tapRead = false; s.held = { what: '', n: 0, key: '' }; s.all = null; s.timeTold = false; s.timeMarked = false; s.timeFirst = 0; s.told = 0; },
     /* It leaves just as the `nth` command of this instruction (two hex digits) is sent, which is not answered. */
     leaveBefore(ins, nth) { leaveAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* It leaves as it answers the `nth` command of this instruction: the card has done what was asked, and nobody hears. */
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION < 20) ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS, proofRoom: o.proofRoom });
-      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, told: 0 });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION < 20) || VERSION >= 21 ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS, proofRoom: o.proofRoom });
+      Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, tapClaimed: false, tapRead: false, held: { what: '', n: 0, key: '' }, told: 0 });
       return twin;
     },
     /* It leaves the field after `n` more commands have been answered. */

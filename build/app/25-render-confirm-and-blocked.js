@@ -139,7 +139,9 @@
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
       return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
     };
-    const cards = (sc === 'currency' || pick) ? ['usd', 'sat'].map(u => {
+    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js, where a card that holds both is a row to add)
+    const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];
+    const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
       const chosen = pick && u === current && !tag;

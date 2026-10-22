@@ -20,16 +20,14 @@ enum CardGate {
     /// The applet's class byte.
     static let appletClass: UInt8 = 0xB0
 
-    /// The instructions the page uses, and no others the applet has: thirty-one.
+    /// The instructions the page uses, and no others the applet has: thirty-three.
     /// tests/flashcard-model.js holds this list to the page's own (`CARD_INS`,
     /// build/wallet/08a-flashcard.js), both ways: an instruction the page sends and
     /// the phone does not carry is a card that cannot be used.
     ///
-    /// Three the applet has stay out, because the page does not send them, so the
+    /// Two the applet has stay out, because the page does not send them, so the
     /// phone will not carry them for a page that had been got at: the count of
-    /// proofs (12); the limit set with the PIN (33), the form for a card that has
-    /// no owner, where the page sends the owner's form (34); and locking a card
-    /// for good (50).
+    /// proofs (12), and locking a card for good (50).
     static let instructions: Set<UInt8> = [
         0x01, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16, 0x17,   // what it is, its key, what it holds, proof it is the card, its record, which pieces it holds
         0x18,                                       // the card's own log (it gives it to its owner, or under its PIN)
@@ -39,7 +37,8 @@ enum CardGate {
         0x22, 0x23, 0x24, 0x25,                     // one signature for a payment: its pieces, its outputs, the signature, and the last one again
         0x26,                                       // one output of a payment's change, which the card makes for itself (software 1.12)
         0x30, 0x31, 0x32,                           // write a piece, free used places, its record
-        0x34,                                       // set the card's daily limit (the owner's proof, no PIN)
+        0x33,                                       // the holder's limits under the PIN, on a card with no owner (software 1.21): its set-up's two numbers
+        0x34,                                       // set the card's limits (the owner's proof, no PIN)
         0x36,                                       // show a card of software 1.15 and on a Bitcoin block header: its clock is the time in the newest it has taken
         0x37,                                       // tell a card of 1.15 and on this phone's own time, a note it keeps for the tap and trusts for nothing
         0x40, 0x41, 0x42,                           // its PIN: check, set, change

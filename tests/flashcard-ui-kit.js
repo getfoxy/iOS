@@ -29,7 +29,7 @@ const fs = require('fs');
 const path = require('path');
 
 const read = (files) => files.map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
-const PARTS = read(['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js']);
+const PARTS = read(['10-pin.js', '11-cards.js', '26e-loaders.js', '26f-flashcard.js', '26g-tap-limit-explainer.js', '26h-tap-screen.js', '26j-card-wheel.js']);
 const SPLIT_PARTS = read(['17-split-bill-and-copy.js', '20-split-values.js']);
 /* One of the app's methods, out of the text of its file, by its first line: from there to the brace that closes it. */
 const liftFrom = (src, sig) => {

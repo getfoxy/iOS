@@ -271,8 +271,8 @@ function representative(logic) {
     before: (a) => { a._fcCard = { key: KEY_A, info: {}, pieces: [] }; },
   }));
   add('amount, withdrawing from a card, with all of it under NEXT', at('amount', { flow: 'cardWd', amount: '', unit: 'USD', fc: FC() }, { wallet: CARDS() }));
-  add('amount, a card\u2019s daily limit, in sats, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
-  add('fcLimitConfirm, a daily limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
+  add('amount, a card\u2019s limit on one tap, in sats, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '5000', unit: 'SATS', fc: FC() }, { wallet: CARDS() }));
+  add('fcLimitConfirm, a limit on one tap, to be confirmed, with no tap said', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 5000 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, no limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 0 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, a per tap limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 2000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; } }));
   add('amount, a card\u2019s limit for paying without its PIN, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '10', unit: 'USD', fc: FC({ noPinKnown: true }) }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
@@ -296,15 +296,15 @@ function representative(logic) {
       { key: KEY_C, mint: MINT, sats: 512, date: 1700000000, due: true, takenBack: 1700000500000 },
     ] }) }));
   add('flashcard, a card of this phone\u2019s, with no limit', at('flashcard', { fc: FC() }, { wallet: CARDS() }));
-  add('flashcard, a card with a daily limit, what is left and when the day turns', at('flashcard', { fc: FC({ limit: 5000, day: DAY }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a daily limit, which it says nothing about', at('flashcard', { fc: FC({ limit: 5000, day: DAY }) }, { wallet: CARDS() }));
   // the limit on one tap: alone, and beside the daily limit
   const TAP = { known: true, limited: true, limit: 2000, spent: 0, left: 2000, turns: 0, noTime: false };
   add('flashcard, a card with a limit on one tap', at('flashcard', { fc: FC({ tap: TAP }) }, { wallet: CARDS() }));
-  add('flashcard, a card with a limit on one tap and a daily limit', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a card with a limit on one tap and a daily limit: the one on one tap alone', at('flashcard', { fc: FC({ limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   /* The limit line is on the card's own face, at its bottom left (the card's badge above it where it has one), in either design; and the balance
    * on the card's screen counts to what the card holds after money goes on or off it. */
-  add('flashcard, a locked card with a daily limit: its badge above the limit line, on the face', at('flashcard', { fc: FC({ locked: true, limit: 5000, day: DAY }) }, { wallet: CARDS() }));
-  add('flashcard, a card of the Foxy design with both limits on its face', at('flashcard', { fc: FC({ design: 'FX1', limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a locked card with a daily limit: its badge on the face, and nothing of the limit', at('flashcard', { fc: FC({ locked: true, limit: 5000, day: DAY }) }, { wallet: CARDS() }));
+  add('flashcard, a card of the Foxy design with a limit on one tap on its face, and a daily one not said', at('flashcard', { fc: FC({ design: 'FX1', limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, the balance counting up after money went on', at('flashcard', { fc: FC({ balance: 2000 }), fcRoll: { key: KEY_A, from: 0 }, fcRollT: 0.5 }, { wallet: CARDS() }));
   // the card's own log: its last tap in a line under the balance, and a tap the card has marked
   const LOG = { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0, at: 0 },
@@ -320,9 +320,9 @@ function representative(logic) {
   const NO_CLOCK = { hash: '', short: '', time: 0 };
   const DAY_ON_TRUST = { limited: true, limit: 5000, spent: 800, left: 4200, turns: 0, now: 0, noTime: false, onTrust: true };
   add('flashcard, a card of software 1.15, the block its clock reads', at('flashcard', { fc: FC({ headers: true, clock: CLOCK }) }, { wallet: CARDS() }));
-  add('flashcard, a card of software 1.15 with both limits, the block its clock reads under them', at('flashcard', { fc: FC({ headers: true, clock: CLOCK, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.15 with a limit on one tap and a daily one not said, the block its clock reads under them', at('flashcard', { fc: FC({ headers: true, clock: CLOCK, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card of software 1.15 that has been shown no block', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK }) }, { wallet: CARDS() }));
-  add('flashcard, a card of software 1.15 with a daily limit and no block yet: a day with no start', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK, limit: 5000, day: DAY_ON_TRUST }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.15 with a daily limit and no block yet: nothing said of its day', at('flashcard', { fc: FC({ headers: true, clock: NO_CLOCK, limit: 5000, day: DAY_ON_TRUST }) }, { wallet: CARDS() }));
   /* Software 1.17: RESET in the row under the card for the owner, the row drawn as the receive screen's (HISTORY is the round button at the top left), and under the title
    * the time the mint's word was had and the block the card's clock is at (its height where this phone has it, else its hash, else none). */
   const R17 = { resetKnown: true, headers: true, clock: CLOCK };
@@ -351,11 +351,18 @@ function representative(logic) {
   const NOPIN = { known: true, set: true, limit: 1000, spent: 300, left: 700, turns: 4102444800, now: 4102358400 };
   add('flashcard, a card with no PIN, with ADD PIN', at('flashcard', { fc: FC({ pin: 'none', pinSet: false, noPinKnown: true, noPin: { known: true, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: 0 } }) }, { wallet: CARDS() }));
   add('flashcard, a card with a PIN and a limit for paying without it', at('flashcard', { fc: FC({ noPinKnown: true, noPin: NOPIN }) }, { wallet: CARDS() }));
-  add('flashcard, a card with a PIN and a limit for paying without it, beside the daily limit and the limit on one tap',
+  add('flashcard, a card with a PIN and a limit for paying without it, beside the limit on one tap (and a daily limit, not said)',
     at('flashcard', { fc: FC({ noPinKnown: true, noPin: NOPIN, limit: 5000, day: DAY, tap: TAP }) }, { wallet: CARDS() }));
   add('flashcard, a card with a PIN and no limit for paying without it', at('flashcard', { fc: FC({ noPinKnown: true, noPin: Object.assign({}, NOPIN, { set: false, limit: 0, spent: 0, left: 0, turns: 0 }) }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
+  /* Software 1.21 and 1.22: RESTORE in the owner's row; and the card of a holder with no phone, read on any Foxy, with its balance and VIEW AS
+   * GUEST and TIE OWNERSHIP TO THIS PHONE, and the same card after a guest's view (its log, and its limit on one tap read under the PIN). */
+  add('flashcard, a card of software 1.21 of this phone\u2019s, with RESTORE in its row', at('flashcard', { fc: FC({ pinFirst: true, resetKnown: true, noPinKnown: true, noPin: NOPIN }) }, { wallet: CARDS() }));
+  const GUEST = { owner: false, ownedHere: false, mine: false, recoverable: false, guests: true, pinFirst: true, noPinKnown: true, noPin: NOPIN, first: 0, last: 0 };
+  add('flashcard, a holder\u2019s card with no owner, with VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE', at('flashcard', { fc: FC(GUEST) }, { wallet: CARDS() }));
+  add('flashcard, a holder\u2019s card after a guest\u2019s view', at('flashcard', { fc: FC(Object.assign({}, GUEST, { guestRead: true, tap: { known: true, limited: true, limit: 2000, spent: 0, left: null, turns: 0, noTime: false, paced: true } })) }, { wallet: CARDS() }));
+  add('flashcard, a new card: welcome, SET UP CARD and RESTORE LOST CARD', at('flashcard', { fc: FC({ setUp: false, hasRecord: false, pin: 'none', pinSet: false, owner: false, ownedHere: false, balance: 0, count: 0, pinFirst: true, guests: true }) }, { wallet: CARDS() }));
   add('flashcard, a cash card the mint says is spent', at('flashcard', { fc: FC({ recoverable: false, mine: false, first: 0, last: 0, check: { spent: 1024 } }) }, { wallet: CARDS() }));
   add('flashcard, somebody else\u2019s card, past its date, no connection', at('flashcard', { fc: FC({ mine: false, first: 1700000000, last: 1700000000, check: 'off', locked: true }) }, { wallet: CARDS() }));
   add('home, working offline', at('home', { series: SERIES, range: '1D' }, { wallet: OFFLINE }));
@@ -804,7 +811,7 @@ function representative(logic) {
   // (this phone's $42.05 is what can be put on it: the dollar keypad, capped by it)
   add('amount, adding to a dollar card', at('amount', Object.assign({ flow: 'cardAdd', amount: '5.00', unit: 'USD', fc: FC({ unit: 'usd', balance: 2000 }) }, TWO_LIVE),
     { wallet: Object.assign(TWO(), CARDS()) }));
-  add('fcLimitConfirm, a dollar card\u2019s daily limit', at('fcLimitConfirm', { fc: FC({ unit: 'usd', balance: 2000 }), fcLimit: { sats: 2000, usd: 0 } },
+  add('fcLimitConfirm, a dollar card\u2019s limit on one tap', at('fcLimitConfirm', { fc: FC({ unit: 'usd', balance: 2000 }), fcLimit: { sats: 2000, usd: 0 } },
     { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = false; a._fcLimitTap = false; } }));
   add('CURRENCY, setting up a card', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard' }, TWO_LIVE), { wallet: TWO() }));
   add('PAYMENT RECEIVED, a dollar card paid', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 475, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
@@ -947,9 +954,24 @@ function cards() {
   add('stage: tap behind phone, no amount', behind({ amount: '' }));
   add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
-  // the daily limit's first step, what making this phone a card's owner says, and what a till says when a card cannot cover a payment
-  add('card: set daily limit, the warning', (a) => a.fcLimitAsk(() => {}));
+  // a limit's first step (no daily limit is asked for), what making this phone a card's owner says, and what a till says when a card cannot cover a payment
+  add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
+  /* A card's set-up from software 1.21 (26j-card-wheel.js): its two questions, the wheel for each, the PIN pad for a card set up for
+   * somebody else; then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning, and RESTORE on a cash card. */
+  add('card: set-up, small amounts without the PIN', (a) => { a._fcSu = { unit: '' }; a.fcSuNoPin(); });
+  add('card: set-up, a max per tap', (a) => { a._fcSu = { unit: '' }; a.fcSuTap(); });
+  add('overlay: the set-up\u2019s wheel, the no PIN amount', (a) => { a._fcSu = { unit: '' }; a.fcSuWheel('noPin', () => {}, () => {}); },
+    { wallet: { cardSession: () => Promise.resolve() } });
+  add('overlay: the set-up\u2019s wheel, the max per tap and its seconds', (a) => { a._fcSu = { unit: '' }; a.fcSuWheel('tap', () => {}, () => {}); },
+    { wallet: { cardSession: () => Promise.resolve() } });
+  add('overlay: the set-up\u2019s wheel, a dollar card\u2019s max per tap', (a) => { a._fcSu = { unit: 'usd' }; a.fcSuWheel('tap', () => {}, () => {}); },
+    { wallet: { cardSession: () => Promise.resolve() } });
+  add('overlay: CREATE A PIN, for a card set up for its holder', (a) => a.fcSetUpSteps({ other: true, unit: 'sat', run() {} }));
+  add('card: tie ownership to this phone, the warning', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
+  add('card: restore lost card, a cash card', (a) => { a.state.fc = { key: '02' + 'ab'.repeat(32), recoverable: false }; a.fcRestoreThis(); },
+    { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
+  add('card: restore lost card, a phone that loaded none', (a) => a.fcRestoreLost(), { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
   // LIMITS on a card of software 1.16 that has a PIN: the third limit, under the other two
   add('card: change limit, which of the three', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true }, pinSet: true, noPinKnown: true, pin: 'set' }; a.fcSetLimit(); });
   // a card of software before 1.16 is asked for a PIN when it is set up (a card of 1.16 and on is not: it is set up with none), and the pad that adds a PIN says what a card with none is

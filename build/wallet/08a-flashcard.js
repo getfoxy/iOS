@@ -91,6 +91,11 @@
     var moreKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 18));
     // 1.20: the card keeps the mint's proof (NUT-12) with each piece it is loaded with one for, and gives it back (`cardRealCheck`)
     var proofsKnown = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 20));
+    // 1.21: a PIN before any money, every load under it, the owner claimed in a held tap (`cardIs121`, by the card's own version)
+    var pinFirst = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 21));
+    /* 1.22: a card with a PIN and no owner is the card of a holder with no phone: set up, loaded and read under its PIN (`guests`),
+     * its history held for (`cardGuestLook`), and tied to a phone of the holder's own only while it is empty (`cardClaim`) */
+    var guests = b(8) === CARD_FORMAT_ALL && (b(0) > 1 || (b(0) === 1 && b(1) >= 22));
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
              locked: b(10) === 1, hasRecord: b(11) === 1, limit: cardU32(h, 12), owner: b(16) === 1,
@@ -129,7 +134,10 @@
              pinSet: b(7) !== 0,
              /* `setUp`: a record and, before 1.16, a PIN; from 1.16 a record and an OWNER, which set-up writes last: a card
               * whose record was written by hand (a design put on it before it is set up) is not set up, and reads as new */
-             setUp: b(11) === 1 && (noPinKnown ? b(16) === 1 : b(7) !== 0),
+             /* (1.22: a record and an owner, or a record and a PIN: a card with no owner is a holder's with no phone, set up by the
+              * first phone that sent it money, and used as any card is) */
+             setUp: b(11) === 1 && (guests ? (b(16) === 1 || b(7) !== 0) : noPinKnown ? b(16) === 1 : b(7) !== 0),
+             pinFirst: pinFirst, guests: guests,
              /* `resetKnown`: the card's software is 1.17 or later, whose owner can reset it (the version says so, as for `costed`):
               * no PIN, no owner, no record, no limits, no log and a new key, with its clock and its software kept. */
              resetKnown: resetKnown,
@@ -225,6 +233,22 @@
     if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
     all[key] = code;
     save(CARD_DESIGNS, all);
+  }
+  /* A card this phone began to set up for its holder (`cardSetUpFor`, software 1.22) and did not finish: a set-up cut off after its
+   * PIN, or after its record and before the holder's two numbers. Kept by the card's key until the set-up is finished, so that the
+   * next send to it from this phone takes the set-up up again, under the holder's PIN, rather than loading a card whose numbers were
+   * never written, and so that this phone never offers to set it up as its own. Nothing else: no PIN, no numbers. */
+  var CARD_FOR_HOLDER = 'foxy.flashcard.forholder';
+  function cardHolderNote(key, on) {
+    if (!key) return;
+    var all = load(CARD_FOR_HOLDER, {});
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    if (on) all[key] = true; else if (Object.prototype.hasOwnProperty.call(all, key)) delete all[key]; else return;
+    save(CARD_FOR_HOLDER, all);
+  }
+  function cardHolderNoted(key) {
+    var all = load(CARD_FOR_HOLDER, {});
+    return !!(all && typeof all === 'object' && !Array.isArray(all) && all[key] === true);
   }
   function cardDesignNoted(key) {
     var all = load(CARD_DESIGNS, {});
@@ -879,6 +903,8 @@
                    /* 1a is GET_DLEQ (1.20 and on): the mint's proof kept with an unspent piece, for one place or two. */
                    dleq: '1a',
                    spend: '20', begin: '22', outputs: '23', signAll: '24', again: '25', change: '26', loadChange: '53', load: '30', clear: '31', setCard: '32', setLimit: '34',
+                   /* 33 is SET_LIMIT's PIN form: from 1.21 the holder's numbers on a card with no owner (`cardPinLimits`) */
+                   setLimitPin: '33',
                    /* 35 was SET_TIME, a time under a signature, for cards of software 1.14 and before, and is gone (a card answers 6d00).
                     * The card's clock is the newest Bitcoin block header it has been shown (36), and the phone's own time is a note it is told (37). */
                    header: '36', tell: '37',
@@ -932,6 +958,9 @@
     if (w === '6a8e') return cardError('no-refund-key', 'This card was set up as cash and cannot hold a piece that can be taken back.');
     if (w === '6a94') return cardError('on-card', 'That piece is on the card already.');
     if (w === '6a96') return cardError('too-many', 'That is more pieces than the card signs for at once.');
+    // 1.21: a card with no PIN takes nothing and pays nothing; and a held tap let go before it was through
+    if (w === '6a97') return cardError('pin-first', 'This card has no PIN yet. It is given one when it is set up.');
+    if (w === '6a98') return cardError('keep-holding', 'The card was not held long enough. Hold it to the phone and try again.');
     return cardError('refused', 'The card refused ' + (doing || 'that') + ' (' + w + ').', { sw: w });
   }
 
@@ -1213,6 +1242,72 @@
     }
     return cardOwned(t, cardKey, 'set-limit', value).then(function (data) {
       return t.want(cardCommand(CARD_INS.setLimit, 0, data), 'its limit');
+    });
+  }
+
+  /* SET_LIMIT's PIN form (0x33, software 1.21 and on), on a card with no owner: the holder's numbers, under the PIN given in this
+   * tap. The limit on one payment and the no-PIN allowance, in the card's unit (zero is none for either), in the one command of
+   * eight bytes. The card takes it while nothing is on it and nothing is owed to it (6A8D), and not once it has an owner (6A91).
+   * The daily limit is not the PIN's to set, and this phone sets none. */
+  function cardPinLimits(t, tapSats, noPinSats) {
+    var a = Math.round(Number(tapSats) || 0), b = Math.round(Number(noPinSats) || 0);
+    if (!(a >= 0 && a <= 4294967295) || !(b >= 0 && b <= 4294967295)) return Promise.reject(cardError('bad-limit', 'That is not a limit a card can hold.'));
+    return t.want(cardCommand(CARD_INS.setLimitPin, 0, cardU32Hex(a) + cardU32Hex(b)), 'its limits');
+  }
+
+  /* A held tap (software 1.21 and on): the same command asked again for as long as the card answers 6A98, keep holding, each
+   * answer after a signature's work of the card's own, until it answers. `most` is how many askings in all this phone will make
+   * (the card wants six for a claim and ten for a history); `onHold(n)`, where given, is told each asking before it is made, so
+   * that the screen says KEEP HOLDING and counts. Resolves the answer's data. 6A98 is not 9000: a phone that stops at the first
+   * has done nothing. */
+  var CARD_HOLD_MOST = 40;
+  function cardHoldOn(t, apdu, onHold, doing, most) {
+    var top = Number(most) > 0 ? Number(most) : CARD_HOLD_MOST;
+    var ask = function (n) {
+      try { if (typeof onHold === 'function') onHold(n); } catch (e) {}
+      return t.ask(apdu).then(function (r) {
+        if (r.sw === '9000') return r.data;
+        if (r.sw === '6a98' && n < top) return ask(n + 1);
+        throw cardRefused(r.sw, doing);
+      });
+    };
+    return ask(1);
+  }
+
+  /* The history of a card with no owner (software 1.22), read by its holder as a guest on any Foxy: the PIN has been given in this
+   * tap, the log is asked for and held for (`cardHoldOn`), then the receipts, which the same held tap opens, and the limit on one
+   * payment, which the card says to the PIN in a tap that read its history. Put on `card.log`, `card.receipts`, `card.info.tapLimit`
+   * and `card.tap`. Nothing of it is written down on this phone: the history is the holder's, and this phone is a friend's.
+   * 6985 is a tap that paid already: `paid-here`. */
+  function cardGuestRead(t, card, onHold) {
+    var told = !!card.info.headers;
+    return cardHoldOn(t, cardCommand(CARD_INS.log, 0, '', 0), onHold, 'its history').then(function (data) {
+      var log = /** @type {any} */ (cardLogOf(data, !!card.info.quick, told));
+      log.since = null;
+      log.unit = (card.record && card.record.unit) || 'sat';
+      card.log = log;
+      var list = [];
+      var page = function (back) {
+        return t.want(cardCommand(CARD_INS.log, 1, '', 0, back), 'its receipts').then(function (d) {
+          var got = cardReceiptsOf(d, told);
+          got.list.forEach(function (x, k) { list.push({ n: got.count - back - k, time: x.time, told: x.told, sats: x.sats, hash: x.hash, out: x.out }); });
+          if (got.list.length === 3 && back + 3 < Math.min(16, got.count)) return page(back + 3);
+          return got.count;
+        });
+      };
+      return page(0).then(function (count) {
+        card.receipts = { count: count, list: list.sort(function (a, b) { return a.n - b.n; }), fresh: 0, unit: log.unit, guest: true };
+      });
+    }).then(function () {
+      return t.want(cardCommand(CARD_INS.info, 1, '', 0), 'to say its limit');
+    }).then(function (d) {
+      card.info.tapLimit = cardInfoOf(d).tapLimit;
+      card.tap = cardTapOf(card.info);
+      card.guest = true;
+      return card;
+    }, function (e) {
+      if (e && e.sw === '6985') throw cardError('paid-here', 'This card has just paid, so it does not show its history in the same tap. Take it away from the phone and tap it again.');
+      throw e;
     });
   }
 
@@ -4966,7 +5061,7 @@
       var all = load(store, {});
       if (all && typeof all === 'object' && !Array.isArray(all) && Object.prototype.hasOwnProperty.call(all, key)) { delete all[key]; save(store, all); }
     };
-    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_REAL, CARD_DESIGNS, CARD_LOG_SEEN].forEach(drop);
+    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_REAL, CARD_DESIGNS, CARD_LOG_SEEN, CARD_FOR_HOLDER].forEach(drop);
     if (!abandon) return;
     var keep = function (r) { return !(r && r.card === key); };
     var owed = cardStore(CARD_OWED);

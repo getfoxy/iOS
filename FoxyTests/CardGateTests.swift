@@ -33,10 +33,10 @@ final class CardGateTests: XCTestCase {
     }
 
     func testOnlyTheInstructionsThePageUsesAreCarried() {
-        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these thirty
+        // every command build/wallet/08a-flashcard.js builds: class B0, and one of these thirty-two
         let carried = ["01", "10", "11", "13", "14", "15", "16", "17", "18", "19", "1a", "20", "22", "23", "24", "25", "26",
-                       "30", "31", "32", "34", "36", "37", "40", "41", "42", "43", "44", "45", "51"]
-        XCTAssertEqual(carried.count, 30)
+                       "30", "31", "32", "33", "34", "36", "37", "40", "41", "42", "43", "44", "45", "51", "53"]
+        XCTAssertEqual(carried.count, 32)
         XCTAssertEqual(CardGate.instructions, Set(carried.map { UInt8($0, radix: 16)! }), "exactly these, and the table says so")
         for ins in carried {
             XCTAssertNotNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins)")
@@ -71,12 +71,13 @@ final class CardGateTests: XCTestCase {
         XCTAssertEqual(CardGate.read(bytes("b017400000")), .applet(0x17), "the next page of them")
         XCTAssertTrue(CardGate.allows(bytes("b017000000"), selected: true))
         XCTAssertFalse(CardGate.allows(bytes("b017000000"), selected: false), "not before the applet is chosen")
-        // 33 (the limit with the PIN, for a card with no owner) and 50 (lock the card for good) are not sent by the page, so
-        // they are refused; and the others are ones the page never asks for, the signing upstream had, and nothing at all
-        for ins in ["33", "50", "12", "21", "27", "00", "ff", "a4"] {
+        // 50 (lock the card for good) is not sent by the page, so it is refused; and the others are ones the page never asks
+        // for, the signing upstream had, and nothing at all. (33, the holder's limits under the PIN on a card with no owner, is
+        // sent from software 1.21: the set-up's two numbers.)
+        for ins in ["50", "12", "21", "27", "00", "ff", "a4"] {
             XCTAssertNil(CardGate.read(bytes("b0" + ins + "0000")), "instruction \(ins) is not one the page sends")
         }
-        XCTAssertNil(CardGate.read(bytes("b033000004" + "00000000")), "the PIN form of the limit, with its data")
+        XCTAssertEqual(CardGate.read(bytes("b033000008" + "0000012c00000032")), .applet(0x33), "the PIN form of the limits, with its eight bytes")
         XCTAssertNil(CardGate.read(bytes("b050" + "00de" + "00")), "locking a card for good")
         // another class with one of our instructions
         for cla in ["00", "80", "84", "b1"] {

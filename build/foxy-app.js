@@ -1930,6 +1930,8 @@ class Component extends DCLogic {
   bootWallet() {
     this.mirrorConsole();
     this.watchEdgeSwipe();
+    // and the swipe between home and the card (26f-flashcard.js)
+    this.fcWatchSwipe();
     // Tor comes first. Until it connects, or the person chooses to continue
     // unprotected, the native side refuses every mint call, price and address
     // lookup; the gate's screens only say why.
@@ -16281,7 +16283,9 @@ class Component extends DCLogic {
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
       return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
     };
-    const cards = (sc === 'currency' || pick) ? ['usd', 'sat'].map(u => {
+    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js, where a card that holds both is a row to add)
+    const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];
+    const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
       const chosen = pick && u === current && !tag;
@@ -22538,7 +22542,12 @@ class Component extends DCLogic {
         reason: (e.most > 0 ? 'This card can pay ' + this.fcSats(e.most, u) + ' at once. Its money is in more pieces than it signs for in one go.'
           : 'That is more pieces than the card signs for at once.') + safe }),
       'old-card': () => ({ tone: 'warn', title: 'NOT ON THIS CARD',
-        reason: /limit on one tap/.test(said) ? 'This card’s software has no per tap limit. Its daily limit can still be set.' : said }),
+        reason: /limit on one tap/.test(said) ? 'This card’s software has no per tap limit.' : said }),
+      // software 1.21: a card with no PIN takes nothing; 1.22: a card that paid in this tap shows no history in it, and one with an owner none to a guest
+      'pin-first': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
+      'paid-here': () => ({ tone: 'warn', title: 'THE CARD HAS JUST PAID', reason: said }),
+      'has-owner': () => ({ tone: 'warn', title: 'THIS CARD HAS AN OWNER', reason: said }),
+      'keep-holding': () => Object.assign({ tone: 'warn', title: 'HOLD IT LONGER', reason: said }, again),
       // software 1.16: a card with no PIN has no limit for payments without one; a card that has a PIN cannot be given another
       'no-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'has-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS A PIN', reason: said }),
@@ -23913,7 +23922,9 @@ class Component extends DCLogic {
    * asked for a tap, or a card is up that asks for the card to be tapped again (TAP CARD: the rest of a withdrawal, a payment held, change
    * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
   cardFlowBusy() {
-    return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard();
+    return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard()
+      // (the set-up's wheel, 26j-card-wheel.js)
+      || !!(this._fcWheelEl && this._fcWheelEl.parentNode);
   }
 
   // a card's PIN pad, asked for a tap, is still up
@@ -24192,6 +24203,11 @@ class Component extends DCLogic {
       setUp: !!card.info.setUp, pinSet: !!card.info.pinSet, noPinKnown: !!card.info.noPinKnown, noPin: card.noPin || null,
       // software 1.21 and on: a PIN before any money, every load under it, and the owner taken in a held claim
       pinFirst: (() => { const v = String(card.info.version || '').split('.'); return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21); })(),
+      /* software 1.22 and on: a card with a PIN and no owner is a holder's with no phone, shown with VIEW AS GUEST and TIE OWNERSHIP
+       * TO THIS PHONE; `guestRead`, the history it showed as a guest in this tap (`fcGuestRun`), which this phone keeps nowhere */
+      guests: !!card.info.guests, guestRead: !!card.guest,
+      // a set-up this phone began for the card's holder and did not finish (`cardSetUpFor`): not this phone's to set up as its own
+      forHolder: !!card.forHolder,
       limit: (card.record && card.record.limit) || 0,
       day: card.day || null,
       // the limit on one tap: { known, limited, limit, left, turns }; `known` false on a card whose software has none
@@ -24236,6 +24252,7 @@ class Component extends DCLogic {
       owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts } : null,
     } });
     this.fcOwesLater(card);
+    this.fcNoteCard(card);
     if ((card.pieces || []).length) { this.fcCheck(card); this.fcReal(card); }
     // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
     if (W && W.cardOwedCheck) W.cardOwedCheck(card).then((gone) => { if (gone) this.forceUpdate(); }, () => {});
@@ -24387,6 +24404,14 @@ class Component extends DCLogic {
   fcSetUp() {
     const fc = this.state.fc;
     if (!fc) return;
+    // a set-up this phone began for the card's holder is finished by sending it money, never by setting it up as this phone's own
+    if (fc.forHolder && fc.pinSet && !fc.setUp) {
+      this.fcFailed({ card: 'for-holder', message: 'This phone began setting this card up for the person who holds it. Send it money to finish.' });
+      return;
+    }
+    /* A card of 1.21 and on holds no money without a PIN: the owner's steps, in his order (26j-card-wheel.js): the PIN twice, what
+     * it holds, then its two numbers on the wheel, and one tap. */
+    if (fc.pinFirst) { this.fcSetUpSteps({}); return; }
     /* At a mint with two balances the card is asked what it will hold first, on the CURRENCY screen, every time: a card
      * holds one kind, chosen here and changed only by RESET and setting it up again. At a mint with one, nothing is asked:
      * it holds bitcoin, as every card did. */
@@ -24780,18 +24805,11 @@ class Component extends DCLogic {
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.',
       retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
-    } : tap ? {
+    } : {
       tone: 'warn', title: 'SET PER TAP LIMIT',
       reason: 'A per tap limit is the most this card pays in one tap straight away, when it pays exactly. A payment that makes change holds the card 3 seconds; one over the limit, 3 seconds for every limit\u2019s worth of what leaves the card. Lift the card and the payment stops, with nothing taken.\n\n'
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
-        + 'Do you wish to continue?',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
-      shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
-    } : {
-      tone: 'warn', title: 'SET DAILY LIMIT',
-      reason: 'A daily limit is the most this card will spend in one day.\n\n'
-        + 'If you lose the seed phrase for this Foxy app, the limit can never be changed.\n\n'
         + 'Do you wish to continue?',
       retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
@@ -24800,8 +24818,12 @@ class Component extends DCLogic {
 
   /* What the keypad asks, for whichever limit is being set (23-render-home-and-amount.js). */
   fcLimitQuestion() {
-    if (this._fcLimitNoPin) return 'What is the most this card should pay in a day without its PIN?';
-    return this._fcLimitTap ? 'What is the most this card should pay in one tap straight away?' : 'What would you like the daily limit to be?';
+    // (from 1.21 the allowance is filled again by the PIN, not by the day)
+    if (this._fcLimitNoPin) {
+      return (this.state.fc && this.state.fc.pinFirst) ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
+        : 'What is the most this card should pay in a day without its PIN?';
+    }
+    return 'What is the most this card should pay in one tap straight away?';
   }
 
   /* After NEXT on the keypad, or NO LIMIT under it: the confirmation, over it. */
@@ -24828,48 +24850,29 @@ class Component extends DCLogic {
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN LIMIT OF:',
         amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
-        warn: 'This card will pay up to this much a day without its PIN. Over it, the PIN is asked for the whole payment. '
+        // (from 1.21 the PIN fills the allowance again, and no day does)
+        warn: ((this.state.fc && this.state.fc.pinFirst) ? 'This card will pay up to this much without its PIN, and entering the PIN fills it again. '
+          : 'This card will pay up to this much a day without its PIN. ') + 'Over it, the PIN is asked for the whole payment. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
       };
     }
-    if (this._fcLimitTap) {
-      return !(sats > 0) ? {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
-        amount: 'NO LIMIT', amountSub: '', rows: [],
-        warn: 'One tap will be able to pay as much as the card holds straight away' + (((this.state.fc || {}).limit || 0) > 0 ? ', up to its daily limit.' : '.'),
-        secondary, cta: 'CONFIRM', ctaTone: 'go',
-        go: () => this.fcLimitConfirmed(),
-      } : {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
-        amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
-        warn: (this.fcShaped()
-          ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
-          : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
-          + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
-          + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats), U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
-          + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
-        secondary, cta: 'CONFIRM', ctaTone: 'go',
-        go: () => this.fcLimitConfirmed(),
-      };
-    }
-    if (!(sats > 0)) {
-      return {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD’S DAILY LIMIT.',
-        amount: 'NO LIMIT', amountSub: '', rows: [],
-        warn: 'It will be able to spend everything on it.',
-        secondary, cta: 'CONFIRM', ctaTone: 'go',
-        go: () => this.fcLimitConfirmed(),
-      };
-    }
-    return {
-      title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A DAILY LIMIT OF:',
+    return !(sats > 0) ? {
+      title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
+      amount: 'NO LIMIT', amountSub: '', rows: [],
+      warn: 'One tap will be able to pay as much as the card holds straight away.',
+      secondary, cta: 'CONFIRM', ctaTone: 'go',
+      go: () => this.fcLimitConfirmed(),
+    } : {
+      title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
       amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
-      /* The two sentences go under the amount, in this order. They are set as
-       * `warn` because the shell's subtitle sits above the amount, and would read first. */
-      warn: 'This card will spend no more than this in one day. The limit starts again by itself each day. '
+      warn: (this.fcShaped()
+        ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
+        : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
+        + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
+        + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats), U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
       secondary, cta: 'CONFIRM', ctaTone: 'go',
       go: () => this.fcLimitConfirmed(),
@@ -24963,26 +24966,30 @@ class Component extends DCLogic {
         + (log.since.refused > 0 ? ', ' + log.since.refused + ' refused' : '') + '.\n\n'
       : '';
     const ahead = fc.clockAhead > 0
-      ? 'This card’s clock is ' + this.fcSpan(fc.clockAhead) + ' ahead of this phone’s: it has been told a time that had not come. Its daily limit cannot be relied on.\n\n'
+      ? 'This card’s clock is ' + this.fcSpan(fc.clockAhead) + ' ahead of this phone’s: it has been told a time that had not come.\n\n'
       : '';
+    // a guest's view (software 1.22) is kept nowhere on this phone: what the card says, and nothing to copy
+    const guest = !!fc.guestRead;
     const receipts = fc.receipts && fc.receipts.count > 0
-      ? '\n\nReceipts kept on this phone: ' + fc.receipts.list.length + ' of ' + n(fc.receipts.count, 'payment', 'payments')
-        + '. Each names the swap its money went into, which can be matched to the wallet that took it.'
+      ? (guest ? '\n\nThe card has signed ' + n(fc.receipts.count, 'payment', 'payments') + '.'
+        : '\n\nReceipts kept on this phone: ' + fc.receipts.list.length + ' of ' + n(fc.receipts.count, 'payment', 'payments')
+          + '. Each names the swap its money went into, which can be matched to the wallet that took it.')
       : '';
     this.blockedCard('fc-log', Object.assign({
       long: true,
       tone: marked ? 'warn' : 'ask', title: marked ? 'TAMPER ON THIS CARD' : 'THIS CARD’S OWN LOG',
       reason: (refusals ? 'A terminal asked this card for more than its limit allows, three times or more ' + (blocks ? 'before its clock moved on' : 'within ten seconds') + '. The card refused each time and wrote it down.\n\n' : '')
-        + ((!blocks && (log.last.some((x) => x.clock) || counted)) ? 'A terminal told this card the time twice in one tap, more than two minutes apart. No phone’s clock does that: it is how a daily limit is got round.\n\n' : '')
+        + ((!blocks && (log.last.some((x) => x.clock) || counted)) ? 'A terminal told this card the time twice in one tap, more than two minutes apart. No phone’s clock does that.\n\n' : '')
         + (blocks ? 'This card keeps its time by Bitcoin blocks, which no terminal can set. Each tap is shown at the time the phone that tapped it told the card, with the block the card had beside it.\n\n' : '')
         + ahead
-        + 'Kept by the card itself. No phone or terminal can change it.\n\n' + since
+        + 'Kept by the card itself. No phone or terminal can change it.'
+        + (guest ? ' Shown as a guest: nothing of it is kept on this phone.' : '') + '\n\n' + since
         + log.last.map(line).join('\n')
         + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.sats, U) + ' signed for, ' + log.refused + ' refused.'
         + ((U !== 'usd' && ((this.px && this.px()) || 0) > 0) ? '\n\nIn dollars at the price now.' : '')
         + receipts,
       shut: { label: 'CLOSE' },
-    }, receipts ? { retry: 'COPY RECEIPTS', go: () => this.fcCopyReceipts() } : {}));
+    }, (receipts && !guest) ? { retry: 'COPY RECEIPTS', go: () => this.fcCopyReceipts() } : {}));
   }
 
   /* A length of time in words, for how far a clock is out. */
@@ -25027,19 +25034,19 @@ class Component extends DCLogic {
     // said before anything is asked: a card with no owner has nobody to set its limit, and another phone's card is not this one's to
     if (!fc.owner) { this.fcFailed({ card: 'no-owner', message: 'This card has no owner, so its limit cannot be changed.' }); return; }
     if (fc.ownedHere === false) { this.fcFailed({ card: 'not-owner' }); return; }
-    /* Which of the two. A card whose software has no limit on one tap (an
-     * older one) has the one limit, and is asked for it as it always was. */
-    if (!(fc.tap && fc.tap.known)) { this.fcLimitAsk((sats) => this.fcLimitRun(sats)); return; }
-    // the question and the two, each a button: what each limit is comes on its own screen
-    // and a third for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
+    /* The limit on one payment and the no-PIN limit. This phone sets no daily limit (the card's own rule since 1.21), and says
+     * nothing of one a card has. A card whose software has no limit on one tap (an older one) has none this phone sets. */
+    if (!(fc.tap && fc.tap.known)) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software has no limit on one tap.' }); return; }
+    // a second for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
     const np = !!(fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked');
     this.blockedCard('fc-limit-which', Object.assign({
       tone: 'ask', title: 'CHANGE CARD LIMITS',
       reason: 'Which limit would you like to add or change?',
       retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
-      shut: { label: 'DAILY LIMIT', pill: true, tap: () => this.fcLimitAsk((sats) => this.fcLimitRun(sats)) },
-      also: { label: 'CANCEL' },
-    }, np ? { pills: [{ label: 'NO PIN LIMIT', tap: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin') }] } : {}));
+    }, np ? {
+      shut: { label: 'NO PIN LIMIT', pill: true, tap: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin') },
+      also: { label: 'CLOSE' },
+    } : { shut: { label: 'CLOSE' } }));
   }
 
   /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked, unless the card holds
@@ -25057,7 +25064,7 @@ class Component extends DCLogic {
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((np ? 'No PIN limit ' : tap ? 'Per tap limit ' : 'Daily limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+        this.toast((np ? 'No PIN limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin) }));
   }
 
@@ -25624,6 +25631,27 @@ class Component extends DCLogic {
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
+          /* A new card, with no PIN and no owner, of software 1.22: the first phone that sends it money sets it up for its holder
+           * (`fcSendSetUp`). The sheet ends calmly, nothing made, and the set-up's steps come up. */
+          // (a new card of 1.21 takes no money with no owner: its holder sets it up on a Foxy of their own first)
+          if (!card.info.setUp && !card.info.pinSet && !card.info.owner && card.info.pinFirst && !card.info.guests) {
+            const o = /** @type {any} */ (new Error('This card is new, and its software cannot be set up on somebody else\u2019s phone. Its holder sets it up on their own Foxy first.'));
+            o.card = 'old-card';
+            throw o;
+          }
+          /* And a set-up cut short (1.22): a card with a PIN and no record yet, which any phone takes up again, or one this phone began
+           * for its holder and did not finish (`forHolder`: its record written, the holder's two numbers perhaps not), while it is
+           * empty. Its steps come up again; where the card has its record, its PIN is the holder's already and is asked once. */
+          const empty = !(card.info.unspent > 0) && !card.info.changeDue;
+          const cut = !!card.info.guests && !card.info.owner && !card.info.locked && !!card.info.pinSet && empty
+            && (!card.info.hasRecord || (!!card.forHolder && card.info.pin !== 'blocked'));
+          if ((!card.info.setUp && !card.info.pinSet && !card.info.owner && card.info.guests && !card.info.locked) || cut) {
+            const n = /** @type {any} */ (new Error('The card is new.'));
+            n.card = 'needs-set-up';
+            n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
+            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord });
+            throw n;
+          }
           // a card that has a PIN is asked for it before any money is made for it: the sheet ends saying so
           if (card.info.pinSet && !pin) {
             const x = /** @type {any} */ (new Error('The card wants its PIN first.'));
@@ -25631,22 +25659,7 @@ class Component extends DCLogic {
             x.sheetText = 'Enter the card\u2019s PIN';
             throw x;
           }
-          const holdsUsd = !!(card.record && card.record.unit === 'usd');
-          if (unit === 'usd' && !holdsUsd && alt) {
-            // a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them
-            if (!(alt.sats > 0)) {
-              const np = /** @type {any} */ (new Error('This phone has no Bitcoin price to load the card at. Type the amount in sats.'));
-              np.card = 'wrong-unit';
-              throw np;
-            }
-            if (alt.sats > alt.have) {
-              const short = /** @type {any} */ (new Error('You have ' + this.fcBoth(alt.have) + '.'));
-              short.card = 'bad-amount';
-              throw short;
-            }
-            return W.cardPrepare(card, alt.sats);
-          }
-          return W.cardPrepare(card, sats, unit ? { unit } : undefined);
+          return this.fcSendPrepare(card, sats, unit, alt);
         }).then((m) => {
           made = m;
           // said by this flow, so not announced as a payment sent (16-history-lists.js)
@@ -25661,6 +25674,7 @@ class Component extends DCLogic {
         this.fcWrote(r, { rounded: Number(made && made.rounded) || 0 });
       }, (e) => {
         if (e && e.card === 'pin-needed' && !pin && !made) { this.fcSendAsk(sats, unit, alt); return; }
+        if (e && e.card === 'needs-set-up' && !made) { this.fcSendSetUp(sats, unit, alt, e.info); return; }
         if (made) {
           // the pieces exist and are owed to that card; they go on at its next tap
           this.refreshBalance();
@@ -25675,6 +25689,264 @@ class Component extends DCLogic {
         }
         this.fcFailed(e, { again: () => (pin ? this.fcSendAsk(sats, unit, alt) : this.fcSendRun(sats, '', unit, alt)) });
       });
+  }
+
+  /* The pieces for the card held to the phone, in its unit (`fcSendRun`). Typed in dollars, a bitcoin card is loaded with the sats
+   * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
+  fcSendPrepare(card, sats, unit, alt) {
+    const W = this.fcW();
+    const holdsUsd = !!(card.record && card.record.unit === 'usd');
+    if (unit === 'usd' && !holdsUsd && alt) {
+      // a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them
+      if (!(alt.sats > 0)) {
+        const np = /** @type {any} */ (new Error('This phone has no Bitcoin price to load the card at. Type the amount in sats.'));
+        np.card = 'wrong-unit';
+        throw np;
+      }
+      if (alt.sats > alt.have) {
+        const short = /** @type {any} */ (new Error('You have ' + this.fcBoth(alt.have) + '.'));
+        short.card = 'bad-amount';
+        throw short;
+      }
+      return W.cardPrepare(card, alt.sats);
+    }
+    return W.cardPrepare(card, sats, unit ? { unit } : undefined);
+  }
+
+  /* ---- a new card, set up by the first phone that sends it money (software 1.22) ------------------------------------
+   *
+   * SEND > FLASHCARD to a card that has no PIN and no owner: the card's holder may have no phone, and this one sets the card up
+   * for them, with the set-up's own steps (26j-card-wheel.js): the holder types their PIN twice here, and chooses the two numbers.
+   * The card holds what is being sent. Then one tap: the PIN, the record with no key of this phone's in it (a cash card: its
+   * money cannot be got back if it is lost), the numbers, and the money, under the holder's PIN. This phone does not become its
+   * owner, and never says it is: read again, the card is somebody else's here as on any phone (VIEW AS GUEST, TIE OWNERSHIP TO
+   * THIS PHONE). */
+  fcSendSetUp(sats, unit, alt, info) {
+    this.fcSetUpSteps({ other: true, unit: unit === 'usd' ? 'usd' : 'sat', info: info || null, keepPin: !!(info && info.keepPin),
+                        run: (c) => this.fcSendSetUpRun(sats, unit, alt, c) });
+  }
+
+  fcSendSetUpRun(sats, unit, alt, c) {
+    const W = this.fcW();
+    if (!W) return;
+    let made = null;
+    // whether the set-up itself was finished in this tap: a tap cut after it is a send with the holder's PIN, one cut before it the set-up again
+    let setUp = false;
+    this.fcTap({ amount: this.stageMoney(sats, unit), warm: true }, (link, on) => {
+      on('writing');
+      return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin })
+        .then((card) => { setUp = true; on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
+        .then((m) => {
+          made = m;
+          if (m && m.hash) this.txIsNew(m.hash);
+          on('writing');
+          return W.cardWrite(link, { pin: c.pin });
+        });
+    }).then((r) => {
+      this.setState({ screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
+      this.toast('The card is set up for the person who holds it.');
+      this.fcWrote(r, { rounded: Number(made && made.rounded) || 0 });
+    }, (e) => {
+      if (made) {
+        this.refreshBalance();
+        this.loadHistory();
+        if (e && (e.card === 'cancelled' || e.card === 'gone')) {
+          this.setState({ screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
+          this.fcStillWaiting({});
+          return;
+        }
+        this.fcFailed(e, { again: () => this.fcWriteRun(c.pin, {}) });
+        return;
+      }
+      /* Set up, the next try is the send with the holder's PIN. Cut short before that, it is the set-up again with the same PIN and
+       * the same two numbers (`cardSetUpFor` takes up a set-up cut after the PIN or after the record): the holder's numbers are not
+       * dropped by a send that never writes them. */
+      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)) });
+    });
+  }
+
+  /* ---- a card with no owner, on any Foxy (software 1.22) ----------------------------------------------------------
+   *
+   * A card with a PIN and no owner is its holder's, who may have no phone. Read on the FLASHCARD screen of any Foxy, it shows what
+   * it holds at once (nothing of that is held for), and two buttons:
+   *
+   *   VIEW AS GUEST                  its PIN, then a held tap: the card answers Keep holding for some seconds and then gives its
+   *                                  history, which the screen shows with what it holds (the card's own log). A till that was
+   *                                  handed the PIN for a payment does not hold a card that long, and the card shows nothing in a
+   *                                  tap that paid. Nothing is paid in this tap, and nothing of the history is kept here.
+   *   TIE OWNERSHIP TO THIS PHONE    a plain warning first, then its PIN and the claim set-up makes (about four seconds of Keep
+   *                                  holding): this phone is then its owner. Only an empty card: one with money on it is told
+   *                                  to spend or move it first. */
+  fcGuestView() {
+    const fc = this.state.fc;
+    if (!fc) return;
+    this.fcAskPin({
+      title: 'CARD PIN',
+      subtitle: 'To see this card\u2019s history. Hold the card still for a few seconds when you tap it.',
+      cta: 'VIEW AS GUEST',
+    }, (pin) => this.fcGuestRun(pin));
+  }
+
+  fcGuestRun(pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing') }))
+      .then((card) => {
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.fcLogCard();
+      }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin) }));
+  }
+
+  fcGuestTie() {
+    const fc = this.state.fc;
+    if (!fc) return;
+    if (fc.balance > 0 || fc.count > 0) {
+      this.fcFailed({ card: 'has-money', message: 'Spend or move the money on this card first. Only an empty card can be tied to a phone.' });
+      return;
+    }
+    this.blockedCard('fc-tie', {
+      tone: 'warn', title: 'TIE OWNERSHIP TO THIS PHONE?',
+      reason: 'This makes this phone the card\u2019s owner. From then on only this phone, or one restored from its seed phrase, can change the card\u2019s PIN and limits.',
+      retry: 'TIE OWNERSHIP', go: () => this.fcAskPin({
+        title: 'CARD PIN',
+        subtitle: 'To tie the card to this phone. Hold it still for about four seconds when you tap it.',
+        cta: 'TIE OWNERSHIP',
+      }, (pin) => this.fcTieRun(pin)),
+    });
+  }
+
+  fcTieRun(pin) {
+    const W = this.fcW();
+    if (!W) return;
+    this.fcTap({}, (link, on) => { on('writing'); return W.cardClaim(link, { pin, onHold: () => on('writing') }); })
+      .then((card) => {
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.toast('This phone is the card\u2019s owner now.');
+      }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin) }));
+  }
+
+  /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
+   *
+   * From the welcome of a new card and from a card's own row of buttons: the take-back of a lost card's dated pieces by the phone
+   * that loaded them (`fcRowCard`, `fcTakeBack`), as the list of CARDS YOU LOADED offers it. A card on screen that is cash (no
+   * refund key in its record, which is every card a phone set up for somebody else) says that it cannot be, and why. */
+  FC_CASH_LINE = 'This card is cash: it was set up with no key that can take its money back, so if it is lost its money cannot be restored.';
+
+  fcRestoreLost() {
+    const W = this.fcW();
+    if (!W) return;
+    const rows = (W.cardsList() || []);
+    if (!rows.length) {
+      this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
+        reason: 'This phone has set up no card whose money it can take back. A card set up for somebody else is cash, and its money cannot be restored if it is lost.' });
+      return;
+    }
+    // the list of CARDS YOU LOADED, on the card screen with no card on it: a lost card cannot be tapped
+    this._fcCard = null;
+    this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
+  }
+
+  // RESTORE on a card's own screen: what restoring would do for this card
+  fcRestoreThis() {
+    const fc = this.state.fc;
+    const W = this.fcW();
+    if (!fc || !W) return;
+    if (!fc.recoverable) { this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD', reason: this.FC_CASH_LINE }); return; }
+    const row = (W.cardsList() || []).filter((r) => r.key === fc.key)[0];
+    if (row) { this.fcRowCard(row); return; }
+    this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
+      reason: 'Only the phone that loaded this card can take its money back if it is lost, after its date.' });
+  }
+
+  /* ---- a swipe between home and the card ---------------------------------------------------------------------------
+   *
+   * Once this phone has a card (one it set up, or one it owns, the newest it has seen), a swipe across home to the left opens that
+   * card's screen as MENU > FLASHCARD does (the card is read with a tap: the phone has no copy of what it holds), and a swipe to the
+   * right on the card's screen comes back home. The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
+   * is left to it; a swipe that starts in something that scrolls sideways, or in a field, is not this one; and nothing happens over
+   * a pad, a card or a sheet, or in the middle of a card's flow. */
+  FC_LAST = 'foxy.flashcard.last';
+  FC_SWIPE = { edge: 24, travel: 72, slop: 48, ms: 700 };
+
+  // the newest card this phone set up or owns, as it last showed it: { key, at }, or null
+  fcLastCard() {
+    try {
+      const o = JSON.parse(localStorage.getItem(this.FC_LAST) || 'null');
+      if (o && typeof o.key === 'string' && /^0[23][0-9a-f]{64}$/.test(o.key)) return o;
+    } catch (e) {}
+    const W = this.fcW();
+    const rows = (W && W.cardsList) ? (W.cardsList() || []) : [];
+    return rows.length ? { key: rows[0].key, at: rows[0].seen || rows[0].at || 0 } : null;
+  }
+
+  // a card this phone owns or set up, shown: the newest for the swipe
+  fcNoteCard(card) {
+    const W = this.fcW();
+    if (!card || !card.key || !(card.mine === true || (W && W.cardIsMine && W.cardIsMine(card)))) return;
+    try { localStorage.setItem(this.FC_LAST, JSON.stringify({ key: card.key, at: Date.now() })); } catch (e) {}
+  }
+
+  fcWatchSwipe() {
+    if (this._fcSwipeOn) return;
+    this._fcSwipeOn = true;
+    const S = this.FC_SWIPE;
+    let live = false, x0 = 0, y0 = 0, t0 = 0;
+    const start = (e) => {
+      const t = e.touches && e.touches[0];
+      live = !!t && e.touches.length === 1 && t.clientX > S.edge && this.fcSwipeFrom(e.target);
+      if (t) { x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); }
+    };
+    const end = (e) => {
+      if (!live) return;
+      live = false;
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
+      if (Math.abs(dx) < S.travel || dy > S.slop || Date.now() - t0 > S.ms) return;
+      this.fcSwipe(dx < 0 ? 'left' : 'right');
+    };
+    document.addEventListener('touchstart', start, { passive: true });
+    document.addEventListener('touchend', end, { passive: true });
+    this._fcSwipeOff = () => {
+      document.removeEventListener('touchstart', start);
+      document.removeEventListener('touchend', end);
+      this._fcSwipeOn = false;
+    };
+  }
+
+  // whether a touch that starts on `target` may be this swipe: not in a field, and not in anything that scrolls sideways
+  fcSwipeFrom(target) {
+    for (let n = /** @type {any} */ (target); n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
+      const tag = String(n.tagName || '');
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+      if (n.scrollWidth > n.clientWidth + 1) {
+        let ox = '';
+        try { ox = window.getComputedStyle(n).overflowX; } catch (e) {}
+        if (ox === 'auto' || ox === 'scroll') return false;
+      }
+    }
+    return true;
+  }
+
+  /* A swipe, `dir` 'left' or 'right': home to the card, the card to home. Answers whether it did anything. */
+  fcSwipe(dir) {
+    const s = this.state;
+    if (this._pinLocked || s.open0 || this.cardTapOver() || this.cardFlowBusy()) return false;
+    if (s.screen === 'home' && dir === 'left') {
+      if (!this.fcLastCard()) return false;
+      console.log('[foxy] swipe: to the card');
+      this.goFlashcard();
+      return true;
+    }
+    if (s.screen === 'flashcard' && dir === 'right') {
+      console.log('[foxy] swipe: home');
+      this._fcCard = null;
+      this.setState({ screen: 'home', stack: [], fc: null });
+      return true;
+    }
+    return false;
   }
 
   /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
@@ -26043,14 +26315,17 @@ class Component extends DCLogic {
 
     // (software 1.16 and on can be set up without a PIN: `setUp` is a record, and before 1.16 a PIN as well)
     const fresh = !!fc && !fc.setUp && fc.pin !== 'blocked';
+    const holderCut = fresh && !!fc.forHolder && !!fc.pinSet;
     const blocked = !!fc && fc.pin === 'blocked';
     // the owner's phone is offered UNBLOCK on a blocked card, which is CHANGE PIN
     const unblock = blocked && !!fc.ownedHere;
-    // the card's day: the daily limit, what is left today, and when the day turns
-    const day = (fc && fc.hasRecord && fc.day) || null;
-    const limited = !!(day && day.limited);
+    /* The daily limit is not on these screens: this phone sets none, and a card that has one shows nothing about it. The limit on
+     * one payment and the no-PIN limit are what a card's face says. */
     const tapped = !!(fc && fc.tap && fc.tap.limited);
-    const usable = !!fc && !!fc.setUp && fc.pin !== 'blocked';
+    /* software 1.22: a card with a PIN and no owner is a holder's with no phone (set up here as the first phone to send it money, or
+     * anywhere else): its balance, and VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE, and nothing that moves its money from here */
+    const guest = !!fc && !!fc.guests && !fc.owner && !!fc.pinSet && !!fc.setUp && fc.pin !== 'blocked';
+    const usable = !!fc && !!fc.setUp && fc.pin !== 'blocked' && !guest;
     // a card that has no PIN is offered ADD PIN where a card that has one is offered CHANGE PIN
     const addable = !!fc && !!fc.setUp && !fc.pinSet && !!fc.noPinKnown;
     // a card set up with no PIN: its limit line says so
@@ -26091,6 +26366,13 @@ class Component extends DCLogic {
      * label. A circular arrow for RESET (software 1.17 and on), a lock for its PIN and a dial for its limit are the owner's: only
      * the phone that holds the words the card was set up with can do any of them. A card before 1.17 has the two it can offer.
      * HISTORY, what has been done with this card on this phone, is the round button at the top left, for any card that is one. */
+    /* RESTORE, for a card of software 1.21 and on: what restoring it would do if it were lost (`fcRestoreThis`), the welcome's
+     * RESTORE LOST CARD for the card in hand. (A card before 1.21 keeps the row it had; the list of CARDS YOU LOADED restores
+     * any card.) */
+    const restore = !!(fc && fc.hasRecord && fc.pinFirst) ? [
+      { label: 'RESTORE', tap: () => this.fcRestoreThis(),
+        path: 'M12 3.8v10.4m0 0-4.2-4.2m4.2 4.2 4.2-4.2M4.6 15.4v2.8a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.8' },
+    ] : [];
     const links = !(fc && fc.hasRecord) ? [] : (!resettable ? [] : [
       { label: 'RESET', tap: () => this.fcReset(),
         path: 'M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4' },
@@ -26104,7 +26386,7 @@ class Component extends DCLogic {
        * software holds one unit, and what two would take is not built, so the tap only says so. */
       { label: 'SWAP', tap: () => this.toast('This card cannot swap yet.', true),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
-    ]);
+    ]).concat(restore);
 
     /* Under the title: how fresh the mint's word on this card is. Just now,
      * where it has just been asked; how long ago, on a phone that cannot ask
@@ -26149,6 +26431,17 @@ class Component extends DCLogic {
     const limitShown = !!fc && !!fc.hasRecord && fc.pin !== 'blocked';
     // what the balance says now: what the card holds, or, while it counts after money went on or off, where it has got to
     const shown = this.fcBalanceShown(fc, s);
+    /* The line on the card's face: its limit on one payment, or its no-PIN limit, or NO LIMIT. A card with no PIN says so beside it,
+     * after a bar: "NO LIMIT | NO PIN". A card whose one limit is a daily one (set by an older Foxy) says nothing of limits at all:
+     * this phone sets no daily limit, and says nothing about one. */
+    const limitBase = !(fc && fc.hasRecord) ? '' : (
+      tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, U)
+      // another phone's card keeps its per tap limit to its owner: it is not said to have none
+      : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? (noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U) : '')
+      // only a no PIN limit: it is the one thing to say (with the per tap limit it has its own line below)
+      : noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U)
+      : (Number(fc.limit) > 0) ? '' : 'NO LIMIT');
+    const limitLine = (fc && fc.hasRecord && noPinCard) ? (limitBase ? limitBase + ' | NO PIN' : 'NO PIN') : limitBase;
     return {
       isFlashcard: on,
       fcVerified: verified[0], fcVerifiedInk: verified[1], fcVerifiedShown: !!verified[0],
@@ -26195,27 +26488,12 @@ class Component extends DCLogic {
       fcBalance: !fc ? '' : usdCard ? '$ ' + this.usd(shown / 100) : '\u20bf ' + this.group(shown),
       /* The limit line is on the card's own face, at its bottom left, where its design has BEARER at the bottom right (build/markup.html;
        * with the card's badge above it where it has one), in dollars first as the balance is. */
-      fcLimitShown: limitShown,
-      fcFaceLines: limitShown || !!check[0],
-      // a card with no PIN says so beside its limit, after a bar: "NO LIMIT | NO PIN"
-      fcLimitLine: !(fc && fc.hasRecord) ? '' : (
-        // (the space before the dot does not break: on the card's face the line can wrap, and a line began with the dot)
-        (limited && tapped) ? 'PER TAP ' + this.fcPrice(fc.tap.limit, U) + '\u00a0\u00b7 DAILY ' + this.fcPrice(day.limit, U)
-        : tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, U)
-        // another phone's card says its daily limit and keeps its per tap limit to its owner: it is not said to have none
-        : (fc.tap && fc.tap.paced && fc.ownedHere !== true) ? (limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit, U) : 'NO DAILY LIMIT')
-        // only a no PIN limit: it is the one thing to say (with another limit it has its own line below)
-        : (noPin && !limited) ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U)
-        : limited ? 'DAILY LIMIT ' + this.fcPrice(day.limit, U) : 'NO LIMIT') + (noPinCard ? ' | NO PIN' : ''),
-      // under the balance, where there is a limit: what the day has left, and when it turns
-      fcDayShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && limited,
-      fcDayLeft: limited ? 'LEFT TODAY ' + (day.left > 0 || !px || usdCard ? this.fcPrice(day.left, U) : '$0.00') : '',
-      // under it, for a card with a PIN that pays some of a day without it: how much, and what is left of it today
+      fcLimitShown: limitShown && !!limitLine,
+      fcFaceLines: (limitShown && !!limitLine) || !!check[0],
+      fcLimitLine: limitLine,
+      // under the balance, for a card with a PIN that pays some without it: how much, and what is left of it (today, before 1.21; till the PIN is next given, from it)
       fcNoPinShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && !!noPin,
-      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U) + ' \u00b7 LEFT TODAY ' + (noPin.left > 0 || !px || usdCard ? this.fcPrice(noPin.left, U) : '$0.00') : '',
-      // a card of 1.15 and on with a limit and no block yet has a day with no start: it begins with the first block the card is shown
-      fcDayTurns: limited ? (day.turns > 0 ? 'THE DAY TURNS AT ' + this.fcWhen(day.turns).toUpperCase()
-        : day.onTrust ? 'THE DAY BEGINS WITH THE CARD\u2019S FIRST BLOCK' : 'A NEW DAY BEGINS WITH THE NEXT PAYMENT') : '',
+      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U) + ' \u00b7 LEFT ' + (fc.pinFirst ? '' : 'TODAY ') + (noPin.left > 0 || !px || usdCard ? this.fcPrice(noPin.left, U) : '$0.00') : '',
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,
       fcAboveLine: (fc && fc.above > 0) ? this.fcPrice(fc.above, U).toUpperCase() + ' IN PIECES ABOVE THE LIMIT \u00b7 A TILL HOLDS LONGER FOR THOSE' : '',
@@ -26229,9 +26507,21 @@ class Component extends DCLogic {
       fcHistory: () => this.fcHistory(),
       fcRowShown: links.length > 0,
       fcNew: fresh,
-      fcNewLine: (fc && fc.pin === 'set' && !fc.hasRecord)
+      /* SET UP CARD and RESTORE LOST CARD, but not on a card whose set-up this phone began for its holder: sending it money finishes
+       * that set-up (`fcSendRun`), and this phone does not become its owner */
+      fcNewSetUp: fresh && !holderCut,
+      fcNewLine: holderCut
+        ? 'Its set-up for the person who holds it was cut short. Send it money to finish it.'
+        : (fc && fc.pin === 'set' && !fc.hasRecord)
         ? 'Its set-up was cut short. Finish it to put money on it.'
-        : 'This card is new. Set it up to put money on it.',
+        : 'Welcome to Foxy Card. Set it up to put money on it.',
+      // the welcome's second button, and the card screen's with no card on it: the cards this phone can take back (`fcRestoreLost`)
+      fcRestore: () => this.fcRestoreLost(),
+      // a holder's card with no owner (software 1.22): what it is, and its two buttons
+      fcGuest: guest,
+      fcGuestLine: 'This card belongs to whoever holds it. It is not tied to any phone.',
+      fcGuestView: () => this.fcGuestView(),
+      fcGuestTie: () => this.fcGuestTie(),
       fcBlocked: blocked,
       fcUnblock: unblock,
       fcUnblockTap: () => this.fcChangePin(),
@@ -27695,6 +27985,292 @@ class Component extends DCLogic {
         + (rate > 0 ? ' · ' + this.swapRateText(rate) : ''),
       swapDoneGo: () => this.swapDoneClose(),
     };
+  }
+  /* ---- a card's set-up: its questions, in order, and the wheel ------------------------------------------------------
+   *
+   * The owner's set-up of a card (software 1.21 and on, which holds no money without a PIN), in his own order:
+   *
+   *   CREATE A PIN       the PIN pad every card PIN is typed on (`fcAskPin`), four to eight digits
+   *   RE-ENTER PIN       the same again; two that differ start it again
+   *   CURRENCY           what the card holds, on the CURRENCY screen (`fcUnitAsk`), at a mint with two balances; at a mint
+   *                      with one, nothing is asked and the card holds bitcoin. Its rows are FC_SETUP_UNITS: a third, a card
+   *                      that holds both, is a row to add there when cards hold two balances, which none does yet
+   *   SMALL AMOUNTS      "Do you want to pay small amounts without entering your PIN?" YES or NO; YES turns the wheel for
+   *                      how much (the no-PIN allowance)
+   *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES turns the wheel for the limit on one payment,
+   *                      with the line "It will take N seconds to pay $X." under it
+   *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
+   *
+   * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
+   * PIN on this phone, and the words say it is theirs; what the card holds is what is being sent, so CURRENCY is not asked; and
+   * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
+   *
+   * The way back is the round back button of the pad and of the wheel: one step back, and from the first, to where the set-up
+   * began. A question's card goes when it is tapped beside, and the set-up with it. */
+
+  /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
+  FC_SETUP_UNITS = ['usd', 'sat'];
+
+  /* The wheel's figures. In dollars for a bitcoin card where there is a price (its sats at that price, under each) and for a dollar
+   * card (its cents); in sats for a bitcoin card where there is none. The no-PIN amount is $0 to $20, $2 unless turned; the limit on
+   * one payment is $1 to $100, $10 unless turned. */
+  FC_WHEEL = {
+    noPin: { usd: [0, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 7.5, 10, 12.5, 15, 20], usdAt: 2,
+             sat: [0, 250, 500, 1000, 2000, 3000, 5000, 10000, 20000], satAt: 2000 },
+    tap: { usd: [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100], usdAt: 10,
+           sat: [1000, 2000, 5000, 10000, 20000, 50000, 100000], satAt: 10000 },
+  };
+  // the height of one figure on the wheel, in pixels, and how many are in sight
+  FC_WHEEL_ROW = 64;
+  FC_WHEEL_SHOW = 5;
+
+  /* The set-up's steps from the first. `o`: { other, unit, run, keepPin } — `other` for a card set up for somebody else (`fcSendSetUp`), `keepPin` for one of those taken up again on a card that keeps its PIN (asked once),
+   * `unit` the card's where it is not asked, `run(choice)` what the tap does with { pin, unit, noPin, tapLimit, noPinUsd, tapUsd }
+   * (the owner's set-up when none is given). */
+  fcSetUpSteps(o) {
+    this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0 }, o || {});
+    this.fcSuPin('');
+  }
+
+  fcSuPin(warn) {
+    const su = this._fcSu;
+    if (!su) return;
+    /* A set-up for the holder taken up again on a card that has its record (`keepPin`): the card keeps the PIN it was given, so the
+     * holder types it once, as on every card PIN pad. */
+    if (su.keepPin) {
+      this.fcAskPin({
+        title: 'CARD PIN',
+        subtitle: 'This card’s set-up was cut short. The person who holds it types their PIN to finish it.',
+        warn: warn || '',
+        onBack: () => { this._fcSu = null; },
+      }, (a) => { su.pin = a; this.fcSuUnit(); });
+      return;
+    }
+    this.fcAskPin({
+      title: 'CREATE A PIN',
+      subtitle: su.other
+        ? 'This card is new. The person who holds it types the PIN they want, four to eight digits: it is their PIN, and the card stays theirs, not this phone’s.'
+        : 'Four to eight digits. The card asks for it when it pays.',
+      warn: warn || '',
+      onBack: () => { this._fcSu = null; },
+    }, (a) => this.fcAskPin({
+      title: 'RE-ENTER PIN',
+      subtitle: su.other ? 'The person who holds the card types the same PIN again.' : 'The same PIN again.',
+      onBack: () => this.fcSuPin(''),
+    }, (b) => {
+      if (a !== b) { this.fcSuPin('Those did not match. Start again.'); return; }
+      su.pin = a;
+      this.fcSuUnit();
+    }));
+  }
+
+  // CURRENCY: asked only where this phone's mint has two balances, and never for a card set up for somebody else
+  fcSuUnit() {
+    const su = this._fcSu;
+    if (!su) return;
+    if (!su.other && !su.unit && this.twoUnitsOn && this.twoUnitsOn()) {
+      this.fcUnitAsk((unit) => { su.unit = unit; this.fcSuNoPin(); });
+      return;
+    }
+    this.fcSuNoPin();
+  }
+
+  /* The unit the card will hold, for the wheel's figures: what was chosen, or bitcoin. */
+  fcSuUnitNow() {
+    const su = this._fcSu;
+    return (su && su.unit === 'usd') ? 'usd' : 'sat';
+  }
+
+  fcSuNoPin() {
+    const su = this._fcSu;
+    if (!su) return;
+    this.blockedCard('fc-su-nopin', {
+      tone: 'ask', title: 'SMALL AMOUNTS',
+      reason: 'Do you want to pay small amounts without entering your PIN?',
+      retry: 'YES', go: () => this.fcSuWheel('noPin', () => this.fcSuNoPin(), () => this.fcSuTap()),
+      shut: { label: 'NO', pill: true, tap: () => { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); } },
+    });
+  }
+
+  fcSuTap() {
+    const su = this._fcSu;
+    if (!su) return;
+    this.blockedCard('fc-su-tap', {
+      tone: 'ask', title: 'MAX PER TAP',
+      reason: 'Do you want to set a max per tap?',
+      retry: 'YES', go: () => this.fcSuWheel('tap', () => this.fcSuTap(), () => this.fcSuGo()),
+      shut: { label: 'NO', pill: true, tap: () => { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } },
+    });
+  }
+
+  /* The wheel for one of the two (`which`: 'noPin' or 'tap'), in the card's unit. `back` is the question again, `next` the
+   * step after. */
+  fcSuWheel(which, back, next) {
+    const su = this._fcSu;
+    if (!su) return;
+    const rows = this.fcWheelRows(which, this.fcSuUnitNow());
+    const tap = which === 'tap';
+    this.fcWheel({
+      title: tap ? 'MAX PER TAP' : 'NO PIN AMOUNT',
+      question: tap ? 'The most the card pays in one tap straight away. More than this waits, and the card is held longer.'
+        : 'Up to this much, the card pays with a tap and no PIN.',
+      rows: rows.list, at: rows.at,
+      line: tap ? (r) => this.fcWaitLine(r.amount, rows.unit) : null,
+      cta: (r) => 'SET ' + r.main,
+      back,
+      done: (r) => {
+        if (tap) { su.tapLimit = r.amount; su.tapUsd = r.usd; } else { su.noPin = r.amount; su.noPinUsd = r.usd; }
+        next();
+      },
+    });
+  }
+
+  /* The wheel's rows for `which` on a card that holds `unit`: [{ amount (the card's unit), usd (the dollars it was chosen in, for a
+   * bitcoin card; 0 otherwise), main, sub }], and where it stands at first. */
+  fcWheelRows(which, unit) {
+    const spec = this.FC_WHEEL[which];
+    const px = (this.px && this.px()) || 0;
+    if (unit === 'usd' || px > 0) {
+      const list = spec.usd.map((d) => {
+        const sats = px > 0 ? Math.round(d / px * 1e8) : 0;
+        return { amount: unit === 'usd' ? Math.round(d * 100) : sats, usd: unit === 'usd' ? 0 : d,
+                 main: '$' + this.usd(d), sub: px > 0 ? '₿ ' + this.group(sats) : '' };
+      });
+      return { list, at: Math.max(0, spec.usd.indexOf(spec.usdAt)), unit };
+    }
+    const list = spec.sat.map((n) => ({ amount: n, usd: 0, main: '₿ ' + this.group(n), sub: '' }));
+    return { list, at: Math.max(0, spec.sat.indexOf(spec.satAt)), unit };
+  }
+
+  /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
+   * for the askings of the card's software (`fcWaitOver`, `fcWaitMore`): the first limit's worth over, and two more after it. A
+   * round figure above the limit, so that the line says something. */
+  FC_WAIT_EXAMPLE = 4;
+  fcWaitLine(limit, unit) {
+    if (!(limit > 0)) return '';
+    const units = this.FC_WAIT_EXAMPLE;
+    const askings = this.fcWaitOver() + this.fcWaitMore() * (units - 2);
+    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + this.fcPrice(limit * units, unit) + '.';
+  }
+
+  // the end of the questions: the tap
+  fcSuGo() {
+    const su = this._fcSu;
+    if (!su) return;
+    this._fcSu = null;
+    const choice = { pin: su.pin, unit: su.unit, noPin: su.noPin, tapLimit: su.tapLimit, noPinUsd: su.noPinUsd, tapUsd: su.tapUsd };
+    if (typeof su.run === 'function') { su.run(choice); return; }
+    this.fcSetUpStepsRun(choice);
+  }
+
+  /* The owner's set-up, in one tap: the PIN, the record, the holder's numbers, and this phone as the owner, the card holding while
+   * it is claimed (08a-flashcard.js, `cardHoldOn`). */
+  fcSetUpStepsRun(c) {
+    const W = this.fcW();
+    if (!W) return;
+    const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
+                                      tapUsd: c.tapUsd, noPinUsd: c.noPinUsd });
+    if (c.unit) how.unit = c.unit;
+    this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
+      .then((card) => {
+        this.fcShow(card);
+        this.haptic && this.haptic('success');
+        this.toast(c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
+  }
+
+  /* A wheel of amounts to turn, for a figure the owner asked to be chosen this way ("price is right"): one figure in the band at
+   * the middle, dollars first and their sats under them, turned by a finger or chosen by a tap. The round back button at the top
+   * left, as on every screen; one button under it that says what it sets ("SET $2.00"). `o`: { title, question, rows, at, line,
+   * cta, back, done } — `rows` [{ main, sub, ... }], `at` the row it stands at first, `line(row)` the words under the wheel or
+   * null, `cta(row)` the button's words, `done(row)` on the button, `back()` on back. */
+  fcWheel(o) {
+    this.fcWheelDismiss();
+    const el = (style, text) => {
+      const d = document.createElement('div');
+      d.style.cssText = style;
+      if (text != null) d.textContent = text;
+      return d;
+    };
+    const ROW = this.FC_WHEEL_ROW, SHOW = this.FC_WHEEL_SHOW;
+    const root = el('position:fixed;inset:0;z-index:2147483647;background:var(--bg,#050505);display:flex;flex-direction:column;'
+      + 'align-items:center;padding:118px 26px 26px;box-sizing:border-box;font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
+    root.setAttribute('data-wheel', '1');
+    root.appendChild(el('font-size:26px;font-weight:800;letter-spacing:-0.02em;color:var(--ink,#F5F1EC);text-align:center', o.title || ''));
+    root.appendChild(el('margin-top:10px;font-size:17px;font-weight:500;line-height:1.4;color:rgba(245,241,236,.6);text-align:center;text-wrap:pretty',
+      o.question || ''));
+    const frame = el('position:relative;margin-top:30px;width:100%;max-width:336px;height:' + (ROW * SHOW) + 'px;flex:none');
+    frame.appendChild(el('position:absolute;left:0;right:0;top:' + (ROW * Math.floor(SHOW / 2)) + 'px;height:' + ROW + 'px;border-radius:20px;'
+      + 'background:rgba(245,241,236,.08);border:1.5px solid rgba(242,128,46,.65);box-sizing:border-box;pointer-events:none'));
+    const list = el('position:absolute;inset:0;overflow-y:auto;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;'
+      + 'padding:' + (ROW * Math.floor(SHOW / 2)) + 'px 0;box-sizing:border-box;'
+      + '-webkit-mask-image:linear-gradient(180deg,transparent,#000 32%,#000 68%,transparent);mask-image:linear-gradient(180deg,transparent,#000 32%,#000 68%,transparent)');
+    list.setAttribute('data-wheel-list', '1');
+    const rows = (o.rows || []).map((r, i) => {
+      const row = el('height:' + ROW + 'px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer');
+      row.setAttribute('data-wheel-row', String(i));
+      const main = el('font-size:28px;font-weight:800;letter-spacing:-0.01em;color:var(--ink,#F5F1EC);transition:opacity .12s ease', r.main);
+      main.setAttribute('data-wheel-main', '1');
+      row.appendChild(main);
+      if (r.sub) row.appendChild(el('font-size:14px;font-weight:600;color:rgba(245,241,236,.5)', r.sub));
+      list.appendChild(row);
+      return row;
+    });
+    frame.appendChild(list);
+    root.appendChild(frame);
+    const line = el('margin-top:22px;min-height:24px;font-size:17px;font-weight:600;line-height:1.4;color:rgba(245,241,236,.75);text-align:center');
+    line.setAttribute('data-wheel-line', '1');
+    root.appendChild(line);
+    // the SET AMOUNT screen's NEXT, as the PIN pad's button is (10-pin.js): it can always be pressed, since a figure is always chosen
+    const cta = el('margin-top:auto;align-self:stretch;margin-left:2px;margin-right:2px;height:60px;border-radius:30px;display:flex;align-items:center;'
+      + 'justify-content:center;font-family:SatSymbol,Sora,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.02em;color:#fff;cursor:pointer;'
+      + 'background-color:var(--acc,#E8622A);background-image:radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),'
+      + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp');"
+      + 'background-repeat:no-repeat,no-repeat,no-repeat;background-size:auto,auto,150% auto;background-position:center,center,50% 34%;'
+      + 'box-shadow:inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(232,98,42,.34);white-space:nowrap');
+    cta.setAttribute('data-wheel-cta', '1');
+    root.appendChild(cta);
+    let at = Math.max(0, Math.min(rows.length - 1, Math.round(Number(o.at) || 0)));
+    const pick = (i, turn) => {
+      at = Math.max(0, Math.min(rows.length - 1, i));
+      rows.forEach((row, k) => { /** @type {any} */ (row.firstChild).style.opacity = k === at ? '1' : '.38'; });
+      const r = o.rows[at];
+      line.textContent = (typeof o.line === 'function' && r) ? o.line(r) : '';
+      cta.textContent = r ? o.cta(r) : '';
+      if (turn) { try { list.scrollTop = at * ROW; } catch (e) {} }
+    };
+    // where the finger leaves it, the figure in the band; a little after the last movement, so a fling settles first
+    let settle = null;
+    list.addEventListener('scroll', () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => { if (this._fcWheelEl === root) pick(Math.round(list.scrollTop / ROW), false); }, 90);
+    }, { passive: true });
+    rows.forEach((row, i) => row.addEventListener('click', () => { pick(i, true); this.haptic && this.haptic('light'); }));
+    cta.addEventListener('click', () => {
+      const r = o.rows[at];
+      this.fcWheelDismiss();
+      if (r && typeof o.done === 'function') o.done(r);
+    });
+    const b = el('position:absolute;left:22px;top:56px;width:52px;height:52px;border-radius:50%;'
+      + 'background:linear-gradient(180deg,var(--lift,#2A2B2E),var(--sink,#151618)),var(--chip,#1C1D20);'
+      + 'border-top:1px solid var(--lift-edge,rgba(255,255,255,.14));'
+      + 'box-shadow:inset 0 2px 0 var(--lift-edge,rgba(255,255,255,.14)),inset 0 -3px 0 var(--sink-edge,rgba(0,0,0,.5)),0 8px 16px rgba(0,0,0,.34);'
+      + 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;cursor:pointer');
+    b.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink,#F5F1EC)" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12H5m0 0 6-6m-6 6 6 6"></path></svg>';
+    b.setAttribute('data-wheel-back', '1');
+    b.setAttribute('role', 'button');
+    b.setAttribute('aria-label', 'Back');
+    b.addEventListener('click', () => { this.fcWheelDismiss(); if (typeof o.back === 'function') o.back(); });
+    root.appendChild(b);
+    document.body.appendChild(root);
+    this._fcWheelEl = root;
+    pick(at, true);
+    return root;
+  }
+
+  fcWheelDismiss() {
+    if (this._fcWheelEl) { this._fcWheelEl.remove(); this._fcWheelEl = null; }
   }
   /* ---- what this phone takes offline before it settles ---------------------
    *

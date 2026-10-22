@@ -45,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const { page, funded, newCard, settle, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
 const { booksWrong } = require('./harness');
-const { appOn, until, pad, card, behind, vals } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, behind, vals } = require('./flashcard-ui-kit');
 
 let failed = 0, passed = 0;
 const ok = (good, name, detail) => {
@@ -298,13 +298,14 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.fcRead();
     await until('the card read again', () => !!holder.state.fc && holder.state.fc.tap && holder.state.fc.tap.limited && holder.state.fc.limit === 5000);
     const line = () => vals(holder).fcLimitLine;
-    const want = 'PER TAP $20.00 · DAILY $50.00 | NO PIN';
-    ok(line() === want, 'its limits in dollars: PER TAP $20.00 · DAILY $50.00', line());
+    // (its daily limit is not said: the card screens have none)
+    const want = 'PER TAP LIMIT $20.00 | NO PIN';
+    ok(line() === want, 'its per tap limit in dollars: PER TAP LIMIT $20.00, and nothing of its daily limit', line());
     holder.price = 80000;
     const at80 = line();
     holder.price = 160000;
-    ok(at80 === want && line() === want && vals(holder).fcDayLeft === 'LEFT TODAY $50.00',
-       'and the same at a price and at a doubled price: a dollar is a dollar', line() + ' | ' + vals(holder).fcDayLeft);
+    ok(at80 === want && line() === want && vals(holder).fcDayLeft === undefined,
+       'and the same at a price and at a doubled price: a dollar is a dollar', line());
     holder.price = 0;
     booksGood('the card’s screen', H);
   }
@@ -692,8 +693,9 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     H.W.cardSetLimit = (link, o) => { asked.push(Object.assign({}, o, { on: undefined, progress: undefined })); return real.call(H.W, link, o); };
     holder.price = 80000;
     holder.fcSetLimit();
-    card(holder).press('DAILY LIMIT');
-    card(holder).press('CONTINUE');
+    // (the per tap limit: the card screens set no daily limit)
+    card(holder).press('PER TAP LIMIT');
+    if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
     ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.unit === 'USD' && holder.usdKeypad() === true, 'the dollar keypad');
     holder.state.amount = '20.00';
     holder.fcAmountNext();
@@ -704,10 +706,10 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     sp.go();
     await until('the limit to be set', () => asked.length === 1 && !(holder._fcTaps > 0));
     await settle();
-    ok(asked[0].sats === 2000 && asked[0].usd === 0 && k.state.record.limit === 2000, 'the card is set to 2,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
+    ok(asked[0].sats === 2000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 2000, 'the card’s limit on one tap is set to 2,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
     H.W.cardSetLimit = real;
     k.tap();
-    await H.W.cardSetLimit(k, { sats: 0 });
+    await H.W.cardSetLimit(k, { sats: 0, tap: true });
     holder.price = 0;
   }
 

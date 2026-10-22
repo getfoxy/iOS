@@ -946,8 +946,9 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     zed.fcRead(true);
     await until('the pending card to be read', () => zed.state.fc && zed.state.fc.hasRecord);
     v = vals(zed);
-    ok(v.fcDayShown && /LEFT TODAY/.test(v.fcDayLeft) && v.fcDayTurns === 'THE DAY BEGINS WITH THE CARD’S FIRST BLOCK',
-       'a card with a limit and no block yet says its day begins with its first block, and does not call it a card that cannot sign', v.fcDayLeft + ' / ' + v.fcDayTurns);
+    // (the card screens say nothing of a daily limit: this phone sets none)
+    ok(v.fcDayShown === undefined && v.fcDayLeft === undefined && v.fcDayTurns === undefined && v.fcCheck === '' && v.fcUsable,
+       'a card with a daily limit and no block yet: its screen says nothing of the day, and does not call it a card that cannot sign', JSON.stringify([v.fcLimitLine, v.fcCheck]));
     ok(pending.state.record.limit === 5000 && pending.state.windowStart === 0, 'the limit stands, with a day that has no start');
     // and spends on trust, and the first block begins the day
     const till = await funded({ sharedMint: H.mint, words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' }, 0);
