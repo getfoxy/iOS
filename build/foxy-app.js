@@ -24839,6 +24839,9 @@ class Component extends DCLogic {
        * SEND put on it and nothing else; '' for a card of both, one this phone made no such promise for, or one that holds the other
        * currency all the same (given it elsewhere): that is a card of both (the wallet's `cardHold`) */
       only: (() => { const h = (W && W.cardHold) ? W.cardHold(card) : ''; return h === 'usd' || h === 'sat' ? h : ''; })(),
+      /* `both`: the card holds both or may (format 5, the wallet's `cardBoth`), as against one shown with two pills only because its
+       * owner chose BOTH when this phone set it up (`units` lists both for either): that one is not swapped until it holds some of each */
+      both: !!(W && W.cardBoth && W.cardBoth(card)),
       rate: (card.info && card.info.rateSaid) ? Number(card.info.rate) || 0 : 0,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -26898,7 +26901,7 @@ class Component extends DCLogic {
   FC_READS_MAX = 8;
   FC_KEEP = ['unit', 'key', 'balance', 'count', 'readAt', 'room', 'pin', 'locked', 'hasRecord', 'setUp', 'pinSet', 'noPinKnown', 'noPin',
     'pinFirst', 'guests', 'limit', 'day', 'tap', 'log', 'receipts', 'clockAhead', 'headers', 'clock', 'owner', 'resetKnown', 'ownedHere',
-    'mint', 'v123', 'cents', 'units', 'bal', 'rate', 'recoverable', 'mine', 'first', 'last', 'check', 'checkedAt', 'proofs', 'real',
+    'mint', 'v123', 'cents', 'units', 'bal', 'only', 'both', 'rate', 'recoverable', 'mine', 'first', 'last', 'check', 'checkedAt', 'proofs', 'real',
     'design', 'above', 'owes'];
 
   fcReads() {
@@ -27564,14 +27567,18 @@ class Component extends DCLogic {
      * `fcSwap`). On a card of one currency SWAP is greyed and says why when pressed; offline it is greyed as home's is, and the
      * swap says why itself. */
     const swappable = !!(fc && this.fcTwoUnits(fc));
+    /* A card shown with two pills because it was set up for both, and holding nothing yet of one of them, is offered SWAP greyed, with
+     * the reason when pressed: there is nothing on the other side to swap with until money of each has been added. */
+    const swapEarly = swappable && !fc.both && !!fc.bal && !(fc.bal.usd > 0 && fc.bal.sat > 0);
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: need(() => this.fcOutOpen()), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
       { label: 'PASTE', tap: () => this.fcOutPaste(), spin: 'none', dim: '1', pasteHere: '',
         path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
       { label: 'SWAP', spin: 'none', pasteHere: '',
-        dim: (!swappable || this.offlineNow()) ? '0.38' : '1',
-        tap: swappable ? need(() => this.fcSwap()) : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
+        dim: (!swappable || swapEarly || this.offlineNow()) ? '0.38' : '1',
+        tap: swapEarly ? () => this.toast('Add both dollars and bitcoin to the card to swap between them.', true)
+          : swappable ? need(() => this.fcSwap()) : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ];
     // the limit line has a card to be on, and says nothing of a blocked one
@@ -27612,11 +27619,12 @@ class Component extends DCLogic {
       fcMintName: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '').toUpperCase() : '',
       /* A dollar card has home's dollar pill instead: frost and dark ink, its cents big, and their worth in sats under them at the
        * market price where there is one, as home has it (display only: the card holds dollars). */
+      // (a card set up for both shows both from the start, each at nothing where it holds none: "$0.00" with "₿ 0" under, and the other way)
       fcPillRows: two ? [{
         ...this.USD_PILL,
         label: 'This card\u2019s history',
         big: this.usd(fc.bal.usd / 100),
-        small: sat1 ? '\u20bf ' + this.group(Math.round(fc.bal.usd / 100 / sat1)) : '',
+        small: (sat1 || !(fc.bal.usd > 0)) ? '\u20bf ' + this.group(sat1 ? Math.round(fc.bal.usd / 100 / sat1) : 0) : '',
         glow: '0 10px 24px rgba(0,0,0,.3)',
         tap: () => this.fcHistory(),
         badge: false,
@@ -27624,7 +27632,7 @@ class Component extends DCLogic {
         ...this.BTC_PILL,
         label: 'This card\u2019s history',
         big: this.group(fc.bal.sat),
-        small: px > 0 ? '$' + this.usd((fc.bal.sat / 1e8) * px) + ' USD' : '',
+        small: (px > 0 || !(fc.bal.sat > 0)) ? '$' + this.usd(px > 0 ? (fc.bal.sat / 1e8) * px : 0) + ' USD' : '',
         glow: '0 10px 24px rgba(0,0,0,.3)',
         tap: () => this.fcHistory(),
         badge: false,

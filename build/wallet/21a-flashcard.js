@@ -69,10 +69,15 @@
      * [{ unit, balance, pieces }], one entry for each unit it holds or may (a card of format 5 lists both, a card of one unit its record's);
      * null for a card before 1.23. `cardBoth`: whether it holds both, or may (format 5). `cardInUnit`: the card as one of its units, its
      * pieces and balance that unit's, for the sums the screens ask (`cardLoadFits`, `cardNeedsPin`). */
+    /* (A card its owner set up on this phone to hold both (`cardHoldOf` 'both') lists both from the moment it is set up, each at
+     * nothing where it holds none: the choice made at set-up is what the screen shows, not only what the card holds yet. A card
+     * set up here for one currency lists that one; a card read as a guest, or set up on another phone, lists what it holds or
+     * may (format 5). A card before 1.23 has no `units` and is null here whatever its row says: one pill, as ever.) */
     cardUnits: function (card) {
       if (!card || !card.units) return null;
       var ru = card.record && card.record.unit === 'usd' ? 'usd' : 'sat';
-      return ['sat', 'usd'].filter(function (u) { return cardBoth(card) || u === ru || card.units[u].balance > 0; })
+      var both = cardBoth(card) || cardHoldOf(card) === 'both';
+      return ['sat', 'usd'].filter(function (u) { return both || u === ru || card.units[u].balance > 0; })
         .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
     },
     cardBoth: function (card) { return cardBoth(card); },

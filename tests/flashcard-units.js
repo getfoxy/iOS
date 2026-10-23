@@ -40,7 +40,9 @@
  *   17 the set-up's CURRENCY step on a card of 1.23: DOLLARS, BITCOIN or BOTH, three cards of one shape; BOTH writes a dollar record
  *      and ADD FUNDS asks which every time, sats going on after; BITCOIN alone never asks and refuses nothing the card can do (dollars
  *      put on it all the same make it a card of both, asked again), and SEND refuses dollars it cannot turn into sats; a card of 1.22
- *      shows the two rows and the old words; a set-up for somebody else asks no currency
+ *      shows the two rows and the old words; a set-up for somebody else asks no currency. The choice drives the card's screen: BOTH
+ *      shows two pills at nothing from the moment set-up ends, the ceiling said for both and SWAP greyed with its reason while a
+ *      side is empty; DOLLARS or BITCOIN one pill and no question; a phone that did not set it up shows what the card holds
  *
  * Every page ends with its books per unit off by 0. */
 const fs = require('fs');
@@ -953,6 +955,13 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
       ok(c.state.noPinLimit === 200 && c.state.tapLimit === 1000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+      // one currency chosen: one pill from the moment set-up ends, the ceiling said with no "both", and ADD FUNDS asks nothing
+      const v1 = vals(a);
+      ok(v1.fcPillRows.length === 1 && v1.fcPillRows[0].big === (i === 0 ? '0.00' : '0') && !/both currencies/.test(limitsSub(v1)),
+         name + ': one pill, at nothing, and the ceiling not said for both', JSON.stringify([v1.fcPillRows.map((x) => x.big), limitsSub(v1)]));
+      a.fcAdd();
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && !a.state.curCard && a.fcUnit() === (i === 0 ? 'usd' : 'sat'), name + ': ADD FUNDS asks no currency', a.state.screen);
+      a.back();
     }
 
     // BOTH: three cards of one shape, the words; a dollar record, and ADD FUNDS asks which, sats going on after
@@ -980,6 +989,16 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          'BOTH: a dollar record, BOTH kept beside the card’s row on this phone, and the screen says it holds dollars and bitcoin',
          JSON.stringify({ unit: c.state.record.unit, hold: (H.W.cardsKnown()[c.key] || {}).hold, only: a.state.fc.only }));
       ok(c.state.book && c.state.book.table.every((x) => x.state === 0), 'and nothing of it is told the card: its table is empty');
+      // two pills from the moment set-up ends, each at nothing, though the card holds neither yet; SWAP greyed with its reason
+      let vb = vals(a);
+      ok(vb.fcPillRows.length === 2 && vb.fcPillRows[0].big === '0.00' && vb.fcPillRows[0].small === '\u20bf 0'
+         && vb.fcPillRows[1].big === '0' && vb.fcPillRows[1].small === '$0.00 USD',
+         'BOTH: two pills at once, $0.00 with \u20bf 0 under and \u20bf 0 with $0.00 under', JSON.stringify(vb.fcPillRows.map((x) => [x.big, x.small])));
+      const swapB = vb.fcButtons.find((x) => x.label === 'SWAP');
+      a.toasts.length = 0;
+      swapB.tap();
+      ok(swapB.dim === '0.38' && a.state.screen === 'flashcard' && a.toasts[0] === 'Add both dollars and bitcoin to the card to swap between them.',
+         'SWAP is offered, greyed, and says why while a side is empty', JSON.stringify([swapB.dim, a.toasts]));
       a.fcAdd();
       ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?' && !a.state.curBoth,
          'ADD FUNDS on it asks which currency, with no BOTH among them', a.state.screen);
@@ -994,9 +1013,49 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the sats to go on', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat >= 2000);
       await uiSettle();
       ok(a.state.fc.bal.sat >= 2000 && a.state.fc.bal.usd === 0 && a.state.fc.unit === 'usd', 'and sats go on a card whose record is dollars', JSON.stringify(a.state.fc.bal));
+      vb = vals(a);
+      ok(vb.fcPillRows.length === 2 && vb.fcPillRows[0].big === '0.00' && vb.fcPillRows[1].big === a.group(a.state.fc.bal.sat),
+         'still two pills: the dollars at nothing, the sats as they are', JSON.stringify(vb.fcPillRows.map((x) => x.big)));
       a.fcAdd();
       ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks again the next time');
       a.back();
+    }
+
+    /* BOTH with a no-PIN allowance: the ceiling is said for both currencies from the start. Read on another phone (one that did not set
+     * it up), the card falls back to what it holds: one pill while it holds one currency, two once it holds both. */
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await toCurrency(a, c);
+      cur(a).curCards[2].tap();
+      cardUp(a).press('YES');
+      a.setState({ amount: '2.00' });
+      a.fcAmountNext();
+      c.tap();
+      cardUp(a).press('NO');
+      await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
+      await uiSettle();
+      const v = vals(a);
+      ok(v.fcPillRows.length === 2 && / \u00b7 both currencies$/.test(limitsSub(v)), 'BOTH: two pills, and the ceiling under LIMITS says both currencies', limitsSub(v));
+      const R = await funded({ units: ['sat', 'usd'], sharedMint: H.mint, words: OTHER_WORDS }, 0);
+      const other = appOn(R, { screen: 'home' });
+      other.price = PRICE;
+      const readOn = async () => {
+        R.nfc = c;
+        c.tap();
+        other.setState({ screen: 'home', stack: [], fc: null });
+        other._fcCard = null;
+        other.goFlashcard();
+        await until('the card read on the other phone', () => !!other.state.fc && other.state.fc.key === c.key && !(other._fcTaps > 0));
+        await uiSettle();
+        return vals(other);
+      };
+      let vo = await readOn();
+      ok(vo.fcPillRows.length === 1 && other.state.fc.ownedHere !== true, 'on a phone that did not set it up, a card that holds nothing yet shows one pill', String(vo.fcPillRows.length));
+      await add(H, c, 1500, 'sat');
+      await add(H, c, 250, 'usd');
+      vo = await readOn();
+      ok(vo.fcPillRows.length === 2 && vo.fcPillRows[0].big === '2.50' && vo.fcPillRows[1].big === '1,500', 'and two once it holds both', JSON.stringify(vo.fcPillRows.map((x) => x.big)));
     }
 
     // BITCOIN alone: never asked, refuses nothing the card can do, and dollars on it all the same make it a card of both

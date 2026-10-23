@@ -863,6 +863,46 @@ function amt(a) {
        'the card’s own log screen says nothing of a daily limit');
   }
 
+  /* ---- B11: what the owner chose at set-up drives the card's screen (software 1.23) ---------------------------------------
+   * BOTH: two pills from the moment set-up ends, each at nothing, ADD FUNDS asking which and SWAP greyed while a side is empty; the read
+   * kept for the swipe keeps it so. DOLLARS: one pill, and ADD FUNDS asks nothing. */
+  {
+    const U = await funded({ units: ['sat', 'usd'] }, 0);
+    const twoCard = card4(U, 23);
+    twoCard.tap();
+    await U.W.cardSetUp(twoCard, { pin: '2468', unit: 'usd', hold: 'both', price: 60000 });
+    const oneCard = card4(U, 23);
+    oneCard.tap();
+    await U.W.cardSetUp(oneCard, { pin: '2468', unit: 'usd', hold: 'usd', price: 60000 });
+    const a = appOn(U);
+    a.price = 60000;
+    a.twoUnitsOn = () => true;
+    a.unitBalance = () => 1000;
+    const readIt = async (c) => {
+      U.nfc = c;
+      c.tap();
+      a.setState({ screen: 'home', stack: [], fc: null, curCard: null });
+      a._fcCard = null;
+      a.goFlashcard();
+      await until('the card read', () => !!a.state.fc && a.state.fc.key === c.key && !(a._fcTaps > 0));
+      await settle();
+      return vals(a);
+    };
+    let v = await readIt(twoCard);
+    ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '0.00' && v.fcPillRows[1].big === '0',
+       'a card set up for both shows two pills at nothing before anything is on it', JSON.stringify(v.fcPillRows.map((x) => x.big)));
+    ok((v.fcButtons.find((x) => x.label === 'SWAP') || {}).dim === '0.38', 'and SWAP greyed while a side is empty');
+    a.fcAdd();
+    ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks which', a.state.screen);
+    const k = kept(U)[twoCard.key];
+    ok(!!k && Array.isArray(k.fc.units) && k.fc.units.length === 2 && k.fc.both === false && k.fc.only === '',
+       'the read kept for the swipe keeps both pills and what SWAP needs', JSON.stringify(k && [k.fc.units, k.fc.both, k.fc.only]));
+    v = await readIt(oneCard);
+    ok(v.fcPillRows.length === 1 && v.fcPillRows[0].big === '0.00', 'a card set up for dollars shows one pill', JSON.stringify(v.fcPillRows.map((x) => x.big)));
+    a.fcAdd();
+    ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && !a.state.curCard && a.fcUnit() === 'usd', 'and ADD FUNDS asks no currency', a.state.screen);
+  }
+
   console.log('\n' + (failed || until.failed ? (failed + until.failed) + ' flashcard-holder check(s) failed' : 'all flashcard-holder checks pass'));
   process.exit(failed || until.failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });
