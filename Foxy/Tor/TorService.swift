@@ -461,6 +461,39 @@ enum TorService {
         changed()
     }
 
+    /// Does Tor's SOCKS listener answer a connect over loopback right now?
+    ///
+    /// `nil` with no port to ask (not ready). Otherwise a non-blocking TCP
+    /// connect to 127.0.0.1: the kernel answers at once for loopback, accepted
+    /// or refused, and a quarter of a second is the most this waits. Refused
+    /// is the mark iOS leaves on a suspended app's listener (ECONNREFUSED,
+    /// `connection refused` in the resume diagnostics); `false` then.
+    static func socksListenerAnswers() -> Bool? {
+        let port = socksPort
+        guard port != 0 else { return nil }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let r = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        if r == 0 { return true }
+        if errno == ECONNREFUSED { return false }
+        guard errno == EINPROGRESS else { return nil }
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        guard poll(&pfd, 1, 250) == 1 else { return nil }
+        var err: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 else { return nil }
+        if err == 0 { return true }
+        return err == ECONNREFUSED ? false : nil
+    }
+
     /// The app came forward after `away` seconds in the background.
     ///
     /// Every return sets up a private connection the way launch does (`setUp`),
@@ -480,13 +513,25 @@ enum TorService {
      * A connection that is genuinely up is left alone — there is nothing to
      * reconnect, and tearing down a working circuit to rebuild it would be the
      * slow thing this is meant to cure. */
-    static func resumed(away: TimeInterval) {
+    static func resumed(away given: TimeInterval, leftKnown: Bool = true) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard thread != nil else { return }
         let wasParked = parked
         let sinceBroughtBack = broughtBackAt.map { Date().timeIntervalSince($0) }
         parked = false
         if wasParked { broughtBackAt = Date() }
+        /* A Foxy launched in the background, for the Bluetooth accessory, and
+         * never in front has no time put away: it reckons with at least half a
+         * minute (TorReturn.awayReckoned). And the SOCKS listener is asked, over
+         * loopback, whether it still answers: iOS reclaims a suspended app's
+         * sockets, and a listener it took is the one thing the flags cannot
+         * show. Three returns found it dead with "nothing to set up" said. */
+        let away = TorReturn.awayReckoned(away: given, leftKnown: leftKnown)
+        let listenerUp = socksListenerAnswers()
+        if !leftKnown || listenerUp == false {
+            print("[foxy] tor: back" + (leftKnown ? "" : " in front for the first time in this run (launched in the background; how long it was suspended is unknown)")
+                  + (listenerUp == false ? "; the SOCKS listener on 127.0.0.1:\(socksPort) does not answer (iOS reclaims a suspended app's sockets)" : ""))
+        }
         /* Not parked and up: nothing to set up, however long that took. Tor is
          * now kept on the network for up to twenty seconds after Foxy is put
          * away, while a payment or the change top-up is with the mint
@@ -494,7 +539,7 @@ enum TorService {
          * was "away" two seconds, and the set-up that followed cut the swap
          * it had been kept up for, and left its sats held. */
         if TorReturn.returnFindsRouteUp(ready: ready, wasParked: wasParked, away: away,
-                                        sinceBroughtBack: sinceBroughtBack) {
+                                        sinceBroughtBack: sinceBroughtBack, listenerUp: listenerUp) {
             print("[foxy] tor: back after \(Int(away))s and the circuit is up"
                   + (away < TorReturn.upLeftAlone ? "" : ", brought back \(Int(sinceBroughtBack ?? 0))s ago")
                   + "; nothing to set up")

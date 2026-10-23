@@ -142,6 +142,25 @@ final class TorReturnTests: XCTestCase {
         XCTAssertTrue(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 2, sinceBroughtBack: nil))
     }
 
+    func testAReturnThatFindsTheListenerDeadSetsUp() {
+        // iOS reclaimed the suspended app's listener: up by its flags, dead on loopback; set up, however short the time away
+        XCTAssertFalse(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 2, sinceBroughtBack: nil, listenerUp: false))
+        XCTAssertFalse(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 240, sinceBroughtBack: 10, listenerUp: false))
+        XCTAssertTrue(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 2, sinceBroughtBack: nil, listenerUp: true))
+        XCTAssertTrue(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 2, sinceBroughtBack: nil, listenerUp: nil), "not probed is not dead")
+    }
+
+    func testAFoxyNeverPutAwayReckonsWithHalfAMinuteAtLeast() {
+        // launched in the background and in front for the first time: the time suspended is unknown
+        XCTAssertEqual(TorReturn.awayReckoned(away: 0, leftKnown: false), TorReturn.upLeftAlone)
+        XCTAssertEqual(TorReturn.awayReckoned(away: 900, leftKnown: false), 900)
+        XCTAssertEqual(TorReturn.awayReckoned(away: 0, leftKnown: true), 0, "put away and back: its own time")
+        XCTAssertEqual(TorReturn.awayReckoned(away: 2, leftKnown: true), 2)
+        // and with that time a Tor left up is set up again, unless brought back on the network since
+        XCTAssertFalse(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: TorReturn.awayReckoned(away: 0, leftKnown: false), sinceBroughtBack: nil))
+        XCTAssertTrue(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: TorReturn.awayReckoned(away: 0, leftKnown: false), sinceBroughtBack: 10))
+    }
+
     func testAReturnLongAfterBothSetsUpAsBefore() {
         // a connection left up through half a minute or more away may be one a suspension broke
         XCTAssertFalse(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 240, sinceBroughtBack: 300))
@@ -212,7 +231,7 @@ final class TorReturnTests: XCTestCase {
     }
 
     func testAReturnAsksTheRuleBeforeSettingUp() throws {
-        let resumed = body(try torService(), "static func resumed(away: TimeInterval)")
+        let resumed = body(try torService(), "static func resumed(away given: TimeInterval, leftKnown: Bool = true)")
         guard let rule = resumed.range(of: "TorReturn.returnLeavesSetUpAlone("),
               let setUp = resumed.range(of: "setUp(\"back after") else {
             return XCTFail("resumed no longer asks TorReturn.returnLeavesSetUpAlone before its set-up")
@@ -222,7 +241,7 @@ final class TorReturnTests: XCTestCase {
 
     func testAReturnAsksWhetherTheRouteIsUpFirst() throws {
         let src = try torService()
-        let resumed = body(src, "static func resumed(away: TimeInterval)")
+        let resumed = body(src, "static func resumed(away given: TimeInterval, leftKnown: Bool = true)")
         guard let up = resumed.range(of: "TorReturn.returnFindsRouteUp("),
               let alone = resumed.range(of: "TorReturn.returnLeavesSetUpAlone("),
               let setUp = resumed.range(of: "setUp(\"back after") else {
@@ -230,6 +249,12 @@ final class TorReturnTests: XCTestCase {
         }
         XCTAssertLessThan(up.lowerBound, alone.lowerBound)
         XCTAssertLessThan(alone.lowerBound, setUp.lowerBound)
+        // and the listener is asked on loopback, and the away time reckoned, before the route-up rule hears either
+        guard let probe = resumed.range(of: "socksListenerAnswers()"), let reckoned = resumed.range(of: "TorReturn.awayReckoned(") else {
+            return XCTFail("resumed no longer probes the SOCKS listener or reckons the away time of a Foxy never put away")
+        }
+        XCTAssertLessThan(probe.lowerBound, up.lowerBound)
+        XCTAssertLessThan(reckoned.lowerBound, up.lowerBound)
         XCTAssertFalse(resumed.contains("away < 30"), "the half minute is the rule's, counted from the later of the two")
         // brought back is noted only when the return takes Tor from parked
         XCTAssertTrue(resumed.contains("if wasParked { broughtBackAt = Date() }"))

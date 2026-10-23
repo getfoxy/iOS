@@ -1289,7 +1289,7 @@ final class WebHostController: UIViewController {
         backgroundedAt = nil
         pushUptime()
         // Tor first: a set-up marks it not ready before the page hears of the return
-        bridge.torResumed(away: away)
+        bridge.torResumed(away: away, wentAway: wentAway)
         webView?.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._resumed(\(away))")
         /* After the page has been told of the return, and in that order on its side too: it raises its lock on hearing
          * it, and a card tapped on the way back must find the lock up. A card's address that was waiting for this goes

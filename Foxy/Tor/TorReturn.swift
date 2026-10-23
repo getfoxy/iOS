@@ -137,10 +137,31 @@ enum TorReturn {
     /// that, cuts the request that is out and leaves its sats held. After half
     /// a minute away from both, the connection may be one a suspension broke,
     /// and it is set up again as before.
+    ///
+    /// Never when Tor's SOCKS listener does not answer (`listenerUp` false): iOS
+    /// reclaims every socket of a suspended app, the listeners included, and a
+    /// Tor whose flags still say ready behind a dead listener refuses every
+    /// request in milliseconds until it is set up again. The listener was
+    /// found dead three times on the way back from a suspension, each time
+    /// with "nothing to set up" said a moment before, and each time the
+    /// person killed Foxy to get connected. Not probed (`nil`) is not dead.
     static func returnFindsRouteUp(ready: Bool, wasParked: Bool, away: TimeInterval,
-                                   sinceBroughtBack: TimeInterval?) -> Bool {
-        guard ready, !wasParked else { return false }
+                                   sinceBroughtBack: TimeInterval?, listenerUp: Bool? = nil) -> Bool {
+        guard ready, !wasParked, listenerUp != false else { return false }
         return min(away, sinceBroughtBack ?? away) < upLeftAlone
+    }
+
+    /// The time away a return reckons with.
+    ///
+    /// A Foxy that was put away knows how long ago (`leftKnown`). One that iOS
+    /// launched in the background, for a Bluetooth accessory, and that was
+    /// never in front has no such time: it was suspended for anything from
+    /// seconds to hours, and its first coming to the front read as away for
+    /// no time at all, which left a Tor broken by the suspension alone. With no
+    /// time known, the return reckons with at least `upLeftAlone`: a set-up
+    /// unless Tor was brought back on the network since, or is mid set-up.
+    static func awayReckoned(away: TimeInterval, leftKnown: Bool) -> TimeInterval {
+        leftKnown ? away : max(away, upLeftAlone)
     }
 
     /// A set-up younger than this, that is still moving, is not started over by a return.
