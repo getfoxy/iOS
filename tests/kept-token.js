@@ -94,7 +94,8 @@ ok(/this\.movingMints\(\) \|\| this\._changeDueAt\) \{ this\.tidyChangeLater\(mo
    'but not while change is on its way back to this phone');
 ok(/tidySteps: function \(\) \{/.test(read('build/wallet/19-bill-split.js')), 'the wallet says how many swaps that is');
 ok(/if TorReturn\.returnFindsRouteUp\(ready: ready, wasParked: wasParked, away: away,/.test(read('Foxy/Tor/TorService.swift'))
-   && /guard ready, !wasParked else \{ return false \}\s*return min\(away, sinceBroughtBack \?\? away\) < upLeftAlone/.test(read('Foxy/Tor/TorReturn.swift'))
+   // (and never over a SOCKS listener that does not answer: `listenerUp` false is a Tor iOS broke in its sleep, set up again)
+   && /guard ready, !wasParked, listenerUp != false else \{ return false \}\s*return min\(away, sinceBroughtBack \?\? away\) < upLeftAlone/.test(read('Foxy/Tor/TorReturn.swift'))
    && /static let upLeftAlone: TimeInterval = 30\n/.test(read('Foxy/Tor/TorReturn.swift')),
    'back while Tor was being kept up, it is left alone and the swap is not cut');
 {
