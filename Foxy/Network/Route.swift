@@ -109,8 +109,13 @@ enum Route {
     ///
     /// `circuit`: the Tor circuit label for this request (TorService.socksSession).
     /// Nil shares the circuit other requests to the same host use.
+    ///
+    /// `warm`: the page's spare circuit being opened (`warmSpare`): its session
+    /// is kept for the job that takes the circuit (`startWarm`). A request on
+    /// a circuit whose session is kept takes that session, and with it the
+    /// connection the spare made to the mint.
     @discardableResult
-    static func start(_ request: URLRequest, circuit: String? = nil,
+    static func start(_ request: URLRequest, circuit: String? = nil, warm: Bool = false,
                       _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask? {
         // Foxy is being put away: nothing new leaves (the door, below)
         guard !shut() else {
@@ -118,6 +123,10 @@ enum Route {
             return nil
         }
 #if canImport(Tor)
+        if TorService.isRunning, let circuit {
+            if warm { return startWarm(request, circuit: circuit, counted(done)) }
+            if let kept = takeWarm(circuit: circuit, host: request.url?.host) { return startOnce(kept, request, counted(done)) }
+        }
         if TorService.isRunning { return startOnce(TorService.socksSession(circuit: circuit), request, counted(done)) }
 #endif
         guard unprotected else { return nil }
@@ -170,6 +179,10 @@ enum Route {
     }
     static func shutDoor(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         shutUntil.value = now + shutFor
+#if canImport(Tor)
+        // and the spare's connection, which a suspended app would lose anyway
+        dropWarm()
+#endif
     }
     static func openDoor() {
         shutUntil.value = 0
@@ -235,6 +248,91 @@ enum Route {
         guard waited < holdAtMost else { return false }
         return remaining > holdReserve
     }
+
+#if canImport(Tor)
+    /* The connection the spare circuit made, kept for the job that takes it.
+     *
+     * Every request has a session of its own (`startOnce`), so every request
+     * also has a connection of its own: through the circuit to the mint, and
+     * a TLS handshake over it, two round trips over Tor before the question
+     * is asked. The page keeps one circuit ready for the next job somebody is
+     * waiting on, by asking the mint for its keysets on it (`warmSpare`), and
+     * opens it the moment the route comes back. Its session is kept here, not
+     * let go, so the first request of the job that takes the circuit goes out
+     * on the connection already open to the mint, on the circuit already
+     * built: on a return, the fee quote rode a circuit Tor had not begun.
+     *
+     * One at a time, for one circuit and one host. It goes to the first
+     * request on that circuit to that host, which is then its only user: it is
+     * started through `startOnce`, which lets the session go once that task
+     * has started, as every session's. A newer spare's replaces it. It is let
+     * go unused when Foxy is put away (`shutDoor`), when Tor's listener has
+     * moved since it was made, after five minutes, and when the spare's own
+     * request fails. What it carries across is the spare's public question
+     * and the job, which already share the circuit: nothing a job did not
+     * already share. */
+    private struct Warm {
+        let circuit: String
+        let host: String
+        let port: UInt16
+        let session: URLSession
+        let at: TimeInterval
+    }
+    private static let warm = Locked<Warm?>(nil)
+    static let warmFor: TimeInterval = 5 * 60
+
+    /// The spare's request, on a session kept for its circuit's job.
+    private static func startWarm(_ request: URLRequest, circuit: String,
+                                  _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask {
+        let warmSession = TorService.socksSession(circuit: circuit)
+        let kept = Warm(circuit: circuit, host: (request.url?.host ?? "").lowercased(), port: TorService.socksPort,
+                        session: warmSession, at: ProcessInfo.processInfo.systemUptime)
+        // a spare before this one is nobody's now: let go once what it has out is over
+        warm.exchange { _ in kept }?.session.finishTasksAndInvalidate()
+        let task = warmSession.dataTask(with: request)
+        redirectGuard.collect(task, limit: largestAnswer) { data, response, error in
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if error != nil || code != 200 {
+                // a circuit the mint did not answer on: its connection is not kept
+                var mine = false
+                warm.exchange { now in
+                    guard let now, now.session === warmSession else { return now }
+                    mine = true
+                    return nil
+                }
+                if mine { warmSession.invalidateAndCancel() }
+            }
+            done(data, response, error)
+        }
+        task.resume()
+        return task
+    }
+
+    /// The kept session, for the first request on its circuit to its host; nil,
+    /// and the session let go if it is stale, otherwise.
+    private static func takeWarm(circuit: String, host: String?,
+                                 now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> URLSession? {
+        var taken: Warm?
+        var stale: Warm?
+        warm.exchange { kept in
+            guard let kept else { return nil }
+            if now - kept.at > warmFor || kept.port != TorService.socksPort {
+                stale = kept
+                return nil
+            }
+            guard kept.circuit == circuit, kept.host == (host ?? "").lowercased() else { return kept }
+            taken = kept
+            return nil
+        }
+        stale?.session.invalidateAndCancel()
+        return taken?.session
+    }
+
+    /// Let go of the kept session: Foxy is being put away.
+    private static func dropWarm() {
+        warm.exchange { _ in nil }?.session.invalidateAndCancel()
+    }
+#endif
 
     /// A websocket to a Nostr relay, through Tor and nowhere else.
     ///

@@ -1439,7 +1439,14 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         #if DEBUG
         DebugLog.write("mint \(method) \(url.path) on circuit \(circuit.prefix(6))")
         #endif
-        let sent = Sent(url: url, method: method, circuit: circuit, began: Date(), mark: mark)
+        /* The page's spare circuit being opened (`warmSpare`): its connection is
+         * kept for the job that takes the circuit (Route.start `warm`), and a
+         * return's diary says when it was asked and when the mint answered. */
+        let warm = (body["warm"] as? Bool) == true && body["circuit"] as? String == circuit
+        let sent = Sent(url: url, method: method, circuit: circuit, began: Date(), mark: mark, warm: warm)
+        #if canImport(Tor)
+        if warm { TorService.spareAsked(circuit) }
+        #endif
         sendMintRequest(id: id, mreq, sent: sent, triesLeft: 1)
     }
 
@@ -1452,12 +1459,20 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         let circuit: String
         let began: Date
         let mark: String?
+        /// The page's spare circuit being opened.
+        var warm = false
 
         /// The diary's line for this request, in every build (NetDiary).
         func diary(_ outcome: String) {
+            let ms = Int(Date().timeIntervalSince(began) * 1000)
             print(NetDiary.line(method: method, host: NetDiary.host(of: url), path: url.path,
-                                circuit: circuit, ms: Int(Date().timeIntervalSince(began) * 1000),
-                                outcome: outcome, mark: mark))
+                                circuit: circuit, ms: ms, outcome: outcome, mark: mark))
+            #if canImport(Tor)
+            if warm {
+                let circuit = circuit, outcome = outcome
+                DispatchQueue.main.async { TorService.spareAnswered(circuit, ms: ms, outcome: outcome) }
+            }
+            #endif
         }
     }
 
@@ -1476,7 +1491,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
      * reached the mint, and those are the page's to reason about. */
     private func sendMintRequest(id: String, _ mreq: URLRequest, sent: Sent, triesLeft: Int) {
         let url = sent.url
-        let mintTask = Route.start(mreq, circuit: sent.circuit) { data, response, error in
+        let mintTask = Route.start(mreq, circuit: sent.circuit, warm: sent.warm) { data, response, error in
             // the session stopped reading at Route.largestAnswer (RedirectGuard)
             if error is AnswerTooLarge {
                 sent.diary("failed: too large")

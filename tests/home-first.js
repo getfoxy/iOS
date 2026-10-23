@@ -369,9 +369,12 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     const requests = [];
     const ctx = loadReal({
       routeWaitMs: opts.routeWaitMs,
+      spare: opts.spare,
       bridge: (w, m) => {
         if (m.action === 'mintRequest') {
-          requests.push({ url: m.url, circuit: m.circuit });
+          requests.push({ url: m.url, circuit: m.circuit, warm: m.warm === true, body: m.body });
+          // the spare's own request, answered when the scenario says (`holdWarm`)
+          if (m.warm === true && opts.holdWarm) return opts.holdWarm(() => reply(w, m.id, mint.handle(m)));
           if (opts.address && !/^https:\/\/m\.test\//.test(String(m.url))) {
             const got = opts.address(m, requests.filter((r) => r.url === m.url).length);
             // 'hang' is never answered; a promise is answered when the scenario says
@@ -483,6 +486,104 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     const ms = first.length ? Number((first[0].match(/phone (\d+) ms/) || [])[1]) : -1;
     ok(ms >= 25 && ms < 5000, 'counted from the moment the route opened', String(ms));
     ok(!gate.some((l) => /mint|example|http|sat/i.test(l)), 'naming no mint and no amount', gate.join(' | ').slice(0, 200));
+  }
+
+  /* ---- a return: the spare circuit is opened as the route opens ----------------
+   *
+   * On a phone's cellular return the route opened at 4.6 s and the fee quote,
+   * handed over a second later on a circuit of its own, took five seconds more.
+   * The circuit kept ready (`warmSpare`) used to be opened a second and a half
+   * after the route, so the quote never found it. Now it is opened the moment
+   * the route comes back to a connected wallet; the first job somebody waits on
+   * takes it even while it is still being opened, and the phone is told which
+   * request is the spare's (`warm`) so it keeps that connection for the job.
+   * Handed out once: the next job goes on a circuit of its own. */
+  const soon = async (fn, ms) => { for (let at = 0; at < (ms || 4000); at += 20) { if (fn()) return true; await sleep(20); } return false; };
+  {
+    let release = null;
+    const q = page({ spare: true, holdWarm: (go) => { release = go; } });
+    q.W._spareAfterMs = 86400000;                 // nothing opened "soon": only the return's own, at once
+    await q.W.connect(MINT, null, null, { remember: true });
+    await q.W.claim((await q.W.invoice(500, '')).hash);
+    const bolt11 = (await q.W.invoice(40, '')).bolt11;
+    const diary = [];
+    const con = q.window.console, log = con.log;
+    con.log = (...a) => { diary.push(a.join(' ')); };
+    dark(q.W);
+    coming(q.W);
+    const mark = q.requests.length;
+    up(q.W);
+    const warmed = q.requests.slice(mark).filter((r) => r.warm);
+    ok(warmed.length === 1 && q.requests.length === mark + 1 && /\/v1\/keysets$/.test(warmed[0].url) && /^[0-9a-f]{32}$/.test(warmed[0].circuit),
+       'the route opening on a connected wallet opens the spare at once: the mint\u2019s keysets, on a circuit of its own, marked as the spare\u2019s',
+       JSON.stringify(q.requests.slice(mark)).slice(0, 200));
+    // the person's fee quote, a second later in life and before the mint has answered on the spare
+    await sleep(20);
+    const fee = await q.W.quoteFee(bolt11);
+    const quoted = q.requests.slice(mark).find((r) => /\/v1\/melt\/quote\/bolt11$/.test(r.url));
+    ok(!!fee && !!quoted && quoted.circuit === warmed[0].circuit && quoted.warm === false,
+       'the fee quote takes the spare\u2019s circuit while it is still being opened, as an ordinary request',
+       (quoted && quoted.circuit) + ' vs ' + (warmed[0] && warmed[0].circuit));
+    const first = diary.filter((l) => /^\[foxy\] tor gate: the first request since the route opened/.test(l));
+    ok(first.length === 1 && /handed to the phone \d+ ms after it, on the warmed circuit: yes \(still being opened\)$/.test(first[0]),
+       'the diary counts the quote as the first request, not the spare, and says it rode the warmed circuit', first.join(' | '));
+    // a receive started while the spare is still opening, and taken: a circuit of its own, never the payment's
+    const m1 = q.requests.length;
+    await q.W.invoice(22, '');
+    const beside = q.requests.slice(m1).find((r) => /\/v1\/mint\/quote\/bolt11$/.test(r.url));
+    ok(!!beside && beside.circuit !== warmed[0].circuit, 'a receive asked while it opens does not share the payment\u2019s circuit',
+       beside && beside.circuit);
+    // the spare lands: it was taken, so it is the quote's alone and nobody's spare
+    release();
+    await soon(() => diary.some((l) => /is ready for what comes next/.test(l)), 2000);
+    ok(q.W._spare() === '' && diary.some((l) => /already taken by the job that came while it opened/.test(l)),
+       'once the mint answers on it, a spare a job took is not offered again', q.W._spare());
+    // the payment after the quote stays on the quote's circuit; another job is another circuit
+    const m2 = q.requests.length;
+    await q.W.pay(bolt11, () => {}, { quote: fee });
+    const melt = q.requests.slice(m2).find((r) => /\/v1\/melt\/bolt11$/.test(r.url));
+    ok(!!melt && melt.circuit === warmed[0].circuit, 'the payment melts on the circuit its quote took',
+       melt && melt.circuit);
+    const m3 = q.requests.length;
+    await q.W.invoice(21, '');
+    const other = q.requests.slice(m3).find((r) => /\/v1\/mint\/quote\/bolt11$/.test(r.url));
+    ok(!!other && other.circuit !== warmed[0].circuit, 'and the next job goes on a circuit of its own: one spare, one job',
+       other && other.circuit);
+    con.log = log;
+
+    // a return that opens the spare and has no route a moment later: what lands then is kept by nobody
+    release = null;
+    dark(q.W); coming(q.W); up(q.W);
+    dark(q.W);
+    if (release) release();
+    await sleep(30);
+    ok(q.W._spare() === '', 'a spare whose route went while it opened is not kept');
+    coming(q.W);
+  }
+
+  /* And the claim a return makes of a payment kept with no route: on the spare, the walk's first swap. */
+  {
+    const payer = page({});
+    await payer.W.connect(MINT, null, null, { remember: true });
+    await payer.W.claim((await payer.W.invoice(500, '')).hash);
+    const rx = page({ sharedMint: payer.mint, spare: true,
+      words: 'legal winner thank year wave sausage worth useful legal winner thank yellow' });
+    rx.W._spareAfterMs = 86400000;
+    await rx.W.connect(MINT, null, null, { remember: true });
+    await rx.W.primeLocks();
+    const ask = rx.W.decodeRequest(rx.W.paymentRequest(33, { purpose: 'receive' })) || {};
+    const sent = await payer.W.sendToken(33, { unit: 'sat', lockTo: ask.lockTo });
+    dark(rx.W);
+    const kept = await rx.W.receiveToken(sent.token).then((r) => r, (e) => ({ why: e && e.message }));
+    ok(kept && kept.kept === true, 'a payment locked to this phone, taken with no route, is kept to be swapped in', JSON.stringify(kept).slice(0, 120));
+    coming(rx.W);
+    const mark = rx.requests.length;
+    up(rx.W);
+    const warmed = rx.requests.slice(mark).filter((r) => r.warm);
+    await soon(() => rx.requests.slice(mark).some((r) => /\/v1\/swap$/.test(r.url)), 4000);
+    const swap = rx.requests.slice(mark).find((r) => /\/v1\/swap$/.test(r.url));
+    ok(warmed.length === 1 && !!swap && swap.circuit === warmed[0].circuit,
+       'the return\u2019s claim swaps on the spare the return opened', (swap && swap.circuit) + ' vs ' + (warmed[0] && warmed[0].circuit));
   }
 
   /* ---- a payment scanned while the connection is on its way ------------------

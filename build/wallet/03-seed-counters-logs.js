@@ -1293,45 +1293,99 @@
    * keysets followed by the job, which is what a job's first connect looks
    * like anyway. Work nobody is waiting on (sweeps, checks, top-ups) does not
    * take it. It is let go after five minutes, when Tor would be retiring the
-   * circuit, when the mint changes, and when Foxy has been away. */
+   * circuit, when the mint changes, and when Foxy has been away.
+   *
+   * When the route comes back to a connected wallet it is opened at once,
+   * not a moment later (11-routing.js), because the first thing a person
+   * does then (a fee quote, a payment, a card's payment kept with no route)
+   * used to leave on a circuit Tor had not begun: on a phone's cellular
+   * return the route opened at 4.6 s and the fee quote, handed over a second
+   * later on a circuit of its own, took five more. Now it takes the one
+   * already under way, and the phone keeps the connection the spare made to
+   * the mint for it. The rule is unchanged: one spare to one job, at the
+   * mint it was opened for. */
   var spare = /** @type {?{ label: string, mint: string, at: number }} */ (null);
   var sparing = /** @type {?Promise<boolean>} */ (null);
   var SPARE_FOR_MS = 5 * 60 * 1000;
+  /* The circuit being opened now, before the mint has answered on it: its
+   * label, its mint, and whether a job has already taken it (`takeSpare`).
+   * `gen` is `spareGen` when it began: one that began before a `dropSpare`
+   * is nobody's spare when it lands. */
+  var warming = /** @type {?{ label: string, mint: string, gen: number, taken: boolean }} */ (null);
+  var spareGen = 0;
+  /* The labels a job took from the spare, newest last, and whether the mint
+   * had answered on it yet: for the connection diary's line on the first
+   * request after the route opens (`noteRequestLeft`). Labels only. */
+  var spareTaken = /** @type {Array<{ label: string, ready: boolean }>} */ ([]);
 
   function spareReady() {
     return !!(spare && wallet && spare.mint === mintOf(wallet) && Date.now() - spare.at < SPARE_FOR_MS);
   }
 
-  function dropSpare() { spare = null; }
+  /* Let go of the one kept, and of the one being opened: what lands of it
+   * afterwards is kept by nobody. */
+  function dropSpare() {
+    spare = null;
+    warming = null;
+    sparing = null;
+    spareGen += 1;
+  }
+
+  /* Whether `label` came from the spare: '' when it did not, 'ready' when the
+   * mint had answered on it when it was taken, 'opening' when it was still
+   * being opened. */
+  function spareRode(label) {
+    var l = String(label || '');
+    if (!l) return '';
+    for (var i = spareTaken.length - 1; i >= 0; i--) {
+      if (spareTaken[i].label === l) return spareTaken[i].ready ? 'ready' : 'opening';
+    }
+    return '';
+  }
 
   /* Open one, unless one is ready or on its way. Two tries at most, each on a
    * circuit of its own and given eight seconds: a road that will not carry
    * this is not one to keep. Resolves whether a spare is ready. Silent when
    * it fails; the job that would have used it asks on a fresh circuit, as it
-   * always did. */
+   * always did.
+   *
+   * One a job has already taken while it was being opened is that job's, so
+   * another is opened beside it rather than waited for. The request is
+   * marked as the spare's (`foxyWarm`): the phone keeps the connection it
+   * made to the mint for the job that takes this circuit (Route.keepWarm),
+   * and its diary of a return says when the spare was warmed. */
   function warmSpare() {
     if (FoxyWallet._spareOff || !wallet || !routeOpen() || !bridged()) return Promise.resolve(false);
     if (spareReady()) return Promise.resolve(true);
-    if (sparing) return sparing;
+    if (sparing && !(warming && warming.taken)) return sparing;
     spare = null;
-    var at = mintOf(wallet);
+    var at = mintOf(wallet), gen = spareGen;
+    var mine = function () { return gen === spareGen && !!wallet && mintOf(wallet) === at && routeOpen(); };
     var tryOne = function (left) {
       var label = newCircuitLabel(), began = Date.now();
+      var opening = { label: label, mint: at, gen: gen, taken: false };
+      warming = opening;
       var asked = FoxyWallet.nativeRequest({ endpoint: at + '/v1/keysets', method: 'GET',
-                                              foxyFresh: true, foxyCircuit: label });
+                                              foxyFresh: true, foxyWarm: true, foxyCircuit: label });
       var clock = new Promise(function (_, no) {
         setTimeout(function () { no(new Error('no answer')); }, FoxyWallet._spareWaitMs || 8000);
       });
+      var over = function () { if (warming === opening) warming = null; };
       return Promise.race([asked, clock]).then(function () {
-        // the mint changed, or the route went, while it was being opened
-        if (!wallet || mintOf(wallet) !== at || !routeOpen()) return false;
-        spare = { label: label, mint: at, at: Date.now() };
+        over();
+        // the mint changed, or the route went, or it was let go, while it was being opened
+        if (!mine()) return false;
         console.log('[foxy] a circuit to ' + hostOf(at) + ' is ready for what comes next, in '
-          + (Date.now() - began) + ' ms');
+          + (Date.now() - began) + ' ms' + (opening.taken ? ', and already taken by the job that came while it opened' : ''));
+        // taken while it opened: that job's alone, and no spare for the next one yet
+        if (opening.taken) return false;
+        spare = { label: label, mint: at, at: Date.now() };
         return true;
       }, function () {
-        if (left > 0 && wallet && mintOf(wallet) === at && routeOpen()) return tryOne(left - 1);
-        console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
+        over();
+        // one a job took is that job's to wait on, and not tried again for it
+        if (left > 0 && mine() && !opening.taken) return tryOne(left - 1);
+        if (gen === spareGen) console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
         return false;
       });
     };
@@ -1349,14 +1403,38 @@
     setTimeout(function () { warmSpare(); }, FoxyWallet._spareAfterMs === undefined ? 1500 : FoxyWallet._spareAfterMs);
   }
 
+  /* The spare's label for a job somebody is waiting on, or '' when there is
+   * none. The one kept ready first; failing that, on the connected wallet's
+   * mint, the one being opened right now, which is further along than any
+   * circuit the job could ask for itself. That is the case of a return: the
+   * spare is opened the moment the route opens (11-routing.js), and the
+   * person's fee quote comes a second later, before the mint has answered on
+   * it. Either way it is handed out once. */
+  function takeSpare() {
+    var label = '', ready = false;
+    if (spareReady()) {
+      label = /** @type {{ label: string }} */ (spare).label;
+      ready = true;
+    } else if (warming && !warming.taken && warming.gen === spareGen && wallet
+               && warming.mint === mintOf(wallet) && routeOpen()) {
+      warming.taken = true;
+      label = warming.label;
+    }
+    spare = null;
+    if (label) {
+      spareTaken.push({ label: label, ready: ready });
+      if (spareTaken.length > 8) spareTaken.shift();
+    }
+    return label;
+  }
+
   /* The connected wallet for a job somebody is waiting on: on the spare
-   * circuit when one is ready, and on a new one of its own when not. */
+   * circuit when one is ready or being opened, and on a new one of its own
+   * when not. */
   function viewNow(w) {
-    if (!spareReady()) { dropSpare(); warmSpareSoon(); return onCircuit(w); }
-    var label = /** @type {{ label: string }} */ (spare).label;
-    dropSpare();
+    var label = takeSpare();
     warmSpareSoon();
-    return onLabel(w, label);
+    return label ? onLabel(w, label) : onCircuit(w);
   }
 
   function needNow() {

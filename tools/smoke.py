@@ -570,7 +570,18 @@ socks_uses = [l.strip() for l in code_all.splitlines()
               if 'socksSession(' in l and 'func socksSession(' not in l
               and 'startOnce(TorService.socksSession(' not in l
               # Route.startSocket: one session for one relay socket, invalidated by its caller
-              and 'let session = TorService.socksSession(circuit: circuit)' not in l]
+              and 'let session = TorService.socksSession(circuit: circuit)' not in l
+              # Route.startWarm: the spare circuit's session, kept for one request (checked below)
+              and 'let warmSession = TorService.socksSession(circuit: circuit)' not in l]
+# The spare's session (Route.startWarm) is the one kept past its task: for the
+# first request of the job that takes its circuit, which starts it through
+# startOnce and so lets it go. It must also be let go when a newer spare
+# replaces it, when its own request fails, when it is stale, and when Foxy is
+# put away; and only one is kept.
+warm_fn = re.search(r'private static func startWarm\((.*?)\n    \}', route_src, re.S)
+take_fn = re.search(r'private static func takeWarm\((.*?)\n    \}', route_src, re.S)
+shut_fn = re.search(r'static func shutDoor\((.*?)\n    \}', route_src, re.S)
+start_fn = re.search(r'static func start\(_ request: URLRequest(.*?)\n    \}', route_src, re.S)
 task_files = sorted(p for p in swift_files
                     if '.dataTask(' in swift_code(open(p, encoding='utf8').read()) and not p.endswith('Route.swift'))
 needs = [
@@ -580,6 +591,17 @@ needs = [
      'Route.startOnce no longer invalidates its session once the task has started'),
     (not socks_uses, "Tor's per-request session is used other than through Route.startOnce: " + '; '.join(socks_uses)[:160]),
     (not task_files, 'a data task is made outside Route.swift, where its session may never be invalidated: ' + ', '.join(task_files)),
+    (bool(warm_fn) and 'private static let warm = Locked<Warm?>(nil)' in route_src
+     and '?.session.finishTasksAndInvalidate()' in warm_fn.group(1)
+     and 'warmSession.invalidateAndCancel()' in warm_fn.group(1),
+     "the spare's kept session is not let go when a newer one replaces it or its request fails"),
+    (bool(take_fn) and 'stale?.session.invalidateAndCancel()' in take_fn.group(1)
+     and 'kept.circuit == circuit' in take_fn.group(1) and 'warmFor' in take_fn.group(1),
+     "the spare's kept session is handed to a request on another circuit, or kept when stale"),
+    (bool(start_fn) and 'startOnce(kept, request' in start_fn.group(1),
+     "the spare's kept session is used other than through startOnce, which lets it go"),
+    (bool(shut_fn) and 'dropWarm()' in shut_fn.group(1),
+     "the spare's kept session outlives Foxy being put away"),
     (not re.search(r'clearSession\.(finishTasksAndInvalidate|invalidateAndCancel)', code_all),
      "the open connection's shared session is invalidated: every later unprotected request would fail"),
 ]

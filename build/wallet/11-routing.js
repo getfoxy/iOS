@@ -70,13 +70,19 @@
         claimOnReturnT = setTimeout(function () {
           claimOnReturnT = null;
           if (!routeOpen()) return;
-          Promise.resolve().then(function () { return FoxyWallet.claimUnclaimed(); }).then(null, function (e) {
+          // the first claim is somebody's wait (a till's, a payer's): on the circuit kept ready, when it is free
+          Promise.resolve().then(function () { return FoxyWallet.claimUnclaimed({ now: true }); }).then(null, function (e) {
             console.warn('[foxy] the payments waiting for a route, on its return:', e && e.message);
           });
         }, 1500);
       }
-      // Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`)
-      if (!wasUp && privacy.tor === 'up') warmSpareSoon();
+      /* Tor has just come up: a circuit is made ready for whatever comes next (`warmSpare`). At once on a wallet
+       * that was connected for real, which is a return: the first job a person starts then takes this circuit
+       * while it is still being opened (`takeSpare`), rather than asking Tor for a new one a second behind it.
+       * A wallet built from storage is left to its connect, which opens one itself. */
+      if (!wasUp && privacy.tor === 'up') {
+        if (wallet && !wallet.foxyFromCache) warmSpare(); else warmSpareSoon();
+      }
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
       if (!wasUp && privacy.tor === 'up') headerLater();
       return FoxyWallet.privacy();

@@ -1073,7 +1073,11 @@
      * anything — is still money, and this is what goes and gets it. The lock
      * key is found by the lock itself, so it does not matter that the request
      * it belonged to is long forgotten. */
-    claimUnclaimed: function () {
+    /* `opts.now`: the walk a return starts. Its first claim at this mint is
+     * swapped on the circuit kept ready (`receiveToken` `now`), which the
+     * return opened as the route came back; the rest go as they did, each on
+     * one of its own. */
+    claimUnclaimed: function (opts) {
       /* One walk at a time, shared. A connect starts one and so does every
        * screen money can leave from; the second, waiting its turn behind the
        * first, was then refused by the mint for ecash the first had just
@@ -1081,7 +1085,7 @@
       if (claimingLate) return claimingLate;
       /* Not while a card's visit has this phone at the card's mint (08a-flashcard.js, `cardVisit`): the walk would set out from
        * there, and come back to it. Once the phone is home. */
-      if (cardAway) return cardAway.finished.then(function () { return FoxyWallet.claimUnclaimed(); });
+      if (cardAway) return cardAway.finished.then(function () { return FoxyWallet.claimUnclaimed(opts); });
       // a card's payments kept with no route, put right first where a write between two of their steps did not land (08a-flashcard.js)
       try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       var all = unclaimed(), ids = Object.keys(all);
@@ -1106,6 +1110,7 @@
       claimHeldSaid = -1;
       console.log('[foxy] a payment for a request was never claimed:', ids.length, 'waiting');
       var took = 0;
+      var spareFree = !!(opts && opts.now);
       /* Where the phone is, to come back to. Ecash from another mint is
        * claimed at that mint, and the claim used to leave the wallet there:
        * a receiver that took a payment to carry home, and claimed it late,
@@ -1200,7 +1205,9 @@
           if (one.cardKept && cardKeptPost(id) === 'drop') { dropUnclaimed(id); return null; }
           arrivingHold(id, { amount: amountOfRecord(one), unit: ru, mint: unclaimedMint(one) || where, hash: 'req-' + id });
           walkCalling = true;
-          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true }); }
+          var now = spareFree && !!startedAt && (!where || where === startedAt);
+          if (now) spareFree = false;
+          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true, now: now }); }
           catch (eSync) { arrivingLetGo(id); throw eSync; }
           finally { walkCalling = false; }
           claim = claim.then(function (r) { arrivingLetGo(id); return r; }, function (e) { arrivingLetGo(id); throw e; });

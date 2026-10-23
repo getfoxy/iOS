@@ -664,6 +664,22 @@ enum TorService {
         print("[foxy] tor: set-up +\(Int((Date().timeIntervalSince(began) * 1000).rounded())) ms: \(what)")
     }
 
+    /// The page's spare circuit for the mint was asked for (`warmSpare`, which a
+    /// return starts the moment the route opens), and how it went. Diary lines
+    /// only: the first six of the circuit's label, which the request lines
+    /// carry too, and never the mint. Main queue.
+    static func spareAsked(_ circuit: String) {
+        step("warming a spare for the mint (circuit \(circuit.prefix(6)))")
+    }
+
+    static func spareAnswered(_ circuit: String, ms: Int, outcome: String) {
+        if outcome == "200" {
+            step("spare warmed for the mint (circuit \(circuit.prefix(6))) in \(ms) ms")
+        } else {
+            step("spare for the mint not warmed (circuit \(circuit.prefix(6))): \(outcome)")
+        }
+    }
+
     /// Foxy is going to the background: Tor comes off the network now, while
     /// iOS still lets it answer.
     ///

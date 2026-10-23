@@ -719,11 +719,16 @@
     }
   }
 
-  function noteRequestLeft() {
-    if (firstRequestSaid || !routeOpenedAt) return;
+  /* `circuit`: the request's circuit label, to say whether it rides the spare
+   * (`spareRode`). `warm`: the spare's own opening, which is nobody's first
+   * request and is not counted as one. */
+  function noteRequestLeft(circuit, warm) {
+    if (warm || firstRequestSaid || !routeOpenedAt) return;
     firstRequestSaid = true;
+    var rode = spareRode(circuit);
     // handed to the phone, which may still hold it back (its own "[foxy] net:" line says whether it went out)
-    console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt) + ' ms after it');
+    console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt)
+      + ' ms after it, on the warmed circuit: ' + (rode === 'ready' ? 'yes' : rode === 'opening' ? 'yes (still being opened)' : 'no'));
   }
 
   /* ---- a route that is on its way ------------------------------------------
