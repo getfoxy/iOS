@@ -229,7 +229,7 @@ function rxApp(c, o) {
   const opts = o || {};
   const W = c.W;
   const a = Object.assign(lift(W, COMMON.concat(['tapPriceOffered(text) {', 'priceTermsCard(q) {', 'priceAnswer(yes) {', 'priceSpec() {',
-    'convertOnReturn(due) {', 'convertWaiting() {', 'convertLater() {', 'swapPendingCard(r) {', 'moneyBusy() {'])), {
+    'convertOnReturn(due) {', 'convertWaiting() {', 'convertLater() {', 'swapPendingCard(r, o) {', 'moneyBusy() {'])), {
     CONVERT_WAITS: 6,
     state: { screen: 'home', stack: [], tapArmed: false }, cards: [], toasts: [], made: [], settled: [], events: [],
     setState(u) { Object.assign(this.state, typeof u === 'function' ? u(this.state) : u); },
@@ -614,7 +614,7 @@ async function run() {
     const say = (id, outcome) => ({ id, outcome, state: outcome === 'done' ? 'done' : 'claimed', rec: { id, got: 5000 },
       from: { unit: 'sat', amount: 5000 }, to: { unit: 'usd', amount: outcome === 'done' ? 380 : 0 } });
     const appOf = (W, extra) => Object.assign(lift(W, COMMON.concat(['convertOnReturn(due) {', 'convertWaiting() {', 'convertLater() {',
-      'swapPendingCard(r) {', 'moneyBusy() {'])), {
+      'swapPendingCard(r, o) {', 'moneyBusy() {'])), {
       CONVERT_WAITS: 6, state: { screen: 'home', stack: [], tapArmed: false }, cards: [], toasts: [], settled: [], went: [],
       setState(u) { const n = typeof u === 'function' ? u(this.state) : u; if (n.screen) this.went.push(n.screen); Object.assign(this.state, n); },
       blockedCard(kind, cc) { this.cards.push(Object.assign({ kind }, cc)); },

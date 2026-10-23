@@ -4083,7 +4083,7 @@
           this.refreshBalance();
           this.loadHistory();
           this.setState({ swapBusy: false, swapQuote: null });
-          if (sw && sw.state === 'pending') { this._swapCard = null; this.swapStillGoing(sw); return; }
+          if (sw && sw.state === 'pending') { this.fcSwapPending(sw, took, from); return; }
           if (!(sw && sw.state === 'done')) { this.fcSwapBack(took, from, pin); return; }
           /* (what the mint's fee reserve did not use came back to this phone in the currency that left: it goes back on the card in the
            * same tap, `back`) */
@@ -4097,6 +4097,25 @@
           this.fcSwapBack(took, from, pin);
         });
     });
+  }
+
+  /* The swap's first half made and the second not answered: back on the card's screen, not home, with what came off the card
+   * (`took`, which the card signed away) taken from its figures, since the card is not read again here; the card over it says
+   * where the swap stands (26i-swap.js, `swapPendingCard`). The sweeps finish the swap when the mint answers: what it brings
+   * lands in this phone, in the other currency, and ADD FUNDS puts it on the card; a swap the mint never made leaves what
+   * came off in this phone, in the currency it left in. */
+  fcSwapPending(sw, took, unit) {
+    const sc = this._swapCard;
+    this._swapCard = null;
+    this._preSettle = null;
+    const fc = this.state.fc;
+    const off = Math.max(0, Math.round(Number(took) || 0));
+    const next = (fc && sc && fc.key === sc.key && off > 0) ? Object.assign({}, fc, {
+      balance: fc.unit === unit ? Math.max(0, (Number(fc.balance) || 0) - off) : fc.balance,
+      bal: fc.bal ? Object.assign({}, fc.bal, { [unit]: Math.max(0, (Number(fc.bal[unit]) || 0) - off) }) : fc.bal,
+    }) : fc;
+    this.setState({ screen: 'flashcard', stack: [], fc: next, swapResult: null });
+    this.swapPendingCard(sw, { card: true });
   }
 
   // the swap was not made: what came off the card is in this phone, in the currency it left in, to put back or keep

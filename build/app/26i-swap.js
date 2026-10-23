@@ -540,14 +540,18 @@
   /* The card itself, wherever the person is: SWAP's own, and a swap into
    * dollars Foxy started by itself (`convertOnReturn`), which puts it over
    * home without taking anybody there. */
-  swapPendingCard(r) {
+  /* `o.card`: a swap from a card (26f-flashcard.js, `fcSwapPending`): what the swap brings lands in this phone, and the
+   * card says so, since the card itself is not tapped again for it. */
+  swapPendingCard(r, o) {
     const from = (r && r.from) || {};
     const fig = this.unitFigure(Number(from.amount) || 0, from.unit === 'sat' ? 'sat' : 'usd');
+    const to = (r && r.to && r.to.unit === 'sat') ? 'bitcoin' : 'dollars';
     this.blockedCard('swapPending', {
       tone: 'warn',
       title: 'SWAP STILL GOING THROUGH',
       reason: 'The mint has your ' + fig + ' and has not finished the swap yet. Foxy finishes it by itself '
-        + 'the next time the mint answers.',
+        + 'the next time the mint answers.'
+        + ((o && o.card) ? ' The ' + to + ' it brings goes to this phone; ADD FUNDS puts it on the card.' : ''),
       chip: 'Nothing is lost. Your balance shows it as pending with the mint until then.',
     });
   }

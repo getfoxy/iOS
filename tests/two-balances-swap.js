@@ -57,7 +57,7 @@ const method = (sig) => {
 };
 // (`swapHave`: what there is to swap, this phone's balance or a card's, 26f-flashcard.js `fcSwap`; `swapComing`: a card's, counted as coming)
 const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 'swapComing(u) {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
-  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r) {', 'swapDoneClose() {',
+  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r, o) {', 'swapDoneClose() {',
   'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
