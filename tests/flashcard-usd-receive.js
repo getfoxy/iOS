@@ -118,6 +118,23 @@ async function receiveDollars(till, R, amount) {
     ok(till.state.paidUnit === 'usd' && till.state.paidAmount === 100,
        'PAYMENT RECEIVED in dollars: 100 cents, by the dollar invoice’s own watch', JSON.stringify({ unit: till.state.paidUnit, amount: till.state.paidAmount }));
     ok(cardBefore - k.balance() === 1300, 'the card paid the invoice’s 1,300 sats, and only those', String(cardBefore - k.balance()));
+    /* Between the card's payment and PAYMENT RECEIVED the code is still on screen: CARD pressed again then brings no second
+     * sheet, which read the card again for the same code and refused it as short on the phone. */
+    {
+      const was = { fcUsd: till._fcUsd, screen: till.state.screen, invoiceHash: till.state.invoiceHash };
+      till._fcUsd = { hash: inv.hash, bolt11: inv.bolt11, sats: 1300, melting: true };
+      till.setState({ screen: 'confirm', invoiceHash: inv.hash });
+      R.sheet.length = 0;
+      const toastsBefore = till.toasts.length;
+      till.payByCard();
+      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.length === toastsBefore + 1 && /The card has paid this code/.test(till.toasts.slice(-1)[0]),
+         'CARD pressed again while the card’s payment settles: no second sheet, a word instead', (till.toasts.slice(-1)[0] || '') + ' | ' + R.sheet.join(' / '));
+      till._fcUsd = { hash: inv.hash, bolt11: inv.bolt11, sats: 1300, landingUntil: Date.now() + 20000 };
+      till.payByCard();
+      ok(!R.sheet.some((x) => /^begin: /.test(x)), 'nor while the paid code’s dollars are landing');
+      till._fcUsd = was.fcUsd;
+      till.setState({ screen: was.screen, invoiceHash: was.invoiceHash });
+    }
     ok(cents(R) - centsBefore === 100 && sats(R) === satsBefore,
        'the dollar balance rose by 100 cents, and the bitcoin balance did not move', JSON.stringify({ usd: cents(R), sat: sats(R) }));
     ok(quoteState(R, inv.hash) === 'ISSUED', 'the mint says its dollar invoice was paid, and its dollars issued', quoteState(R, inv.hash));

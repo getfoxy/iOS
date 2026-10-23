@@ -1234,6 +1234,8 @@
     }
     // no code yet: a dollar card needs none, and a bitcoin card is told to tap again once it is up
     if (!bolt11) { this.fcPayStart(0, false, null, null, { cents, bolt11: '', hash: '', sats: 0 }); return; }
+    // the code on screen paid by a card already, its dollars landing: no second sheet for it (`fcUsdLanding`, as `fcPayBegin`)
+    if (this.fcUsdLanding()) { this.toast('The card has paid this code. The dollars land in a moment.', true); return; }
     const usd = { bolt11, hash: String(s.invoiceHash || ''), cents, sats, run: this._invoiceRun, ends };
     // the code on screen is kept while the card pays it (`fcUsdHolds`), and not replaced when its minute runs out
     this._fcUsd = usd;
@@ -1243,6 +1245,15 @@
   /* Whether the dollar code `hash` is being paid by a card at this moment: tapped, its PIN asked for, waiting for the
    * mint, or its sats on their way to the invoice. The receive screen does not swap it for a new code meanwhile
    * (12-receive.js, `recvClockTick`), which would leave the sats paying a code nobody is watching. */
+  /* Whether the dollar code on screen is being paid by a card's sats right now, or was paid moments ago and its dollars are
+   * landing: melting, pending with the mint, or paid with the watch's twenty seconds running (`fcUsdPay`, `fcUsdLand`). */
+  fcUsdLanding() {
+    const u = this._fcUsd;
+    const hash = this.state && this.state.invoiceHash;
+    if (!u || !hash || u.hash !== hash || u.done) return false;
+    return !!(u.melting || u.pending || (u.landingUntil && u.landingUntil > Date.now()));
+  }
+
   fcUsdHolds(hash) {
     // a card at another mint paying this very code from there (`fcXmPay`): kept until that payment is over
     const x = this._fcXmLive;
@@ -1461,6 +1472,13 @@
    * that left part way), so that it is the same share that is ticked when the mint says paid. */
   fcPayBegin(sats, share) {
     const W = this.fcW();
+    /* The dollar code on screen has been paid by a card already, and its dollars are landing (the card's sats are with the
+     * mint, or paid and the code's watch about to say so): no second sheet, which read the card again for the same code and
+     * refused it as short. The owner tapped twice in the seconds between the card's payment and PAYMENT RECEIVED. */
+    if (!share && this.fcUsdLanding()) {
+      this.toast('The card has paid this code. The dollars land in a moment.', true);
+      return;
+    }
     /* No route to the mint: a card still pays, with nothing asked of the person. The wallet takes it only from a card
      * that proves its money with the mint's own proofs and has a week or more left on it, and only an exact set of its
      * pieces; the card signs the swap over to this phone, which nobody else can use, and this phone settles it with the
