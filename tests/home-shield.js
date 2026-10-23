@@ -422,6 +422,28 @@ const STATES = [
       'and is headed by the name alone, with no MINT under it and no chevron', fcBlock);
   }
 
+  // ---- 7. HOME | CARD at the foot of both screens, and no snow on the money card or the card's picture ----------
+  {
+    /* The two-way pill (history's DOLLARS | BITCOIN: a dark track, the chosen half raised) is the first thing in each screen's
+     * bottom group, which is laid out bottom first, so it sits below SCAN / PASTE / SWAP at the group's own spacing. The dots
+     * and "Swipe left for your card" are gone. */
+    const tabs = markup.split('<sc-if value="{{ pageTabsShown }}">');
+    const block = (i) => tabs[i].slice(0, tabs[i].indexOf('</sc-if>') + 8);
+    ok(tabs.length === 3 && block(1) === block(2), 'the HOME | CARD pill is in the markup twice, home’s and the card screen’s, letter for letter');
+    const hist = markup.slice(markup.indexOf('<sc-for list="{{ histTabs }}"'), markup.indexOf('</sc-for>', markup.indexOf('<sc-for list="{{ histTabs }}"')));
+    const halfStyle = (t) => (t.match(/style="flex:1;height:50px;[^"]*"/) || [''])[0];
+    ok(!!halfStyle(hist) && halfStyle(block(1)) === halfStyle(hist)
+       && block(1).indexOf('padding:4px;border-radius:30px;background:var(--chip);border:1px solid rgba(var(--ink-rgb),.1)') > 0,
+      'and its track and halves are history’s DOLLARS | BITCOIN, the same height and style');
+    const foot = (row) => markup.slice(markup.lastIndexOf('<div style="flex:none;padding:10px 22px 26px', markup.indexOf(row)), markup.indexOf(row));
+    ok(/column-reverse;align-items:center;gap:18px">\n<sc-if value="\{\{ pageTabsShown \}\}">[^\n]*\n$/.test(foot('<sc-if value="{{ homeOneMint }}">'))
+       && /column-reverse;align-items:center;gap:18px">\n<sc-if value="\{\{ pageTabsShown \}\}">[^\n]*\n$/.test(foot('<sc-if value="{{ fcRowShown }}">')),
+      'on both screens it opens the bottom group, so it sits below SCAN / PASTE / SWAP, 18px from it');
+    ok(markup.indexOf('swipeDot') < 0 && markup.indexOf('Swipe left for your card') < 0, 'the dots and the swipe hint are gone from both screens');
+    ok(markup.indexOf('data-snow-cap') < 0 && !/foxySnow(Drape|Pile|Clump)/.test(markup + app),
+      'no snow settles on the money card or on the card’s picture any more');
+  }
+
   const real = errors.filter((e) => !/Not implemented|navigation/i.test(e));
   ok(real.length === 0, 'no errors in the page', real.slice(0, 3).join(' | '));
   console.log('\n' + (failed ? passed + ' passed, ' + failed + ' failed' : 'all ' + passed + ' home shield checks pass'));

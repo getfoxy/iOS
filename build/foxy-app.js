@@ -12189,40 +12189,9 @@ class Component extends DCLogic {
     + '[data-snow] i>i>i{width:100%;height:100%;border-radius:50%;opacity:0;'
     + 'background:radial-gradient(circle at 34% 30%,#FFF 0%,#E4EEF6 45%,rgba(190,212,230,.55) 100%);'
     + 'animation:foxySnowFade linear infinite}'
-    /* And where it lands on something, it settles. The panel on the home
-     * screen, and a card on its own screen, have a top edge, round at both
-     * corners, for the snow to gather on (`data-snow-cap`, in the markup at
-     * the top of the panel and beside the card): a drift that rises along the
-     * edge and clumps that swell on it, each on its own clock, and a band
-     * across the whole width that creeps down round both corners to where
-     * they end. From nothing to settled in about half a minute, once, and it
-     * stays until the screen is left. */
-    + '@keyframes foxySnowPile{0%{transform:scale(.9,0)}100%{transform:scale(1,1)}}'
-    + '@keyframes foxySnowClump{0%{transform:scale(0)}100%{transform:scale(1)}}'
-    + '@keyframes foxySnowDrape{0%{clip-path:inset(-3cqw -3cqw 100% -3cqw)}100%{clip-path:inset(-3cqw -3cqw -1cqw -3cqw)}}'
-    + '@media (prefers-reduced-motion: reduce){[data-snow],[data-snow-cap]{display:none}}';
-
-  /* Snow that settles (`data-snow-cap`) is held at nothing while the launch
-   * screen is in front and started when it lifts: gathered where nobody
-   * could see it, it has already fallen by the time they can. Nothing is
-   * written to the page; the clocks themselves are held and let go. */
-  syncSnowCap() {
-    const G = window.FoxyGate;
-    const covered = !!(G && G.visible && G.visible());
-    if (!covered && !this._snowCapHeld) return;          // falling or settled: left alone
-    /** @type {Animation[]} */
-    const clocks = [];
-    document.querySelectorAll('[data-snow-cap], [data-snow-cap] i').forEach((el) => {
-      if (el.getAnimations) el.getAnimations().forEach((a) => clocks.push(a));
-    });
-    this._snowCapHeld = covered;
-    clocks.forEach((a) => {
-      try { a.currentTime = 0; if (covered) a.pause(); else a.play(); } catch (e) {}
-    });
-  }
+    + '@media (prefers-reduced-motion: reduce){[data-snow]{display:none}}';
 
   syncSnow() {
-    this.syncSnowCap();
     const layer = document.querySelector('[data-snow="home"]');
     if (!layer || layer.firstChild) return;            // made once, then left alone
     if (!this._snowCss) {
@@ -16642,15 +16611,7 @@ class Component extends DCLogic {
         line2Weight: r.metaRail ? '600' : '500',
       })),
     })).filter(g => g.items.length);
-    const tabLook = (u) => (u === tab
-      ? (u === 'usd'
-        ? { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
-            shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' }
-        : { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
-              + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
-            blend: 'normal,soft-light,normal', ink: '#fff',
-            shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' })
-      : { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' });
+    const tabLook = (u) => this.segLook(u === tab, u === 'usd' ? 'frost' : 'fur');
     return {
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
@@ -16690,6 +16651,20 @@ class Component extends DCLogic {
       histAuditInk: (auditTitle === 'DOES NOT ADD UP' || auditAction) ? 'var(--bad)' : auditTitle === 'ADDS UP' ? 'var(--ok-ink)' : 'var(--btc-ink)',
       histAuditEdge: (auditTitle === 'DOES NOT ADD UP' || auditAction) ? 'rgba(var(--bad-rgb),.5)' : 'rgba(var(--ink-rgb),.12)',
     };
+  }
+
+  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot,
+   * and HOME | CARD at the foot of home and the card's screen (26f-flashcard.js). `look` is the chosen half's: 'frost', the pale
+   * frost pill, or 'fur', the fox's orange. */
+  segLook(on, look) {
+    if (!on) return { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' };
+    return look === 'fur'
+      ? { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+            + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+          blend: 'normal,soft-light,normal', ink: '#fff',
+          shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' }
+      : { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
+          shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' };
   }
 
   /* txDetail: one transaction — amounts, fee, mint, payment id, audit record. */
@@ -26892,15 +26867,12 @@ class Component extends DCLogic {
    *
    * Once this phone has a card (one it set up, or one it owns, the newest it has seen), a swipe across home to the left opens that
    * card's screen as MENU > FLASHCARD does, with the card as this phone last read it and how long ago (`fcKeptRead`; a tap of the card
-   * reads it again), and a swipe to the right on the card's screen comes back home. Two dots under the money on both screens say there
-   * are two, and which is on show; home says "Swipe left for your card" under them until the swipe has been used twice (FC_SWIPES). The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
+   * reads it again), and a swipe to the right on the card's screen comes back home. The same two ways are a two-way pill at the foot
+   * of both screens, HOME | CARD, the one on show raised (`pageTabs`). The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
    * is left to it; a swipe that starts in something that scrolls sideways, or in a field, is not this one; and nothing happens over
    * a pad, a card or a sheet, or in the middle of a card's flow. */
   FC_LAST = 'foxy.flashcard.last';
   FC_SWIPE = { edge: 24, travel: 72, slop: 48, ms: 700 };
-  // how many times the swipe has been used: the hint under home's dots goes after FC_SWIPE_HINT of them
-  FC_SWIPES = 'foxy.flashcard.swipes';
-  FC_SWIPE_HINT = 2;
   /* The last read of each card this phone owns or set up, by its key: { at, fc }, `fc` the screen's own figures (`fcShow`'s state.fc).
    *
    * What is kept is what the card's screen shows and nothing that can spend: its public key, its mint's address, its balance in each
@@ -26972,17 +26944,6 @@ class Component extends DCLogic {
     if (!fc || !fc.memo) { go(); return; }
     this._fcThen = { key: fc.key, go };
     this.fcRead();
-  }
-
-  // how many times the swipe has been used, for the hint
-  fcSwipesUsed() {
-    try { return Math.max(0, parseInt(localStorage.getItem(this.FC_SWIPES) || '0', 10) || 0); } catch (e) { return 0; }
-  }
-
-  fcSwipeUsed() {
-    const n = this.fcSwipesUsed();
-    if (n >= this.FC_SWIPE_HINT) return;
-    try { localStorage.setItem(this.FC_SWIPES, String(n + 1)); } catch (e) {}
   }
 
   // whether there is a card for the swipe, asked at each drawing of home and the card's screen: looked up at most once a few seconds
@@ -27062,13 +27023,11 @@ class Component extends DCLogic {
     if (s.screen === 'home' && dir === 'left') {
       if (!this.fcLastCard()) return false;
       console.log('[foxy] swipe: to the card');
-      this.fcSwipeUsed();
       this.goFlashcard({ kept: true });
       return true;
     }
     if (s.screen === 'flashcard' && dir === 'right') {
       console.log('[foxy] swipe: home');
-      this.fcSwipeUsed();
       this._fcCard = null;
       this._fcThen = null;
       this.setState({ screen: 'home', stack: [], fc: null });
@@ -27425,10 +27384,10 @@ class Component extends DCLogic {
     const DIM = 'rgba(var(--ink-rgb),.55)';
     // what the screen says of this phone's own card is kept as it changes (the mint's word, a write's new balance): `fcKeepRead`
     if (fc && !fc.memo) this.fcKeepRead(fc);
-    /* The two dots under the money, home's and the card's, the one on show filled; and home's hint, until the swipe has been used */
+    /* HOME | CARD at the foot of home and the card's screen, once this phone has a card for the swipe: the one on show raised in the
+     * pale frost pill, the other dimmed; a tap on the other does what the swipe does (`fcSwipe`) */
     const home = sc === 'home';
-    const dots = (home || on) && this.fcSwipeCard();
-    const DOT_ON = 'rgba(var(--ink-rgb),.72)';
+    const tabs = (home || on) && this.fcSwipeCard();
     // a kept read: what pressing anything that needs the card itself does first (`fcNeedCard`)
     const need = (go) => () => this.fcNeedCard(go);
     const memo = !!(fc && fc.memo);
@@ -27748,11 +27707,12 @@ class Component extends DCLogic {
       fcMemoShown: memo,
       fcMemoLine: memo ? 'As read ' + this.agoWords(Date.now() - fc.memo) + ' \u00b7 tap the card to refresh' : '',
       fcCardTap: () => { if (this.state.fc && this.state.fc.memo) this.fcRead(); },
-      // the two dots, on home and on the card's screen, and home's hint under them
-      swipeDots: dots,
-      swipeDotHome: (dots && home) ? DOT_ON : 'transparent',
-      swipeDotCard: (dots && on) ? DOT_ON : 'transparent',
-      swipeHintShown: dots && home && this.fcSwipesUsed() < this.FC_SWIPE_HINT,
+      pageTabsShown: tabs,
+      pageTabs: tabs ? [['home', 'HOME', home, 'right'], ['card', 'CARD', on, 'left']].map(([key, label, chosen, dir]) => Object.assign(
+        this.segLook(chosen, 'frost'), {
+          key, label, pressed: chosen ? 'true' : 'false',
+          tap: () => { if (!chosen && this.fcSwipe(dir)) { if (this.haptic) this.haptic('light'); } },
+        })) : [],
     };
   }
 

@@ -4991,15 +4991,12 @@
    *
    * Once this phone has a card (one it set up, or one it owns, the newest it has seen), a swipe across home to the left opens that
    * card's screen as MENU > FLASHCARD does, with the card as this phone last read it and how long ago (`fcKeptRead`; a tap of the card
-   * reads it again), and a swipe to the right on the card's screen comes back home. Two dots under the money on both screens say there
-   * are two, and which is on show; home says "Swipe left for your card" under them until the swipe has been used twice (FC_SWIPES). The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
+   * reads it again), and a swipe to the right on the card's screen comes back home. The same two ways are a two-way pill at the foot
+   * of both screens, HOME | CARD, the one on show raised (`pageTabs`). The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
    * is left to it; a swipe that starts in something that scrolls sideways, or in a field, is not this one; and nothing happens over
    * a pad, a card or a sheet, or in the middle of a card's flow. */
   FC_LAST = 'foxy.flashcard.last';
   FC_SWIPE = { edge: 24, travel: 72, slop: 48, ms: 700 };
-  // how many times the swipe has been used: the hint under home's dots goes after FC_SWIPE_HINT of them
-  FC_SWIPES = 'foxy.flashcard.swipes';
-  FC_SWIPE_HINT = 2;
   /* The last read of each card this phone owns or set up, by its key: { at, fc }, `fc` the screen's own figures (`fcShow`'s state.fc).
    *
    * What is kept is what the card's screen shows and nothing that can spend: its public key, its mint's address, its balance in each
@@ -5071,17 +5068,6 @@
     if (!fc || !fc.memo) { go(); return; }
     this._fcThen = { key: fc.key, go };
     this.fcRead();
-  }
-
-  // how many times the swipe has been used, for the hint
-  fcSwipesUsed() {
-    try { return Math.max(0, parseInt(localStorage.getItem(this.FC_SWIPES) || '0', 10) || 0); } catch (e) { return 0; }
-  }
-
-  fcSwipeUsed() {
-    const n = this.fcSwipesUsed();
-    if (n >= this.FC_SWIPE_HINT) return;
-    try { localStorage.setItem(this.FC_SWIPES, String(n + 1)); } catch (e) {}
   }
 
   // whether there is a card for the swipe, asked at each drawing of home and the card's screen: looked up at most once a few seconds
@@ -5161,13 +5147,11 @@
     if (s.screen === 'home' && dir === 'left') {
       if (!this.fcLastCard()) return false;
       console.log('[foxy] swipe: to the card');
-      this.fcSwipeUsed();
       this.goFlashcard({ kept: true });
       return true;
     }
     if (s.screen === 'flashcard' && dir === 'right') {
       console.log('[foxy] swipe: home');
-      this.fcSwipeUsed();
       this._fcCard = null;
       this._fcThen = null;
       this.setState({ screen: 'home', stack: [], fc: null });
@@ -5524,10 +5508,10 @@
     const DIM = 'rgba(var(--ink-rgb),.55)';
     // what the screen says of this phone's own card is kept as it changes (the mint's word, a write's new balance): `fcKeepRead`
     if (fc && !fc.memo) this.fcKeepRead(fc);
-    /* The two dots under the money, home's and the card's, the one on show filled; and home's hint, until the swipe has been used */
+    /* HOME | CARD at the foot of home and the card's screen, once this phone has a card for the swipe: the one on show raised in the
+     * pale frost pill, the other dimmed; a tap on the other does what the swipe does (`fcSwipe`) */
     const home = sc === 'home';
-    const dots = (home || on) && this.fcSwipeCard();
-    const DOT_ON = 'rgba(var(--ink-rgb),.72)';
+    const tabs = (home || on) && this.fcSwipeCard();
     // a kept read: what pressing anything that needs the card itself does first (`fcNeedCard`)
     const need = (go) => () => this.fcNeedCard(go);
     const memo = !!(fc && fc.memo);
@@ -5847,11 +5831,12 @@
       fcMemoShown: memo,
       fcMemoLine: memo ? 'As read ' + this.agoWords(Date.now() - fc.memo) + ' \u00b7 tap the card to refresh' : '',
       fcCardTap: () => { if (this.state.fc && this.state.fc.memo) this.fcRead(); },
-      // the two dots, on home and on the card's screen, and home's hint under them
-      swipeDots: dots,
-      swipeDotHome: (dots && home) ? DOT_ON : 'transparent',
-      swipeDotCard: (dots && on) ? DOT_ON : 'transparent',
-      swipeHintShown: dots && home && this.fcSwipesUsed() < this.FC_SWIPE_HINT,
+      pageTabsShown: tabs,
+      pageTabs: tabs ? [['home', 'HOME', home, 'right'], ['card', 'CARD', on, 'left']].map(([key, label, chosen, dir]) => Object.assign(
+        this.segLook(chosen, 'frost'), {
+          key, label, pressed: chosen ? 'true' : 'false',
+          tap: () => { if (!chosen && this.fcSwipe(dir)) { if (this.haptic) this.haptic('light'); } },
+        })) : [],
     };
   }
 

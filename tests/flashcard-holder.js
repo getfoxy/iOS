@@ -583,20 +583,27 @@ function wheel(a) {
        'on the phone that loaded cards: the list of CARDS YOU LOADED, the take-back of each', String(v.fcRows.length));
   }
 
-  /* ---- B10: a swipe between home and the card, its dots, its hint, and the card as it was last read ------------------ */
+  /* ---- B10: a swipe between home and the card, the HOME | CARD pill, and the card as it was last read --------------- */
   {
     const fresh = await funded({ sharedMint: H.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
     const a = appOn(fresh);
     ok(a.fcSwipe('left') === false && a.state.screen === 'home', 'a phone with no card: a swipe on home does nothing');
-    ok(!vals(a).swipeDots && !vals(a).swipeHintShown, 'and home shows no dots and no hint');
+    ok(!vals(a).pageTabsShown && vals(a).pageTabs.length === 0, 'and home shows no HOME | CARD pill');
     H.storage.removeItem('foxy.flashcard.reads');
-    H.storage.removeItem('foxy.flashcard.swipes');
     const b = appOn(H);
     ok(!!b.fcLastCard(), 'a phone that set a card up has a newest card');
     let v = vals(b);
-    const ON = 'rgba(var(--ink-rgb),.72)';
-    ok(v.swipeDots && v.swipeDotHome === ON && v.swipeDotCard === 'transparent' && v.swipeHintShown,
-       'home shows two dots under the money, its own filled and the card’s hollow, and "Swipe left for your card"');
+    // the pill: HOME on the left and CARD on the right, the one on show raised in the pale frost pill, the other dimmed
+    const FROST = 'linear-gradient(160deg,#D6EEF7,#B9DCEA)';
+    const tabsAre = (w, onKey) => w.pageTabsShown && w.pageTabs.length === 2
+      && w.pageTabs.map((t) => t.key + ':' + t.label).join(',') === 'home:HOME,card:CARD'
+      && w.pageTabs.every((t) => (t.key === onKey)
+        ? (t.bg === FROST && t.ink === '#10161B' && t.pressed === 'true')
+        : (t.bg === 'transparent' && t.ink === 'rgba(var(--ink-rgb),.55)' && t.pressed === 'false'));
+    ok(tabsAre(v, 'home') && !('swipeDots' in v) && !('swipeHintShown' in v),
+       'home shows HOME | CARD with HOME raised, and no dots and no hint', JSON.stringify(v.pageTabs && v.pageTabs.map((t) => [t.key, t.pressed])));
+    ok(JSON.stringify(v.pageTabs[0].bg) === JSON.stringify(b.segLook(true, 'frost').bg) && v.pageTabs[1].bg === b.segLook(false, 'frost').bg,
+       'the halves are drawn by segLook, the same as history’s DOLLARS | BITCOIN');
     H.nfc = null;
     H.sheet.length = 0;
     b.fcWatchSwipe();
@@ -611,11 +618,11 @@ function wheel(a) {
     ok(b.state.screen === 'flashcard' && H.sheet.some((x) => /^begin: /.test(x)), 'a swipe to the left with no read of the card kept asks for the card, as MENU > FLASHCARD did', H.sheet.join(' / '));
     await settle();
     v = vals(b);
-    ok(v.swipeDots && v.swipeDotCard === ON && v.swipeDotHome === 'transparent', 'the card’s screen shows the same dots, the card’s filled');
+    ok(tabsAre(v, 'card'), 'the card’s screen shows the same pill with CARD raised');
     touch('touchstart', 100, 400);
     touch('touchend', 260, 395);
     ok(b.state.screen === 'home' && !b.state.fc, 'and a swipe to the right on the card’s screen is home again');
-    ok(!vals(b).swipeHintShown && b.fcSwipesUsed() === 2, 'the swipe used twice, home’s hint is gone', String(b.fcSwipesUsed()));
+    ok(H.storage.getItem('foxy.flashcard.swipes') === null, 'the swipe counts nothing any more (the hint is gone)');
     touch('touchstart', 10, 400);
     touch('touchend', 200, 400);
     ok(b.state.screen === 'home', 'a swipe that starts at the left edge is the back gesture’s, not this one');
@@ -655,10 +662,27 @@ function wheel(a) {
        'a swipe to the card shows it at once as it was last read, with no tap', v.fcBalance + ' / ' + H.sheet.join(' / '));
     ok(v.fcMemoShown && v.fcMemoLine === 'As read a moment ago · tap the card to refresh' && v.fcPillRows.length === 1,
        'with its pill, and a line under it saying when it was read and that a tap of the card refreshes it', v.fcMemoLine);
-    ok(v.swipeDotCard === ON, 'and the card’s dot filled');
+    ok(tabsAre(v, 'card'), 'and CARD raised');
     touch('touchstart', 100, 400);
     touch('touchend', 260, 395);
     ok(b.state.screen === 'home', 'a swipe to the right is home again');
+    // the pill's taps: CARD on home is the swipe to the card (from its last read), HOME on the card's screen the swipe home
+    v = vals(b);
+    v.pageTabs[0].tap();
+    ok(b.state.screen === 'home', 'HOME on home, the half already raised, does nothing');
+    H.sheet.length = 0;
+    v.pageTabs[1].tap();
+    v = vals(b);
+    ok(b.state.screen === 'flashcard' && b.state.fc && b.state.fc.memo && v.fcBalance === read && !H.sheet.some((x) => /^begin: /.test(x)) && tabsAre(v, 'card'),
+       'CARD on home opens the card’s screen at once as it was last read, CARD raised', v.fcBalance + ' / ' + H.sheet.join(' / '));
+    v.pageTabs[1].tap();
+    ok(b.state.screen === 'flashcard', 'CARD on the card’s screen does nothing');
+    v.pageTabs[0].tap();
+    ok(b.state.screen === 'home' && !b.state.fc && b.state.stack.length === 0 && tabsAre(vals(b), 'home'), 'HOME on the card’s screen is home again, HOME raised');
+    b.state.open0 = true;
+    vals(b).pageTabs[1].tap();
+    ok(b.state.screen === 'home', 'with the menu open, CARD does nothing, as the swipe');
+    b.state.open0 = false;
     b._fcSwipeOff();
 
     // Foxy started again: the stored read, with its age

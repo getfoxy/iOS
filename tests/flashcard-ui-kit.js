@@ -64,6 +64,8 @@ const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => l
   // the phone's own on-chain screens, which a card in card mode pays a bitcoin address through
   + '\n' + read(['26b-onchain.js']);
 const MONEY_PARTS = liftFrom(read(['03-send.js']), 'money(sats, fiatCents) {');
+// the two-way pill's halves (HOME | CARD at the foot of home and the card's screen), shared with history's DOLLARS | BITCOIN
+const SEG_PART = liftFrom(read(['26-render-history-and-contacts.js']), 'segLook(on, look) {');
 const RECEIVE_SIGS = {
   '12-receive.js': ['wantedAmount() {', 'stopReceive() {', 'openUsdReceive(cents) {', 'usdInvoiceUp(inv, mine) {', 'recvClockTick(mine) {', 'recvRequote(mine) {'],
   '24-render-receive-and-send.js': ['renderReceive(c) {'],
@@ -74,7 +76,7 @@ const RECEIVE_PARTS = Object.keys(RECEIVE_SIGS).map((f) => RECEIVE_SIGS[f].map((
  * the rest of the app class stood in for: state, navigation, and the few
  * helpers the parts call. */
 function appOn(ctx, start, o) {
-  const body = PARTS + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '')
+  const body = PARTS + '\n' + SEG_PART + ((o && o.split) ? '\n' + SPLIT_PARTS : '') + ((o && o.send) ? '\n' + SEND_PARTS : '')
     + ((o && o.receive) ? '\n' + RECEIVE_PARTS : '') + ((o && o.money) ? '\n' + MONEY_PARTS : '');
   // (the split values keep a React ref in a field of the class: nothing here draws with it)
   const Parts = new Function('window', 'document', 'localStorage', 'React', 'navigator', 'CTA_INK', 'return class {\n' + body + '\n};')(

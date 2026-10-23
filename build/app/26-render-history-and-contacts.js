@@ -193,15 +193,7 @@
         line2Weight: r.metaRail ? '600' : '500',
       })),
     })).filter(g => g.items.length);
-    const tabLook = (u) => (u === tab
-      ? (u === 'usd'
-        ? { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
-            shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' }
-        : { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
-              + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
-            blend: 'normal,soft-light,normal', ink: '#fff',
-            shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' })
-      : { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' });
+    const tabLook = (u) => this.segLook(u === tab, u === 'usd' ? 'frost' : 'fur');
     return {
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
@@ -241,6 +233,20 @@
       histAuditInk: (auditTitle === 'DOES NOT ADD UP' || auditAction) ? 'var(--bad)' : auditTitle === 'ADDS UP' ? 'var(--ok-ink)' : 'var(--btc-ink)',
       histAuditEdge: (auditTitle === 'DOES NOT ADD UP' || auditAction) ? 'rgba(var(--bad-rgb),.5)' : 'rgba(var(--ink-rgb),.12)',
     };
+  }
+
+  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot,
+   * and HOME | CARD at the foot of home and the card's screen (26f-flashcard.js). `look` is the chosen half's: 'frost', the pale
+   * frost pill, or 'fur', the fox's orange. */
+  segLook(on, look) {
+    if (!on) return { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' };
+    return look === 'fur'
+      ? { bg: "linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 45%,rgba(0,0,0,.22) 100%),"
+            + "url('foxy-fur.webp') center/150% auto no-repeat,linear-gradient(160deg,#F2742B,#D9561A)",
+          blend: 'normal,soft-light,normal', ink: '#fff',
+          shadow: 'inset 0 2px 0 rgba(255,255,255,.35),inset 0 -3px 0 rgba(0,0,0,.18)' }
+      : { bg: 'linear-gradient(160deg,#D6EEF7,#B9DCEA)', blend: 'normal', ink: '#10161B',
+          shadow: 'inset 0 2px 0 rgba(255,255,255,.5),inset 0 -3px 0 rgba(0,0,0,.12)' };
   }
 
   /* txDetail: one transaction — amounts, fee, mint, payment id, audit record. */
