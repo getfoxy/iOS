@@ -1369,9 +1369,15 @@
       return;
     }
     usd.melting = true;
+    /* VERIFYING over the code, from the card's payment until PAYMENT RECEIVED: the code stayed on screen for the seconds
+     * the mint took and read as unpaid, and the owner tapped the card at it again. The receive's watch takes this screen
+     * down as it says paid (12-receive.js); a refusal takes it down here, and a payment the mint has not answered keeps it
+     * up with that said. */
+    this.fcUsdVerifying(usd, 'The card paid ' + this.fcSats(usd.sats) + '. Foxy is confirming the payment with your mint.', 60000);
     const end = (paid) => {
       usd.melting = false;
       if (paid) usd.landingUntil = Date.now() + 20000; else usd.done = true;
+      if (!paid && this.hideStage) this.hideStage('paidCheck');
       this.refreshBalance();
       this.loadHistory();
     };
@@ -1379,6 +1385,7 @@
     const waiting = () => {
       usd.melting = false;
       usd.pending = true;
+      this.fcUsdVerifying(usd, 'The card paid ' + this.fcSats(usd.sats) + '. The mint has not answered yet; the dollars land when it does.', 120000);
       this.refreshBalance();
       this.loadHistory();
       this.fcUsdWaiting();
@@ -1404,6 +1411,17 @@
       end();
       this.fcUsdKept(usd, e, e && e.plain);
     });
+  }
+
+  /* The VERIFYING screen over the dollar code a card has paid (the receive's `paidCheck` stage, as a tap payment's
+   * "Confirming payment"): what the card paid and what Foxy is waiting on. CLOSE shows the code again, where CARD says the code
+   * is paid already (`fcUsdLanding`). Not drawn where the code is no longer the one on screen. */
+  fcUsdVerifying(usd, body, forMs) {
+    if (!usd || this.state.invoiceHash !== usd.hash || this.state.screen !== 'confirm') return;
+    const o = { art: 'phone', title: 'Verifying', dots: true, forMs: forMs || 60000, body, button: 'CLOSE', go: () => {} };
+    // (the tap screens' `waitingScreen` where the app has it; the stage itself where a page has only the card's methods)
+    if (this.waitingScreen) this.waitingScreen('paidCheck', o);
+    else if (this.stageScreen) { console.log('[foxy] blocked: paidCheck \u2014 ' + body); this.stageScreen('paidCheck', o); }
   }
 
   // whether the wallet still holds a melt of this dollar invoice whose outcome the mint has not given
@@ -1437,6 +1455,7 @@
   // the card paid and the dollar invoice did not take its sats: they are this phone's bitcoin
   fcUsdKept(usd, e, plain) {
     const W = this.fcW();
+    if (this.hideStage) this.hideStage('paidCheck');
     const said = String(plain || (e ? (W && W.reason ? W.reason(e) : e.message) : '') || '').trim();
     console.log('[foxy] card: the dollar invoice was not paid; the card’s sats stay in bitcoin — ' + said);
     this.haptic && this.haptic('error');

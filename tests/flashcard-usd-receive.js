@@ -112,9 +112,18 @@ async function receiveDollars(till, R, amount) {
     ok(till.state.invoice === inv.bolt11 && !till._requoting, 'and its minute running out asks for no new code meanwhile');
     till.setState({ recvExpiresAt: kept });
     pad(till).type('1234');
-    await until('the dollars to land', () => till.state.screen === 'paid');
+    /* From the card's payment to PAYMENT RECEIVED the screen says VERIFYING over the code, instead of the code read as unpaid
+     * (the owner tapped the card at it again); the receive's watch takes it down as it says paid. */
+    let verifying = false, verifyingBody = '';
+    await until('VERIFYING or the dollars', () => {
+      if (stage(R) === 'paidCheck') { verifying = true; verifyingBody = (R.window.document.getElementById('foxy-stage') || {}).textContent || ''; }
+      return till.state.screen === 'paid';
+    });
+    ok(verifying && /Verifying/.test(verifyingBody) && /The card paid ₿1,300\. Foxy is confirming the payment with your mint\./.test(verifyingBody),
+       'VERIFYING over the code while the card’s sats pay it, naming what the card paid', verifyingBody.replace(/\s+/g, ' ').slice(0, 160));
     await until('the tap to be over', () => !(till._fcTaps > 0) && R.W.cardOwed().length === 0 && !stage(R));
     await settle();
+    ok(!stage(R), 'and VERIFYING is gone with PAYMENT RECEIVED');
     ok(till.state.paidUnit === 'usd' && till.state.paidAmount === 100,
        'PAYMENT RECEIVED in dollars: 100 cents, by the dollar invoice’s own watch', JSON.stringify({ unit: till.state.paidUnit, amount: till.state.paidAmount }));
     ok(cardBefore - k.balance() === 1300, 'the card paid the invoice’s 1,300 sats, and only those', String(cardBefore - k.balance()));
