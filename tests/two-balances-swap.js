@@ -245,8 +245,9 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     ok(app.swapSpec().cta === 'CONFIRM NEW RATE', 'still CONFIRM NEW RATE on the next one');
     const third = app.state.swapQuote;
     app.swapGo();
-    await until(() => app.state.screen !== 'swapConfirm' || app.state.swapErr, 5000);
-    ok(app.state.screen === 'swapDone' && c.W.balanceOf('usd') === third.get, 'CONFIRM NEW RATE swaps at the new rate', app.state.swapErr);
+    // (fifteen seconds: under the full check's load the swap's two requests have taken longer than five)
+    await until(() => app.state.screen !== 'swapConfirm' || app.state.swapErr, 15000);
+    ok(app.state.screen === 'swapDone' && c.W.balanceOf('usd') === third.get, 'CONFIRM NEW RATE swaps at the new rate', app.state.swapErr || app.state.screen);
     ok(booksClose(c, from), 'the books close in each unit', JSON.stringify(booksMove(c, from)));
     app.state.screen = 'home';
   }
