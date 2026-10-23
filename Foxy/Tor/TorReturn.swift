@@ -164,6 +164,27 @@ enum TorReturn {
         leftKnown ? away : max(away, upLeftAlone)
     }
 
+    /// A Foxy launched in the background and in front for the first time takes this
+    /// long after launch, at least, to count as one whose time away is unknown.
+    static let launchedAwayAfter: TimeInterval = 10
+
+    /// Is the time away known, as the app comes to the front or back into focus?
+    ///
+    /// Known when Foxy was put away (`wentAway`: there is a time), and known
+    /// (as none) when it has been in front before in this run: the card sheet,
+    /// Face ID, Control Center and a screenshot all take the focus and hand it
+    /// back without Foxy leaving, and every one of them reads as a return.
+    /// Reckoning those as half a minute away set Tor up in the middle of a
+    /// swap's melt, three seconds after the card sheet closed, and the melt
+    /// was cut off with its outcome unknown. Unknown only on the first time in
+    /// front of a run that began long enough ago to have been a launch in the
+    /// background for the Bluetooth accessory, suspended since.
+    static func leftKnown(wentAway: Bool, firstFront: Bool, sinceLaunch: TimeInterval) -> Bool {
+        if wentAway { return true }
+        if !firstFront { return true }
+        return sinceLaunch < launchedAwayAfter
+    }
+
     /// A set-up younger than this, that is still moving, is not started over by a return.
     static let youngSetUp: TimeInterval = 15
     /// "Still moving": something from Tor (a step, bytes from a relay, a relay

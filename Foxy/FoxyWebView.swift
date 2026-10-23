@@ -1108,6 +1108,10 @@ final class WebHostController: UIViewController {
     }
 
     private var backgroundedAt: Date?
+    /// Foxy has been active in this run before: a focus taken and given back
+    /// (the card sheet, Face ID) is then no return from anywhere (`TorReturn.leftKnown`).
+    private var everActive = false
+    private let launchedAt = Date()
     /// Which putting-away is under way; a return makes the one before it stale.
     private var parkRun = 0
 
@@ -1270,6 +1274,12 @@ final class WebHostController: UIViewController {
         Route.openDoor()
         let wentAway = backgroundedAt != nil
         let away = backgroundedAt.map { max(0, Int(Date().timeIntervalSince($0))) } ?? 0
+        /* Whether the time away is known: put away (a time), or in front before in this run (a focus given back, no time
+         * away at all); unknown only the first time in front of a run that began long ago, which is a launch in the
+         * background for the Bluetooth accessory, suspended since (TorReturn.leftKnown). */
+        let leftKnown = TorReturn.leftKnown(wentAway: wentAway, firstFront: !everActive,
+                                            sinceLaunch: Date().timeIntervalSince(launchedAt))
+        everActive = true
         if Self.coverOffAtOnce(wentAway: wentAway, away: away) {
             removeCover()
         } else {
@@ -1289,7 +1299,7 @@ final class WebHostController: UIViewController {
         backgroundedAt = nil
         pushUptime()
         // Tor first: a set-up marks it not ready before the page hears of the return
-        bridge.torResumed(away: away, wentAway: wentAway)
+        bridge.torResumed(away: away, wentAway: leftKnown)
         webView?.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._resumed(\(away))")
         /* After the page has been told of the return, and in that order on its side too: it raises its lock on hearing
          * it, and a card tapped on the way back must find the lock up. A card's address that was waiting for this goes

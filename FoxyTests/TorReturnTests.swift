@@ -161,6 +161,18 @@ final class TorReturnTests: XCTestCase {
         XCTAssertTrue(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: TorReturn.awayReckoned(away: 0, leftKnown: false), sinceBroughtBack: 10))
     }
 
+    func testOnlyAFirstTimeInFrontLongAfterLaunchHasAnUnknownTimeAway() {
+        // put away and back: known, whatever else
+        XCTAssertTrue(TorReturn.leftKnown(wentAway: true, firstFront: true, sinceLaunch: 600))
+        // the card sheet, Face ID, Control Center: Foxy was in front before, the focus comes back, no time away
+        XCTAssertTrue(TorReturn.leftKnown(wentAway: false, firstFront: false, sinceLaunch: 600))
+        // an ordinary launch: in front within a second of it
+        XCTAssertTrue(TorReturn.leftKnown(wentAway: false, firstFront: true, sinceLaunch: 0.2))
+        // launched in the background for the accessory, suspended, opened minutes later: unknown
+        XCTAssertFalse(TorReturn.leftKnown(wentAway: false, firstFront: true, sinceLaunch: 655))
+        XCTAssertFalse(TorReturn.leftKnown(wentAway: false, firstFront: true, sinceLaunch: TorReturn.launchedAwayAfter))
+    }
+
     func testAReturnLongAfterBothSetsUpAsBefore() {
         // a connection left up through half a minute or more away may be one a suspension broke
         XCTAssertFalse(TorReturn.returnFindsRouteUp(ready: true, wasParked: false, away: 240, sinceBroughtBack: 300))
