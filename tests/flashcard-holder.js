@@ -14,7 +14,8 @@
  *   the screens         driven as a person drives them (flashcard-ui-kit.js): the owner's set-up, its PIN pads, YES and NO
  *                       and SET AMOUNT for each; SEND > FLASHCARD to a new card, which this phone sets up for its holder and does not
  *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; CARD at the top left of home
- *                       and HOME at the top left of the card's screen, HISTORY first in each MENU, a tap asked for every time;
+ *                       and HOME at the top left of the card's screen, and a swipe that does the same with nothing drawn for it,
+ *                       HISTORY first in each MENU, a tap asked for every time;
  *                       and no daily limit anywhere on the card's screen.
  *
  * And the set-up's two amounts in the card's own money, on SET AMOUNT: a dollar card's in dollars only, a bitcoin card's in dollars
@@ -567,7 +568,7 @@ function amt(a) {
        'on the phone that loaded cards: the list of CARDS YOU LOADED, the take-back of each', String(v.fcRows.length));
   }
 
-  /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, HISTORY in each MENU, and a tap asked for -- */
+  /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, the swipe for each, HISTORY in each MENU, a tap asked for -- */
   {
     const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
     // a phone with no card: CARD is there all the same, and opens the card's screen asking for a card, as MENU > FLASHCARD did
@@ -622,8 +623,61 @@ function amt(a) {
     ok(b.state.screen === 'flashcard' && !b.state.fc && H.sheet.some((x) => /^begin: /.test(x)), 'CARD again asks for the tap again');
     await until('the card read again', () => b.state.fc && b.state.fc.key === own.key && !(b._fcTaps > 0));
     vals(b).fcHome();
-    // nothing of a swipe is left: no listener, no store; what an earlier build kept is cleared at start
-    ok(typeof b.fcWatchSwipe !== 'function' && typeof b.fcSwipe !== 'function' && typeof b.fcKeptRead !== 'function', 'there is no swipe and no kept read');
+    /* The swipe, back as it was before CARD and HOME, and doing what they do: to the left on home is CARD (the tap asked for, nothing
+     * of the card shown from before), to the right on the card's screen is HOME. No dots, no hint, no kept read. */
+    ok(typeof b.fcKeptRead !== 'function' && typeof b.fcLastCard !== 'function', 'no kept read for the swipe');
+    b.fcWatchSwipe();
+    const doc = H.window.document;
+    const touch = (kind, x, y) => {
+      const ev = new H.window.Event(kind, { bubbles: true });
+      ev[kind === 'touchend' ? 'changedTouches' : 'touches'] = [{ clientX: x, clientY: y }];
+      doc.body.dispatchEvent(ev);
+    };
+    v = vals(b);
+    ok(!('swipeDots' in v) && !('swipeHintShown' in v) && !('pageTabs' in v) && !('pageTabsShown' in v), 'home draws nothing for the swipe: no dots, no hint, no pill');
+    H.sheet.length = 0;
+    own.tap();
+    touch('touchstart', 300, 400);
+    touch('touchend', 150, 410);
+    ok(b.state.screen === 'flashcard' && !b.state.fc && H.sheet.some((x) => /^begin: /.test(x)), 'a swipe to the left on home is CARD: the card’s screen, asking for the tap', H.sheet.join(' / '));
+    await until('the card read by the swipe', () => b.state.fc && b.state.fc.key === own.key && !(b._fcTaps > 0));
+    v = vals(b);
+    ok(!('swipeDots' in v) && !('swipeHintShown' in v) && !('pageTabs' in v) && !('fcMemoLine' in v), 'and the card’s screen draws nothing for it either');
+    touch('touchstart', 100, 400);
+    touch('touchend', 260, 395);
+    ok(b.state.screen === 'home' && !b.state.fc && b.state.stack.length === 0, 'a swipe to the right on the card’s screen is HOME');
+    ok(H.storage.getItem('foxy.flashcard.reads') === null && H.storage.getItem('foxy.flashcard.last') === null, 'and nothing of the card is kept for it');
+    H.sheet.length = 0;
+    touch('touchstart', 10, 400);
+    touch('touchend', 200, 400);
+    touch('touchstart', 300, 400);
+    touch('touchend', 150, 400);
+    ok(b.state.screen === 'flashcard' && H.sheet.filter((x) => /^begin: /.test(x)).length === 1, 'a swipe from the left edge is the back gesture’s, not this one');
+    await until('the card read again by the swipe', () => b.state.fc && b.state.fc.key === own.key && !(b._fcTaps > 0));
+    touch('touchstart', 10, 400);
+    touch('touchend', 200, 400);
+    ok(b.state.screen === 'flashcard', 'and on the card’s screen too');
+    touch('touchstart', 300, 400);
+    touch('touchend', 150, 400);
+    ok(b.state.screen === 'flashcard', 'a swipe to the left on the card’s screen does nothing');
+    touch('touchstart', 100, 400);
+    touch('touchend', 140, 400);
+    ok(b.state.screen === 'flashcard', 'a short movement is not a swipe');
+    // nothing over the screen, and no card flow under way
+    b.fcAskPin({ title: 'CARD PIN', subtitle: '' }, () => {});
+    ok(b.fcSwipe('right') === false && b.state.screen === 'flashcard', 'with a PIN pad up, nothing');
+    pad(b).back();
+    b.setState({ open0: true });
+    ok(b.fcSwipe('right') === false && b.state.screen === 'flashcard', 'with the menu open, nothing');
+    b.setState({ open0: false });
+    b._fcTaps = 1;
+    ok(b.fcSwipe('right') === false && b.state.screen === 'flashcard', 'while a card is being tapped, nothing');
+    b._fcTaps = 0;
+    ok(b.fcSwipe('right') === true && b.state.screen === 'home', 'and once nothing is up, the swipe is HOME');
+    b.setState({ open0: true });
+    ok(b.fcSwipe('left') === false && b.state.screen === 'home', 'on home with the menu open, nothing');
+    b.setState({ open0: false });
+    b._fcSwipeOff();
     H.storage.setItem('foxy.flashcard.reads', '{"x":{}}');
     H.storage.setItem('foxy.flashcard.last', '{"key":"x"}');
     b.fcDropOldStores();

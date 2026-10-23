@@ -2001,6 +2001,8 @@ class Component extends DCLogic {
     this.watchEdgeSwipe();
     // what an earlier build kept of the cards for a swipe between home and the card is cleared (26f-flashcard.js)
     this.fcDropOldStores();
+    // and the swipe between home and the card, which keeps nothing: CARD and HOME by a swipe (26f-flashcard.js)
+    this.fcWatchSwipe();
     // Tor comes first. Until it connects, or the person chooses to continue
     // unprotected, the native side refuses every mint call, price and address
     // lookup; the gate's screens only say why.
@@ -24339,12 +24341,16 @@ class Component extends DCLogic {
     /* The card on screen is this phone's own: it loads it with its own proof and
      * no PIN. Any other card is written to as a till writes change, with its PIN. */
     const fc = this.state.fc;
-    if (fc && fc.ownedHere && this.state.screen === 'flashcard' && !opt.pin) { this.fcWriteRun('', Object.assign({}, opt, { owner: true })); return; }
+    /* A card of 1.21 and on on its screen wants its PIN for every load, its owner's and a payment's change included: the PIN is asked
+     * before the card is, so it is tapped once (`fcCardPinFirst`); a tap with none, refused for want of it, then the pad and a second tap,
+     * was what the owner's phone did. */
+    const pinFirst = !!(fc && this.state.screen === 'flashcard' && this.fcCardPinFirst());
+    if (fc && fc.ownedHere && this.state.screen === 'flashcard' && !opt.pin && !pinFirst) { this.fcWriteRun('', Object.assign({}, opt, { owner: true })); return; }
     /* What is owed is a payment's change, or pieces a card signed for a payment
      * that was not made: the card has just paid, and lets the tap after a payment
      * put pieces on with no PIN. Tapped first without one; a card that asks for
      * it after all is given it on the next tap. */
-    if (!opt.pin && this.fcOwedAfterPaying()) { this.fcWriteRun('', Object.assign({}, opt, { change: true })); return; }
+    if (!opt.pin && !pinFirst && this.fcOwedAfterPaying()) { this.fcWriteRun('', Object.assign({}, opt, { change: true })); return; }
     // money made for a card that has no PIN (FLASHCARD on the send screen): nothing to ask, whoever holds it writes it
     if (opt.noPin) { this.fcWriteRun('', opt); return; }
     const sum = this.fcOwedSum(opt.unit);
@@ -26974,7 +26980,8 @@ class Component extends DCLogic {
    *
    * Home's round button at the top left is the CARD button: it opens the card's screen as a card's address does (`goFlashcard`),
    * which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
-   * button in the same place, which comes back home (`fcGoHome`). There is no swipe between the two. */
+   * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
+   * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
   // the stores an earlier build kept for a swipe between home and the card: a card's last read and the newest card; cleared once
   FC_OLD_STORES = ['foxy.flashcard.reads', 'foxy.flashcard.last'];
 
@@ -26988,6 +26995,70 @@ class Component extends DCLogic {
     this._fcCard = null;
     this.setState({ screen: 'home', stack: [], fc: null, open0: false });
     return true;
+  }
+
+  /* The swipe: `edge`, the strip at the left that is the back gesture's (`watchEdgeSwipe`); `travel`, how far sideways a swipe goes
+   * at the least; `slop`, how far up or down it may wander; `ms`, how long it may take. */
+  FC_SWIPE = { edge: 24, travel: 72, slop: 48, ms: 700 };
+
+  fcWatchSwipe() {
+    if (this._fcSwipeOn) return;
+    this._fcSwipeOn = true;
+    const S = this.FC_SWIPE;
+    let live = false, x0 = 0, y0 = 0, t0 = 0;
+    const start = (e) => {
+      const t = e.touches && e.touches[0];
+      live = !!t && e.touches.length === 1 && t.clientX > S.edge && this.fcSwipeFrom(e.target);
+      if (t) { x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); }
+    };
+    const end = (e) => {
+      if (!live) return;
+      live = false;
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
+      if (Math.abs(dx) < S.travel || dy > S.slop || Date.now() - t0 > S.ms) return;
+      if (this.fcSwipe(dx < 0 ? 'left' : 'right') && this.haptic) this.haptic('light');
+    };
+    document.addEventListener('touchstart', start, { passive: true });
+    document.addEventListener('touchend', end, { passive: true });
+    this._fcSwipeOff = () => {
+      document.removeEventListener('touchstart', start);
+      document.removeEventListener('touchend', end);
+      this._fcSwipeOn = false;
+    };
+  }
+
+  // whether a touch that starts on `target` may be this swipe: not in a field, and not in anything that scrolls sideways
+  fcSwipeFrom(target) {
+    for (let n = /** @type {any} */ (target); n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
+      const tag = String(n.tagName || '');
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+      if (n.scrollWidth > n.clientWidth + 1) {
+        let ox = '';
+        try { ox = window.getComputedStyle(n).overflowX; } catch (e) {}
+        if (ox === 'auto' || ox === 'scroll') return false;
+      }
+    }
+    return true;
+  }
+
+  /* A swipe, `dir` 'left' or 'right': on home to the left is CARD (`goFlashcard`, which asks for the tap), on the card's screen to the
+   * right is HOME (`fcGoHome`). Nothing while Foxy is locked, the menu is open, anything is up over the screen (a sheet, a pad, a card)
+   * or a card flow is under way. Answers whether it did anything. */
+  fcSwipe(dir) {
+    const s = this.state;
+    if (this._pinLocked || s.open0 || this.cardTapOver() || this.cardFlowBusy()) return false;
+    if (s.screen === 'home' && dir === 'left') {
+      console.log('[foxy] swipe: to the card');
+      this.goFlashcard();
+      return true;
+    }
+    if (s.screen === 'flashcard' && dir === 'right') {
+      console.log('[foxy] swipe: home');
+      return this.fcGoHome();
+    }
+    return false;
   }
 
   /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
@@ -27215,7 +27286,8 @@ class Component extends DCLogic {
   /* TAP CARD on NOT PAID: the card's own phone writes with its own proof and no PIN; any other, as a till writes change. */
   fcOutWrite() {
     const fc = this.state.fc;
-    if (fc && fc.ownedHere) { this.fcWriteRun('', { owner: true }); return; }
+    // (a card of 1.21 and on wants its PIN for every load, its owner's too: asked before the tap, `fcWriteAsk`)
+    if (fc && fc.ownedHere && !this.fcCardPinFirst()) { this.fcWriteRun('', { owner: true }); return; }
     this.fcWriteAsk({});
   }
 

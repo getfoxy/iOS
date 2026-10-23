@@ -47,6 +47,9 @@
  *      for want of it asks for it; SEND > FLASHCARD to a card of both in the currency the send was started in, or asked once the card
  *      is read, a card of one currency still refusing the other; the card's SEND asks the way to pay first and the currency only on
  *      the confirmation, where both could pay
+ *   19 ADD FUNDS as the owner pressed it on the card's screen of a 1.23 card of both: the PIN pad before any card sheet, then one tap
+ *      that writes; and money left waiting for the card (the line on its screen, TAP CARD on NOT PAID) the same: PIN, then one tap,
+ *      never a tap refused for want of the PIN and a second one after the pad
  *
  * Every page ends with its books per unit off by 0. */
 const fs = require('fs');
@@ -1279,6 +1282,80 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       a.fcOutWithdraw();
       ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'WITHDRAW WHICH?', 'WITHDRAW asks its own question, the only one', a.state.curCard && a.state.curCard.question);
     }
+    await settle();
+  }
+
+  /* ---- 19: ADD FUNDS from the card's screen, as the owner pressed it: the PIN before the card is asked for, then one tap ---- */
+  if (want(19)) {
+    const H = await funded({ units: ['sat', 'usd'] }, 50000);
+    await fundUsd(H, 20000);
+    const lifted = new Function('return {' + [['01-ui-basics.js', 'currencyPick(unit) {'], ['01-ui-basics.js', 'unitWord(unit) {'],
+      ['01-ui-basics.js', 'unitFigure(amount, unit) {'], ['01-ui-basics.js', 'centsTyped() {']].map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')();
+    const both = newCard(H, undefined, { format: 4, software: 23 });
+    both.tap();
+    await H.W.cardSetUp(both, { pin: '1234', unit: 'usd', hold: 'both', price: PRICE });
+    const a = appOn(H, { screen: 'home' });
+    Object.assign(a, lifted);
+    a.price = PRICE;
+    a.twoUnitsOn = () => true;
+    a.unitBalance = (u) => (u === 'usd' ? 20000 : 50000);
+    a.satUsd = () => PRICE / 1e8;
+    a.state.balUsdCents = 20000;
+    await a.refreshBalance();
+    H.nfc = both;
+    both.tap();
+    a.goFlashcard();
+    await until('the card read', () => !!a.state.fc && a.state.fc.key === both.key && !(a._fcTaps > 0));
+    await uiSettle();
+    ok(a.state.fc.ownedHere === true && a.state.fc.v123 === true, 'the owner’s card of 1.23, of both, read on its screen');
+    // what is asked, in order: each card sheet and each PIN pad
+    const asked = [];
+    const tap = a.fcTap.bind(a), askPin = a.fcAskPin.bind(a);
+    a.fcTap = (...x) => { asked.push('tap'); return tap(...x); };
+    a.fcAskPin = (...x) => { asked.push('pin'); return askPin(...x); };
+    a.fcAdd();
+    ok(a.state.screen === 'currency', 'ADD FUNDS asks which', a.state.screen);
+    a.currencyPick('usd');
+    a.state.amount = '10.00';
+    a.state.unit = 'USD';
+    both.tap();
+    a.fcAmountNext();
+    await uiSettle();
+    ok(asked[0] === 'pin' && !!pad(a) && /^ADD \$10\.00 TO CARD$/.test(pad(a).cta), 'NEXT: the PIN pad first, before the card is asked for', asked.join(' ') + ' | ' + (pad(a) && pad(a).cta));
+    if (pad(a)) pad(a).type('1234');
+    await until('the dollars on the card', () => !(a._fcTaps > 0) && !pad(a) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd === 1000);
+    ok(asked.join(' ') === 'pin tap', 'and one tap writes it: no second tap, no PIN after it', asked.join(' '));
+    ok(a.state.fc.bal.usd === 1000 && (H.W.cardOwed() || []).length === 0, 'the $10.00 is on the card, nothing left owed', JSON.stringify(a.state.fc.bal));
+    /* The owner's own finding: ADD FUNDS's dollars made and left waiting for the card (CLOSE while they were being made, or a tap that
+     * did not take), then "Press here, then tap it" on the card's screen. The card of 1.21 and on takes no load on its owner's proof
+     * alone: its PIN is asked first, then one tap, and not a tap refused for want of it and a second one after the pad. */
+    const waiting = async (cents, press) => {
+      // the card's screen as the owner had it: CARD on home, the card read and known as this phone's own
+      both.tap();
+      a.setState({ screen: 'home', stack: [], fc: null });
+      a.goFlashcard();
+      await until('the card read again', () => !!a.state.fc && a.state.fc.key === both.key && !(a._fcTaps > 0));
+      await uiSettle();
+      await H.W.cardPrepare(a._fcCard, cents, { unit: 'usd' });
+      ok((H.W.cardOwed() || []).length > 0, 'money waiting for the card: ' + press);
+      asked.length = 0;
+      ok(a.state.screen === 'flashcard' && a.state.fc.ownedHere === true, press + ': on the card’s screen, the card known as this phone’s');
+      both.tap();
+      if (press === 'the line on its screen') {
+        const note = (vals(a).fcNotes || [])[0];
+        ok(!!note && /waiting to go onto this card/.test(note.text), 'the card’s screen says it is waiting', note && note.text);
+        if (note) note.tap();
+      } else a.fcOutWrite();
+      await uiSettle();
+      ok(asked[0] === 'pin' && !!pad(a) && !(a._fcTaps > 0), press + ': the PIN pad first, no card asked for yet', asked.join(' '));
+      if (pad(a)) pad(a).type('1234');
+      await until('the waiting dollars on the card', () => !(a._fcTaps > 0) && !pad(a) && (H.W.cardOwed() || []).length === 0);
+      await uiSettle();
+      ok(asked.join(' ') === 'pin tap', press + ': and one tap puts it on', asked.join(' '));
+    };
+    await waiting(250, 'the line on its screen');
+    await waiting(150, 'TAP CARD on NOT PAID');
+    ok(a.state.fc.bal.usd === 1400, 'all of it on the card', JSON.stringify(a.state.fc.bal));
     await settle();
   }
 

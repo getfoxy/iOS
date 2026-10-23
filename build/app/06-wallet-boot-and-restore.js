@@ -8,6 +8,8 @@
     this.watchEdgeSwipe();
     // what an earlier build kept of the cards for a swipe between home and the card is cleared (26f-flashcard.js)
     this.fcDropOldStores();
+    // and the swipe between home and the card, which keeps nothing: CARD and HOME by a swipe (26f-flashcard.js)
+    this.fcWatchSwipe();
     // Tor comes first. Until it connects, or the person chooses to continue
     // unprotected, the native side refuses every mint call, price and address
     // lookup; the gate's screens only say why.
