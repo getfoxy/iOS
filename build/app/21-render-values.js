@@ -193,8 +193,8 @@
      *   SETTINGS, which opens and closes in place:
      *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
      *     SEND IN (only at a mint with two balances, holding both), each with
-     *     the balance it is set to; SET PIN; OFFLINE, ONE PAYER and OFFLINE,
-     *     IN ALL, each with its figure; RESTORE, BACKUP, LOGS
+     *     the balance it is set to; SET PIN; OFFLINE, PER PAYER and OFFLINE,
+     *     TOTAL, each with its figure; RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has

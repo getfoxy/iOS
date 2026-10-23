@@ -149,16 +149,28 @@
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
       return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
     };
-    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js, where a card that holds both is a row to add)
+    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js)
     const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];
+    /* A card of software 1.23 being set up (`curBoth`, `fcSuUnit`): BOTH is a third card of the same shape, in the slate of home's
+     * buttons, its two balances on the one line where the others say CURRENT BALANCE. Three cards are drawn a size smaller to fit. */
+    const both = cardFlow && !cc && !!s.curBoth;
+    if (both) {
+      LOOK.both = { bg: 'linear-gradient(160deg,var(--slate-a),var(--slate-b))', ink: 'var(--ink)', inkRgb: 'var(--ink-rgb)', blend: 'normal',
+        edge: 'var(--slate-edge)', badgeBg: 'rgba(var(--ink-rgb),.12)', badgeInk: 'var(--ink)', sym: '$\u20bf' };
+      units.push('both');
+    }
+    const three = units.length > 2;
     const cards = (sc === 'currency' || pick) ? units.map(u => {
-      const tag = whyNot(u);
+      const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
       const chosen = pick && u === current && !tag;
       return Object.assign(look, {
         sym: LOOK[u].sym,
-        name: this.unitWord(u),
-        balance: balanceText(u),
+        name: u === 'both' ? 'BOTH' : this.unitWord(u),
+        balance: u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
+        labelShown: u !== 'both',
+        badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
+        balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
         tag: tag, tagShown: !!tag,
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
@@ -187,6 +199,7 @@
         : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
+      curGap: three ? '12px' : '16px',
       curFoot: pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
@@ -195,6 +208,7 @@
             + ' cannot cover this one.'
           : 'The one you pick is remembered for your next payment.')
         : cc ? String(cc.foot || '')
+        : both ? 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.'
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',

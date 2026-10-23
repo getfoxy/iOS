@@ -91,7 +91,7 @@ const LIFTED = [
   // the route, and which balance pays
   'connecting() {', 'offlineNow() {', 'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'rememberWallet(flow, unit) {',
   'unitWord(unit) {', 'walletLabel(unit) {', 'unitFigure(amount, unit) {', 'unitBalance(unit) {', 'syncWalletAsk() {', 'openWalletPick() {',
-  'walletPickChoose(unit, why) {', 'autoWallet(fits) {', 'quoteFits(unit) {',
+  'walletPickChoose(unit, why) {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'payFromOnly() {', 'payFitNow(unit, sats) {',
   // the confirmation
   'confirmSpec() {', 'confirmTwoSpec() {', 'cfRow(label, value, opt) {', 'sendToText() {', 'shortId(v) {', 'sendAmountText() {', 'money(sats, fiatCents) {',
   'usd(v) {', 'group(n) {', 'satUsd() {', 'px() {', 'peerRate() {', 'peerRateLabel() {', 'peerRateRow() {', 'heldBlocks(shortBy) {', 'heldNote() {',

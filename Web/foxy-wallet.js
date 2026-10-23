@@ -7937,7 +7937,7 @@
    * comes back.
    *
    * Kept in sats, at the phone's last bitcoin price when the person set them
-   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, IN ALL). Never set, each is its
+   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, TOTAL). Never set, each is its
    * dollar default at the phone's last price, worked out when it is asked, so
    * the default follows the price until somebody picks a figure.
    *
@@ -12512,6 +12512,35 @@
       mustSave(CARDS, all);
       return pub;
     });
+  }
+
+  /* What its owner chose a card of software 1.23 to hold when this phone set it up: 'usd' or 'sat' for one currency, 'both' for
+   * either, kept as `hold` on the card's row here (`CARDS`). It is this phone's promise and not the card's, which takes either
+   * currency whatever was chosen: a one-currency card is offered only that one when this phone adds to it. `hold` '' or absent
+   * takes the note off (a set-up with nothing chosen, or a card before 1.23). Nothing is written where the card has no row. */
+  function cardHoldNote(cardKey, hold) {
+    var h = hold === 'usd' || hold === 'sat' || hold === 'both' ? hold : '';
+    var all = cardsOnFile();
+    var row = all[cardKey];
+    if (!row || (row.hold || '') === h) return;
+    if (h) row.hold = h; else delete row.hold;
+    all[cardKey] = row;
+    mustSave(CARDS, all);
+  }
+
+  /* The same for a card as `cardLook` gave it: 'usd' or 'sat' where it was set up here to hold that one and holds nothing of the
+   * other; 'both' where it was set up for both, or holds the other or may (format 5: it was given some, here or on another phone);
+   * '' where this phone made it no promise (not its row, a row whose key is not on the card, a card before 1.23, nothing chosen). */
+  function cardHoldOf(card) {
+    if (!cardIs123(card) || !card.record || !card.key) return '';
+    var row = cardsOnFile()[card.key];
+    if (!row || !row.refundKey || row.refundKey !== card.record.refundKey) return '';
+    var h = row.hold === 'usd' || row.hold === 'sat' || row.hold === 'both' ? row.hold : '';
+    if (h !== 'usd' && h !== 'sat') return h;
+    var other = h === 'usd' ? 'sat' : 'usd';
+    var whole = card.whole || card;
+    if (cardBoth(whole) || (whole.units && whole.units[other] && whole.units[other].balance > 0)) return 'both';
+    return h;
   }
 
   /* ---- money on its way to a card, and from one ------------------------------
@@ -31192,6 +31221,9 @@
         .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
     },
     cardBoth: function (card) { return cardBoth(card); },
+    /* What this phone promised a card of 1.23 to hold when it set it up (`cardHoldOf`): 'usd' or 'sat' (offer only that one when adding
+     * to it), 'both' (ask which), or '' (no promise: ask, as for both). */
+    cardHold: function (card) { return cardHoldOf(card); },
     cardInUnit: function (card, unit) { return cardInUnit(card, unit); },
     /* The rate a card of 1.23 would be given at `price` (dollars a bitcoin): floor(100,000,000 / price) sats a dollar, 0 for none. */
     cardRateOf: function (price) { return cardRateOf(price); },
@@ -31255,11 +31287,15 @@
      * under the PIN just given and before the claim, while the card has no owner (`cardPinLimits`); on an older card, with the owner's
      * proof once it is the owner (`cardLimitTo`). `opts.tapUsd` and `opts.noPinUsd`: the dollars a bitcoin card's figures were chosen in,
      * kept so that the card's sats follow the price, as LIMITS keeps them (`cardPaceNote`). */
+    /* `opts.hold`, on a card of software 1.23: what its owner chose it to hold, 'usd', 'sat' (its record's unit: one currency) or 'both'
+     * (either), kept on this phone's row for it (`cardHoldNote`) once the card is set up, and never told the card. */
     cardSetUp: function (link, opts) {
       var o = opts || {};
       var recoverable = o.recoverable !== false;
       var unit = (o.unit === undefined || o.unit === null || o.unit === '') ? 'sat' : unitOf(o.unit);
       if (unit !== 'sat' && unit !== 'usd') return Promise.reject(cardError('bad-unit', 'A card holds bitcoin or dollars.'));
+      var hold = (o.hold === undefined || o.hold === null || o.hold === '') ? '' : o.hold === 'both' ? 'both' : unitOf(o.hold);
+      if (hold && hold !== 'both' && hold !== unit) return Promise.reject(cardError('bad-unit', 'A card that holds one currency is set up in it.'));
       /* `o.pin` empty or absent: a card with no PIN (software 1.16 and on). It pays without one, and its per tap and daily limits are
        * set later by its owner as for any card; no allowance exists on it. A PIN can be added later (`cardAddPin`). */
       var pin = '';
@@ -31345,6 +31381,8 @@
          * carry it (before 1.10): its own note, not the list of cards this
          * phone can take back, which a cash card is never on. */
         cardDesignNote(card.key, (card.record && card.record.design) || o.design);
+        // (what its owner chose it to hold, on a card of 1.23; a set-up with nothing chosen takes off what an earlier one left)
+        if (cardIs123(card)) cardHoldNote(card.key, hold);
         return FoxyWallet.cardLook(link, { mine: true });
       });
     },

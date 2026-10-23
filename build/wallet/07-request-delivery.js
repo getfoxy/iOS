@@ -703,7 +703,7 @@
    * comes back.
    *
    * Kept in sats, at the phone's last bitcoin price when the person set them
-   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, IN ALL). Never set, each is its
+   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, TOTAL). Never set, each is its
    * dollar default at the phone's last price, worked out when it is asked, so
    * the default follows the price until somebody picks a figure.
    *

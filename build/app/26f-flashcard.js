@@ -2936,6 +2936,10 @@
       v123: !!(card.info && card.info.units), cents: !!(card.info && card.info.cents),
       units: (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null,
       bal: card.units ? { usd: card.units.usd.balance, sat: card.units.sat.balance } : null,
+      /* `only`: the one currency its owner chose for it when this phone set it up ('usd' or 'sat'), which this phone's ADD FUNDS and
+       * SEND put on it and nothing else; '' for a card of both, one this phone made no such promise for, or one that holds the other
+       * currency all the same (given it elsewhere): that is a card of both (the wallet's `cardHold`) */
+      only: (() => { const h = (W && W.cardHold) ? W.cardHold(card) : ''; return h === 'usd' || h === 'sat' ? h : ''; })(),
       rate: (card.info && card.info.rateSaid) ? Number(card.info.rate) || 0 : 0,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -3222,10 +3226,12 @@
 
   /* WHAT WILL THIS CARD HOLD? (25-render-confirm-and-blocked.js, `renderCurrency`, its `card` flow): the two balances' own
    * cards, each with what this phone holds of it, which is what can be loaded. The pick is this card's and nobody's
-   * remembered choice (`currencyPick` writes nothing for it); `then(unit)` goes on with it. Back is the card's screen. */
-  fcUnitAsk(then, card) {
+   * remembered choice (`currencyPick` writes nothing for it); `then(unit)` goes on with it. Back is the card's screen. `both`: a card of
+   * software 1.23 being set up, which is offered BOTH as well (`then('both')`). */
+  fcUnitAsk(then, card, both) {
     this._fcUnitThen = then;
-    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]), curCard: card || null }));
+    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]), curCard: card || null,
+                          curBoth: !card && !!both }));
   }
 
   /* Which of a card's two currencies (software 1.23): the same CURRENCY screen, asked in this flow's words. `o`: { question, foot, bal (the
@@ -3295,8 +3301,10 @@
     if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
     this._fcFlowUnit = null;
     /* A card of software 1.23 at a mint with both currencies takes either: which is asked first, on the CURRENCY screen with what this
-     * phone holds of each (what can be added), and then SET AMOUNT in it. */
+     * phone holds of each (what can be added), and then SET AMOUNT in it. One its owner set up here to hold one currency (`fc.only`)
+     * is asked nothing: SET AMOUNT in that one. */
     const fc = this.state.fc;
+    if (fc && fc.v123 && fc.only) { this._fcFlowUnit = fc.only; this.fcAmount('cardAdd'); return; }
     if (fc && fc.v123 && this.twoUnitsOn && this.twoUnitsOn()) {
       const none = (u) => !(this.unitBalance(u) > 0);
       this.fcPickUnit({
@@ -4778,6 +4786,18 @@
    * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
   fcSendPrepare(card, sats, unit, alt) {
     const W = this.fcW();
+    /* A card of 1.23 its owner set up on this phone to hold one currency (`cardHold`) takes that one alone from here: the other is
+     * refused before anything is made, in the wallet's words for a card of the other kind. A bitcoin card typed in dollars is loaded
+     * with their sats, as below. */
+    const only = (W.cardHold && W.cardHold(card)) || '';
+    const from = unit === 'usd' ? 'usd' : 'sat';
+    if ((only === 'usd' || only === 'sat') && from !== only && !(only === 'sat' && alt)) {
+      const wu = /** @type {any} */ (new Error('This card holds ' + (only === 'usd' ? 'dollars' : 'bitcoin') + ', so it is loaded from your '
+        + (only === 'usd' ? 'dollars' : 'bitcoin') + '.'));
+      wu.card = 'wrong-unit';
+      wu.cardUnit = only;
+      throw wu;
+    }
     /* A card of software 1.23 takes the currency sent where it holds it already, or where it is its record's: dollars onto its dollars,
      * as they are (a new currency on it is its holder's to start, and a phone that is not its owner would be refused). */
     const cu = W.cardUnits ? W.cardUnits(card) : null;

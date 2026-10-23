@@ -76,6 +76,9 @@
         .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
     },
     cardBoth: function (card) { return cardBoth(card); },
+    /* What this phone promised a card of 1.23 to hold when it set it up (`cardHoldOf`): 'usd' or 'sat' (offer only that one when adding
+     * to it), 'both' (ask which), or '' (no promise: ask, as for both). */
+    cardHold: function (card) { return cardHoldOf(card); },
     cardInUnit: function (card, unit) { return cardInUnit(card, unit); },
     /* The rate a card of 1.23 would be given at `price` (dollars a bitcoin): floor(100,000,000 / price) sats a dollar, 0 for none. */
     cardRateOf: function (price) { return cardRateOf(price); },
@@ -139,11 +142,15 @@
      * under the PIN just given and before the claim, while the card has no owner (`cardPinLimits`); on an older card, with the owner's
      * proof once it is the owner (`cardLimitTo`). `opts.tapUsd` and `opts.noPinUsd`: the dollars a bitcoin card's figures were chosen in,
      * kept so that the card's sats follow the price, as LIMITS keeps them (`cardPaceNote`). */
+    /* `opts.hold`, on a card of software 1.23: what its owner chose it to hold, 'usd', 'sat' (its record's unit: one currency) or 'both'
+     * (either), kept on this phone's row for it (`cardHoldNote`) once the card is set up, and never told the card. */
     cardSetUp: function (link, opts) {
       var o = opts || {};
       var recoverable = o.recoverable !== false;
       var unit = (o.unit === undefined || o.unit === null || o.unit === '') ? 'sat' : unitOf(o.unit);
       if (unit !== 'sat' && unit !== 'usd') return Promise.reject(cardError('bad-unit', 'A card holds bitcoin or dollars.'));
+      var hold = (o.hold === undefined || o.hold === null || o.hold === '') ? '' : o.hold === 'both' ? 'both' : unitOf(o.hold);
+      if (hold && hold !== 'both' && hold !== unit) return Promise.reject(cardError('bad-unit', 'A card that holds one currency is set up in it.'));
       /* `o.pin` empty or absent: a card with no PIN (software 1.16 and on). It pays without one, and its per tap and daily limits are
        * set later by its owner as for any card; no allowance exists on it. A PIN can be added later (`cardAddPin`). */
       var pin = '';
@@ -229,6 +236,8 @@
          * carry it (before 1.10): its own note, not the list of cards this
          * phone can take back, which a cash card is never on. */
         cardDesignNote(card.key, (card.record && card.record.design) || o.design);
+        // (what its owner chose it to hold, on a card of 1.23; a set-up with nothing chosen takes off what an earlier one left)
+        if (cardIs123(card)) cardHoldNote(card.key, hold);
         return FoxyWallet.cardLook(link, { mine: true });
       });
     },

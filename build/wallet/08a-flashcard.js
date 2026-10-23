@@ -2276,6 +2276,35 @@
     });
   }
 
+  /* What its owner chose a card of software 1.23 to hold when this phone set it up: 'usd' or 'sat' for one currency, 'both' for
+   * either, kept as `hold` on the card's row here (`CARDS`). It is this phone's promise and not the card's, which takes either
+   * currency whatever was chosen: a one-currency card is offered only that one when this phone adds to it. `hold` '' or absent
+   * takes the note off (a set-up with nothing chosen, or a card before 1.23). Nothing is written where the card has no row. */
+  function cardHoldNote(cardKey, hold) {
+    var h = hold === 'usd' || hold === 'sat' || hold === 'both' ? hold : '';
+    var all = cardsOnFile();
+    var row = all[cardKey];
+    if (!row || (row.hold || '') === h) return;
+    if (h) row.hold = h; else delete row.hold;
+    all[cardKey] = row;
+    mustSave(CARDS, all);
+  }
+
+  /* The same for a card as `cardLook` gave it: 'usd' or 'sat' where it was set up here to hold that one and holds nothing of the
+   * other; 'both' where it was set up for both, or holds the other or may (format 5: it was given some, here or on another phone);
+   * '' where this phone made it no promise (not its row, a row whose key is not on the card, a card before 1.23, nothing chosen). */
+  function cardHoldOf(card) {
+    if (!cardIs123(card) || !card.record || !card.key) return '';
+    var row = cardsOnFile()[card.key];
+    if (!row || !row.refundKey || row.refundKey !== card.record.refundKey) return '';
+    var h = row.hold === 'usd' || row.hold === 'sat' || row.hold === 'both' ? row.hold : '';
+    if (h !== 'usd' && h !== 'sat') return h;
+    var other = h === 'usd' ? 'sat' : 'usd';
+    var whole = card.whole || card;
+    if (cardBoth(whole) || (whole.units && whole.units[other] && whole.units[other].balance > 0)) return 'both';
+    return h;
+  }
+
   /* ---- money on its way to a card, and from one ------------------------------
    *
    * Two stores, both written before the thing they describe is tried.

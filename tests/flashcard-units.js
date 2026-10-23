@@ -37,6 +37,10 @@
  *      on and the one that pays, end to end; a card of both short of sats at a bitcoin till pays from its dollars, end to end, and says
  *      why; the limit screen of a card of both says its pieces stay as they are, and asks no PIN to recut; set-up with no price says
  *      the card was not set up
+ *   17 the set-up's CURRENCY step on a card of 1.23: DOLLARS, BITCOIN or BOTH, three cards of one shape; BOTH writes a dollar record
+ *      and ADD FUNDS asks which every time, sats going on after; BITCOIN alone never asks and refuses nothing the card can do (dollars
+ *      put on it all the same make it a card of both, asked again), and SEND refuses dollars it cannot turn into sats; a card of 1.22
+ *      shows the two rows and the old words; a set-up for somebody else asks no currency
  *
  * Every page ends with its books per unit off by 0. */
 const fs = require('fs');
@@ -886,6 +890,160 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const e = await H.W.cardSetUp(card2, { pin: '1234', unit: 'sat', tapLimit: 10000, tapUsd: 10 }).then(() => null, (x) => x);
       ok(e && e.card === 'no-price' && /the card was not set up/.test(e.message) && !card2.state.hasRecord, 'review 6 again: set-up with no price says the card was not set up', e && e.message);
       await settle();
+    }
+  }
+
+  /* ---- 17: the set-up's CURRENCY step ------------------------------------------------------------------------------ */
+  if (want(17)) {
+    const H = await funded({ units: ['sat', 'usd'] }, 50000);
+    await fundUsd(H, 20000);
+    // the phone's screens, with the CURRENCY screen's own values and pick (25-render-confirm-and-blocked.js, 01-ui-basics.js)
+    const screens = () => {
+      const a = appOn(H, { screen: 'home' });
+      a.price = PRICE;
+      a.twoUnitsOn = () => true;
+      a.unitBalance = (u) => (u === 'usd' ? 20000 : 50000);
+      const lifted = new Function('return {' + [['01-ui-basics.js', 'currencyPick(unit) {'], ['01-ui-basics.js', 'unitWord(unit) {'],
+        ['01-ui-basics.js', 'unitFigure(amount, unit) {'], ['25-render-confirm-and-blocked.js', 'renderCurrency(c) {']].map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')();
+      Object.assign(a, lifted);
+      a.satUsd = () => PRICE / 1e8;
+      return a;
+    };
+    const cur = (a) => a.renderCurrency({ s: a.state, sc: 'currency' });
+    const toCurrency = async (a, c) => {
+      H.nfc = c;
+      c.tap();
+      a.goFlashcard();
+      await until('the new card to be read', () => !!a.state.fc && a.state.fc.key === c.key && !(a._fcTaps > 0));
+      a.fcSetUp();
+      pad(a).type('1234');
+      pad(a).type('1234');
+    };
+    const setUpAs = async (a, c, i) => {
+      await toCurrency(a, c);
+      cur(a).curCards[i].tap();
+      cardUp(a).press('NO');
+      c.tap();
+      cardUp(a).press('NO');
+      await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
+      await uiSettle();
+    };
+
+    // BOTH: three cards of one shape, the words; a dollar record, and ADD FUNDS asks which, sats going on after
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await toCurrency(a, c);
+      const v = cur(a);
+      ok(a.state.screen === 'currency' && v.curQuestion === 'WHAT WILL THIS CARD HOLD?' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN,BOTH',
+         'a card of 1.23: WHAT WILL THIS CARD HOLD? with DOLLARS, BITCOIN and BOTH', v.curCards.map((x) => x.name).join());
+      const b = v.curCards[2];
+      ok(b.balance === '$ 200.00 \u00b7 \u20bf 50,000' && b.labelShown === false && v.curCards[0].labelShown === true && v.curCards[0].balance === '$ 200.00'
+         && v.curCards.every((x) => x.badgePx === '52px' && typeof x.tap === 'function'),
+         'BOTH is a card of the same shape, its two balances on one line where the others say CURRENT BALANCE, all three a size smaller', JSON.stringify([b.balance, b.labelShown]));
+      ok(v.curFoot === 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.',
+         'the words under them say what each choice does', v.curFoot);
+      b.tap();
+      cardUp(a).press('NO');
+      c.tap();
+      cardUp(a).press('NO');
+      await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
+      await uiSettle();
+      ok(c.state.record.unit === 1 && a.state.fc.unit === 'usd' && (H.W.cardsKnown()[c.key] || {}).hold === 'both' && a.state.fc.only === ''
+         && a.toasts.indexOf('The card is set up. It holds dollars and bitcoin.') >= 0,
+         'BOTH: a dollar record, BOTH kept beside the card’s row on this phone, and the screen says it holds dollars and bitcoin',
+         JSON.stringify({ unit: c.state.record.unit, hold: (H.W.cardsKnown()[c.key] || {}).hold, only: a.state.fc.only }));
+      ok(c.state.book && c.state.book.table.every((x) => x.state === 0), 'and nothing of it is told the card: its table is empty');
+      a.fcAdd();
+      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?' && !a.state.curBoth,
+         'ADD FUNDS on it asks which currency, with no BOTH among them', a.state.screen);
+      a.currencyPick('sat');
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && a.fcUnit() === 'sat', 'bitcoin chosen: SET AMOUNT in bitcoin');
+      a.setState({ amount: '2000', unit: 'SATS' });
+      await a.refreshBalance();
+      c.tap();
+      a.fcAmountNext();
+      await until('the PIN pad', () => !!pad(a));
+      pad(a).type('1234');
+      await until('the sats to go on', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat >= 2000);
+      await uiSettle();
+      ok(a.state.fc.bal.sat >= 2000 && a.state.fc.bal.usd === 0 && a.state.fc.unit === 'usd', 'and sats go on a card whose record is dollars', JSON.stringify(a.state.fc.bal));
+      a.fcAdd();
+      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks again the next time');
+      a.back();
+    }
+
+    // BITCOIN alone: never asked, refuses nothing the card can do, and dollars on it all the same make it a card of both
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await setUpAs(a, c, 1);
+      ok(c.state.record.unit === 0 && (H.W.cardsKnown()[c.key] || {}).hold === 'sat' && a.state.fc.only === 'sat', 'BITCOIN: a bitcoin record, and BITCOIN kept for it on this phone',
+         JSON.stringify({ unit: c.state.record.unit, hold: (H.W.cardsKnown()[c.key] || {}).hold, only: a.state.fc.only }));
+      a.fcAdd();
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && a.fcUnit() === 'sat' && !a.state.curCard, 'ADD FUNDS asks nothing: SET AMOUNT in bitcoin at once', a.state.screen);
+      a.setState({ amount: '3000', unit: 'SATS' });
+      await a.refreshBalance();
+      c.tap();
+      a.fcAmountNext();
+      await until('the PIN pad', () => !!pad(a));
+      pad(a).type('1234');
+      await until('the sats to go on', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat >= 3000);
+      await uiSettle();
+      ok(a.state.fc.bal.sat >= 3000 && a.state.fc.only === 'sat', 'and the sats go on, the card still one of bitcoin', JSON.stringify(a.state.fc.bal));
+      // SEND > FLASHCARD from this phone's dollars, with no price to turn them into sats: refused before anything is made
+      c.tap();
+      const read = await H.W.cardLook(c, { mine: true, price: PRICE });
+      let no = null;
+      try { await a.fcSendPrepare(read, 300, 'usd', null); } catch (e) { no = e; }
+      ok(no && no.card === 'wrong-unit' && no.cardUnit === 'sat' && /holds bitcoin, so it is loaded from your bitcoin/.test(no.message),
+         'SEND of dollars to it is refused in words, nothing made', no && no.message);
+      // typed in dollars with a price, it is loaded with their sats
+      const made = await a.fcSendPrepare(read, 300, 'usd', { sats: 1000, have: 50000 });
+      ok(made && made.unit === 'sat' && made.amount === 1000, 'SEND typed in dollars with a price puts their sats on it', JSON.stringify(made && [made.unit, made.amount]));
+      c.tap();
+      await H.W.cardWrite(c, { pin: '1234' });
+      // the card itself is not bound: a payment from it, and dollars put on by the wallet asked for them
+      const R = await funded({ units: ['sat', 'usd'], sharedMint: H.mint, words: OTHER_WORDS }, 0);
+      const p = await pay(R, c, { sats: 100 });
+      ok(!p.refused, 'it pays as any card does', JSON.stringify(p.refused));
+      const d = await add(H, c, 300, 'usd');
+      ok(d && d.amount === 300, 'and the card takes dollars when they are put on it all the same: the choice was this phone’s, not the card’s', JSON.stringify(d && d.amount));
+      c.tap();
+      a.fcRead();
+      await until('the card read again', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd === 300);
+      await uiSettle();
+      ok(a.state.fc.only === '' && H.W.cardHold(await (async () => { c.tap(); return H.W.cardLook(c, { mine: true, price: PRICE }); })()) === 'both',
+         'holding dollars, it is read as a card of both', a.state.fc.only);
+      a.fcAdd();
+      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks which');
+      a.back();
+      await settle();
+      booksGood('the set-up’s currency', H, R);
+    }
+
+    // a card of 1.22: the two rows and the old words
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 22 });
+      await toCurrency(a, c);
+      const v = cur(a);
+      ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '92px' && x.labelShown)
+         && v.curFoot === 'A card holds one of them. To change it later, RESET the card and set it up again.',
+         'a card of 1.22: DOLLARS and BITCOIN, and the old words', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
+      v.curBack();
+    }
+
+    // a set-up for somebody else (SEND > FLASHCARD to a new card of 1.23) asks no currency: the card holds what is sent
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      a.fcSendSetUp(500, 'sat', null, null);
+      pad(a).type('1234');
+      pad(a).type('1234');
+      ok(a.state.screen !== 'currency' && cardUp(a) && cardUp(a).title === 'SMALL AMOUNTS', 'a set-up for the card’s holder goes from the PIN to SMALL AMOUNTS, no currency asked',
+         a.state.screen + ' ' + (cardUp(a) && cardUp(a).title));
+      void c;
     }
   }
 

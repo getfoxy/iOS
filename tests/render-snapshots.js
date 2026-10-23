@@ -841,6 +841,9 @@ function representative(logic) {
   add('CURRENCY, which currency of a card pays, one too short', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', fc: FC123(),
     curCard: { question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. The one you pick pays this time; you are asked every time.',
       bal: { usd: 50, sat: 3000 }, short: { usd: 'NOT ENOUGH ON THE CARD', sat: '' } } }, TWO_LIVE), { wallet: TWO() }));
+  // (setting a new card of 1.23 up: a third card, BOTH, with this phone's two balances on its one line, and the words for the three)
+  add('CURRENCY, setting up a card of software 1.23: dollars, bitcoin or both', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', curBoth: true,
+    fc: FC123({ hasRecord: false, setUp: false, owner: false, ownedHere: false, units: null, bal: null, balance: 0 }) }, TWO_LIVE), { wallet: TWO() }));
   add('CURRENCY, adding to a card of software 1.23', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', fc: FC123(),
     curCard: { question: 'ADD WHICH TO THE CARD?', foot: 'From what this phone holds. The card keeps dollars and bitcoin side by side.', bal: null, short: { usd: '', sat: '' } } }, TWO_LIVE),
     { wallet: TWO() }));

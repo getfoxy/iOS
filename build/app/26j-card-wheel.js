@@ -5,8 +5,11 @@
    *   CREATE A PIN       the PIN pad every card PIN is typed on (`fcAskPin`), four to eight digits
    *   RE-ENTER PIN       the same again; two that differ start it again
    *   CURRENCY           what the card holds, on the CURRENCY screen (`fcUnitAsk`), at a mint with two balances; at a mint
-   *                      with one, nothing is asked and the card holds bitcoin. Its rows are FC_SETUP_UNITS: a third, a card
-   *                      that holds both, is a row to add there when cards hold two balances, which none does yet
+   *                      with one, nothing is asked and the card holds bitcoin. Its rows are FC_SETUP_UNITS, and on a card of
+   *                      software 1.23 a third, BOTH. DOLLARS or BITCOIN there is this phone's promise to offer only that one
+   *                      when it adds to the card (kept beside the card's row, 08a-flashcard.js `cardHoldNote`); BOTH sets the
+   *                      card up in dollars, the owner's dollars first, and ADD FUNDS asks which every time. The card itself is
+   *                      told nothing of it: it takes either currency whatever was chosen
    *   SMALL AMOUNTS      "Do you want to pay small amounts without entering your PIN?" YES or NO; YES turns the wheel for
    *                      how much (the no-PIN allowance)
    *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES turns the wheel for the limit on one payment,
@@ -87,16 +90,17 @@
     const su = this._fcSu;
     if (!su) return;
     if (!su.other && !su.unit && this.twoUnitsOn && this.twoUnitsOn()) {
-      this.fcUnitAsk((unit) => { su.unit = unit; this.fcSuNoPin(); });
+      const fc = this.state.fc;
+      this.fcUnitAsk((unit) => { su.unit = unit; this.fcSuNoPin(); }, null, !!(fc && fc.v123));
       return;
     }
     this.fcSuNoPin();
   }
 
-  /* The unit the card will hold, for the wheel's figures: what was chosen, or bitcoin. */
+  /* The unit the card will hold, for the wheel's figures: what was chosen, or bitcoin. (BOTH is set up in dollars: dollars.) */
   fcSuUnitNow() {
     const su = this._fcSu;
-    return (su && su.unit === 'usd') ? 'usd' : 'sat';
+    return (su && (su.unit === 'usd' || su.unit === 'both')) ? 'usd' : 'sat';
   }
 
   fcSuNoPin() {
@@ -201,12 +205,15 @@
     // (and the price: a card of software 1.23 keeps its numbers in cents and is given its rate at it, 08a-flashcard.js `cardSetUpCents`)
     const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                       tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
-    if (c.unit) how.unit = c.unit;
+    /* (a card of 1.23: BOTH is a dollar record, and what was chosen is kept on this phone as `hold`, which the card is never told) */
+    if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
+    const fc = this.state.fc;
+    if (fc && fc.v123 && c.unit) how.hold = c.unit;
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast(c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
+        this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
   }
 

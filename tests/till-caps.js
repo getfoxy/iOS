@@ -274,7 +274,7 @@ async function run() {
       }
       return appSrc.slice(at + 3, i + 1);
     };
-    const sigs = ['tillCapRows(path, shut) {', 'tillCapAsk(which) {', 'tillCapQuestion() {', 'tillCapDefaultLabel() {',
+    const sigs = ['tillCapRows(path, shut) {', 'tillCapAsk(which) {', 'tillCapQuestion() {', 'tillCapNote() {', 'tillCapDefaultLabel() {',
       'tillCapSet(sats) {', 'tillNoticeText() {', 'unitFigure(amount, unit) {', 'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {'];
     const t = Object.assign(new Function('window', 'return {' + sigs.map(method).join(',\n') + '}')({ FoxyWallet: rx.W }), {
       state: { screen: 'home', stack: [] }, toasts: [],
@@ -282,13 +282,23 @@ async function run() {
       toast(x) { this.toasts.push(x); }, px: () => RATE, satUsd: () => RATE / 1e8, offlineNow: () => true,
     });
     const rows = t.tillCapRows('M0', null);
-    ok(rows.length === 2 && rows[0].label === 'OFFLINE, ONE PAYER' && rows[0].value === '$ 50.00' && rows[0].valueSub === '₿ 500'
-      && rows[1].label === 'OFFLINE, IN ALL' && rows[1].value === '$ 300.00' && rows[1].valueSub === '₿ 3,000',
+    ok(rows.length === 2 && rows[0].label === 'OFFLINE, PER PAYER' && rows[0].value === '$ 50.00' && rows[0].valueSub === '₿ 500'
+      && rows[1].label === 'OFFLINE, TOTAL' && rows[1].value === '$ 300.00' && rows[1].valueSub === '₿ 3,000',
       'two SETTINGS rows, dollars with the sats under', JSON.stringify(rows.map((r) => [r.label, r.value, r.valueSub])));
     rows[0].tap();
     ok(t.state.screen === 'amount' && t.state.flow === 'tillCap' && t.state.tillCapWhich === 'payer' && t.state.unit === 'USD'
       && /one payer/.test(t.tillCapQuestion()) && t.tillCapDefaultLabel() === 'USE THE DEFAULT ($ 50.00)',
       'a tap opens SET AMOUNT in dollars, asking the question', JSON.stringify(t.state));
+    ok(t.tillCapNote() === 'The most one payer may hand this phone while it is offline, before it connects to settle. Cards don\u2019t count.',
+      'and a plain line under it says what the figure is', t.tillCapNote());
+    t.state.tillCapWhich = 'hold';
+    ok(t.tillCapNote() === 'The most this phone holds unsettled from everyone while offline. It warns at half.',
+      'the total’s own line', t.tillCapNote());
+    const amountVals = method('renderAmount(c) {');
+    ok(/amountNote: s\.flow === 'tillCap' && this\.tillCapNote \? this\.tillCapNote\(\) : '',/.test(amountVals)
+      && /\{\{ amountNote \}\}/.test(fs.readFileSync(path.join(__dirname, '..', 'build', 'markup.html'), 'utf8')),
+      'SET AMOUNT draws it under the question');
+    t.state.tillCapWhich = 'payer';
     t.tillCapSet(250);
     ok(rx.W.tillCaps().payerSats === 250 && t.state.screen === 'home' && t.toasts[t.toasts.length - 1] === 'Set to $ 25.00',
       'NEXT keeps the figure in sats and says it in dollars', JSON.stringify(rx.W.tillCaps()) + ' ' + t.toasts.join('|'));

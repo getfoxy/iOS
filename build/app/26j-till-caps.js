@@ -21,8 +21,8 @@
         tap: shut ? shut(() => this.tillCapAsk(which)) : () => this.tillCapAsk(which) };
     };
     return [
-      row('OFFLINE, ONE PAYER', 'payer', caps.payerSats, caps.payerCents),
-      row('OFFLINE, IN ALL', 'hold', caps.holdSats, caps.holdCents),
+      row('OFFLINE, PER PAYER', 'payer', caps.payerSats, caps.payerCents),
+      row('OFFLINE, TOTAL', 'hold', caps.holdSats, caps.holdCents),
     ];
   }
 
@@ -39,6 +39,13 @@
     return this.state.tillCapWhich === 'payer'
       ? 'How much may one payer hand you while you are offline?'
       : 'How much may you hold while offline before it settles?';
+  }
+
+  /* What the figure is, in a plain line under SET AMOUNT's question (`amountNote`): the rows' names alone did not say. */
+  tillCapNote() {
+    return this.state.tillCapWhich === 'payer'
+      ? 'The most one payer may hand this phone while it is offline, before it connects to settle. Cards don\u2019t count.'
+      : 'The most this phone holds unsettled from everyone while offline. It warns at half.';
   }
 
   /* The default, as SET AMOUNT's second answer: the owner's figure in dollars,

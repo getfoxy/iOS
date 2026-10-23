@@ -556,6 +556,9 @@
       // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
       swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
+      // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
+      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
+      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
       hideSkip: true,
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no

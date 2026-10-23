@@ -602,8 +602,64 @@ class Component extends DCLogic {
     // (a payment from a card is bitcoin only, and is not asked about)
     if (sending && this.cardSendNow()) return;
     if (!this.twoUnitsOn() || this.walletNow(receiving ? 'receive' : 'send')) return;
+    /* A send asks only when both balances can pay it, as a card does (`payFromOnly`): where one alone can, it pays
+     * with no question, and where neither can, the confirmation says NOT ENOUGH. Neither is remembered: nobody chose. */
+    const only = sending && this.payFromOnly ? this.payFromOnly() : '';
+    if (only) {
+      const unit = only === 'usd' ? 'usd' : 'sat';
+      console.log('[foxy] two balances: ' + (only === 'none' ? 'neither covers this send' : 'only ' + this.unitWord(unit).toLowerCase() + ' covers this send') + ', so nothing is asked');
+      const patch = { wallet: unit, walletAuto: only !== 'none', walletTapped: false };
+      // a dollar balance is typed in dollars, exactly (as `currencyPick`)
+      if (unit === 'usd' && s.screen === 'amount' && s.unit !== 'USD') Object.assign(patch, { unit: 'USD', amount: '' });
+      this.setState(patch);
+      return;
+    }
     console.log('[foxy] two balances: asking which one, before ' + s.screen);
     this.setState(p => ({ screen: 'currency', currencyFlow: receiving ? 'receive' : 'send', currencyNext: p.screen }));
+  }
+
+  /* Which of this phone's two balances can pay this send, by the card's rule (the owner, 2026-10-22: "phone should
+   * behave like card"): the question is asked only when both can. 'usd' or 'sat' where that one alone can, 'none' where
+   * neither can, and '' where the question is asked: both can, or one can and the other cannot be told yet. One that
+   * cannot be told beside one that cannot pay is no question either: the only one that might pay is the one used, and
+   * where it cannot after all the confirmation says NOT ENOUGH, as it would for either. */
+  payFromOnly() {
+    const s = this.state;
+    // on SET AMOUNT nothing is typed yet: only an empty balance is known not to pay
+    const sats = s.screen === 'amount' ? 0 : (this.sendSatsNow ? this.sendSatsNow() : 0);
+    const usd = this.payFitNow('usd', sats), sat = this.payFitNow('sat', sats);
+    if (usd === true && sat === true) return '';
+    if (usd === false && sat === false) return 'none';
+    if (usd === false) return 'sat';
+    if (sat === false) return 'usd';
+    return '';
+  }
+
+  /* Does `unit` cover `sats` with its fee? true, false, or null where it cannot be told. Its quote where it is in
+   * (`quoteFits`); before it is, the wallet's own sum (`payNeed`) with the usual reserve (1%, at least 2 sats or a cent),
+   * and for dollars the market price a tenth either way, since the mint's rate is not the market's. In between it is
+   * null, and the question is asked as before, CHECKING on the confirmation after it, rather than guessed. */
+  payFitNow(unit, sats) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    if (u === 'usd' && this.state.balUsdCents == null) return null;
+    if (!(this.unitBalance(u) > 0)) return false;
+    if (!(sats > 0)) return null;
+    const quoted = this.quoteFits(u);
+    if (quoted !== null) return quoted;
+    const W = window.FoxyWallet;
+    const covers = (amount, reserve) => {
+      try { const r = (W && W.payNeed) ? W.payNeed(amount, reserve, { unit: u }) : null; return r ? !!r.ok : null; }
+      catch (e) { return null; }
+    };
+    if (u === 'sat') {
+      if (covers(sats, Math.max(2, Math.ceil(sats / 100))) === true) return true;
+      return covers(sats, 0) === false ? false : null;
+    }
+    const px = this.satUsd ? this.satUsd() : null;
+    if (!px) return null;
+    const cents = sats * px * 100;
+    if (covers(Math.ceil(cents * 1.1), Math.max(1, Math.ceil(cents / 100))) === true) return true;
+    return covers(Math.floor(cents * 0.9), 0) === false ? false : null;
   }
 
   /* A card on CURRENCY: the balance for this flow, remembered for the next. */
@@ -614,8 +670,10 @@ class Component extends DCLogic {
     if (s.currencyFlow === 'card') {
       const then = this._fcUnitThen;
       this._fcUnitThen = null;
-      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null }));
-      if (then) then(unit === 'usd' ? 'usd' : 'sat');
+      // (BOTH, offered only where a card of software 1.23 is set up: `curBoth`)
+      const picked = unit === 'usd' ? 'usd' : (unit === 'both' && s.curBoth) ? 'both' : 'sat';
+      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null, curBoth: false }));
+      if (then) then(picked);
       return;
     }
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
@@ -13978,8 +14036,8 @@ class Component extends DCLogic {
      *   SETTINGS, which opens and closes in place:
      *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
      *     SEND IN (only at a mint with two balances, holding both), each with
-     *     the balance it is set to; SET PIN; OFFLINE, ONE PAYER and OFFLINE,
-     *     IN ALL, each with its figure; RESTORE, BACKUP, LOGS
+     *     the balance it is set to; SET PIN; OFFLINE, PER PAYER and OFFLINE,
+     *     TOTAL, each with its figure; RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has
@@ -15015,6 +15073,9 @@ class Component extends DCLogic {
       // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
       swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
+      // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
+      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
+      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
       hideSkip: true,
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no
@@ -16306,16 +16367,28 @@ class Component extends DCLogic {
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
       return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
     };
-    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js, where a card that holds both is a row to add)
+    // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js)
     const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];
+    /* A card of software 1.23 being set up (`curBoth`, `fcSuUnit`): BOTH is a third card of the same shape, in the slate of home's
+     * buttons, its two balances on the one line where the others say CURRENT BALANCE. Three cards are drawn a size smaller to fit. */
+    const both = cardFlow && !cc && !!s.curBoth;
+    if (both) {
+      LOOK.both = { bg: 'linear-gradient(160deg,var(--slate-a),var(--slate-b))', ink: 'var(--ink)', inkRgb: 'var(--ink-rgb)', blend: 'normal',
+        edge: 'var(--slate-edge)', badgeBg: 'rgba(var(--ink-rgb),.12)', badgeInk: 'var(--ink)', sym: '$\u20bf' };
+      units.push('both');
+    }
+    const three = units.length > 2;
     const cards = (sc === 'currency' || pick) ? units.map(u => {
-      const tag = whyNot(u);
+      const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
       const chosen = pick && u === current && !tag;
       return Object.assign(look, {
         sym: LOOK[u].sym,
-        name: this.unitWord(u),
-        balance: balanceText(u),
+        name: u === 'both' ? 'BOTH' : this.unitWord(u),
+        balance: u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
+        labelShown: u !== 'both',
+        badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
+        balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
         tag: tag, tagShown: !!tag,
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
@@ -16344,6 +16417,7 @@ class Component extends DCLogic {
         : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
+      curGap: three ? '12px' : '16px',
       curFoot: pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
@@ -16352,6 +16426,7 @@ class Component extends DCLogic {
             + ' cannot cover this one.'
           : 'The one you pick is remembered for your next payment.')
         : cc ? String(cc.foot || '')
+        : both ? 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.'
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',
@@ -24762,6 +24837,10 @@ class Component extends DCLogic {
       v123: !!(card.info && card.info.units), cents: !!(card.info && card.info.cents),
       units: (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null,
       bal: card.units ? { usd: card.units.usd.balance, sat: card.units.sat.balance } : null,
+      /* `only`: the one currency its owner chose for it when this phone set it up ('usd' or 'sat'), which this phone's ADD FUNDS and
+       * SEND put on it and nothing else; '' for a card of both, one this phone made no such promise for, or one that holds the other
+       * currency all the same (given it elsewhere): that is a card of both (the wallet's `cardHold`) */
+      only: (() => { const h = (W && W.cardHold) ? W.cardHold(card) : ''; return h === 'usd' || h === 'sat' ? h : ''; })(),
       rate: (card.info && card.info.rateSaid) ? Number(card.info.rate) || 0 : 0,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
@@ -25048,10 +25127,12 @@ class Component extends DCLogic {
 
   /* WHAT WILL THIS CARD HOLD? (25-render-confirm-and-blocked.js, `renderCurrency`, its `card` flow): the two balances' own
    * cards, each with what this phone holds of it, which is what can be loaded. The pick is this card's and nobody's
-   * remembered choice (`currencyPick` writes nothing for it); `then(unit)` goes on with it. Back is the card's screen. */
-  fcUnitAsk(then, card) {
+   * remembered choice (`currencyPick` writes nothing for it); `then(unit)` goes on with it. Back is the card's screen. `both`: a card of
+   * software 1.23 being set up, which is offered BOTH as well (`then('both')`). */
+  fcUnitAsk(then, card, both) {
     this._fcUnitThen = then;
-    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]), curCard: card || null }));
+    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]), curCard: card || null,
+                          curBoth: !card && !!both }));
   }
 
   /* Which of a card's two currencies (software 1.23): the same CURRENCY screen, asked in this flow's words. `o`: { question, foot, bal (the
@@ -25121,8 +25202,10 @@ class Component extends DCLogic {
     if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
     this._fcFlowUnit = null;
     /* A card of software 1.23 at a mint with both currencies takes either: which is asked first, on the CURRENCY screen with what this
-     * phone holds of each (what can be added), and then SET AMOUNT in it. */
+     * phone holds of each (what can be added), and then SET AMOUNT in it. One its owner set up here to hold one currency (`fc.only`)
+     * is asked nothing: SET AMOUNT in that one. */
     const fc = this.state.fc;
+    if (fc && fc.v123 && fc.only) { this._fcFlowUnit = fc.only; this.fcAmount('cardAdd'); return; }
     if (fc && fc.v123 && this.twoUnitsOn && this.twoUnitsOn()) {
       const none = (u) => !(this.unitBalance(u) > 0);
       this.fcPickUnit({
@@ -26604,6 +26687,18 @@ class Component extends DCLogic {
    * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
   fcSendPrepare(card, sats, unit, alt) {
     const W = this.fcW();
+    /* A card of 1.23 its owner set up on this phone to hold one currency (`cardHold`) takes that one alone from here: the other is
+     * refused before anything is made, in the wallet's words for a card of the other kind. A bitcoin card typed in dollars is loaded
+     * with their sats, as below. */
+    const only = (W.cardHold && W.cardHold(card)) || '';
+    const from = unit === 'usd' ? 'usd' : 'sat';
+    if ((only === 'usd' || only === 'sat') && from !== only && !(only === 'sat' && alt)) {
+      const wu = /** @type {any} */ (new Error('This card holds ' + (only === 'usd' ? 'dollars' : 'bitcoin') + ', so it is loaded from your '
+        + (only === 'usd' ? 'dollars' : 'bitcoin') + '.'));
+      wu.card = 'wrong-unit';
+      wu.cardUnit = only;
+      throw wu;
+    }
     /* A card of software 1.23 takes the currency sent where it holds it already, or where it is its record's: dollars onto its dollars,
      * as they are (a new currency on it is its holder's to start, and a phone that is not its owner would be refused). */
     const cu = W.cardUnits ? W.cardUnits(card) : null;
@@ -28980,8 +29075,11 @@ class Component extends DCLogic {
    *   CREATE A PIN       the PIN pad every card PIN is typed on (`fcAskPin`), four to eight digits
    *   RE-ENTER PIN       the same again; two that differ start it again
    *   CURRENCY           what the card holds, on the CURRENCY screen (`fcUnitAsk`), at a mint with two balances; at a mint
-   *                      with one, nothing is asked and the card holds bitcoin. Its rows are FC_SETUP_UNITS: a third, a card
-   *                      that holds both, is a row to add there when cards hold two balances, which none does yet
+   *                      with one, nothing is asked and the card holds bitcoin. Its rows are FC_SETUP_UNITS, and on a card of
+   *                      software 1.23 a third, BOTH. DOLLARS or BITCOIN there is this phone's promise to offer only that one
+   *                      when it adds to the card (kept beside the card's row, 08a-flashcard.js `cardHoldNote`); BOTH sets the
+   *                      card up in dollars, the owner's dollars first, and ADD FUNDS asks which every time. The card itself is
+   *                      told nothing of it: it takes either currency whatever was chosen
    *   SMALL AMOUNTS      "Do you want to pay small amounts without entering your PIN?" YES or NO; YES turns the wheel for
    *                      how much (the no-PIN allowance)
    *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES turns the wheel for the limit on one payment,
@@ -29062,16 +29160,17 @@ class Component extends DCLogic {
     const su = this._fcSu;
     if (!su) return;
     if (!su.other && !su.unit && this.twoUnitsOn && this.twoUnitsOn()) {
-      this.fcUnitAsk((unit) => { su.unit = unit; this.fcSuNoPin(); });
+      const fc = this.state.fc;
+      this.fcUnitAsk((unit) => { su.unit = unit; this.fcSuNoPin(); }, null, !!(fc && fc.v123));
       return;
     }
     this.fcSuNoPin();
   }
 
-  /* The unit the card will hold, for the wheel's figures: what was chosen, or bitcoin. */
+  /* The unit the card will hold, for the wheel's figures: what was chosen, or bitcoin. (BOTH is set up in dollars: dollars.) */
   fcSuUnitNow() {
     const su = this._fcSu;
-    return (su && su.unit === 'usd') ? 'usd' : 'sat';
+    return (su && (su.unit === 'usd' || su.unit === 'both')) ? 'usd' : 'sat';
   }
 
   fcSuNoPin() {
@@ -29176,12 +29275,15 @@ class Component extends DCLogic {
     // (and the price: a card of software 1.23 keeps its numbers in cents and is given its rate at it, 08a-flashcard.js `cardSetUpCents`)
     const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                       tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
-    if (c.unit) how.unit = c.unit;
+    /* (a card of 1.23: BOTH is a dollar record, and what was chosen is kept on this phone as `hold`, which the card is never told) */
+    if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
+    const fc = this.state.fc;
+    if (fc && fc.v123 && c.unit) how.hold = c.unit;
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast(c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
+        this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
   }
 
@@ -29320,8 +29422,8 @@ class Component extends DCLogic {
         tap: shut ? shut(() => this.tillCapAsk(which)) : () => this.tillCapAsk(which) };
     };
     return [
-      row('OFFLINE, ONE PAYER', 'payer', caps.payerSats, caps.payerCents),
-      row('OFFLINE, IN ALL', 'hold', caps.holdSats, caps.holdCents),
+      row('OFFLINE, PER PAYER', 'payer', caps.payerSats, caps.payerCents),
+      row('OFFLINE, TOTAL', 'hold', caps.holdSats, caps.holdCents),
     ];
   }
 
@@ -29338,6 +29440,13 @@ class Component extends DCLogic {
     return this.state.tillCapWhich === 'payer'
       ? 'How much may one payer hand you while you are offline?'
       : 'How much may you hold while offline before it settles?';
+  }
+
+  /* What the figure is, in a plain line under SET AMOUNT's question (`amountNote`): the rows' names alone did not say. */
+  tillCapNote() {
+    return this.state.tillCapWhich === 'payer'
+      ? 'The most one payer may hand this phone while it is offline, before it connects to settle. Cards don\u2019t count.'
+      : 'The most this phone holds unsettled from everyone while offline. It warns at half.';
   }
 
   /* The default, as SET AMOUNT's second answer: the owner's figure in dollars,

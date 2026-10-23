@@ -375,6 +375,60 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(W.rec.sets.pop(), { send: 'sat' }, 'remembered for sending');
   }
 
+  // ---- 4b. the card's rule: CURRENCY only when both balances can pay (the owner, 2026-10-22) -----
+  {
+    // both cover 6,112 sats (about $ 4.89): asked, as above
+    const W = twoWallet({ choice: { hold: 'both' } });
+    await fresh(W);
+    A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
+    A.acceptTarget('lnbcsat-both-cover');
+    await settle();
+    eq([A.state.screen, A.payFromOnly()], ['currency', ''], 'both cover it: CURRENCY asks');
+    // dollars short ($ 2.00): no question, CONFIRM PAYMENT on bitcoin, nothing remembered
+    const W2 = twoWallet({ choice: { hold: 'both' }, usd: 200 });
+    await fresh(W2);
+    A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
+    A.acceptTarget('lnbcsat-dollars-short');
+    await settle(); await settle();
+    ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'sat' && V().cfWalletWord === 'BITCOIN' && W2.rec.sets.length === 0,
+      'only bitcoin covers it: no CURRENCY, CONFIRM PAYMENT on bitcoin, nothing remembered',
+      JSON.stringify([A.state.screen, A.state.wallet, W2.rec.sets]));
+    ok(/^PAY/.test(String(A.confirmTwoSpec().cta)), 'and it can be paid', String(A.confirmTwoSpec().cta));
+    // the WALLET picker stays, with dollars greyed NOT ENOUGH
+    A.openWalletPick(); await settle();
+    eq(V().curCards.map((k) => k.tag), ['NOT ENOUGH FOR ' + A.sendAmountText(), ''], 'WALLET still opens, dollars NOT ENOUGH');
+    A.back(); await settle();
+    // bitcoin short: dollars, typed in dollars
+    const W3 = twoWallet({ choice: { hold: 'both' }, sat: 1000 });
+    await fresh(W3);
+    A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
+    A.acceptTarget('lnbcsat-bitcoin-short');
+    await settle(); await settle();
+    ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'usd' && V().cfWalletWord === 'USD' && W3.rec.sets.length === 0,
+      'only dollars cover it: no CURRENCY, CONFIRM PAYMENT on dollars', JSON.stringify([A.state.screen, A.state.wallet]));
+    // neither: no question, NOT ENOUGH
+    const W4 = twoWallet({ choice: { hold: 'both' }, sat: 1000, usd: 200 });
+    await fresh(W4);
+    A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
+    A.acceptTarget('lnbcsat-neither');
+    await settle(); await settle();
+    const nf = A.confirmTwoSpec();
+    ok(A.state.screen === 'sendConfirm' && nf.cta === 'NOT ENOUGH' && /^Neither balance covers this/.test(String(nf.warn)),
+      'neither covers it: no CURRENCY, NOT ENOUGH', JSON.stringify([A.state.screen, nf.cta, nf.warn]));
+    // SET AMOUNT, nothing typed yet: an empty balance is the only one known not to pay
+    const W5 = twoWallet({ choice: { hold: 'both' }, usd: 0 });
+    await fresh(W5);
+    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', unit: 'SATS', amount: '', recipient: 'me@addr.test', recipientKind: 'email' });
+    await settle();
+    ok(A.state.screen === 'amount' && A.state.wallet === 'sat', 'no dollars at all: SET AMOUNT on bitcoin, not asked', JSON.stringify([A.state.screen, A.state.wallet]));
+    const W6 = twoWallet({ choice: { hold: 'both' } });
+    await fresh(W6);
+    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', unit: 'SATS', amount: '', recipient: 'me@addr.test', recipientKind: 'email' });
+    await settle();
+    eq(A.state.screen, 'currency', 'both hold something, nothing typed: asked, as before');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+
   // ---- 7. the keypad for dollars --------------------------------------------------------------
   {
     const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });

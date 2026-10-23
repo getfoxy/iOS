@@ -600,8 +600,64 @@ class Component extends DCLogic {
     // (a payment from a card is bitcoin only, and is not asked about)
     if (sending && this.cardSendNow()) return;
     if (!this.twoUnitsOn() || this.walletNow(receiving ? 'receive' : 'send')) return;
+    /* A send asks only when both balances can pay it, as a card does (`payFromOnly`): where one alone can, it pays
+     * with no question, and where neither can, the confirmation says NOT ENOUGH. Neither is remembered: nobody chose. */
+    const only = sending && this.payFromOnly ? this.payFromOnly() : '';
+    if (only) {
+      const unit = only === 'usd' ? 'usd' : 'sat';
+      console.log('[foxy] two balances: ' + (only === 'none' ? 'neither covers this send' : 'only ' + this.unitWord(unit).toLowerCase() + ' covers this send') + ', so nothing is asked');
+      const patch = { wallet: unit, walletAuto: only !== 'none', walletTapped: false };
+      // a dollar balance is typed in dollars, exactly (as `currencyPick`)
+      if (unit === 'usd' && s.screen === 'amount' && s.unit !== 'USD') Object.assign(patch, { unit: 'USD', amount: '' });
+      this.setState(patch);
+      return;
+    }
     console.log('[foxy] two balances: asking which one, before ' + s.screen);
     this.setState(p => ({ screen: 'currency', currencyFlow: receiving ? 'receive' : 'send', currencyNext: p.screen }));
+  }
+
+  /* Which of this phone's two balances can pay this send, by the card's rule (the owner, 2026-10-22: "phone should
+   * behave like card"): the question is asked only when both can. 'usd' or 'sat' where that one alone can, 'none' where
+   * neither can, and '' where the question is asked: both can, or one can and the other cannot be told yet. One that
+   * cannot be told beside one that cannot pay is no question either: the only one that might pay is the one used, and
+   * where it cannot after all the confirmation says NOT ENOUGH, as it would for either. */
+  payFromOnly() {
+    const s = this.state;
+    // on SET AMOUNT nothing is typed yet: only an empty balance is known not to pay
+    const sats = s.screen === 'amount' ? 0 : (this.sendSatsNow ? this.sendSatsNow() : 0);
+    const usd = this.payFitNow('usd', sats), sat = this.payFitNow('sat', sats);
+    if (usd === true && sat === true) return '';
+    if (usd === false && sat === false) return 'none';
+    if (usd === false) return 'sat';
+    if (sat === false) return 'usd';
+    return '';
+  }
+
+  /* Does `unit` cover `sats` with its fee? true, false, or null where it cannot be told. Its quote where it is in
+   * (`quoteFits`); before it is, the wallet's own sum (`payNeed`) with the usual reserve (1%, at least 2 sats or a cent),
+   * and for dollars the market price a tenth either way, since the mint's rate is not the market's. In between it is
+   * null, and the question is asked as before, CHECKING on the confirmation after it, rather than guessed. */
+  payFitNow(unit, sats) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    if (u === 'usd' && this.state.balUsdCents == null) return null;
+    if (!(this.unitBalance(u) > 0)) return false;
+    if (!(sats > 0)) return null;
+    const quoted = this.quoteFits(u);
+    if (quoted !== null) return quoted;
+    const W = window.FoxyWallet;
+    const covers = (amount, reserve) => {
+      try { const r = (W && W.payNeed) ? W.payNeed(amount, reserve, { unit: u }) : null; return r ? !!r.ok : null; }
+      catch (e) { return null; }
+    };
+    if (u === 'sat') {
+      if (covers(sats, Math.max(2, Math.ceil(sats / 100))) === true) return true;
+      return covers(sats, 0) === false ? false : null;
+    }
+    const px = this.satUsd ? this.satUsd() : null;
+    if (!px) return null;
+    const cents = sats * px * 100;
+    if (covers(Math.ceil(cents * 1.1), Math.max(1, Math.ceil(cents / 100))) === true) return true;
+    return covers(Math.floor(cents * 0.9), 0) === false ? false : null;
   }
 
   /* A card on CURRENCY: the balance for this flow, remembered for the next. */
@@ -612,8 +668,10 @@ class Component extends DCLogic {
     if (s.currencyFlow === 'card') {
       const then = this._fcUnitThen;
       this._fcUnitThen = null;
-      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null }));
-      if (then) then(unit === 'usd' ? 'usd' : 'sat');
+      // (BOTH, offered only where a card of software 1.23 is set up: `curBoth`)
+      const picked = unit === 'usd' ? 'usd' : (unit === 'both' && s.curBoth) ? 'both' : 'sat';
+      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null, curBoth: false }));
+      if (then) then(picked);
       return;
     }
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
