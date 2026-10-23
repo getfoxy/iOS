@@ -31,7 +31,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
 | `23-render-home-and-amount.js` | 730 | `renderHome`, `renderHomeTwo`, `goHistoryIn`, `swapStart`, `keypadLocked`, `usdKeypad`, `keypadStale`, `keypadWallet`, `torBannerVals`, `shieldVals`, `shieldWatch`, `renderAmount` |
 | `24-render-receive-and-send.js` | 1001 | `renderReceive`, `renderPaid`, `renderPaidBase`, `renderSend`, `renderSent`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
-| `25-render-confirm-and-blocked.js` | 231 | `renderConfirmShell`, `renderBlocked`, `renderCurrency` |
+| `25-render-confirm-and-blocked.js` | 233 | `renderConfirmShell`, `renderBlocked`, `renderCurrency` |
 | `26-render-history-and-contacts.js` | 725 | `renderHistory`, `segLook`, `renderTxDetail`, `histRowTwo`, `renderContacts` |
 | `26a-transfer.js` | 197 | `goTransfer`, `trPick`, `trFromSats`, `trNext`, `quoteTransfer`, `trMoveLess`, `runTransfer`, `trCancel`, `transferSpec` |
 | `26b-onchain.js` | 449 | `onchainAsk`, `ocCan`, `ocReceiveAddress`, `ocReceiveNote`, `ocFloorShort`, `ocFloorSays`, `ocReceiveBlocked`, `payOnchain`, `ocNext`, `ocQuote`, `ocPickFee`, `ocFeeLabel`, `ocTxidOf`, `ocPay`, `onchainSpec`, `ocCancel`, `onchainWatchLater`, `onchainWatch` |

@@ -980,9 +980,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(a.state.screen === 'currency' && v.curQuestion === 'WHAT WILL THIS CARD HOLD?' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN,BOTH',
          'a card of 1.23: WHAT WILL THIS CARD HOLD? with DOLLARS, BITCOIN and BOTH', v.curCards.map((x) => x.name).join());
       const b = v.curCards[2];
-      ok(b.balance === '$ 200.00 \u00b7 \u20bf 50,000' && b.labelShown === false && v.curCards[0].labelShown === true && v.curCards[0].balance === '$ 200.00'
+      ok(b.balance === '' && b.labelShown === false && v.curCards.every((x) => x.labelShown === false && x.balance === '')
          && v.curCards.every((x) => x.badgePx === '52px' && typeof x.tap === 'function'),
-         'BOTH is a card of the same shape, its two balances on one line where the others say CURRENT BALANCE, all three a size smaller', JSON.stringify([b.balance, b.labelShown]));
+         'BOTH is a card of the same shape; the set-up tiles show no balances, all three a size smaller', JSON.stringify([b.balance, b.labelShown]));
       ok(v.curFoot === 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.',
          'the words under them say what each choice does', v.curFoot);
       b.tap();
@@ -1120,7 +1120,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const c = newCard(H, undefined, { format: 4, software: 22 });
       await toCurrency(a, c);
       const v = cur(a);
-      ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '92px' && x.labelShown)
+      ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '92px' && x.labelShown === false && x.balance === '')
          && v.curFoot === 'A card holds one of them. To change it later, RESET the card and set it up again.',
          'a card of 1.22: DOLLARS and BITCOIN, and the old words', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
       v.curBack();

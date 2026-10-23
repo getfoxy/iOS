@@ -1611,8 +1611,8 @@
  },
  "CURRENCY, setting up a card": {
   "file": "477-currency-setting-up-a-card.html",
-  "markup": "632c36228d281ed7f3dd96dd7dbd0903257bcd1f602cacdc28d8ecd55e328405",
-  "vals": "49588ac2654784de052a558ca20f7c20befbfce21b4517a728eddc56be56a1f7"
+  "markup": "caca70c0e29da5cfd8bf5eac50e6032f4a86c60db9e2929fa36e592753dfebde",
+  "vals": "c90640dae5791d9612ae865f30eb176aa917f705dd8323a1f3221bd8d35c1703"
  },
  "flashcard, a card of software 1.23 holding dollars and bitcoin: two pills, its ceiling in dollars under them": {
   "file": "530-flashcard-a-card-of-software-1-23-holding-dollars-and-bitcoin-two-pills-its-ceiling-in-dollars-under-them.html",
@@ -1636,8 +1636,8 @@
  },
  "CURRENCY, setting up a card of software 1.23: dollars, bitcoin or both": {
   "file": "540-currency-setting-up-a-card-of-software-1-23-dollars-bitcoin-or-both.html",
-  "markup": "6071265d44990d8c25c1d4d81d296c44fee054d1f344d7b8e2c603a11e7a830c",
-  "vals": "8edbd9c0fc30eac89d9a629f69fb29059e18da8a0cfa2bf3cdd8733b00e8535d"
+  "markup": "7bc26f04c73b38c2f1db4cd06de069d3d3b146c777836ae8b335e15f73c0dabe",
+  "vals": "9b2263ec4dc31ac8e545fa18b5f4f5dd3e2cc0ad1799ceebdc0fc2bdfe147424"
  },
  "CURRENCY, adding to a card of software 1.23": {
   "file": "534-currency-adding-to-a-card-of-software-1-23.html",

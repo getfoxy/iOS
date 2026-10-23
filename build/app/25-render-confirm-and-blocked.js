@@ -160,6 +160,7 @@
       units.push('both');
     }
     const three = units.length > 2;
+    const setUp = cardFlow && !cc;
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
@@ -167,8 +168,9 @@
       return Object.assign(look, {
         sym: LOOK[u].sym,
         name: u === 'both' ? 'BOTH' : this.unitWord(u),
-        balance: u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
-        labelShown: u !== 'both',
+        // (setting a card up shows no balances: they would read as what the card already holds)
+        balance: setUp ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
+        labelShown: u !== 'both' && !setUp,
         badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
         balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
         tag: tag, tagShown: !!tag,
