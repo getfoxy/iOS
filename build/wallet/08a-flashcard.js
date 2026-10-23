@@ -1791,6 +1791,9 @@
    * owner (`card.mine`, by the grant to load, which also lets this tap load with
    * no PIN); and a limit that an earlier tap lifted and did not put back is put
    * back now. */
+  /* The last card any flow read here: its key and what it is (`info`), for the app to know the card in hand off its own screen. */
+  var lastCardRead = null;
+
   function cardLook(link, opts) {
     var o = opts || {};
     var t = cardTalk(link);
@@ -1840,6 +1843,8 @@
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      // the last card read, whatever the flow: the app's PIN-first rule for a change or a load asks it (`cardLastRead`)
+      lastCardRead = { key: card.key, info: card.info, at: Date.now() };
       if (one) one.key = d;
       mark('key');
       if (link && link.one && link.one.proved === card.key) { card.proved = true; return null; }

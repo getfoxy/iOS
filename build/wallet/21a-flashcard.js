@@ -794,6 +794,8 @@
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
+    // the last card read in any flow (its key and info), or null
+    cardLastRead: function () { return lastCardRead; },
 
     /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
      * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */

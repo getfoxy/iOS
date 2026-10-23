@@ -315,8 +315,11 @@
             /* One line for the log: what the mint kept of its reserve, and what came back. The owner asked after a card paid
              * his dollar code whether Forge had charged anything, and the log said only what was reserved. */
             try {
+              // (the reserve may be the library's own Amount, which warns when coerced)
+              var fr = quote.fee_reserve;
+              fr = (fr && typeof fr === 'object' && typeof fr.toNumber === 'function') ? fr.toNumber() : (Number(fr) || 0);
               console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: paid ' + formatAmount(quote.amount, unit) + ', reserved '
-                + formatAmount(Math.max(0, Number(quote.fee_reserve) || 0), unit) + ', the mint kept ' + formatAmount(Math.max(0, feeSats), unit)
+                + formatAmount(Math.max(0, fr), unit) + ', the mint kept ' + formatAmount(Math.max(0, feeSats), unit)
                 + ', ' + formatAmount(sumProofs(change || []), unit) + ' back as change');
             } catch (eLog) { /* a line for the log, nothing more */ }
             if (heldId) FoxyWallet.cardOutDone(heldId);

@@ -827,6 +827,8 @@
     const memo = (this.state.note || '').trim();
     this._recvMemo = memo;
     const mine = (this._invoiceRun = (this._invoiceRun || 0) + 1);
+    // the code is being made: CARD waits for it rather than read a bitcoin card now and refuse it (26f-flashcard.js, `payUsdByCard`)
+    this._usdCodeMaking = mine;
     const G = window.FoxyGate;
     const attempt = (n, waits) => W.invoice(cents, memo, { unit: 'usd' }).catch(e => {
       const closed = !!(W.neverSent && W.neverSent(e));
@@ -836,11 +838,13 @@
       return new Promise(ok => setTimeout(ok, n * 1500)).then(() => attempt(n + 1, waits));
     });
     attempt(1, 0).then(inv => {
+      if (this._usdCodeMaking === mine) this._usdCodeMaking = 0;
       if (mine !== this._invoiceRun) { console.log('[foxy] dollar invoice: an older request answered late; letting it go'); return; }
       if (W.tag) W.tag(inv.hash, { note: memo });
       this.setState({ invoice: inv.bolt11, invoiceHash: inv.hash, note: '', noteDraft: '' });
       this.usdInvoiceUp(inv, mine);
     }).catch(e => {
+      if (this._usdCodeMaking === mine) this._usdCodeMaking = 0;
       if (mine !== this._invoiceRun) return;
       console.error('[foxy] dollar invoice failed after 3 tries:', e);
       this.setState(p => ({

@@ -12116,6 +12116,9 @@
    * owner (`card.mine`, by the grant to load, which also lets this tap load with
    * no PIN); and a limit that an earlier tap lifted and did not put back is put
    * back now. */
+  /* The last card any flow read here: its key and what it is (`info`), for the app to know the card in hand off its own screen. */
+  var lastCardRead = null;
+
   function cardLook(link, opts) {
     var o = opts || {};
     var t = cardTalk(link);
@@ -12165,6 +12168,8 @@
     }).then(function (d) {
       if (!cardHexOk(d, 33) || !/^0[23]/.test(d)) throw cardError('not-a-card', 'That card\u2019s key is not a key.');
       card.key = d;
+      // the last card read, whatever the flow: the app's PIN-first rule for a change or a load asks it (`cardLastRead`)
+      lastCardRead = { key: card.key, info: card.info, at: Date.now() };
       if (one) one.key = d;
       mark('key');
       if (link && link.one && link.one.proved === card.key) { card.proved = true; return null; }
@@ -23381,8 +23386,11 @@
             /* One line for the log: what the mint kept of its reserve, and what came back. The owner asked after a card paid
              * his dollar code whether Forge had charged anything, and the log said only what was reserved. */
             try {
+              // (the reserve may be the library's own Amount, which warns when coerced)
+              var fr = quote.fee_reserve;
+              fr = (fr && typeof fr === 'object' && typeof fr.toNumber === 'function') ? fr.toNumber() : (Number(fr) || 0);
               console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: paid ' + formatAmount(quote.amount, unit) + ', reserved '
-                + formatAmount(Math.max(0, Number(quote.fee_reserve) || 0), unit) + ', the mint kept ' + formatAmount(Math.max(0, feeSats), unit)
+                + formatAmount(Math.max(0, fr), unit) + ', the mint kept ' + formatAmount(Math.max(0, feeSats), unit)
                 + ', ' + formatAmount(sumProofs(change || []), unit) + ' back as change');
             } catch (eLog) { /* a line for the log, nothing more */ }
             if (heldId) FoxyWallet.cardOutDone(heldId);
@@ -32046,6 +32054,8 @@
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
+    // the last card read in any flow (its key and info), or null
+    cardLastRead: function () { return lastCardRead; },
 
     /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
      * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */

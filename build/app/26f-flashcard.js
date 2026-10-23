@@ -883,7 +883,7 @@
         reason: 'The card was taken away too soon. ' + (opt.paying ? 'Nothing was paid. ' : 'Nothing was taken. ')
           + (e.made === false
             ? 'What it signed for is made ready to go back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back.'
-            : 'Tap it again to put back the ' + this.fcSats(e.owed, u) + ' it signed for. No PIN is needed.'),
+            : 'Tap it again to put back the ' + this.fcSats(e.owed, u) + ' it signed for. ' + this.fcNoPinWords()),
         chip: 'Hold it still until the phone says to remove it.' },
         e.made === false ? { shut: { label: 'OK' } } : { retry: 'TAP CARD', go: () => this.fcWriteAsk({}), shut: { label: 'LATER' } }),
       'spent': () => ({ title: opt.taken ? 'NOT PAID' : 'ALREADY SPENT',
@@ -931,7 +931,7 @@
       'not-paid-out': () => (e.made ? {
         tone: 'warn', title: 'NOT PAID',
         reason: said + ' ' + this.fcSats(this.fcAmt(e), u) + ' goes back on the card: tap it to put it back.',
-        chip: 'No PIN is needed.',
+        chip: this.fcNoPinWords(),
         retry: 'TAP CARD', go: () => this.fcOutWrite(), shut: { label: 'LATER' },
       } : {
         tone: 'warn', title: 'NOT PAID',
@@ -1220,6 +1220,19 @@
       return;
     }
     const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
+    /* The code still being made by the mint (12-receive.js, `_usdCodeMaking`; or asked again, `_requoting`): a bitcoin card
+     * needs it, and reading the card now refused it ("tap it again when the dollar code is on screen"), as the owner found
+     * pressing CARD the moment the screen opened. Wait for the code, two and a half seconds at most (the mint answers in about
+     * one; a dollar card needs no code, and is not kept waiting on a mint that is slow), then go on as before. */
+    if (!bolt11 && (this._usdCodeMaking === this._invoiceRun || this._requoting)) {
+      if (!this._fcUsdCodeWait) { this._fcUsdCodeWait = Date.now(); this.toast('One moment: the code is being made.', false); }
+      if (Date.now() - this._fcUsdCodeWait < 2500) {
+        clearTimeout(this._fcUsdCodeWaitT);
+        this._fcUsdCodeWaitT = setTimeout(() => { if (this.state.screen === 'confirm') this.payUsdByCard(); }, 250);
+        return;
+      }
+    }
+    this._fcUsdCodeWait = 0;
     const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
     // a code on screen that names no sats is not one to pay, nor to pay around
     if (bolt11 && !(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
@@ -2233,12 +2246,17 @@
     this._fcXmLive = x;
     const v = this._fcXmVisit;
     if (v && this.fcMintKey(v.mint) === this.fcMintKey(x.mint) && this.fcXmThere(x)) { then(); return; }
+    /* The seconds this takes showed the receive's code bare, as if nothing had happened to it (the owner saw "the receive invoice
+     * screen for a second" between confirming and the sheet): a screen says what is going on instead. */
+    if (this.showMelt) this.showMelt('Reaching ' + this.mintNameOf(x.mint) + '\u2026', 30000);
     Promise.resolve().then(() => W.cardVisit(x.mint)).then((visit) => {
+      if (this.hideMelt) this.hideMelt();
       // a visit already ended by the time this one is there (a back out of the pad meanwhile) ends this one too
       if (this._fcXmLive !== x) { visit.end(); return; }
       this._fcXmVisit = visit;
       then();
     }, (e) => {
+      if (this.hideMelt) this.hideMelt();
       console.warn('[foxy] card: the card’s mint could not be reached:', (W.reason ? W.reason(e) : (e && e.message)));
       this._fcXmLive = null;
       this.haptic && this.haptic('error');
@@ -2426,7 +2444,7 @@
     this.blockedCard('fc-change', {
       tone: 'warn', title: 'TAP TO RECEIVE',
       reason: (p > 0 ? 'Paid ' + this.fcSats(p, unit) + '. ' : 'The money is off the card. ')
-        + 'Tap the card again to receive its ' + this.fcSats(sats, unit) + ' of change. No PIN is needed.',
+        + 'Tap the card again to receive its ' + this.fcSats(sats, unit) + ' of change. ' + this.fcNoPinWords(),
       chip: (p > 0 ? 'Tap 2 of 2. ' : '') + 'The change is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk(Object.assign({ paid: p, receive: true }, unit === 'usd' ? { unit } : {})),
       shut: { label: 'LATER', tap: () => this.fcReleaseConfirm('the change is left for later') },
@@ -2488,7 +2506,7 @@
     /* A card of 1.21 and on on its screen wants its PIN for every load, its owner's and a payment's change included: the PIN is asked
      * before the card is, so it is tapped once (`fcCardPinFirst`); a tap with none, refused for want of it, then the pad and a second tap,
      * was what the owner's phone did. */
-    const pinFirst = !!(fc && this.state.screen === 'flashcard' && this.fcCardPinFirst());
+    const pinFirst = !!(fc && this.state.screen === 'flashcard' && this.fcCardPinFirst()) || this.fcKnownPinFirst();
     if (fc && fc.ownedHere && this.state.screen === 'flashcard' && !opt.pin && !pinFirst) { this.fcWriteRun('', Object.assign({}, opt, { owner: true })); return; }
     /* What is owed is a payment's change, or pieces a card signed for a payment
      * that was not made: the card has just paid, and lets the tap after a payment
@@ -2759,7 +2777,7 @@
     const after = this.fcOwedAfterPaying();
     this.blockedCard('fc-change', {
       tone: 'warn', title: after ? 'TAP TO RECEIVE' : 'TAP THE CARD AGAIN',
-      reason: 'The card was not read. ' + this.fcSats(owed, sum.unit) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' No PIN is needed.' : ''),
+      reason: 'The card was not read. ' + this.fcSats(owed, sum.unit) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' ' + this.fcNoPinWords() : ''),
       chip: 'It is kept for that card and no other.',
       retry: 'TAP CARD', go: () => this.fcWriteAsk(opt),
       shut: { label: 'LATER', tap: () => this.fcReleaseConfirm('the change is left for later') },
@@ -3402,12 +3420,28 @@
   /* Whether the card in hand is of software 1.21 or later, whose every load wants its PIN: from the card as it was read (its version,
    * which the wallet's `pinFirst` is worked out from); a card with no version said is taken to want it, so the PIN is asked, not refused. */
   fcCardPinFirst() {
-    const info = this._fcCard && this._fcCard.info;
+    // off the card's own screen (a payment's change at a till, money waiting after a payment): the card as the last flow read it
+    const W = this.fcW();
+    const last = (W && W.cardLastRead) ? W.cardLastRead() : null;
+    const info = (this._fcCard && this._fcCard.info) || (last && last.info);
     if (!info) return true;
     if (info.pinFirst === true) return true;
     const v = String(info.version || '').split('.');
     if (v.length < 2 || !v[0]) return true;
     return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21);
+  }
+
+  /* Whether the card in hand, as the last flow read it, wants its PIN before any load: a payment's change included (software 1.21 and
+   * on). Unknown card: no, as before (the tap after a payment puts change on with no PIN on older cards). */
+  fcKnownPinFirst() {
+    const W = this.fcW();
+    const known = !!(this._fcCard && this._fcCard.info) || !!(W && W.cardLastRead && W.cardLastRead());
+    return known && this.fcCardPinFirst();
+  }
+
+  // the sentence after "tap the card again": whether its PIN comes first
+  fcNoPinWords() {
+    return this.fcKnownPinFirst() ? 'Its PIN is asked first.' : 'No PIN is needed.';
   }
 
   fcAddAskPin(sats) {

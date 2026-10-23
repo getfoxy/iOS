@@ -83,6 +83,24 @@ async function receiveDollars(till, R, amount) {
     let v = screen(till);
     // (a dollar card pays the cents and needs no invoice, so CARD is there already; a bitcoin card is told to tap again: tests/flashcard-usd-ui.js)
     ok(v.recvTapShown === true && v.recvCardShown === true, 'before the mint has made the invoice: TAP, and CARD for a dollar card');
+    /* CARD pressed while the mint is still making the code (the owner pressed it the moment the screen opened, and the bitcoin
+     * card was read and refused): no sheet yet, a word, and CARD tries again by itself until the code is there. */
+    {
+      const was = { screen: till.state.screen, run: till._invoiceRun, making: till._usdCodeMaking, toasts: till.toasts.length };
+      till._invoiceRun = (till._invoiceRun || 0) + 1;
+      till._usdCodeMaking = till._invoiceRun;
+      till.setState({ screen: 'confirm', invoice: '', recvAmount: 100, recvUnit: 'usd' });
+      R.sheet.length = 0;
+      till.payByCard();
+      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.slice(-1)[0] === 'One moment: the code is being made.',
+         'CARD while the code is being made: no sheet, "One moment: the code is being made."', (till.toasts.slice(-1)[0] || '') + ' | ' + R.sheet.join(' / '));
+      // the screen left before the code came: the retry does nothing
+      till.setState({ screen: 'home' });
+      await new Promise((ok2) => setTimeout(ok2, 400));
+      ok(!R.sheet.some((x) => /^begin: /.test(x)), 'and no sheet comes up for a screen that was left');
+      till._usdCodeMaking = was.making; till._fcUsdCodeWait = 0;
+      till.setState({ screen: was.screen });
+    }
     const inv = await receiveDollars(till, R, '1.00');
     v = screen(till);
     ok(v.recvCardShown === true && v.recvTapShown === true && v.confirmAmount === '$ 1.00',
