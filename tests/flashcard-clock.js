@@ -896,8 +896,8 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     holder.goFlashcard();
     await until('the card to be read', () => !!holder.state.fc && holder.state.fc.hasRecord);
     let v = vals(holder);
-    ok(holder.state.fc.headers === true && v.fcBlockShown === true && v.fcBlockLine === 'No block yet',
-       'a card of 1.15 that has been shown no block says so, under its title', v.fcBlockLine);
+    ok(holder.state.fc.headers === true && v.fcBlockShown === undefined && v.fcBlockLine === undefined,
+       'a card of 1.15 that has been shown no block: its screen has no block line (it was taken off the top)', v.fcBlockLine);
     // a block, shown
     const h = mineHeader(t0 - 90, CHEAP);
     tipIs(H, h);
@@ -908,8 +908,8 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     v = vals(holder);
     // its height where this phone has it (the source said it, or the phone fetched that block), else the eight digits after the zeros
     const height = H.W.headerHeightOf(hashOfHeader(h));
-    const want = height > 0 ? 'Block #' + height : 'Block ' + H.W.headerShort(hashOfHeader(h)) + '\u2026';
-    ok(v.fcBlockShown && v.fcBlockLine === want && holder.state.fc.clock.time === t0 - 90, 'a card that has a block shows its height, or its hash (the eight digits after the zeros)', v.fcBlockLine);
+    ok(holder.state.fc.clock.time === t0 - 90 && !!holder.state.fc.clock.hash && v.fcBlockLine === undefined,
+       'a card that has a block is read at it, and its screen still has no block line', String(height));
     // the real tip, at the real floor: the eight digits after its nineteen zeros
     const strict = newCard(H, undefined, { format: 4 });
     await strict.send(SEL);
@@ -920,7 +920,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     holder.fcRead(true);
     await until('the strict card to be read', () => holder.state.fc && holder.state.fc.clock && holder.state.fc.clock.short);
     v = vals(holder);
-    ok(holder.state.fc.hasRecord === false && v.fcBlockShown === false, 'a card that is new (no PIN, no record) has no limits and no block line', v.fcBlockLine);
+    ok(holder.state.fc.hasRecord === false && v.fcBlockShown === undefined, 'a card that is new (no PIN, no record) has no limits and no block line', v.fcBlockLine);
     ok(holder.state.fc.clock.short === '1fa7ca83' && holder.state.fc.clock.time === TIP.time, 'the real tip reads as 1fa7ca83 and its time', holder.state.fc.clock.short);
     // a card of 1.14 has no such line
     const old = newCard(H, undefined, { format: 4, software: 14, floorBits: CHEAP });
@@ -931,7 +931,7 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
     holder.fcRead(true);
     await until('the 1.14 card to be read', () => holder.state.fc && holder.state.fc.hasRecord);
     v = vals(holder);
-    ok(holder.state.fc.headers === false && v.fcBlockShown === false && v.fcBlockLine === '', 'a card of 1.14 has no block line: its clock is a signed time');
+    ok(holder.state.fc.headers === false && v.fcBlockShown === undefined && v.fcBlockLine === undefined, 'a card of 1.14 has no block line either: its clock is a signed time');
     // a limit set on a card with no block yet: the day begins with the first block (a phone that has none kept: H has one by now)
     const Z = await funded({ sharedMint: H.mint }, 6000);
     const zed = appOn(Z);

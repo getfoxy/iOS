@@ -286,7 +286,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(v.fcPillRows.length === 1 && v.fcPillRows[0].sym === '$' && v.fcPillRows[0].big === '20.00' && v.fcPillRows[0].ink === '#10161B'
        && v.fcPillRows[0].small === '₿ 25,000' && v.fcBalance === '$ 20.00',
        'one dollar pill, frost and dark ink: its cents big, their worth in sats under them at the price', JSON.stringify(v.fcPillRows[0] && { big: v.fcPillRows[0].big, small: v.fcPillRows[0].small }));
-    ok(v.fcLinks.every((x) => x.label !== 'SWAP'), 'no SWAP');
+    ok(v.fcButtons.some((x) => x.label === 'SWAP' && x.dim === '0.38'), 'SWAP greyed: the card holds one currency');
     holder.price = 0;
     v = vals(holder);
     ok(v.fcPillRows[0].small === '' && v.fcPillRows[0].big === '20.00', 'with no price, nothing under the dollars');

@@ -62,8 +62,11 @@ const takeLimitSteps = (app, sats, which) => {
 /* Money put on a card, or taken off it, from its own screen is said by that screen and not by a card raised over it: the balance on it counts to
  * what the card holds (`fcRollStart`). Waits for the count to end, with `sats` on the card. */
 const counted = (app, sats, what) => until(what, () => !!app.state.fc && app.state.fc.balance === sats && !app.state.fcRoll);
-// whether the row under the card has RESET in it (a card of software 1.17 and on, its owner's phone)
-const hasReset = (app) => vals(app).fcLinks.some((k) => k.label === 'RESET');
+// whether the card's MENU has RESET in it (a card of software 1.17 and on, its owner's phone)
+const hasReset = (app) => vals(app).fcMenuItems.some((k) => k.label === 'RESET');
+// the card's MENU, at the top right: its rows, and what LIMITS says under it (what the card pays without its PIN)
+const menuOf = (v) => (v.fcMenuItems || []).map((k) => k.label).join();
+const limitsSub = (v) => ((v.fcMenuItems || []).find((k) => k.label === 'LIMITS') || {}).sub || '';
 /* Two pads in a row (a PIN asked twice, and asked again where the two differed): the pad's own opening and closing are watched, and a turn
  * is a stretch of the page with no paint in it. The second pad must come up in the very turn the first went down, and with no fade: it fades
  * in from the screen under it, which showed through for an instant between the two. */
@@ -159,16 +162,19 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === undefined && v.fcDayLeft === undefined, 'and under it, that it has no limit, with nothing to say of a day: the card screens have no daily limit', v.fcLimitLine);
-  ok(v.fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS' && v.fcRowShown === true && v.fcHistoryVis === 'visible' && v.fcResetVis === undefined && v.fcReset === undefined
+  ok(menuOf(v) === 'LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE,SWAP'
+     && v.fcHistoryVis === 'visible' && v.fcResetVis === undefined && v.fcReset === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcHistory === 'function' && !hasReset(holder),
-     'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY at the top left, and a row of CHANGE PIN and LIMITS under them: RESET is in the row for a card of 1.17 and not for this older one');
+     'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY at the top left, SCAN, PASTE and SWAP under them, and a MENU of LIMITS and CHANGE PIN: RESET is in the menu for a card of 1.17 and not for this older one');
+  ok(v.fcButtons[2].dim === '0.38' && (v.fcButtons[2].tap(), holder.toasts.slice(-1)[0] === 'This card holds one currency, so there is nothing to swap.'),
+     'SWAP is greyed on a card of one currency, and says why when pressed', holder.toasts.slice(-1)[0]);
   ok(v.fcFaceLines === true && v.fcLimitShown === true, 'and the limit line is drawn on the card’s own face (it has the card’s badge above it only where there is one)');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
      'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
   ok(VERIFIED_AT.test(v.fcVerified) && v.fcVerifiedShown === true, 'and under its title, that it is verified, and at what time: a card with nothing on it has nothing a mint could dispute', v.fcVerified);
-  ok(v.fcBlockShown === false && v.fcBlockLine === '' && v.fcClockShown === undefined && v.fcClockLine === undefined,
-     'a card whose clock is not block headers has no block to say, and no card has a CLOCK line any more', v.fcBlockLine);
+  ok(v.fcBlockShown === undefined && v.fcBlockLine === undefined && v.fcClockShown === undefined && v.fcClockLine === undefined,
+     'no card has a block line or a CLOCK line on its screen any more', v.fcBlockLine);
 
   /* ---- add funds: the owner's phone, with no PIN ------------------------------- */
   c.tap();
@@ -951,7 +957,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const sizes = (k) => k.pieces.map((x) => x.amount).sort((a, b) => a - b).join();
     ok(shown.balance === real.balance && sizes(shown) === sizes(real) && shown.info.unspent === real.info.unspent && holder.state.fc.count === real.pieces.length,
        'the screen says what the card says when it is read: the card as the sheet read it after its change went on, whole pieces and all', shown.balance + ' / ' + real.balance);
-    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcLinks.length === 2 && !hasReset(holder),
+    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcMenuItems.length === 2 && !hasReset(holder),
        'and it is still this phone’s card: the owner’s buttons are there (the read after the change is not the owner’s read, and what only that says is kept)');
     // what is left comes off again, so that what follows has the card as it was
     c.tap();
@@ -1156,7 +1162,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(11 * 86400000);
   v = vals(holder);
-  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcLinks.length === 2,
+  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcMenuItems.length === 2,
      'with under twenty days to run the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
@@ -1971,8 +1977,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line', owner.state.screen);
     await look();
     v = vals(owner);
-    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && v.fcLinks.map((k) => k.label).join() === 'RESET,ADD PIN,LIMITS' && v.fcHistoryVis === 'visible' && v.fcLimitLine === 'NO LIMIT | NO PIN',
-       'its screen has ADD PIN in CHANGE PIN’s place, and LIMITS, with RESET before them (a card of 1.17 and on) and HISTORY at the top left', v.fcLinks.map((k) => k.label).join());
+    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'LIMITS,ADD PIN,RESET' && v.fcHistoryVis === 'visible' && v.fcLimitLine === 'NO LIMIT | NO PIN',
+       'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, with RESET last (a card of 1.17 and on), and HISTORY is at the top left', menuOf(v));
     owner.fcSetLimit();
     ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'CLOSE'].join(' | '),
        'LIMITS offers a card with no PIN its per tap limit and no NO PIN LIMIT: there is nothing to pay without', card(owner) && card(owner).all);
@@ -2019,7 +2025,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     card(owner).press('CLOSE');
     await look();
     const addPads = watchPads(owner);
-    vals(owner).fcLinks[1].tap();
+    vals(owner).fcMenuItems[1].tap();
     ok(pad(owner).title === 'CHOOSE A PIN' && pad(owner).sub === 'A card with no PIN is cash to whoever holds it. Four to eight digits.' && !pad(owner).has('NO PIN'),
        'ADD PIN asks CHOOSE A PIN, and says in one line that a card with no PIN is cash to whoever holds it', pad(owner) && pad(owner).sub);
     pad(owner).type('4321');
@@ -2036,7 +2042,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.pinState === 1 && n.state.pin === Buffer.from('4321').toString('hex') && n.state.noPinLimit === 0 && owner.state.fc.pinSet === true && owner.state.screen === 'flashcard',
        'one tap gave the card the PIN, with no allowance, and said so in a line', owner.toasts.slice(-1)[0]);
     v = vals(owner);
-    ok(v.fcLinks.map((k) => k.label).join() === 'RESET,CHANGE PIN,LIMITS' && v.fcNoPinShown === false, 'and ADD PIN is CHANGE PIN again', v.fcLinks.map((k) => k.label).join());
+    ok(menuOf(v) === 'LIMITS,CHANGE PIN,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
 
     /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
@@ -2088,8 +2094,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.noPinLimit === 500 && n.state.record.limit === 0 && pins() === 0 && owner.toasts.indexOf('No PIN limit set.') >= 0,
        'the card has an allowance of 500 and no PIN was sent', String(n.state.noPinLimit));
     v = vals(owner);
-    ok(v.fcLimitLine === 'NO PIN UP TO ₿500' && v.fcNoPinShown === true && v.fcNoPinLine === 'NO PIN UP TO ₿500 · LEFT TODAY ₿500',
-       'its screen says the limit and what is left of it today', [v.fcLimitLine, v.fcNoPinLine].join(' | '));
+    ok(v.fcLimitLine === 'NO PIN UP TO ₿500' && v.fcNoPinShown === undefined && limitsSub(v) === 'No PIN up to ₿500 · ₿500 left today',
+       'its face says the limit, and LIMITS in its menu what is left of it today', [v.fcLimitLine, limitsSub(v)].join(' | '));
 
     /* at a till: within it, one tap and no PIN; over what is left of it, the PIN; the card's own word is the truth */
     n.sent.length = 0;
@@ -2100,7 +2106,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'it is paid in the first tap, with no PIN, and the card counts 300 of its 500', (await bal2()) + ' / ' + n.state.noPinSpent);
     await look();
     v = vals(owner);
-    ok(v.fcNoPinLine === 'NO PIN UP TO ₿500 · LEFT TODAY ₿200', 'the screen says 200 is left today', v.fcNoPinLine);
+    ok(limitsSub(v) === 'No PIN up to ₿500 · ₿200 left today', 'the menu says 200 is left today', limitsSub(v));
     n.sent.length = 0;
     await payAt(300);
     await until('the card to say it wants its PIN', () => !!pad(till3));
@@ -2151,7 +2157,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
     owner.fcLimitSpec().go();
     await until('the no PIN limit to be removed', () => owner.state.fc.noPin && owner.state.fc.noPin.limit === 0);
-    ok(n.state.noPinLimit === 0 && owner.toasts.indexOf('No PIN limit removed.') >= 0 && vals(owner).fcNoPinShown === false && vals(owner).fcLimitLine === 'NO LIMIT',
+    ok(n.state.noPinLimit === 0 && owner.toasts.indexOf('No PIN limit removed.') >= 0 && limitsSub(vals(owner)) === '' && vals(owner).fcLimitLine === 'NO LIMIT',
        'and the card has none, and its screen says so', vals(owner).fcLimitLine);
 
     // in dollars where there is a price: kept at those dollars
@@ -2289,16 +2295,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await setUpWith(owner, H2, n, '1234');
     await look(owner, H2, n);
     v = vals(owner);
-    ok(owner.state.fc.resetKnown === true && v.fcLinks.map((k) => k.label).join() === 'RESET,CHANGE PIN,LIMITS' && v.fcHistoryVis === 'visible',
-       'a card of 1.17 read by its owner: HISTORY at the top left, and the row of RESET, CHANGE PIN and LIMITS', v.fcLinks.map((k) => k.label).join());
-    ok(v.fcLinks.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcLinks.map((k) => k.path)).size === 3, 'each a button with its own drawing');
-    ok(owner.state.fc.headers === true && v.fcBlockShown === true && v.fcBlockLine === 'No block yet' && VERIFIED_AT.test(v.fcVerified),
-       'a card shown no block says "No block yet" under the time it was verified', v.fcBlockLine);
+    ok(owner.state.fc.resetKnown === true && menuOf(v) === 'LIMITS,CHANGE PIN,RESET' && v.fcHistoryVis === 'visible',
+       'a card of 1.17 read by its owner: HISTORY at the top left, and a MENU of LIMITS, CHANGE PIN and RESET', menuOf(v));
+    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcMenuItems.map((k) => k.path)).size === 3, 'each a row with its own drawing');
+    ok(owner.state.fc.headers === true && v.fcBlockShown === undefined && v.fcBlockLine === undefined && VERIFIED_AT.test(v.fcVerified),
+       'a card whose clock is block headers says no block under the time it was verified: the screen has no block line', v.fcVerified);
     const HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
     owner.state.fc = Object.assign({}, owner.state.fc, { clock: { hash: HASH, short: '1fa7ca83', time: 4102358400 } });
-    ok(vals(owner).fcBlockLine === 'Block 1fa7ca83…', 'a block this phone has no height for is told by the first digits of its hash, as the line this replaces told it', vals(owner).fcBlockLine);
     H2.storage.setItem('foxy.flashcard.heights', JSON.stringify([{ hash: HASH, height: 970809, time: 4102358400 }]));
-    ok(vals(owner).fcBlockLine === 'Block #970809', 'and one it has the height of by that: Block #970809', vals(owner).fcBlockLine);
+    ok(vals(owner).fcBlockLine === undefined && vals(owner).fcBlockShown === undefined, 'nor once it has a block whose height this phone knows', vals(owner).fcBlockLine);
     H2.storage.removeItem('foxy.flashcard.heights');
     ok(vals(owner).fcClockLine === undefined && vals(owner).fcClockShown === undefined, 'and there is no CLOCK line under the limits');
     // the limit line: "| NO PIN" for a card without one
@@ -2345,7 +2350,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const old16 = newCard(H2, undefined, { format: 4, software: 16 });
     await setUpWith(owner, H2, old16, '1234');
     await look(owner, H2, old16);
-    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && vals(owner).fcLinks.map((k) => k.label).join() === 'CHANGE PIN,LIMITS', 'a card of software 1.16 has no RESET: its row has the two it can offer');
+    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && menuOf(vals(owner)) === 'LIMITS,CHANGE PIN', 'a card of software 1.16 has no RESET: its menu has the two it can offer');
     owner.fcReset();
     ok(card(owner) && card(owner).title === 'NOT ON THIS CARD', 'and pressed anyway it says it cannot', card(owner) && card(owner).all);
     card(owner).press('CLOSE');
@@ -2369,7 +2374,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.key !== keyBefore && n.state.pinState === 0 && !n.state.record.set && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1 && H2.sheet[H2.sheet.length - 1] === 'end: Done.',
        'the card is another card (a key of its own, no PIN, no record), in one sheet', H2.sheet.join(' / '));
     await look(owner, H2, n);
-    ok(vals(owner).fcNew && owner.state.fc.owner === false && !hasReset(owner) && vals(owner).fcLinks.length === 0, 'and it reads as new, with nothing to reset');
+    ok(vals(owner).fcNew && owner.state.fc.owner === false && !hasReset(owner) && vals(owner).fcMenuItems.length === 0, 'and it reads as new, with nothing to reset');
 
     /* a card with money and a PIN: the warning says the money comes off first; the PIN is asked on the pad */
     await setUpWith(owner, H2, n, '1234');

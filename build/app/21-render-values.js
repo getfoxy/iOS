@@ -268,7 +268,7 @@
       { label: 'YOUR CHANGE', path: MENU_ICON.change, tap: shut(() => this.goChange()) },
       /* A card that holds ecash: what is on it, money on and off it, and the
        * cards this phone can take back (26f-flashcard.js). */
-      { label: 'FLASHCARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard()) },
+      { label: 'FLASHCARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard({ kept: true })) },
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
       { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },

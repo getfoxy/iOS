@@ -60,6 +60,8 @@ const liftFrom = (file, sig) => {
 };
 
 let failed = 0, passed = 0;
+// what LIMITS says under it in the card's MENU (what the card pays without its PIN)
+const limitsSub = (v) => ((v.fcMenuItems || []).find((k) => k.label === 'LIMITS') || {}).sub || '';
 const ok = (good, name, detail) => {
   console.log((good ? 'ok    ' : 'FAIL  ') + name + (detail !== undefined && !good ? ' — ' + detail : ''));
   if (good) passed += 1; else failed += 1;
@@ -493,8 +495,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     ok(fc.v123 && fc.cents && fc.bal && fc.bal.usd === 500 && fc.bal.sat === 3000 && holder.fcTwoUnits(fc), 'the card\u2019s screen knows it holds both, and each balance');
     const v = vals(holder);
     ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '5.00' && v.fcPillRows[1].big === '3,000', 'two pills: dollars, then bitcoin', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-    ok(/^PER TAP LIMIT \$10\.00/.test(v.fcLimitLine) && /BOTH CURRENCIES/.test(v.fcNoPinLine), 'the ceiling once, in dollars, for both', v.fcLimitLine + ' / ' + v.fcNoPinLine);
-    ok(v.fcLinks.some((x) => x.label === 'SWAP'), 'SWAP is there');
+    ok(/^PER TAP LIMIT \$10\.00/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both', v.fcLimitLine + ' / ' + limitsSub(v));
+    ok(v.fcButtons.some((x) => x.label === 'SWAP' && (x.dim === '1') === !holder.offlineNow()), 'SWAP is in the bottom row, and not greyed for being of one currency');
     holder.fcWithdraw();
     ok(holder.state.screen === 'currency' && holder.state.currencyFlow === 'card' && holder.state.curCard && holder.state.curCard.question === 'WITHDRAW WHICH?'
        && holder.state.curCard.bal.usd === 500, 'WITHDRAW asks which currency first, with what the card holds of each');

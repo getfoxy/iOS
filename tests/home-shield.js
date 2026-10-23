@@ -357,14 +357,16 @@ const STATES = [
     ok(v.fcPillRows.length === 1 && q.sym === '₿' && q.big === '2,048' && /^\$\d+\.\d\d USD$/.test(q.small),
       'its pill is home’s bitcoin pill, the card’s sats big and their dollar worth under', JSON.stringify([q.big, q.small]));
     ok(!!shieldEl() && shieldEl().getAttribute('data-shield') === 'secure', 'the shield sits on the card’s money card too');
-    eq(v.fcLinks.map((b) => b.label), ['RESET', 'CHANGE PIN', 'LIMITS'], 'a card of today: RESET, CHANGE PIN, LIMITS, and no SWAP');
+    eq(v.fcMenuItems.map((b) => b.label), ['LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: LIMITS, CHANGE PIN, RESET in its menu');
+    eq(v.fcButtons.map((b) => b.label + ' ' + b.dim), ['SCAN 1', 'PASTE 1', 'SWAP 0.38'], 'and SWAP greyed in its bottom row');
     ok([undefined, null, [], ['sat']].every((u) => A.fcTwoUnits({ units: u }) === false) && A.fcTwoUnits(null) === false,
       'no card that reports one unit, or none, holds two balances');
     ok(A.fcTwoUnits({ units: ['sat', 'usd'] }) === true, 'one that reports two does');
     A.setState({ fc: FC({ units: ['sat', 'usd'] }) });
     await settle();
     v = V();
-    eq(v.fcLinks.map((b) => b.label), ['RESET', 'CHANGE PIN', 'LIMITS', 'SWAP'], 'a (pretend) card reporting two units: SWAP joins the row');
+    eq(v.fcButtons.map((b) => b.label), ['SCAN', 'PASTE', 'SWAP'], 'a (pretend) card reporting two units: SWAP in the bottom row');
+    ok(v.fcButtons[2].dim === (A.offlineNow() ? '0.38' : '1'), 'and not greyed for its currency', v.fcButtons[2].dim);
     const swapEl = w.document.querySelector('[aria-label="SWAP"]');
     ok(!!swapEl, 'and it is drawn');
     A.setState({ fc: FC({ hasRecord: false, mint: '' }) });
