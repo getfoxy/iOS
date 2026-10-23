@@ -676,10 +676,12 @@
     this._convertT = setTimeout(() => { this._convertT = null; this.convertOnReturn(); }, Math.min(2000 * Math.pow(2, n - 1), 60000));
   }
 
-  /* SWAPPED, dismissed: home, and both pills count to their new figures. */
+  /* SWAPPED, dismissed: home, and both pills count to their new figures; a card's swap (26f-flashcard.js, `fcSwapOn`, which
+   * leaves 'flashcard' under swapDone) goes back to the card's screen instead, where its pills already say what the tap wrote. */
   swapDoneClose() {
-    this.setState({ screen: 'home', stack: [], swapResult: null, swapQuote: null });
-    this.settleAnimate('both');
+    const toCard = (this.state.stack || []).indexOf('flashcard') >= 0;
+    this.setState({ screen: toCard ? 'flashcard' : 'home', stack: [], swapResult: null, swapQuote: null });
+    if (!toCard) this.settleAnimate('both');
   }
 
   /* The wallet keeps a swap's rate as dollars per bitcoin; a row may carry it
@@ -783,7 +785,8 @@
     const getOpt = { ink: this.swapInk(to), size: '30px' };
     const base = {
       title: 'SWAP', titleUp: true, amountLabel: '', amount: '',
-      close: () => this.setState({ screen: 'home', stack: [] }),
+      // a card's swap closes onto the card's screen it came from (26f-flashcard.js, `fcSwapOn` leaves 'flashcard' under swapDone)
+      close: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
     };
     if (!q) {
       /* No rate yet: what leaves, and the rest waiting on the mint. Bitcoin
@@ -887,7 +890,7 @@
       swapRows: rows,
       swapFlipGo: () => this.swapFlip(),
       swapBackGo: () => this.back(),
-      swapCloseGo: () => this.setState({ screen: 'home', stack: [] }),
+      swapCloseGo: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
       swapNextGo: () => this.swapToAmount(),
       swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.'
         : 'At ' + this.swapRateWho() + '. You see the rate and the fee before anything moves.',
