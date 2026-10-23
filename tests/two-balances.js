@@ -166,18 +166,22 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     const W = c.W;
     ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: '', recv: '', send: '' }), 'nothing chosen: all empty');
     W.setWalletChoice({ hold: 'dollars' });
-    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'dollars', recv: 'usd', send: 'usd' }), 'dollars sets both starting units to usd');
+    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'dollars', recv: 'usd', send: 'usd' }), 'dollars: its one balance is usd');
     W.setWalletChoice({ hold: 'bitcoin' });
-    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'bitcoin', recv: 'sat', send: 'sat' }), 'bitcoin sets both to sat');
+    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'bitcoin', recv: 'sat', send: 'sat' }), 'bitcoin: its one balance is sat');
     W.setWalletChoice({ hold: 'both' });
-    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'both', recv: '', send: '' }), 'both clears them, so each flow asks once');
-    W.setWalletChoice({ recv: 'usd' });
-    W.setWalletChoice({ send: 'sat' });
-    ok(W.walletChoice().recv === 'usd' && W.walletChoice().send === 'sat' && W.walletChoice().hold === 'both',
-      'a receive and a send remember a unit each');
+    ok(JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'both', recv: '', send: '' }), 'both: no one balance, so each receive and send asks');
+    // no balance is remembered for a receive or a send any more (the owner, 2026-10-22): asking to keep one is refused
+    const keepR = await why(() => W.setWalletChoice({ recv: 'usd' }));
+    const keepS = await why(() => W.setWalletChoice({ send: 'sat' }));
+    ok(keepR === 'Foxy does not know that choice.' && keepS === keepR && c.storage.getItem('foxy.wallet.recv') == null
+      && c.storage.getItem('foxy.wallet.send') == null && JSON.stringify(W.walletChoice()) === JSON.stringify({ hold: 'both', recv: '', send: '' }),
+      'a receive or send balance is not kept: refused, nothing written', keepR + ' / ' + keepS);
+    c.storage.setItem('foxy.wallet.recv', '"usd"');
+    ok(W.walletChoice().recv === '', 'one an older build kept is not read back');
     const said = await why(() => W.setWalletChoice({ hold: 'euros' }));
     const said2 = await why(() => W.setWalletChoice({ send: 'USD!' }));
-    ok(said === 'Foxy does not know that choice.' && said2 === said && W.walletChoice().send === 'sat',
+    ok(said === 'Foxy does not know that choice.' && said2 === said && W.walletChoice().hold === 'both',
       'anything else is refused in words, and nothing is written', said + ' / ' + said2);
     ok(c.storage.getItem('foxy.wallet.hold') === '"both"', 'kept under foxy.wallet.hold');
   }

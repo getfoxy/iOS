@@ -173,8 +173,11 @@ check('and a RECEIVE keypad is left in dollars',
   'the person asking is the one who carries a stale price');
 check('the warning says what it is based on and how old that is',
   /WARNING: This is based on the price of Bitcoin '\s*\+/.test(app));
-check('and only offline, in dollars, with a price to convert at',
-  /: \(this\.offlineNow\(\) && s\.unit === 'USD' && this\.satUsd\(\)\)\s*\? 'WARNING: This is based on the price of Bitcoin '/.test(app));
+/* Only where a figure typed in one unit is put into the other offline (`keypadStale`): dollars for bitcoin, or,
+ * now that the dollar balance takes sats too (the owner, 2026-10-22), sats for dollars. Run for real below. */
+check('and only offline, typed in the other unit, with a price to convert at',
+  /priceWarn: sendHeld \? sendHeld\s*: this\.keypadStale\(\)\s*\? 'WARNING: This is based on the price of Bitcoin '/.test(app)
+  && /priceWarnShown: \(sendHeld \|\| this\.keypadStale\(\)\)/.test(app));
 check('the markup draws it',
   /\{\{ priceWarn \}\}/.test(markup) && /\{\{ priceWarnShown \}\}/.test(markup),
   'a warning nothing reads is a warning nobody sees');
@@ -333,21 +336,31 @@ check('and the mark is cleared the moment it lands or fails',
   (app.match(/W\.tag\((?:r|made)\.hash, \{ inflight: false \}\)/g) || []).length >= 3,
   'delivered, refused, and made-but-undelivered');
 
-/* Offline, asking to be paid is in dollars and only in dollars --------------
+/* Offline, asking to be paid: dollars typed stay dollars, sats typed stay sats --
  *
- * This phone's bitcoin price may be hours old, so it does not convert: it names
- * the amount in the money the price is named in, and the paying phone — which
- * has a current rate — says what that makes in sats and offers it back. A sats
- * figure beside the dollars here would be this phone showing a conversion it is
- * refusing to make. */
+ * This phone's bitcoin price may be hours old, so it does not convert the
+ * figure it asks for: dollars typed are asked as dollars, and the paying
+ * phone, which has a current rate, says what that makes in sats and offers it
+ * back. It used to go further and lock the keypad into dollars offline. The
+ * owner, 2026-10-22: "setting an amount should always allow a dollar amount
+ * or the user to switch to enter a sat amount", so the swap is there offline
+ * as online, and sats typed are asked as sats, which need no price at all.
+ * What is still pinned: no conversion this phone refuses to make goes out,
+ * a swap converts the figure rather than relabelling it, a send offline is
+ * still in sats, and the price's age is said under a figure put through it. */
 {
   const only = new Function('return {' + body(app, 'dollarsOnly() {', 'dollarsOnly') + ','
-    + body(app, 'syncUnit() {', 'syncUnit') + '}')();
+    + body(app, 'syncUnit() {', 'syncUnit') + ',' + body(app, 'toggleUnit() {', 'toggleUnit') + ','
+    + body(app, 'centsOfSats(sats, px) {', 'centsOfSats') + ',' + body(app, 'keypadStale() {', 'keypadStale') + '}')();
   const put = (o) => {
-    only.state = Object.assign({ flow: 'receive', unit: 'SATS' }, o.state || {});
+    only.state = Object.assign({ flow: 'receive', unit: 'SATS', screen: 'amount' }, o.state || {});
     only.offlineNow = () => o.offline !== false;
     only.satUsd = () => (o.price === undefined ? 84000 / 1e8 : o.price);
     only.px = () => (only.satUsd() || 0) * 1e8;
+    only.keypadLocked = () => false;
+    only.usdKeypad = () => false;
+    only.toasts = [];
+    only.toast = (m) => only.toasts.push(String(m));
     only._set = null;
     only.setState = (u) => {
       const patch = typeof u === 'function' ? u(only.state) : u;
@@ -355,37 +368,54 @@ check('and the mark is cleared the moment it lands or fails',
     };
     return only;
   };
-  check('offline, asking to be paid is dollars only', put({}).dollarsOnly() === true);
+  check('offline, dollars typed to be paid into bitcoin are asked as dollars',
+    put({ state: { unit: 'USD' } }).dollarsOnly() === true);
+  check('and sats typed are asked as sats: no lock into dollars',
+    put({}).dollarsOnly() === false);
   check('with a route it is the person\'s choice as before',
-    put({ offline: false }).dollarsOnly() === false);
+    put({ offline: false, state: { unit: 'USD' } }).dollarsOnly() === false);
   check('sending offline is unchanged: sats, which need no rate',
-    put({ state: { flow: 'send' } }).dollarsOnly() === false);
+    put({ state: { flow: 'send', unit: 'USD' } }).dollarsOnly() === false);
   check('and with no price ever seen there is nothing to type dollars against',
-    put({ price: null }).dollarsOnly() === false,
+    put({ price: null, state: { unit: 'USD' } }).dollarsOnly() === false,
     'the keypad stays in sats rather than offering a unit it cannot use');
 
-  const forced = put({ state: { amount: '2100' } });
-  forced.syncUnit();
-  check('so the keypad is put into dollars rather than waiting to be switched',
-    forced.state.unit === 'USD', JSON.stringify(forced.state));
-  check('and the figure already typed is converted, not relabelled',
-    forced.state.amount === '1.76', forced.state.amount
+  const left = put({ state: { amount: '2100' } });
+  left.syncUnit();
+  check('offline, a receive keypad in sats is left in sats, with the figure as typed',
+    left.state.unit === 'SATS' && left.state.amount === '2100' && left._set === null, JSON.stringify(left.state));
+  const swapped = put({ state: { amount: '2100' } });
+  swapped.toggleUnit();
+  check('and its swap works offline, with no word against it',
+    swapped.state.unit === 'USD' && swapped.toasts.length === 0, JSON.stringify({ state: swapped.state, toasts: swapped.toasts }));
+  check('the figure is converted, not relabelled',
+    swapped.state.amount === '1.76', swapped.state.amount
       + ' \u2014 2,100 sats at $84,000 is $1.76, and calling it $2,100 is eighty thousand times the money');
+  swapped.toggleUnit();
+  check('and back, to the sats the dollars make', swapped.state.unit === 'SATS' && swapped.state.amount === '2095', JSON.stringify(swapped.state));
   const sending = put({ state: { flow: 'send', unit: 'USD' } });
   sending.syncUnit();
   check('while a send offline still goes back to sats',
     sending.state.unit === 'SATS', JSON.stringify(sending.state));
 
-  check('the sats line under the figure is dropped with it',
+  check('the price\'s age is said under dollars typed for bitcoin offline',
+    put({ state: { unit: 'USD' } }).keypadStale() === true && put({}).keypadStale() === false
+    && put({ offline: false, state: { unit: 'USD' } }).keypadStale() === false);
+  const usdBal = put({ state: { unit: 'SATS' } });
+  usdBal.usdKeypad = () => true;
+  check('and under sats typed for the dollar balance offline, which are put into cents at it',
+    usdBal.keypadStale() === true && (usdBal.state.unit = 'USD', usdBal.keypadStale() === false));
+
+  check('the sats line under the figure is dropped where dollars are asked as dollars',
     /if \(this\.dollarsOnly\(\)\) return '';/.test(app),
     'amountSub, 23-render-home-and-amount.js');
-  check('and the swap control is hidden rather than left to be pressed',
-    /swapVis: this\.dollarsOnly\(\) \? 'hidden' : 'visible'/.test(app)
+  check('the swap control is hidden only on a card\'s own dollar amounts',
+    /swapVis: \(this\.keypadLocked && this\.keypadLocked\(\)\) \? 'hidden' : 'visible'/.test(app)
+    && !/swapVis: this\.dollarsOnly\(\)/.test(app)
     && /visibility:\{\{ swapVis \}\};pointer-events:\{\{ swapPE \}\}[^>]*toggleUnit|toggleUnit[^>]*visibility:\{\{ swapVis \}\}/.test(markup),
     'hidden, not removed: taking it out of the flow moves the keypad mid-entry');
-  check('and pressing it anyway says why rather than doing nothing',
-    /if \(this\.dollarsOnly\(\)\) \{\s*this\.toast\('Offline, Foxy asks in dollars/.test(app),
-    'toggleUnit');
+  check('and toggleUnit no longer refuses offline',
+    !/Offline, Foxy asks in dollars/.test(app), 'toggleUnit');
   check('the request that goes out names the dollars, not a conversion',
     /if \(this\.dollarsOnly\(\)\) \{\s*const cents = Math\.round\(\(parseFloat\(s\.amount\)/.test(app),
     'cashuRequest');

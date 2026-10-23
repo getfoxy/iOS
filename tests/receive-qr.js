@@ -29,7 +29,7 @@ function method(sig) {
 const methods = new Function('return {' +
   [method('cashuRequest() {'), method('railRequest(sats, purpose, usdCents) {'),
    method('railRequestReady(sats, purpose, usdCents) {'), method('wantedSats() {'),
-   method('qrDense(text) {'), method('tapOnlyRequest(sats, purpose) {')].join(',') + '}')();
+   method('qrDense(text) {'), method('tapOnlyRequest(sats, purpose) {'), method('recvPicked(unit) {')].join(',') + '}')();
 
 const R = { pass: 0, fail: 0 };
 function check(name, ok, detail) {
@@ -44,6 +44,7 @@ function screen(state, opts) {
   const o = opts || {};
   const out = { askedInbox: 0 };
   const made = [];
+  const kept = [];                        // each request's `kept`: the person picked its unit for this receive
   let inbox = null;                       // the pending openInbox, resolved by hand
   global.window = {
     FoxyWallet: {
@@ -52,6 +53,7 @@ function screen(state, opts) {
       paymentRequest: (sats, opt) => {
         const cents = Math.round(Number(opt && opt.usd) || 0);
         made.push(cents > 0 ? '$' + cents : (Number(sats) || 0));
+        kept.push(!!(opt && opt.kept === true));
         return cents > 0 ? 'creq-$' + cents : 'creq-' + (Number(sats) || 0);
       },
       openInbox: () => { out.askedInbox += 1; return new Promise((ok) => { inbox = ok; }); },
@@ -66,9 +68,10 @@ function screen(state, opts) {
     // offline, railRequest asks for no onion address: there is none to be had,
     // and waiting out the bridge's timeout for it costs 25 seconds (12-receive.js)
     offlineNow: () => !!o.offline,
+    twoUnitsOn: () => !!o.two,
     setState(patch) { Object.assign(this.state, patch); },
   }, methods);
-  Object.assign(out, { app, made, openInbox: (url) => { if (inbox) inbox(url || ''); inbox = null; } });
+  Object.assign(out, { app, made, kept, openInbox: (url) => { if (inbox) inbox(url || ''); inbox = null; } });
   return out;
 }
 const settle = () => new Promise((ok) => setTimeout(ok, 0));
@@ -197,8 +200,35 @@ function framesBelongToTheirRequest() {
   check('and a different request is asked about on its own', asked === 2, asked + ' encodes');
 }
 
+/* ---- a request says whether its unit was picked for this receive -----------
+ *
+ * With two balances nothing is remembered and each receive asks (the owner,
+ * 2026-10-22). A request in the balance picked carries `kept`, so what is paid
+ * in it stays in it (08c-units.js `convertDue`); one in the other unit, or one
+ * made with no pick, does not, so sats paid to a phone that holds dollars are
+ * still swapped into dollars. */
+function keptFollowsPick() {
+  const picked = screen({ amount: '1200', unit: 'SATS', flow: 'receive', wallet: 'sat' }, { two: true });
+  picked.app.tapOnlyRequest(1200);
+  check('bitcoin picked for this receive: its sat request is kept in bitcoin', picked.kept.join() === 'true', picked.kept.join());
+  const other = screen({ amount: '', unit: 'USD', flow: 'receive', wallet: 'usd' }, { two: true });
+  other.app.tapOnlyRequest(1200);
+  other.app.tapOnlyRequest(500, '', 'usd');
+  check('dollars picked: a sat request beside it is not kept, the dollar one is', other.kept.join() === 'false,true', other.kept.join());
+  const none = screen({ amount: '1200', unit: 'SATS', flow: 'receive', wallet: '' }, { two: true });
+  none.app.tapOnlyRequest(1200);
+  check('nothing picked (home shows one balance): not kept, so the hold decides', none.kept.join() === 'false', none.kept.join());
+  const one = screen({ amount: '1200', unit: 'SATS', flow: 'receive', wallet: 'sat' }, {});
+  one.app.tapOnlyRequest(1200);
+  check('a mint with one balance: not kept, nothing to keep it from', one.kept.join() === 'false', one.kept.join());
+  const share = screen({ amount: '1200', unit: 'SATS', flow: 'receive', wallet: 'sat' }, { two: true });
+  share.app.tapOnlyRequest(1200, 'split:1');
+  check('a share of a bill is never kept', share.kept.join() === 'false', share.kept.join());
+}
+
 (async () => {
   tapRequestIsInstant();
+  keptFollowsPick();
   await dollarQr();
   framesBelongToTheirRequest();
   await offlineIsAtOnce();

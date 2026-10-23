@@ -302,7 +302,7 @@ async function pair(o) {
   const opts = o || {};
   const rx = await connected({});
   await rx.W.primeLocks();
-  rx.W.setWalletChoice({ hold: opts.hold || 'dollars', recv: 'usd', send: 'usd' });
+  rx.W.setWalletChoice({ hold: opts.hold || 'dollars' });
   const payer = await connected({ mint: rx.mint, words: WORDS_B });
   if (opts.payerSat !== 0) await fund(payer, opts.payerSat || 20000, 'sat');
   if (opts.payerUsd) await fund(payer, opts.payerUsd, 'usd');
@@ -421,23 +421,25 @@ async function run() {
       '2: swapped in, claimed, and swapped into dollars at once', JSON.stringify({ done, sat: t.rx.W.balanceOf('sat'), usd: t.rx.W.balanceOf('usd') }));
     const row = rowOf(t.rx, back.id);
     ok(row.usdAsked === 500 && row.convert === 'done' && row.rate === PRICE, '2: its row: asked $ 5.00, swapped', JSON.stringify(row));
-    // the screen's own word on a payment that has landed (`requestPaidHere`): a dollars wallet paid in sats stays in dollars
+    /* the screen's own word on a payment that has landed (`requestPaidHere`): nothing is kept for the next receive,
+     * whatever was paid and whatever is held (the owner, 2026-10-22: each receive asks) */
     const landed = (ev, hold) => {
       const kept = [];
       const quietly = (x) => new Proxy(x, { get: (o2, k) => (k in o2 ? o2[k] : (typeof k === 'string' && k[0] !== '_' ? () => '' : undefined)) });
       const h = quietly(Object.assign(lift(t.rx.W, ['requestPaidHere(ev) {']), {
         state: { screen: 'home', stack: [] }, setState() {}, twoUnitsOn: () => true,
-        walletChoiceNow: () => ({ hold, recv: 'usd', send: 'usd' }), rememberWallet(kind, u) { kept.push(kind + ':' + u); },
+        walletChoiceNow: () => ({ hold }), rememberWallet(kind, u) { kept.push(kind + ':' + u); },
+        setWalletChoice(x) { kept.push('set:' + JSON.stringify(x)); },
       }));
       h.requestPaidHere(ev);
       return kept;
     };
     const paidEv = t.rxa.events.filter((e) => e.stage === 'paid').pop() || {};
     ok(paidEv.convert === true && !landed(paidEv, 'dollars').length && t.rx.W.walletChoice().recv === 'usd',
-      '2: the next receive is still in dollars', JSON.stringify(paidEv));
+      '2: the sats were swapped into dollars, the wallet still holds dollars, and nothing is kept for the next receive', JSON.stringify(paidEv));
     ok(!landed(Object.assign({}, paidEv, { convert: false }), 'dollars').length
-      && landed(Object.assign({}, paidEv, { convert: false }), 'both').join() === 'receive:sat',
-      '2: while a wallet holding both, paid in sats, starts its next receive in bitcoin as before');
+      && !landed(Object.assign({}, paidEv, { convert: false }), 'both').length,
+      '2: a wallet holding both, paid in sats, keeps nothing either: its next receive asks');
     await booksShut(t, '2');
   }
 

@@ -8054,10 +8054,13 @@ class Component extends DCLogic {
     });
   }
 
-  /* Did the person pick the balance this receive goes into (CURRENCY, or WALLET on the invoice), at a mint with two? */
-  recvPicked() {
+  /* Did the person pick the balance this receive goes into (CURRENCY, or WALLET on the invoice), at a mint with two,
+   * and is it `unit`, the unit of the request being made? A sat request made beside a dollar pick (a Lightning
+   * address's, for one) is not what was picked, so what is paid to it is swapped as the person's hold says. */
+  recvPicked(unit) {
     const s = this.state;
-    return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat'));
+    return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat')
+      && s.wallet === (unit === 'usd' ? 'usd' : 'sat'));
   }
 
   // sats for whatever is on the keypad, at the live price
@@ -8137,7 +8140,7 @@ class Component extends DCLogic {
     if (have) return have.text;
     this._creqs[key] = { making: true };
     // the person picked this balance for this receive: what is paid in it stays in it (08c-units.js, `convertDue`)
-    const kept = why === 'receive' && this.recvPicked();
+    const kept = why === 'receive' && this.recvPicked(inUsd ? 'usd' : 'sat');
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
@@ -8247,7 +8250,7 @@ class Component extends DCLogic {
      * unlocked is what every request was before requests were locked, and
      * waiting for a key here would put back the delay this exists to remove. */
     if (W.primeLocks) { try { W.primeLocks(); } catch (e) {} }
-    const kept = !purpose && this.recvPicked();
+    const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
     const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd', kept: kept })
       : W.paymentRequest(n, { purpose: purpose || 'receive', kept: kept });
     if (!text) return '';

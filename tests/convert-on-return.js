@@ -280,7 +280,8 @@ async function pair(o) {
 let answerN = 0;
 async function pay(t, sats, o) {
   const opts = o || {};
-  const text = t.rx.W.paymentRequest(sats, { unit: 'sat', purpose: 'receive' });
+  // `kept`: the person picked bitcoin on CURRENCY for this receive (12-receive.js `recvPicked`)
+  const text = t.rx.W.paymentRequest(sats, { unit: 'sat', purpose: 'receive', kept: opts.kept === true });
   const req = t.rx.W.decodeRequest(text) || {};
   if (opts.terms) t.rx.W.noteRequestTerms(req.id, opts.terms);
   const tok = await t.payer.W.sendToken(sats, opts.plain ? { unit: 'sat' } : { unit: 'sat', lockTo: req.lockTo });
@@ -703,12 +704,13 @@ async function run() {
     const t = await pair({});
     const from = books(t.rx);
     appOn(t.rx);
-    t.rx.W.setWalletChoice({ recv: 'sat' });
-    const p = await pay(t, 2000, { plain: true });
+    ok((() => { try { t.rx.W.setWalletChoice({ recv: 'sat' }); return false; } catch (e) { return true; } })(),
+      '12: no balance for receives is remembered any more: asking to keep one is refused');
+    const p = await pay(t, 2000, { plain: true, kept: true });
     await until(() => t.rx.W.balanceOf('sat') === 2000);
     await wait(80);
-    ok(!recOf(t.rx, p.id) && swapRows(t.rx).length === 0, '12: a receive the person started in bitcoin stays bitcoin');
-    const q = await pay(t, 2000, { plain: true, terms: terms() });
+    ok(!recOf(t.rx, p.id) && swapRows(t.rx).length === 0, '12: a receive the person picked bitcoin for stays bitcoin');
+    const q = await pay(t, 2000, { plain: true, kept: true, terms: terms() });
     await until(() => (recOf(t.rx, q.id) || {}).state === 'done');
     ok((recOf(t.rx, q.id) || {}).state === 'done', '12: unless it was agreed for dollars');
     await booksShut(t.rx, '12 bitcoin pick', from);
@@ -930,30 +932,33 @@ async function run() {
    * pins the tap and its record). Here the record is put where it would be, with the dollars
    * really in the pile, and the runner is held to the same rules in the other direction. */
 
-  // ---- 20. sats are what they always were: the rule's answers, hold by recv by terms by purpose
+  // ---- 20. sats are what they always were: the rule's answers, hold by kept by terms by purpose
+  /* `kept` (the person picked this request's unit for this receive) stands where the remembered receive balance
+   * stood: a pick of the unit that came keeps it, as a remembered `recv` of that unit did; no pick converts, as the
+   * remembered unit set by the hold choice did. A `foxy.wallet.recv` an older build left behind changes nothing. */
   {
     const c = await connected({});
     const holds = ['dollars', 'bitcoin', 'both', ''];
-    const recvs = ['sat', 'usd', ''];
+    const keptOf = [true, false, undefined];
     const termsOf = [null, { convert: true }, { convert: false }];
     const purposes = ['receive', 'card', 'card-offline', 'change', 'split:1', 'carry:1'];
-    const old = (hold, recv, t, purpose) => hold === 'dollars' && !/^(split|carry):/.test(purpose) && purpose !== 'change' && purpose !== 'card'
-      && (!!(t && t.convert === true) || recv === 'usd');
+    const rule = (hold, kept, t, purpose) => hold === 'dollars' && !/^(split|carry):/.test(purpose) && purpose !== 'change' && purpose !== 'card'
+      && (!!(t && t.convert === true) || kept !== true);
     const wrong = [];
     let asked = 0;
-    for (const hold of holds) for (const recv of recvs) for (const t of termsOf) for (const purpose of purposes) {
+    for (const hold of holds) for (const kept of keptOf) for (const t of termsOf) for (const purpose of purposes) {
       if (hold) c.storage.setItem('foxy.wallet.hold', JSON.stringify(hold)); else c.storage.removeItem('foxy.wallet.hold');
-      if (recv) c.storage.setItem('foxy.wallet.recv', JSON.stringify(recv)); else c.storage.removeItem('foxy.wallet.recv');
-      const said = c.W._convertDue({ id: 'x', unit: 'sat', mint: MINT, purpose, terms: t });
+      c.storage.setItem('foxy.wallet.recv', JSON.stringify(hold === 'dollars' ? 'sat' : 'usd'));
+      const said = c.W._convertDue({ id: 'x', unit: 'sat', mint: MINT, purpose, terms: t, kept });
       asked += 1;
-      if (said !== old(hold, recv, t, purpose)) wrong.push({ hold, recv, t, purpose, said });
+      if (said !== rule(hold, kept, t, purpose)) wrong.push({ hold, kept, t, purpose, said });
       // and the mirror: dollars convert only for a phone that holds bitcoin, by the same rules
-      const usd = c.W._convertDue({ id: 'x', unit: 'usd', mint: MINT, purpose, terms: t });
+      const usd = c.W._convertDue({ id: 'x', unit: 'usd', mint: MINT, purpose, terms: t, kept });
       const want = hold === 'bitcoin' && !/^(split|carry):/.test(purpose) && purpose !== 'change' && purpose !== 'card'
-        && (!!(t && t.convert === true) || recv === 'sat');
-      if (usd !== want) wrong.push({ unit: 'usd', hold, recv, t, purpose, said: usd });
+        && (!!(t && t.convert === true) || kept !== true);
+      if (usd !== want) wrong.push({ unit: 'usd', hold, kept, t, purpose, said: usd });
     }
-    ok(wrong.length === 0 && asked === 216, '20: for sats, every answer is the one it always was; for dollars, the mirror of it', JSON.stringify(wrong.slice(0, 4)));
+    ok(wrong.length === 0 && asked === 216, '20: for sats, every answer is the rule (a pick for this receive keeps the unit); for dollars, the mirror of it', JSON.stringify(wrong.slice(0, 4)));
     c.storage.removeItem('foxy.wallet.hold'); c.storage.removeItem('foxy.wallet.recv');
     ok(c.W._convertDue({ id: 'x', unit: 'usd', mint: OTHER, purpose: 'card-offline', terms: { convert: true } }) === false,
       '20: never at another mint than the one the phone is on');

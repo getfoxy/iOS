@@ -1,26 +1,24 @@
 'use strict';
-/* default-currency-settings.js — RECEIVE IN and SEND IN, the two rows inside SETTINGS.
+/* default-currency-settings.js — no default currency: nothing is remembered for a receive or a send.
  *
  *     node tests/default-currency-settings.js
  *
- * At a mint with two balances, a receive and a send each start in a balance the wallet remembers
- * (build/wallet/16b-two-balances.js `walletChoice`, `setWalletChoice`): the last one that kind of flow used,
- * or '' and the CURRENCY screen asks. The two rows in SETTINGS (build/app/21-render-values.js) show those two
- * values and set them, a tap flipping between DOLLARS and BITCOIN. They are only there while the person
- * holds both: holding one sets both values to it, and the rows would say otherwise.
+ * The owner, 2026-10-22: "the default of receiving in dollars or bitcoin or sending in bitcoin or dollars should
+ * be removed, if user has multiple balances they should be asked each receive and send what they want to receive
+ * or send from". So the RECEIVE IN and SEND IN rows that were in SETTINGS are gone, and the wallet keeps no balance
+ * for either kind of flow (build/wallet/16b-two-balances.js `walletChoice`, `setWalletChoice`): only what the
+ * person holds. This suite used to pin those rows; it now pins their absence and what stands in their place.
  *
  * The real page, rendered in jsdom by build/foxy-render.js as tests/two-balances-screens.js renders it, on a
  * stand-in wallet whose walletChoice and setWalletChoice are the real wallet's (tests/harness.js `loadReal`),
  * so what a tap writes is read back from the real wallet's own storage. Checked:
- *   - no rows at a mint with one balance, nor while holding only dollars or only bitcoin
- *   - with Both, the two rows after the two switches and before SET PIN, each with its word: ASK, DOLLARS, BITCOIN
- *   - a tap flips the word, drawn at once, and writes that flow's value and nothing else; the drawer stays
- *     open, no toast
- *   - walletNow follows the rows; a receive opened after a flip starts in that balance, with no CURRENCY
- *   - a tap flips from the value kept, even on a row drawn before it changed
- *   - a balance picked in a flow (CURRENCY, WALLET) moves the row's word, as it always moved what was remembered
- *   - WHAT YOU HOLD answered Both again keeps both values; another answer still sets them as before
- *   - a value the wallet does not know is refused, and nothing is written */
+ *   - no RECEIVE IN or SEND IN row anywhere: one balance, holding dollars, bitcoin, both, or never asked
+ *   - holding both: every receive asks on CURRENCY, the pick is this receive's only, nothing is written, and the
+ *     next receive asks again; the same for WALLET on a send
+ *   - a receive or send balance an older build left in storage is not read
+ *   - holding one: the receive is in it with no question (home shows one balance)
+ *   - walletChoice's recv and send are what the hold makes them, nothing else; WHAT YOU HOLD writes the hold only
+ *   - the wallet refuses to keep a receive or send balance, and anything else it does not know, writing nothing */
 process.env.TZ = 'UTC';
 const { JSDOM, VirtualConsole } = require('jsdom');
 const fs = require('fs');
@@ -92,8 +90,9 @@ function realChoice(choice) {
   const ctx = loadReal();
   const c = choice || {};
   if (c.hold) ctx.W.setWalletChoice({ hold: c.hold });
-  if (c.recv) ctx.W.setWalletChoice({ recv: c.recv });
-  if (c.send) ctx.W.setWalletChoice({ send: c.send });
+  // what an older build kept, written straight into storage: the wallet no longer writes it
+  if (c.recv) ctx.storage.setItem('foxy.wallet.recv', JSON.stringify(c.recv));
+  if (c.send) ctx.storage.setItem('foxy.wallet.send', JSON.stringify(c.send));
   return ctx;
 }
 const store = (ctx) => {
@@ -193,149 +192,99 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
   };
   const labels = () => V().menuItems.map((m) => m.label);
   const row = (label) => V().menuItems.find((m) => m.label === label);
-  const words = () => [row('RECEIVE IN'), row('SEND IN')].map((r) => (r ? r.value : null));
+  const noRows = () => !row('RECEIVE IN') && !row('SEND IN') && !/RECEIVE IN|SEND IN/.test(textOf(w));
+  const home = async () => { A.setState({ screen: 'home', stack: [], flow: '', open0: false }); await settle(); };
 
-  // ---- 1. where the rows are not --------------------------------------------------------------
+  // ---- 1. the rows are nowhere ------------------------------------------------------------------
   {
     const W = twoWallet({ units: ['sat'], real: realChoice({ hold: 'both' }) });
     await fresh(W);
     ok(labels().indexOf('SET PIN') >= 0, 'one balance: SETTINGS is open (SET PIN is there)');
-    ok(!row('RECEIVE IN') && !row('SEND IN'), 'one balance: no RECEIVE IN or SEND IN');
-    ok(!/RECEIVE IN|SEND IN/.test(textOf(w)), 'one balance: neither is drawn');
+    ok(noRows(), 'one balance: no RECEIVE IN or SEND IN');
     eq(A.walletNow('receive'), 'sat', 'one balance: a receive is in bitcoin');
   }
-  for (const hold of ['dollars', 'bitcoin']) {
+  for (const hold of ['dollars', 'bitcoin', 'both', '']) {
     const W = twoWallet({ real: realChoice({ hold }) });
     await fresh(W);
-    ok(!row('RECEIVE IN') && !row('SEND IN') && !/RECEIVE IN|SEND IN/.test(textOf(w)),
-      'holding ' + hold + ': no RECEIVE IN or SEND IN (WHAT YOU HOLD already set both)');
+    ok(labels().indexOf('SET PIN') >= 0 && noRows(), 'two balances, holding ' + (hold || 'nothing chosen') + ': no RECEIVE IN or SEND IN in SETTINGS');
   }
-  {
-    const W = twoWallet({ real: realChoice() });
-    await fresh(W);
-    ok(!row('RECEIVE IN') && !row('SEND IN'), 'two balances, never asked what to hold: no rows');
-    await fresh(W, { menuSettingsOpen: false });
-    ok(!row('RECEIVE IN'), 'SETTINGS closed: no rows');
-  }
-
-  // ---- 2. holding both: the rows, where and what they say ------------------------------------
   {
     const W = twoWallet({ real: realChoice({ hold: 'both' }) });
     await fresh(W);
     const l = labels();
-    const at = (x) => l.indexOf(x);
-    ok(at('RECEIVE IN') >= 0 && at('SEND IN') >= 0, 'holding both: RECEIVE IN and SEND IN are rows');
-    ok(at('FACE / FINGER LOCK') < at('RECEIVE IN') && at('RECEIVE IN') + 1 === at('SEND IN') && at('SEND IN') + 1 === at('SET PIN'),
-      'after the two switches, before SET PIN', l.join(', '));
-    const r = row('RECEIVE IN');
-    ok(r.indent === '10px' && r.hasSwitch === false && r.hasChev === false, 'indented as SETTINGS rows are, with no switch or chevron');
-    eq(words(), ['ASK', 'ASK'], 'never set: both read ASK');
-    ok(/RECEIVE IN\s*ASK/.test(textOf(w)) && /SEND IN\s*ASK/.test(textOf(w)), 'the page draws each word at the end of its row');
-    eq(row('AUTO TAP TO PAY').value, '', 'the other rows carry no word');
-
-    W.real.W.setWalletChoice({ recv: 'usd' });
-    W.real.W.setWalletChoice({ send: 'sat' });
-    await fresh(W);
-    eq(words(), ['DOLLARS', 'BITCOIN'], 'the words follow the wallet: DOLLARS, BITCOIN');
-    ok(/RECEIVE IN\s*DOLLARS/.test(textOf(w)) && /SEND IN\s*BITCOIN/.test(textOf(w)), 'and are drawn');
+    ok(l.indexOf('FACE / FINGER LOCK') >= 0 && l.indexOf('FACE / FINGER LOCK') + 1 === l.indexOf('SET PIN'),
+      'holding both: SET PIN follows the two switches straight away', l.join(', '));
   }
 
-  // ---- 3. a tap flips, and writes that flow's value only --------------------------------------
-  for (const [label, flow, key, other] of [['RECEIVE IN', 'receive', 'recv', 'send'], ['SEND IN', 'send', 'send', 'recv']]) {
+  // ---- 2. holding both: every receive asks, and nothing is kept ------------------------------
+  {
     const real = realChoice({ hold: 'both' });
     const W = twoWallet({ real });
-    await fresh(W);
-    const otherBefore = real.W.walletChoice()[other];
-    const seen = [];
-    for (let i = 0; i < 3; i++) {
+    for (const [i, pick] of [[1, 'sat'], [2, 'usd'], [3, 'sat']]) {
+      await fresh(W, { open0: false });
       const before = store(real);
-      row(label).tap();
+      V().goReceive();
       await settle();
-      const after = store(real);
-      const c = real.W.walletChoice();
-      seen.push([row(label).value, c[key], A.walletNow(flow)]);
-      // what is drawn, not only what renderVals would say: the tap must redraw the row
-      ok(new RegExp(label + '\\s*' + row(label).value).test(textOf(w)), label + ' tap ' + (i + 1) + ': the drawn row reads '
-        + row(label).value + ' at once', textOf(w).slice(textOf(w).indexOf(label), textOf(w).indexOf(label) + 40));
-      eq(changed(before, after), ['foxy.wallet.' + key], label + ' tap ' + (i + 1) + ': only foxy.wallet.' + key + ' is written');
-      ok(c.hold === 'both' && c[other] === otherBefore, label + ' tap ' + (i + 1) + ': the hold and the other flow untouched');
+      eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'receive ' + i + ': asked on CURRENCY');
+      A.currencyPick(pick);
+      await settle();
+      ok(A.state.screen === 'amount' && A.walletNow('receive') === pick && (pick !== 'usd' || A.state.unit === 'USD'),
+        'receive ' + i + ': ' + pick + ' picked, SET AMOUNT in it', JSON.stringify([A.state.screen, A.walletNow('receive'), A.state.unit]));
+      eq(changed(before, store(real)), [], 'receive ' + i + ': the pick writes nothing');
+      await home();
+      eq(A.walletNow('receive'), '', 'receive ' + i + ': back home, no balance is left for the next receive');
     }
-    eq(seen, [['DOLLARS', 'usd', 'usd'], ['BITCOIN', 'sat', 'sat'], ['DOLLARS', 'usd', 'usd']],
-      label + ': ASK → DOLLARS (dollars first) → BITCOIN → DOLLARS, and walletNow(\'' + flow + '\') follows');
-    eq(W.sets, [{ [key]: 'usd' }, { [key]: 'sat' }, { [key]: 'usd' }], label + ': each tap one setWalletChoice({ ' + key + ' })');
-    ok(A.state.open0 === true && A.state.menuSettingsOpen === true && A.state.screen === 'home', label + ': the drawer and SETTINGS stay open');
-    eq(toasts, [], label + ': no toast');
+    eq(W.sets, [], 'no setWalletChoice on the way');
+    eq(toasts, [], 'no toast on the way');
   }
 
-  // ---- 4. the next flow starts where the row says ---------------------------------------------
+  // ---- 3. WALLET on a send: this payment's only ----------------------------------------------
   {
-    const W = twoWallet({ real: realChoice({ hold: 'both' }) });
-    await fresh(W);
-    row('RECEIVE IN').tap(); await settle();
-    eq(row('RECEIVE IN').value, 'DOLLARS', 'RECEIVE IN set to DOLLARS');
-    A.setState({ open0: false }); await settle();
-    V().goReceive();
-    await settle();
-    ok(A.state.screen === 'amount' && A.state.currencyFlow !== 'receive', 'a receive after the tap: SET AMOUNT, no CURRENCY', A.state.screen);
-    ok(A.walletNow('receive') === 'usd' && A.state.unit === 'USD', 'the receive is in dollars, typed in dollars', A.state.unit);
-    A.setState({ screen: 'home', stack: [], flow: '', wallet: '' }); await settle();
-    // and the other way
-    await fresh(W);
-    row('RECEIVE IN').tap(); await settle();
-    eq(row('RECEIVE IN').value, 'BITCOIN', 'RECEIVE IN flipped to BITCOIN');
-    A.setState({ open0: false }); await settle();
-    V().goReceive();
-    await settle();
-    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'a receive after the flip: SET AMOUNT, in bitcoin', A.state.screen);
-    A.setState({ screen: 'home', stack: [], flow: '', wallet: '' }); await settle();
-    // this payment's own pick still comes first
-    await fresh(W, { wallet: 'usd' });
-    ok(A.walletNow('receive') === 'usd' && row('RECEIVE IN').value === 'BITCOIN', 'a balance picked for this payment comes before the row');
-  }
-
-  // ---- 5. a balance used in a flow moves the row's word ---------------------------------------
-  {
-    const W = twoWallet({ real: realChoice({ hold: 'both' }) });
+    const real = realChoice({ hold: 'both' });
+    const W = twoWallet({ real });
     await fresh(W, { open0: false });
-    V().goReceive();
-    await settle();
-    eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'RECEIVE IN at ASK: the first receive asks on CURRENCY');
-    A.currencyPick('sat');
-    await settle();
-    await fresh(W);
-    eq(words(), ['BITCOIN', 'ASK'], 'BITCOIN picked on CURRENCY: RECEIVE IN reads BITCOIN, SEND IN still ASK');
-    // WALLET on CONFIRM PAYMENT, picked by hand
-    A.setState({ screen: 'walletPick', stack: ['home', 'sendConfirm'], flow: 'send', open0: false });
+    const before = store(real);
+    A.setState({ screen: 'walletPick', stack: ['home', 'sendConfirm'], flow: 'send' });
     await settle();
     A.walletPickChoose('usd');
     await settle();
-    await fresh(W);
-    eq(words(), ['BITCOIN', 'DOLLARS'], 'DOLLARS picked on WALLET: SEND IN reads DOLLARS');
-    A.rememberWallet('receive', 'usd');
-    await fresh(W);
-    eq(words(), ['DOLLARS', 'DOLLARS'], 'a receive that used dollars: RECEIVE IN reads DOLLARS');
+    eq(A.walletNow('send'), 'usd', 'DOLLARS picked on WALLET: this send is in dollars');
+    eq(changed(before, store(real)), [], 'and nothing is written');
+    await home();
+    eq(A.walletNow('send'), '', 'back home: the next send is not started in dollars');
+    eq(W.sets, [], 'no setWalletChoice');
   }
 
-  // ---- 4b. a tap flips from what is kept, not from what the row drew -------------------------
-  for (const [label, key] of [['RECEIVE IN', 'recv'], ['SEND IN', 'send']]) {
-    const real = realChoice({ hold: 'both' });
-    const W = twoWallet({ real });
-    await fresh(W);
-    const drawn = row(label);
-    eq(drawn.value, 'ASK', label + ': drawn at ASK');
-    real.W.setWalletChoice({ [key]: 'usd' });   // kept elsewhere, with no redraw
-    drawn.tap();
-    await settle();
-    eq(real.W.walletChoice()[key], 'sat', label + ': a tap on the row drawn at ASK, the wallet now at dollars, flips to bitcoin');
-    eq(row(label).value, 'BITCOIN', label + ': and reads BITCOIN');
-  }
-
-  // ---- 5b. WHAT YOU HOLD answered again ---------------------------------------------------------
+  // ---- 4. what an older build kept is not read -------------------------------------------------
   {
     const real = realChoice({ hold: 'both', recv: 'usd', send: 'sat' });
     const W = twoWallet({ real });
+    eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'a kept recv and send are not read back');
+    await fresh(W, { open0: false });
+    eq([A.walletNow('receive'), A.walletNow('send')], ['', ''], 'neither starts a flow');
+    V().goReceive();
+    await settle();
+    eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'a receive still asks');
+    await home();
+  }
+
+  // ---- 5. holding one: no question, the receive is in it -------------------------------------
+  for (const [hold, unit, bal] of [['dollars', 'usd', { sat: 0 }], ['bitcoin', 'sat', { usd: 0 }]]) {
+    const W = twoWallet(Object.assign({ real: realChoice({ hold }) }, bal));
+    await fresh(W, Object.assign({ open0: false }, hold === 'dollars' ? { balSats: 0, balUsdCents: 4205 } : { balUsdCents: 0 }));
+    eq(A.homePills(), [unit], 'holding ' + hold + ' with nothing in the other: home shows one balance');
+    V().goReceive();
+    await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === unit, 'holding ' + hold + ': a receive opens SET AMOUNT in ' + unit + ', with no CURRENCY',
+      JSON.stringify([A.state.screen, A.walletNow('receive')]));
+    await home();
+  }
+
+  // ---- 6. WHAT YOU HOLD: the hold, and recv/send only as the hold makes them ------------------
+  {
+    const real = realChoice({ hold: 'both' });
+    const W = twoWallet({ real });
     await fresh(W);
-    eq(words(), ['DOLLARS', 'BITCOIN'], 'set by hand: DOLLARS, BITCOIN');
     const before = store(real);
     row('WHAT YOU HOLD').tap();
     await settle();
@@ -343,37 +292,34 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.holdDone();
     await settle();
     eq(changed(before, store(real)), [], 'Both again, DONE: nothing written');
-    eq(real.W.walletChoice(), { hold: 'both', recv: 'usd', send: 'sat' }, 'Both again keeps both balances');
-    await fresh(W);
-    eq(words(), ['DOLLARS', 'BITCOIN'], 'and the rows still read DOLLARS, BITCOIN');
-    // a different answer is still written, and sets both, as it always did
+    eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'Both: no one balance');
     row('WHAT YOU HOLD').tap(); await settle();
+    const b2 = store(real);
     A.setState({ holdPick: 'bitcoin' }); await settle();
     A.holdDone(); await settle();
-    eq(real.W.walletChoice(), { hold: 'bitcoin', recv: 'sat', send: 'sat' }, 'Bitcoin instead: both set to bitcoin');
+    eq(changed(b2, store(real)), ['foxy.wallet.hold'], 'Bitcoin instead: only the hold is written');
+    eq(real.W.walletChoice(), { hold: 'bitcoin', recv: 'sat', send: 'sat' }, 'and its one balance is bitcoin');
     A.setState({ screen: 'holdChoice', stack: ['home'], holdPick: 'both' }); await settle();
     A.holdDone(); await settle();
-    eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'then Both, from Bitcoin: cleared, each flow asks once');
-    await fresh(W);
-    eq(words(), ['ASK', 'ASK'], 'and the rows read ASK');
+    eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'then Both, from Bitcoin: no one balance again');
     eq(toasts, [], 'no toast on the way');
   }
 
-  // ---- 6. the wallet refuses what it does not know ---------------------------------------------
+  // ---- 7. the wallet refuses what it does not keep or know -------------------------------------
   {
-    const real = realChoice({ hold: 'both', recv: 'usd', send: 'sat' });
-    for (const bad of [{ recv: 'eur' }, { send: 'btc' }, { recv: '' }, { send: 'USD' }, { recv: 'usd', send: 'sats' }, { hold: 'some' }]) {
+    const real = realChoice({ hold: 'both' });
+    for (const bad of [{ recv: 'usd' }, { send: 'sat' }, { recv: 'eur' }, { send: 'btc' }, { recv: '' }, { hold: 'both', send: 'usd' }, { hold: 'some' }]) {
       const before = store(real);
       let threw = false;
       try { real.W.setWalletChoice(bad); } catch (e) { threw = true; }
       ok(threw && changed(before, store(real)).length === 0, 'refused, nothing written: ' + JSON.stringify(bad));
     }
-    eq(real.W.walletChoice(), { hold: 'both', recv: 'usd', send: 'sat' }, 'the choice is as it was');
+    eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'the choice is as it was');
   }
 
   const errs = errors.filter((e) => !/never resolved|Not implemented/.test(e));
   ok(!errs.length, 'no errors on the page', errs.slice(0, 3).join(' | '));
   console.log('');
-  console.log(failed ? failed + ' of ' + (passed + failed) + ' default currency checks failed' : 'all ' + passed + ' default currency checks pass');
+  console.log(failed ? failed + ' of ' + (passed + failed) + ' no-default-currency checks failed' : 'all ' + passed + ' no-default-currency checks pass');
   process.exit(failed ? 1 : 0);
 })();
