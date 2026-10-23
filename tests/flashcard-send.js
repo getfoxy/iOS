@@ -806,16 +806,22 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(T.W.balanceOf('usd') === usdBefore && T.W.walletChoice().send === '',
        'the dollar pill is untouched by the card’s payment, and nothing is remembered from it for the next send', String(T.W.balanceOf('usd')));
     ok(booksWrong(T).length === 0, 'the books add up, per unit', booksWrong(T).join(' / '));
-    // out of card mode: home's SEND, the same kind of invoice, from this phone, with dollars remembered for sends
+    // out of card mode: home's SEND, the same kind of invoice, from this phone; nothing is remembered, so with both balances able to pay the confirmation asks which pays
     two.setState({ screen: 'home', stack: [], sendPhase: null });
     upd();
-    T.W.setWalletChoice({ send: 'usd' });
+    ok(T.W.walletChoice().send === '' && two.walletNow('send') === '', 'back on home nothing is remembered for sending: the card’s payment left no choice behind');
     two.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '',
       wallet: '', walletAuto: false, walletTapped: false, feeQ: null }));
     upd();
     two._quotedFor = null;
     two.acceptTarget(invoice(400));
-    // (from this phone the invoice is first asked whether this mint made it, so the confirmation comes a moment later)
+    // (from this phone the invoice is first asked whether this mint made it, so the question comes a moment later)
+    await until('the question', () => { upd(); return two.state.screen === 'currency'; });
+    ok(two.state.screen === 'currency' && two.state.currencyFlow === 'send' && two.state.currencyNext === 'sendConfirm',
+       'both balances can pay and none is remembered: CURRENCY asks which pays before the confirmation', two.state.screen);
+    upd();
+    // the Dollars card on CURRENCY (the app's `currencyPick('usd')`, whose patch this is)
+    two.setState({ wallet: 'usd', walletAuto: false, walletTapped: false, screen: 'sendConfirm', unit: 'USD', amount: '' });
     await until('the confirmation', () => two.state.screen === 'sendConfirm');
     upd();
     await until('both balances to be quoted', () => !!two.state.feeQ && !!two.state.feeQ.usd);
@@ -824,7 +830,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const labels2 = sp2.rows.map((r) => r.label);
     ok(!two.cardSendNow() && sp2.title === 'CONFIRM PAYMENT' && !!sp2.wallet && sp2.wallet.word === 'USD' && labels2.indexOf('RATE') >= 0
        && labels2.indexOf('FROM') < 0 && sp2.cta === 'PAY',
-       'leaving card mode restores the two-unit confirmation: CONFIRM PAYMENT, the WALLET button on USD, the RATE row, PAY', labels2.join() + ' | ' + sp2.cta);
+       'leaving card mode restores the two-unit confirmation: CONFIRM PAYMENT, the WALLET button on USD (the answer to CURRENCY), the RATE row, PAY', labels2.join() + ' | ' + sp2.cta);
     two.setState({ screen: 'home', stack: [] });
     upd();
   }

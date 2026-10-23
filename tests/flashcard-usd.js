@@ -582,9 +582,8 @@ async function pay(R, card, asks, o) {
   if (want(16)) {
     // a dollar ask at a till with no route: kept in cents, and settled at the first connection
     const { H, R, card } = await world({ load: 2000 });
-    // a phone that holds bitcoin, taking this one in dollars (its WALLET chip turned to dollars: `recv`)
-    R.W.setWalletChoice({ hold: 'bitcoin' });
-    R.W.setWalletChoice({ recv: 'usd' });
+    // a phone that holds both, so what comes in dollars stays dollars (no receive balance is remembered to say so)
+    R.W.setWalletChoice({ hold: 'both' });
     const usd0 = sum(usdPile(R));
     offline(R);
     const t0 = R.trace.length;
@@ -609,8 +608,8 @@ async function pay(R, card, asks, o) {
     booksGood('16a', H, R);
     // a dollar card asked for sats offline: told so at the first tap, nothing signed; paid in cents at the till's price at the second
     R.W._rate = 76900; R.W._rateAt = Date.now() - 2 * HOUR;
-    // and now taking sats, as a phone that holds bitcoin starts a receive
-    R.W.setWalletChoice({ recv: 'sat' });
+    // and now a phone that holds bitcoin only: what comes in dollars is swapped into sats
+    R.W.setWalletChoice({ hold: 'bitcoin' });
     offline(R);
     const first = await pay(R, card, [{ unit: 'sat', amount: 7000 }], { offline: true });
     ok(first.refused === 'other-unit' && first.error.unit === 'usd' && first.error.asked === 'sat' && first.error.mint === MINT && first.error.key === card.key
