@@ -1380,6 +1380,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     await until('the dollars on the card', () => !(a._fcTaps > 0) && !pad(a) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd === 1000);
     ok(asked.join(' ') === 'pin tap', 'and one tap writes it: no second tap, no PIN after it', asked.join(' '));
     ok(a.state.fc.bal.usd === 1000 && (H.W.cardOwed() || []).length === 0, 'the $10.00 is on the card, nothing left owed', JSON.stringify(a.state.fc.bal));
+    /* The short read after the write asks the card nothing about its owner; the screen keeps what the card said before. On the
+     * phone it forgot: SWAP and CHANGE LIMIT then said NOT THIS PHONE'S CARD to the phone that had set the card up. */
+    ok(a.state.fc.ownedHere === true, 'and the card is still known as this phone’s own after the write (SWAP and CHANGE LIMIT stay open)', String(a.state.fc.ownedHere));
     /* The owner's own finding: ADD FUNDS's dollars made and left waiting for the card (CLOSE while they were being made, or a tap that
      * did not take), then "Press here, then tap it" on the card's screen. The card of 1.21 and on takes no load on its owner's proof
      * alone: its PIN is asked first, then one tap, and not a tap refused for want of it and a second one after the pad. */
@@ -1409,7 +1412,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     };
     await waiting(250, 'the line on its screen');
     await waiting(150, 'TAP CARD on NOT PAID');
-    ok(a.state.fc.bal.usd === 1400, 'all of it on the card', JSON.stringify(a.state.fc.bal));
+    ok(a.state.fc.bal.usd === 1400 && a.state.fc.ownedHere === true, 'all of it on the card, the card still this phone’s own', JSON.stringify(a.state.fc.bal) + ' ' + a.state.fc.ownedHere);
     await settle();
   }
 

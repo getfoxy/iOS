@@ -24851,8 +24851,10 @@ class Component extends DCLogic {
       owner: !!(card.info && card.info.owner),
       // software 1.17 and on: its owner can reset it (RESET CARD)
       resetKnown: !!(card.info && card.info.resetKnown),
-      // whether this phone is its owner, which the card was asked (a till does not ask)
-      ownedHere: card.mine === true,
+      /* whether this phone is its owner, which the card was asked (a till does not ask). A read that did not ask (`card.mine`
+       * undefined: the short read after money went on under the PIN, say) keeps the answer the card gave before: the $10 put on a
+       * 1.23 card under its PIN left SWAP and CHANGE LIMIT saying NOT THIS PHONE'S CARD to the phone that had set it up. */
+      ownedHere: card.mine === true || (card.mine === undefined && !!prior && prior.ownedHere === true),
       mint: (card.record && card.record.mint) || '',
       /* Software 1.23: dollars and sats at its one mint. `v123`: the card is of it, and its ceiling is cents for both its currencies
        * (`cents`); `units`: the two it holds (or may: format 5), for `fcTwoUnits`, or the one; `bal`: what it holds in each; `rate`: the
