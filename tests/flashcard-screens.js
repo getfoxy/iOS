@@ -1707,17 +1707,19 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await T.W.claim((await T.W.invoice(4000, '')).hash);
     await app.refreshBalance();
 
-    // holding something: the words that tell it to be withdrawn first, and nothing to press but CLOSE
+    /* holding something: ADD FUNDS is not refused, and goes to SET AMOUNT, for money put on it at its own mint
+     * (tests/flashcard-cross-mint-load.js); nothing is asked of the card */
     T.nfc = full;
     app.fcRead(true);
     await until('the card to be read', () => app.state.fc && app.state.fc.key === full.key && app.state.fc.check !== 'asking');
+    full.sent.length = 0;
     app.fcAdd();
-    ok(card(app) && card(app).all === 'A DIFFERENT MINT | You need to withdraw all funds on the card before you can switch mints. | CLOSE',
-       'a card holding money at another mint: ADD FUNDS says to withdraw it all first, in those words, and offers only CLOSE', card(app) && card(app).all);
-    card(app).press('CLOSE');
-    ok(!card(app) && app.state.screen === 'flashcard', 'CLOSE leaves the card’s screen as it was');
+    ok(!card(app) && app.state.screen === 'amount' && app.state.flow === 'cardAdd' && full.sent.length === 0,
+       'a card holding money at another mint: ADD FUNDS goes to SET AMOUNT, for a load at the card’s own mint', card(app) && card(app).all);
+    app.back();
+    ok(!card(app) && app.state.screen === 'flashcard', 'back from it is the card’s screen as it was');
 
-    // empty, on a phone that is not its owner: told, plainly, that the owner’s phone must do it
+    // empty, on a phone that is not its owner: the same, a load at its own mint, which needs no switch
     T.nfc = empty;
     app.fcRead(true);
     await until('the empty card to be read', () => app.state.fc && app.state.fc.key === empty.key && app.state.fc.check !== 'asking');
@@ -1725,9 +1727,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const mine = app.state.fc;
     app.state.fc = Object.assign({}, mine, { ownedHere: false });
     app.fcAdd();
-    ok(card(app) && card(app).title === 'A DIFFERENT MINT' && !card(app).has('SWITCH TO N.TEST') && /Only the phone that set the card up can switch it to another mint/.test(card(app).reason)
-       && card(app).all.split(' | ').slice(-1)[0] === 'CLOSE', 'on a phone that is not its owner there is no switch, and the card says the owner’s phone must do it', card(app) && card(app).all);
-    card(app).press('CLOSE');
+    ok(!card(app) && app.state.screen === 'amount' && app.state.flow === 'cardAdd',
+       'on a phone that is not its owner there is no switch: ADD FUNDS goes to SET AMOUNT, for a load at the card’s own mint', card(app) && card(app).all);
+    app.back();
     app.state.fc = mine;
 
     // empty, on its owner’s phone: SWITCH TO <mint>, straight to the amount, one tap that moves the card and writes the funds

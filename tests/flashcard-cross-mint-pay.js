@@ -22,7 +22,9 @@
  *   6  the card's mint refuses the melt: NOT PAID, and the card is whole again at its next tap; the till keeps nothing
  *   7  the card's mint has not answered the melt: the payment is held as any is, the phone home, and the wallet's own sweep
  *      settles it from there
- *   8  a share of a split bill, or a card paying out of this phone, is still refused as A DIFFERENT MINT (not built)
+ *   8  a share of a split bill, and a card paying an invoice out of this phone from its own screen (SEND in card mode), are
+ *      still refused as A DIFFERENT MINT (not built); money put onto a card at another mint from this phone is built, and is
+ *      tests/flashcard-cross-mint-load.js
  *   9  a card that does not hold enough: said, PAY greyed, and no TRY AGAIN (asking again cannot change it)
  *  10  the till's own mint does not answer as the phone comes home: it keeps trying until it is home, the payment lands, and an
  *      invoice asked for meanwhile is made at the till's own mint, never at the card's

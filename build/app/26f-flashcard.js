@@ -693,6 +693,9 @@
      * says the same thing in red, but it is worked out in dollars and has
      * nothing to say with no price. A dollar card is loaded from this phone's dollars, and says them. */
     const have = unit === 'usd' ? Math.max(0, Math.round(Number(this.state.balUsdCents) || 0)) : Math.floor(this.balNow().sats || 0);
+    /* ADD FUNDS to a card at another mint: what this phone can cover, the fees in it and in whichever balance pays, is the
+     * confirmation's to say (`fcXlBegin`), asked of both mints. */
+    if (flow === 'cardAdd' && this.fcAddAway()) { this.fcXlAdd(sats); return; }
     // the card's room first, as the line under the figure names it first: the wallet's own words, asked of what the phone holds at the most
     const room = flow === 'cardAdd' ? this.fcLoadFits(Math.min(sats, have)) : null;
     if (room && !room.ok) { this.toast(room.why, true); return; }
@@ -3234,43 +3237,23 @@
     return true;
   }
 
-  /* The card is at another mint than this phone. What can be done about it
-   * depends on what is on it:
+  /* The card is at another mint than this phone. ADD FUNDS to a card with money on it, or to one this phone does not own, loads it
+   * at its own mint, online (`fcAddAway`, `fcXlAdd`), and does not come here. What is left:
    *
-   *   anything, and the only way is to take it all off first (a card's money is
-   *   at one mint, and the record cannot change under it): ADD FUNDS says so, in
-   *   those words, with nothing to press but CLOSE; the other things a card does
-   *   offer to move the phone to the card's mint, as ever;
-   *   nothing, on its owner's phone: SWITCH TO <this phone's mint> goes straight
+   *   ADD FUNDS to an empty card, on its owner's phone: SWITCH TO <this phone's mint> goes straight
    *   to the amount, and the card's record is rewritten in the same tap that
    *   writes the funds (`fcAddRun`, the owner's proof, no PIN; its PIN, its
-   *   owner, its limit and its time key stay as they are);
-   *   nothing, on any other phone: only the phone that set the card up can
-   *   change its record, and the card says so. */
+   *   owner, its limit and its time key stay as they are), which costs no fee;
+   *   the other things a card does offer to move the phone to the card's mint, as ever. */
   fcOtherMint(doing) {
     const fc = this.state.fc;
     const adding = doing === 'Adding funds';
     const at = this.mintNameOf(fc.mint), here = this.mintName();
-    if (adding && fc.count > 0) {
-      this.blockedCard('fc-other-mint', {
-        tone: 'warn', title: 'A DIFFERENT MINT',
-        reason: 'You need to withdraw all funds on the card before you can switch mints.',
-      });
-      return;
-    }
     if (adding && fc.ownedHere && fc.owner) {
       this.blockedCard('fc-other-mint', {
         tone: 'warn', title: 'A DIFFERENT MINT',
         reason: 'This card holds nothing, and is set up at ' + at + '. This phone is at ' + here + '.',
         retry: 'SWITCH TO ' + String(here).toUpperCase(), go: () => this.fcAmount('cardAdd'), shut: { label: 'CANCEL' },
-      });
-      return;
-    }
-    if (adding) {
-      this.blockedCard('fc-other-mint', {
-        tone: 'warn', title: 'A DIFFERENT MINT',
-        reason: 'This card holds nothing, and is set up at ' + at + '. This phone is at ' + here
-          + '. Only the phone that set the card up can switch it to another mint: use that phone to do it.',
       });
       return;
     }
@@ -3384,7 +3367,11 @@
    * made before the tap, so the card is held for as long as writing takes and
    * no longer. A tap that fails leaves them owed to the card. */
   fcAdd() {
-    if (!this.fcReady('Adding funds')) return;
+    /* A card at another mint with money on it, or one this phone cannot switch (not its owner): loaded at its own mint, online
+     * (`fcXlAdd`). An empty card this phone owns is still offered the switch to this phone's mint, which costs nothing (`fcOtherMint`). */
+    if (this.fcAddAway()) {
+      if (this.offlineNow()) { this.fcXlOffline(); return; }
+    } else if (!this.fcReady('Adding funds')) return;
     // one at a time: the pieces of the last ADD FUNDS are still being made (a second sheet would take the reader from the first's)
     if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
     this._fcFlowUnit = null;
@@ -3404,6 +3391,14 @@
       return;
     }
     this.fcAmount('cardAdd');
+  }
+
+  // whether ADD FUNDS on the card on screen loads it at its own mint, another than this phone's (`fcAdd`)
+  fcAddAway() {
+    const fc = this.state.fc;
+    const card = this._fcCard;
+    if (!fc || !card || card.key !== fc.key || !this.fcXlAway(card)) return false;
+    return fc.count > 0 || !(fc.ownedHere && fc.owner);
   }
 
   /* The owner's phone adds funds with its own proof and no PIN: the PIN was
@@ -4882,6 +4877,9 @@
     if (!W) return;
     let made = null;
     const typedUsd = this.state.unit !== 'SATS';
+    // the dollars typed, exactly, for a dollar card at another mint (`fcXlSend`), whatever balance the figure was sent in
+    const cents = (typedUsd && this.state.screen === 'amount' && this.centsTyped) ? this.centsTyped() : 0;
+    let away = null;
     this.fcTap({ amount: unit ? this.stageMoney(sats, unit) : typedUsd ? this.stageMoney(fig.usd, 'usd') : this.stageMoney(fig.sat, 'sat'), warm: true },
       (link, on) => {
         on('mint');
@@ -4908,6 +4906,15 @@
             n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
             n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord });
             throw n;
+          }
+          /* A card whose money is at another mint than this phone's: loaded there, online, from this phone's balance (`fcXlBegin`), with
+           * what it costs shown first. Nothing is made here, and the sheet ends calmly. */
+          if (this.fcXlAway(card)) {
+            away = card;
+            const xa = /** @type {any} */ (new Error('This card’s money is at another mint.'));
+            xa.card = 'xl-away';
+            xa.sheetText = 'Card read';
+            throw xa;
           }
           /* Not started in a currency: the card's own (one currency), or, for a card that takes both, the one of this phone's that can
            * pay, or the question which where both can: the sheet ends calmly, nothing made, and the CURRENCY screen asks. */
@@ -4949,6 +4956,7 @@
         this.setState({ screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
         this.fcWrote(r, { rounded: Number(made && made.rounded) || 0 });
       }, (e) => {
+        if (e && e.card === 'xl-away' && !made && away) { this.fcXlSend(away, pin, sats, unit, alt, fig, typedUsd, cents); return; }
         if (e && e.card === 'choose-unit' && !made && fig) {
           this.fcPickUnit({ question: 'SEND WHICH TO THE CARD?', foot: 'This card holds dollars and bitcoin. You are asked when both could pay.',
                             short: { usd: fig.usd > this.fcHave('usd') ? 'NOT ENOUGH' : '', sat: fig.sat > this.fcHave('sat') ? 'NOT ENOUGH' : '' },
@@ -5044,6 +5052,270 @@
       return W.cardPrepare(card, alt.sats);
     }
     return W.cardPrepare(card, sats, unit ? { unit } : undefined);
+  }
+
+  /* ---- a card at another mint, loaded from this phone ---------------------------------------------------------------
+   *
+   * SEND > FLASHCARD (home) and ADD FUNDS (the card's screen) for a card whose money is at another mint than this phone's. Its money
+   * stays where it is: this phone's money goes there by Lightning and is made into pieces for the card at the card's mint (the wallet's
+   * `cardLoadQuote`, `cardLoadAcross`, 08a-flashcard.js). The card is read once (SEND's tap, or the card on screen), and then:
+   *
+   *   the confirmation (`fcXlSpec`)  what goes on the card, the most that leaves this phone, the fee and the two mints, asked of both
+   *                                  mints before anything moves; where this phone cannot cover it, said, with the button greyed;
+   *   PUT ... ON CARD                the card's PIN, where it wants one and it was not typed before the read (SEND asks it first on a
+   *                                  card of 1.21 and on, `fcSendPinFirst`); the owner's own proof on its screen where the card
+   *                                  takes it (`fcAddPin`'s rule); then the crossing, with this phone visiting the card's mint for
+   *                                  the claim and the pieces (`cardVisit`), and one tap that writes them under the PIN;
+   *   home                           this phone goes home after the tap, whatever it did (`fcXmHome`); SEND ends at Home, ADD FUNDS
+   *                                  on the card's screen.
+   *
+   * This phone pays every fee, as it pays a move between its own mints. A tap that does not take the pieces leaves them owed to the
+   * card and written at its next tap, from any mint (`_fcXmAt`). A melt not answered is held as any is, and the sweeps settle it. Offline
+   * nothing is asked of anybody: between two mints, the connection is needed. */
+  fcXlAway(card) {
+    const W = this.fcW();
+    const at = card && card.record && card.record.mint;
+    return !!(W && at && card.info && card.info.setUp && W.mintUrl && this.fcMintKey(at) !== this.fcMintKey(W.mintUrl));
+  }
+
+  fcXlOffline() {
+    this.haptic && this.haptic('error');
+    this.blockedCard('fc-xm-offline', { tone: 'warn', title: 'A DIFFERENT MINT', reason: 'Putting money on a card at another mint needs the connection.' });
+  }
+
+  /* The unit the card is loaded in: the one a card of 1.23 its owner set up to hold alone, the one typed where it takes that one, and
+   * otherwise its own. */
+  fcXlUnit(card, typed) {
+    const W = this.fcW();
+    const hold = (W && W.cardHold && W.cardHold(card)) || '';
+    if (hold === 'usd' || hold === 'sat') return hold;
+    const cu = (W && W.cardUnits && W.cardUnits(card)) || null;
+    if (cu && (typed === 'usd' || typed === 'sat') && cu.some((x) => x.unit === typed)) return typed;
+    return (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+  }
+
+  /* SEND > FLASHCARD's tap found the card at another mint (`fcSendRun`): the figure typed, in the card's unit, and the balance of this
+   * phone's that pays. A dollar card is loaded with the dollars typed (a figure typed in sats is not a dollar amount: said, and nothing
+   * is asked); a bitcoin card with the sats typed, or with the sats the dollars typed are at this phone's price, as at its own mint. */
+  fcXlSend(card, pin, sats, unit, alt, fig, typedUsd, cents) {
+    const typed = unit || (typedUsd ? 'usd' : 'sat');
+    const cu = this.fcXlUnit(card, typed);
+    let amount = 0;
+    let pay = unit === 'usd' ? 'usd' : 'sat';
+    if (cu === 'usd') {
+      if (!fig && !typedUsd) {
+        this.haptic && this.haptic('error');
+        this.blockedCard('fc-xl-unit', { tone: 'warn', title: 'A DOLLAR CARD', reason: 'This card holds dollars. Type the amount in dollars.' });
+        return;
+      }
+      amount = fig ? fig.usd : unit === 'usd' ? sats : cents;
+      if (fig) pay = (this.twoUnitsOn && this.twoUnitsOn() && fig.usd > 0 && fig.usd <= this.fcHave('usd')) ? 'usd' : 'sat';
+    } else {
+      if (fig) {
+        amount = fig.sat;
+        pay = (fig.sat > this.fcHave('sat') && fig.usd > 0 && fig.usd <= this.fcHave('usd')) ? 'usd' : 'sat';
+      } else if (unit === 'usd') {
+        amount = alt ? Math.round(Number(alt.sats) || 0) : 0;
+        if (!(amount > 0)) {
+          this.fcFailed({ card: 'wrong-unit', message: 'This phone has no Bitcoin price to load the card at. Type the amount in sats.' });
+          return;
+        }
+      } else amount = sats;
+    }
+    if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
+    this.fcXlBegin({ from: 'send', card, pin: (card.info && card.info.pinSet) ? String(pin || '') : '', cardUnit: cu, payUnit: pay, amount });
+  }
+
+  /* ADD FUNDS on the screen of a card at another mint: the amount typed is in the card's unit (`fcUnit`), and this phone pays from its
+   * dollars where it loads dollars and holds some at a mint with two balances, from its bitcoin otherwise. */
+  fcXlAdd(amount) {
+    const card = this._fcCard;
+    const fc = this.state.fc;
+    if (!card || !fc) return;
+    const cu = fc.v123 ? this.fcUnit() : (card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+    const pay = (cu === 'usd' && this.twoUnitsOn && this.twoUnitsOn() && this.fcHave('usd') > 0) ? 'usd' : 'sat';
+    this.fcXlBegin({ from: 'add', card, pin: '', cardUnit: cu, payUnit: pay, amount });
+  }
+
+  fcXlBegin(o) {
+    const W = this.fcW();
+    if (!W || !o || !o.card) return;
+    if (this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXlOffline(); return; }
+    const card = o.card;
+    const x = {
+      from: o.from === 'add' ? 'add' : 'send', mint: this.fcMintKey(card.record.mint), home: this.fcMintKey(W.mintUrl),
+      key: String(card.key || ''), cardUnit: o.cardUnit === 'usd' ? 'usd' : 'sat', payUnit: o.payUnit === 'usd' ? 'usd' : 'sat',
+      amount: Math.round(Number(o.amount) || 0), pinSet: !!(card.info && card.info.pinSet), pin: String(o.pin || ''),
+      plan: null, err: '', short: false, busy: false,
+    };
+    // the card as read, in memory only: its pieces are cut at its mint from it, and made for it there (`cardLoadQuote`, `cardPrepare`)
+    this._fcXlCard = card;
+    console.log('[foxy] card: its money is at ' + x.mint + '; this phone at ' + x.home + ' puts money on it there');
+    this.fcXlOpen(x);
+  }
+
+  // the confirmation for `x`, its figures asked of both mints afresh
+  fcXlOpen(x) {
+    const fresh = Object.assign({}, x, { plan: null, err: '', short: false, busy: false });
+    if (this.state.screen === 'fcXlConfirm') this.setState({ fcXl: fresh });
+    else this.setState(p => ({ screen: 'fcXlConfirm', stack: p.stack.concat([p.screen]), fcXl: fresh }));
+    this.fcXlQuote();
+  }
+
+  /* What it costs, asked of both mints with this phone at its own: the card's mint's invoice for the amount (a mint quote, which commits
+   * to nothing), and this phone's mint's melt quote for it. A refusal that is the card's (no owner, full, its mint's keys) is said as the
+   * card's, off the confirmation; a mint that did not answer, on it, with TRY AGAIN. */
+  fcXlQuote() {
+    const W = this.fcW();
+    const x0 = this.state.fcXl;
+    if (!W || !x0) return;
+    const run = (this._fcXlRun = (this._fcXlRun || 0) + 1);
+    const live = () => run === this._fcXlRun && !!this.state.fcXl && this.state.fcXl.key === x0.key;
+    const put = (more) => { if (live()) this.setState({ fcXl: Object.assign({}, this.state.fcXl, more) }); };
+    put({ plan: null, err: '', short: false });
+    Promise.resolve().then(() => W.cardLoadQuote(x0.mint, x0.amount, { cardUnit: x0.cardUnit, payUnit: x0.payUnit, card: this._fcXlCard || undefined })).then((plan) => {
+      put({ plan, short: !!plan.short, err: plan.short ? String(plan.why || 'This phone does not hold enough for that.') : '' });
+    }, (e) => {
+      if (!live()) return;
+      if (e && e.card) {
+        this.setState(p => ({ fcXl: null, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1) }));
+        this.fcFailed(e, {});
+        return;
+      }
+      put({ err: 'Foxy could not find out what this costs: ' + String((W.reason ? W.reason(e) : (e && e.message)) || 'a mint did not answer').replace(/\.?$/, '.') });
+    });
+  }
+
+  /* The confirmation (confirmSpec), dollars first: what goes on the card, the most that leaves this phone (`total`) with the fee in it
+   * (`fee`: the Lightning reserve, this mint's fee on what it melts and the card's mint's on the pieces it makes), and the two mints. */
+  fcXlSpec() {
+    const x = this.state.fcXl || { amount: 0, cardUnit: 'sat', payUnit: 'sat', mint: '', home: '' };
+    const cu = x.cardUnit === 'usd' ? 'usd' : 'sat';
+    const pu = x.payUnit === 'usd' ? 'usd' : 'sat';
+    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
+    const p = x.plan;
+    const known = !!p;
+    const on = fig(x.amount, cu);
+    const rows = [
+      this.cfRow('ON THE CARD', on.main, { sub: on.sub }),
+      this.cfRow('FEE, PAID BY YOU', x.err && !known ? 'UNKNOWN' : known ? 'UP TO ' + fig(p.fee, pu).main : 'CHECKING…',
+                 { sub: known ? fig(p.fee, pu).sub : '', ink: 'var(--btc-ink)' }),
+      this.cfRow('THE CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
+      this.cfRow('YOUR MINT', String(this.mintNameOf(x.home) || '').toUpperCase(), { half: true }),
+    ];
+    const subtitle = 'This card’s money is at another mint. Your money goes there by Lightning, and you pay the fee.'
+      + (known ? ' What the fee does not use comes back to you.' : '');
+    const cta = 'PUT ' + on.main + ' ON CARD';
+    const head = { title: 'A CARD AT ANOTHER MINT', amountLabel: 'YOU PAY', rows, subtitle };
+    // this phone cannot cover it: said, with the button greyed; asking again cannot change it, and the way out is the round back button
+    if (known && x.short) {
+      return Object.assign(head, { amount: 'UP TO ' + fig(p.total, pu).main, amountSub: fig(p.total, pu).sub, amountInk: '#FF5C5C',
+                                   warn: x.err, cta, ctaTone: 'go', ctaBusy: true, go: () => {} });
+    }
+    if (x.err) {
+      return Object.assign(head, { amount: on.main + ' + fee', amountSub: '', amountInk: '#FF5C5C', warn: x.err, cta: 'TRY AGAIN', ctaTone: 'warn',
+                                   go: () => this.fcXlQuote() });
+    }
+    return Object.assign(head, {
+      amount: known ? 'UP TO ' + fig(p.total, pu).main : on.main + ' + fee', amountSub: known ? fig(p.total, pu).sub : '',
+      cta: x.busy ? 'PUTTING IT ON…' : known ? cta : 'CHECKING THE FEE…', ctaTone: 'go', ctaBusy: !known || !!x.busy,
+      go: () => { if (known && !x.busy) this.fcXlGo(); },
+    });
+  }
+
+  /* PUT ... ON CARD: the PIN where the card wants one and none was typed (on its own screen, its owner's proof where the card takes it,
+   * as ADD FUNDS at its own mint), then the load. A quote that has gone stale is asked again first, so the fee shown is the one paid. */
+  fcXlGo() {
+    const W = this.fcW();
+    const x = this.state.fcXl;
+    if (!W || !x || !x.plan || x.short || x.busy) return;
+    if (this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXlOffline(); return; }
+    if (!this.fcQuoteFresh(x.plan.melt) || Date.now() - Number(x.plan.at || 0) > 60000) { this.fcXlOpen(x); return; }
+    const fc = this.state.fc;
+    const price = this.fcPrice(x.amount, x.cardUnit);
+    if (x.from === 'add' && fc && fc.key === x.key && fc.ownedHere && !this.fcCardPinFirst()) { this.fcXlRun(x, '', true); return; }
+    if (!x.pinSet || x.pin) { this.fcXlRun(x, x.pin, false); return; }
+    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put ' + this.fcBoth(x.amount, x.cardUnit) + ' on the card.', cta: 'PUT ' + price + ' ON CARD' },
+                  (pin) => this.fcXlRun(x, pin, false));
+  }
+
+  /* The load: off the confirmation to where the flow ends (Home for SEND, the card's screen for ADD FUNDS), the crossing with a screen
+   * saying so, and then the one tap. */
+  fcXlRun(x, pin, owner) {
+    const W = this.fcW();
+    const card = this._fcXlCard;
+    if (!W || !card || card.key !== x.key) return;
+    if (this.state.fcXl) this.setState({ fcXl: Object.assign({}, this.state.fcXl, { busy: true }) });
+    const plan = x.plan;
+    const to = this.mintNameOf(x.mint);
+    // what this writes to the history is this flow's to say: none of it is announced as a payment (16-history-lists.js)
+    if (plan.mintQuote && plan.mintQuote.quote) this.txIsNew(String(plan.mintQuote.quote));
+    if (plan.melt && plan.melt.quote && plan.melt.quote.quote) this.txIsNew(String(plan.melt.quote.quote));
+    this.setState(x.from === 'add'
+      ? (p) => { const i = p.stack.lastIndexOf('flashcard'); return { fcXl: null, screen: 'flashcard', stack: i >= 0 ? p.stack.slice(0, i) : ['home'], flow: 'receive', amount: '', unit: 'USD' }; }
+      : { fcXl: null, screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
+    // the pieces it leaves owed to the card at its mint go on from any mint this phone is at (`fcWriteAsk`)
+    this._fcXmAt = Object.assign({}, this._fcXmAt || {}, { [x.mint]: true });
+    if (this.showMelt) this.showMelt('Moving ' + this.fcPrice(x.amount, x.cardUnit) + ' to ' + to + '…', 0, { mint: to });
+    Promise.resolve().then(() => W.cardLoadAcross(plan, card, () => {})).then((done) => {
+      if (this.hideMelt) this.hideMelt();
+      const made = done.made;
+      if (done.paid && done.paid.hash) this.txIsNew(String(done.paid.hash));
+      if (made && made.hash) this.txIsNew(String(made.hash));
+      // the visit stays open for the tap, and `fcXmHome` ends it
+      this._fcXmVisit = done.visit;
+      this.refreshBalance();
+      this.loadHistory();
+      this.fcXlWrite(x, made, pin, owner);
+    }, (e) => this.fcXlFailed(x, e));
+  }
+
+  // the one tap: the pieces made at the card's mint, written under its PIN (or its owner's proof), and home after
+  fcXlWrite(x, made, pin, owner) {
+    const W = this.fcW();
+    const cu = x.cardUnit;
+    const how = owner ? { owner: true } : { pin: pin || undefined };
+    this.fcTap({ amount: this.stageMoney(this.fcAmt(made), cu) }, (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
+      .then((r) => {
+        this.fcXmHome();
+        this.fcWrote(r, { rounded: Number(made && made.rounded) || 0, unit: cu });
+      }, (e) => {
+        // the pieces exist and are owed to that card; they go on at its next tap, from any mint
+        this.fcXmHome();
+        this.refreshBalance();
+        this.loadHistory();
+        if (e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcStillWaiting({ noPin: !x.pinSet, unit: cu }); return; }
+        this.fcFailed(e, { again: () => ((e && e.card === 'wrong-pin') ? this.fcWriteAsk({ unit: cu }) : this.fcWriteRun(pin || '', owner ? { owner: true, unit: cu } : { unit: cu })) });
+      });
+  }
+
+  /* The load did not get as far as the card. Where the money is is said: still here (refused, nothing taken), on its way (the melt not
+   * answered: held, and settled by the sweeps), or this phone's at the card's mint (paid, and not made into pieces for the card). */
+  fcXlFailed(x, e) {
+    const W = this.fcW();
+    if (this.hideMelt) this.hideMelt();
+    this.refreshBalance();
+    this.loadHistory();
+    const to = this.mintNameOf(x.mint);
+    const said = String((e ? (W && W.reason ? W.reason(e) : e.message) : '') || 'That did not work.').trim().replace(/\.?$/, '.');
+    console.log('[foxy] card: the load at ' + x.mint + ' did not reach the card — ' + said);
+    this.haptic && this.haptic('error');
+    if (e && e.pending) {
+      this.blockedCard('fc-xl-waiting', {
+        tone: 'warn', title: 'NOT ON THE CARD',
+        reason: 'The payment to ' + to + ' has not finished. Foxy holds the money until the mint says either way. Nothing went on the card.',
+        chip: 'If it goes through, the money is in this phone at ' + to + '. If not, it comes back here.',
+      });
+      return;
+    }
+    if (e && e.movePaid) {
+      this.blockedCard('fc-xl-across', {
+        tone: 'warn', title: 'NOT ON THE CARD', reason: said,
+        chip: 'The money is in this phone, at ' + to + '. The card is as it was.',
+      });
+      return;
+    }
+    this.blockedCard('fc-xl-not', { tone: 'warn', title: 'NOT ON THE CARD', reason: said + ' Nothing was taken.' });
   }
 
   /* ---- a new card, set up by the first phone that sends it money (software 1.22) ------------------------------------

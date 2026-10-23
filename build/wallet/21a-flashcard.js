@@ -1007,6 +1007,9 @@
        * says so, so that the card is told its new mint before they are
        * written (`cardRepointFor`). */
       var moving = !!(opts && opts.moving);
+      /* `opts.visit`: made on a card's visit to its own mint, as part of it (`cardLoadAcross`): not held for this phone to be home,
+       * which is what everything else started during a visit waits for (99-proof-lock-and-export.js). */
+      var onVisit = !!(opts && opts.visit && cardAway);
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
       var unit = (card && card.record && card.record.unit) || 'sat';
@@ -1072,7 +1075,7 @@
       // `ladder.sats` is the cut's figure, in the card's unit (cents for a dollar card)
       return FoxyWallet.sendToken(ladder.sats, { unit: unit, lockTo: card.key, lockUntil: date || undefined,
                                                  refundTo: recoverable ? card.record.refundKey : undefined, sigAll: cardIsAll(card),
-                                                 denominations: ladder.denominations, purpose: 'card' })
+                                                 denominations: ladder.denominations, purpose: 'card', cardVisit: onVisit || undefined })
         .then(function (made) {
           var n = cardMade(made);
           /* Filed first, whatever else is true of it. From this line the
@@ -1375,6 +1378,9 @@
     cardOutTotal: function (amount, reserve, unit) { return cardOutTotal(amount, reserve, unit); },
     // a till paid by a card at another mint: what that mint asks for the till's invoice, in the card's unit (`cardCrossQuote`)
     cardCrossQuote: function (at, bolt11, unit, card) { return cardCrossQuote(at, bolt11, unit, card); },
+    // a card at another mint loaded from this phone: what it costs, asked of both mints (`cardLoadCrossQuote`), and the load made (`cardLoadAcross`)
+    cardLoadQuote: function (at, amount, opts) { return cardLoadCrossQuote(at, amount, opts); },
+    cardLoadAcross: function (plan, card, onStage) { return cardLoadAcross(plan, card, onStage); },
     /* this phone at a card's mint for what is done there, and home after (`cardVisit`: resolves { end }, `end()` resolving once
      * home); whether a card's visit has it away now; and what card payments left at other mints, settled there (`cardAwayLeft`) */
     cardVisit: function (at) { return cardVisit(at); },

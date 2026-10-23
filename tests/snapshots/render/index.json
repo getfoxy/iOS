@@ -359,6 +359,31 @@
   "markup": "1113d0413c00ebe7483f75addde15e64fe2ccfba297fa1851707f9d817dece2a",
   "vals": "60058f012dae919fbb595db4dc657de96be6e81a93d18ce15cc0cbcffe168848"
  },
+ "fcXlConfirm, asking both mints what it costs": {
+  "file": "546-fcxlconfirm-asking-both-mints-what-it-costs.html",
+  "markup": "5c8b8dac443be69459fb620c5918bebed441f7437c6b0991979a5edf5340780c",
+  "vals": "d884f9224a5a15f6403fae8f096f10f7d028ea2838ec2ccb8f6193dbe10c2c93"
+ },
+ "fcXlConfirm, with what it costs": {
+  "file": "547-fcxlconfirm-with-what-it-costs.html",
+  "markup": "123b9664eb1ef8cb987a1565927949a3eacc95a67b383f11f1f3a76910a73498",
+  "vals": "75e4d7da4a11af85e6e6fc253c361dd060537af2769c255e7b2c83ae55b7778b"
+ },
+ "fcXlConfirm, a dollar card, from bitcoin": {
+  "file": "548-fcxlconfirm-a-dollar-card-from-bitcoin.html",
+  "markup": "f479aea055ea13729a8d8d841d87acaedb8a2c4722a646810c1b2f9efda5dc2e",
+  "vals": "8f592809e40f0111a3ac84dcfa53312acbb2078da4c7365197ba37bb1acef000"
+ },
+ "fcXlConfirm, this phone short of the fee": {
+  "file": "549-fcxlconfirm-this-phone-short-of-the-fee.html",
+  "markup": "3c25ca44c879cf9ccf8a331d8285945b46453b034f8305997533392950439f67",
+  "vals": "0afce7b05aebd8b02aa72cad4b2ec8a450fd6672364c32fefa2dabec1fc06359"
+ },
+ "fcXlConfirm, a mint would not say": {
+  "file": "550-fcxlconfirm-a-mint-would-not-say.html",
+  "markup": "899b42d1b1e75cb8dec0d161e2e1ebaeeb48165a01d3b590d2a6f5ca2ce33788",
+  "vals": "7c213adae30fd93e356e3538ac04316b024aa17a21cdaf1fc8d83ff089130dcc"
+ },
  "amount, money for a card from the send screen": {
   "file": "347-amount-money-for-a-card-from-the-send-screen.html",
   "markup": "a5579101e9e1bf9a50b3e4451814837b5b44a32fdbafa0c156672f26ba6504f2",
@@ -2164,19 +2189,24 @@
   "markup": "28ee65cb12813682826254cb1dee1a438a65b34fec9e8580c666019d5eef8f83",
   "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
  },
- "card: a different mint, adding funds, a card that holds money": {
-  "file": "282-card-a-different-mint-adding-funds-a-card-that-holds-money.html",
-  "markup": "c342494ba395b010a429d90d767ce6f07dbadeffcf01d26bf8b55a1fc9c39bc4",
-  "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
- },
  "card: a different mint, adding funds, an empty card, on its owner’s phone": {
   "file": "283-card-a-different-mint-adding-funds-an-empty-card-on-its-owner-s-phone.html",
   "markup": "34ff36df83173ee29fa53d2018d82b234838263cec51ebfdc1f599b721877b83",
   "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
  },
- "card: a different mint, adding funds, an empty card, on another phone": {
-  "file": "284-card-a-different-mint-adding-funds-an-empty-card-on-another-phone.html",
-  "markup": "65fe0f9355a7d78629254af6b8e2c1a2d427204e3a37e9ed895bbcee644374d5",
+ "card: a card at another mint, loaded with no connection": {
+  "file": "551-card-a-card-at-another-mint-loaded-with-no-connection.html",
+  "markup": "23ef8bfb6eab82e7f1d9336aef19bb209582bb3366eb6a326ea0628288535b1a",
+  "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
+ },
+ "card: a dollar card at another mint, the amount typed in sats": {
+  "file": "552-card-a-dollar-card-at-another-mint-the-amount-typed-in-sats.html",
+  "markup": "81a41202ae6c1cff830db892ac509ec0ee75e55ca27f4b200248d3d35203c79d",
+  "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
+ },
+ "card: a card at another mint, the melt refused": {
+  "file": "553-card-a-card-at-another-mint-the-melt-refused.html",
+  "markup": "0b2c86839937a16203b15f60b78fdb04c17e6ce639962040329b4c147a065402",
   "vals": "5d4866912349d679b13ae49c68eb5a493d149393ecd442b33803cd57019007ee"
  },
  "card: too old to pay offline": {

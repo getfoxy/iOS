@@ -424,7 +424,10 @@
       return onceMoreIfSigned(w, 'claim', function () {
         return rec.attempt(function () { return mintQuoteProofs(w, want, quoteId, lock); });
       }, quoteStillPaid(w, quoteId)).then(function (fresh) {
-        addProofs(fresh, mintOf(w), w);
+        /* Into the pile of the wallet's own unit: a crossing claimed in dollars (a card at another mint loaded in dollars from
+         * this phone, 08a-flashcard.js `cardLoadAcross`) is cents, never sats. Every other crossing is in sats, as before. */
+        var cu = recordUnit(w);
+        addProofs(fresh, mintOf(w), w, cu === 'sat' ? undefined : cu);
         // same tick: these ranges are proofs in the pile now, never to be restored again
         var moved = moveNote(quoteId);
         if (moved && moved.outputs) {
@@ -432,7 +435,7 @@
           delete moved.outputsMint;
           putMoveNote(moved);
         }
-        logTx({
+        logTx(unitRow(cu, {
           dir: 'in',
           sats: sumProofs(fresh),
           feeSats: 0,
@@ -442,7 +445,7 @@
           hash: quoteId,
           // where it landed, which is not always where the phone is
           mint: mintOf(w),
-        });
+        }));
         return sumProofs(fresh);
       });
     },

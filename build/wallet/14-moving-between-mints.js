@@ -674,7 +674,10 @@
       var run = notes.reduce(function (chain, m) {
         return chain.then(function () {
           var away = canonicalMint(m.to) !== canonicalMint(mintUrl);
-          return (away ? awayWallet(m.to) : Promise.resolve(null)).then(function (ow) {
+          /* A crossing in dollars (a card loaded at another mint, `cardLoadAcross`) is claimed by that mint's dollar wallet. */
+          var mu = unitOf(m.unit) || 'sat';
+          return (away ? awayWallet(m.to) : Promise.resolve(null))
+            .then(function (ow0) { return mu === 'sat' ? ow0 : unitWalletOn(ow0 || wallet, mu); }).then(function (ow) {
             var using = ow ? { w: ow } : null;
             return FoxyWallet.claimQuote(m.quote, m.amount, m.lock, using).then(function (sats) {
               dropMoveNote(m.quote);

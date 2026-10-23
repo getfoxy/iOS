@@ -299,6 +299,17 @@ function representative(logic) {
   add('fcXmConfirm, a card that does not hold enough', at('fcXmConfirm', { fcXm: XM({ quote: { quote: { quote: 'q' } }, pay: 710, fee: 10, short: true, balance: 500,
     err: 'The card holds \u20bf500, and this needs \u20bf710 with its fee.' }) }, { wallet: CARDS() }));
   add('fcXmConfirm, the card\u2019s mint would not say', at('fcXmConfirm', { fcXm: XM({ err: 'The card\u2019s mint could not say what this costs: it did not answer.' }) }, { wallet: CARDS() }));
+  // money from this phone onto a card at another mint: the confirmation as both mints are asked, answered, short, and silent
+  const XL = (over) => Object.assign({ from: 'send', mint: OTHER, home: MINT, key: KEY_A, cardUnit: 'sat', payUnit: 'sat', amount: 1000, pinSet: true, pin: '',
+                                        plan: null, err: '', short: false, busy: false }, over || {});
+  const XLPLAN = (over) => Object.assign({ amount: 1000, land: 1000, issue: 1000, total: 1010, worth: 1000, fee: 10, short: false, why: '', at: Date.now(),
+                                            melt: { quote: { quote: 'm' } }, mintQuote: { quote: 'q' } }, over || {});
+  add('fcXlConfirm, asking both mints what it costs', at('fcXlConfirm', { fcXl: XL() }, { wallet: CARDS() }));
+  add('fcXlConfirm, with what it costs', at('fcXlConfirm', { fcXl: XL({ plan: XLPLAN() }) }, { wallet: CARDS() }));
+  add('fcXlConfirm, a dollar card, from bitcoin', at('fcXlConfirm', { fcXl: XL({ cardUnit: 'usd', amount: 500, plan: XLPLAN({ amount: 500, land: 500, issue: 500, total: 6513, worth: 6503, fee: 10 }) }) }, { wallet: CARDS() }));
+  add('fcXlConfirm, this phone short of the fee', at('fcXlConfirm', { fcXl: XL({ short: true, err: 'Your balance isn\u2019t enough to cover the payment and its fee: this needs 1010 sats and you hold 1005.',
+    plan: XLPLAN({ short: true }) }) }, { wallet: CARDS() }));
+  add('fcXlConfirm, a mint would not say', at('fcXlConfirm', { fcXl: XL({ err: 'Foxy could not find out what this costs: n.test did not answer.' }) }, { wallet: CARDS() }));
   add('amount, money for a card from the send screen', at('amount', { flow: 'cardSend', amount: '5', unit: 'USD' }, { wallet: CARDS() }));
   add('flashcard, nothing tapped', at('flashcard', {}, { wallet: CARDS() }));
   // every card can be taken back (FC_RECOVERABLE): the list of cards this phone loaded is drawn, with the money waiting
@@ -1060,9 +1071,12 @@ function cards() {
   const THERE = (over) => Object.assign({ key: '02' + 'a1'.repeat(30) + 'c3d4', balance: 0, count: 0, room: 64, pin: 'set', locked: false,
     hasRecord: true, limit: 0, day: null, owner: true, ownedHere: true, mint: 'https://forge.example/Bitcoin', recoverable: false, mine: false,
     first: 0, last: 0, check: 'none' }, over || {});
-  add('card: a different mint, adding funds, a card that holds money', (a) => { a.state.fc = THERE({ balance: 2048, count: 4 }); a.fcOtherMint('Adding funds'); });
+  // (a card with money on it, or one on another phone, is loaded at its own mint instead: the fcXlConfirm snapshots)
   add('card: a different mint, adding funds, an empty card, on its owner\u2019s phone', (a) => { a.state.fc = THERE(); a.fcOtherMint('Adding funds'); });
-  add('card: a different mint, adding funds, an empty card, on another phone', (a) => { a.state.fc = THERE({ ownedHere: false }); a.fcOtherMint('Adding funds'); });
+  // money from this phone onto a card at another mint: what is refused before anything is asked (26f-flashcard.js, fcXlOffline, fcXlSend)
+  add('card: a card at another mint, loaded with no connection', (a) => a.fcXlOffline());
+  add('card: a dollar card at another mint, the amount typed in sats', (a) => a.blockedCard('fc-xl-unit', { tone: 'warn', title: 'A DOLLAR CARD', reason: 'This card holds dollars. Type the amount in dollars.' }));
+  add('card: a card at another mint, the melt refused', (a) => a.blockedCard('fc-xl-not', { tone: 'warn', title: 'NOT ON THE CARD', reason: 'The payment could not be routed. Nothing was taken.' }));
   /* A till with no route: a card that cannot pay it (too old to prove its money, unable to, or holding money the mint never
    * signed), and the price a card cannot make exactly. */
   add('card: too old to pay offline', (a) => a.fcFailed({ card: 'offline-old', message: 'This card is too old to pay a phone that is offline. Take this payment when this phone is online.' }, { taken: true }));

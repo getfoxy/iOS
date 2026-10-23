@@ -18066,6 +18066,153 @@
     }
   }
 
+  /* ---- a card at another mint, loaded from this phone -----------------------------------------------------------------
+   *
+   * SEND > FLASHCARD and ADD FUNDS for a card whose money is at another mint than this phone's (26f-flashcard.js, `fcXlBegin`).
+   * The money crosses by Lightning, as a move between this phone's own mints does (14-moving-between-mints.js): the card's mint
+   * makes an invoice for the amount in the card's unit, and this phone's mint pays it from this phone's balance. Then, on a visit
+   * to the card's mint (`cardVisit`), the invoice is claimed there and the pieces for the card are made of it (`cardPrepare`),
+   * owed to the card and written at the next tap. This phone pays every fee: the Lightning reserve, its own mint's fee on the
+   * pieces it melts, and the card's mint's fee on the pieces it makes for the card, which the invoice is padded by so that the
+   * amount asked is what goes on the card.
+   *
+   * `cardLoadCrossQuote` asks both mints and commits to nothing (the invoice is a mint quote nobody has paid). It resolves what goes
+   * on the card (`amount`, in the card's unit), the most that leaves this phone (`total`, in the unit that pays: the very sum `pay`
+   * refuses on, `payNeed`), and the fee (`fee`: that total less what the amount is worth in the unit that pays, at the card's
+   * mint's own price for it, `worth`). `short`, with `why`, where this phone cannot cover the total. `opts`: `cardUnit`, the unit
+   * the card is loaded in; `payUnit`, the balance of this phone's that pays; `card`, the card as read, so that the pieces are cut
+   * as `cardPrepare` will cut them there. */
+  function cardLoadCrossQuote(at, amount, opts) {
+    var o = opts || {};
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    var to = canonicalMint(at);
+    var home = canonicalMint(mintUrl || '');
+    var cu = unitOf(o.cardUnit) || 'sat';
+    var pu = unitOf(o.payUnit) || 'sat';
+    var want = Math.round(Number(amount) || 0);
+    if (!to) return Promise.reject(new Error('No mint to load the card at.'));
+    if (!home) return Promise.reject(new Error('No mint is connected.'));
+    if (to === home) return Promise.reject(new Error('That card is at this phone’s own mint.'));
+    if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
+    /* What `cardPrepare` would refuse at the card's mint, refused here, before anything has moved: the money would otherwise cross
+     * and then not go on, and be this phone's at a mint it is not at. */
+    var c0 = o.card || null;
+    if (c0 && c0.info) {
+      if (c0.info.pin === 'blocked') return Promise.reject(cardRefused('6983'));
+      if (!c0.info.setUp) return Promise.reject(cardError('no-record', 'Set this card up first.'));
+      if (c0.info.locked) return Promise.reject(cardRefused('6986'));
+      if (!c0.info.owner && !(c0.info.guests && c0.info.pinSet)) return Promise.reject(cardError('no-owner', 'This card has no owner, so it cannot be loaded.'));
+    }
+    var dest;
+    try { dest = newWallet(to, cu === 'sat' ? undefined : { unit: cu }); } catch (e1) { return Promise.reject(e1); }
+    return withTimeout(dest.loadMint(), 25000, hostOf(to)).then(function () {
+      if (cu !== 'sat') {
+        var sets = [];
+        try { sets = (dest.keyChain && dest.keyChain.getKeysets) ? dest.keyChain.getKeysets() : []; } catch (e2) { sets = []; }
+        if (!sets || !sets.length) {
+          throw cardError('no-dollars-here', hostOf(to) + ' does not issue ' + unitName(cu) + ' ecash now, so this card cannot be loaded there.', { cardUnit: cu });
+        }
+      }
+      var misfit = cardMintMisfit(dest);
+      if (misfit) throw misfit;
+      // the pieces, cut for the card as `cardPrepare` will cut them at its mint: what lands is what they come to
+      var card = o.card || null;
+      if (card && cardIs123(card) && card.record && !card.units) cardSortUnits(card);
+      if (card && card.units) card = cardInUnit(card, cu);
+      var land = want;
+      if (card && card.info && card.record) {
+        var cut = cardLoadCut(dest, card, want);
+        if (cut.full) throw cardError('full', CARD_FULL_WORDS);
+        land = cut.ladder.sats;
+      }
+      // and the card's mint's fee for making them, from what is claimed there: the pieces a claim of that much comes in
+      var issue = land;
+      for (var i = 0; i < 6; i++) {
+        var next = land + feeForInputs(dest, piecesFor(issue));
+        if (next <= issue) break;
+        issue = next;
+      }
+      var lock = quoteLock(dest);
+      return withTimeout(createQuote(dest, issue, undefined, lock), 25000, hostOf(to) + ' invoice').then(function (mq) {
+        if (lock) mq.foxyLock = lock;
+        return FoxyWallet.quoteFee(mq.request, { unit: pu }).then(function (kq) {
+          if (!kq) throw new Error(hostOf(home) + ' could not say what paying ' + hostOf(to) + ' costs.');
+          var mn = FoxyWallet.payNeed(kq.amount, kq.feeReserve, { unit: pu });
+          var total = mn ? mn.need : kq.amount + kq.feeReserve;
+          var worth = Math.round(kq.amount * want / issue);
+          console.log('[foxy] card: ' + cardSaid(land, cu) + ' to go on a card at ' + hostOf(to) + ' (' + cardSaid(issue, cu) + ' asked there); '
+                      + hostOf(home) + ' pays it with at most ' + cardSaid(total, pu));
+          return { mint: to, home: home, cardUnit: cu, payUnit: pu, amount: want, land: land, issue: issue, invoice: mq.request,
+                   mintQuote: mq, melt: kq, total: total, worth: worth, fee: Math.max(0, total - worth),
+                   short: !!(mn && !mn.ok), why: (mn && !mn.ok) ? mn.why : '', at: Date.now() };
+        });
+      });
+    });
+  }
+
+  /* The load carried out, the card's PIN typed already where it wants one: `plan` from `cardLoadCrossQuote`, `card` as read. The
+   * crossing is written down before the melt, as every crossing's is (`putMoveNote`): between the payment and the claim the money is
+   * at the card's mint and nowhere else, and the note is how it is claimed from wherever this phone is (`finishMove`). Then the melt
+   * here, held as any melt is; then a visit to the card's mint (`cardVisit`), the claim there, and the pieces made for the card
+   * there (`cardPrepare`: owed to it, and written at the next tap). Resolves { made, visit, paid }, the visit still open for that
+   * tap: whoever called ends it (`visit.end()`). Rejects with what happened, the visit over: `pending`, the melt not answered (held,
+   * and the sweeps settle it: paid, what it pays is this phone's at the card's mint; not, it is back here); `movePaid`, paid and not
+   * yet made into pieces for the card (the money is this phone's at the card's mint, claimed by `finishMove` where it was not); or
+   * neither, and nothing left this phone. */
+  function cardLoadAcross(plan, card, onStage) {
+    var stage = typeof onStage === 'function' ? onStage : function () {};
+    if (!plan || !plan.mintQuote || !plan.invoice || !card) return Promise.reject(new Error('No load to make.'));
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    if (canonicalMint(mintUrl || '') !== plan.home) return Promise.reject(new Error('This phone is not at ' + hostOf(plan.home) + ' now. Nothing was taken.'));
+    var quoteId = plan.mintQuote.quote;
+    var cu = unitOf(plan.cardUnit) || 'sat';
+    liveMove[quoteId] = true;
+    var notLive = function () { delete liveMove[quoteId]; };
+    try {
+      putMoveNote({ to: plan.mint, from: plan.home, quote: quoteId, request: plan.invoice, amount: plan.issue,
+                    unit: cu === 'sat' ? undefined : cu, lock: plan.mintQuote.foxyLock || null, card: card.key || undefined, at: Date.now() }, true);
+    } catch (eNote) { notLive(); return Promise.reject(eNote); }
+    // the card's mint hears of the payment a moment after this one says paid (`moveRun`): asked again for a few seconds
+    var claimPatiently = function (left) {
+      return Promise.resolve().then(function () { return unitWalletOn(need(), cu); }).then(function (uw) {
+        return FoxyWallet.claimQuote(quoteId, plan.issue, plan.mintQuote.foxyLock, cu === 'sat' ? undefined : { w: uw });
+      }).catch(function (e) {
+        var notYet = /not paid|unpaid|not been paid/i.test(String((e && e.message) || e));
+        if (!notYet || left <= 0) throw e;
+        return new Promise(function (r) { setTimeout(r, 2000); }).then(function () { return claimPatiently(left - 1); });
+      });
+    };
+    var run = FoxyWallet.pay(plan.invoice, stage, { unit: plan.payUnit, quote: plan.melt }).then(null, function (e) {
+      // not paid, and nothing held that could still pay it: the note would be a note of nothing
+      var held = load(K.melting, []).some(function (h) { return h && h.bolt11 === plan.invoice; });
+      if (!held) dropMoveNote(quoteId);
+      throw e;
+    }).then(function (paid) {
+      if (paid && paid.pending) {
+        var later = /** @type {any} */ (new Error('That payment may still be going through. Foxy is holding the ecash until the mint says either way.'));
+        later.pending = true;
+        later.moveQuote = quoteId;
+        throw later;
+      }
+      stage('switching');
+      return cardVisit(plan.mint).then(function (v) {
+        stage('claiming');
+        return claimPatiently(8).then(function () {
+          dropMoveNote(quoteId);
+          return FoxyWallet.cardPrepare(card, plan.amount, { unit: cu, visit: true });
+        }).then(function (made) { return { made: made, visit: v, paid: paid }; }, function (e) {
+          v.end();
+          throw e;
+        });
+      }).then(null, function (e) {
+        try { e.movePaid = true; e.moveTo = plan.mint; e.moveAmount = plan.issue; e.moveUnit = cu; } catch (x) {}
+        throw e;
+      });
+    });
+    run.then(notLive, notLive);
+    return run;
+  }
+
   /* ---- a visit to a card's mint ---------------------------------------------------------------------------------------
    *
    * A card at another mint pays this phone from there (26f-flashcard.js, `fcXmGo`), and what that leaves at its mint is settled
@@ -20593,7 +20740,10 @@
       return onceMoreIfSigned(w, 'claim', function () {
         return rec.attempt(function () { return mintQuoteProofs(w, want, quoteId, lock); });
       }, quoteStillPaid(w, quoteId)).then(function (fresh) {
-        addProofs(fresh, mintOf(w), w);
+        /* Into the pile of the wallet's own unit: a crossing claimed in dollars (a card at another mint loaded in dollars from
+         * this phone, 08a-flashcard.js `cardLoadAcross`) is cents, never sats. Every other crossing is in sats, as before. */
+        var cu = recordUnit(w);
+        addProofs(fresh, mintOf(w), w, cu === 'sat' ? undefined : cu);
         // same tick: these ranges are proofs in the pile now, never to be restored again
         var moved = moveNote(quoteId);
         if (moved && moved.outputs) {
@@ -20601,7 +20751,7 @@
           delete moved.outputsMint;
           putMoveNote(moved);
         }
-        logTx({
+        logTx(unitRow(cu, {
           dir: 'in',
           sats: sumProofs(fresh),
           feeSats: 0,
@@ -20611,7 +20761,7 @@
           hash: quoteId,
           // where it landed, which is not always where the phone is
           mint: mintOf(w),
-        });
+        }));
         return sumProofs(fresh);
       });
     },
@@ -21756,7 +21906,10 @@
       var run = notes.reduce(function (chain, m) {
         return chain.then(function () {
           var away = canonicalMint(m.to) !== canonicalMint(mintUrl);
-          return (away ? awayWallet(m.to) : Promise.resolve(null)).then(function (ow) {
+          /* A crossing in dollars (a card loaded at another mint, `cardLoadAcross`) is claimed by that mint's dollar wallet. */
+          var mu = unitOf(m.unit) || 'sat';
+          return (away ? awayWallet(m.to) : Promise.resolve(null))
+            .then(function (ow0) { return mu === 'sat' ? ow0 : unitWalletOn(ow0 || wallet, mu); }).then(function (ow) {
             var using = ow ? { w: ow } : null;
             return FoxyWallet.claimQuote(m.quote, m.amount, m.lock, using).then(function (sats) {
               dropMoveNote(m.quote);
@@ -32267,6 +32420,9 @@
        * says so, so that the card is told its new mint before they are
        * written (`cardRepointFor`). */
       var moving = !!(opts && opts.moving);
+      /* `opts.visit`: made on a card's visit to its own mint, as part of it (`cardLoadAcross`): not held for this phone to be home,
+       * which is what everything else started during a visit waits for (99-proof-lock-and-export.js). */
+      var onVisit = !!(opts && opts.visit && cardAway);
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
       var unit = (card && card.record && card.record.unit) || 'sat';
@@ -32332,7 +32488,7 @@
       // `ladder.sats` is the cut's figure, in the card's unit (cents for a dollar card)
       return FoxyWallet.sendToken(ladder.sats, { unit: unit, lockTo: card.key, lockUntil: date || undefined,
                                                  refundTo: recoverable ? card.record.refundKey : undefined, sigAll: cardIsAll(card),
-                                                 denominations: ladder.denominations, purpose: 'card' })
+                                                 denominations: ladder.denominations, purpose: 'card', cardVisit: onVisit || undefined })
         .then(function (made) {
           var n = cardMade(made);
           /* Filed first, whatever else is true of it. From this line the
@@ -32635,6 +32791,9 @@
     cardOutTotal: function (amount, reserve, unit) { return cardOutTotal(amount, reserve, unit); },
     // a till paid by a card at another mint: what that mint asks for the till's invoice, in the card's unit (`cardCrossQuote`)
     cardCrossQuote: function (at, bolt11, unit, card) { return cardCrossQuote(at, bolt11, unit, card); },
+    // a card at another mint loaded from this phone: what it costs, asked of both mints (`cardLoadCrossQuote`), and the load made (`cardLoadAcross`)
+    cardLoadQuote: function (at, amount, opts) { return cardLoadCrossQuote(at, amount, opts); },
+    cardLoadAcross: function (plan, card, onStage) { return cardLoadAcross(plan, card, onStage); },
     /* this phone at a card's mint for what is done there, and home after (`cardVisit`: resolves { end }, `end()` resolving once
      * home); whether a card's visit has it away now; and what card payments left at other mints, settled there (`cardAwayLeft`) */
     cardVisit: function (at) { return cardVisit(at); },
