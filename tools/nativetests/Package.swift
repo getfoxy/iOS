@@ -26,6 +26,10 @@
 // reason: they need nothing of the app. CardAddressTests and CardTapDeliveryTests import
 // it as FoxyCardTap here and as Foxy in the app.
 //
+// Foxy/Tor/TorReturn.swift, the rules a Tor set-up runs by on the way back from the
+// background, is a module too, FoxyTorReturn: it needs no Tor. TorReturnTests imports it
+// as FoxyTorReturn here and as Foxy in the app.
+//
 // libsecp256k1 is Vendor/secp256k1 (Sources/CSecp256k1's src and include are
 // links to it), compiled with the defines and optimisation project.yml gives it.
 // tools/check-all.sh runs this, and GitHub's checks run it on macOS.
@@ -66,9 +70,13 @@ let package = Package(
             name: "FoxyNetDiary",
             path: "Sources/FoxyNetDiary"
         ),
+        .target(
+            name: "FoxyTorReturn",
+            path: "Sources/FoxyTorReturn"
+        ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary"],
+            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary", "FoxyTorReturn"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -90,6 +98,7 @@ let package = Package(
                 "CardAddressTests.swift",
                 "CardTapDeliveryTests.swift",
                 "NetDiaryTests.swift",
+                "TorReturnTests.swift",
             ]
         ),
     ]

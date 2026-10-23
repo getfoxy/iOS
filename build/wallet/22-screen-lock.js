@@ -436,7 +436,7 @@
       var lockTries = 0;
       // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
       var sentAt = 0;
-      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', withMark({
+      var ask = function (circuit) { sentAt = Date.now(); noteRequestLeft(); return bridgeAsk('mintRequest', withMark({
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,

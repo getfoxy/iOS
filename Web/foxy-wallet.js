@@ -2481,6 +2481,34 @@
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
+  /* When the route last opened, for the connection diary: a line as it opens or
+   * shuts (`_privacy`), and one for how long after it the first request was
+   * handed to the phone (`noteRequestLeft`), which is where a payment's seconds start once Foxy is
+   * back. Times only: no mint, no path, nothing about a payment. */
+  var routeOpenedAt = 0;
+  var firstRequestSaid = true;
+
+  function noteRouteChange(wasOpen) {
+    var open = routeOpen();
+    if (open === wasOpen || !bridged()) return;
+    if (open) {
+      routeOpenedAt = Date.now();
+      firstRequestSaid = false;
+      console.log('[foxy] tor gate: the route is open, ' + (privacy.tor === 'up' ? 'through Tor' : 'unprotected'));
+    } else {
+      routeOpenedAt = 0;
+      firstRequestSaid = true;
+      console.log('[foxy] tor gate: the route is shut, tor ' + privacy.tor + (privacy.network === 'none' ? ', no network' : ''));
+    }
+  }
+
+  function noteRequestLeft() {
+    if (firstRequestSaid || !routeOpenedAt) return;
+    firstRequestSaid = true;
+    // handed to the phone, which may still hold it back (its own "[foxy] net:" line says whether it went out)
+    console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt) + ' ms after it');
+  }
+
   /* ---- a route that is on its way ------------------------------------------
    *
    * Foxy opens on the home screen and works offline until Tor is up, so for
@@ -19572,6 +19600,7 @@
     _privacy: function (p) {
       var next = (p && typeof p === 'object') ? p : {};
       var wasUp = privacy.tor === 'up';
+      var wasOpen = routeOpen();
       privacy = {
         tor: String(next.tor || 'connecting'),
         progress: Number(next.progress) || 0,
@@ -19609,6 +19638,8 @@
           && !(String(next.tor || 'connecting') === 'up'
                && String(next.network || 'unknown') !== 'none'),
       };
+      // for the connection diary: the moment the route opens or shuts
+      noteRouteChange(wasOpen);
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }
@@ -33277,7 +33308,7 @@
       var lockTries = 0;
       // when the request now out left, for how long the mint took to answer it (`noteAnswerTime`)
       var sentAt = 0;
-      var ask = function (circuit) { sentAt = Date.now(); return bridgeAsk('mintRequest', withMark({
+      var ask = function (circuit) { sentAt = Date.now(); noteRequestLeft(); return bridgeAsk('mintRequest', withMark({
         url: String(o.endpoint || ''),
         method: String(o.method || 'GET'),
         headers: o.headers || null,

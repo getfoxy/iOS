@@ -698,6 +698,34 @@
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
+  /* When the route last opened, for the connection diary: a line as it opens or
+   * shuts (`_privacy`), and one for how long after it the first request was
+   * handed to the phone (`noteRequestLeft`), which is where a payment's seconds start once Foxy is
+   * back. Times only: no mint, no path, nothing about a payment. */
+  var routeOpenedAt = 0;
+  var firstRequestSaid = true;
+
+  function noteRouteChange(wasOpen) {
+    var open = routeOpen();
+    if (open === wasOpen || !bridged()) return;
+    if (open) {
+      routeOpenedAt = Date.now();
+      firstRequestSaid = false;
+      console.log('[foxy] tor gate: the route is open, ' + (privacy.tor === 'up' ? 'through Tor' : 'unprotected'));
+    } else {
+      routeOpenedAt = 0;
+      firstRequestSaid = true;
+      console.log('[foxy] tor gate: the route is shut, tor ' + privacy.tor + (privacy.network === 'none' ? ', no network' : ''));
+    }
+  }
+
+  function noteRequestLeft() {
+    if (firstRequestSaid || !routeOpenedAt) return;
+    firstRequestSaid = true;
+    // handed to the phone, which may still hold it back (its own "[foxy] net:" line says whether it went out)
+    console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt) + ' ms after it');
+  }
+
   /* ---- a route that is on its way ------------------------------------------
    *
    * Foxy opens on the home screen and works offline until Tor is up, so for

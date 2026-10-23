@@ -4,6 +4,7 @@
     _privacy: function (p) {
       var next = (p && typeof p === 'object') ? p : {};
       var wasUp = privacy.tor === 'up';
+      var wasOpen = routeOpen();
       privacy = {
         tor: String(next.tor || 'connecting'),
         progress: Number(next.progress) || 0,
@@ -41,6 +42,8 @@
           && !(String(next.tor || 'connecting') === 'up'
                && String(next.network || 'unknown') !== 'none'),
       };
+      // for the connection diary: the moment the route opens or shuts
+      noteRouteChange(wasOpen);
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }

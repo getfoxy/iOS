@@ -455,6 +455,34 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
        && !said.some((l) => /the lock the request asked for is dropped/.test(l)),
        'a payer whose connection is 120 ms off waits for it and keeps the lock the request asked for',
        said.filter((l) => /lock|connection is on its way/.test(l)).join(' | ').slice(0, 160));
+
+    /* The connection diary of a return: the moment the route shuts and opens,
+     * once each, and how long after it opened the first request was handed
+     * to the phone. Times
+     * only, never the mint. */
+    const diary = [];
+    const rcon = rx.window.console, rlog = rcon.log;
+    rcon.log = (...a) => { diary.push(a.join(' ')); };
+    dark(rx.W);
+    coming(rx.W);
+    up(rx.W);
+    up(rx.W);
+    await new Promise((r) => setTimeout(r, 30));
+    await rx.W.invoice(12, '').catch(() => null);
+    await rx.W.invoice(13, '').catch(() => null);
+    rcon.log = rlog;
+    const gate = diary.filter((l) => /^\[foxy\] tor gate: /.test(l));
+    const shut = gate.filter((l) => /the route is shut/.test(l));
+    const open = gate.filter((l) => /the route is open/.test(l));
+    const first = gate.filter((l) => /the first request since the route opened was handed to the phone \d+ ms after it/.test(l));
+    ok(shut.length === 1 && /no network/.test(shut[0]) && open.length === 1 && /through Tor/.test(open[0]),
+       'the diary says once when the route shut and once when it opened again, however often the same news is pushed',
+       gate.join(' | ').slice(0, 200));
+    ok(first.length === 1 && gate.indexOf(first[0]) > gate.indexOf(open[0]),
+       'and, once, how long after it opened the first request was handed to the phone', gate.join(' | ').slice(0, 200));
+    const ms = first.length ? Number((first[0].match(/phone (\d+) ms/) || [])[1]) : -1;
+    ok(ms >= 25 && ms < 5000, 'counted from the moment the route opened', String(ms));
+    ok(!gate.some((l) => /mint|example|http|sat/i.test(l)), 'naming no mint and no amount', gate.join(' | ').slice(0, 200));
   }
 
   /* ---- a payment scanned while the connection is on its way ------------------

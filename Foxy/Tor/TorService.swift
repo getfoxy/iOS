@@ -194,6 +194,28 @@ enum TorService {
     /// Off the network because Foxy went to the background (`backgrounded`).
     /// The return sets up a private connection; nothing else does.
     private static var parked = false
+    /// When a return last brought Tor back on the network from parked
+    /// (`resumed`), for `TorReturn.returnFindsRouteUp`.
+    private static var broughtBackAt: Date?
+    /// The control link on which Tor answered "off the network" as Foxy was put
+    /// away (`backgrounded`). A return on that same link has nothing to switch
+    /// off, and its set-up goes straight to the settings (`setUp`).
+    private static weak var offOnLink: TorController?
+    /// When the set-up running now began, for its diary (`step`) and for a
+    /// return that finds it still under way (`resumed`); nil while parked.
+    private static var setUpBegan: Date?
+    /// The set-up running now came from Foxy's return from the background.
+    private static var setUpOnReturn = false
+    /// The set-up's diary is written until then: the whole set-up, and a few
+    /// seconds past its circuit, which is where the first requests go.
+    private static var diaryUntil = Date.distantPast
+    /// The circuits this set-up asked Tor for (EXTENDCIRCUIT), by id, and the
+    /// relay connections Tor has open now (ORCONN), by Tor's id for them.
+    private static var askedCircuits: Set<String> = []
+    private static var openLinks: Set<String> = []
+    private static var askedAgainAt = Date.distantPast
+    /// The control link Tor's circuit and relay-connection events were asked for on.
+    private static weak var eventsAsked: TorController?
     /// Moves on every change that can close Tor's listener, so an answer about
     /// the old one is never used; and the generation a read is in flight for,
     /// so one read answers for everyone waiting on it.
@@ -204,6 +226,10 @@ enum TorService {
     static var onChange: (() -> Void)?
 
     static var isRunning: Bool { ready }
+
+    /// Off the network because Foxy is in the background (`backgrounded`), until
+    /// a return sets it up again.
+    static var isParked: Bool { parked }
 
     /// "up", "connecting", "failed", or "stopped": Tor's thread has exited, and
     /// only reopening Foxy can start it again (one TorThread per process, above).
@@ -290,6 +316,11 @@ enum TorService {
             closeLink(old)                        // the link only; Tor keeps running
         }
         setUpPending = true
+        // a set-up of its own, for the diary: the new link's set-up continues this one (`continuing`)
+        setUpBegan = Date()
+        setUpOnReturn = false
+        diaryUntil = Date().addingTimeInterval(60)
+        step("restart (\(reason)): a new control link, then the set-up")
         if deadline == nil { armDeadline() }      // the clock already running is kept
         changed()
         connectControl()
@@ -453,15 +484,20 @@ enum TorService {
         dispatchPrecondition(condition: .onQueue(.main))
         guard thread != nil else { return }
         let wasParked = parked
+        let sinceBroughtBack = broughtBackAt.map { Date().timeIntervalSince($0) }
         parked = false
+        if wasParked { broughtBackAt = Date() }
         /* Not parked and up: nothing to set up, however long that took. Tor is
          * now kept on the network for up to twenty seconds after Foxy is put
          * away, while a payment or the change top-up is with the mint
          * (FoxyWebView.appEnteredBackground). Somebody back inside that time
          * was "away" two seconds, and the set-up that followed cut the swap
          * it had been kept up for, and left its sats held. */
-        if ready && !wasParked && away < 30 {
-            print("[foxy] tor: back after \(Int(away))s and the circuit is up; nothing to set up")
+        if TorReturn.returnFindsRouteUp(ready: ready, wasParked: wasParked, away: away,
+                                        sinceBroughtBack: sinceBroughtBack) {
+            print("[foxy] tor: back after \(Int(away))s and the circuit is up"
+                  + (away < TorReturn.upLeftAlone ? "" : ", brought back \(Int(sinceBroughtBack ?? 0))s ago")
+                  + "; nothing to set up")
             return
         }
         /* Nor over a set-up that is already running.
@@ -473,12 +509,24 @@ enum TorService {
          * about Bluetooth a few seconds in, and the set-up that followed the
          * answer cut Tor off at 14%, mid-handshake with its first relay; it
          * never recovered and the launch screen sat at 99% until the app was
-         * killed (on a first install). */
-        if !wasParked && away < 1 && !failed && (deadline != nil || setUpPending) {
-            print("[foxy] tor: back after \(Int(away))s with a set-up already running; left alone")
+         * killed (on a first install).
+         *
+         * And not over a set-up begun a few seconds ago that is still moving,
+         * however long Foxy was away (`TorReturn.returnLeavesSetUpAlone`). Put
+         * away and brought back while the connection was still being made, Foxy
+         * started it over, and the set-up's first step switched Tor's network
+         * off in the middle of the handshake the first one was waiting on: the
+         * return then waited for two set-ups, one after the other. */
+        let age = setUpBegan.map { Date().timeIntervalSince($0) }
+        if TorReturn.returnLeavesSetUpAlone(wasParked: wasParked, away: away, failed: failed, stuck: stuck,
+                                            setUpRunning: deadline != nil || setUpPending,
+                                            setUpAge: age, quiet: Date().timeIntervalSince(lifeAt)) {
+            print("[foxy] tor: back after \(Int(away))s with a set-up already running"
+                  + (away < 1 ? "" : ", begun \(Int(age ?? 0))s ago and still moving") + "; left alone")
+            step("Foxy came back after \(Int(away))s; this set-up is left to finish")
             return
         }
-        setUp("back after \(Int(away))s")
+        setUp("back after \(Int(away))s", returning: true)
     }
 
     /// A private connection set up on the daemon that is already running — Tor
@@ -500,8 +548,16 @@ enum TorService {
     ///      announces a one-hop directory tunnel (circuitbuild.c)
     ///
     /// A control link that does not answer within three seconds is connected
-    /// again, and the set-up runs once it is. Every return and RETRY use this.
-    static func setUp(_ reason: String) {
+    /// again, and the set-up runs once it is (`continuing`: the same set-up, on
+    /// the new link). On a return from the background the wait is a second
+    /// (`TorReturn.linkAnswerWait`): iOS takes a suspended app's sockets away,
+    /// so a link that is silent then is dead, not slow. Every return and RETRY
+    /// use this.
+    ///
+    /// Each step is written to the set-up's diary with the milliseconds since it
+    /// began (`step`, "[foxy] tor: set-up +N ms: …"), up to Tor's circuit and a
+    /// few seconds past it: where the seconds of a return go.
+    static func setUp(_ reason: String, returning: Bool = false, continuing: Bool = false) {
         dispatchPrecondition(condition: .onQueue(.main))
         if parked {
             print("[foxy] tor: \(reason) — waiting for Foxy to come back")
@@ -510,6 +566,13 @@ enum TorService {
         guard thread != nil else { start(); return }
         setUpGen += 1
         let gen = setUpGen
+        if !continuing || setUpBegan == nil {
+            setUpBegan = Date()
+            setUpOnReturn = returning
+        }
+        diaryUntil = Date().addingTimeInterval(60)
+        askedCircuits = []
+        step("set-up (\(reason)) through \(transport.rawValue), network \(Route.network)")
         let keep = keepClock
         keepClock = false
         clockKeptFor = keep ? gen : -1
@@ -536,6 +599,15 @@ enum TorService {
             }
             return
         }
+        /* Off the network already, on this very link: Foxy was put away and Tor
+         * said so (`backgrounded`), and nothing has switched it on since. So
+         * there is nothing to switch off, and the return goes straight to the
+         * settings: one round trip less before Tor reaches for its guard. Direct
+         * only, where the settings change nothing; a bridge's start keeps its
+         * full order. A link connected since is another object, and goes the
+         * full way. */
+        let alreadyOff = transport == .direct && offOnLink === ctrl
+        offOnLink = nil
         /* Nothing to set up through. Tor stays off the network until there is
          * one (`networkCameBack`), so a retry pressed in airplane mode cannot
          * start it failing against its guards. */
@@ -554,21 +626,42 @@ enum TorService {
         #endif
 
         var answered = false
-        setConf(ctrl, ["DisableNetwork=1"], timeout: 4) { _, _ in
-            guard gen == setUpGen, !answered else { return }
+        // the first answer on this link, whichever command it is: the link is alive
+        let firstAnswer: () -> Bool = {
+            guard gen == setUpGen, !answered else { return false }
             answered = true
-            networkOff(gen, ctrl)
+            return true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        if alreadyOff {
+            step("Tor has been off the network since Foxy was put away; straight to its settings")
+            networkOff(gen, ctrl, firstAnswer: firstAnswer)
+        } else {
+            setConf(ctrl, ["DisableNetwork=1"], timeout: 4) { _, _ in
+                guard firstAnswer() else { return }
+                step("network off")
+                networkOff(gen, ctrl)
+            }
+        }
+        let wait = TorReturn.linkAnswerWait(onReturn: setUpOnReturn)
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             guard gen == setUpGen, !answered else { return }
             answered = true
             print("[foxy] tor: the control link is not answering — connecting it again; Tor thread \(threadState(thread))")
+            step("the control link said nothing in \(String(format: "%.1f", wait)) s; connecting it again")
             controller = nil                      // first: its observers now answer for nothing
             closeLink(ctrl)                       // the link only; Tor keeps running
             setUpPending = true
             armDeadline()
             connectControl()
         }
+    }
+
+    /// One line of the set-up's diary: what happened, and how many milliseconds
+    /// after the set-up began. Nothing outside a set-up and the seconds after its
+    /// circuit. It names no relay, address, mint or amount.
+    private static func step(_ what: String) {
+        guard let began = setUpBegan, Date() < diaryUntil else { return }
+        print("[foxy] tor: set-up +\(Int((Date().timeIntervalSince(began) * 1000).rounded())) ms: \(what)")
     }
 
     /// Foxy is going to the background: Tor comes off the network now, while
@@ -593,6 +686,8 @@ enum TorService {
         setUpGen += 1                             // a set-up in flight stops here
         let gen = setUpGen
         setUpPending = false
+        setUpBegan = nil                          // and its diary with it
+        offOnLink = nil
         stallOff()
         deadline?.cancel()
         deadline = nil
@@ -606,6 +701,9 @@ enum TorService {
         #endif
         setConf(ctrl, ["DisableNetwork=1"], timeout: 4) { ok, message in
             if gen == setUpGen && parked {
+                // Tor said it is off, on this link: the return has nothing to switch off (`setUp`)
+                if ok { offOnLink = ctrl }
+                openLinks = []
                 #if canImport(IPtProxy)
                 if transport != .direct { Bridges.stopAll() }
                 #endif
@@ -639,15 +737,30 @@ enum TorService {
     }
     #endif
 
-    /// Steps 3 and 4: Tor's network is off.
-    private static func networkOff(_ gen: Int, _ ctrl: TorController) {
+    /// Steps 3 and 4: Tor's network is off. `firstAnswer`, when the set-up sent
+    /// nothing before this (Tor was off already): the settings' answer is the
+    /// one that says the link is alive.
+    private static func networkOff(_ gen: Int, _ ctrl: TorController, firstAnswer: (() -> Bool)? = nil) {
         setUpProgress(10)
+        /* Tor's circuit and relay-connection events first, once per link,
+         * before the network comes on so the diary has the first of them. Alone
+         * on the link: its answer is a bare OK, like a SETCONF's, and two in
+         * flight could each take the other's. */
+        guard eventsAsked === ctrl else {
+            watchCircuits(ctrl) {
+                if let firstAnswer { guard firstAnswer() else { return } }
+                guard gen == setUpGen, controller === ctrl else { return }
+                networkOff(gen, ctrl)
+            }
+            return
+        }
         guard let dir = conf?.dataDirectory else { return }
         #if canImport(IPtProxy)
         if transport != .direct { Bridges.stopAll() }
         #endif
         guard let settings = transportSettings(transport, dir: dir) else {
             // this transport will not start now: on with the network, and the next one
+            if let firstAnswer { _ = firstAnswer() }
             networkOn(gen, ctrl) { deadlineExpired() }
             return
         }
@@ -656,13 +769,20 @@ enum TorService {
         // Settings first, network after: switching the network on straight
         // after a transport change is what broke a Snowflake handshake before
         // (see apply). Here the network is off while the settings change.
-        apply(settings, on: ctrl) { networkOn(gen, ctrl) }
+        apply(settings, on: ctrl) {
+            if let firstAnswer { guard firstAnswer() else { return } }
+            guard gen == setUpGen else { return }
+            step("settings in")
+            networkOn(gen, ctrl)
+        }
     }
 
     private static func networkOn(_ gen: Int, _ ctrl: TorController, then: (() -> Void)? = nil) {
         setConf(ctrl, ["DisableNetwork=0"]) { ok, _ in
             guard gen == setUpGen else { return }
             if !ok { print("[foxy] tor: could not switch the network back on") }
+            step(ok ? "network on: Tor reaches for its guard" : "Tor did not switch its network back on")
+            openLinks = []
             stallReset()
             setUpProgress(30)
             getInfo(ctrl, ["status/enough-dir-info"]) { values in dirInfoChanged(values.first != "0") }
@@ -683,11 +803,70 @@ enum TorService {
     /// path Tor picks, as it builds on its own), again every five seconds until
     /// Tor announces one. Tor refuses it while it lacks directory info.
     private static func askForCircuit(_ gen: Int) {
-        guard gen == setUpGen, !ready, !circuitUp, let ctrl = controller else { return }
+        guard gen == setUpGen, !ready, !circuitUp, controller != nil else { return }
+        askOnce(gen, why: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { askForCircuit(gen) }
+    }
+
+    /// One EXTENDCIRCUIT 0, outside the five-second round: when one this set-up
+    /// asked for has failed (`circuitEvent`), and when direct's patience runs
+    /// out with a relay connection open (`deadlineExpired`). The id Tor gives
+    /// it is kept, so its failure can be told from a circuit of Tor's own.
+    private static func askOnce(_ gen: Int, why: String?) {
+        guard gen == setUpGen, !ready, !circuitUp, !parked, let ctrl = controller else { return }
+        askedAgainAt = Date()
         control(ctrl, "EXTENDCIRCUIT", ["0"], timeout: 5, claims: { c, l in
             c.count == 1 && ((c[0] == 250 && (l.first ?? "").hasPrefix("EXTENDED ")) || c[0] >= 500)
-        }, done: { _, _ in })
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { askForCircuit(gen) }
+        }, done: { c, l in
+            guard gen == setUpGen else { return }
+            let line = l.first ?? ""
+            let because = why.map { " (\($0))" } ?? ""
+            if c.first == 250, line.hasPrefix("EXTENDED ") {
+                let id = line.dropFirst("EXTENDED ".count).trimmingCharacters(in: .whitespaces)
+                askedCircuits.insert(id)
+                step("asked Tor for a circuit\(because): circuit \(id)")
+            } else {
+                step("asked Tor for a circuit\(because): " + (c.isEmpty ? "nothing back yet" : "Tor said no (\(c.first ?? 0))"))
+            }
+        })
+    }
+
+    /// Tor's CIRC and ORCONN events on this link, from here on (`circuitEvent`).
+    ///
+    /// Asked once per link, and only once Tor has answered something on it (the
+    /// set-up's first step, or the putting-away before a return): Tor.framework
+    /// asks for STATUS_CLIENT itself as the link's observers are added, and a
+    /// SETEVENTS that reached Tor before that one would be replaced by it. This
+    /// one names STATUS_CLIENT too, so it takes away nothing the app reads.
+    private static func watchCircuits(_ ctrl: TorController, then: @escaping () -> Void) {
+        eventsAsked = ctrl
+        control(ctrl, "SETEVENTS", ["STATUS_CLIENT", "CIRC", "ORCONN"], timeout: 5, claims: { c, l in
+            c.count == 1 && ((c[0] == 250 && l.first == "OK") || c[0] >= 500)
+        }, events: { [weak ctrl] line in
+            guard let e = TorReturn.parse(line) else { return }
+            DispatchQueue.main.async {
+                guard let ctrl, controller === ctrl else { return }
+                circuitEvent(e)
+            }
+        }, done: { c, l in
+            // asked once on this link whatever the answer: the set-up goes on without them rather than ask again
+            if c.first != 250 { print("[foxy] tor: no circuit events from Tor: \(c.isEmpty ? "no answer" : (l.first ?? ""))") }
+            then()
+        })
+    }
+
+    /// A circuit or a relay connection changed. Progress counts as life (so a
+    /// set-up building its circuit is not called stuck); a circuit this set-up
+    /// asked for that failed is asked for again at once, rather than at the
+    /// next five-second round; and the set-up's diary says it.
+    private static func circuitEvent(_ e: TorReturn.Event) {
+        openLinks = TorReturn.openLinks(openLinks, after: e)
+        if TorReturn.isProgress(e) { noteLife() }
+        step(TorReturn.words(e))
+        if TorReturn.askAgain(after: e, asked: askedCircuits, circuitUp: circuitUp || ready),
+           Date().timeIntervalSince(askedAgainAt) >= 1 {
+            askOnce(setUpGen, why: "circuit \(e.id) not built")
+        }
     }
 
     /// Set-up progress, which only goes up. A first bootstrap shows Tor's own.
@@ -724,6 +903,7 @@ enum TorService {
             }
             socksReadingGen = -1
             if port != socksPort { print("[foxy] tor: SOCKS on 127.0.0.1:\(port)") }
+            step("SOCKS listener read")
             socksPort = port
             if circuitUp { established() }
         }
@@ -752,6 +932,7 @@ enum TorService {
     private static func dirInfoChanged(_ enough: Bool) {
         guard enough != dirInfo else { return }
         dirInfo = enough
+        step(enough ? "directory info complete" : "directory info incomplete")
         if enough {
             print("[foxy] tor: directory info complete")
             if circuitUp { established() }
@@ -949,8 +1130,11 @@ enum TorService {
         DispatchQueue.global(qos: .utility).async {
             var cookie: Data?
             var address: (String, UInt16)?
-            for _ in 0..<60 {
-                Thread.sleep(forTimeInterval: 0.5)
+            /* Looked for at once, then every half second. A link connected
+             * again (a return whose link iOS took away, a restart) finds both
+             * already there, and used to sleep half a second before looking. */
+            for attempt in 0..<61 {
+                if attempt > 0 { Thread.sleep(forTimeInterval: 0.5) }
                 if cookie == nil {
                     cookie = c.cookie
                         ?? (try? Data(contentsOf: dir.appendingPathComponent("control_auth_cookie")))
@@ -1028,6 +1212,7 @@ enum TorService {
                     }
                     controller = ctrl
                     noteLife()
+                    step("control link connected")
                     observe(ctrl)
                     getInfo(ctrl, ["status/enough-dir-info"]) { values in dirInfoChanged(values.first != "0") }
                     /* Where Tor has got to, asked rather than waited for. It
@@ -1053,7 +1238,7 @@ enum TorService {
                     // Orbot answered before the control link was up
                     if orbotPending { orbotPending = false; reapply() }
                     // a set-up that found the old link dead runs now
-                    if setUpPending { setUpPending = false; setUp("control link connected again") }
+                    if setUpPending { setUpPending = false; setUp("control link connected again", continuing: true) }
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + authenticationPatience) {
@@ -1154,6 +1339,7 @@ enum TorService {
                     lastTrouble = reason
                     print("[foxy] tor: not getting through at \(at)% —", reason,
                           "(\(arguments?["COUNT"] ?? "?") so far)")
+                    DispatchQueue.main.async { step("Tor is not getting through at \(at)%: \(reason)") }
                 }
                 return false
             }
@@ -1184,6 +1370,7 @@ enum TorService {
             DispatchQueue.main.async {
                 guard let ctrl, controller === ctrl else { return }
                 noteLife()                        // an event, even at the same percentage
+                step("Tor reports \(p)%" + (tag.isEmpty ? "" : " (\(tag))"))
                 if p != bootLogged {
                     bootLogged = p
                     print("[foxy] tor: bootstrapped \(p)%"
@@ -1224,11 +1411,11 @@ enum TorService {
             return
         }
         guard dirInfo else {
-            if !ready { print("[foxy] tor: circuit up, waiting for directory info") }
+            if !ready { print("[foxy] tor: circuit up, waiting for directory info"); step("Tor has a circuit; waiting for directory info") }
             return
         }
         guard socksPort != 0 else {
-            if !ready { print("[foxy] tor: circuit up, reading its SOCKS port") }
+            if !ready { print("[foxy] tor: circuit up, reading its SOCKS port"); step("Tor has a circuit; reading its SOCKS port") }
             readSocksPort()                       // a read already in flight answers instead
             return
         }
@@ -1276,6 +1463,9 @@ enum TorService {
         // continuing unprotected lasts until Tor can carry the traffic
         Route.unprotected = false
         print("[foxy] tor: circuit established")
+        step("circuit established: the route is open")
+        // the diary goes on a few seconds more, for the circuits the first requests take
+        diaryUntil = min(diaryUntil, Date().addingTimeInterval(15))
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "FoxyBridgeTest") {
             let via = transport.rawValue
@@ -1469,6 +1659,7 @@ enum TorService {
 
     private static func deadlineExpired() {
         guard !ready else { return }
+        step("\(transport.rawValue)'s patience is out with no circuit; \(openLinks.count) relay connection(s) open")
         /* Nothing to escalate to.
          *
          * Every transport fails identically with no interface, so walking the
@@ -1580,6 +1771,24 @@ enum TorService {
             armDeadline(extending: true)
             return
         }
+        /* Not out of a circuit that is on its way.
+         *
+         * Five seconds is direct's patience, and a return's circuit can take
+         * longer than that through a slow relay while the guard connection it
+         * needs is already open. The restart below switched the network off,
+         * which closed that connection, and the next circuit began with a new
+         * handshake to the guard. With a relay connection open, another circuit
+         * is asked for over it and the clock given two more rounds
+         * (`TorReturn.onDirectDeadline`); with none open, the guard is not
+         * answering and the restart is what cures it, as before. */
+        if transport == .direct,
+           TorReturn.onDirectDeadline(relayLinksOpen: openLinks.count, extensions: extensions) == .anotherCircuit {
+            extensions += 1
+            print("[foxy] tor: direct has \(openLinks.count) relay connection(s) open and no circuit after \(Int(transport.patience))s; asking for another circuit and giving it longer")
+            askOnce(setUpGen, why: "patience out")
+            armDeadline(extending: true)
+            return
+        }
         if transport == .direct, directTries < TorService.directTriesMax {
             directTries += 1
             print("[foxy] tor: direct has not moved in \(Int(transport.patience))s; "
@@ -1639,6 +1848,7 @@ enum TorService {
         guard let ctrl = controller, !parked else { return }
         let gen = setUpGen
         print("[foxy] tor: retrying")
+        step("Tor's connections started again (network off and on)")
         forgetSocksPort()                         // switching the network closes the listener
         stallReset()
         setConf(ctrl, ["DisableNetwork=1"]) { _, _ in
@@ -1722,18 +1932,31 @@ enum TorService {
     /// got past it. Here a command recognises its reply by its shape, and has a
     /// deadline, after which it answers empty and lets a late reply pass on.
     /// `done` runs on the main queue.
+    ///
+    /// `events`: this command's observer stays on the link after its reply and
+    /// is shown every event (code 650) from then on, on Tor.framework's control
+    /// queue, and passes each on to the other observers. SETEVENTS uses it
+    /// (`watchCircuits`), so the one command sender here is still this one.
     private static func control(_ ctrl: TorController, _ command: String, _ args: [String],
                                 timeout: TimeInterval = 10,
                                 claims: @escaping (_ codes: [Int], _ lines: [String]) -> Bool,
+                                events: ((_ line: String) -> Void)? = nil,
                                 done: @escaping (_ codes: [Int], _ lines: [String]) -> Void) {
         let once = ControlOnce()
+        let watching = events != nil
         ctrl.sendCommand(command, arguments: args, data: nil) { codes, lines, stop in
             let c = codes.map { $0.intValue }
-            if c.first == 650 { return false }                  // an event, not a reply
-            if once.isDone { stop.pointee = true; return false } // out of time: pass it on
+            if c.first == 650 {                                 // an event, not a reply
+                if let events, let first = lines.first { events(String(data: first, encoding: .utf8) ?? "") }
+                return false
+            }
+            if once.isDone {                                    // out of time, or answered: pass it on
+                if !watching { stop.pointee = true }
+                return false
+            }
             let l = lines.map { String(data: $0, encoding: .utf8) ?? "" }
             guard claims(c, l), once.claim() else { return false }
-            stop.pointee = true
+            if !watching { stop.pointee = true }
             DispatchQueue.main.async { done(c, l) }
             return true
         }
