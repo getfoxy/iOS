@@ -4075,7 +4075,10 @@
           // the swap at the mint, with no card: at the rate shown while it holds, a new one for what came off where not
           const fresh = Number(q.expiresAt) - Date.now() > (this.SWAP_MARGIN_MS || 15000);
           this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '\u2026', 120000);
-          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took)).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
+          /* the swap is the card's (`opts.card`, kept on the quote): both its rows name the card, so they are in the card's history and
+           * not in home's. The quote the swap screen asked is marked here, a new one is asked with it. */
+          if (fresh) q.card = sc.key;
+          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took, { card: sc.key })).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
           return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
         })
         .then((sw) => {

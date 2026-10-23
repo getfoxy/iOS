@@ -795,6 +795,12 @@
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
 
+    /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
+     * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */
+    cardKnownHere: function (key) {
+      return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
+    },
+
     /* The same, for a screen: what each held when last seen, and when it can
      * be taken back. Newest first. Each in the unit it holds (`unit`, a row from
      * before cards held dollars is bitcoin): `amount`, and `sats` the same for a

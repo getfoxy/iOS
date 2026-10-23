@@ -241,6 +241,8 @@
                                 // the melt's change is the card's (`opts.changeToCard`), however late the melt is settled
                                 changeToCard: (opts && opts.changeToCard) || undefined }
                        : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
+                         // a swap from a card's screen: the card it is for, so the row the sweep writes names it (`swapMarks`)
+                         swapCard: (opts && opts.swapCard) || undefined,
                          // paid over its need: what comes back is checked when the sweep settles it too
                          changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
             /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
@@ -312,7 +314,7 @@
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
             if (heldId) FoxyWallet.cardOutDone(heldId);
             // in the unit paid from (hard rule 4): a usd row is cents, with sats at 0
-            logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null, {
+            logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere, swapCard: (opts && opts.swapCard) || undefined } : null, {
               dir: 'out',
               sats: satsOf(quote.amount),
               feeSats: Math.max(0, feeSats),

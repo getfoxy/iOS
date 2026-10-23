@@ -218,6 +218,10 @@
     row.kind = 'swap';
     row.swap = String(rec.swap);
     if (Number(rec.mintRate) > 0) row.mintRate = Number(rec.mintRate);
+    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) is that card's business: both its rows name the card, so
+     * the card's history shows them and home's leaves them out. `swapCard` on the record, never `card`: a melt's hold entry
+     * already has a `card`, for a payment made with a card's held pieces, which is another thing. */
+    if (rec.swapCard) row.card = String(rec.swapCard);
     return row;
   }
 

@@ -200,5 +200,62 @@ console.log('\n5. a card’s own list is the card’s account');
      mine.rows.map((r) => r.name + ' ' + r.amtText).join(', '));
 }
 
+console.log('\n6. a card’s business is in the card’s list, and not in home’s');
+{
+  /* Home's HISTORY leaves out what is a card's: rows naming a card this phone set up or loaded (`cardKnownHere`), and what a
+   * card paid from its own screen (`fromCard`). A till's receipt of someone else's card stays: it is the till's own income. A
+   * swap begun from the card names it on both legs, and is in the card's list, one leg in each tab of a card of both. The
+   * books (`histAudit`, lifted for real here) still walk every row, so home still ADDS UP with the card's rows not shown. */
+  const a = lift(['renderHistory(c) {', 'histAudit() {']);
+  global.CTA_INK = () => '#fff';
+  const KEY = '02mine', OTHER = '02someone';
+  global.window = { FoxyWallet: { cardKnownHere: (k) => k === KEY, heldSats: () => 0 } };
+  Object.assign(a, {
+    histAuditIn: function (u) { return this.histAudit(); }, histAuditUsd: function () { return this.histAudit(); },
+    stageMoney: (n) => '₿ ' + n, money: (n) => ({ main: '₿ ' + n, sub: '' }), txFiat: () => 0,
+    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), px: () => 0, group: (n) => String(n),
+    topUpFeeSats: () => 0, recoveringSats: () => 0, unitMoney: (n) => String(n), unitLabel: (u) => u,
+    unitFigure: (n, u) => (u === 'usd' ? '$' + (n / 100).toFixed(2) : '₿ ' + n), unitWord: (u) => (u === 'usd' ? 'DOLLARS' : 'BITCOIN'),
+    homePills: () => ['usd', 'sat'], segLook: () => ({}), twoUnitsOn: () => false, fcTwoUnits: () => true,
+    openTx: () => {}, openPendingSplit: () => {}, goSwitchMint: () => {}, go: () => {}, setState: () => {}, histRef: () => {},
+  });
+  a.histRowTwo = function (t) { return { amtText: (t.dir === 'in' ? '+ ' : '- ') + (t.unit === 'usd' ? '$' + (t.amount / 100).toFixed(2) : '₿ ' + t.sats), amtSub: '', balText: 'BAL' }; };
+  const item = (o) => Object.assign({ hash: 'h' + Math.random(), time: '9:22 AM', fee: 0, card: '', fromCard: '', name: 'x', memo: '', changeSats: 0, changeState: '' }, o);
+  const rows = [
+    item({ dir: 'in', sats: 4900, memo: 'swap', kind: 'swap', swap: 'uswap-1', card: KEY, name: 'swap' }),           // the swap's claim, in bitcoin
+    item({ dir: 'out', sats: 0, unit: 'usd', amount: 500, memo: 'swap', kind: 'swap', swap: 'uswap-1', card: KEY, name: 'swap' }),  // its melt, in dollars
+    item({ dir: 'out', sats: 300, memo: 'paid from card', fromCard: KEY, name: 'shop' }),                           // paid from the card's screen
+    item({ dir: 'in', sats: 2000, memo: 'card', card: OTHER, name: 'card payment' }),                              // a stranger's card paid this till
+    item({ dir: 'out', sats: 10000, fee: 20, memo: 'to card', card: KEY, name: 'card' }),                           // put on my card
+    item({ dir: 'in', sats: 50000, memo: 'lunch', name: 'alice@example.com' }),
+  ];
+  const history = [{ label: 'TODAY', items: rows }];
+  // the books as this list leaves them: 50,000 in, 10,020 put on the card, 2,000 from the till, 300 paid from the card, the swap's sats
+  const balSats = 50000 - 10020 + 2000 - 300 + 4900;
+  const view = (card, unit) => {
+    const s = { screen: 'history', stack: card ? ['home', 'flashcard'] : ['home'], histCard: card ? KEY : '', histFilter: 'all', history, historyComplete: true,
+                balSats, histUnit: unit || 'sat', fc: card ? { key: KEY, v123: true, bal: { usd: 100, sat: 4900 } } : null };
+    a.state = s;
+    const v = a.renderHistory({ s, sc: 'history' });
+    return { v, rows: [].concat(...v.historyGroups.map((g) => g.items)) };
+  };
+  const home = view(false);
+  const names = (rs) => rs.map((r) => r.name + ' ' + r.amtText).join(', ');
+  ok('home leaves out the load onto my card, the swap made from it, and what it paid from its own screen',
+     home.rows.length === 2 && !home.rows.some((r) => /card$|swap|shop/.test(r.name) && r.name !== 'card payment'), names(home.rows));
+  ok('home keeps a till’s receipt of someone else’s card: the till’s own income', home.rows.some((r) => r.name === 'card payment' && r.amtText === '+₿ 2000'), names(home.rows));
+  ok('home still ADDS UP: the books walk the card’s rows too, shown or not', home.v.histAuditTitle === 'ADDS UP', home.v.histAuditTitle + ' / ' + home.v.histAuditBody);
+  const sats = view(true, 'sat'), usd = view(true, 'usd');
+  ok('the card’s BITCOIN tab: the swap’s sats in, the payment from its screen, and the load', names(sats.rows) === 'Swapped from dollars + ₿ 4900, Paid - ₿ 300, Added + ₿ 10000',
+     names(sats.rows));
+  ok('the card’s DOLLARS tab: the swap’s dollars out', names(usd.rows) === 'Swapped to bitcoin - $5.00', names(usd.rows));
+  ok('a swap’s leg says it was made on this phone between the taps, and a card’s list has no wallet balance on it',
+     sats.rows[0].line2 === 'On this phone, between the two taps' && sats.rows.every((r) => r.balText === '') && usd.rows.every((r) => r.balText === ''),
+     JSON.stringify(sats.rows.map((r) => [r.line2, r.balText])));
+  ok('a till’s receipt of a stranger’s card is not in my card’s list', !sats.rows.some((r) => r.amtText.indexOf('2000') >= 0), names(sats.rows));
+  global.window = { FoxyWallet: { heldSats: () => 0 } };
+  ok('with no word from the wallet about cards, home hides only what a card paid from its own screen', view(false).rows.length === 5, names(view(false).rows));
+}
+
 console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');
 process.exit(R.fail ? 1 : 0);

@@ -100,10 +100,18 @@
      * was to the card, and counted at what reached or left the card (a load's
      * fee was this phone's). It read the other way: a $5 payment off the card
      * as a $5 credit, and $50 put on it as a withdrawal. */
-    const dirOf = (t) => (ofCard ? (t.dir === 'in' ? 'out' : 'in') : t.dir);
+    /* Two kinds are not turned round. A payment made from the card's own screen (`fromCard`) is the card's pieces paying, out of
+     * the card as it is out of this phone's entry. And a leg of a swap begun from the card (`kind` 'swap', `card` naming it) is
+     * the swap this phone made between the card's two taps: what left in one currency and what came in the other, as it was. */
+    const swapLeg = (t) => t.kind === 'swap';
+    const dirOf = (t) => (!ofCard ? t.dir : (t.fromCard === ofCard || swapLeg(t)) ? t.dir : (t.dir === 'in' ? 'out' : 'in'));
     const unfinished = (t) => !!ofCard && t.memo === 'card, not completed';
-    const cardName = (t) => (t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
+    const otherWord = (t) => (t.unit === 'usd' ? 'bitcoin' : 'dollars');
+    const cardName = (t) => (swapLeg(t) ? (t.dir === 'in' ? 'Swapped from ' : 'Swapped to ') + otherWord(t)
+      : t.fromCard === ofCard ? 'Paid'
+      : t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
     const cardRail = (t) => {
+      if (swapLeg(t)) return 'On this phone, between the two taps';
       if (unfinished(t)) return t.changeState === 'given back' ? 'Put back on the card' : 'To go back on the card';
       if (t.dir === 'in' && t.changeState === 'not handed' && (t.changeSats > 0 || t.changeAmount > 0)) return 'Change to go back on the card';
       return '';
@@ -119,9 +127,17 @@
       return this.unitFigure(u === 'usd' ? o.amount : o.sats, u);
     };
     const inTab = (t) => !two || unitOf(t) === tab;
+    /* Whose list a row is in. A card's own list (`ofCard`): the rows that name that card, its loads, withdrawals and swaps
+     * (`card`), and what it paid from its own screen (`fromCard`). Home's: everything else. A row that names a card this phone
+     * set up or loaded (the wallet's `cardKnownHere`), or that a card paid from its own screen, is that card's business and is
+     * left to the card's list. A till's receipt of someone else's card (a `card` this phone has no row for) is the till's own
+     * income and stays. The books (`histAudit`) still walk every row, these included, so home's ADDS UP is the whole wallet's;
+     * the running balance on a row is what the wallet held after it, so it can step by a card's row that is not shown. */
+    const known = (k) => !!(k && W1 && typeof W1.cardKnownHere === 'function' && W1.cardKnownHere(k));
+    const inList = (t) => (ofCard ? (t.card === ofCard || t.fromCard === ofCard) : !(t.fromCard || known(t.card)));
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => Object.assign({
+      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && inList(t)).map(t => Object.assign({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
@@ -186,7 +202,12 @@
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {})).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {},
+      /* On a card of both currencies its list has the tabs, and each row the figure in its own unit (`histRowTwo`), signed as the
+       * card saw it and with no wallet balance beside it, as on a card of one. A swap's leg keeps its own figure, fee and all: what
+       * left in one currency, what came in the other. */
+      cardTwo ? Object.assign(swapLeg(t) ? {} : { amtText: (unfinished(t) ? '' : dirOf(t) === 'in' ? '+ ' : '- ') + this.unitFigure(t.unit === 'usd' ? Math.round(Number(t.amount) || 0) : Math.round(Number(t.sats) || 0), unitOf(t)),
+}, { balText: '' }) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',

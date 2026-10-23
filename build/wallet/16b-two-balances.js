@@ -690,6 +690,9 @@
           expiresAt: Math.min.apply(null, ends),
           state: 'quoted',
         });
+        /* `opts.card`: the card a swap from a card's screen is for (26f-flashcard.js `fcSwapGo`); kept on the quote, and from it
+         * on the swap's record, its invoice's record and its melt, so both rows of the swap name the card (`swapMarks`). */
+        if (opts && typeof opts.card === 'string' && opts.card) quote.card = opts.card;
         // the two quotes and the wallets they came by, kept off anything that is copied or shown
         Object.defineProperty(quote, '_mintQuote', { value: got.q, enumerable: false });
         Object.defineProperty(quote, '_lock', { value: got.lock, enumerable: false });
@@ -728,14 +731,16 @@
       q.state = 'running';
       var mq = q._mintQuote, melt = q._melt;
       var rate = (q.rate && Number(q.rate.usdPerBtc)) || 0;
+      // the card a swap from a card's screen is for (`swapQuote`, `opts.card`), or none
+      var swapCard = typeof q.card === 'string' && q.card ? q.card : undefined;
       var result = function (state, spent, fee) {
         return { id: q.id, state: state, from: { unit: q.from, amount: spent }, to: { unit: q.to, amount: q.get },
                  fee: fee, rate: q.rate };
       };
       try {
         putUnitSwap({ id: q.id, at: Date.now(), mint: q.mint, from: q.from, to: q.to, total: q.total, amount: q.amount,
-                      fee: q.fee, get: q.get, rate: rate, mintQuote: mq.quote, meltQuote: melt.quote, state: 'paying' });
-        keepQuote(mq, q._lock, q.get, 'swap', q.to, q.mint, { swap: q.id, mintRate: rate || undefined });
+                      fee: q.fee, get: q.get, rate: rate, mintQuote: mq.quote, meltQuote: melt.quote, state: 'paying', card: swapCard });
+        keepQuote(mq, q._lock, q.get, 'swap', q.to, q.mint, { swap: q.id, mintRate: rate || undefined, swapCard: swapCard });
       } catch (e) {
         dropUnitSwap(q.id);
         q.state = 'failed';
@@ -748,7 +753,7 @@
         dropQuoteRecord({ key: K.quotes, entry: { quote: mq.quote } });
       };
       return FoxyWallet.pay(String(mq.request), function () {}, {
-        unit: q.from, swap: q.id, mintRate: rate,
+        unit: q.from, swap: q.id, mintRate: rate, swapCard: swapCard,
         quote: { quote: melt, w: q._w, bolt11: String(mq.request), at: Date.now(), unit: q.from },
       }).then(function (paid) {
         if (paid && paid.pending) {

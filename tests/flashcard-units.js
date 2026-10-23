@@ -1067,6 +1067,19 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the swap and the second tap', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || !!cardUp(a)));
       await uiSettle();
       ok(a.state.screen === 'swapDone' && !cardUp(a), 'SWAPPED: both taps made', JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
+      /* The swap is the card's: both its rows name the card (`swapCard` on its records, `card` on its rows), as the load onto the
+       * card does, so home's HISTORY leaves them out (`cardKnownHere`) and the card's shows them, one leg in each tab. */
+      {
+        const log = await H.W.transactions(500);
+        const legs = log.filter((e) => e.kind === 'swap' && e.swap === q.id);
+        ok(legs.length === 2 && legs.every((e) => e.card === c.key && e.memo === 'swap') && legs.some((e) => e.dir === 'out' && e.unit === 'usd') && legs.some((e) => e.dir === 'in' && !(e.unit && e.unit !== 'sat')),
+           'the card’s swap writes its two rows, dollars out and sats in, each naming the card', JSON.stringify(legs.map((e) => [e.dir, e.unit, e.card === c.key, e.memo])));
+        ok(H.W.cardKnownHere(c.key) === true && H.W.cardKnownHere('02' + 'ab'.repeat(32)) === false && H.W.cardKnownHere('') === false,
+           'the wallet says which cards are this phone’s own business, for home’s list to leave out');
+        ok(log.some((e) => e.memo === 'to card' && e.card === c.key) && log.some((e) => e.memo === 'from card' && e.card === c.key),
+           'the card’s two taps are rows naming the card too: what came off it and what went back on');
+        booksGood('a card’s swap', H);
+      }
       c.tap();
       const seen = await H.W.cardLook(c, { mine: true, price: PRICE });
       ok(seen.units.usd.balance > 0 && seen.units.usd.balance < 1000 && seen.units.sat.balance > 0,
