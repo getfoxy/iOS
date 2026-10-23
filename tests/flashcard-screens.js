@@ -164,12 +164,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === undefined && v.fcDayLeft === undefined, 'and under it, that it has no limit, with nothing to say of a day: the card screens have no daily limit', v.fcLimitLine);
-  ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE,SWAP'
+  ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE'
      && histFirst(v) && v.fcResetVis === undefined && v.fcReset === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcMenuItems[0].tap === 'function' && !hasReset(holder),
      'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY first in its MENU and HOME at the top left, SCAN, PASTE and SWAP under them, and a MENU of HISTORY, LIMITS and CHANGE PIN: RESET is in the menu for a card of 1.17 and not for this older one');
-  ok(v.fcButtons[2].dim === '0.38' && (v.fcButtons[2].tap(), holder.toasts.slice(-1)[0] === 'This card holds one currency, so there is nothing to swap.'),
-     'SWAP is greyed on a card of one currency, and says why when pressed', holder.toasts.slice(-1)[0]);
+  ok(v.fcButtons.length === 2 && !v.fcButtons.some((k) => k.label === 'SWAP'),
+     'no SWAP on a card of one currency: SCAN and PASTE alone, as home with one pill', v.fcButtons.map((k) => k.label).join());
   ok(v.fcFaceLines === true && v.fcLimitShown === true, 'and the limit line is drawn on the card’s own face (it has the card’s badge above it only where there is one)');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
@@ -2474,7 +2474,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       H2.sheet.length = 0;
       const had = await H2.W.balanceSats();
       keyIn(owner, 700);
-      ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'NEXT brings the sheet up at once', H2.sheet[0]);
+      /* The owner's rule: the PIN before any card sheet, so the card is tapped once (this phone has cards on file, so it asks ahead,
+       * `fcSendPinFirst`); a card with no PIN, read then, ignores the PIN typed. */
+      ok(!!pad(owner) && pad(owner).cta === 'TAP CARD' && !H2.sheet.some((x) => /^begin:/.test(x)), 'NEXT asks the card’s PIN first, before any sheet', (pad(owner) && pad(owner).cta) + ' | ' + H2.sheet[0]);
+      if (pad(owner)) pad(owner).type('1234');
+      await until('the sheet after the PIN', () => H2.sheet[0] === 'begin: Tap behind the phone.');
+      ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'then the sheet comes up, once', H2.sheet[0]);
       await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
       await settle();
       ok(free.balance() === 700 && owner.state.screen === 'home' && owner.state.stack.length === 0 && /^₿700 went onto the card\.$/.test(card(owner).reason) && (await H2.W.balanceSats()) < had - 699,
@@ -2488,9 +2493,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       H2.sheet.length = 0;
       keyIn(owner, 500);
       await until('the PIN pad', () => !!pad(owner));
-      ok(H2.sheet.indexOf('end: Enter the card’s PIN') >= 0 && !H2.sheet.some((x) => /^error:/.test(x)) && keyed.balance() === 0 && H2.W.cardOwed().length === 0 && owner.state.screen === 'amount',
-         'a card with a PIN ends the sheet saying so, in no red, with nothing made or written', H2.sheet.join(' / '));
-      ok(pad(owner).title === 'CARD PIN' && pad(owner).cta === 'TAP AGAIN' && /^To put ₿500 on the card\./.test(pad(owner).sub), 'the pad says what the PIN is for, and TAP AGAIN writes it', pad(owner).sub);
+      // (this phone has cards on file, so the PIN is asked before any sheet, `fcSendPinFirst`: no card read, nothing made, one tap to come)
+      ok(!H2.sheet.some((x) => /^begin:/.test(x)) && keyed.balance() === 0 && H2.W.cardOwed().length === 0 && owner.state.screen === 'amount',
+         'a card with a PIN: the pad comes up before any sheet, with nothing made or written', H2.sheet.join(' / '));
+      ok(pad(owner).title === 'CARD PIN' && pad(owner).cta === 'TAP CARD' && /^To put ₿500 on the card\./.test(pad(owner).sub), 'the pad says what the PIN is for, and TAP CARD writes it in the one tap', pad(owner).cta + ' | ' + pad(owner).sub);
       // a wrong PIN: the pieces were made, owed to the card, and the way on is the pad again
       H2.sheet.length = 0;
       pad(owner).type('9999');

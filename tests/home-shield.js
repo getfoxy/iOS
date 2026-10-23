@@ -358,7 +358,7 @@ const STATES = [
       'its pill is home’s bitcoin pill, the card’s sats big and their dollar worth under', JSON.stringify([q.big, q.small]));
     ok(!!shieldEl() && shieldEl().getAttribute('data-shield') === 'secure', 'the shield sits on the card’s money card too');
     eq(v.fcMenuItems.map((b) => b.label), ['HISTORY', 'LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: HISTORY, LIMITS, CHANGE PIN, RESET in its menu');
-    eq(v.fcButtons.map((b) => b.label + ' ' + b.dim), ['SCAN 1', 'PASTE 1', 'SWAP 0.38'], 'and SWAP greyed in its bottom row');
+    eq(v.fcButtons.map((b) => b.label + ' ' + b.dim), ['SCAN 1', 'PASTE 1'], 'and no SWAP in its bottom row: the card holds one currency');
     ok([undefined, null, [], ['sat']].every((u) => A.fcTwoUnits({ units: u }) === false) && A.fcTwoUnits(null) === false,
       'no card that reports one unit, or none, holds two balances');
     ok(A.fcTwoUnits({ units: ['sat', 'usd'] }) === true, 'one that reports two does');

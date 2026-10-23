@@ -319,9 +319,8 @@ function amt(a) {
     // (MENU is home's own button, `toggleMenu`, which turns `open0`)
     ok(v.fcMenuOpen === false && (holder.setState({ open0: true }), vals(holder).fcMenuOpen === true) && (holder.setState({ open0: false }), vals(holder).fcMenuOpen === false),
        'MENU opens the drawer, as home’s does, and closes it');
-    ok(v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE,SWAP' && v.fcButtons.every((k) => typeof k.tap === 'function' && /^M/.test(k.path))
-       && v.fcButtons[2].dim === '0.38',
-       'the bottom row is home’s: SCAN, PASTE and SWAP, SWAP greyed on a card of one currency', v.fcButtons.map((k) => k.label + ' ' + k.dim).join(', '));
+    ok(v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE' && v.fcButtons.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)),
+       'the bottom row is home’s with one pill: SCAN and PASTE, no SWAP on a card of one currency', v.fcButtons.map((k) => k.label + ' ' + k.dim).join(', '));
     ok(v.fcLinks === undefined && v.fcNoPinLine === undefined && v.fcBlockLine === undefined, 'and the old row, the no-PIN line and the block line are gone from the screen');
 
     // NO and NO: nothing set, no limit sent

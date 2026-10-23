@@ -700,7 +700,17 @@
     /* The sheet comes up at once, over the keypad, which stays where it is (`fcSendRun`). Typed in dollars, the card held to
      * the phone may yet turn out to hold bitcoin, as every card did: it is then loaded with the sats those dollars are at
      * this phone's price, from this phone's bitcoin (`alt`), as it always was. */
-    if (flow === 'cardSend') { this.fcSendRun(sats, '', unit, unit === 'usd' ? { sats: this.wantedSats(), have: Math.floor(this.balNow().sats || 0) } : null); return; }
+    if (flow === 'cardSend') {
+      const alt = unit === 'usd' ? { sats: this.wantedSats(), have: Math.floor(this.balNow().sats || 0) } : null;
+      /* The PIN before the card is asked for, so the card is tapped once: every card of 1.21 and on takes money under its PIN only,
+       * and the owner found the tap, then "enter the card's PIN", then a second tap (`fcSendPinFirst`). A card read without a PIN
+       * after all ignores the one typed (`fcSendRun`). */
+      // (a new send: no card has been tapped for it yet, whatever the last one did)
+      this._fcSendTapped = false;
+      if (this.fcSendPinFirst()) { this.fcSendAsk(sats, unit, alt); return; }
+      this.fcSendRun(sats, '', unit, alt);
+      return;
+    }
     // (a card of 1.23: what it holds in the currency being taken off)
     if (flow === 'cardWd' && sats > this.fcHeld(fc, unit)) { this.toast('The card holds ' + this.fcBoth(this.fcHeld(fc, unit), unit) + '.', true); return; }
     /* The PIN pad goes up over the keypad, which stays where it is: back
@@ -4769,11 +4779,25 @@
   }
 
   fcSendAsk(sats, unit, alt) {
+    // the pad before any tap (`fcSendPinFirst`) says TAP CARD; asked by the card after a tap, it says TAP AGAIN
+    const tapped = !!(this._fcTaps > 0) || this._fcSendTapped === true;
+    this._fcSendTapped = false;
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To put ' + this.fcBoth(sats, unit) + ' on the card.',
-      cta: 'TAP AGAIN',
+      cta: tapped ? 'TAP AGAIN' : 'TAP CARD',
     }, (pin) => this.fcSendRun(sats, pin, unit, alt));
+  }
+
+  /* Whether SEND > FLASHCARD from home asks the card's PIN before the card is asked for. Yes where this phone has read a card of 1.21 or
+   * later in this run (`fcCardPinFirst`), or has any card on file (every card this phone sets up takes money under its PIN only); a
+   * phone that knows no card reads the card first, as before, since a card with no PIN (software before 1.21) would be asked for one
+   * it has not got. */
+  fcSendPinFirst() {
+    if (this.state.fc && this.fcCardPinFirst && this.fcCardPinFirst()) return true;
+    const W = this.fcW();
+    const known = (W && W.cardsKnown) ? W.cardsKnown() : null;
+    return !!(known && Object.keys(known).length);
   }
 
   /* `unit`: the balance the money comes from ('usd' from this phone's dollars), which the card held to the phone must hold:
@@ -4791,6 +4815,8 @@
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
+          // the card has been tapped for this send: a PIN asked after this says TAP AGAIN (`fcSendAsk`)
+          this._fcSendTapped = true;
           /* A new card, with no PIN and no owner, of software 1.22: the first phone that sends it money sets it up for its holder
            * (`fcSendSetUp`). The sheet ends calmly, nothing made, and the set-up's steps come up. */
           // (a new card of 1.21 takes no money with no owner: its holder sets it up on a Foxy of their own first)
@@ -4827,8 +4853,10 @@
             sats = fig[unit];
             alt = null;
           }
-          // a card set up for the other currency alone is refused before its PIN is asked
-          if (unit && !pin) this.fcSendGuard(card, unit, alt);
+          // a card set up for the other currency alone is refused before anything is made for it (its PIN may have been typed ahead of the read)
+          if (unit) this.fcSendGuard(card, unit, alt);
+          // a PIN typed before the read (`fcSendPinFirst`), for a card that turns out to have none: not sent to it
+          if (pin && !card.info.pinSet) pin = '';
           // a card that has a PIN is asked for it before any money is made for it: the sheet ends saying so
           if (card.info.pinSet && !pin) {
             const x = /** @type {any} */ (new Error('The card wants its PIN first.'));
@@ -5375,6 +5403,9 @@
     }
     // a bitcoin address: paid on chain, on the confirmation it was read on
     if (send.onchain) { this.fcOcPay(o, send); return; }
+    /* What came off the card for this payment, for the card's screen the confirmation returns to (24-render-receive-and-send.js,
+     * `dismissPaid`): the card is not read again there, so its figure is stepped down by this much. */
+    this._fcPaidOff = { key: send.key, unit: o.unit, off: Math.max(0, Math.round(Number(sats) || 0)) };
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
     this.startSendNow(send.to, o);
@@ -5740,17 +5771,19 @@
      * (the card then holds both); where both hold, the swap screen's own from and to choose. Only a card that holds nothing at all is
      * offered SWAP greyed, with the reason when pressed. */
     const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
+    /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`): a card of one currency has
+     * SCAN and PASTE alone, the owner's rule. */
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
       { label: 'PASTE', tap: () => this.fcOutPaste(), spin: 'none', dim: '1', pasteHere: '',
         path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
+    ].concat(swappable ? [
       { label: 'SWAP', spin: 'none', pasteHere: '',
-        dim: (!swappable || swapEarly || this.offlineNow()) ? '0.38' : '1',
-        tap: swapEarly ? () => this.toast('Put money on the card to swap.', true)
-          : swappable ? () => this.fcSwap() : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
+        dim: (swapEarly || this.offlineNow()) ? '0.38' : '1',
+        tap: swapEarly ? () => this.toast('Put money on the card to swap.', true) : () => this.fcSwap(),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
-    ];
+    ] : []);
     // the limit line has a card to be on, and says nothing of a blocked one
     const limitShown = !!fc && !!fc.hasRecord && fc.pin !== 'blocked';
     // what the balance says now: what the card holds, or, while it counts after money went on or off, where it has got to

@@ -1307,8 +1307,12 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       both.tap();
       look = await H.W.cardLook(both, { mine: true, price: PRICE });
       ok(look.units.sat.balance === 1500 && look.units.usd.balance === 350, 'and they go on', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
-      // a card its owner set up for dollars alone: the guard stays
+      // a card its owner set up for dollars alone: the guard stays (the PIN is asked ahead of the read now, so it is typed first)
       a = await sendTo(usdOnly, 'sat', '500', 'SATS');
+      ok(!!pad(a) && !cardUp(a), 'started in bitcoin at a dollars-only card: the PIN first, as for any card', cardUp(a) && cardUp(a).reason);
+      usdOnly.tap();
+      pad(a).type('1234');
+      await until('the dollars-only card to refuse', () => !(a._fcTaps > 0) && !!cardUp(a));
       ok(!!cardUp(a) && /holds dollars, so it is loaded from your dollars/.test(cardUp(a).reason) && !pad(a), 'a card set up for dollars alone still refuses bitcoin, nothing made', cardUp(a) && cardUp(a).reason);
       // and not started in a currency, the one currency it holds, with nothing asked
       a = await sendTo(usdOnly, '', '1.00', 'USD');

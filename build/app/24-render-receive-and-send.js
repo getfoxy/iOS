@@ -310,7 +310,18 @@
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
+           * home: the owner's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
+           * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
+          const fc = this.state.fc;
+          const off = this._fcPaidOff;
+          this._fcPaidOff = null;
+          const toCard = !!fc && (this.state.stack || []).indexOf('flashcard') >= 0 && (!off || off.key === fc.key);
+          const fcNext = (toCard && off && off.off > 0) ? Object.assign({}, fc, {
+            balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
+            bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
+          }) : fc;
+          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
