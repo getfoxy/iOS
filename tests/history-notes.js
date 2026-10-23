@@ -202,10 +202,12 @@ console.log('\n5. a card’s own list is the card’s account');
 
 console.log('\n6. a card’s business is in the card’s list, and not in home’s');
 {
-  /* Home's HISTORY leaves out what is a card's: rows naming a card this phone set up or loaded (`cardKnownHere`), and what a
+  /* Home's HISTORY leaves out what is a card's: rows naming a card on file here (`cardKnownHere`: set up here or claimed), and what a
    * card paid from its own screen (`fromCard`). A till's receipt of someone else's card stays: it is the till's own income. A
-   * swap begun from the card names it on both legs, and is in the card's list, one leg in each tab of a card of both. The
-   * books (`histAudit`, lifted for real here) still walk every row, so home still ADDS UP with the card's rows not shown. */
+   * swap begun from the card is, to the card, its two taps (the take-off 'from card' and the put-on 'to card'), and those are
+   * in the card's list; the swap's own legs name no card and are in home's, as any swap is. The take-back of a lost card
+   * (`lost`) is in home's list too: that card's own list cannot be opened. The books (`histAudit`, lifted for real here) still
+   * walk every row, so home still ADDS UP with the card's rows not shown. */
   const a = lift(['renderHistory(c) {', 'histAudit() {']);
   global.CTA_INK = () => '#fff';
   const KEY = '02mine', OTHER = '02someone';
@@ -221,19 +223,24 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
   });
   a.histRowTwo = function (t) { return { amtText: (t.dir === 'in' ? '+ ' : '- ') + (t.unit === 'usd' ? '$' + (t.amount / 100).toFixed(2) : '₿ ' + t.sats), amtSub: '', balText: 'BAL' }; };
   const item = (o) => Object.assign({ hash: 'h' + Math.random(), time: '9:22 AM', fee: 0, card: '', fromCard: '', name: 'x', memo: '', changeSats: 0, changeState: '' }, o);
+  // a $5 swap into bitcoin begun from my card: its first tap, the swap's two legs on this phone, its second tap
   const rows = [
-    item({ dir: 'in', sats: 4900, memo: 'swap', kind: 'swap', swap: 'uswap-1', card: KEY, name: 'swap' }),           // the swap's claim, in bitcoin
-    item({ dir: 'out', sats: 0, unit: 'usd', amount: 500, memo: 'swap', kind: 'swap', swap: 'uswap-1', card: KEY, name: 'swap' }),  // its melt, in dollars
+    item({ dir: 'in', sats: 0, unit: 'usd', amount: 510, memo: 'from card', card: KEY, name: 'card' }),             // the first tap: $5.10 off the card
+    item({ dir: 'out', sats: 0, unit: 'usd', amount: 510, memo: 'swap', kind: 'swap', swap: 'uswap-1', name: 'swap' }),   // the swap's melt, in dollars
+    item({ dir: 'in', sats: 4900, memo: 'swap', kind: 'swap', swap: 'uswap-1', name: 'swap' }),                      // its claim, in bitcoin
+    item({ dir: 'out', sats: 4900, memo: 'to card', card: KEY, name: 'card' }),                                       // the second tap: ₿4900 onto the card
     item({ dir: 'out', sats: 300, memo: 'paid from card', fromCard: KEY, name: 'shop' }),                           // paid from the card's screen
     item({ dir: 'in', sats: 2000, memo: 'card', card: OTHER, name: 'card payment' }),                              // a stranger's card paid this till
     item({ dir: 'out', sats: 10000, fee: 20, memo: 'to card', card: KEY, name: 'card' }),                           // put on my card
     item({ dir: 'in', sats: 50000, memo: 'lunch', name: 'alice@example.com' }),
+    item({ dir: 'in', sats: 700, memo: 'from card', card: KEY, lost: true, name: 'Taken back from a lost card' }),  // RESTORE LOST CARD
   ];
   const history = [{ label: 'TODAY', items: rows }];
-  // the books as this list leaves them: 50,000 in, 10,020 put on the card, 2,000 from the till, 300 paid from the card, the swap's sats
-  const balSats = 50000 - 10020 + 2000 - 300 + 4900;
-  const view = (card, unit) => {
-    const s = { screen: 'history', stack: card ? ['home', 'flashcard'] : ['home'], histCard: card ? KEY : '', histFilter: 'all', history, historyComplete: true,
+  // the books as this list leaves them: 50,000 in, 10,020 put on the card, 2,000 from the till, 300 paid from the card, the swap's
+  // sats in and put on the card, and 700 taken back from a lost card
+  const balSats = 50000 - 10020 + 2000 - 300 + 4900 - 4900 + 700;
+  const view = (card, unit, list) => {
+    const s = { screen: 'history', stack: card ? ['home', 'flashcard'] : ['home'], histCard: card ? KEY : '', histFilter: 'all', history: list || history, historyComplete: true,
                 balSats, histUnit: unit || 'sat', fc: card ? { key: KEY, v123: true, bal: { usd: 100, sat: 4900 } } : null };
     a.state = s;
     const v = a.renderHistory({ s, sc: 'history' });
@@ -241,20 +248,32 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
   };
   const home = view(false);
   const names = (rs) => rs.map((r) => r.name + ' ' + r.amtText).join(', ');
-  ok('home leaves out the load onto my card, the swap made from it, and what it paid from its own screen',
-     home.rows.length === 2 && !home.rows.some((r) => /card$|swap|shop/.test(r.name) && r.name !== 'card payment'), names(home.rows));
+  ok('home leaves out the load onto my card, the swap’s two taps, and what the card paid from its own screen',
+     home.rows.length === 5 && !home.rows.some((r) => r.name === 'card' || r.name === 'shop'), names(home.rows));
+  ok('home has the swap’s two legs, as any swap: this phone made it between the taps',
+     home.rows.filter((r) => r.name === 'swap').map((r) => r.amtText).join() === '−510,+₿ 4900',
+     names(home.rows));
   ok('home keeps a till’s receipt of someone else’s card: the till’s own income', home.rows.some((r) => r.name === 'card payment' && r.amtText === '+₿ 2000'), names(home.rows));
+  ok('home keeps the take-back of a lost card, named for what it was: that card’s own list cannot be opened',
+     home.rows.some((r) => r.name === 'Taken back from a lost card' && r.amtText === '+₿ 700'), names(home.rows));
+  ok('the history read from the wallet carries `lost`, and names such a row for what it was',
+     /lost: !!t\.lost,/.test(method('loadHistory() {')) && /const who = t\.lost \? 'Taken back from a lost card' :/.test(method('loadHistory() {')));
   ok('home still ADDS UP: the books walk the card’s rows too, shown or not', home.v.histAuditTitle === 'ADDS UP', home.v.histAuditTitle + ' / ' + home.v.histAuditBody);
   const sats = view(true, 'sat'), usd = view(true, 'usd');
-  ok('the card’s BITCOIN tab: the swap’s sats in, the payment from its screen, and the load', names(sats.rows) === 'Swapped from dollars + ₿ 4900, Paid - ₿ 300, Added + ₿ 10000',
-     names(sats.rows));
-  ok('the card’s DOLLARS tab: the swap’s dollars out', names(usd.rows) === 'Swapped to bitcoin - $5.00', names(usd.rows));
-  ok('a swap’s leg says it was made on this phone between the taps, and a card’s list has no wallet balance on it',
-     sats.rows[0].line2 === 'On this phone, between the two taps' && sats.rows.every((r) => r.balText === '') && usd.rows.every((r) => r.balText === ''),
-     JSON.stringify(sats.rows.map((r) => [r.line2, r.balText])));
+  ok('the card’s BITCOIN tab: the swap’s second tap, the payment from its screen, the load, and the take-back; no swap leg',
+     names(sats.rows) === 'Added + ₿ 4900, Paid - ₿ 300, Added + ₿ 10000, Withdrawn - ₿ 700', names(sats.rows));
+  ok('the card’s DOLLARS tab: the swap’s first tap, what came off the card, and not the swap’s dollars again', names(usd.rows) === 'Withdrawn - $5.10', names(usd.rows));
+  ok('one $5 swap reads once in the card’s list: no "Swapped" row beside its taps', !sats.rows.concat(usd.rows).some((r) => /Swapped/.test(r.name)), names(sats.rows.concat(usd.rows)));
+  ok('a card’s list has no wallet balance on it', sats.rows.every((r) => r.balText === '') && usd.rows.every((r) => r.balText === ''),
+     JSON.stringify(sats.rows.map((r) => r.balText)));
   ok('a till’s receipt of a stranger’s card is not in my card’s list', !sats.rows.some((r) => r.amtText.indexOf('2000') >= 0), names(sats.rows));
+  // the legs an earlier build wrote, naming the card: home's still, and never the card's
+  const old = [{ label: 'TODAY', items: rows.map((t) => (t.kind === 'swap' ? Object.assign({}, t, { card: KEY }) : t)) }];
+  ok('a swap leg that names the card (an earlier build’s) is in home’s list and not in the card’s',
+     view(false, 'sat', old).rows.filter((r) => r.name === 'swap').length === 2 && !view(true, 'sat', old).rows.concat(view(true, 'usd', old).rows).some((r) => /Swapped|swap/.test(r.name)),
+     names(view(false, 'sat', old).rows) + ' / ' + names(view(true, 'sat', old).rows));
   global.window = { FoxyWallet: { heldSats: () => 0 } };
-  ok('with no word from the wallet about cards, home hides only what a card paid from its own screen', view(false).rows.length === 5, names(view(false).rows));
+  ok('with no word from the wallet about cards, home hides only what a card paid from its own screen', view(false).rows.length === 8, names(view(false).rows));
 }
 
 console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');

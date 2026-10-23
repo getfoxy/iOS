@@ -98,10 +98,50 @@ async function receiveDollars(till, R, amount) {
       till.setState({ screen: 'home' });
       await new Promise((ok2) => setTimeout(ok2, 400));
       ok(!R.sheet.some((x) => /^begin: /.test(x)), 'and no sheet comes up for a screen that was left');
-      till._usdCodeMaking = was.making; till._fcUsdCodeWait = 0;
+      ok(!till._fcUsdCodeWait, 'and the wait ends with the screen: its start is not kept for the next receive', JSON.stringify(till._fcUsdCodeWait));
+      /* The next dollar receive, CARD pressed as it opens: it waits for its own code, as the first did. A wait left behind used
+       * to stand, and every later receive skipped the wait for the rest of the run. */
+      till._invoiceRun += 1;
+      till._usdCodeMaking = till._invoiceRun;
+      till.setState({ screen: 'confirm', invoice: '', recvAmount: 100, recvUnit: 'usd' });
+      const toasts = till.toasts.length;
+      till.payByCard();
+      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.length === toasts + 1 && till.toasts.slice(-1)[0] === 'One moment: the code is being made.'
+         && till._fcUsdCodeWait && till._fcUsdCodeWait.run === till._invoiceRun,
+         'a later receive waits for its own code, with its own word', (till.toasts.slice(-1)[0] || '') + ' | ' + JSON.stringify(till._fcUsdCodeWait));
+      till.setState({ screen: 'home' });
+      await new Promise((ok2) => setTimeout(ok2, 400));
+      ok(!till._fcUsdCodeWait && !R.sheet.some((x) => /^begin: /.test(x)), 'and left, it ends too');
+      till._usdCodeMaking = was.making;
       till.setState({ screen: was.screen });
     }
     const inv = await receiveDollars(till, R, '1.00');
+    /* CARD while the code is being made arms a retry; CARD pressed again once the code is up begins the sheet, and the retry
+     * armed before must not begin a second one for the same code. Nor does CARD begin one while a card flow is going. (The
+     * sheet itself is stood in for here: what is counted is how many are begun.) */
+    {
+      const realStart = till.fcPayStart;
+      const starts = [];
+      till.fcPayStart = (n, off, share, x, usd) => { starts.push((usd && usd.bolt11) || '(none)'); };
+      const kept = { invoice: till.state.invoice, invoiceHash: till.state.invoiceHash, run: till._invoiceRun, making: till._usdCodeMaking, fcUsd: till._fcUsd };
+      till._usdCodeMaking = till._invoiceRun;
+      till.setState({ invoice: '', invoiceHash: '' });
+      till.payByCard();
+      await new Promise((ok2) => setTimeout(ok2, 100));
+      till._usdCodeMaking = kept.making;
+      till.setState({ invoice: kept.invoice, invoiceHash: kept.invoiceHash });
+      till.payByCard();
+      await new Promise((ok2) => setTimeout(ok2, 600));
+      ok(starts.length === 1 && starts[0] === kept.invoice, 'CARD pressed again once the code is up: one sheet, and the retry armed before begins none',
+         JSON.stringify(starts.map((x) => x.slice(0, 12))));
+      till._fcUsd = kept.fcUsd;
+      till._fcTaps = 1;
+      till.payByCard();
+      till._fcTaps = 0;
+      ok(starts.length === 1, 'and CARD while a card flow is going begins no second one', String(starts.length));
+      till.fcPayStart = realStart;
+      till._fcUsd = kept.fcUsd;
+    }
     v = screen(till);
     ok(v.recvCardShown === true && v.recvTapShown === true && v.confirmAmount === '$ 1.00',
        'once the invoice is there, CARD is beside TAP, under $ 1.00', JSON.stringify({ card: v.recvCardShown, amount: v.confirmAmount }));
@@ -331,6 +371,19 @@ async function receiveDollars(till, R, amount) {
        'while the wallet lists the melt as unanswered, the code is held, as a payment still with the mint');
     till.recvClockTick(till._invoiceRun);
     ok(till.state.invoice === inv.bolt11 && !till._requoting, 'and no new code is asked for, with its minute long gone');
+    ok(till.fcUsdLanding(), 'CARD on it says the card has paid it, while the melt is with the mint');
+    /* The wallet holds that melt no longer (the mint answered; a melt that failed is the case that mattered), and the screen's hold
+     * has not asked yet: CARD no longer says the code is paid, and VERIFYING comes down. They stayed until the code's clock ran out. */
+    {
+      const held = inFlight;
+      till.fcUsdVerifying(till._fcUsd, 'The card paid. The mint has not answered yet; the dollars land when it does.', 120000);
+      const up = stage(R) === 'paidCheck';
+      inFlight = [];
+      const landing = till.fcUsdLanding();
+      ok(up && !landing && stage(R) !== 'paidCheck' && till._fcUsd.pending === true,
+         'the melt no longer held: not landing, VERIFYING down, and the answer left to the screen’s hold', JSON.stringify({ up, landing, stage: stage(R) }));
+      inFlight = held;
+    }
     // the code's watch has ended by now (its minute and a quarter are long gone), and the mint answers
     till.stopReceive();
     inFlight = [];

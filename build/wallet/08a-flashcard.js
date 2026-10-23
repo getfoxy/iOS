@@ -5783,6 +5783,12 @@
     // how this card writes a piece's secret, for taking it back with no card to ask
     // (format 5, a card of 1.23 that holds both units, writes its secrets as format 4 does, and is filed as 4)
     if (card.info && card.info.format) row.format = cardAllFormat(card.info.format) ? CARD_FORMAT_ALL : card.info.format;
+    /* Its software as last read, and whether that wants its PIN before any load (1.21 and on, `pinFirst`): SEND > FLASHCARD asks
+     * the PIN ahead only of cards known to want it (26f-flashcard.js `fcSendPinFirst`). A row from before this was kept has neither. */
+    if (card.info) {
+      row.pinFirst = !!card.info.pinFirst;
+      row.software = String(card.info.version || '');
+    }
     all[card.key] = row;
     if (!save(CARDS, all)) console.warn('[foxy] card: what is on a card could not be written down; it can be taken back only from what was known before');
   }
@@ -5891,7 +5897,7 @@
          * that asked for it keeps it quiet, and announces the sats it buys) */
         try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x) {}
         // and names the card, as a load's entry does: the card's own history is read from that (26f-flashcard.js)
-        try { amendTx(row.id, { card: row.card }); } catch (x1) {}
+        try { amendTx(row.id, cardRowMarks(row, {})); } catch (x1) {}
         return cardChangeKept(row).then(function () { return got(r && (r.amount != null ? r.amount : r.sats)); });
       }, function (e) {
         var text = String((e && e.message) || '');
@@ -5916,7 +5922,7 @@
         if (again && spent && !(e && e.foxyMine) && FoxyWallet.txSeen(row.id)) {
           mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
           try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x2) {}
-          try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x3) {}
+          try { amendTx(row.id, cardRowMarks(row, { memo: row.memo || 'card' })); } catch (x3) {}
           // what this phone has of it: the card's own change (1.12) was never in its pile
           return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
         }
@@ -5930,7 +5936,7 @@
             if (!FoxyWallet.txSeen(row.id)) throw cardError('waiting', 'The card has signed and the mint has not said what became of its swap yet.', { id: row.id });
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
             try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x4) {}
-            try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x5) {}
+            try { amendTx(row.id, cardRowMarks(row, { memo: row.memo || 'card' })); } catch (x5) {}
             return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
           });
         }
@@ -5940,6 +5946,14 @@
         if (spent || (mintRefused(e) && !(e && e.recovered) && !busy)) return cardRefusal(row, e, !!(e && e.foxyMine));
         throw cardError('waiting', 'The card has signed and the mint has not answered yet. ' + text, { id: row.id });
       });
+  }
+
+  /* What a taken row's entry is marked with: the card it names, and `lost` for the take-back of a lost card (RESTORE LOST CARD,
+   * 21a-flashcard.js `cardTakeBack`), which home's history keeps since that card's own list cannot be opened. */
+  function cardRowMarks(row, more) {
+    var f = /** @type {any} */ (Object.assign({ card: row.card }, more || {}));
+    if (row.lost) f.lost = true;
+    return f;
   }
 
   // whether this phone's record of a swap for a card's row is still open (its answer not had: `swapGuard`, `into`)

@@ -1201,6 +1201,10 @@
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
+    /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. The
+     * wait's own timer pressed CARD again after the person had, and two sheets were begun for one code, the second taking over
+     * `_fcUsd` from the payment the first was making. */
+    if (this.cardFlowBusy && this.cardFlowBusy()) { clearTimeout(this._fcUsdCodeWaitT); this._fcUsdCodeWait = null; return; }
     // the cents asked, as the receive screen holds them, or as typed while the mint is still making the code
     const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : (this.centsTyped ? this.centsTyped() : 0)) || 0);
     if (W && W.cardOnline && !W.cardOnline()) {
@@ -1226,16 +1230,29 @@
     /* The code still being made by the mint (12-receive.js, `_usdCodeMaking`; or asked again, `_requoting`): a bitcoin card
      * needs it, and reading the card now refused it ("tap it again when the dollar code is on screen"), as the owner found
      * pressing CARD the moment the screen opened. Wait for the code, two and a half seconds at most (the mint answers in about
-     * one; a dollar card needs no code, and is not kept waiting on a mint that is slow), then go on as before. */
+     * one; a dollar card needs no code, and is not kept waiting on a mint that is slow), then go on as before. The wait is this
+     * receive's (`run`): one begun for another, or for this one and left when its screen was, is not this one's, and its start
+     * no longer cuts this one short. */
     if (!bolt11 && (this._usdCodeMaking === this._invoiceRun || this._requoting)) {
-      if (!this._fcUsdCodeWait) { this._fcUsdCodeWait = Date.now(); this.toast('One moment: the code is being made.', false); }
-      if (Date.now() - this._fcUsdCodeWait < 2500) {
+      const was = this._fcUsdCodeWait;
+      if (!was || was.run !== this._invoiceRun) {
+        this._fcUsdCodeWait = { at: Date.now(), run: this._invoiceRun };
+        this.toast('One moment: the code is being made.', false);
+      }
+      const wait = this._fcUsdCodeWait;
+      if (Date.now() - wait.at < 2500) {
         clearTimeout(this._fcUsdCodeWaitT);
-        this._fcUsdCodeWaitT = setTimeout(() => { if (this.state.screen === 'confirm') this.payUsdByCard(); }, 250);
+        this._fcUsdCodeWaitT = setTimeout(() => {
+          // the receive screen left, or another receive on it: the wait is over, and nothing is pressed for it
+          if (this.state.screen !== 'confirm' || this._invoiceRun !== wait.run) { if (this._fcUsdCodeWait === wait) this._fcUsdCodeWait = null; return; }
+          this.payUsdByCard();
+        }, 250);
         return;
       }
     }
-    this._fcUsdCodeWait = 0;
+    // past the wait, or none: its timer, if one is armed, would press CARD a second time
+    clearTimeout(this._fcUsdCodeWaitT);
+    this._fcUsdCodeWait = null;
     const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
     // a code on screen that names no sats is not one to pay, nor to pay around
     if (bolt11 && !(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
@@ -1267,6 +1284,13 @@
     const u = this._fcUsd;
     const hash = this.state && this.state.invoiceHash;
     if (!u || !hash || u.hash !== hash || u.done) return false;
+    /* Pending with the mint, and the wallet holds that melt no longer: the mint has answered (`fcUsdHolds` takes it from here). It is
+     * not landing on the card's word: a melt that failed kept VERIFYING up, and CARD saying the code was paid, until the code's clock
+     * ran out. */
+    if (u.pending && !this.fcUsdInFlight(u)) {
+      if (this.hideStage && (!this.stageUp || this.stageUp('paidCheck'))) this.hideStage('paidCheck');
+      return false;
+    }
     return !!(u.melting || u.pending || (u.landingUntil && u.landingUntil > Date.now()));
   }
 
@@ -3413,25 +3437,35 @@
   }
 
   /* Whether the card in hand is of software 1.21 or later, whose every load wants its PIN: from the card as it was read (its version,
-   * which the wallet's `pinFirst` is worked out from); a card with no version said is taken to want it, so the PIN is asked, not refused. */
+   * which the wallet's `pinFirst` is worked out from); a card with no version said is taken to want it, so the PIN is asked, not refused.
+   * A card read with no PIN set (`pinSet` false) has none to ask, whatever its software. */
   fcCardPinFirst() {
-    // off the card's own screen (a payment's change at a till, money waiting after a payment): the card as the last flow read it
-    const W = this.fcW();
-    const last = (W && W.cardLastRead) ? W.cardLastRead() : null;
-    const info = (this._fcCard && this._fcCard.info) || (last && last.info);
+    const info = this.fcPinInfo();
     if (!info) return true;
+    if (info.pinSet === false) return false;
     if (info.pinFirst === true) return true;
     const v = String(info.version || '').split('.');
     if (v.length < 2 || !v[0]) return true;
     return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21);
   }
 
+  /* The card the PIN-first rule is asked of, as it was read (`info`), or null. Off the card's own screen (a payment's change at a till,
+   * money waiting after a payment) it is the last card read by any flow (the wallet's `cardLastRead`), never the card on the screen this
+   * phone was last on: a till whose owner had opened his own 1.21 card and swiped home asked a customer's 1.20 card, which has no PIN, for
+   * one. On the card's screen it is the card shown (`_fcCard`) where that is the card last read, and the last read where another card
+   * has been read since. */
+  fcPinInfo() {
+    const W = this.fcW();
+    const last = (W && W.cardLastRead) ? W.cardLastRead() : null;
+    const shown = this._fcCard;
+    const useShown = this.state && this.state.screen === 'flashcard' && !!(shown && shown.info) && (!last || last.key === shown.key);
+    return (useShown ? shown.info : (last && last.info)) || null;
+  }
+
   /* Whether the card in hand, as the last flow read it, wants its PIN before any load: a payment's change included (software 1.21 and
    * on). Unknown card: no, as before (the tap after a payment puts change on with no PIN on older cards). */
   fcKnownPinFirst() {
-    const W = this.fcW();
-    const known = !!(this._fcCard && this._fcCard.info) || !!(W && W.cardLastRead && W.cardLastRead());
-    return known && this.fcCardPinFirst();
+    return !!this.fcPinInfo() && this.fcCardPinFirst();
   }
 
   // the sentence after "tap the card again": whether its PIN comes first
@@ -4151,8 +4185,8 @@
           // the swap at the mint, with no card: at the rate shown while it holds, a new one for what came off where not
           const fresh = Number(q.expiresAt) - Date.now() > (this.SWAP_MARGIN_MS || 15000);
           this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '\u2026', 120000);
-          /* the swap is the card's (`opts.card`, kept on the quote): both its rows name the card, so they are in the card's history and
-           * not in home's. The quote the swap screen asked is marked here, a new one is asked with it. */
+          /* the card the swap is for (`opts.card`, kept on the quote and the swap's records); the swap's own rows are this phone's and
+           * name no card: in the card's history it is the two taps. The quote the swap screen asked is marked here, a new one is asked with it. */
           if (fresh) q.card = sc.key;
           this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took, { card: sc.key })).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
           return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
@@ -4855,15 +4889,22 @@
     }, (pin) => this.fcSendRun(sats, pin, unit, alt));
   }
 
-  /* Whether SEND > FLASHCARD from home asks the card's PIN before the card is asked for. Yes where this phone has read a card of 1.21 or
-   * later in this run (`fcCardPinFirst`), or has any card on file (every card this phone sets up takes money under its PIN only); a
-   * phone that knows no card reads the card first, as before, since a card with no PIN (software before 1.21) would be asked for one
-   * it has not got. */
+  /* Whether SEND > FLASHCARD from home asks the card's PIN before the card is asked for: only where the card is known to want it, a
+   * card of 1.21 or later (`pinFirst`) with a PIN. Known from the last card read in this run (the wallet's `cardLastRead`) where that
+   * is a card of this phone's own (on file) or the card on screen: the card most likely to be held to it. Otherwise from the cards on
+   * file that say what they were when last read (`pinFirst`, written by the wallet's `cardRemember`): every one of those 1.21 or
+   * later, and at least one. Otherwise the card is read first, as before. A card with no PIN (software before 1.21, a new card, or
+   * one with none set) was asked for one it has not got, and the PIN typed was dropped; typed ahead for a card that is not the one
+   * tapped (the last card a till read was a customer's), it could cost that card a try. */
   fcSendPinFirst() {
-    if (this.state.fc && this.fcCardPinFirst && this.fcCardPinFirst()) return true;
     const W = this.fcW();
-    const known = (W && W.cardsKnown) ? W.cardsKnown() : null;
-    return !!(known && Object.keys(known).length);
+    const known = /** @type {any} */ ((W && W.cardsKnown) ? W.cardsKnown() : null) || {};
+    const last = (W && W.cardLastRead) ? W.cardLastRead() : null;
+    const fc = this.state.fc;
+    const likely = !!(last && last.info && last.key) && (Object.prototype.hasOwnProperty.call(known, last.key) || !!(fc && fc.key === last.key));
+    if (likely) return last.info.pinFirst === true && last.info.pinSet !== false;
+    const said = Object.keys(known).map((k) => known[k]).filter((r) => r && typeof r.pinFirst === 'boolean');
+    return said.length > 0 && said.every((r) => r.pinFirst === true);
   }
 
   /* `unit`: the balance the money comes from ('usd' from this phone's dollars), which the card held to the phone must hold:
@@ -5766,6 +5807,8 @@
     const W = this.fcW();
     if (!W || !o || o.done) return;
     o.done = true;
+    // nothing left the card for good: no confirmation is to step its figure down (`_fcPaidOff`, kept by `fcOutPay` for `dismissPaid`)
+    this._fcPaidOff = null;
     const said = e ? String(W.reason ? W.reason(e) : (e.message || '')) : 'The payment could not be started.';
     console.log('[foxy] card: a payment from the card was not made; what it paid goes back to it');
     const tell = (r) => {
@@ -5792,7 +5835,10 @@
     o.done = true;
     const W = this.fcW();
     if (W && W.cardOutDone) W.cardOutDone(o.held);
-    if (!paid) return;
+    /* Not made (pending, or stopped): no confirmation comes to step the card's figure down, and what `fcOutPay` kept for one
+     * (`_fcPaidOff`) would be taken by the next, a payment on chain from the card's screen that keeps none. Made, it is kept:
+     * the confirmation raised after this is what takes it (24-render-receive-and-send.js, `dismissPaid`). */
+    if (!paid) { this._fcPaidOff = null; return; }
     if (o.change > 0 && this.fcOwedAfterPaying()) this.fcChangeWaiting(o.change, 0, o.unit);
     else if (o.changeLater > 0) this.fcChangeLater(o.changeLater, 0, o.unit);
   }

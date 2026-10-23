@@ -241,7 +241,7 @@
                                 // the melt's change is the card's (`opts.changeToCard`), however late the melt is settled
                                 changeToCard: (opts && opts.changeToCard) || undefined }
                        : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
-                         // a swap from a card's screen: the card it is for, so the row the sweep writes names it (`swapMarks`)
+                         // a swap from a card's screen: the card it is for, on the record only; the row names no card (`swapMarks`)
                          swapCard: (opts && opts.swapCard) || undefined,
                          // paid over its need: what comes back is checked when the sweep settles it too
                          changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);

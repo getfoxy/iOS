@@ -218,10 +218,10 @@
     row.kind = 'swap';
     row.swap = String(rec.swap);
     if (Number(rec.mintRate) > 0) row.mintRate = Number(rec.mintRate);
-    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) is that card's business: both its rows name the card, so
-     * the card's history shows them and home's leaves them out. `swapCard` on the record, never `card`: a melt's hold entry
-     * already has a `card`, for a payment made with a card's held pieces, which is another thing. */
-    if (rec.swapCard) row.card = String(rec.swapCard);
+    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) keeps the card it was for on its records (`swapCard`), and
+     * its legs name no card: to the card the swap is its two taps, the take-off ('from card') and the put-on ('to card'), and
+     * those rows name it. A leg with the card on it counted the swap twice in the card's list, and a pending swap's leg, which
+     * lands in this phone, was credited to the card and hidden from home (26-render-history-and-contacts.js `renderHistory`). */
     return row;
   }
 

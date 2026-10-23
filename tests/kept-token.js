@@ -98,6 +98,21 @@ ok(/if TorReturn\.returnFindsRouteUp\(ready: ready, wasParked: wasParked, away: 
    && /guard ready, !wasParked, listenerUp != false else \{ return false \}\s*return min\(away, sinceBroughtBack \?\? away\) < upLeftAlone/.test(read('Foxy/Tor/TorReturn.swift'))
    && /static let upLeftAlone: TimeInterval = 30\n/.test(read('Foxy/Tor/TorReturn.swift')),
    'back while Tor was being kept up, it is left alone and the swap is not cut');
+// whether the time away is known reaches Tor on every return: worked out in `appBecameActive` and handed on under that name
+{
+  const became = native.slice(native.indexOf('@objc private func appBecameActive() {'), native.indexOf('/// Whether the cover over a return comes off now'));
+  const bridgeSrc = read('Foxy/Bridge/FoxyBridge.swift');
+  ok(/var leftKnown = TorReturn\.leftKnown\(wentAway: wentAway, firstFront: !everActive,\s*sinceLaunch: Date\(\)\.timeIntervalSince\(launchedAt\)\)/.test(became)
+     && /if !wentAway && !everActive, let background = launchedInBackground \{ leftKnown = !background \}/.test(became)
+     && became.indexOf('everActive = true') > became.indexOf('leftKnown = !background')
+     && /bridge\.torResumed\(away: away, leftKnown: leftKnown\)/.test(became)
+     && /func torResumed\(away: Int, leftKnown: Bool\) \{[\s\S]{0,40}?TorService\.resumed\(away: TimeInterval\(away\), leftKnown: leftKnown\)/.test(bridgeSrc),
+     'a return works out whether its time away is known, and hands that to Tor under its own name');
+  // and how the run began is iOS's word as the view loads, not the clock: already active, the first return heard is a focus given back
+  ok(/let state = UIApplication\.shared\.applicationState\s*if state == \.active \{ everActive = true \}\s*launchedInBackground = state == \.background/.test(native)
+     && native.indexOf('launchedInBackground = state == .background') > native.indexOf('selector: #selector(appBecameActive)'),
+     'a run already active as the view loads counts as in front before; one in the background as launched there');
+}
 {
   const paid = read('build/app/15-paid-wake-keyboard.js');
   const at = (s) => paid.indexOf(s);

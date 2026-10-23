@@ -146,8 +146,13 @@ function appOn(ctx, start, o) {
     if (a.state.unit === 'SATS') return Math.round(val);
     return a.px() ? Math.round(val / a.px() * 1e8) : 0;
   };
-  // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes back to its question
-  a.back = () => { if (a.fcSuAmountBack && a.fcSuAmountBack()) return; const st = a.state.stack; a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1); };
+  // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes back to its question; back off the card's screen leaves the card behind
+  a.back = () => {
+    if (a.fcSuAmountBack && a.fcSuAmountBack()) return;
+    const st = a.state.stack;
+    if (a.state.screen === 'flashcard' && (st.length ? st[st.length - 1] : 'home') !== 'flashcard' && st.slice(0, -1).indexOf('flashcard') < 0) a._fcCard = null;
+    a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1);
+  };
   if (o && o.send) {
     // the app's own row, and not the short one above: the confirmation's rows are read as the app makes them
     delete a.cfRow;

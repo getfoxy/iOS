@@ -180,6 +180,13 @@ class Component extends DCLogic {
   back() {
     // a card's set-up asking an amount: back is its question (26j-card-wheel.js)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
+    /* Back off the card's own screen, the edge swipe's way home among them: the card shown there is left behind, as HOME leaves it
+     * (26f-flashcard.js `fcGoHome`), so nothing later reads it as the card in hand (`fcPinInfo`). Not on a screen above it, which
+     * comes back to it. */
+    const st = this.state || {};
+    const stk = st.stack || [];
+    const to = stk.length ? stk[stk.length - 1] : 'home';
+    if (st.screen === 'flashcard' && to !== 'flashcard' && stk.slice(0, -1).indexOf('flashcard') < 0) this._fcCard = null;
     this.setState(p => {
       const next = p.stack.length
         ? { screen: p.stack[p.stack.length - 1], stack: p.stack.slice(0, -1) }

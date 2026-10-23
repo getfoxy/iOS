@@ -156,11 +156,15 @@ function booksGood(name, ...pages) {
     ok(spec(till).cta === 'PAY ₿ 710' && !spec(till).ctaBusy, 'PAY says the total, and can be pressed', spec(till).cta);
     k.tap();
     R.sheet.length = 0;
+    till.melts.length = 0;
     spec(till).go();
+    // the seconds it takes to reach the card's mint have a screen of their own, not the receive's code bare (`fcXmGo`)
+    const reaching = till.melts[0] === 'Reaching m.test\u2026' && till.melting === true;
     await until('the invoice to be paid at B', () => R.mint2.quotes[q.hash].state === 'PAID');
     await tapDone(till, R);
     await home(R);
     await settle();
+    ok(reaching, 'PAY: "Reaching" the card’s mint is on the screen while it is reached', JSON.stringify(till.melts));
     ok(/^begin: Hold to pay ₿710/.test(R.sheet[0] || ''), 'the sheet says what the hold pays', R.sheet[0]);
     ok(cardBefore - k.balance() === 710, 'the card paid the total it was shown at the tap, its own change back on it', String(cardBefore - k.balance()));
     ok(saved(R) === MINT2 && bare(R.W.mintUrl) === MINT2, 'the till is home at B, and B is still its own mint', saved(R) + ' ' + R.W.mintUrl);

@@ -691,7 +691,8 @@
           state: 'quoted',
         });
         /* `opts.card`: the card a swap from a card's screen is for (26f-flashcard.js `fcSwapGo`); kept on the quote, and from it
-         * on the swap's record, its invoice's record and its melt, so both rows of the swap name the card (`swapMarks`). */
+         * on the swap's record, its invoice's record and its melt. The swap's rows do not name it (`swapMarks`): to the card the
+         * swap is its two taps, and those rows do. */
         if (opts && typeof opts.card === 'string' && opts.card) quote.card = opts.card;
         // the two quotes and the wallets they came by, kept off anything that is copied or shown
         Object.defineProperty(quote, '_mintQuote', { value: got.q, enumerable: false });

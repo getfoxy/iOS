@@ -1067,13 +1067,15 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the swap and the second tap', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || !!cardUp(a)));
       await uiSettle();
       ok(a.state.screen === 'swapDone' && !cardUp(a), 'SWAPPED: both taps made', JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
-      /* The swap is the card's: both its rows name the card (`swapCard` on its records, `card` on its rows), as the load onto the
-       * card does, so home's HISTORY leaves them out (`cardKnownHere`) and the card's shows them, one leg in each tab. */
+      /* To the card the swap is its two taps: those rows name the card, as the load onto the card does, so home's HISTORY leaves
+       * them out (`cardKnownHere`) and the card's shows them. The swap's own legs, made on this phone between the taps, name no
+       * card (`swapCard` is on its records only) and are in home's list as any swap is: named on the legs too, they counted the
+       * swap twice in the card's list (history-notes §6). */
       {
         const log = await H.W.transactions(500);
         const legs = log.filter((e) => e.kind === 'swap' && e.swap === q.id);
-        ok(legs.length === 2 && legs.every((e) => e.card === c.key && e.memo === 'swap') && legs.some((e) => e.dir === 'out' && e.unit === 'usd') && legs.some((e) => e.dir === 'in' && !(e.unit && e.unit !== 'sat')),
-           'the card’s swap writes its two rows, dollars out and sats in, each naming the card', JSON.stringify(legs.map((e) => [e.dir, e.unit, e.card === c.key, e.memo])));
+        ok(legs.length === 2 && legs.every((e) => !e.card && e.memo === 'swap') && legs.some((e) => e.dir === 'out' && e.unit === 'usd') && legs.some((e) => e.dir === 'in' && !(e.unit && e.unit !== 'sat')),
+           'the card’s swap writes its two legs, dollars out and sats in, and neither names the card', JSON.stringify(legs.map((e) => [e.dir, e.unit, e.card || '', e.memo])));
         ok(H.W.cardKnownHere(c.key) === true && H.W.cardKnownHere('02' + 'ab'.repeat(32)) === false && H.W.cardKnownHere('') === false,
            'the wallet says which cards are this phone’s own business, for home’s list to leave out');
         ok(log.some((e) => e.memo === 'to card' && e.card === c.key) && log.some((e) => e.memo === 'from card' && e.card === c.key),
@@ -1249,8 +1251,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(!!pad(a) && pad(a).title === 'CARD PIN' && /^ADD /.test(pad(a).cta), 'ADD FUNDS asks the PIN, with nothing of the screen’s to say so', pad(a) && pad(a).cta);
       pad(a).back();
       const was = a._fcCard;
+      // (the card on its screen is the one last read: the rule asks it, by its version; `fcPinInfo`)
       ok([['1.20', false], ['1.21', true], ['1.23', true], ['2.0', true], ['', true]].every(([ver, want]) => {
-        a._fcCard = { info: { version: ver } };
+        a._fcCard = { key: both.key, info: { version: ver } };
         return a.fcCardPinFirst() === want;
       }) && (a._fcCard = null, a.fcCardPinFirst() === true), 'before 1.21 the owner’s proof loads; from 1.21, or where the card said no version, the PIN is asked');
       a._fcCard = was;
@@ -1431,6 +1434,56 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     await waiting(150, 'TAP CARD on NOT PAID');
     ok(a.state.fc.bal.usd === 1400 && a.state.fc.ownedHere === true, 'all of it on the card, the card still this phone’s own', JSON.stringify(a.state.fc.bal) + ' ' + a.state.fc.ownedHere);
     await settle();
+  }
+
+  /* ---- 20: what the review found: a swap from the card left pending, and what a payment from the card keeps for its confirmation ---- */
+  if (want(20)) {
+    const H = await funded({ units: ['sat', 'usd'] }, 5000);
+    const KEY = '02' + 'cd'.repeat(32);
+    /* A swap from the card whose second half the mint has not answered (`fcSwapPending`): back on the card's screen, its figure less
+     * what came off it, the swap's card over it saying the bitcoin goes to this phone; nothing of the swap is kept for the card. */
+    {
+      const a = appOn(H, { screen: 'swapDone', stack: ['flashcard'] });
+      Object.assign(a, new Function('return {' + [['26i-swap.js', 'swapPendingCard(r, o) {'], ['01-ui-basics.js', 'unitFigure(amount, unit) {']]
+        .map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')());
+      a.state.fc = { key: KEY, unit: 'usd', balance: 1000, bal: { usd: 1000, sat: 0 } };
+      a._swapCard = { key: KEY, bal: { usd: 1000, sat: 0 } };
+      a.fcSwapPending({ from: { unit: 'usd', amount: 400 }, to: { unit: 'sat', amount: 4900 } }, 410, 'usd');
+      ok(a.state.screen === 'flashcard' && a.state.stack.length === 0 && a._swapCard === null && a.state.fc.bal.usd === 590 && a.state.fc.balance === 590 && a.state.fc.bal.sat === 0,
+         'a pending swap from the card: back on the card’s screen, less what came off it, and nothing of the swap kept for the card', JSON.stringify([a.state.screen, a.state.fc.bal, a._swapCard]));
+      ok(!!cardUp(a) && cardUp(a).title === 'SWAP STILL GOING THROUGH' && /The bitcoin it brings goes to this phone; ADD FUNDS puts it on the card\./.test(cardUp(a).reason),
+         'and it says the bitcoin the swap brings goes to this phone, for ADD FUNDS to put on the card', cardUp(a) && cardUp(a).reason);
+      const b = appOn(H, { screen: 'swapDone', stack: ['flashcard'] });
+      Object.assign(b, { swapPendingCard: () => {} });
+      b.state.fc = { key: KEY, unit: 'usd', balance: 1000, bal: { usd: 1000, sat: 0 } };
+      b._swapCard = { key: '02' + 'ef'.repeat(32), bal: { usd: 1000, sat: 0 } };
+      b.fcSwapPending({ from: { unit: 'usd', amount: 400 } }, 410, 'usd');
+      ok(b.state.fc.bal.usd === 1000 && b.state.fc.balance === 1000, 'another card on the screen by then: its figure is left as it is', JSON.stringify(b.state.fc.bal));
+    }
+    /* What came off the card for a payment from its screen (`_fcPaidOff`, kept by `fcOutPay`) is for that payment's confirmation to
+     * step the card's figure by (`dismissPaid`). A payment not made leaves none behind: the next, a payment on chain that keeps none,
+     * stepped the card's figure by the old one. */
+    {
+      const a = appOn(H, { screen: 'confirm', stack: ['flashcard'] });
+      const sent = [];
+      a.startSendNow = (to, o) => sent.push(o);
+      a.fcW = () => ({ cardOutBack: () => Promise.resolve(null), cardOutDone: () => {}, reason: (e) => (e && e.message) || '' });
+      const send = { key: KEY, unit: 'sat', to: 'lnbc1x' };
+      a.fcOutPay({ hash: 'h-1', held: 'hold-1' }, send, 300);
+      ok(a._fcPaidOff && a._fcPaidOff.key === KEY && a._fcPaidOff.off === 300 && a._fcPaidOff.unit === 'sat', 'a payment from the card keeps what came off it, for its confirmation', JSON.stringify(a._fcPaidOff));
+      a.fcOutBack(sent[0], new Error('No route.'));
+      ok(a._fcPaidOff === null, 'not made, back to the card: none kept', JSON.stringify(a._fcPaidOff));
+      await uiSettle();
+      a.fcOutPay({ hash: 'h-2', held: 'hold-2' }, send, 200);
+      a.fcOutSettled(sent[1], false);
+      ok(a._fcPaidOff === null, 'not made (pending, or stopped): none kept', JSON.stringify(a._fcPaidOff));
+      a.fcOutPay({ hash: 'h-3', held: 'hold-3' }, send, 150);
+      a.fcOutSettled(sent[2], true);
+      ok(a._fcPaidOff && a._fcPaidOff.off === 150, 'made: kept, for the confirmation raised after it', JSON.stringify(a._fcPaidOff));
+      const paidSrc = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '24-render-receive-and-send.js'), 'utf8');
+      ok(/const off = this\._fcPaidOff;\s*this\._fcPaidOff = null;[\s\S]{0,400}?balance: fc\.unit === off\.unit \? Math\.max\(0, \(Number\(fc\.balance\) \|\| 0\) - off\.off\)/.test(paidSrc),
+         'and the confirmation takes it once, stepping the card’s figure by it');
+    }
   }
 
   console.log(failed ? failed + ' flashcard-units check(s) failed, ' + passed + ' passed' : 'all flashcard-units checks pass (' + passed + ')');

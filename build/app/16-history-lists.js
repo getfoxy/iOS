@@ -418,7 +418,9 @@
         const key = d.toDateString() === now.toDateString() ? 'TODAY'
           : d.toDateString() === yest.toDateString() ? 'YESTERDAY' : 'EARLIER';
         const meta = W.tagsFor(t.hash) || {};
-        const who = meta.to || this.txWho(t);
+        /* The take-back of a lost card (RESTORE LOST CARD, `lost`) is in home's list, the one list it can be in, and says what it
+         * was: "From card" alone read as a card tapped here. */
+        const who = t.lost ? 'Taken back from a lost card' : (meta.to || this.txWho(t));
         buckets[key].push({
           name: who,
           /* The detail screen gets the whole address where there is one.
@@ -435,6 +437,8 @@
           card: t.card || '',
           // a payment made from a card (SEND on the card's screen): which card, for the line that says so
           fromCard: t.fromCard || '',
+          // the take-back of a lost card, which home keeps (26-render-history-and-contacts.js `renderHistory`)
+          lost: !!t.lost,
           // and what the wallet called it, which is what a card's own list names it by
           memo: t.memo || '',
           dir: t.dir,

@@ -792,13 +792,15 @@
     /* The rate guard's no: not asked again at this price (`cardRepeg23`). */
     cardRateNo: function (key, rate) { if (key && Number(rate) > 0) cardRateDeclined[key] = Number(rate); },
 
-    /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
+    /* The cards on file here: those this phone set up with a key to take their money back, and those it claimed (TIE OWNERSHIP),
+     * { key: { mint, refundKey, at, ... } }. Not a card it only loaded, nor one it set up as cash for somebody else. */
     cardsKnown: function () { return cardsOnFile(); },
     // the last card read in any flow (its key and info), or null
     cardLastRead: function () { return lastCardRead; },
 
-    /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
-     * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */
+    /* Whether `key` is a card on file here (`cardsKnown`: set up by this phone with a key to take its money back, or claimed by it;
+     * not a card it only loaded): its entries are the card's business, shown in the card's own history and left out of home's
+     * (26-render-history-and-contacts.js `renderHistory`). */
     cardKnownHere: function (key) {
       return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
     },
@@ -938,7 +940,7 @@
                   cardSwapWrite(plan, null);
                   var pieces = [one].concat(plan.inputs.slice(1));
                   var back = Object.assign({ id: 'cardback-' + plan.id, token: encodeToken(mintOf(uw), pieces, u),
-                                             worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() }, cardFig(u, 0));
+                                             worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', lost: true, at: Date.now() }, cardFig(u, 0));
                   mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
                   firstId = firstId || back.id;
                   return cardSwapTaken(back).then(function (got) { totals[u] += (got && got.amount) || 0; });
@@ -949,7 +951,7 @@
             var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
             if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
             var taken = Object.assign({ id: 'cardback-' + piecesFingerprint(signed), token: encodeToken(mintOf(uw), signed, u),
-                                        worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() }, cardFig(u, 0));
+                                        worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', lost: true, at: Date.now() }, cardFig(u, 0));
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
             firstId = firstId || taken.id;
             return cardSwapTaken(taken).then(function (got) { totals[u] += (got && got.amount) || 0; });

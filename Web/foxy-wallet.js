@@ -16108,6 +16108,12 @@
     // how this card writes a piece's secret, for taking it back with no card to ask
     // (format 5, a card of 1.23 that holds both units, writes its secrets as format 4 does, and is filed as 4)
     if (card.info && card.info.format) row.format = cardAllFormat(card.info.format) ? CARD_FORMAT_ALL : card.info.format;
+    /* Its software as last read, and whether that wants its PIN before any load (1.21 and on, `pinFirst`): SEND > FLASHCARD asks
+     * the PIN ahead only of cards known to want it (26f-flashcard.js `fcSendPinFirst`). A row from before this was kept has neither. */
+    if (card.info) {
+      row.pinFirst = !!card.info.pinFirst;
+      row.software = String(card.info.version || '');
+    }
     all[card.key] = row;
     if (!save(CARDS, all)) console.warn('[foxy] card: what is on a card could not be written down; it can be taken back only from what was known before');
   }
@@ -16216,7 +16222,7 @@
          * that asked for it keeps it quiet, and announces the sats it buys) */
         try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x) {}
         // and names the card, as a load's entry does: the card's own history is read from that (26f-flashcard.js)
-        try { amendTx(row.id, { card: row.card }); } catch (x1) {}
+        try { amendTx(row.id, cardRowMarks(row, {})); } catch (x1) {}
         return cardChangeKept(row).then(function () { return got(r && (r.amount != null ? r.amount : r.sats)); });
       }, function (e) {
         var text = String((e && e.message) || '');
@@ -16241,7 +16247,7 @@
         if (again && spent && !(e && e.foxyMine) && FoxyWallet.txSeen(row.id)) {
           mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
           try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x2) {}
-          try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x3) {}
+          try { amendTx(row.id, cardRowMarks(row, { memo: row.memo || 'card' })); } catch (x3) {}
           // what this phone has of it: the card's own change (1.12) was never in its pile
           return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
         }
@@ -16255,7 +16261,7 @@
             if (!FoxyWallet.txSeen(row.id)) throw cardError('waiting', 'The card has signed and the mint has not said what became of its swap yet.', { id: row.id });
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).filter(function (x) { return !(x && x.id === row.id); }));
             try { FoxyWallet.tag(row.id, { to: (row.memo === 'from card' || row.refund || (row.send && !row.tillKeeps)) ? 'card' : 'card payment' }); } catch (x4) {}
-            try { amendTx(row.id, { card: row.card, memo: row.memo || 'card' }); } catch (x5) {}
+            try { amendTx(row.id, cardRowMarks(row, { memo: row.memo || 'card' })); } catch (x5) {}
             return cardChangeKept(row).then(function () { return got((Number(row.worth) || 0) - (Number(row.cardChange) || 0)); });
           });
         }
@@ -16265,6 +16271,14 @@
         if (spent || (mintRefused(e) && !(e && e.recovered) && !busy)) return cardRefusal(row, e, !!(e && e.foxyMine));
         throw cardError('waiting', 'The card has signed and the mint has not answered yet. ' + text, { id: row.id });
       });
+  }
+
+  /* What a taken row's entry is marked with: the card it names, and `lost` for the take-back of a lost card (RESTORE LOST CARD,
+   * 21a-flashcard.js `cardTakeBack`), which home's history keeps since that card's own list cannot be opened. */
+  function cardRowMarks(row, more) {
+    var f = /** @type {any} */ (Object.assign({ card: row.card }, more || {}));
+    if (row.lost) f.lost = true;
+    return f;
   }
 
   // whether this phone's record of a swap for a card's row is still open (its answer not had: `swapGuard`, `into`)
@@ -18990,10 +19004,10 @@
     row.kind = 'swap';
     row.swap = String(rec.swap);
     if (Number(rec.mintRate) > 0) row.mintRate = Number(rec.mintRate);
-    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) is that card's business: both its rows name the card, so
-     * the card's history shows them and home's leaves them out. `swapCard` on the record, never `card`: a melt's hold entry
-     * already has a `card`, for a payment made with a card's held pieces, which is another thing. */
-    if (rec.swapCard) row.card = String(rec.swapCard);
+    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) keeps the card it was for on its records (`swapCard`), and
+     * its legs name no card: to the card the swap is its two taps, the take-off ('from card') and the put-on ('to card'), and
+     * those rows name it. A leg with the card on it counted the swap twice in the card's list, and a pending swap's leg, which
+     * lands in this phone, was credited to the card and hidden from home (26-render-history-and-contacts.js `renderHistory`). */
     return row;
   }
 
@@ -23465,7 +23479,7 @@
                                 // the melt's change is the card's (`opts.changeToCard`), however late the melt is settled
                                 changeToCard: (opts && opts.changeToCard) || undefined }
                        : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
-                         // a swap from a card's screen: the card it is for, so the row the sweep writes names it (`swapMarks`)
+                         // a swap from a card's screen: the card it is for, on the record only; the row names no card (`swapMarks`)
                          swapCard: (opts && opts.swapCard) || undefined,
                          // paid over its need: what comes back is checked when the sweep settles it too
                          changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
@@ -25394,7 +25408,8 @@
           state: 'quoted',
         });
         /* `opts.card`: the card a swap from a card's screen is for (26f-flashcard.js `fcSwapGo`); kept on the quote, and from it
-         * on the swap's record, its invoice's record and its melt, so both rows of the swap name the card (`swapMarks`). */
+         * on the swap's record, its invoice's record and its melt. The swap's rows do not name it (`swapMarks`): to the card the
+         * swap is its two taps, and those rows do. */
         if (opts && typeof opts.card === 'string' && opts.card) quote.card = opts.card;
         // the two quotes and the wallets they came by, kept off anything that is copied or shown
         Object.defineProperty(quote, '_mintQuote', { value: got.q, enumerable: false });
@@ -32205,13 +32220,15 @@
     /* The rate guard's no: not asked again at this price (`cardRepeg23`). */
     cardRateNo: function (key, rate) { if (key && Number(rate) > 0) cardRateDeclined[key] = Number(rate); },
 
-    /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
+    /* The cards on file here: those this phone set up with a key to take their money back, and those it claimed (TIE OWNERSHIP),
+     * { key: { mint, refundKey, at, ... } }. Not a card it only loaded, nor one it set up as cash for somebody else. */
     cardsKnown: function () { return cardsOnFile(); },
     // the last card read in any flow (its key and info), or null
     cardLastRead: function () { return lastCardRead; },
 
-    /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
-     * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */
+    /* Whether `key` is a card on file here (`cardsKnown`: set up by this phone with a key to take its money back, or claimed by it;
+     * not a card it only loaded): its entries are the card's business, shown in the card's own history and left out of home's
+     * (26-render-history-and-contacts.js `renderHistory`). */
     cardKnownHere: function (key) {
       return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
     },
@@ -32351,7 +32368,7 @@
                   cardSwapWrite(plan, null);
                   var pieces = [one].concat(plan.inputs.slice(1));
                   var back = Object.assign({ id: 'cardback-' + plan.id, token: encodeToken(mintOf(uw), pieces, u),
-                                             worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() }, cardFig(u, 0));
+                                             worth: sumProofs(pieces), over: 0, all: true, card: cardKey, memo: 'from card', lost: true, at: Date.now() }, cardFig(u, 0));
                   mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([back]));
                   firstId = firstId || back.id;
                   return cardSwapTaken(back).then(function (got) { totals[u] += (got && got.amount) || 0; });
@@ -32362,7 +32379,7 @@
             var bad = signed.filter(function (pr) { try { return !CT.isP2PKSpendAuthorised(pr); } catch (e) { return true; } });
             if (bad.length) throw cardError('too-soon', 'The mint would not take this phone\u2019s key for that card yet.');
             var taken = Object.assign({ id: 'cardback-' + piecesFingerprint(signed), token: encodeToken(mintOf(uw), signed, u),
-                                        worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', at: Date.now() }, cardFig(u, 0));
+                                        worth: sumProofs(signed), over: 0, all: true, card: cardKey, memo: 'from card', lost: true, at: Date.now() }, cardFig(u, 0));
             mustSave(CARD_TAKEN, cardStore(CARD_TAKEN).concat([taken]));
             firstId = firstId || taken.id;
             return cardSwapTaken(taken).then(function (got) { totals[u] += (got && got.amount) || 0; });

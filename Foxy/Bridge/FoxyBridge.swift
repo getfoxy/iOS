@@ -117,11 +117,12 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
 #endif
     }
 
-    /// The app came forward after `away` seconds in the background; `wentAway`
-    /// false when it was never put away in this run (launched in the background).
-    func torResumed(away: Int, wentAway: Bool) {
+    /// The app came forward after `away` seconds in the background; `leftKnown`
+    /// false when that time is not known (a run launched in the background, in
+    /// front for the first time: `TorReturn.leftKnown`).
+    func torResumed(away: Int, leftKnown: Bool) {
 #if canImport(Tor)
-        TorService.resumed(away: TimeInterval(away), leftKnown: wentAway)
+        TorService.resumed(away: TimeInterval(away), leftKnown: leftKnown)
         /* Back to a Tor that never went down: nothing changes, so nothing
          * says "up" and the address kept warm for the next request, closed as
          * Foxy left, was never started again (warmSpare runs on a change).

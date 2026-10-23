@@ -261,6 +261,14 @@ final class WebHostController: UIViewController {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+        /* Where the run stands as that is heard from: already active, its first coming to the front came before anyone was
+         * listening, and the first one heard is a focus given back (the card sheet, Face ID), no time away; in the background,
+         * a launch for the Bluetooth accessory, whose time away is unknown on its first coming to the front. Taken from the
+         * time since launch alone, a first focus given back more than ten seconds after a launch in front was reckoned as half
+         * a minute away, and Tor was set up again in the middle of a melt. */
+        let state = UIApplication.shared.applicationState
+        if state == .active { everActive = true }
+        launchedInBackground = state == .background
 
         // How long Foxy was really in the background, for the page's confirming
         // check. Face ID and Control Center take the app's focus without
@@ -1112,6 +1120,9 @@ final class WebHostController: UIViewController {
     /// (the card sheet, Face ID) is then no return from anywhere (`TorReturn.leftKnown`).
     private var everActive = false
     private let launchedAt = Date()
+    /// Whether iOS launched this run in the background (for the Bluetooth accessory), by its own word as the view loaded
+    /// (`applicationState`, viewDidLoad); nil before that, when `launchedAt` is the fallback (`TorReturn.leftKnown`).
+    private var launchedInBackground: Bool?
     /// Which putting-away is under way; a return makes the one before it stale.
     private var parkRun = 0
 
@@ -1277,8 +1288,10 @@ final class WebHostController: UIViewController {
         /* Whether the time away is known: put away (a time), or in front before in this run (a focus given back, no time
          * away at all); unknown only the first time in front of a run that began long ago, which is a launch in the
          * background for the Bluetooth accessory, suspended since (TorReturn.leftKnown). */
-        let leftKnown = TorReturn.leftKnown(wentAway: wentAway, firstFront: !everActive,
+        var leftKnown = TorReturn.leftKnown(wentAway: wentAway, firstFront: !everActive,
                                             sinceLaunch: Date().timeIntervalSince(launchedAt))
+        // iOS's own word on how the run began, where it was had (viewDidLoad): the time since launch is only the fallback
+        if !wentAway && !everActive, let background = launchedInBackground { leftKnown = !background }
         everActive = true
         if Self.coverOffAtOnce(wentAway: wentAway, away: away) {
             removeCover()
@@ -1299,7 +1312,7 @@ final class WebHostController: UIViewController {
         backgroundedAt = nil
         pushUptime()
         // Tor first: a set-up marks it not ready before the page hears of the return
-        bridge.torResumed(away: away, wentAway: leftKnown)
+        bridge.torResumed(away: away, leftKnown: leftKnown)
         webView?.evaluateJavaScript("window.FoxyWallet && window.FoxyWallet._resumed(\(away))")
         /* After the page has been told of the return, and in that order on its side too: it raises its lock on hearing
          * it, and a card tapped on the way back must find the lock up. A card's address that was waiting for this goes

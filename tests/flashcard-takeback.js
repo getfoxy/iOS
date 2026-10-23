@@ -61,6 +61,9 @@ function later(c, ms) {
   ok(back.sats === 976 && (await bal(H)) === hBefore + 976, 'what the phone loaded and the card had not spent comes back: 976 of the 2,000', String(back.sats));
   const entry = history(H).filter((e) => e.hash === back.hash)[0] || {};
   ok(entry.dir === 'in' && entry.sats === 976 && entry.memo === 'from card', 'with one entry, from the card');
+  /* marked as a lost card's take-back (`lost`): that card cannot be read, so its own list cannot be opened, and home's history
+   * keeps this row (26-render-history-and-contacts.js; the list itself is pinned in history-notes §6) */
+  ok(entry.card === card.key && entry.lost === true, 'and the entry names the card and is marked the take-back of a lost card', JSON.stringify([entry.card === card.key, entry.lost]));
   ok(H.W.cardTaken().length === 0, 'and nothing left waiting');
   const again = await H.W.cardTakeBack(card.key);
   ok(again.sats === 0 && (await bal(H)) === hBefore + 976, 'taken back a second time, there is nothing more', String(again.sats));

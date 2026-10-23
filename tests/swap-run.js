@@ -217,6 +217,15 @@ async function swap(c, cents) {
     // a mint's own invoice is settled inside the melt, at no routing cost: the whole reserve comes back too
     const owedBack = sum(ins) - amount;
     ok(back === owedBack, '1: the mint gave back all it owed: the pieces over the need and the reserve not used', back + ' of ' + owedBack);
+    /* the paid melt's one line for the log: what was paid, the reserve (the library's own Amount, read as a number and not coerced),
+     * what the mint kept of it and what came back as change, each in the melt's own unit */
+    {
+      const reserve = Number(String(s.q._melt.fee_reserve));
+      const dollars = (n) => '$' + (n / 100).toFixed(2);
+      const line = c.logs.filter((l) => /^\[foxy\] melt [^:]{1,13}: paid /.test(l)).pop() || '';
+      ok(line.endsWith(': paid ' + dollars(amount) + ', reserved ' + dollars(reserve) + ', the mint kept ' + dollars(owedBack - back) + ', ' + dollars(back) + ' back as change'),
+         '1: the log says what the melt paid, what was reserved, what the mint kept and what came back', line);
+    }
     ok(c.warns.every((l) => !/gave back/.test(l)) && !c.storage.getItem('foxy.cashu.melt.short'), '1: nothing is said of the change, and the mint is not marked');
     ok(c.W.balanceOf('usd') === 1500 - sum(ins) + back && c.W.balanceOf('usd') === 1500 - s.res.from.amount,
       '1: the dollars left are the pile less what the swap cost, change and all', c.W.balanceOf('usd') + ' cents, spent ' + s.res.from.amount);

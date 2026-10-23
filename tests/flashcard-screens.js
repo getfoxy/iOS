@@ -2459,9 +2459,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     /* FLASHCARD on the send screen: any card, the amount first, the sheet at once */
     {
       const free = newCard(H2, undefined, { format: 4 });
-      const keyed = newCard(H2, undefined, { format: 4 });
+      // a card of 1.21, whose every load wants its PIN
+      const keyed = newCard(H2, undefined, { format: 4, software: 21 });
       await setUpWith(other, R2, free, '');
-      await setUpWith(other, R2, keyed, '1234');
+      // (set up by this phone, with its PIN, as a card of 1.21 is: its owner claimed in the set-up's held tap; on file here)
+      keyed.tap();
+      await H2.W.cardSetUp(keyed, { pin: '1234' });
+      // the last card this phone reads before the sends: its own of 1.20, which wants no PIN first
+      await look(owner, H2, n);
       await owner.refreshBalance();
       owner.setState({ screen: 'sendHow', stack: ['home'], fc: null });
       H2.sheet.length = 0;
@@ -2476,12 +2481,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       H2.sheet.length = 0;
       const had = await H2.W.balanceSats();
       keyIn(owner, 700);
-      /* The owner's rule: the PIN before any card sheet, so the card is tapped once (this phone has cards on file, so it asks ahead,
-       * `fcSendPinFirst`); a card with no PIN, read then, ignores the PIN typed. */
-      ok(!!pad(owner) && pad(owner).cta === 'TAP CARD' && !H2.sheet.some((x) => /^begin:/.test(x)), 'NEXT asks the card’s PIN first, before any sheet', (pad(owner) && pad(owner).cta) + ' | ' + H2.sheet[0]);
-      if (pad(owner)) pad(owner).type('1234');
-      await until('the sheet after the PIN', () => H2.sheet[0] === 'begin: Tap behind the phone.');
-      ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'then the sheet comes up, once', H2.sheet[0]);
+      /* The PIN is asked ahead (`fcSendPinFirst`) only of a card known to want it, 1.21 and on with a PIN: the last card this phone
+       * read was its own of 1.20, so the card is read first, and a card with no PIN is asked for none (it was asked for one it has
+       * not got, and the PIN typed was dropped). */
+      ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'NEXT brings the sheet up at once: no PIN pad for a card not known to want one', (pad(owner) && pad(owner).cta) + ' | ' + H2.sheet[0]);
       await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
       await settle();
       ok(free.balance() === 700 && owner.state.screen === 'home' && owner.state.stack.length === 0 && /^₿700 went onto the card\.$/.test(card(owner).reason) && (await H2.W.balanceSats()) < had - 699,
@@ -2495,10 +2498,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       H2.sheet.length = 0;
       keyIn(owner, 500);
       await until('the PIN pad', () => !!pad(owner));
-      // (this phone has cards on file, so the PIN is asked before any sheet, `fcSendPinFirst`: no card read, nothing made, one tap to come)
-      ok(!H2.sheet.some((x) => /^begin:/.test(x)) && keyed.balance() === 0 && H2.W.cardOwed().length === 0 && owner.state.screen === 'amount',
-         'a card with a PIN: the pad comes up before any sheet, with nothing made or written', H2.sheet.join(' / '));
-      ok(pad(owner).title === 'CARD PIN' && pad(owner).cta === 'TAP CARD' && /^To put ₿500 on the card\./.test(pad(owner).sub), 'the pad says what the PIN is for, and TAP CARD writes it in the one tap', pad(owner).cta + ' | ' + pad(owner).sub);
+      /* (the card last read, the one with no PIN, is not this phone's, and the cards on file are not all of 1.21, so this one is read
+       * first: it says it wants its PIN, and nothing is made or written) */
+      ok(H2.sheet.indexOf('end: Enter the card’s PIN') >= 0 && !H2.sheet.some((x) => /^error:/.test(x)) && keyed.balance() === 0 && H2.W.cardOwed().length === 0 && owner.state.screen === 'amount',
+         'a card with a PIN, not known before: the sheet ends saying so, in no red, with nothing made or written', H2.sheet.join(' / '));
+      ok(pad(owner).title === 'CARD PIN' && pad(owner).cta === 'TAP AGAIN' && /^To put ₿500 on the card\./.test(pad(owner).sub), 'the pad says what the PIN is for, and TAP AGAIN writes it', pad(owner).cta + ' | ' + pad(owner).sub);
       // a wrong PIN: the pieces were made, owed to the card, and the way on is the pad again
       H2.sheet.length = 0;
       pad(owner).type('9999');
@@ -2512,15 +2516,22 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await settle();
       ok(keyed.balance() === 500 && H2.W.cardOwed().length === 0, 'and with the right one it is on', String(keyed.balance()));
       card(owner).press('DONE');
-      // and with its PIN right the first time
+      /* and with its PIN right the first time. The card last read is this one, this phone's own of 1.21 with a PIN: known to want it,
+       * so the PIN comes before any sheet, and the card is tapped once */
       owner.setState({ screen: 'sendHow', stack: ['home'] });
       owner.fcSendCard();
+      H2.sheet.length = 0;
       keyIn(owner, 300);
       await until('the PIN pad', () => !!pad(owner));
+      ok(pad(owner).cta === 'TAP CARD' && !H2.sheet.some((x) => /^begin:/.test(x)) && owner.fcSendPinFirst() === true,
+         'a card of 1.21 just read: the PIN pad first, before any sheet, and TAP CARD writes it in the one tap', pad(owner).cta + ' | ' + H2.sheet.join(' / '));
       pad(owner).type('1234');
       await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
       await settle();
-      ok(keyed.balance() === 800 && owner.state.screen === 'home', 'the right PIN in the second tap writes it', String(keyed.balance()));
+      ok(keyed.balance() === 800 && owner.state.screen === 'home' && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1, 'the right PIN writes it, in one sheet', String(keyed.balance()) + ' | ' + H2.sheet.join(' / '));
+      const lastRead = H2.W.cardLastRead();
+      ok(!!lastRead && lastRead.key === keyed.key && lastRead.info.pinFirst === true && lastRead.info.version === '1.21',
+         'the wallet keeps the last card read in any flow, its key and what it said (`cardLastRead`)', JSON.stringify(lastRead && [lastRead.key === keyed.key, lastRead.info.version]));
       card(owner).press('DONE');
       // offline, it says why
       owner.offline = true;
@@ -2528,6 +2539,76 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       owner.fcSendCard();
       ok(owner.state.screen === 'sendHow' && owner.toasts.slice(-1)[0] === 'Putting money on a card needs a connection.', 'offline it says so and goes no further', owner.toasts.slice(-1)[0]);
       owner.offline = false;
+    }
+
+    /* Which card the PIN-first rule asks (`fcPinInfo`): off the card's screen the last card read by any flow, never the card on the
+     * screen this phone was last on; on it the card shown where that is the one last read. A till whose owner had opened his own 1.21
+     * card and swiped home asked a customer's 1.20 card with no PIN for one, for its change. And SEND > FLASHCARD asks ahead only of a
+     * card known to want it (`fcSendPinFirst`): the last card read, or else the cards on file that say what they were. */
+    {
+      ok(H2.W.cardsKnown()[n.key] && H2.W.cardsKnown()[n.key].software === '1.' + n.version && H2.W.cardsKnown()[n.key].pinFirst === false,
+         'a card on file says the software it was last read with, and that it does not want its PIN first', JSON.stringify(H2.W.cardsKnown()[n.key] && [H2.W.cardsKnown()[n.key].software, H2.W.cardsKnown()[n.key].pinFirst]));
+      const realW = owner.fcW, realCard = owner._fcCard, realState = { screen: owner.state.screen, stack: owner.state.stack };
+      const own = { key: '02own', info: { version: '1.21', pinFirst: true, pinSet: true } };
+      const stranger = { key: '02stranger', info: { version: '1.20', pinFirst: false, pinSet: false } };
+      const new21 = { key: '02new', info: { version: '1.21', pinFirst: true, pinSet: false } };
+      let last = null, file = {};
+      owner.fcW = () => ({ cardLastRead: () => last, cardsKnown: () => file });
+      const rule = () => [owner.fcKnownPinFirst(), owner.fcNoPinWords()].join(' | ');
+      owner.setState({ screen: 'home', stack: [] });
+      owner._fcCard = own;
+      last = { key: stranger.key, info: stranger.info, at: Date.now() };
+      ok(rule() === 'false | No PIN is needed.', 'off the card’s screen: the customer’s card just read, not the owner’s card left in memory: no PIN asked', rule());
+      last = { key: own.key, info: own.info, at: Date.now() };
+      owner._fcCard = null;
+      ok(rule() === 'true | Its PIN is asked first.', 'a card of 1.21 with a PIN just read: its PIN first', rule());
+      last = { key: new21.key, info: new21.info, at: Date.now() };
+      ok(rule() === 'false | No PIN is needed.' && owner.fcCardPinFirst() === false, 'a card of 1.21 with no PIN set: none to ask', rule());
+      last = null;
+      ok(rule() === 'false | No PIN is needed.', 'no card read: as before, no PIN first', rule());
+      owner.setState({ screen: 'flashcard', stack: ['home'] });
+      owner._fcCard = own;
+      last = { key: own.key, info: own.info, at: Date.now() };
+      ok(owner.fcCardPinFirst() === true, 'on the card’s screen, the card shown when it is the one last read');
+      last = { key: stranger.key, info: stranger.info, at: Date.now() };
+      ok(owner.fcCardPinFirst() === false, 'and the card last read when another has been read since', String(owner.fcCardPinFirst()));
+      // SEND > FLASHCARD (from home: no card on screen)
+      owner.setState({ screen: 'home', stack: [], fc: null });
+      const ahead = [];
+      file = { [own.key]: { pinFirst: true, software: '1.21' }, [new21.key]: { mint: 'm' } };
+      last = { key: own.key, info: own.info, at: Date.now() };
+      ahead.push(owner.fcSendPinFirst());                    // its own card of 1.21 with a PIN, just read
+      last = { key: new21.key, info: new21.info, at: Date.now() };
+      ahead.push(owner.fcSendPinFirst());                    // its own card of 1.21 with no PIN set, just read
+      file = {};
+      last = { key: stranger.key, info: stranger.info, at: Date.now() };
+      ahead.push(owner.fcSendPinFirst());                    // a customer's card of 1.20 just read, nothing on file
+      last = { key: own.key, info: own.info, at: Date.now() };
+      ahead.push(owner.fcSendPinFirst());                    // a customer's card of 1.21 just read, not this phone's: not the likely card
+      last = null;
+      file = { a: { mint: 'm' } };
+      ahead.push(owner.fcSendPinFirst());                    // none read, a card on file that says nothing
+      file = { a: { pinFirst: true, software: '1.21' }, b: { mint: 'm' } };
+      ahead.push(owner.fcSendPinFirst());                    // none read, the cards on file that say are all of 1.21
+      file = { a: { pinFirst: true, software: '1.21' }, b: { pinFirst: false, software: '1.20' } };
+      ahead.push(owner.fcSendPinFirst());                    // none read, one of them of 1.20
+      ok(ahead.join() === 'true,false,false,false,false,true,false',
+         'SEND > FLASHCARD asks the PIN ahead of this phone’s own 1.21 card with a PIN just read, not of one with no PIN, nor of a card that is not its own; with none of its own read, only where every card on file that says is 1.21 and on, and one does',
+         ahead.join());
+      /* the edge swipe back off the card's screen leaves the card behind, as HOME does; a screen above it comes back to it (the app's
+       * own `back`, 01-ui-basics.js, lifted out of its file: the kit's stands in for it everywhere else) */
+      const uiSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'app', '01-ui-basics.js'), 'utf8');
+      const backAt = uiSrc.indexOf('\n  back() {') + 1;
+      const realBack = new Function('return {' + uiSrc.slice(backAt, uiSrc.indexOf('\n  }\n', backAt) + 4) + '}')().back;
+      owner.setState({ screen: 'history', stack: ['home', 'flashcard'] });
+      owner._fcCard = own;
+      realBack.call(owner);
+      ok(owner._fcCard === own && owner.state.screen === 'flashcard', 'back from a screen above the card’s comes back to it, the card kept', owner.state.screen);
+      realBack.call(owner);
+      ok(owner._fcCard === null && owner.state.screen === 'home', 'back off the card’s screen leaves the card behind', String(owner._fcCard && owner._fcCard.key) + ' ' + owner.state.screen);
+      owner.fcW = realW;
+      owner._fcCard = realCard;
+      owner.setState(realState);
     }
   }
 
