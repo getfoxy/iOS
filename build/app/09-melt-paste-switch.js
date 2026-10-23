@@ -832,20 +832,26 @@
    * `toggleUnit` already refuses to go the other way without a price; this is the
    * half that was missing, for somebody already in dollars when the price went.
    * It does nothing at all while there is one. */
-  /* Offline, asking to be paid is in dollars and only in dollars.
+  /* Offline, asking to be paid into bitcoin with a dollar figure typed: the
+   * request asks in dollars.
    *
    * This phone cannot convert honestly — its price may be hours old — so it
-   * does not convert at all. It names a price in the money the price is named
-   * in, and the phone with a current rate says what that makes in sats and
-   * offers it back (`tapQuote`); nothing is paid until this phone agrees to
-   * that number. Showing sats beside the dollars here would be showing a
+   * does not convert that figure. It names a price in the money the price is
+   * named in, and the phone with a current rate says what that makes in sats
+   * and offers it back (`tapQuote`); nothing is paid until this phone agrees
+   * to that number. Showing sats beside the dollars here would be showing a
    * conversion this phone is refusing to make.
    *
-   * Only where the conversion is actually possible. With no price ever seen
-   * there is nothing to type dollars against, and the keypad stays in sats —
-   * `syncUnit` and `toggleUnit` both already hold that line. */
+   * No longer a lock: the keypad's swap is there offline as online (the owner,
+   * 2026-10-22: "setting an amount should always allow a dollar amount or the
+   * user to switch to enter a sat amount"), and sats typed are asked as sats.
+   * A receive into the dollar balance is not this: it is asked in dollars as
+   * its own unit (`wantedAmount`). With no price ever seen there is nothing to
+   * type dollars against, and the keypad stays in sats (`syncUnit`). */
   dollarsOnly() {
-    return !!(this.offlineNow() && this.state.flow === 'receive' && this.satUsd());
+    const s = this.state;
+    if (!(this.offlineNow() && s.flow === 'receive' && s.unit === 'USD' && this.satUsd())) return false;
+    return !(this.twoUnitsOn && this.twoUnitsOn() && this.walletNow && this.walletNow('receive') === 'usd');
   }
 
   syncUnit() {
@@ -867,26 +873,21 @@
       }
       return;
     }
-    /* Not a payment to an address: that is asked in sats, so dollars typed
-     * there convert, and its ⇅ works as it always did (`usdKeypad`). */
+    /* The dollar balance's own unit is dollars, exact. Sats may be typed for
+     * it too, and are put into cents at this phone's price (`centsTyped`), but
+     * only where that price can be used (`unitPx`, a day at most) and, for a
+     * send, only with a route: offline a send moves no money at a stale price.
+     * Otherwise the keypad goes back to dollars. Not a payment to an address:
+     * that is asked in sats, so dollars typed there convert, and its ⇅ works
+     * as it always did. */
     if ((s0.flow === 'receive' || s0.flow === 'send') && (s0.screen === 'amount' || s0.screen === 'confirm')
         && !(s0.flow === 'send' && s0.recipientKind === 'email')
         && this.walletNow && this.walletNow(s0.flow === 'receive' ? 'receive' : 'send') === 'usd') {
-      if (s0.unit !== 'USD') this.setState({ unit: 'USD', amount: '' });
-      return;
-    }
-    if (this.dollarsOnly() && this.state.unit !== 'USD') {
-      console.log('[foxy] offline and asking to be paid, so the keypad is in dollars');
-      /* The figure is converted, not relabelled. Switching the unit under a
-       * typed number turns 2,100 sats into $2,100 — the same digits standing
-       * for eighty thousand times the money. `toggleUnit` converts for exactly
-       * this reason and so does this; the price is the one this phone last saw,
-       * which is the price the person is naming their amount in anyway. */
-      const px = this.px();
-      this.setState(p => {
-        const v = parseFloat(p.amount) || 0;
-        return { unit: 'USD', amount: (v && px) ? (v / 1e8 * px).toFixed(2) : '' };
-      });
+      if (s0.unit === 'SATS' && (!this.unitPx() || (s0.flow === 'send' && this.offlineNow()))) {
+        console.log('[foxy] the dollar balance: no price to put sats into dollars, so the keypad is in dollars');
+        const c = this.centsTyped();
+        this.setState({ unit: 'USD', amount: c > 0 ? (c / 100).toFixed(2) : '' });
+      }
       return;
     }
     if (this.state.unit !== 'USD') return;

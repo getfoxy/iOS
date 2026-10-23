@@ -73,9 +73,9 @@
    *
    * The last first step, at a mint that issues dollars and bitcoin: after the
    * Tor gate, after the custody and passcode cards, after SECURE FOXY, and
-   * before the home is used. Dollars or Bitcoin sets both remembered balances
-   * and gives a home with one pill; Both gives two pills and leaves each kind
-   * of flow to ask once (the CURRENCY screen). A mint with one balance never
+   * before the home is used. Dollars or Bitcoin gives a home with one pill, and
+   * its flows use that balance with no question; Both gives two pills and every
+   * receive and send asks (the CURRENCY screen). A mint with one balance never
    * asks. Asked once: the answer is kept by the wallet (`setWalletChoice`), and
    * MENU › WHAT YOU HOLD asks it again. */
   holdDue() {
@@ -111,9 +111,7 @@
     const W = window.FoxyWallet;
     const hold = this.state.holdPick;
     if (!hold) { this.toast('Pick one first.', true); return; }
-    /* Both again, from MENU › WHAT YOU HOLD, keeps the balances a receive and
-     * a send start in: writing it would clear them, and they may be the ones
-     * set in SETTINGS › RECEIVE IN and SEND IN. */
+    /* Both again, from MENU › WHAT YOU HOLD, is not written again: nothing changes. */
     const again = hold === 'both' && this.walletChoiceNow().hold === 'both';
     try { if (!again) W.setWalletChoice({ hold: hold }); } catch (e) {
       this.toast((W && W.reason) ? W.reason(e) : 'That could not be kept.', true);

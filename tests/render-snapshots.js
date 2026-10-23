@@ -668,9 +668,9 @@ function representative(logic) {
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
   add('two balances: home, the menu with SWAP', at('home', Object.assign({ balSats: 0, open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
-  // holding both, SETTINGS open: RECEIVE IN and SEND IN, one set and one not yet (ASK)
-  add('two balances: settings, receive in and send in', at('home', Object.assign({ open0: true, menuSettingsOpen: true }, TWO_LIVE),
-    { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: 'usd', send: '' }) }) }));
+  // holding both, SETTINGS open: no RECEIVE IN or SEND IN (every receive and send asks which balance)
+  add('two balances: settings', at('home', Object.assign({ open0: true, menuSettingsOpen: true }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: '', send: '' }) }) }));
   // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
   add('settings, what it takes offline', at('home', { open0: true, menuSettingsOpen: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
@@ -678,6 +678,8 @@ function representative(logic) {
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));
+  // the same, with sats typed: asked as the cents they are worth, said under them
+  add('two balances: SET AMOUNT, a dollars receive typed in sats', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'SATS', amount: '1000' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: RECEIVE INVOICE in dollars', at('confirm', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00',
     recvUnit: 'usd', recvAmount: 500, recvRail: 'LIGHTNING', invoice: 'lnbcusdexample', asset: 'BITCOIN' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: RECEIVE INVOICE in bitcoin', at('confirm', Object.assign({ flow: 'receive', wallet: 'sat', unit: 'USD', amount: '5.00',

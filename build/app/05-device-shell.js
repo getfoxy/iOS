@@ -178,8 +178,8 @@
     if (!m) return false;
     const target = m[1].toLowerCase();
     const W = window.FoxyWallet;
-    /* A link starts a flow afresh: at a mint with two balances, from the
-     * remembered balance, not the one a flow left on screen picked. */
+    /* A link starts a flow afresh: at a mint with two balances, with no
+     * balance picked, not the one a flow left on screen picked. */
     const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null }, patch));
     const done = () => {
       try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}

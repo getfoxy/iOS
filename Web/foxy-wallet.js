@@ -135,9 +135,10 @@
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
     line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
     /* Two balances at one mint (sat and usd). What the person said they want
-     * to hold ('dollars', 'bitcoin', 'both'), and the unit a receive and a
-     * send start in ('sat', 'usd', or '' when the screen should ask). Choices,
-     * not money: a wipe of the seed removes them with every other foxy. key. */
+     * to hold ('dollars', 'bitcoin', 'both'). A choice, not money: a wipe of
+     * the seed removes it with every other foxy. key. `recv` and `send` are no
+     * longer read or written (every receive and send asks which balance); they
+     * are named so that a wipe still removes what an older build kept there. */
     hold: 'foxy.wallet.hold',
     recv: 'foxy.wallet.recv',
     send: 'foxy.wallet.send',
@@ -9827,7 +9828,9 @@
   /* A request names its unit, and its amount is in that unit (sats, or
    * cents). `sats` is the amount on a sat request and 0 on any other, so
    * nothing that reads sats finds cents there. */
-  function noteOpenRequest(id, amount, mint, purpose, unit) {
+  /* `kept`: the person picked this request's unit for this receive (`paymentRequest`'s `kept`), so what is paid in it
+   * stays in it (08c-units.js, `convertDue`). */
+  function noteOpenRequest(id, amount, mint, purpose, unit, kept) {
     var now = Date.now();
     Object.keys(openRequests).forEach(function (k) {
       if (now - openRequests[k].at > OPEN_REQUEST_MS) delete openRequests[k];
@@ -9835,6 +9838,7 @@
     var u = unitOf(unit) || 'sat';
     var n = Math.max(0, Math.round(Number(amount) || 0));
     openRequests[id] = { amount: n, sats: u === 'sat' ? n : 0, unit: u, mint: mint, at: now, purpose: purpose || 'receive' };
+    if (kept === true) openRequests[id].kept = true;
     saveOpenRequests();
   }
 
@@ -10067,7 +10071,7 @@
     var changeTo = typeof j.changeTo === 'string' && /^0[23][0-9a-f]{64}$/i.test(j.changeTo)
       ? j.changeTo.toLowerCase() : '';
     return { id: id, mint: mint, proofs: proofs, unit: unit, amount: amount, sats: unit === 'sat' ? amount : 0,
-             inFee: inFee, purpose: open.purpose, asked: asked,
+             inFee: inFee, purpose: open.purpose, asked: asked, kept: open.kept === true,
              // what the request was agreed for, if a price was talked over first (`noteRequestTerms`)
              terms: open.terms && typeof open.terms === 'object' ? open.terms : null,
              changeTo: changeTo,
@@ -19358,8 +19362,9 @@
    * is on, in the unit the person does not hold, while they hold just the
    * other there: sats while they hold dollars, and dollars while they hold
    * bitcoin. Someone who holds both keeps what came. The person's own pick
-   * wins: a receive they started in the unit that came (`recv`) converts
-   * only what was agreed for the other (`terms.convert`). Never a share of a
+   * wins: a request they asked in that unit on purpose, picked on CURRENCY
+   * for this receive (`kept`, set by `paymentRequest`), converts only what
+   * was agreed for the other (`terms.convert`). Never a share of a
    * bill, a payment being carried home, change or a card's own taking-off:
    * none of those is the person being paid. Nothing at a mint with one unit,
    * and nothing while a late claim has the phone at another mint. For sats
@@ -19378,7 +19383,8 @@
     if (!FoxyWallet.twoUnits(at)) return false;
     var purpose = String(p.purpose || '');
     if (/^(split|carry):/.test(purpose) || purpose === 'change' || purpose === 'card') return false;
-    return !!(p.terms && p.terms.convert === true) || choice.recv === to;
+    if (p.terms && p.terms.convert === true) return true;
+    return p.kept !== true;
   }
 
   /* What a payment was asked for in the unit it is swapped into: cents for
@@ -24530,8 +24536,7 @@
      * this part is an integer in its own unit. The screens ask:
      *
      *   mintUnits, twoUnits   whether to show any of it at all
-     *   walletChoice          what the person said they hold, and the unit a
-     *                         receive and a send start in
+     *   walletChoice          what the person said they hold
      *   balanceOf, heldIn …   each balance, and what is held back from it
      *   mintRate              the mint's dollar price, from its last quote
      *   quoteFeeBoth          a Lightning invoice quoted from both balances
@@ -24564,40 +24569,28 @@
     unitKeysOffline: function (unit) { return unitKeysOffline(unit); },
 
     /* What the person said they want to hold ('dollars', 'bitcoin', 'both',
-     * or '' when never asked), and the unit a receive and a send start in
-     * ('sat', 'usd', or '' when the CURRENCY screen should ask). */
+     * or '' when never asked), and the unit that makes the one balance their
+     * money goes into and comes from ('usd' for dollars, 'sat' for bitcoin, ''
+     * for both or never asked) as `recv` and `send`. Nothing else is kept:
+     * with both, every receive and send asks which (the CURRENCY screen). */
     walletChoice: function () {
-      var pick = function (key, ok) {
-        var v = load(key, '');
-        return typeof v === 'string' && ok.indexOf(v) >= 0 ? v : '';
-      };
-      return {
-        hold: pick(K.hold, ['dollars', 'bitcoin', 'both']),
-        recv: pick(K.recv, ['sat', 'usd']),
-        send: pick(K.send, ['sat', 'usd']),
-      };
+      var v = load(K.hold, '');
+      var hold = typeof v === 'string' && ['dollars', 'bitcoin', 'both'].indexOf(v) >= 0 ? v : '';
+      var one = holdUnit(hold);
+      return { hold: hold, recv: one, send: one };
     },
 
-    /* The choice, written. Dollars or bitcoin sets both starting units to
-     * that one; both clears them, so each flow asks once. `recv` and `send`
-     * set one each: the last unit a receive or a send used, or the one the
-     * WALLET chip was changed to. Anything else is refused whole, before
-     * anything is written. Answers the choice as it now stands. */
+    /* The choice, written: `hold` only. A balance for receives or sends to
+     * start in (`recv`, `send`) is no longer kept, and asking to keep one is
+     * refused, as is anything else, before anything is written. Answers the
+     * choice as it now stands. */
     setWalletChoice: function (patch) {
       var p = patch || {};
       var bad = function () { return new Error('Foxy does not know that choice.'); };
       if (typeof p !== 'object') throw bad();
       if (p.hold !== undefined && ['dollars', 'bitcoin', 'both'].indexOf(p.hold) < 0) throw bad();
-      if (p.recv !== undefined && ['sat', 'usd'].indexOf(p.recv) < 0) throw bad();
-      if (p.send !== undefined && ['sat', 'usd'].indexOf(p.send) < 0) throw bad();
-      if (p.hold !== undefined) {
-        var both = p.hold === 'dollars' ? 'usd' : p.hold === 'bitcoin' ? 'sat' : '';
-        save(K.hold, p.hold);
-        save(K.recv, both);
-        save(K.send, both);
-      }
-      if (p.recv !== undefined) save(K.recv, p.recv);
-      if (p.send !== undefined) save(K.send, p.send);
+      if (p.recv !== undefined || p.send !== undefined) throw bad();
+      if (p.hold !== undefined) save(K.hold, p.hold);
       return FoxyWallet.walletChoice();
     },
 
@@ -28788,7 +28781,7 @@
         }
         var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, unit,
           [mint], says || undefined, true, lock).toEncodedRequest();
-        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit);
+        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit, o.kept === true);
         return text;
       } catch (e) {
         return '';

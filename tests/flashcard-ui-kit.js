@@ -45,7 +45,7 @@ const liftFrom = (src, sig) => {
 const SEND_SIGS = {
   '01-ui-basics.js': ['confirmSpec() {', 'cfRow(label, value, opt) {', 'sendToText() {', 'sendAmountText() {',
                       // a mint with two balances: the confirmation's own for it, and what decides which balance pays
-                      'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'rememberWallet(flow, unit) {',
+                      'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'homePills() {',
                       'unitWord(unit) {', 'walletLabel(unit) {', 'unitFigure(amount, unit) {', 'unitBalance(unit) {', 'syncWalletAsk() {',
                       'openWalletPick() {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'confirmTwoSpec() {',
                       // the dollar keypad's cents, exactly: a dollar card's own amounts are typed on it (26f-flashcard.js, `fcTyped`)

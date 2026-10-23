@@ -89,7 +89,7 @@ const method = (sig) => {
 };
 const LIFTED = [
   // the route, and which balance pays
-  'connecting() {', 'offlineNow() {', 'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'rememberWallet(flow, unit) {',
+  'connecting() {', 'offlineNow() {', 'twoUnitsOn() {', 'cardSendNow() {', 'walletChoiceNow() {', 'walletNow(flow) {', 'homePills() {',
   'unitWord(unit) {', 'walletLabel(unit) {', 'unitFigure(amount, unit) {', 'unitBalance(unit) {', 'syncWalletAsk() {', 'openWalletPick() {',
   'walletPickChoose(unit, why) {', 'autoWallet(fits) {', 'quoteFits(unit) {', 'payFromOnly() {', 'payFitNow(unit, sats) {',
   // the confirmation
@@ -150,7 +150,8 @@ async function phone(o) {
     const inv = await W.invoice(o.fund[unit], '', unit === 'usd' ? { unit: 'usd' } : undefined);
     await W.claim(inv.hash);
   }
-  if (W.twoUnits()) W.setWalletChoice(Object.assign({ hold: 'both' }, o.send ? { send: o.send } : {}));
+  // `send`: the balance answered on CURRENCY for each payment (nothing is kept from one to the next)
+  if (W.twoUnits()) W.setWalletChoice({ hold: 'both' });
   // what a connect starts by itself (its sweeps) is over before the payment begins
   await wait(300);
   const app = ctx.window.eval('(function () { return {' + LIFTED.map(method).join(',\n') + '}; })()');
@@ -172,14 +173,16 @@ async function phone(o) {
     showPayPending() { log.pending = true; }, isBadSignatures: () => false, editSendNote() {}, checkSendPrice() {},
   });
   const t0 = { at: 0 };
+  app.picked = (W.twoUnits() && o.send) || '';
+  const picked = () => (app.picked ? { wallet: app.picked, walletAuto: false, walletTapped: false } : {});
   app.open = (inv) => {
     t0.at = Date.now();
-    app.setState({ screen: 'sendConfirm', stack: ['home'], recipient: inv || FOREIGN, recipientKind: 'invoice', amount: '' });
+    app.setState(Object.assign({ screen: 'sendConfirm', stack: ['home'], recipient: inv || FOREIGN, recipientKind: 'invoice', amount: '' }, picked()));
   };
   // CONFIRM PAYMENT for `sats` to the address, typed in sats
   app.openAddress = (sats) => {
     t0.at = Date.now();
-    app.setState({ screen: 'sendConfirm', stack: ['home'], recipient: ADDRESS, recipientKind: 'email', unit: 'SATS', amount: String(sats) });
+    app.setState(Object.assign({ screen: 'sendConfirm', stack: ['home'], recipient: ADDRESS, recipientKind: 'email', unit: 'SATS', amount: String(sats) }, picked()));
   };
   // the invoices the address was asked for
   app.lookups = () => ctx.asked.filter((x) => x.path === 'address /cb');
@@ -238,9 +241,9 @@ async function quickChosen(letter, pick) {
   // its circuit went nowhere for a while: with PAY pressed, no other circuit is built for it beside the payment
   ok(app.quotes(other).length === 1, letter + '. and once PAY is pressed it is not asked again on another circuit',
      JSON.stringify(app.quotes(other).map((x) => x.at - app.quotes(other)[0].at)));
-  ok(!app.log.toasts.some((m) => /chosen for you/.test(m)) && app.state.wallet === '' && !app.state.walletAuto && app.melts().length === 1,
+  ok(!app.log.toasts.some((m) => /chosen for you/.test(m)) && app.state.wallet === app.picked && !app.state.walletAuto && app.melts().length === 1,
      letter + '. nothing is switched, and nothing is paid twice', JSON.stringify(app.log.toasts) + ' ' + app.melts().length);
-  ok(app.ctx.W.walletChoice().send === pick, letter + '. and the balance chosen is still the one remembered', app.ctx.W.walletChoice().send);
+  ok(app.ctx.W.walletChoice().send === '', letter + '. and nothing is kept for the next payment', app.ctx.W.walletChoice().send);
   // the next payment asks afresh: nothing of the last one's quotes is carried over
   app.setState({ screen: 'home', stack: [] });
   app.ctx.delay = null;
@@ -279,7 +282,7 @@ async function chosenFails() {
      'live at ' + liveAt + ' ms, ' + app.spec().cta + ', ' + app.fee());
   await until(() => (app._feeQuotes || {}).sat !== undefined, 4000);
   await wait(50);
-  ok((app._feeQuotes || {}).sat && app.quoteFits('sat') === true && app.state.wallet === '' && !app.state.walletAuto && !app.log.toasts.length
+  ok((app._feeQuotes || {}).sat && app.quoteFits('sat') === true && app.state.wallet === app.picked && !app.state.walletAuto && !app.log.toasts.length
      && app.spec().wallet.word === 'USD' && app.live(),
      'd. the bitcoin quote lands and switches nothing, and says nothing of the dollars; WALLET offers bitcoin, which covers it',
      JSON.stringify({ wallet: app.state.wallet, auto: app.state.walletAuto, toasts: app.log.toasts }));
@@ -295,7 +298,7 @@ async function chosenFails() {
   await wait(50);
   const held = late.spec().cta;
   const at = (await until(() => late.live(), 4000)) ? late.since() : -1;
-  ok(held === 'CHECKING…' && at >= 1400 && late.spec().wallet.word === 'USD' && late.fee() === 'UNKNOWN' && late.state.wallet === '' && !late.state.walletAuto
+  ok(held === 'CHECKING…' && at >= 1400 && late.spec().wallet.word === 'USD' && late.fee() === 'UNKNOWN' && late.state.wallet === late.picked && !late.state.walletAuto
      && !late.log.toasts.length,
      'd. the bitcoin quote in first and the dollar one refused after it: CHECKING on dollars until then, then PAY on dollars, nothing switched',
      held + ', live at ' + at + ' ms, ' + JSON.stringify({ wallet: late.state.wallet, toasts: late.log.toasts }));

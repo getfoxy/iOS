@@ -1,4 +1,10 @@
 
+  /* Did the person pick the balance this receive goes into (CURRENCY, or WALLET on the invoice), at a mint with two? */
+  recvPicked() {
+    const s = this.state;
+    return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat'));
+  }
+
   // sats for whatever is on the keypad, at the live price
   wantedSats() {
     const s = this.state;
@@ -10,8 +16,8 @@
   }
 
   /* What this receive asks for, in the balance it goes into: cents for
-   * dollars, typed exactly and needing no price, or sats as `wantedSats`
-   * works them out. */
+   * dollars (typed exactly, or sats put into cents at this phone's price,
+   * `centsTyped`), or sats as `wantedSats` works them out. */
   wantedAmount() {
     if (this.walletNow && this.walletNow('receive') === 'usd') return { unit: 'usd', amount: this.centsTyped() };
     return { unit: 'sat', amount: this.wantedSats() };
@@ -75,12 +81,14 @@
      * to close (seen in a phone log). Leaving the screen clears these. */
     if (have) return have.text;
     this._creqs[key] = { making: true };
+    // the person picked this balance for this receive: what is paid in it stays in it (08c-units.js, `convertDue`)
+    const kept = why === 'receive' && this.recvPicked();
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), { deliverTo: ways, purpose: why, unit: 'usd' })
+        ? W.paymentRequest(Math.round(Number(sats) || 0), { deliverTo: ways, purpose: why, unit: 'usd', kept: kept })
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0 });
+          { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept });
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -184,8 +192,9 @@
      * unlocked is what every request was before requests were locked, and
      * waiting for a key here would put back the delay this exists to remove. */
     if (W.primeLocks) { try { W.primeLocks(); } catch (e) {} }
-    const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd' })
-      : W.paymentRequest(n, { purpose: purpose || 'receive' });
+    const kept = !purpose && this.recvPicked();
+    const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd', kept: kept })
+      : W.paymentRequest(n, { purpose: purpose || 'receive', kept: kept });
     if (!text) return '';
     this._creqs[key] = { text: text };
     return text;
@@ -417,16 +426,6 @@
      * Marked seen before the history pass runs, because that pass is what
      * queues them and it is one line below. */
     if (split && ev.id) this.txIsNew('req-' + ev.id);
-    /* Paid in dollars or in sats, the next receive starts in that balance, as
-     * a dollar invoice paid does (`usdInvoiceUp`). */
-    /* Not sats paid to a wallet that holds dollars: those are swapped into
-     * dollars as soon as they can be (`convertOnReturn`), and the person's
-     * next receive stays in the dollars they chose. */
-    const intoDollars = ev.unit === 'sat' && (!!ev.convert
-      || !!(this.walletChoiceNow && this.walletChoiceNow().hold === 'dollars'));
-    if (!split && !intoDollars && (ev.unit === 'usd' || ev.unit === 'sat') && this.twoUnitsOn && this.twoUnitsOn()) {
-      this.rememberWallet('receive', ev.unit);
-    }
     /* Nor one that is still to be carried home: it is announced when it has
      * landed at this phone's own mint, and not before (`carryHomeNow`). */
     const carrying = /^carry:/.test(String(ev.purpose || '')) && !!this.carryHomeNow;
@@ -620,6 +619,10 @@
      * (`recvClock`). */
     const want = this.wantedAmount ? this.wantedAmount() : { unit: 'sat', amount: this.wantedSats() };
     const usd = want.unit === 'usd';
+    /* Sats typed for the dollar balance: asked as the cents they are worth at this phone's price (`centsTyped`). */
+    if (usd && this.state.unit === 'SATS') {
+      console.log('[foxy] receive: ' + this.group(parseFloat(this.state.amount) || 0) + ' sats typed for dollars, asked as ' + want.amount + ' cents at $ ' + this.group(Math.round(this.unitPx())));
+    }
     if (usd) return this.openUsdReceive(want.amount);
     const sats = this.wantedSats();
     /* The network this person asked every receive to start on, which used to
@@ -740,7 +743,6 @@
         this._watching = false;
         // what arrived, in its own unit: the paid screen reads it first
         this.setState({ paidUnit: (paid && paid.unit) || 'sat', paidAmount: paid && paid.amount != null ? paid.amount : (paid && paid.sats) });
-        if (this.twoUnitsOn && this.twoUnitsOn()) this.rememberWallet('receive', (paid && paid.unit) || 'sat');
         // the payer said so first, and the mint has now agreed (tapPaidNotice)
         this._tapPaidNote = 0;
         if (this.hideStage) this.hideStage('paidCheck');
@@ -796,8 +798,7 @@
    * the mint's (a minute at Forge), so the screen counts it down under the
    * code (`recvClock`) and asks for a new one when it runs out: the old one's
    * watch goes when the new one is up, and its record stays for the wallet's
-   * sweep. What it answers is announced in its unit ("ADDED TO DOLLARS"), and
-   * the balance it went into is remembered for the next receive.
+   * sweep. What it answers is announced in its unit ("ADDED TO DOLLARS").
    *
    * Beside it, on the air, a Cashu request in dollars (`unit: 'usd'`, the
    * cents): another Foxy at this mint pays it in dollar ecash by a tap, with
@@ -867,7 +868,6 @@
       if (this.hideStage) this.hideStage('paidCheck');
       this.haptic && this.haptic('success');
       const unit = (paid && paid.unit) || 'usd';
-      this.rememberWallet('receive', unit);
       this.setState(p => ({
         screen: 'paid', stack: p.stack.concat([p.screen]), recvResolved: true,
         paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount,
@@ -931,9 +931,8 @@
     });
   }
 
-  /* WALLET on the invoice: which balance this receive goes into. The choice
-   * is remembered for the next receive, and a new code is made in it, for the
-   * same amount. */
+  /* WALLET on the invoice: which balance this receive goes into. A new code
+   * is made in it, for the same amount; nothing is kept for the next receive. */
   pickRecvWallet() {
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
@@ -960,7 +959,6 @@
       this.toast('No bitcoin price yet, so the amount cannot be asked in bitcoin.', true);
       return;
     }
-    this.rememberWallet('receive', unit);
     this.stopReceive();
     this.setState(Object.assign(patch, { invoice: '', invoiceHash: '', recvExpiresAt: null,
       recvUnit: unit, asset: 'BITCOIN', recvRail: 'LIGHTNING' }));

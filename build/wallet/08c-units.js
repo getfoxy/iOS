@@ -742,8 +742,9 @@
    * is on, in the unit the person does not hold, while they hold just the
    * other there: sats while they hold dollars, and dollars while they hold
    * bitcoin. Someone who holds both keeps what came. The person's own pick
-   * wins: a receive they started in the unit that came (`recv`) converts
-   * only what was agreed for the other (`terms.convert`). Never a share of a
+   * wins: a request they asked in that unit on purpose, picked on CURRENCY
+   * for this receive (`kept`, set by `paymentRequest`), converts only what
+   * was agreed for the other (`terms.convert`). Never a share of a
    * bill, a payment being carried home, change or a card's own taking-off:
    * none of those is the person being paid. Nothing at a mint with one unit,
    * and nothing while a late claim has the phone at another mint. For sats
@@ -762,7 +763,8 @@
     if (!FoxyWallet.twoUnits(at)) return false;
     var purpose = String(p.purpose || '');
     if (/^(split|carry):/.test(purpose) || purpose === 'change' || purpose === 'card') return false;
-    return !!(p.terms && p.terms.convert === true) || choice.recv === to;
+    if (p.terms && p.terms.convert === true) return true;
+    return p.kept !== true;
   }
 
   /* What a payment was asked for in the unit it is swapped into: cents for

@@ -40,6 +40,8 @@
     const usdIn = two && this.walletNow('receive') === 'usd';
     const left = (usdIn && s.recvExpiresAt) ? Math.max(0, Math.ceil((s.recvExpiresAt - Date.now()) / 1000)) : 0;
     const usdCents = usdIn ? (s.recvAmount != null ? s.recvAmount : this.centsTyped()) : 0;
+    const usdPx = (usdIn && usdCents > 0 && this.unitPx) ? this.unitPx() : 0;
+    const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
     return {
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
@@ -91,13 +93,14 @@
        * a wrong one: the sats are whatever the paying phone's current price
        * makes of the amount, which is the number this phone is then asked to
        * agree to (`dollarsOnly`, `priceTermsCard`). */
-      // dollars asked for in dollars: the cents exactly, and no second figure, as nothing converts
+      /* Dollars asked for in dollars: the cents, and under them what they come to in sats at this phone's price
+       * (`unitPx`), whichever unit was typed: the amount in both. No price, no sat line. */
       confirmAmount: usdIn ? (usdCents > 0 ? this.unitFigure(usdCents, 'usd') : 'ANY AMOUNT')
         : val <= 0 ? 'ANY AMOUNT'
         : this.dollarsOnly() ? '$ ' + this.usd(val)
         : s.asset === 'BITCOIN' ? this.money(sats).main : '$ ' + this.usd(usd),
-      confirmAlt: usdIn ? '' : this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
-      showSats: !usdIn && s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly(),
+      confirmAlt: usdIn ? (usdSats > 0 ? '₿ ' + this.group(usdSats) : '') : this.dollarsOnly() ? '' : s.asset === 'BITCOIN' ? this.money(sats).sub : '',
+      showSats: usdIn ? usdSats > 0 : (s.asset === 'BITCOIN' && val > 0 && !this.dollarsOnly()),
       confirmTitle: onchain ? 'RECEIVE ON CHAIN' : 'RECEIVE INVOICE',
       confirmNetwork: onchain ? 'ON-CHAIN' : cashu ? 'CASHU' : (s.network || 'LIGHTNING'),
       // the middle of the QR says which it is: the bolt, ecash, or a coin

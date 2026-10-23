@@ -83,7 +83,7 @@
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
-      // home ends a flow: the next one starts from the remembered balance, not this one's
+      // home ends a flow: the next one asks again (or takes home's one balance), not this one's
       if (this.state.screen === 'home' && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
         this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
       }
@@ -198,18 +198,26 @@
      * amount the string "Infinity", which then went on into the send and
      * receive flows as a figure. The other direction was quieter and just as
      * wrong: it multiplied by null and wrote "0.00" over what was typed. */
-    /* Offline, asking to be paid has no other unit to swap to: this phone is
-     * refusing to convert, which is the whole of why it is asking in dollars
-     * (`dollarsOnly`). The control is not on screen either; this is the half
-     * that holds if anything else reaches it. */
-    if (this.dollarsOnly()) {
-      this.toast('Offline, Foxy asks in dollars \u2014 the paying phone works out the sats.', true);
+    /* A card's own dollar amounts are typed in dollars: there are no sats to
+     * swap to. The control is not on screen either (`keypadLocked`). */
+    if (this.keypadLocked && this.keypadLocked()) {
+      this.toast('Dollars are typed in dollars.', true);
       return;
     }
-    /* A dollar balance is typed in dollars: there are no sats to swap to. The
-     * control is not on screen either (`usdKeypad`). */
+    /* The dollar balance takes sats as well, put into cents at a price a day
+     * old at most (`unitPx`), and on a send only with a route (`syncUnit`).
+     * Where it cannot, one line says why and the keypad stays in dollars. */
     if (this.usdKeypad && this.usdKeypad()) {
-      this.toast('Dollars are typed in dollars.', true);
+      const s = this.state;
+      const upx = this.unitPx();
+      if (s.unit === 'USD' && !upx) { this.toast('No current bitcoin price, so dollars are typed in dollars.', true); return; }
+      if (s.unit === 'USD' && s.flow === 'send' && this.offlineNow()) { this.toast('Offline, dollars are sent in dollars.', true); return; }
+      this.setState(p => {
+        const v = parseFloat(p.amount) || 0;
+        if (p.unit === 'USD') return { unit: 'SATS', amount: v ? String(Math.round(v / upx * 1e8)) : '' };
+        const c = this.centsTyped();
+        return { unit: 'USD', amount: c > 0 ? (c / 100).toFixed(2) : '' };
+      });
       return;
     }
     const px = this.px();

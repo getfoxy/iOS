@@ -621,7 +621,7 @@
    * the token screen shows it as a QR and a string. */
   makeEcashToken() {
     const W = window.FoxyWallet;
-    /* From the balance that pays, at a mint with two: the remembered one, or
+    /* From the balance that pays, at a mint with two: the one picked, or
      * the other where it cannot cover the amount (`keypadWallet`). A dollar
      * token is its cents, exactly; it cannot be made offline or locked. */
     if (this.twoUnitsOn && this.twoUnitsOn()) {
@@ -681,8 +681,6 @@
       this.hideMelt();
       this._seenTx = this._seenTx || {};
       this._seenTx[r.hash] = true;
-      // what is remembered is the balance that made it, unless Foxy picked it
-      if (!this.state.walletAuto) this.rememberWallet('send', 'usd');
       const got = Math.round(Number(r.amount != null ? r.amount : cents) || 0);
       this.setState({
         makeBusy: false, tokenCopied: false,

@@ -86,7 +86,7 @@ const satsOfCents = (c) => Math.round((c / 100) / MINT_RATE * 1e8);
 function twoWallet(o) {
   const opt = Object.assign({ units: ['sat', 'usd'], sat: 50000, usd: 4205, online: true }, o || {});
   const rec = { sets: [], invoices: [], watches: [], quotes: [], pays: [], tokens: [], needs: [] };
-  const st = { choice: Object.assign({ hold: '', recv: '', send: '' }, opt.choice || {}), sat: opt.sat, usd: opt.usd };
+  const st = { choice: Object.assign({ hold: '' }, opt.choice || {}), sat: opt.sat, usd: opt.usd };
   let n = 0;
   const invoiceSats = new Map();
   const W = {
@@ -118,18 +118,18 @@ function twoWallet(o) {
     // ---- two balances ----
     mintUnits: () => opt.units.slice(),
     twoUnits: () => opt.units.indexOf('sat') >= 0 && opt.units.indexOf('usd') >= 0,
-    walletChoice: () => Object.assign({}, st.choice),
+    // the wallet's contract: the hold, and the one balance it makes (no balance is kept for receives or sends)
+    walletChoice: () => {
+      const one = st.choice.hold === 'dollars' ? 'usd' : st.choice.hold === 'bitcoin' ? 'sat' : '';
+      return { hold: st.choice.hold, recv: one, send: one };
+    },
     setWalletChoice(p) {
       rec.sets.push(Object.assign({}, p));
+      if (p.recv !== undefined || p.send !== undefined) throw new Error('Foxy does not know that choice.');
       if (p.hold != null) {
         if (['dollars', 'bitcoin', 'both'].indexOf(p.hold) < 0) throw new Error('Foxy does not know that choice.');
         st.choice.hold = p.hold;
-        if (p.hold === 'dollars') { st.choice.recv = 'usd'; st.choice.send = 'usd'; }
-        if (p.hold === 'bitcoin') { st.choice.recv = 'sat'; st.choice.send = 'sat'; }
-        if (p.hold === 'both') { st.choice.recv = ''; st.choice.send = ''; }
       }
-      if (p.recv) st.choice.recv = p.recv;
-      if (p.send) st.choice.send = p.send;
     },
     balanceOf: (u) => (u === 'usd' ? st.usd : st.sat),
     heldIn: () => 0,
@@ -226,6 +226,13 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.refreshUsd();
     await settle();
   };
+  // CURRENCY's answer, where it is up: every receive and send at a mint with two asks (the owner, 2026-10-22)
+  const pickOn = async (unit) => {
+    if (A.state.screen !== 'currency') return false;
+    V().curCards[unit === 'usd' ? 0 : 1].tap();
+    await settle();
+    return true;
+  };
 
   // ---- 1. a mint with one balance: nothing of this shows -----------------------------------------
   {
@@ -280,7 +287,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle();
     ok(A.state.screen === 'history' && A.state.histUnit === 'usd', 'the frost pill opens history on DOLLARS');
     // dollars only
-    W.st.choice = { hold: 'dollars', recv: 'usd', send: 'usd' };
+    W.st.choice = { hold: 'dollars' };
     W.st.sat = 0;
     await fresh(W, { balSats: 0 });
     const d = V();
@@ -292,7 +299,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await fresh(W, { balSats: 1200 });
     eq(V().homePillRows.map((p) => p.sym), ['$', '₿'], 'bitcoin held while holding Dollars keeps its pill');
     // bitcoin only
-    W.st.choice = { hold: 'bitcoin', recv: 'sat', send: 'sat' };
+    W.st.choice = { hold: 'bitcoin' };
     W.st.usd = 0;
     await fresh(W);
     eq(V().homePillRows.map((p) => p.sym), ['₿'], 'Bitcoin: one fur pill');
@@ -323,7 +330,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     V().holdDone();
     await settle();
     eq(W.rec.sets.pop(), { hold: 'dollars' }, 'DONE writes the choice');
-    ok(A.state.screen === 'home' && W.st.choice.recv === 'usd' && W.st.choice.send === 'usd', 'Dollars sets both remembered balances; home');
+    ok(A.state.screen === 'home' && W.st.choice.hold === 'dollars', 'Dollars is kept; home');
     A.offerHoldChoice();
     await settle();
     eq(A.state.screen, 'home', 'asked once');
@@ -344,35 +351,56 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     clearTimeout(A._holdT);
   }
 
-  // ---- 4. CURRENCY, once per kind of flow; 5. what is remembered ------------------------------
+  // ---- 4. CURRENCY at every receive and send; nothing remembered (the owner, 2026-10-22) -------
   {
     const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     V().goReceive();
     await settle();
-    eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'the first receive: CURRENCY first');
+    eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'a receive: CURRENCY first, before SET AMOUNT');
     const v = V();
     eq([v.curTitle, v.curQuestion], ['CURRENCY', 'What do you want to receive?'], 'its title and question');
     eq(v.curCards.map((k) => [k.name, k.balance]), [['DOLLARS', '$ 42.05'], ['BITCOIN', '₿ 50,000']], 'two big cards with the balances');
     v.curCards[0].tap();
     await settle();
-    ok(A.state.screen === 'amount' && A.state.wallet === 'usd' && A.state.unit === 'USD', 'DOLLARS: SET AMOUNT, typing dollars');
-    eq(W.rec.sets.pop(), { recv: 'usd' }, 'the pick is remembered for receiving');
+    ok(A.state.screen === 'amount' && A.state.wallet === 'usd' && A.state.unit === 'USD', 'DOLLARS: SET AMOUNT, starting in dollars');
+    eq(W.rec.sets.length, 0, 'nothing is written: the pick is this receive’s only');
     A.back(); await settle();
+    eq([A.state.screen, A.state.wallet], ['home', ''], 'back home: the pick is gone');
     V().goReceive();
     await settle();
-    eq(A.state.screen, 'amount', 'the second receive: no CURRENCY');
+    eq(A.state.screen, 'currency', 'the second receive asks again');
+    await pickOn('sat');
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'BITCOIN this time: SET AMOUNT for bitcoin');
     A.setState({ screen: 'home', stack: [] }); await settle();
-    // a send: CURRENCY before CONFIRM PAYMENT, then never again
+    // a send: CURRENCY before CONFIRM PAYMENT where both can pay, every time
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-invoice');
     await settle();
-    eq([A.state.screen, A.state.currencyFlow, A.state.currencyNext], ['currency', 'send', 'sendConfirm'], 'the first send: CURRENCY before CONFIRM PAYMENT');
+    eq([A.state.screen, A.state.currencyFlow, A.state.currencyNext], ['currency', 'send', 'sendConfirm'], 'a send both can pay: CURRENCY before CONFIRM PAYMENT');
     eq(V().curQuestion, 'What do you want to send?', 'asked as a send');
     V().curCards[1].tap();
     await settle();
     eq(A.state.screen, 'sendConfirm', 'BITCOIN: on to CONFIRM PAYMENT');
-    eq(W.rec.sets.pop(), { send: 'sat' }, 'remembered for sending');
+    eq(W.rec.sets.length, 0, 'nothing written for sending either');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+    A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
+    A.acceptTarget('lnbcsat-invoice-2');
+    await settle();
+    eq(A.state.screen, 'currency', 'the next send asks again');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+    // SETTINGS: no RECEIVE IN or SEND IN rows
+    A.setState({ menuSettingsOpen: true });
+    const labels = V().menuItems.map((m) => m.label);
+    ok(labels.indexOf('SET PIN') >= 0 && labels.indexOf('RECEIVE IN') < 0 && labels.indexOf('SEND IN') < 0,
+      'SETTINGS has no RECEIVE IN or SEND IN rows', labels.join(','));
+    A.setState({ menuSettingsOpen: false });
+    // holding Dollars with nothing in bitcoin: one balance on home, and a receive asks nothing
+    const W2 = twoWallet({ choice: { hold: 'dollars' }, sat: 0 });
+    await fresh(W2, { balSats: 0 });
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'usd', 'one pill (Dollars): RECEIVE goes straight to SET AMOUNT, into dollars');
+    A.setState({ screen: 'home', stack: [] }); await settle();
   }
 
   // ---- 4b. the card's rule: CURRENCY only when both balances can pay (the owner, 2026-10-22) -----
@@ -431,21 +459,39 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- 7. the keypad for dollars --------------------------------------------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     V().goReceive();
     await settle();
+    await pickOn('usd');
     ['5', '0', '0'].forEach((k) => A.press(k));
     await settle();
     const v = V();
     eq(v.amountDisplay, '$ 5.00', 'dollars typed as cents: $ 5.00');
     eq(A.wantedAmount(), { unit: 'usd', amount: 500 }, 'which is 500 cents, exactly');
-    eq(v.swapVis, 'hidden', 'no ₿ toggle in a dollars receive');
-    eq(v.amountSub, '', 'no second figure: nothing converts');
-    // a send over both balances is MORE THAN YOUR BALANCE; over the remembered one only, the other pays
-    const W2 = twoWallet({ choice: { hold: 'both', send: 'usd' }, usd: 200 });
+    eq(v.swapVis, 'visible', 'the ⇅ is there on a dollars receive');
+    eq(v.amountSub, '₿ 6,250', 'and the same money in sats under it, at the phone’s price');
+    // sats typed for the dollar balance
+    A.toggleUnit(); await settle();
+    eq([A.state.unit, A.state.amount], ['SATS', '6250'], '⇅: the same money, in sats');
+    A.setState({ amount: '1000' }); await settle();
+    eq(A.wantedAmount(), { unit: 'usd', amount: 80 }, '1,000 sats for dollars ask for the 80 cents they are worth at $ 80,000');
+    eq(V().amountSub, '$ 0.80', 'and $ 0.80 is said under them');
+    A.toggleUnit(); await settle();
+    eq([A.state.unit, A.state.amount], ['USD', '0.80'], '⇅ back: $ 0.80');
+    // no price: the keypad stays in dollars and says why in one line
+    A.setState({ satUsd: null, livePrice: null });
+    toasts = [];
+    A.toggleUnit(); await settle();
+    eq([A.state.unit, toasts.pop()], ['USD', 'No current bitcoin price, so dollars are typed in dollars.'], 'no price: dollars stay, and it says why');
+    A.setState({ satUsd: PRICE / 1e8, livePrice: PRICE, unit: 'SATS', amount: '1000' }); await settle();
+    A.setState({ satUsd: null, livePrice: null }); await settle();
+    eq(A.state.unit, 'USD', 'a price lost with sats on the keypad: back to dollars');
+    A.setState({ satUsd: PRICE / 1e8, livePrice: PRICE, screen: 'home', stack: [] }); await settle();
+    // a send over both balances is MORE THAN YOUR BALANCE; over the picked one only, the other pays
+    const W2 = twoWallet({ choice: { hold: 'both' }, usd: 200 });
     await fresh(W2);
-    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', unit: 'USD', amount: '10.00',
+    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', unit: 'USD', amount: '10.00', wallet: 'usd',
       recipient: 'lnbcsat-noamount', recipientKind: 'invoice' });
     await settle();
     eq(V().sendOverShown, '0', '$ 10.00: dollars ($ 2.00) short, bitcoin ($ 40.00) covers it: not red');
@@ -460,10 +506,11 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- 8. the receive invoice in dollars ------------------------------------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' }, usdLife: 1300 });
+    const W = twoWallet({ choice: { hold: 'both' }, usdLife: 1300 });
     await fresh(W);
     V().goReceive();
     await settle();
+    await pickOn('usd');
     ['5', '0', '0'].forEach((k) => A.press(k));
     V().next();
     await settle(); await wait(40);
@@ -472,7 +519,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const v = V();
     ok(v.recvHeadTwo && v.recvChipsTwo && !v.recvChipsOne, 'the title between the round buttons; WALLET and NETWORK chips');
     eq([v.recvWalletWord, v.confirmNetwork], ['USD', 'LIGHTNING'], 'WALLET USD, NETWORK LIGHTNING');
-    eq([v.confirmAmount, v.showSats], ['$ 5.00', false], 'the amount is the cents, with no sats line');
+    eq([v.confirmAmount, v.showSats, v.confirmAlt], ['$ 5.00', true, '₿ 6,250'], 'the amount in both: the cents asked, their sats under at the phone’s price');
     ok(v.recvTapShown === true && v.recvCardShown === true, 'TAP and CARD on a dollar invoice (the card pays the invoice’s sats: tests/flashcard-usd-receive.js)');
     {
       // the same screen a moment earlier, before the mint had made the invoice: a dollar card pays the cents and needs none, so CARD is there
@@ -501,7 +548,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([W.rec.invoices[1].amount, W.rec.invoices[1].opts], [500, { unit: 'usd' }], 'for the same 500 cents, in dollars');
     ok(W.rec.watches[0].stopped && !W.rec.watches[1].stopped, 'the old code’s watch is let go, the new one watched');
     eq(A.state.invoice, W.rec.invoices[1].inv.bolt11, 'the new code is on screen');
-    // paid: ADDED TO DOLLARS, and remembered
+    // paid: ADDED TO DOLLARS, and nothing remembered
     W.rec.sets.length = 0;
     W.rec.watches[1].onPaid({ hash: W.rec.invoices[1].inv.hash, unit: 'usd', amount: 500, sats: 0 });
     await settle();
@@ -509,16 +556,47 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(A.state.screen, 'paid', 'paid');
     eq([p.paidHeadline, p.paidHeadlineSub, p.paidAddedLabel, p.paidAddedTo], ['$ 5.00', '', 'ADDED TO', 'DOLLARS'], 'PAYMENT RECEIVED $ 5.00, ADDED TO DOLLARS');
     ok(/ADDED TO/.test(textOf(w)) && /DOLLARS/.test(textOf(w)) && !/Cash Balance/.test(textOf(w)), 'never "Cash Balance"');
-    eq(W.rec.sets.pop(), { recv: 'usd' }, 'the receive’s balance is remembered');
+    eq(W.rec.sets.length, 0, 'nothing is kept for the next receive');
     clearInterval(A._recvClockT);
   }
 
-  // ---- WALLET chip on the invoice: changed, remembered, and a new code in it -------------------
+  // ---- 8b. a figure typed in the other unit: the quote is in the balance picked ----------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'sat', send: 'sat' } });
+    // dollars asked for with sats typed: a mint quote in dollars for the cents they are worth
+    const W = twoWallet({ choice: { hold: 'both' } });
+    await fresh(W);
+    V().goReceive(); await settle();
+    await pickOn('usd');
+    A.toggleUnit(); await settle();
+    A.setState({ amount: '1000' }); await settle();
+    V().next();
+    await settle(); await wait(40);
+    eq([W.rec.invoices[0].amount, W.rec.invoices[0].opts], [80, { unit: 'usd' }], '1,000 sats typed for dollars: a dollar quote for 80 cents');
+    const v = V();
+    eq([v.recvWalletWord, v.confirmAmount, v.confirmAlt], ['USD', '$ 0.80', '₿ 1,000'], 'the screen says it in both');
+    A.stopReceive(); clearInterval(A._recvClockT);
+    A.setState({ screen: 'home', stack: [] }); await settle();
+    // bitcoin asked for with dollars typed: a sat invoice for what they are worth, as before
+    const W2 = twoWallet({ choice: { hold: 'both' } });
+    await fresh(W2);
+    V().goReceive(); await settle();
+    await pickOn('sat');
+    A.setState({ unit: 'USD', amount: '5.00' }); await settle();
+    V().next();
+    await settle(); await wait(40);
+    eq([W2.rec.invoices[0].amount, W2.rec.invoices[0].opts], [6250, null], '$ 5.00 typed for bitcoin: a sat invoice for 6,250');
+    A.stopReceive();
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+
+  // ---- WALLET chip on the invoice: changed for this receive, and a new code in it -------------------
+  {
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     V().goReceive();
     await settle();
+    await pickOn('sat');
+    A.setState({ unit: 'USD', amount: '' });
     ['5', '0', '0'].forEach((k) => A.press(k));
     V().next();
     await settle();
@@ -527,7 +605,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([v.recvWalletWord, v.recvTapShown, v.recvClockShown], ['BITCOIN', true, false], 'WALLET BITCOIN; tap and card offered; no clock');
     A.recvSwitchWallet('usd');
     await settle();
-    eq(W.rec.sets.pop(), { recv: 'usd' }, 'the chip’s change is remembered at once');
+    eq(W.rec.sets.length, 0, 'the chip’s change is this receive’s only: nothing kept');
     const last = W.rec.invoices[W.rec.invoices.length - 1];
     eq([last.amount, last.opts], [500, { unit: 'usd' }], 'and a new code in dollars for the same $ 5.00');
     eq(V().recvWalletWord, 'USD', 'the chip reads USD');
@@ -536,11 +614,13 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- 9. CONFIRM PAYMENT, the WALLET button, the picker, the switch --------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-maya');
-    await settle(); await settle();
+    await settle();
+    ok(await pickOn('usd'), 'both can pay: CURRENCY asks, DOLLARS picked');
+    await settle();
     eq(A.state.screen, 'sendConfirm', 'an invoice: CONFIRM PAYMENT');
     ok(W.rec.quotes.length === 1, 'both balances quoted at once (quoteFeeBoth)');
     let v = V();
@@ -563,7 +643,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     v.curCards[1].tap();
     await settle();
     ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'sat' && A.state.walletTapped, 'BITCOIN picked by hand');
-    eq(W.rec.sets.pop(), { send: 'sat' }, 'and remembered at once');
+    eq(W.rec.sets.length, 0, 'and nothing kept for the next send');
     v = V();
     eq(v.cfRows.map((r) => r.label), ['TO', 'AMOUNT', 'FEE INCLUDED', 'NETWORK'], 'bitcoin pays bitcoin: no RATE row');
     v.cfGo();
@@ -573,16 +653,15 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(V().sentFrom, 'FROM BITCOIN', 'sent: FROM BITCOIN');
   }
 
-  // ---- the automatic switch: once, said, and not remembered ------------------------------------
+  // ---- only one can pay: no question, the other greyed in the picker --------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' }, usd: 200 });
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 200 });
     await fresh(W);
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-ten');
     await settle(); await settle();
-    ok(A.state.wallet === 'sat' && A.state.walletAuto === true, 'dollars ($ 2.00) cannot cover it: bitcoin pays');
-    eq(toasts.filter((m) => m === 'Bitcoin was chosen for you').length, 1, '"Bitcoin was chosen for you", once');
-    eq(W.rec.sets.length, 0, 'the remembered balance is not changed by the switch');
+    ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'sat' && A.state.walletAuto === true, 'dollars ($ 2.00) cannot cover it: bitcoin pays, nothing asked');
+    eq(W.rec.sets.length, 0, 'nothing written');
     V().cfWalletGo();
     await settle();
     const v = V();
@@ -600,7 +679,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- neither covers it --------------------------------------------------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', send: 'usd' }, usd: 200, sat: 100 });
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 200, sat: 100 });
     await fresh(W, { balSats: 100 });
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-big');
@@ -614,7 +693,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- the mint's price moved: back to CONFIRM PAYMENT, asked again, nothing sent -------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     const realPay = W.pay;
     let refusals = 0;
     W.pay = function (bolt11, onStage, popts) {
@@ -632,7 +711,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await fresh(W);
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-moved');
-    await settle(); await settle();
+    await settle();
+    await pickOn('usd'); await settle();
     const before = W.rec.quotes.length;
     const usdBefore = W.st.usd;
     V().cfGo();
@@ -668,11 +748,12 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- 10. sent from dollars; a dollar token -------------------------------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-coffee');
-    await settle(); await settle();
+    await settle();
+    await pickOn('usd'); await settle();
     V().cfGo();
     await settle(); await wait(700); await settle();
     eq(W.rec.pays[0].unit, 'usd', 'pay is called with {unit: \'usd\'}');
@@ -682,10 +763,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([s.sentFrom, s.sentHeadline, s.sentHeadlineSub], ['FROM DOLLARS', '$ ' + ((cents + 1) / 100).toFixed(2), '₿ 6,112 delivered'],
       'sent: FROM DOLLARS, the dollars that left, the sats delivered under');
     ok(/FROM DOLLARS/.test(textOf(w)), 'the page says FROM DOLLARS');
-    eq(W.rec.sets.pop(), { send: 'usd' }, 'the send’s balance is remembered');
+    eq(W.rec.sets.length, 0, 'nothing kept for the next send');
     // a token in dollars
     await fresh(W);
-    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', tokenMode: true, unit: 'USD', amount: '5.00' });
+    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', tokenMode: true, unit: 'USD', amount: '5.00', wallet: 'usd' });
     await settle();
     A.makeEcashToken();
     await settle(); await settle();
@@ -693,9 +774,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const tk = V();
     eq([A.state.screen, tk.tokenAmount, tk.tokenShowAlt], ['tokenOut', '$ 5.00', false], 'the token screen: $ 5.00, no sats line');
     // offline the wallet makes it from dollar pieces on hand (or says why not), and it is shown to be scanned
-    const off = twoWallet({ choice: { hold: 'both', send: 'usd' }, online: false });
+    const off = twoWallet({ choice: { hold: 'both' }, online: false });
     await fresh(off);
-    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', tokenMode: true, unit: 'USD', amount: '5.00' });
+    A.setState({ screen: 'amount', stack: ['home'], flow: 'send', tokenMode: true, unit: 'USD', amount: '5.00', wallet: 'usd' });
     A.makeEcashToken();
     await settle(); await settle();
     eq([off.rec.tokens.length, off.rec.tokens[0] && off.rec.tokens[0].opts, A.state.tokenOutUnit],
@@ -753,7 +834,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   // ---- 12. what dollars can and cannot do, said in words --------------------------------------
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     A.openRequest('creqA-usd');
     eq([A.state.screen, A.state.wallet], ['reqOffer', 'usd'], 'a NUT-18 request in dollars at this mint opens its offer, paid from dollars');
@@ -792,8 +873,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
 
   /* ---- a second look: the rules the owner set, checked from the other side --------------------
    *
-   * Hold Bitcoin and hold Both as the first step answers them, the two remembered balances kept
-   * apart, the automatic switch not carried into the next payment, the keypad of a payment to an
+   * Hold Bitcoin and hold Both as the first step answers them, every payment asking afresh,
+   * the automatic switch not carried into the next payment, the keypad of a payment to an
    * address (asked in sats, so it converts and keeps its ⇅), the bitcoin paid screen's words, the
    * hold question put off, and a mint with one balance drawing the confirmation and the sent
    * screen as it always did. */
@@ -804,7 +885,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.offerHoldChoice(); await settle();
     V().holdRows[1].tap(); V().holdDone(); await settle();
     eq(W.rec.sets.pop(), { hold: 'bitcoin' }, 'Bitcoin is written as the choice');
-    ok(W.st.choice.recv === 'sat' && W.st.choice.send === 'sat', 'Bitcoin sets both remembered balances to bitcoin');
+    ok(A.walletNow('receive') === 'sat' && A.walletNow('send') === 'sat', 'Bitcoin: its flows use bitcoin');
     const v = V();
     eq(v.homePillRows.map((p) => p.sym), ['₿'], 'Bitcoin, nothing in dollars: one fur pill');
     eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE'], 'and SCAN / PASTE, no SWAP');
@@ -823,32 +904,30 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(V().histTabs.map((t) => t.ink === 'rgba(var(--ink-rgb),.55)'), [true, false], 'history opens on BITCOIN, the one pill held');
   }
   {
-    // Both: two pills, and each kind of flow asks once, on its own
+    // Both: two pills, and every receive and send asks
     const W = twoWallet();
     await fresh(W);
     A.offerHoldChoice(); await settle();
     V().holdRows[2].tap(); V().holdDone(); await settle();
     eq(W.rec.sets.pop(), { hold: 'both' }, 'Both is written as the choice');
-    ok(W.st.choice.recv === '' && W.st.choice.send === '', 'Both leaves the two remembered balances unset');
+    ok(A.walletNow('receive') === '' && A.walletNow('send') === '', 'Both: no balance until a payment picks one');
     eq(V().homePillRows.map((p) => p.sym), ['$', '₿'], 'Both: two pills');
     V().goReceive(); await settle();
-    eq(A.state.screen, 'currency', 'Both: the first receive asks');
+    eq(A.state.screen, 'currency', 'Both: a receive asks');
     V().curCards[0].tap(); await settle();
     A.setState({ screen: 'home', stack: [] }); await settle();
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-both-first-send');
     await settle();
-    eq(A.state.screen, 'currency', 'the receive’s answer is not the send’s: the first send still asks');
+    eq(A.state.screen, 'currency', 'the receive’s answer is not the send’s: the send asks');
     V().curCards[1].tap(); await settle();
-    ok(W.st.choice.recv === 'usd' && W.st.choice.send === 'sat', 'two remembered balances, apart: receive dollars, send bitcoin');
+    eq(W.rec.sets.length, 0, 'nothing written by either answer');
     // CURRENCY's back arrow: nothing remembered, so it asks again next time
     A.setState({ screen: 'home', stack: [] }); await settle();
-    W.st.choice.send = '';
-    W.rec.sets.length = 0;
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-both-back');
     await settle();
-    eq(A.state.screen, 'currency', 'asked again while nothing is remembered');
+    eq(A.state.screen, 'currency', 'asked again');
     V().curBack(); await settle();
     ok(A.state.screen !== 'currency' && W.rec.sets.length === 0, 'back from CURRENCY: nothing remembered');
   }
@@ -867,46 +946,50 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([A.state.screen, V().holdRows.map((h) => h.outline !== 'none')], ['holdChoice', [true, false, false]], 'MENU › WHAT YOU HOLD: the question, Dollars outlined');
   }
   {
-    // the automatic switch is this payment's only: the next one starts from the remembered balance
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' }, usd: 200 });
+    // the automatic choice is this payment's only: the next one asks again
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 200 });
     await fresh(W);
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-auto-once');
     await settle(); await settle();
     eq(A.state.wallet, 'sat', 'dollars short: bitcoin pays this one');
     A.setState({ screen: 'home', stack: [] }); await settle();
-    ok(A.state.wallet === '' && !A.state.walletAuto && A.walletNow('send') === 'usd', 'home: the next payment starts from DOLLARS again');
+    ok(A.state.wallet === '' && !A.state.walletAuto && A.walletNow('send') === '', 'home: nothing carried into the next payment');
     toasts = [];
     W.st.usd = 4205; A.refreshUsd();
     A.setState({ screen: 'sendHow', stack: ['home'], flow: 'send' });
     A.acceptTarget('lnbcsat-auto-twice');
-    await settle(); await settle();
-    ok(V().cfWalletWord === 'USD' && toasts.indexOf('Bitcoin was chosen for you') < 0, 'dollars that cover it pay it, with no toast');
+    await settle();
+    eq(A.state.screen, 'currency', 'both cover the next one: it asks');
+    await pickOn('usd'); await settle();
+    ok(V().cfWalletWord === 'USD' && toasts.indexOf('Bitcoin was chosen for you') < 0, 'dollars picked pay it, with no toast');
   }
   {
     // a payment to an address in dollars converts (an address is asked in sats): the ⇅ still works
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
-    A.setState({ screen: 'amount', stack: ['home', 'sendHow'], flow: 'send', unit: 'USD', amount: '5.00',
+    A.setState({ screen: 'amount', stack: ['home', 'sendHow'], flow: 'send', unit: 'USD', amount: '5.00', wallet: 'usd',
       recipient: 'maya@flash.example', recipientKind: 'email' });
     await settle();
     eq(V().swapVis, 'visible', 'paying an address from dollars: the ⇅ toggle is there');
     A.toggleUnit(); await settle();
     eq(A.state.unit, 'SATS', 'and a tap on it puts the keypad in sats, and it stays there');
     ok(Number(A.state.amount) > 0, 'with the amount converted, not cleared (' + A.state.amount + ')');
-    // a dollar receive: the toggle refuses in words and the keypad stays in dollars
+    // a dollar receive: the toggle takes it to sats, as any receive
     A.setState({ screen: 'home', stack: [] }); await settle();
     V().goReceive(); await settle();
+    await pickOn('usd');
     toasts = [];
     A.toggleUnit(); await settle();
-    ok(A.state.unit === 'USD' && toasts.pop() === 'Dollars are typed in dollars.', 'a dollar receive: the ⇅ refuses, in dollars still');
+    ok(A.state.unit === 'SATS' && !toasts.length, 'a dollar receive: the ⇅ puts the keypad in sats');
     // offline, a dollar receive cannot be asked for
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
   {
-    const W = twoWallet({ choice: { hold: 'both', recv: 'usd', send: 'usd' }, online: false });
+    const W = twoWallet({ choice: { hold: 'both' }, online: false });
     await fresh(W);
     V().goReceive(); await settle();
+    await pickOn('usd');
     ['5', '0', '0'].forEach((k) => A.press(k));
     toasts = [];
     V().next(); await settle();
@@ -914,12 +997,24 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
       'offline: NEXT on a dollar receive opens it on CASHU (a request in dollars), and asks the mint for nothing');
     eq([V().confirmNetwork, V().recvClockShown, V().recvTapShown], ['CASHU', false, true], 'offline: NETWORK CASHU, no clock, TAP armed');
     A.setState({ screen: 'home', stack: [] }); await settle();
+    // offline, sats typed for dollars: the cents at the last price, with that price's age said under the figure
+    V().goReceive(); await settle();
+    await pickOn('usd');
+    A.toggleUnit(); await settle();
+    A.setState({ amount: '1000' }); await settle();
+    const ov = V();
+    ok(A.state.unit === 'SATS' && ov.priceWarnShown === '1' && /^WARNING: This is based on the price of Bitcoin/.test(ov.priceWarn),
+      'offline: sats typed for dollars, and the price’s age said', JSON.stringify([A.state.unit, ov.priceWarn]));
+    eq(A.wantedAmount(), { unit: 'usd', amount: 80 }, 'asked as 80 cents');
+    A.setState({ screen: 'home', stack: [] }); await settle();
   }
   {
-    // a bitcoin receive at a mint with two: ADDED TO BITCOIN, and bitcoin remembered for receiving
-    const W = twoWallet({ choice: { hold: 'both', recv: 'sat', send: 'usd' } });
+    // a bitcoin receive at a mint with two: ADDED TO BITCOIN, and nothing remembered
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     V().goReceive(); await settle();
+    await pickOn('sat');
+    A.setState({ unit: 'USD', amount: '' });
     ['5', '0', '0'].forEach((k) => A.press(k));
     V().next(); await settle();
     W.rec.sets.length = 0;
@@ -929,25 +1024,24 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const p = V();
     eq([A.state.screen, p.paidAddedLabel, p.paidAddedTo], ['paid', 'ADDED TO', 'BITCOIN'], 'bitcoin paid: ADDED TO BITCOIN');
     ok(!/Cash Balance|Bitcoin Balance/.test(textOf(w)), 'never "Bitcoin Balance" at a mint with two');
-    eq(W.rec.sets.pop(), { recv: 'sat' }, 'bitcoin remembered for receiving');
-    ok(W.st.choice.send === 'usd', 'and the send’s balance left alone');
+    eq(W.rec.sets.length, 0, 'nothing kept for the next receive');
     A.stopReceive();
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
   {
-    // a link into a receive (foxy=receive) starts it from the remembered balance, not a send's pick
-    const W = twoWallet({ choice: { hold: 'both', recv: 'sat', send: 'sat' } });
+    // a link into a receive (foxy=receive) asks afresh, not with a send's pick
+    const W = twoWallet({ choice: { hold: 'both' } });
     await fresh(W);
     A.setState({ screen: 'sendConfirm', stack: ['home'], flow: 'send', wallet: 'usd', walletTapped: true });
     w.location.hash = '#foxy=receive';
     A.applyDeepLink(); await settle();
-    ok(A.state.screen === 'amount' && A.state.flow === 'receive' && A.walletNow('receive') === 'sat',
-      'a link to RECEIVE: the remembered bitcoin, not the dollars a send had picked');
+    ok(A.state.screen === 'currency' && A.state.flow === 'receive' && A.state.wallet === '',
+      'a link to RECEIVE: CURRENCY asks, not the dollars a send had picked', JSON.stringify([A.state.screen, A.state.wallet]));
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
   {
     // holding dollars, the roads that are bitcoin only stay bitcoin: on chain and transfer are typed as today
-    const W = twoWallet({ choice: { hold: 'dollars', recv: 'usd', send: 'usd' } });
+    const W = twoWallet({ choice: { hold: 'dollars' } });
     await fresh(W);
     for (const flow of ['onchain', 'transfer']) {
       A.setState({ screen: 'amount', stack: ['home'], flow: flow, unit: 'USD', amount: '5.00', recipientKind: flow === 'onchain' ? 'address' : '' });

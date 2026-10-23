@@ -191,15 +191,13 @@
      *   TRANSFER (only with money at more than one mint)
      *   SWITCH · YOUR CHANGE
      *   SETTINGS, which opens and closes in place:
-     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; RECEIVE IN and
-     *     SEND IN (only at a mint with two balances, holding both), each with
-     *     the balance it is set to; SET PIN; OFFLINE, PER PAYER and OFFLINE,
+     *     AUTO TAP TO PAY and FACE / FINGER LOCK as switches; SET PIN; OFFLINE, PER PAYER and OFFLINE,
      *     TOTAL, each with its figure; RESTORE, BACKUP, LOGS
      *
      * ERRORS is gone: it was the same log with a filter on it. Rows inside
      * SETTINGS are indented; a switch shows its state, so its label never has
-     * to — which is what the REMOVE/STOP verbs were for. RECEIVE IN and SEND
-     * IN show their balance the same way, as a word at the end of the row. */
+     * to — which is what the REMOVE/STOP verbs were for. No balance is kept for
+     * a receive or a send to start in: with two, each one asks (01-ui-basics.js, `walletNow`). */
     const W22 = window.FoxyWallet;
     const verified = !!(W22 && W22.backedUp && W22.backedUp());
     const mintsWithMoney = (() => {
@@ -216,28 +214,6 @@
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const inSettings = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
-    /* The balance a receive and a send start in, at a mint with two balances.
-     * These are the same two values the flows remember (`rememberWallet`): a
-     * receive or a send that uses the other balance moves the word here, and
-     * a tap here is what the next flow starts in. Holding only dollars or
-     * only bitcoin sets both to that one and home shows one pill, so the rows
-     * would contradict WHAT YOU HOLD there, and are not shown. Never set reads
-     * ASK (the CURRENCY screen will), and a tap from there gives dollars
-     * first. Two choices, so a tap flips, and the drawer stays open to show
-     * it. */
-    const pickIn = twoHere && this.walletChoiceNow().hold === 'both';
-    const pickRow = (label, path, flow) => {
-      const unitNow = () => { const c = this.walletChoiceNow(); return flow === 'receive' ? c.recv : c.send; };
-      const unit = unitNow();
-      return { label, path, value: unit ? this.unitWord(unit) : 'ASK',
-        tap: () => {
-          /* From what is kept now, not what was drawn. */
-          const next = unitNow() === 'usd' ? 'sat' : 'usd';
-          try { W22.setWalletChoice(flow === 'receive' ? { recv: next } : { send: next }); }
-          catch (e) { console.warn('[foxy] the balance chosen could not be kept:', e && e.message); }
-          this.setState({ menuTick: (this.state.menuTick || 0) + 1 });
-        } };
-    };
     v.menuItems = /** @type {any[]} */ (verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
@@ -298,9 +274,6 @@
           this.confirmNoProtection();
         }),
       }, sw(faceOn)),
-    ]).concat(!pickIn ? [] : [
-      pickRow('RECEIVE IN', MENU_ICON.receive, 'receive'),
-      pickRow('SEND IN', MENU_ICON.send, 'send'),
     ]).concat([
       /* The label is the tap, not the state: SET, REMOVE — a verb cannot be
        * read as a state. */
@@ -554,7 +527,7 @@
     const cardOut = (s.flow === 'send' || s.flow === 'onchain') && !!(this.fcOutMode && this.fcOutMode());
     /* At a mint with two balances a send is capped by the balance that pays,
      * when one was picked by hand, and otherwise by the larger: a payment the
-     * remembered balance cannot cover goes from the other (`keypadWallet`), so
+     * balance picked cannot cover goes from the other (`keypadWallet`), so
      * MORE THAN YOUR BALANCE means neither covers it. Dollars are their own
      * figure, in cents, and need no price. A card holds bitcoin only, so a
      * payment from one is capped by the card alone. */

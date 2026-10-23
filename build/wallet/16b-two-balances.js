@@ -7,8 +7,7 @@
      * this part is an integer in its own unit. The screens ask:
      *
      *   mintUnits, twoUnits   whether to show any of it at all
-     *   walletChoice          what the person said they hold, and the unit a
-     *                         receive and a send start in
+     *   walletChoice          what the person said they hold
      *   balanceOf, heldIn …   each balance, and what is held back from it
      *   mintRate              the mint's dollar price, from its last quote
      *   quoteFeeBoth          a Lightning invoice quoted from both balances
@@ -41,40 +40,28 @@
     unitKeysOffline: function (unit) { return unitKeysOffline(unit); },
 
     /* What the person said they want to hold ('dollars', 'bitcoin', 'both',
-     * or '' when never asked), and the unit a receive and a send start in
-     * ('sat', 'usd', or '' when the CURRENCY screen should ask). */
+     * or '' when never asked), and the unit that makes the one balance their
+     * money goes into and comes from ('usd' for dollars, 'sat' for bitcoin, ''
+     * for both or never asked) as `recv` and `send`. Nothing else is kept:
+     * with both, every receive and send asks which (the CURRENCY screen). */
     walletChoice: function () {
-      var pick = function (key, ok) {
-        var v = load(key, '');
-        return typeof v === 'string' && ok.indexOf(v) >= 0 ? v : '';
-      };
-      return {
-        hold: pick(K.hold, ['dollars', 'bitcoin', 'both']),
-        recv: pick(K.recv, ['sat', 'usd']),
-        send: pick(K.send, ['sat', 'usd']),
-      };
+      var v = load(K.hold, '');
+      var hold = typeof v === 'string' && ['dollars', 'bitcoin', 'both'].indexOf(v) >= 0 ? v : '';
+      var one = holdUnit(hold);
+      return { hold: hold, recv: one, send: one };
     },
 
-    /* The choice, written. Dollars or bitcoin sets both starting units to
-     * that one; both clears them, so each flow asks once. `recv` and `send`
-     * set one each: the last unit a receive or a send used, or the one the
-     * WALLET chip was changed to. Anything else is refused whole, before
-     * anything is written. Answers the choice as it now stands. */
+    /* The choice, written: `hold` only. A balance for receives or sends to
+     * start in (`recv`, `send`) is no longer kept, and asking to keep one is
+     * refused, as is anything else, before anything is written. Answers the
+     * choice as it now stands. */
     setWalletChoice: function (patch) {
       var p = patch || {};
       var bad = function () { return new Error('Foxy does not know that choice.'); };
       if (typeof p !== 'object') throw bad();
       if (p.hold !== undefined && ['dollars', 'bitcoin', 'both'].indexOf(p.hold) < 0) throw bad();
-      if (p.recv !== undefined && ['sat', 'usd'].indexOf(p.recv) < 0) throw bad();
-      if (p.send !== undefined && ['sat', 'usd'].indexOf(p.send) < 0) throw bad();
-      if (p.hold !== undefined) {
-        var both = p.hold === 'dollars' ? 'usd' : p.hold === 'bitcoin' ? 'sat' : '';
-        save(K.hold, p.hold);
-        save(K.recv, both);
-        save(K.send, both);
-      }
-      if (p.recv !== undefined) save(K.recv, p.recv);
-      if (p.send !== undefined) save(K.send, p.send);
+      if (p.recv !== undefined || p.send !== undefined) throw bad();
+      if (p.hold !== undefined) save(K.hold, p.hold);
       return FoxyWallet.walletChoice();
     },
 

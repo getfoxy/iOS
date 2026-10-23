@@ -16,7 +16,7 @@
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         // home's SEND pays from this phone, never from a card (26f-flashcard.js, `fcOutMode`)
         note: '', noteDraft: '', sendFrom: '',
-        // which balance pays is the remembered one until this payment says otherwise
+        // which balance pays is asked again (`syncWalletAsk`)
         wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       // home's SCAN: straight to the scanner, which is how a payment request,
@@ -25,7 +25,7 @@
         screen: 'sendScan', stack: p.stack.concat([p.screen]), flow: 'send',
         amount: '', asset: '', unit: 'USD', recipient: '', emailDraft: '',
         note: '', noteDraft: '', sendFrom: '',
-        // which balance pays is the remembered one until this payment says otherwise
+        // which balance pays is asked again (`syncWalletAsk`)
         wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
       goReceive: () => this.setState(p => ({
@@ -35,7 +35,7 @@
         // these belong to sending; left set, they decide what the receive
         // invoice screen displays instead of the amount just typed
         recipient: '', recipientKind: '',
-        // the balance it goes into is the remembered one until the WALLET chip says otherwise
+        // the balance it goes into is asked again (`syncWalletAsk`)
         wallet: '', walletAuto: false, walletTapped: false,
       })),
       bkBadge: this.BK_BADGE,
@@ -276,10 +276,18 @@
       swapFrom: first, swapTo: first === 'usd' ? 'sat' : 'usd', swapQuote: null, swapNewRate: false }));
   }
 
-  /* Is the keypad typing a dollar balance's own amount: cents, exactly, with
-   * no ₿ toggle and no second figure? A dollar receive, and a dollar send of
-   * ecash or of an invoice's own amount. Not a dollar balance paying an
-   * address, which is asked in sats and converts. */
+  /* A keypad with no ₿ toggle: a card's own dollar amounts, typed in dollars
+   * exactly. The dollar balance's receive and send are not: they take sats as
+   * well (`usdKeypad`, `centsTyped`). */
+  keypadLocked() {
+    const s = this.state;
+    return s.screen === 'amount' && /^card(Add|Wd|Limit|Send|SuNoPin|SuTap)$/.test(String(s.flow)) && !!(this.usdKeypad && this.usdKeypad());
+  }
+
+  /* Is the keypad typing for a dollar balance, whose amount is cents? A
+   * dollar receive, and a dollar send of ecash or of an invoice's own amount,
+   * typed in dollars exactly or in sats put into cents (`centsTyped`). Not a
+   * dollar balance paying an address, which is asked in sats and converts. */
   usdKeypad() {
     const s = this.state;
     /* A dollar card's own amounts (ADD FUNDS, WITHDRAW, LIMITS), and money onto a card from the dollar balance: cents,
@@ -291,7 +299,16 @@
     return !(s.flow === 'send' && s.recipientKind === 'email');
   }
 
-  /* SET AMOUNT's NEXT on a send at a mint with two balances: the remembered
+  /* Is the figure on the keypad put into the other unit offline, at a price that may be hours old? Dollars typed for
+   * bitcoin, or sats typed for the dollar balance. Then the price's age is said under it (`priceWarn`). */
+  keypadStale() {
+    const s = this.state;
+    if (!this.offlineNow() || !this.satUsd()) return false;
+    if (this.keypadLocked && this.keypadLocked()) return false;
+    return (this.usdKeypad && this.usdKeypad()) ? s.unit === 'SATS' : s.unit === 'USD';
+  }
+
+  /* SET AMOUNT's NEXT on a send at a mint with two balances: the picked
    * balance cannot cover what was typed and the other can, so the other pays
    * (once, said in a toast, and not remembered). Not after a pick by hand. */
   keypadWallet() {
@@ -526,16 +543,14 @@
       /* And, when the amount is over the balance only because part of it is
        * held back with the mint, that — the block's own words (heldBlocks).
        * It goes first: it is why this payment cannot go. */
-      /* Not for the dollar balance, typed in dollars exactly: nothing is
-       * converted, so no price is in it (`usdKeypad`). */
+      /* For the dollar balance the other way round: dollars typed are exact
+       * and need no price, and sats typed are put into cents at it (`usdKeypad`). */
       priceWarn: sendHeld ? sendHeld
-        : (this.usdKeypad && this.usdKeypad()) ? ''
-        : (this.offlineNow() && s.unit === 'USD' && this.satUsd())
+        : this.keypadStale()
         ? 'WARNING: This is based on the price of Bitcoin '
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
-      priceWarnShown: (sendHeld
-        || (this.offlineNow() && s.unit === 'USD' && this.satUsd() && !(this.usdKeypad && this.usdKeypad()))) ? '1' : '0',
+      priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
       amountTitle: 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
         ? 'How much to send on chain?'
@@ -613,7 +628,7 @@
          * screen's NETWORK chip is what chooses Cashu or on chain from there
          * (finding 19). The same two paths, said plainly. */
         if (this.state.flow === 'send') {
-          // the other balance, where the remembered one cannot cover this and the other can
+          // the other balance, where the picked one cannot cover this and the other can
           if (this.keypadWallet) this.keypadWallet();
           this.setState(p => ({ payFrom: 'BITCOIN', screen: 'sendConfirm', stack: p.stack.concat([p.screen]) }));
         } else {
@@ -642,10 +657,16 @@
          * rate would give, or, typed in the unit that does not leave, what
          * leaves (26i-swap.js). */
         if (s.flow === 'swap') return this.swapEstimate();
-        /* A dollar balance: dollars, exactly, and no second figure, because
-         * nothing is converted. Only a payment to an address converts (it is
-         * asked in sats), and that one keeps its line. */
-        if (this.usdKeypad && this.usdKeypad()) return '';
+        // a card's own dollars: exact, and no second figure
+        if (this.keypadLocked && this.keypadLocked()) return '';
+        /* A dollar balance: the figure in the other unit, at the price the
+         * sats are put into cents at (`centsTyped`); none without one. */
+        if (this.usdKeypad && this.usdKeypad()) {
+          const upx = this.unitPx();
+          if (!upx) return '';
+          const v = parseFloat(s.amount) || 0;
+          return s.unit === 'SATS' ? '$ ' + this.usd(this.centsTyped() / 100) : '₿ ' + this.group(Math.round(v / upx * 1e8));
+        }
         const px = this.satUsd();
         if (!px) return '';
         const sats = this.wantedSats() || 0;
@@ -656,10 +677,10 @@
       /* Hidden, not removed: it is a 46px circle above the keypad, and taking
        * it out of the flow moves every key under the thumb mid-entry — the
        * same reason PASTE ECASH is hidden rather than dropped. */
-      swapVis: this.dollarsOnly() ? 'hidden' : 'visible',
-      swapPE: this.dollarsOnly() ? 'none' : 'auto',
-      // and for a dollar balance, typed in dollars exactly: hidden the same way (`usdKeypad`)
-      ...((this.usdKeypad && this.usdKeypad()) ? { swapVis: 'hidden', swapPE: 'none' } : {}),
+      /* Always there for a receive or a send, in either balance, online or not (the owner, 2026-10-22). Only a card's
+       * own dollar amounts have none (`keypadLocked`). */
+      swapVis: (this.keypadLocked && this.keypadLocked()) ? 'hidden' : 'visible',
+      swapPE: (this.keypadLocked && this.keypadLocked()) ? 'none' : 'auto',
       toggleUnit: () => this.toggleUnit(),
       // a token carries its own amount, so the two are alternatives
       // gone entirely once there is an amount, back when the field is cleared:

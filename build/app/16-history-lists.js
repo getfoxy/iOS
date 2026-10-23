@@ -22,7 +22,7 @@
         payFrom: 'BITCOIN',
         amount: '',
         unit: 'USD',
-        // the remembered balance pays, until this payment says otherwise
+        // which balance pays is asked again (`syncWalletAsk`)
         wallet: '', walletAuto: false, walletTapped: false, feeQ: null,
       })),
     }));

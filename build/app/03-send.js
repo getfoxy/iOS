@@ -366,7 +366,7 @@
    * reaches this screen in dollars only with a route. */
   syncSend() {
     /* First, at a mint with two balances: the CURRENCY screen before a flow's
-     * first amount or confirmation, when none is remembered (01-ui-basics.js). */
+     * first amount or confirmation, when none is picked for this payment (01-ui-basics.js). */
     if (this.syncWalletAsk) this.syncWalletAsk();
     const s = this.state;
     if (s.screen !== 'sendConfirm') {
@@ -671,13 +671,11 @@
       if (card) this.fcOutSettled(card, true);
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
-      /* Which balance paid, in its own unit, for the sending screen; and,
-       * unless Foxy picked it for the person, remembered for the next send. */
+      /* Which balance paid, in its own unit, for the sending screen. */
       if (two) {
         const paidIn = (r && r.unit) || unit;
         this._lastPay = { unit: paidIn, amount: r.amount != null ? r.amount : askedSats, fee: r.fee != null ? r.fee : (r.feeSats || 0),
           asked: paidIn === 'usd' ? askedSats : 0 };
-        if (!this.state.walletAuto) this.rememberWallet('send', paidIn);
       }
 
       const showDone = () => {

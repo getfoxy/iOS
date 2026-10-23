@@ -509,19 +509,18 @@ class Component extends DCLogic {
     try { return !!(this.fcOutMode && this.fcOutMode()); } catch (e) { return false; }
   }
 
-  /* What the person chose to hold, and the two remembered defaults (the last
-   * balance a receive used, and the last a send used): '' for any never set. */
+  /* What the person chose to hold: 'dollars', 'bitcoin', 'both', or '' never asked. */
   walletChoiceNow() {
     const W = window.FoxyWallet;
     let c = null;
     try { c = (W && W.walletChoice) ? W.walletChoice() : null; } catch (e) { c = null; }
-    const unit = (u) => ((u === 'usd' || u === 'sat') ? u : '');
-    return { hold: String((c && c.hold) || ''), recv: unit(c && c.recv), send: unit(c && c.send) };
+    return { hold: String((c && c.hold) || '') };
   }
 
-  /* The balance a flow uses: the one picked for this payment, else the one
-   * remembered for its kind, else '' (and the CURRENCY screen asks). Always
-   * 'sat' at a mint with one balance. `flow` is 'receive' or 'send'. */
+  /* The balance a flow uses: the one picked for this payment; else, where home shows one balance, that one; else ''
+   * (and the CURRENCY screen asks). Nothing is remembered from one payment to the next (the owner, 2026-10-22: with
+   * more than one balance, each receive and send asks). Always 'sat' at a mint with one balance. `flow` is 'receive'
+   * or 'send'. */
   walletNow(flow) {
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
@@ -529,16 +528,8 @@ class Component extends DCLogic {
     if (flow === 'send' && this.cardSendNow()) return (this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : 'sat';
     const s = this.state;
     if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
-    const c = this.walletChoiceNow();
-    return flow === 'receive' ? c.recv : c.send;
-  }
-
-  /* Remember the balance a flow used, for the next one of its kind. */
-  rememberWallet(flow, unit) {
-    const W = window.FoxyWallet;
-    if (!this.twoUnitsOn() || !W || !W.setWalletChoice || (unit !== 'usd' && unit !== 'sat')) return;
-    try { W.setWalletChoice(flow === 'receive' ? { recv: unit } : { send: unit }); }
-    catch (e) { console.warn('[foxy] the balance chosen could not be remembered:', e && e.message); }
+    const pills = this.homePills();
+    return pills.length === 1 ? pills[0] : '';
   }
 
   /* A balance's name: DOLLARS or BITCOIN, never "Cash Balance". */
@@ -563,11 +554,27 @@ class Component extends DCLogic {
     return Math.max(0, Math.round(Number(this.balNow().sats) || 0));
   }
 
-  /* The keypad's dollars in cents, exact, for a dollar balance: '5.00' is 500.
-   * No price comes into it. */
+  /* The keypad's figure in cents, for a dollar balance: dollars typed are exact ('5.00' is 500, no price in it); sats
+   * typed are worth their cents at this phone's price (`unitPx`), and 0 with none. */
   centsTyped() {
     const v = parseFloat(this.state.amount) || 0;
-    return v > 0 ? Math.round(v * 100) : 0;
+    if (!(v > 0)) return 0;
+    if (this.state.unit !== 'SATS') return Math.round(v * 100);
+    const px = this.unitPx ? this.unitPx() : 0;
+    return px > 0 ? Math.round(v / 1e8 * px * 100) : 0;
+  }
+
+  /* The price a figure typed in one unit is put into the other balance's at: this phone's (`px`), but none where the
+   * wallet's last price is the one in use and is more than a day old (`priceTooOld`). 0 for none. */
+  unitPx() {
+    const p = Number(this.px && this.px()) || 0;
+    if (!(p > 0)) return 0;
+    const W = window.FoxyWallet;
+    try {
+      const lp = (W && W.lastPrice) ? W.lastPrice() : null;
+      if (lp && Number(lp.rate) > 0 && Math.round(Number(lp.rate)) === Math.round(p) && W.priceTooOld && W.priceTooOld(lp.at)) return 0;
+    } catch (e) { /* a price that cannot be dated is used as px gives it */ }
+    return p;
   }
 
   /* The pills on home, top to bottom: dollars over bitcoin, or one of them.
@@ -586,13 +593,13 @@ class Component extends DCLogic {
     return ['usd', 'sat'];
   }
 
-  /* The CURRENCY screen, once per kind of flow.
+  /* The CURRENCY screen, for every payment at a mint with two balances.
    *
    * Called on every update. A receive's SET AMOUNT, or a send's SET AMOUNT or
-   * CONFIRM PAYMENT, at a mint with two balances and no balance remembered for
-   * that kind of flow, is put behind CURRENCY ("What do you want to receive?").
-   * The pick is remembered (`currencyPick`), so it is asked once; Dollars or
-   * Bitcoin answered at the hold question sets both and it is never asked. */
+   * CONFIRM PAYMENT, with no balance picked for this payment, is put behind
+   * CURRENCY ("What do you want to receive?"). Nothing is remembered: the next
+   * receive or send asks again. A home showing one balance (`homePills`) asks
+   * nothing; a send asks only when both can pay (`payFromOnly`). */
   syncWalletAsk() {
     const s = this.state;
     const receiving = s.flow === 'receive' && s.screen === 'amount';
@@ -662,7 +669,7 @@ class Component extends DCLogic {
     return covers(Math.floor(cents * 0.9), 0) === false ? false : null;
   }
 
-  /* A card on CURRENCY: the balance for this flow, remembered for the next. */
+  /* A card on CURRENCY: the balance for this payment, and this one only. */
   /* Except setting up a Flashcard (`currencyFlow: 'card'`, 26f-flashcard.js `fcUnitAsk`): the pick is what that card will
    * hold, and nothing of this phone's own choice is written. Back to the card's screen, and on with the set-up. */
   currencyPick(unit) {
@@ -677,10 +684,9 @@ class Component extends DCLogic {
       return;
     }
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
-    this.rememberWallet(flow, unit);
     const patch = { wallet: unit, walletAuto: false, walletTapped: false,
       screen: s.currencyNext || (flow === 'receive' ? 'amount' : 'sendConfirm') };
-    // a dollar balance is typed in dollars, exactly
+    // a dollar balance starts in dollars, exactly; the keypad's swap takes sats as well (`centsTyped`)
     if (unit === 'usd' && s.unit !== 'USD') Object.assign(patch, { unit: 'USD', amount: '' });
     this.setState(patch);
   }
@@ -689,18 +695,16 @@ class Component extends DCLogic {
    * cover this payment greyed (renderCurrency). */
   openWalletPick() { this.go('walletPick'); }
 
-  /* A balance picked on WALLET: this payment's, and remembered for the next.
-   * Picked by hand, so it is not switched for the person again. */
+  /* A balance picked on WALLET: this payment's. Picked by hand, so it is not
+   * switched for the person again. */
   walletPickChoose(unit, why) {
     if (why) { this.toast(why, true); return; }
     this.setState({ wallet: unit, walletAuto: false, walletTapped: true });
-    this.rememberWallet('send', unit);
     this.back();
   }
 
   /* The other balance, when the one in use cannot cover the payment and the
-   * other can: "Bitcoin was chosen for you". Once, and not remembered: only a
-   * tap changes what is remembered. Not after a pick by hand. */
+   * other can: "Bitcoin was chosen for you". Once. Not after a pick by hand. */
   autoWallet(fits) {
     const s = this.state;
     if (!this.twoUnitsOn() || s.walletTapped || this.cardSendNow()) return;

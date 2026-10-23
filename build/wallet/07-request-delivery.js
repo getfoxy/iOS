@@ -2510,7 +2510,9 @@
   /* A request names its unit, and its amount is in that unit (sats, or
    * cents). `sats` is the amount on a sat request and 0 on any other, so
    * nothing that reads sats finds cents there. */
-  function noteOpenRequest(id, amount, mint, purpose, unit) {
+  /* `kept`: the person picked this request's unit for this receive (`paymentRequest`'s `kept`), so what is paid in it
+   * stays in it (08c-units.js, `convertDue`). */
+  function noteOpenRequest(id, amount, mint, purpose, unit, kept) {
     var now = Date.now();
     Object.keys(openRequests).forEach(function (k) {
       if (now - openRequests[k].at > OPEN_REQUEST_MS) delete openRequests[k];
@@ -2518,6 +2520,7 @@
     var u = unitOf(unit) || 'sat';
     var n = Math.max(0, Math.round(Number(amount) || 0));
     openRequests[id] = { amount: n, sats: u === 'sat' ? n : 0, unit: u, mint: mint, at: now, purpose: purpose || 'receive' };
+    if (kept === true) openRequests[id].kept = true;
     saveOpenRequests();
   }
 
@@ -2750,7 +2753,7 @@
     var changeTo = typeof j.changeTo === 'string' && /^0[23][0-9a-f]{64}$/i.test(j.changeTo)
       ? j.changeTo.toLowerCase() : '';
     return { id: id, mint: mint, proofs: proofs, unit: unit, amount: amount, sats: unit === 'sat' ? amount : 0,
-             inFee: inFee, purpose: open.purpose, asked: asked,
+             inFee: inFee, purpose: open.purpose, asked: asked, kept: open.kept === true,
              // what the request was agreed for, if a price was talked over first (`noteRequestTerms`)
              terms: open.terms && typeof open.terms === 'object' ? open.terms : null,
              changeTo: changeTo,

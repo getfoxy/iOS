@@ -758,7 +758,7 @@
         }
         var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, unit,
           [mint], says || undefined, true, lock).toEncodedRequest();
-        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit);
+        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit, o.kept === true);
         return text;
       } catch (e) {
         return '';

@@ -55,7 +55,7 @@ const SIGS = [
   [SPLIT, 'spOthers() {'], [SPLIT, 'spEven() {'], [SPLIT, 'spSharesArr() {'],
   [SPLIT, 'spSlots() {'], [SPLIT, 'spPaidArr() {'], [SPLIT, 'spNextUnpaid() {'],
   [SPLIT, 'spInitials(n) {'], [SPLIT, 'splitVals(s, sc) {'],
-  [AMOUNT, 'renderAmount(c) {'], [CONTEXT, 'renderContext() {'],
+  [AMOUNT, 'renderAmount(c) {'], [AMOUNT, 'keypadStale() {'], [CONTEXT, 'renderContext() {'],
   [KEYPAD, 'press(ch) {'], [KEYPAD, 'display() {'], [KEYPAD, 'group(n) {'],
   [SEND, 'usd(v) {'],
 ];

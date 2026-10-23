@@ -134,9 +134,10 @@
     rate: 'foxy.price.last',              // the last bitcoin price this phone was told, and when
     line: 'foxy.price.line',              // the last price line the chart drew, and when: so a launch with no route has one to draw
     /* Two balances at one mint (sat and usd). What the person said they want
-     * to hold ('dollars', 'bitcoin', 'both'), and the unit a receive and a
-     * send start in ('sat', 'usd', or '' when the screen should ask). Choices,
-     * not money: a wipe of the seed removes them with every other foxy. key. */
+     * to hold ('dollars', 'bitcoin', 'both'). A choice, not money: a wipe of
+     * the seed removes it with every other foxy. key. `recv` and `send` are no
+     * longer read or written (every receive and send asks which balance); they
+     * are named so that a wipe still removes what an older build kept there. */
     hold: 'foxy.wallet.hold',
     recv: 'foxy.wallet.recv',
     send: 'foxy.wallet.send',
