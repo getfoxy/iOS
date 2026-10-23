@@ -49,8 +49,12 @@
       /* Sats held for a swap the mint has not answered are out of the
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */
-      deltaText: this.heldPill() || (chart ? chart.t : ''),
-      deltaShown: !!this.heldPill() || !!chart, markerDisplay: chart ? 'block' : 'none',
+      /* And a stale price says its age in this same pill, in red, instead of on a line of its own under the price: the line came
+       * and went as the connection did, and everything under it moved with it (the owner's rule). Held sats first, then the age,
+       * then the day's change. */
+      deltaText: this.heldPill() || this.priceAgeWords() || (chart ? chart.t : ''),
+      deltaShown: !!this.heldPill() || !!this.priceAgeWords() || !!chart, markerDisplay: chart ? 'block' : 'none',
+      deltaInk: (!this.heldPill() && this.priceAgeWords()) ? 'var(--bad)' : 'rgba(var(--ink-rgb),.62)',
       /* Once per visit to this screen, not once per session: the ride is what
        * the home screen opens with. The element is made
        * when the screen is drawn and let go when it is left, so this fires on
@@ -89,8 +93,8 @@
        * collapsed pill and the open chart share. Under three minutes it says
        * nothing, because that is the window the app already treats as current. */
       priceLabel: 'BITCOIN PRICE',
-      /* The age on its own line under the price, in red:
-       * beside the label it read as part of the title. */
+      /* The age beside the label in the collapsed pill, in red (as part of the title it read as the title). Opened, the chart
+       * has no line of its own for it: the age is in the pill under the price that otherwise says the day's change (`deltaText`). */
       priceAge: this.priceAgeWords(),
       priceAgeShown: !!this.priceAgeWords(),
       markerTop: chart ? (chart.y / 92 * 100).toFixed(1) + '%' : '50%',

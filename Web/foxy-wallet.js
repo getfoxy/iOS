@@ -18838,6 +18838,10 @@
     row.kind = 'swap';
     row.swap = String(rec.swap);
     if (Number(rec.mintRate) > 0) row.mintRate = Number(rec.mintRate);
+    /* A swap begun from a card's screen (26f-flashcard.js `fcSwapGo`) is that card's business: both its rows name the card, so
+     * the card's history shows them and home's leaves them out. `swapCard` on the record, never `card`: a melt's hold entry
+     * already has a `card`, for a payment made with a card's held pieces, which is another thing. */
+    if (rec.swapCard) row.card = String(rec.swapCard);
     return row;
   }
 
@@ -23303,6 +23307,8 @@
                                 // the melt's change is the card's (`opts.changeToCard`), however late the melt is settled
                                 changeToCard: (opts && opts.changeToCard) || undefined }
                        : swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere,
+                         // a swap from a card's screen: the card it is for, so the row the sweep writes names it (`swapMarks`)
+                         swapCard: (opts && opts.swapCard) || undefined,
                          // paid over its need: what comes back is checked when the sweep settles it too
                          changeOnMelt: (asIs && asIs.path === 'change') || undefined } : null);
             /* The card's pieces are the melt's now: out of their hold, once the melt's hold has them (never in neither). A hold
@@ -23374,7 +23380,7 @@
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
             if (heldId) FoxyWallet.cardOutDone(heldId);
             // in the unit paid from (hard rule 4): a usd row is cents, with sats at 0
-            logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere } : null, {
+            logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere, swapCard: (opts && opts.swapCard) || undefined } : null, {
               dir: 'out',
               sats: satsOf(quote.amount),
               feeSats: Math.max(0, feeSats),
@@ -25219,6 +25225,9 @@
           expiresAt: Math.min.apply(null, ends),
           state: 'quoted',
         });
+        /* `opts.card`: the card a swap from a card's screen is for (26f-flashcard.js `fcSwapGo`); kept on the quote, and from it
+         * on the swap's record, its invoice's record and its melt, so both rows of the swap name the card (`swapMarks`). */
+        if (opts && typeof opts.card === 'string' && opts.card) quote.card = opts.card;
         // the two quotes and the wallets they came by, kept off anything that is copied or shown
         Object.defineProperty(quote, '_mintQuote', { value: got.q, enumerable: false });
         Object.defineProperty(quote, '_lock', { value: got.lock, enumerable: false });
@@ -25257,14 +25266,16 @@
       q.state = 'running';
       var mq = q._mintQuote, melt = q._melt;
       var rate = (q.rate && Number(q.rate.usdPerBtc)) || 0;
+      // the card a swap from a card's screen is for (`swapQuote`, `opts.card`), or none
+      var swapCard = typeof q.card === 'string' && q.card ? q.card : undefined;
       var result = function (state, spent, fee) {
         return { id: q.id, state: state, from: { unit: q.from, amount: spent }, to: { unit: q.to, amount: q.get },
                  fee: fee, rate: q.rate };
       };
       try {
         putUnitSwap({ id: q.id, at: Date.now(), mint: q.mint, from: q.from, to: q.to, total: q.total, amount: q.amount,
-                      fee: q.fee, get: q.get, rate: rate, mintQuote: mq.quote, meltQuote: melt.quote, state: 'paying' });
-        keepQuote(mq, q._lock, q.get, 'swap', q.to, q.mint, { swap: q.id, mintRate: rate || undefined });
+                      fee: q.fee, get: q.get, rate: rate, mintQuote: mq.quote, meltQuote: melt.quote, state: 'paying', card: swapCard });
+        keepQuote(mq, q._lock, q.get, 'swap', q.to, q.mint, { swap: q.id, mintRate: rate || undefined, swapCard: swapCard });
       } catch (e) {
         dropUnitSwap(q.id);
         q.state = 'failed';
@@ -25277,7 +25288,7 @@
         dropQuoteRecord({ key: K.quotes, entry: { quote: mq.quote } });
       };
       return FoxyWallet.pay(String(mq.request), function () {}, {
-        unit: q.from, swap: q.id, mintRate: rate,
+        unit: q.from, swap: q.id, mintRate: rate, swapCard: swapCard,
         quote: { quote: melt, w: q._w, bolt11: String(mq.request), at: Date.now(), unit: q.from },
       }).then(function (paid) {
         if (paid && paid.pending) {
@@ -32028,6 +32039,12 @@
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
+
+    /* Whether `key` is a card this phone set up or loaded (it has a row here): its entries are the card's business, shown in
+     * the card's own history and left out of home's (26-render-history-and-contacts.js `renderHistory`). */
+    cardKnownHere: function (key) {
+      return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
+    },
 
     /* The same, for a screen: what each held when last seen, and when it can
      * be taken back. Newest first. Each in the unit it holds (`unit`, a row from

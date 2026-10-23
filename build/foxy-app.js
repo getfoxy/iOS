@@ -14533,8 +14533,12 @@ class Component extends DCLogic {
       /* Sats held for a swap the mint has not answered are out of the
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */
-      deltaText: this.heldPill() || (chart ? chart.t : ''),
-      deltaShown: !!this.heldPill() || !!chart, markerDisplay: chart ? 'block' : 'none',
+      /* And a stale price says its age in this same pill, in red, instead of on a line of its own under the price: the line came
+       * and went as the connection did, and everything under it moved with it (the owner's rule). Held sats first, then the age,
+       * then the day's change. */
+      deltaText: this.heldPill() || this.priceAgeWords() || (chart ? chart.t : ''),
+      deltaShown: !!this.heldPill() || !!this.priceAgeWords() || !!chart, markerDisplay: chart ? 'block' : 'none',
+      deltaInk: (!this.heldPill() && this.priceAgeWords()) ? 'var(--bad)' : 'rgba(var(--ink-rgb),.62)',
       /* Once per visit to this screen, not once per session: the ride is what
        * the home screen opens with. The element is made
        * when the screen is drawn and let go when it is left, so this fires on
@@ -14573,8 +14577,8 @@ class Component extends DCLogic {
        * collapsed pill and the open chart share. Under three minutes it says
        * nothing, because that is the window the app already treats as current. */
       priceLabel: 'BITCOIN PRICE',
-      /* The age on its own line under the price, in red:
-       * beside the label it read as part of the title. */
+      /* The age beside the label in the collapsed pill, in red (as part of the title it read as the title). Opened, the chart
+       * has no line of its own for it: the age is in the pill under the price that otherwise says the day's change (`deltaText`). */
       priceAge: this.priceAgeWords(),
       priceAgeShown: !!this.priceAgeWords(),
       markerTop: chart ? (chart.y / 92 * 100).toFixed(1) + '%' : '50%',
@@ -15524,7 +15528,18 @@ class Component extends DCLogic {
             setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
           }
           this.paidDismissed();
-          this.setState({ screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
+           * home: the owner's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
+           * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
+          const fc = this.state.fc;
+          const off = this._fcPaidOff;
+          this._fcPaidOff = null;
+          const toCard = !!fc && (this.state.stack || []).indexOf('flashcard') >= 0 && (!off || off.key === fc.key);
+          const fcNext = (toCard && off && off.off > 0) ? Object.assign({}, fc, {
+            balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
+            bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
+          }) : fc;
+          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -16548,10 +16563,18 @@ class Component extends DCLogic {
      * was to the card, and counted at what reached or left the card (a load's
      * fee was this phone's). It read the other way: a $5 payment off the card
      * as a $5 credit, and $50 put on it as a withdrawal. */
-    const dirOf = (t) => (ofCard ? (t.dir === 'in' ? 'out' : 'in') : t.dir);
+    /* Two kinds are not turned round. A payment made from the card's own screen (`fromCard`) is the card's pieces paying, out of
+     * the card as it is out of this phone's entry. And a leg of a swap begun from the card (`kind` 'swap', `card` naming it) is
+     * the swap this phone made between the card's two taps: what left in one currency and what came in the other, as it was. */
+    const swapLeg = (t) => t.kind === 'swap';
+    const dirOf = (t) => (!ofCard ? t.dir : (t.fromCard === ofCard || swapLeg(t)) ? t.dir : (t.dir === 'in' ? 'out' : 'in'));
     const unfinished = (t) => !!ofCard && t.memo === 'card, not completed';
-    const cardName = (t) => (t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
+    const otherWord = (t) => (t.unit === 'usd' ? 'bitcoin' : 'dollars');
+    const cardName = (t) => (swapLeg(t) ? (t.dir === 'in' ? 'Swapped from ' : 'Swapped to ') + otherWord(t)
+      : t.fromCard === ofCard ? 'Paid'
+      : t.dir !== 'in' ? 'Added' : t.memo === 'from card' ? 'Withdrawn' : unfinished(t) ? 'Not completed' : 'Paid');
     const cardRail = (t) => {
+      if (swapLeg(t)) return 'On this phone, between the two taps';
       if (unfinished(t)) return t.changeState === 'given back' ? 'Put back on the card' : 'To go back on the card';
       if (t.dir === 'in' && t.changeState === 'not handed' && (t.changeSats > 0 || t.changeAmount > 0)) return 'Change to go back on the card';
       return '';
@@ -16567,9 +16590,17 @@ class Component extends DCLogic {
       return this.unitFigure(u === 'usd' ? o.amount : o.sats, u);
     };
     const inTab = (t) => !two || unitOf(t) === tab;
+    /* Whose list a row is in. A card's own list (`ofCard`): the rows that name that card, its loads, withdrawals and swaps
+     * (`card`), and what it paid from its own screen (`fromCard`). Home's: everything else. A row that names a card this phone
+     * set up or loaded (the wallet's `cardKnownHere`), or that a card paid from its own screen, is that card's business and is
+     * left to the card's list. A till's receipt of someone else's card (a `card` this phone has no row for) is the till's own
+     * income and stays. The books (`histAudit`) still walk every row, these included, so home's ADDS UP is the whole wallet's;
+     * the running balance on a row is what the wallet held after it, so it can step by a card's row that is not shown. */
+    const known = (k) => !!(k && W1 && typeof W1.cardKnownHere === 'function' && W1.cardKnownHere(k));
+    const inList = (t) => (ofCard ? (t.card === ofCard || t.fromCard === ofCard) : !(t.fromCard || known(t.card)));
     const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
       label: g.label,
-      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && (!ofCard || t.card === ofCard)).map(t => Object.assign({
+      items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && inList(t)).map(t => Object.assign({
         // HIDE only masks balances on the home screen — history stays readable
         /* The note, where the person wrote one: "Lunch" says more than
          * "ecash" or the first characters of an invoice. One line, as wide
@@ -16634,7 +16665,12 @@ class Component extends DCLogic {
        * further; then how the payment stands, where it has something to
        * say; then the time. A settled payment has nothing to say, so its
        * time moves up under the title. */
-      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {})).map(r => Object.assign(r, {
+      }, two ? this.histRowTwo(t, tab, balOf, legFigure, legOf) : {},
+      /* On a card of both currencies its list has the tabs, and each row the figure in its own unit (`histRowTwo`), signed as the
+       * card saw it and with no wallet balance beside it, as on a card of one. A swap's leg keeps its own figure, fee and all: what
+       * left in one currency, what came in the other. */
+      cardTwo ? Object.assign(swapLeg(t) ? {} : { amtText: (unfinished(t) ? '' : dirOf(t) === 'in' ? '+ ' : '- ') + this.unitFigure(t.unit === 'usd' ? Math.round(Number(t.amount) || 0) : Math.round(Number(t.sats) || 0), unitOf(t)),
+}, { balText: '' }) : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
@@ -22605,7 +22641,17 @@ class Component extends DCLogic {
     /* The sheet comes up at once, over the keypad, which stays where it is (`fcSendRun`). Typed in dollars, the card held to
      * the phone may yet turn out to hold bitcoin, as every card did: it is then loaded with the sats those dollars are at
      * this phone's price, from this phone's bitcoin (`alt`), as it always was. */
-    if (flow === 'cardSend') { this.fcSendRun(sats, '', unit, unit === 'usd' ? { sats: this.wantedSats(), have: Math.floor(this.balNow().sats || 0) } : null); return; }
+    if (flow === 'cardSend') {
+      const alt = unit === 'usd' ? { sats: this.wantedSats(), have: Math.floor(this.balNow().sats || 0) } : null;
+      /* The PIN before the card is asked for, so the card is tapped once: every card of 1.21 and on takes money under its PIN only,
+       * and the owner found the tap, then "enter the card's PIN", then a second tap (`fcSendPinFirst`). A card read without a PIN
+       * after all ignores the one typed (`fcSendRun`). */
+      // (a new send: no card has been tapped for it yet, whatever the last one did)
+      this._fcSendTapped = false;
+      if (this.fcSendPinFirst()) { this.fcSendAsk(sats, unit, alt); return; }
+      this.fcSendRun(sats, '', unit, alt);
+      return;
+    }
     // (a card of 1.23: what it holds in the currency being taken off)
     if (flow === 'cardWd' && sats > this.fcHeld(fc, unit)) { this.toast('The card holds ' + this.fcBoth(this.fcHeld(fc, unit), unit) + '.', true); return; }
     /* The PIN pad goes up over the keypad, which stays where it is: back
@@ -25980,7 +26026,10 @@ class Component extends DCLogic {
           // the swap at the mint, with no card: at the rate shown while it holds, a new one for what came off where not
           const fresh = Number(q.expiresAt) - Date.now() > (this.SWAP_MARGIN_MS || 15000);
           this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '\u2026', 120000);
-          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took)).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
+          /* the swap is the card's (`opts.card`, kept on the quote): both its rows name the card, so they are in the card's history and
+           * not in home's. The quote the swap screen asked is marked here, a new one is asked with it. */
+          if (fresh) q.card = sc.key;
+          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took, { card: sc.key })).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
           return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
         })
         .then((sw) => {
@@ -26671,11 +26720,25 @@ class Component extends DCLogic {
   }
 
   fcSendAsk(sats, unit, alt) {
+    // the pad before any tap (`fcSendPinFirst`) says TAP CARD; asked by the card after a tap, it says TAP AGAIN
+    const tapped = !!(this._fcTaps > 0) || this._fcSendTapped === true;
+    this._fcSendTapped = false;
     this.fcAskPin({
       title: 'CARD PIN',
       subtitle: 'To put ' + this.fcBoth(sats, unit) + ' on the card.',
-      cta: 'TAP AGAIN',
+      cta: tapped ? 'TAP AGAIN' : 'TAP CARD',
     }, (pin) => this.fcSendRun(sats, pin, unit, alt));
+  }
+
+  /* Whether SEND > FLASHCARD from home asks the card's PIN before the card is asked for. Yes where this phone has read a card of 1.21 or
+   * later in this run (`fcCardPinFirst`), or has any card on file (every card this phone sets up takes money under its PIN only); a
+   * phone that knows no card reads the card first, as before, since a card with no PIN (software before 1.21) would be asked for one
+   * it has not got. */
+  fcSendPinFirst() {
+    if (this.state.fc && this.fcCardPinFirst && this.fcCardPinFirst()) return true;
+    const W = this.fcW();
+    const known = (W && W.cardsKnown) ? W.cardsKnown() : null;
+    return !!(known && Object.keys(known).length);
   }
 
   /* `unit`: the balance the money comes from ('usd' from this phone's dollars), which the card held to the phone must hold:
@@ -26693,6 +26756,8 @@ class Component extends DCLogic {
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
+          // the card has been tapped for this send: a PIN asked after this says TAP AGAIN (`fcSendAsk`)
+          this._fcSendTapped = true;
           /* A new card, with no PIN and no owner, of software 1.22: the first phone that sends it money sets it up for its holder
            * (`fcSendSetUp`). The sheet ends calmly, nothing made, and the set-up's steps come up. */
           // (a new card of 1.21 takes no money with no owner: its holder sets it up on a Foxy of their own first)
@@ -26729,8 +26794,10 @@ class Component extends DCLogic {
             sats = fig[unit];
             alt = null;
           }
-          // a card set up for the other currency alone is refused before its PIN is asked
-          if (unit && !pin) this.fcSendGuard(card, unit, alt);
+          // a card set up for the other currency alone is refused before anything is made for it (its PIN may have been typed ahead of the read)
+          if (unit) this.fcSendGuard(card, unit, alt);
+          // a PIN typed before the read (`fcSendPinFirst`), for a card that turns out to have none: not sent to it
+          if (pin && !card.info.pinSet) pin = '';
           // a card that has a PIN is asked for it before any money is made for it: the sheet ends saying so
           if (card.info.pinSet && !pin) {
             const x = /** @type {any} */ (new Error('The card wants its PIN first.'));
@@ -27277,6 +27344,9 @@ class Component extends DCLogic {
     }
     // a bitcoin address: paid on chain, on the confirmation it was read on
     if (send.onchain) { this.fcOcPay(o, send); return; }
+    /* What came off the card for this payment, for the card's screen the confirmation returns to (24-render-receive-and-send.js,
+     * `dismissPaid`): the card is not read again there, so its figure is stepped down by this much. */
+    this._fcPaidOff = { key: send.key, unit: o.unit, off: Math.max(0, Math.round(Number(sats) || 0)) };
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
     this.setState(p => ({ screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in', etaLeft: 600 }));
     this.startSendNow(send.to, o);
@@ -27642,17 +27712,19 @@ class Component extends DCLogic {
      * (the card then holds both); where both hold, the swap screen's own from and to choose. Only a card that holds nothing at all is
      * offered SWAP greyed, with the reason when pressed. */
     const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
+    /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`): a card of one currency has
+     * SCAN and PASTE alone, the owner's rule. */
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
       { label: 'PASTE', tap: () => this.fcOutPaste(), spin: 'none', dim: '1', pasteHere: '',
         path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
+    ].concat(swappable ? [
       { label: 'SWAP', spin: 'none', pasteHere: '',
-        dim: (!swappable || swapEarly || this.offlineNow()) ? '0.38' : '1',
-        tap: swapEarly ? () => this.toast('Put money on the card to swap.', true)
-          : swappable ? () => this.fcSwap() : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
+        dim: (swapEarly || this.offlineNow()) ? '0.38' : '1',
+        tap: swapEarly ? () => this.toast('Put money on the card to swap.', true) : () => this.fcSwap(),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
-    ];
+    ] : []);
     // the limit line has a card to be on, and says nothing of a blocked one
     const limitShown = !!fc && !!fc.hasRecord && fc.pin !== 'blocked';
     // what the balance says now: what the card holds, or, while it counts after money went on or off, where it has got to

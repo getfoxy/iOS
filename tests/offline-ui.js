@@ -153,8 +153,14 @@ check('the age line is built from the age, not just named',
   /priceAge: this\.priceAgeWords\(\)/.test(app)
   // given no age, the home line asks priceAgo(); given one (another phone's price), it says that age
   && /priceAgeWords\(ms\) \{[\s\S]{0,800}?if \(!this\.priceAgo\(\)\) return '';/.test(app));
-check('and the age is red, under the price, in both the pill and the chart',
-  (markup.match(/color:var\(--bad\)[^>]*>\{\{ priceAge \}\}/g) || []).length === 2);
+/* Collapsed, the age is red beside the label; opened, it is in the pill under the price that otherwise says the day's change
+ * (`deltaText`), in red, so nothing under the price moves when the connection comes and goes. */
+check('and the age is red beside the label in the collapsed pill, once',
+  (markup.match(/color:var\(--bad\)[^>]*>\{\{ priceAge \}\}/g) || []).length === 1);
+check('and opened, the age takes the day-change pill, in red, with held sats first',
+  /deltaText: this\.heldPill\(\) \|\| this\.priceAgeWords\(\) \|\| \(chart \? chart\.t : ''\)/.test(app)
+  && /deltaInk: \(!this\.heldPill\(\) && this\.priceAgeWords\(\)\) \? 'var\(--bad\)'/.test(app)
+  && /color:\{\{ deltaInk \}\};white-space:nowrap">\{\{ deltaText \}\}/.test(markup));
 check('and both the pill and the chart use it',
   (markup.match(/\{\{ priceLabel \}\}/g) || []).length === 2,
   'collapsed and expanded share one label');
