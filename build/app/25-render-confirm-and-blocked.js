@@ -124,16 +124,26 @@
     };
     // (setting up a Flashcard: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
     const cardFlow = s.currencyFlow === 'card';
+    /* (a card of software 1.23 asked which of its currencies, 26f-flashcard.js `fcPickUnit`: its own question, its own balances, and a
+     * currency that cannot do what is asked greyed with why: `curCard` { question, foot, bal, short }) */
+    const cc = cardFlow ? (s.curCard || null) : null;
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
     const current = pick ? (this.walletNow('send') || 'sat') : '';
     const off = this.offlineNow();
     // on WALLET, a balance that cannot cover this payment is greyed, and says so
     const whyNot = (u) => {
+      if (cc) return (cc.short && cc.short[u]) || '';
       if (!pick) return '';
       if (off && u !== current) return 'NEEDS A CONNECTION';
       return this.quoteFits(u) === false ? 'NOT ENOUGH FOR ' + this.sendAmountText() : '';
     };
     const balanceText = (u) => {
+      // (the card's, dollars with their sats under them and bitcoin with its dollars, at the market price)
+      if (cc && cc.bal) {
+        const m = Math.round(Number(cc.bal[u]) || 0), r = this.satUsd ? this.satUsd() : 0;
+        if (u === 'usd') return this.unitFigure(m, 'usd') + (r ? ' \u00b7 \u20bf ' + this.group(Math.round(m / 100 / r)) : '');
+        return this.unitFigure(m, 'sat') + (r ? ' \u00b7 $ ' + this.usd(m * r) : '');
+      }
       const n = this.unitBalance(u);
       if (u === 'usd') return this.unitFigure(n, 'usd');
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
@@ -153,7 +163,7 @@
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
         cursor: tag ? 'default' : 'pointer',
-        tap: () => (pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
+        tap: () => ((cc && tag) ? this.toast(String(cc.why || 'That one cannot do this.'), true) : pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
           ? 'Your ' + this.unitWord(u).toLowerCase() + ' need a connection to pay this.'
           : 'Your ' + this.unitWord(u).toLowerCase() + ' cannot cover this payment.') : '') : this.currencyPick(u)),
       });
@@ -173,6 +183,7 @@
       isCurrency: sc === 'currency' || pick,
       curTitle: pick ? 'WALLET' : 'CURRENCY',
       curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+        : cc ? String(cc.question || '')
         : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
@@ -183,6 +194,7 @@
             + ' was chosen for you: your ' + this.unitWord(current === 'usd' ? 'sat' : 'usd').toLowerCase()
             + ' cannot cover this one.'
           : 'The one you pick is remembered for your next payment.')
+        : cc ? String(cc.foot || '')
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',

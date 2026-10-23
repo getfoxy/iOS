@@ -377,7 +377,9 @@ final class NUT13Tests: XCTestCase {
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0xFF, 0xFF, 0xFF, 0xFF]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88]))
         XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x13, 0x88, 0, 0, 0x27, 0x10]))
-        for n in [0, 1, 3, 5, 6, 7, 9, 10, 11, 13, 16] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
+        // card software 1.23: the day's, the one payment's and the allowance in cents, then the rate (sats per dollar)
+        XCTAssertTrue(CardOwner.Label.setLimit.accepts([0, 0, 0, 0, 0, 0, 0x03, 0xE8, 0, 0, 0, 0xC8, 0, 0, 0x03, 0xE8]))
+        for n in [0, 1, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 20] { XCTAssertFalse(CardOwner.Label.setLimit.accepts([UInt8](repeating: 1, count: n)), "\(n) bytes") }
         // set-owner: 65 bytes, 04 first
         let key = [0x04] + [UInt8](repeating: 0x55, count: 64)
         XCTAssertTrue(CardOwner.Label.setOwner.accepts(key))

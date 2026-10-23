@@ -55,7 +55,8 @@ const method = (sig) => {
   }
   return appSrc.slice(start + 3, i + 1);
 };
-const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
+// (`swapHave`: what there is to swap, this phone's balance or a card's, 26f-flashcard.js `fcSwap`; `swapComing`: a card's, counted as coming)
+const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 'swapComing(u) {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
   'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r) {',
   'swapDoneClose() {', 'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',

@@ -149,6 +149,17 @@ phone mending at its next tap (`cardMend`), VIEW AS GUEST mending in its held ta
 the owner's proof and under the PIN and the hold, 1.21's "This card’s software cannot do that.", and
 the card screen's FINISH THIS CHANGE and GIVE UP THIS CHANGE, the second only where an opening is stuck.
 
+**`flashcard-units.js`** holds the card of software 1.23, dollars and bitcoin on one card at
+its one mint, against the model taught 1.23 (`software: 23`, held by `flashcard-model.js` to the
+part of the applet's 1.23 recording that is its own): the table of keysets and its mark, 6A99 to
+6A9D, a 1.23 card of one unit read and paid as a 1.22 card is, two units loaded (labelled, P2 = 1)
+and read (format 5, the table), the bytes of a load of each unit, a limit with its rate and a
+payment of each unit, one ceiling in cents across both, the rate written, re-pegged past 2% and
+asked about when far off, the holder asked which currency pays, SWAP with a tap at each end, the
+drawer four deep in each unit, a card of 1.22 sent nothing new, the log and the receipts by unit,
+and the card's screens: two pills, WITHDRAW asking which currency first, PAY FROM WHICH? and the
+rate guard.
+
 **`flashcard-holder.js`** holds the card of a holder with no phone (card software 1.22)
 and the set-up's own screens, against the model of the card taught 1.21 and 1.22
 (`software: 21`, `software: 22` in `flashcard-card.js`). Of the card: SELECT's 01 15 and

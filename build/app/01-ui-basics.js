@@ -282,10 +282,11 @@ class Component extends DCLogic {
      * in a row of its own after NETWORK, held to what the card holds and not to this phone's balance, and NEXT, which reads
      * the payment off the card (`fcOutNext`). */
     const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
-    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
+    // (a card of software 1.23 that holds both: what it holds of the currency chosen to pay from, `fcUnit`, `fcHeld`)
+    const cardHas = out ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : Math.max(0, Math.round(Number(s.fc.balance) || 0))) : 0;
     /* A dollar card pays by a melt of its dollars, quoted in cents (03-send.js, `quoteSendFee`): its card's figures, the fee
      * and the total are dollars, and nothing of a sats figure is set against what it holds. */
-    const cardUsd = out && s.fc.unit === 'usd';
+    const cardUsd = out && (this.fcUnit ? this.fcUnit() : s.fc.unit) === 'usd';
     const cfig = (n) => (cardUsd ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
@@ -522,7 +523,8 @@ class Component extends DCLogic {
   walletNow(flow) {
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
-    if (flow === 'send' && this.cardSendNow()) return (this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : 'sat';
+    // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)
+    if (flow === 'send' && this.cardSendNow()) return (this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : 'sat';
     const s = this.state;
     if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
     const c = this.walletChoiceNow();
@@ -610,7 +612,7 @@ class Component extends DCLogic {
     if (s.currencyFlow === 'card') {
       const then = this._fcUnitThen;
       this._fcUnitThen = null;
-      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '' }));
+      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null }));
       if (then) then(unit === 'usd' ? 'usd' : 'sat');
       return;
     }

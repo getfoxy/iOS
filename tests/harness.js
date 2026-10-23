@@ -1385,7 +1385,8 @@ function nativePhone(opts) {
       const design = (d) => d.length === 3 && (d.every((b) => b === 0) || d.every((b) => (b >= 0x41 && b <= 0x5a) || (b >= 0x30 && b <= 0x39)));
       const shaped = {
         'change-pin': value.length >= 4 && value.length <= 8 && value.every((b) => b >= 0x30 && b <= 0x39),
-        'set-limit': value.length === 4 || value.length === 8 || value.length === 12,
+        // (16: card software 1.23's, the three figures in cents and the rate)
+        'set-limit': value.length === 4 || value.length === 8 || value.length === 12 || value.length === 16,
         'set-owner': value.length === 65 && value[0] === 4,
         // the time key (65 bytes from 34) starts 04, or is all zeros: a card of software 1.15 has none; and after the mint
         // there is nothing, or the card's design, whose mint is 77 bytes at the most (CardOwner.Label.setCard)

@@ -824,6 +824,30 @@ function representative(logic) {
   add('fcLimitConfirm, a dollar card\u2019s limit on one tap', at('fcLimitConfirm', { fc: FC({ unit: 'usd', balance: 2000 }), fcLimit: { sats: 2000, usd: 0 } },
     { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = false; a._fcLimitTap = false; } }));
   add('CURRENCY, setting up a card', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard' }, TWO_LIVE), { wallet: TWO() }));
+  /* A card of software 1.23 (26f-flashcard.js): dollars and bitcoin on one card, its two pills and its one ceiling in dollars under them;
+   * one of bitcoin alone, its ceiling in dollars all the same; which currency pays, is added or is taken off, on the CURRENCY screen; the
+   * rate guard; the card's SWAP from its own balances; and a refusal of 1.23 in its own words. */
+  const TAP_CENTS = { known: true, paced: true, limited: true, limit: 1000, spent: 0, left: null, turns: 0, noTime: false };
+  const NOPIN_CENTS = { known: true, set: true, limit: 200, spent: 15, left: 185, turns: 0, now: 0 };
+  const FC123 = (over) => FC(Object.assign({ v123: true, cents: true, pinFirst: true, noPinKnown: true, units: ['sat', 'usd'], bal: { usd: 1500, sat: 3000 },
+    balance: 3000, tap: TAP_CENTS, noPin: NOPIN_CENTS, rate: 1000 }, over || {}));
+  add('flashcard, a card of software 1.23 holding dollars and bitcoin: two pills, its ceiling in dollars under them', at('flashcard', Object.assign({ fc: FC123() }, TWO_LIVE),
+    { wallet: Object.assign(TWO(), CARDS()) }));
+  add('flashcard, a card of software 1.23 holding bitcoin alone: one pill, its ceiling in dollars', at('flashcard', Object.assign({ fc: FC123({ units: ['sat'], bal: { usd: 0, sat: 3000 } }) }, TWO_LIVE),
+    { wallet: Object.assign(TWO(), CARDS()) }));
+  add('CURRENCY, which currency of a card pays', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', fc: FC123(),
+    curCard: { question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. The one you pick pays this time; you are asked every time.',
+      bal: { usd: 1500, sat: 3000 }, short: { usd: '', sat: '' } } }, TWO_LIVE), { wallet: TWO() }));
+  add('CURRENCY, which currency of a card pays, one too short', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', fc: FC123(),
+    curCard: { question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. The one you pick pays this time; you are asked every time.',
+      bal: { usd: 50, sat: 3000 }, short: { usd: 'NOT ENOUGH ON THE CARD', sat: '' } } }, TWO_LIVE), { wallet: TWO() }));
+  add('CURRENCY, adding to a card of software 1.23', at('currency', Object.assign({ currencyFlow: 'card', currencyNext: 'flashcard', fc: FC123(),
+    curCard: { question: 'ADD WHICH TO THE CARD?', foot: 'From what this phone holds. The card keeps dollars and bitcoin side by side.', bal: null, short: { usd: '', sat: '' } } }, TWO_LIVE),
+    { wallet: TWO() }));
+  add('two balances: SWAP, a card\u2019s two balances', at('swap', Object.assign({ swapFrom: 'usd', swapTo: 'sat', fc: FC123() }, TWO_LIVE),
+    { wallet: TWO(), before: (a) => { a._swapCard = { key: KEY_A, bal: { usd: 1500, sat: 3000 } }; } }));
+  add('amount, withdrawing dollars from a card of software 1.23', at('amount', Object.assign({ flow: 'cardWd', amount: '', unit: 'USD', fc: FC123() }, TWO_LIVE),
+    { wallet: Object.assign(TWO(), CARDS()), before: (a) => { a._fcFlowUnit = 'usd'; } }));
   add('PAYMENT RECEIVED, a dollar card paid', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 475, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
   add('PAYMENT RECEIVED, sats asked of a dollar card, to be swapped into bitcoin', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 592, paidAskedSats: 7000,
     paidAskOwn: true, paidAskAgeMs: 2 * 3600 * 1000, paidConvert: true, recvResolved: true, recv: { live: 'in' } }, TWO_LIVE),
@@ -1094,6 +1118,11 @@ function cards() {
     { paying: true, taken: true, offline: true, dollarAsk: true, usd: { cents: 100, bolt11: '', satsWhy: 'build' } }));
   add('card error, this card holds bitcoin, before the dollar code', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'sat', askUnit: 'usd', message: 'This card holds bitcoin here, not dollars.' },
     { paying: true, taken: true, dollarAsk: true, codeUp: false, usd: { cents: 100, bolt11: '' } }));
+  // (software 1.23: the rate guard, and two of its refusals in their own words, 26f-flashcard.js)
+  add('card: the rate guard, a price far from the card\u2019s', (a) => a.fcRateFar({ now: 260000, was: 100000 }, () => {}));
+  add('card error, a card of software 1.23 asked for both currencies at once', (a) => a.fcFailed({ card: 'two-units', message: 'The card was asked to pay from both currencies at once. Nothing was taken.' },
+    { paying: true, taken: true }));
+  add('card error, a new currency on a card, not its owner\u2019s phone', (a) => a.fcFailed({ card: 'owner-unit', message: 'Only the card\u2019s owner can add a new currency to it.' }, {}));
   add('card error, no dollars at this mint', (a) => a.fcFailed({ card: 'no-dollars-here', cardUnit: 'usd', message: 'mint.minibits.cash does not issue dollars now, so this card cannot be used here.' },
     { paying: true, taken: true }));
   const USD_TERMS = { payUnit: 'usd', pay: 592, sats: 7000, rate: 84571, ageMs: 2 * 3600 * 1000, seenAt: 1, own: true, convert: true };

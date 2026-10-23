@@ -179,7 +179,8 @@
      * (`cardSendNow`): a dollar card's in dollars. */
     const cardOut = !!(this.cardSendNow && this.cardSendNow());
     const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
-    const cardUnit = (cardOut && this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : '';
+    // (a card of software 1.23 that holds both: the currency chosen to pay from, 26f-flashcard.js `fcUnit`)
+    const cardUnit = (cardOut && this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : '';
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;

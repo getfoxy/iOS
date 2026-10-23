@@ -32,7 +32,7 @@
  "screen currency": {
   "file": "389-screen-currency.html",
   "markup": "5fe0ce1fe424de0b73d27ee6291a7c60822407d3bedbeacfc70fbcab7349bdb6",
-  "vals": "5066ac2258d21ba2b9379f8023ff6038af003a3ad6948aa7b1d971d50463c145"
+  "vals": "09e96b183378fb68a3997a06c412667d896feb4aaa80b45c740bc64f31acd4f6"
  },
  "screen fieldLog": {
   "file": "211-screen-fieldlog.html",
@@ -162,7 +162,7 @@
  "screen walletPick": {
   "file": "393-screen-walletpick.html",
   "markup": "35f34b7983e2dc3fac838c7ef87a75f6501c9dbe54e70408a73119970c5fe6c9",
-  "vals": "0a8b9c723f2ae3bdd2f9b8f63e67df8c4cd9cfdc6849aa67d5b363d266137a00"
+  "vals": "c2d9b018f2a5a04c21ba7cadd50357c0ba257d32bbd00000c3d6de69750db6fe"
  },
  "popup addConfirmOpen": {
   "file": "037-popup-addconfirmopen.html",
@@ -482,7 +482,7 @@
  "flashcard, a card holding two balances, with SWAP": {
   "file": "419-flashcard-a-card-holding-two-balances-with-swap.html",
   "markup": "f0ac0479406aff7da92a71eeecd31742eb283c6f03c5a544833d2e69592d0641",
-  "vals": "2f172567c2edd6ebd77c543f88df8634d47ee4232d5efe74372e4158d1eb5f97"
+  "vals": "4d3cf1341a191a86b57cdd73c7736ccadab6a3121f696c3e539b05dcac2c168b"
  },
  "flashcard, a card at another mint than this phone’s": {
   "file": "420-flashcard-a-card-at-another-mint-than-this-phone-s.html",
@@ -1297,7 +1297,7 @@
  "two balances: CURRENCY before the first receive": {
   "file": "398-two-balances-currency-before-the-first-receive.html",
   "markup": "5fb1011fb9e4b570a5cf5474c250fb177b28b1c0b6fad10a8570167e8d9ef37e",
-  "vals": "0fc0a78ea1c4ed15f81b31c815199a59ca2a1b5f1b621e03dcce82b5f1c5348a"
+  "vals": "284dcea642923fce412b8205d7c5167bcb73885d3e90b433d824054d404669a3"
  },
  "two balances: SET AMOUNT, a dollars receive": {
   "file": "399-two-balances-set-amount-a-dollars-receive.html",
@@ -1332,7 +1332,7 @@
  "two balances: WALLET, dollars short": {
   "file": "404-two-balances-wallet-dollars-short.html",
   "markup": "8aede17bc07ea80c87b4aa17d3411e7e5a9d88b25ae1c677a290ebe55acee350",
-  "vals": "659aaa5bc1ea8e8f0286a074d69906374ae55d62eb38c74e2d8c2c479407edfc"
+  "vals": "1f1d41ddf5032c92d881f86babda9723df465518f2dfe237f0687a25919b454a"
  },
  "two balances: paid, ADDED TO DOLLARS": {
   "file": "405-two-balances-paid-added-to-dollars.html",
@@ -1592,7 +1592,42 @@
  "CURRENCY, setting up a card": {
   "file": "477-currency-setting-up-a-card.html",
   "markup": "52973abaaa812271ff09fab1ea14594105a55253af8c3092a52f413d67baaa54",
-  "vals": "1a412e2fd0b8c7b28106b02ad2fa0af37d30daa21e55cb6e44c55708d8517462"
+  "vals": "b8a4704939d01b723ff24d7f33f00296637be8e34b8060711df6ec2ed8d7d820"
+ },
+ "flashcard, a card of software 1.23 holding dollars and bitcoin: two pills, its ceiling in dollars under them": {
+  "file": "530-flashcard-a-card-of-software-1-23-holding-dollars-and-bitcoin-two-pills-its-ceiling-in-dollars-under-them.html",
+  "markup": "7b5a20340cf0d311d93321b36c2c5bca6cc54b2f784166a96de8af25fea2d9e3",
+  "vals": "4b0754804170a8b82b7fc58c256131aa99b898bd0aff4615740d21b2ec71b671"
+ },
+ "flashcard, a card of software 1.23 holding bitcoin alone: one pill, its ceiling in dollars": {
+  "file": "531-flashcard-a-card-of-software-1-23-holding-bitcoin-alone-one-pill-its-ceiling-in-dollars.html",
+  "markup": "49083e4e7286662c7120be037015b683fdc58bf4215530efc0eb167fa1bb7cb4",
+  "vals": "5c9eff8680de2ec53ef3787a8ae7dcc90cccea0487a9a23a649dd4f3cd1ef9b7"
+ },
+ "CURRENCY, which currency of a card pays": {
+  "file": "532-currency-which-currency-of-a-card-pays.html",
+  "markup": "25a62a17fad07320fa3360de5457b571a53317e19633a0db064a4c5d85b0579b",
+  "vals": "53b789f1f7f8025a3139aa316a9b1e5bf82da0ee4e640f4dbeabbbce30839510"
+ },
+ "CURRENCY, which currency of a card pays, one too short": {
+  "file": "533-currency-which-currency-of-a-card-pays-one-too-short.html",
+  "markup": "c2c72929fd31d90ae6d69d0f60e684fdd0e957bd8816a4d77671ab0df27e9297",
+  "vals": "60a119da2effaee36ccc6b10fba5d4fe1292f08be7658803a510140ffa12a9cb"
+ },
+ "CURRENCY, adding to a card of software 1.23": {
+  "file": "534-currency-adding-to-a-card-of-software-1-23.html",
+  "markup": "4104aa69ddb692c40cf940b809bddc8c3caa7bb26f88009a4309a8f06ec9d0c7",
+  "vals": "794745fb389e6954b789582e381f224e84f0aab315fdf380ec462e453e708566"
+ },
+ "two balances: SWAP, a card’s two balances": {
+  "file": "535-two-balances-swap-a-card-s-two-balances.html",
+  "markup": "2841161d2763cd24fb8349d2c75592cb522dd8024d4b745fd3d0892d1999bb06",
+  "vals": "4d637f7e9fd048c8ec38847e53b412a1076f918339e63b19aa4a8daff9614851"
+ },
+ "amount, withdrawing dollars from a card of software 1.23": {
+  "file": "536-amount-withdrawing-dollars-from-a-card-of-software-1-23.html",
+  "markup": "dd6ed5f23ee3ce57f37e2237a7c54af3d91778dd572f5b7a845c1598059ea32e",
+  "vals": "89d03f5fef24d4329c374e0c6046a825a78cc45033545e2ed9cdd7f3607a05d7"
  },
  "PAYMENT RECEIVED, a dollar card paid": {
   "file": "478-payment-received-a-dollar-card-paid.html",
@@ -2262,6 +2297,21 @@
  "card error, this card holds bitcoin, before the dollar code": {
   "file": "485-card-error-this-card-holds-bitcoin-before-the-dollar-code.html",
   "markup": "4206a4a41ead2012ec3ff4c415afd4aded7cacbed5c568c364f57828714ae023",
+  "vals": "f92e0af5f46e7c14f04b9c5730dac638eb9771dc7a3ed196c55365b7b19d62b5"
+ },
+ "card: the rate guard, a price far from the card’s": {
+  "file": "537-card-the-rate-guard-a-price-far-from-the-card-s.html",
+  "markup": "9b23d54279e4c3666e0a96f9e7c978ef2faa4e68f31c41d482bd07baadf8479d",
+  "vals": "f92e0af5f46e7c14f04b9c5730dac638eb9771dc7a3ed196c55365b7b19d62b5"
+ },
+ "card error, a card of software 1.23 asked for both currencies at once": {
+  "file": "538-card-error-a-card-of-software-1-23-asked-for-both-currencies-at-once.html",
+  "markup": "7f8a8006c2395da8e5b37952bf27f6d20ecae394bbabb73511d46562ae9e8c04",
+  "vals": "f92e0af5f46e7c14f04b9c5730dac638eb9771dc7a3ed196c55365b7b19d62b5"
+ },
+ "card error, a new currency on a card, not its owner’s phone": {
+  "file": "539-card-error-a-new-currency-on-a-card-not-its-owner-s-phone.html",
+  "markup": "9202eda446608a4e690815957a5299ecc509ee58eddaa8fc4142400cafaf10e1",
   "vals": "f92e0af5f46e7c14f04b9c5730dac638eb9771dc7a3ed196c55365b7b19d62b5"
  },
  "card error, no dollars at this mint": {

@@ -562,12 +562,15 @@
     const usdCapUsd = (Number(s.balUsdCents) || 0) / 100;
     /* A dollar card's figures are its cents: what it holds caps a withdrawal or a payment from it, and this phone's dollars
      * cap money put on one, all in dollars, with no price in any of it (26f-flashcard.js, `fcTypedUnit`). */
-    const usdCard = !!(s.fc && s.fc.unit === 'usd');
+    // (a card of software 1.23: the currency of this ADD FUNDS, WITHDRAW or payment, `fcUnit`, and what it holds of it, `fcHeld`)
+    const fcU = this.fcUnit ? this.fcUnit() : ((s.fc && s.fc.unit === 'usd') ? 'usd' : 'sat');
+    const usdCard = !!(s.fc && fcU === 'usd');
+    const cardHeld = s.fc ? (this.fcHeld ? this.fcHeld(s.fc, fcU) : Math.max(0, Math.round(Number(s.fc.balance) || 0))) : 0;
     const usdLoad = (s.flow === 'cardAdd' || s.flow === 'cardSend') && !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
     const sendCapUsd = !capped ? 0
-      : ((s.flow === 'cardWd' || cardOut) && usdCard) ? ((s.fc && s.fc.balance) || 0) / 100
+      : ((s.flow === 'cardWd' || cardOut) && usdCard) ? cardHeld / 100
       : usdLoad ? usdCapUsd
-      : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : (s.flow === 'cardWd' || cardOut) ? cardHeld * this.satUsd()
       : twoSend ? (s.walletTapped ? (this.walletNow('send') === 'usd' ? usdCapUsd : btcAvailUsd)
         : Math.max(usdCapUsd, btcAvailUsd || 0))
       : btcAvailUsd;

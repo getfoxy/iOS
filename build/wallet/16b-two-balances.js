@@ -591,8 +591,12 @@
         return Promise.reject(new Error(hostOf(at) + ' issues only bitcoin, so there is nothing to swap with.'));
       }
       if (!routeOpen()) return Promise.reject(offline());
+      /* `opts.coming`: what will be in this phone of FROM before the swap is run, and is not yet (a card's SWAP: what comes off the card at
+       * its first tap, 26f-flashcard.js `fcSwapGo`); it is counted in what this phone could swap, never in `opts.all`'s whole. */
+      var coming = Math.max(0, Math.round(Number(opts && opts.coming) || 0));
       var have = sumProofs(proofs(at, f));
       var total = (opts && opts.all) ? have : Math.round(Number(amount));
+      have += coming;
       if (!(total > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       if (total > have) {
         return Promise.reject(new Error('That is more than your ' + balanceWord(f) + ': you hold ' + moneyWords(have, f) + '.'));

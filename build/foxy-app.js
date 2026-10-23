@@ -284,10 +284,11 @@ class Component extends DCLogic {
      * in a row of its own after NETWORK, held to what the card holds and not to this phone's balance, and NEXT, which reads
      * the payment off the card (`fcOutNext`). */
     const out = !!(this.fcOutMode && this.fcOutMode()) && !!s.fc;
-    const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
+    // (a card of software 1.23 that holds both: what it holds of the currency chosen to pay from, `fcUnit`, `fcHeld`)
+    const cardHas = out ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : Math.max(0, Math.round(Number(s.fc.balance) || 0))) : 0;
     /* A dollar card pays by a melt of its dollars, quoted in cents (03-send.js, `quoteSendFee`): its card's figures, the fee
      * and the total are dollars, and nothing of a sats figure is set against what it holds. */
-    const cardUsd = out && s.fc.unit === 'usd';
+    const cardUsd = out && (this.fcUnit ? this.fcUnit() : s.fc.unit) === 'usd';
     const cfig = (n) => (cardUsd ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
@@ -524,7 +525,8 @@ class Component extends DCLogic {
   walletNow(flow) {
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
-    if (flow === 'send' && this.cardSendNow()) return (this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : 'sat';
+    // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)
+    if (flow === 'send' && this.cardSendNow()) return (this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : 'sat';
     const s = this.state;
     if (s.wallet === 'usd' || s.wallet === 'sat') return s.wallet;
     const c = this.walletChoiceNow();
@@ -612,7 +614,7 @@ class Component extends DCLogic {
     if (s.currencyFlow === 'card') {
       const then = this._fcUnitThen;
       this._fcUnitThen = null;
-      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '' }));
+      this.setState(p => ({ screen: p.currencyNext || 'flashcard', stack: p.stack.slice(0, -1), currencyFlow: '', curCard: null }));
       if (then) then(unit === 'usd' ? 'usd' : 'sat');
       return;
     }
@@ -946,7 +948,8 @@ class Component extends DCLogic {
      * (`cardSendNow`): a dollar card's in dollars. */
     const cardOut = !!(this.cardSendNow && this.cardSendNow());
     const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
-    const cardUnit = (cardOut && this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : '';
+    // (a card of software 1.23 that holds both: the currency chosen to pay from, 26f-flashcard.js `fcUnit`)
+    const cardUnit = (cardOut && this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : '';
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
@@ -14344,12 +14347,15 @@ class Component extends DCLogic {
     const usdCapUsd = (Number(s.balUsdCents) || 0) / 100;
     /* A dollar card's figures are its cents: what it holds caps a withdrawal or a payment from it, and this phone's dollars
      * cap money put on one, all in dollars, with no price in any of it (26f-flashcard.js, `fcTypedUnit`). */
-    const usdCard = !!(s.fc && s.fc.unit === 'usd');
+    // (a card of software 1.23: the currency of this ADD FUNDS, WITHDRAW or payment, `fcUnit`, and what it holds of it, `fcHeld`)
+    const fcU = this.fcUnit ? this.fcUnit() : ((s.fc && s.fc.unit === 'usd') ? 'usd' : 'sat');
+    const usdCard = !!(s.fc && fcU === 'usd');
+    const cardHeld = s.fc ? (this.fcHeld ? this.fcHeld(s.fc, fcU) : Math.max(0, Math.round(Number(s.fc.balance) || 0))) : 0;
     const usdLoad = (s.flow === 'cardAdd' || s.flow === 'cardSend') && !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
     const sendCapUsd = !capped ? 0
-      : ((s.flow === 'cardWd' || cardOut) && usdCard) ? ((s.fc && s.fc.balance) || 0) / 100
+      : ((s.flow === 'cardWd' || cardOut) && usdCard) ? cardHeld / 100
       : usdLoad ? usdCapUsd
-      : (s.flow === 'cardWd' || cardOut) ? ((s.fc && s.fc.balance) || 0) * this.satUsd()
+      : (s.flow === 'cardWd' || cardOut) ? cardHeld * this.satUsd()
       : twoSend ? (s.walletTapped ? (this.walletNow('send') === 'usd' ? usdCapUsd : btcAvailUsd)
         : Math.max(usdCapUsd, btcAvailUsd || 0))
       : btcAvailUsd;
@@ -15015,9 +15021,10 @@ class Component extends DCLogic {
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
       amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
-      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0, s.fc && s.fc.unit) + ')'
+      // (a card of software 1.23: all of the currency chosen, `fcUnit`)
+      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
-        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
         : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
@@ -16274,16 +16281,26 @@ class Component extends DCLogic {
     };
     // (setting up a Flashcard: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
     const cardFlow = s.currencyFlow === 'card';
+    /* (a card of software 1.23 asked which of its currencies, 26f-flashcard.js `fcPickUnit`: its own question, its own balances, and a
+     * currency that cannot do what is asked greyed with why: `curCard` { question, foot, bal, short }) */
+    const cc = cardFlow ? (s.curCard || null) : null;
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
     const current = pick ? (this.walletNow('send') || 'sat') : '';
     const off = this.offlineNow();
     // on WALLET, a balance that cannot cover this payment is greyed, and says so
     const whyNot = (u) => {
+      if (cc) return (cc.short && cc.short[u]) || '';
       if (!pick) return '';
       if (off && u !== current) return 'NEEDS A CONNECTION';
       return this.quoteFits(u) === false ? 'NOT ENOUGH FOR ' + this.sendAmountText() : '';
     };
     const balanceText = (u) => {
+      // (the card's, dollars with their sats under them and bitcoin with its dollars, at the market price)
+      if (cc && cc.bal) {
+        const m = Math.round(Number(cc.bal[u]) || 0), r = this.satUsd ? this.satUsd() : 0;
+        if (u === 'usd') return this.unitFigure(m, 'usd') + (r ? ' \u00b7 \u20bf ' + this.group(Math.round(m / 100 / r)) : '');
+        return this.unitFigure(m, 'sat') + (r ? ' \u00b7 $ ' + this.usd(m * r) : '');
+      }
       const n = this.unitBalance(u);
       if (u === 'usd') return this.unitFigure(n, 'usd');
       // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
@@ -16303,7 +16320,7 @@ class Component extends DCLogic {
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
         cursor: tag ? 'default' : 'pointer',
-        tap: () => (pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
+        tap: () => ((cc && tag) ? this.toast(String(cc.why || 'That one cannot do this.'), true) : pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
           ? 'Your ' + this.unitWord(u).toLowerCase() + ' need a connection to pay this.'
           : 'Your ' + this.unitWord(u).toLowerCase() + ' cannot cover this payment.') : '') : this.currencyPick(u)),
       });
@@ -16323,6 +16340,7 @@ class Component extends DCLogic {
       isCurrency: sc === 'currency' || pick,
       curTitle: pick ? 'WALLET' : 'CURRENCY',
       curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+        : cc ? String(cc.question || '')
         : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
@@ -16333,6 +16351,7 @@ class Component extends DCLogic {
             + ' was chosen for you: your ' + this.unitWord(current === 'usd' ? 'sat' : 'usd').toLowerCase()
             + ' cannot cover this one.'
           : 'The one you pick is remembered for your next payment.')
+        : cc ? String(cc.foot || '')
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',
@@ -16375,10 +16394,11 @@ class Component extends DCLogic {
      * The list, the running balance on each row and the card at the top all
      * follow it, each in its own unit. A swap between them is two rows, one
      * in each tab, each with the other leg's figure under it. */
-    const two = !!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard;
-    /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card holds
-     * one kind, so its list has no tabs. */
-    const usdCard = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
+    /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card of one kind
+     * has no tabs; a card of software 1.23 that holds both has them, DOLLARS or BITCOIN, each line in its own unit (`cardTwo`). */
+    const cardTwo = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.v123 && s.fc.bal && this.fcTwoUnits && this.fcTwoUnits(s.fc));
+    const two = (!!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard) || cardTwo;
+    const usdCard = !!ofCard && !cardTwo && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
     const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : usdCard ? 'usd' : 'sat';
     const A = ((two || usdCard) && this.histAuditIn) ? this.histAuditIn(tab) : usdCard && this.histAuditUsd ? this.histAuditUsd() : this.histAudit();
     const balOf = A.balOf, balNow = A.balNow, run = A.run;
@@ -21962,8 +21982,76 @@ class Component extends DCLogic {
   }
 
   // the unit of the card on show: 'usd' for a dollar card, 'sat' for any other (and for none)
+  /* (a card of software 1.23: the currency this ADD FUNDS or WITHDRAW is in, where it was asked, `fcFlowUnit`; else its record's) */
   fcUnit() {
-    return (this.state.fc && this.state.fc.unit === 'usd') ? 'usd' : 'sat';
+    const fc = this.state.fc;
+    if (fc && fc.v123 && (this._fcFlowUnit === 'usd' || this._fcFlowUnit === 'sat')) return this._fcFlowUnit;
+    return (fc && fc.unit === 'usd') ? 'usd' : 'sat';
+  }
+
+  /* What a card holds in one currency: for a card of 1.23 that currency's own balance (`fc.bal`), for any other its balance. */
+  fcHeld(fc, unit) {
+    if (!fc) return 0;
+    if (fc.v123 && fc.bal) return Math.max(0, Math.round(Number(fc.bal[unit === 'usd' ? 'usd' : 'sat']) || 0));
+    return Math.max(0, Math.round(Number(fc.balance) || 0));
+  }
+
+  /* The price a card's rate is written at (software 1.23, the sats a dollar its sats payments are weighed at): this phone's own, never
+   * another phone's (`peerRate`, shown while this phone is offline after an offline payment) and never one older than the wallet trusts
+   * (`priceTooOld`); 0 for none, and the wallet then writes no rate where one is needed (`no-price`). */
+  fcRatePrice() {
+    const peer = (this.peerRate && this.peerRate()) || 0;
+    let p = (this.px && this.px()) || 0;
+    if (peer > 0 && p === peer) p = (this.state.satUsd ? this.state.satUsd * 1e8 : 0) || Number(this.state.livePrice) || 0;
+    const W = this.fcW ? this.fcW() : null;
+    const lp = (W && W.lastPrice) ? W.lastPrice() : null;
+    if (p > 0 && lp && Number(lp.rate) > 0 && Math.round(Number(lp.rate)) === Math.round(p) && W.priceTooOld && W.priceTooOld(lp.at)) p = 0;
+    return p > 0 ? p : 0;
+  }
+
+  /* What a card as the wallet read it holds in `unit`: a card of 1.23 that currency's own balance (its `balance` is its record's), any
+   * other its balance. */
+  fcCardHolds(card, unit) {
+    if (!card) return 0;
+    if (card.units && card.units[unit === 'usd' ? 'usd' : 'sat']) return Math.max(0, Math.round(Number(card.units[unit === 'usd' ? 'usd' : 'sat'].balance) || 0));
+    return Math.max(0, Math.round(Number(card.balance) || 0));
+  }
+
+  /* Whether a card holds money in any currency: a card of 1.23 in either of its two (its record's balance may be nothing while it holds
+   * the other), any other card its balance. */
+  fcAnyMoney(fc) {
+    if (!fc) return false;
+    if (fc.v123 && fc.bal) return this.fcHeld(fc, 'usd') > 0 || this.fcHeld(fc, 'sat') > 0;
+    return Math.round(Number(fc.balance) || 0) > 0;
+  }
+
+  /* What all of a card holds, in words: each currency it holds money of, dollars first ("$15.00 and $2.00 (2,000 sats)"); a card of one
+   * currency its balance. */
+  fcWholeWords(fc) {
+    if (!fc) return '';
+    if (!(fc.v123 && fc.bal)) return this.fcBoth(fc.balance, fc.unit);
+    const each = ['usd', 'sat'].filter((u) => this.fcHeld(fc, u) > 0).map((u) => this.fcBoth(this.fcHeld(fc, u), u));
+    return each.length ? each.join(' and ') : this.fcBoth(0, fc.unit);
+  }
+
+  /* The figure a tap that takes all of a card is shown with: its record's currency where it holds any, else the other it holds. */
+  fcWholeStage(fc) {
+    if (!fc) return '';
+    if (!(fc.v123 && fc.bal) || this.fcHeld(fc, fc.unit) > 0) return this.stageMoney(fc.balance, fc.unit);
+    const other = fc.unit === 'usd' ? 'sat' : 'usd';
+    return this.stageMoney(this.fcHeld(fc, other), other);
+  }
+
+  /* The unit a card's limit is typed in (software 1.23, one figure for both currencies, kept in cents): a card that holds dollars only
+   * takes it in dollars; a card that holds bitcoin, alone or with dollars, in dollars or sats, as a bitcoin card's keypad offers them.
+   * A card before 1.23 in its own unit. */
+  fcLimitUnit() {
+    const fc = this.state.fc;
+    if (!(fc && fc.v123)) return this.fcUnit();
+    /* (by what it holds, the owner's rule: bitcoin held, dollars or sats; dollars alone, dollars; nothing yet, by what it was set up to hold) */
+    if (this.fcHeld(fc, 'sat') > 0) return 'sat';
+    if (this.fcHeld(fc, 'usd') > 0) return 'usd';
+    return fc.unit === 'usd' ? 'usd' : 'sat';
   }
 
   /* A wallet result's figure in its own unit. A card's results say `amount` in the card's unit and keep `sats` for
@@ -22373,7 +22461,9 @@ class Component extends DCLogic {
    * cents, typed in dollars. FLASHCARD on the send screen has no card on show: it is in the balance the money comes from,
    * dollars where this phone sends from its dollars at a mint with two, and the card tapped must hold that kind. */
   fcTypedUnitFor(flow) {
-    if (/^card(Add|Wd|Limit)$/.test(String(flow))) return this.fcUnit();
+    // (a card of 1.23's limit: dollars, or dollars and sats where it holds bitcoin, `fcLimitUnit`)
+    if (String(flow) === 'cardLimit') return this.fcLimitUnit();
+    if (/^card(Add|Wd)$/.test(String(flow))) return this.fcUnit();
     if (flow === 'cardSend') return (this.twoUnitsOn && this.twoUnitsOn() && this.walletNow && this.walletNow('send') === 'usd') ? 'usd' : 'sat';
     return 'sat';
   }
@@ -22399,7 +22489,8 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     const card = this._fcCard;
     if (!W || !W.cardLoadFits || !fc || !card || card.key !== fc.key || !(sats > 0)) return null;
-    try { return W.cardLoadFits(card, sats); } catch (e) { return null; }
+    // (a card of 1.23: in the currency being added, `fcUnit`)
+    try { return W.cardLoadFits(card, sats, fc.v123 ? this.fcUnit() : undefined); } catch (e) { return null; }
   }
 
   fcAmountNext() {
@@ -22423,7 +22514,8 @@ class Component extends DCLogic {
      * the phone may yet turn out to hold bitcoin, as every card did: it is then loaded with the sats those dollars are at
      * this phone's price, from this phone's bitcoin (`alt`), as it always was. */
     if (flow === 'cardSend') { this.fcSendRun(sats, '', unit, unit === 'usd' ? { sats: this.wantedSats(), have: Math.floor(this.balNow().sats || 0) } : null); return; }
-    if (flow === 'cardWd' && sats > fc.balance) { this.toast('The card holds ' + this.fcBoth(fc.balance, unit) + '.', true); return; }
+    // (a card of 1.23: what it holds in the currency being taken off)
+    if (flow === 'cardWd' && sats > this.fcHeld(fc, unit)) { this.toast('The card holds ' + this.fcBoth(this.fcHeld(fc, unit), unit) + '.', true); return; }
     /* The PIN pad goes up over the keypad, which stays where it is: back
      * from the pad is back to the amount, still typed. The keypad is left
      * only when the PIN has been given (`fcLeaveAmount`). */
@@ -22512,6 +22604,15 @@ class Component extends DCLogic {
         : { tone: 'warn', title: 'THIS CARD HOLDS BITCOIN', reason: said, chip: 'Nothing was taken.' }),
       // a dollar card asked for sats where the phone being paid cannot work out the dollars for them (`fcOtherUnit`)
       'other-unit': () => ({ tone: 'warn', title: 'THIS CARD HOLDS DOLLARS', reason: said, chip: 'Nothing was taken.' }),
+      /* Software 1.23, a card of dollars and bitcoin, in the wallet's own words (08a-flashcard.js, `cardRefused`): a limit and no rate to
+       * weigh bitcoin at; both currencies asked at once; money of the currency the card keeps that kind as the other of; no room for
+       * another kind; a new currency only its owner may start; and a limit in sats with no price to turn it into dollars. */
+      'no-rate': () => ({ tone: 'warn', title: 'CARD NEEDS ITS OWNER', reason: said, chip: opt.taken ? 'Nothing was taken.' : '' }),
+      'two-units': () => ({ tone: 'warn', title: 'ONE CURRENCY AT A TIME', reason: said, chip: '' }),
+      'unit-taken': () => ({ tone: 'warn', title: 'THE OTHER CURRENCY', reason: said, chip: '' }),
+      'table-full': () => ({ tone: 'warn', title: 'NO ROOM ON THE CARD', reason: said, chip: '' }),
+      'owner-unit': () => ({ tone: 'warn', title: 'A NEW CURRENCY', reason: said, chip: '' }),
+      'no-price': () => ({ tone: 'warn', title: 'NO BITCOIN PRICE', reason: said, chip: '' }),
       // a dollar card at a mint that does not issue dollars (now, or at all): the wallet's words name the mint
       'no-dollars-here': () => ({ tone: 'warn', title: 'NO DOLLARS AT THIS MINT', reason: said, chip: 'Nothing was taken.' }),
       // with no route, a dollar card is checked against the mint's dollar keys this phone has seen; it has seen none
@@ -22990,6 +23091,10 @@ class Component extends DCLogic {
     if (cents === null) return { amount: this.fcPrice(sats) };
     const look = { amount: '$' + this.usd(Math.round(Number(cents) || 0) / 100) };
     if (Math.round(Number(sats) || 0) > 0) look.amountSub = this.fcSats(sats);
+    /* A card of software 1.23 whose holder chose its bitcoin to pay a dollar receive (`fcPayChoose`): the chosen currency's figure big,
+     * the other under it. */
+    const from = (this._fcFrom && Date.now() - this._fcFrom.at < 180000) ? this._fcFrom.unit : '';
+    if (from === 'sat' && look.amountSub) return { amount: look.amountSub, amountSub: look.amount };
     return look;
   }
 
@@ -23209,7 +23314,9 @@ class Component extends DCLogic {
       subtitle: 'To pay ' + figure + '. The card’s owner types its PIN here.',
       cta: 'TAP AGAIN',
       // a card at another mint: backing out of the pad ends the visit to its mint (`fcXmHome`)
-      onBack: (terms && terms.xm) ? () => this.fcXmHome() : undefined,
+      /* and the currency its holder chose for this payment is this payment's alone (`fcPayChoose`): backed out of, the next payment asks
+       * again */
+      onBack: () => { this._fcFrom = null; if (terms && terms.xm) this.fcXmHome(); },
     }, (pin) => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms));
   }
 
@@ -23306,13 +23413,19 @@ class Component extends DCLogic {
                    if (share && info && info.hash && (step === 'checking' || step === 'mint')) this.fcShareNote(share, info.hash);
                    on(step, info);
                  };
+                 /* (a card of software 1.23 that holds both: the currency its holder chose for this payment, `fcPayChoose`; the card it
+                  * was chosen for alone, and for a few minutes) */
+                 const from = (this._fcFrom && Date.now() - this._fcFrom.at < 180000) ? this._fcFrom : null;
                  return W.cardPay(link, Object.assign(asking, { pin, on: onPay, progress, offline: !!offline, keepSheet: !offline },
+                                                      from ? { from: from.unit, fromKey: from.key } : {},
                                                       send ? { holdFor: true, only: send.key }
                                                         : btcHold ? { holdFor: true, holdKeep: true, only: terms.key }
                                                         : xmHold ? { holdFor: true, only: terms.key, feeMost: Math.max(0, Number(terms.cardFee) || 0) } : {}))
                    .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
                })
       .then((r) => {
+        // (the currency chosen is this payment's, and the next asks again)
+        this._fcFrom = null;
         // paying out of this phone: the card has paid this phone, and the payment it is for is made now
         if (send) { this.fcOutPay(r, send, sats); return; }
         this.haptic && this.haptic('success');
@@ -23384,7 +23497,10 @@ class Component extends DCLogic {
         /* A dollar card asked for sats alone: nothing was asked of it but its read, and the phone being paid works out the
          * dollars for them, for the holder to agree to by tapping again (`fcOtherUnit`). Not for one that has agreed already
          * (another card was held up for the second tap), nor for a card paying out of this phone. */
-        if (e && e.card === 'other-unit' && !cross && !send) { this.fcOtherUnit(e, sats, offline, share); return; }
+        if (e && e.card === 'other-unit' && !cross && !send) { this._fcFrom = null; this.fcOtherUnit(e, sats, offline, share); return; }
+        /* A card of software 1.23 that holds dollars and bitcoin, either of which could pay this: its holder is asked which, every time, on
+         * the CURRENCY screen, before any PIN; nothing was asked of the card but its read. The payment goes on with the one chosen. */
+        if (e && e.card === 'choose-unit') { this.fcPayChoose(e, () => opt.again()); return; }
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
         if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, offline, resuming, share, send, usd, terms, e.cardUnit); return; }
@@ -23400,8 +23516,27 @@ class Component extends DCLogic {
         if (e && e.card === 'not-enough' && e.still > 0) { this.fcShortHeld(e, this.fcAskIn(this.fcUnitOf(e), sats, usd, terms, send)); return; }
         // that tap read no card, or the card left before signing anything more: the hold stands, said with TAP CARD
         if (resuming && e && (e.card === 'cancelled' || e.card === 'gone')) { this.fcHeldCard(sats, pin, offline, share, send, usd, terms, e.cardUnit, e.key); return; }
+        this._fcFrom = null;
         this.fcFailed(e, opt);
       });
+  }
+
+  /* Which currency pays, from a card of software 1.23 that holds both (the wallet's `choose-unit`, with each currency's balance and what is
+   * asked in it): the CURRENCY screen, asked "PAY FROM WHICH?", a currency that cannot cover what is asked greyed and not offered. The one
+   * chosen is this payment's (`_fcFrom`, for that card alone), and `again` takes the payment up with it. */
+  fcPayChoose(e, again) {
+    const bal = {}, short = {};
+    (Array.isArray(e.units) ? e.units : []).forEach((x) => {
+      if (!x || (x.unit !== 'usd' && x.unit !== 'sat')) return;
+      bal[x.unit] = Math.max(0, Math.round(Number(x.balance) || 0));
+      short[x.unit] = x.short ? 'NOT ENOUGH ON THE CARD' : '';
+    });
+    this.haptic && this.haptic('warning');
+    this.fcPickUnit({
+      question: 'PAY FROM WHICH?',
+      foot: 'This card holds dollars and bitcoin. The one you pick pays this time; you are asked every time.',
+      bal, short, why: 'The card holds too little of that for this payment.',
+    }, (u) => { this._fcFrom = { key: String(e.key || ''), unit: u, at: Date.now() }; again(); });
   }
 
   /* The sheet again, a moment after the one the card left: iOS refuses a
@@ -23519,9 +23654,16 @@ class Component extends DCLogic {
     const choice = (W.walletChoice && W.walletChoice()) || {};
     const terms = { payUnit: 'usd', pay: q.cents, sats: q.sats, rate: q.rate, ageMs: q.ageMs, seenAt: q.at, own: true,
                     convert: choice.hold === 'bitcoin' };
-    this.fcOtherAgree(e, terms, sats, offline, share,
-      'They asked for ' + this.fcFig(q.sats, 'sat') + '. At this phone’s Bitcoin price, ₿ 1 = $ ' + this.group(Math.round(q.rate))
+    this.fcOtherAgree(e, terms, sats, offline, share, this.fcSatsShort(e)
+      + 'They asked for ' + this.fcFig(q.sats, 'sat') + '. At this phone’s Bitcoin price, ₿ 1 = $ ' + this.group(Math.round(q.rate))
         + ', seen ' + this.agoWords(q.ageMs) + ', that is ' + this.fcFig(q.cents, 'usd') + '. Tapping the card again pays ' + this.fcFig(q.cents, 'usd') + '.');
+  }
+
+  /* A card of software 1.23 that holds bitcoin too little for a bitcoin payment, and dollars enough: what it holds in bitcoin, said before
+   * its dollars are asked for (the wallet's `other-unit`, `satsToo`). Nothing for a card of dollars alone. */
+  fcSatsShort(e) {
+    const n = Math.round(Number(e && e.satsToo) || 0);
+    return n > 0 ? 'Its ' + this.fcFig(n, 'sat') + ' in bitcoin is not enough. ' : '';
   }
 
   /* The holder agrees by tapping again: with its PIN where the card will want one for this (it has one, and what it pays
@@ -23569,8 +23711,8 @@ class Component extends DCLogic {
       // `key` and `read`: the card agreed with, which alone pays it, and what its read said (to ask again by, `fcPayRun`)
       const terms = { payUnit: 'usd', pay: cents, sats, online: true, bolt11, hash: String(s.invoiceHash || ''), quote: q, run, ends,
                       key: String(e.key || ''), read: e };
-      this.fcOtherAgree(e, terms, sats, false, null,
-        'They asked for ' + this.fcFig(sats, 'sat') + '. At ' + this.fcRateWho() + ', that is ' + this.fcFig(cents, 'usd')
+      this.fcOtherAgree(e, terms, sats, false, null, this.fcSatsShort(e)
+        + 'They asked for ' + this.fcFig(sats, 'sat') + '. At ' + this.fcRateWho() + ', that is ' + this.fcFig(cents, 'usd')
           + ' with its fee. Tapping the card again pays ' + this.fcFig(cents, 'usd') + '.');
     }).catch(() => {
       this.haptic && this.haptic('error');
@@ -23706,6 +23848,24 @@ class Component extends DCLogic {
     if (offline || this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
     const bolt11 = usd ? String(usd.bolt11 || '') : (s.invoiceIsAddress ? '' : String(s.invoice || ''));
     if (!bolt11) { this.toast('The invoice is still being made. Press CARD when it is up.', true); return; }
+    /* A card of software 1.23 that holds dollars and bitcoin pays from there in either: its holder is asked which, every time, on the
+     * CURRENCY screen, before its mint is asked anything (`fcPayChoose`'s question). What it pays is then that currency's alone. */
+    const held = (e && e.units && typeof e.units === 'object') ? e.units : null;
+    if (held && Number(held.usd) > 0 && Number(held.sat) > 0) {
+      this.haptic && this.haptic('warning');
+      this.fcPickUnit({
+        question: 'PAY FROM WHICH?',
+        foot: 'This card holds dollars and bitcoin. The one you pick pays this time; you are asked every time.',
+        bal: { usd: Math.round(Number(held.usd) || 0), sat: Math.round(Number(held.sat) || 0) }, short: {}, why: '',
+      }, (u) => {
+        const one = u === 'usd' ? 'usd' : 'sat';
+        const picked = Object.assign({}, e, { units: null, cardUnit: one, balance: Math.round(Number(held[one]) || 0) });
+        // (and the card as read, which is not copied with the rest: its mint's fee on the pieces of the chosen currency is worked out from it)
+        try { Object.defineProperty(picked, 'cardRead', { value: e.cardRead || null, enumerable: false }); } catch (eR) { /* the fee is then found at the tap */ }
+        this.fcXmBegin(picked, sats, offline, usd);
+      });
+      return;
+    }
     // the code on screen is paid by the card from its mint, not by sats from this phone (`fcUsdPay`)
     if (usd) this._fcUsd = null;
     const ask = usd ? { unit: 'usd', amount: Math.round(Number(usd.cents) || 0) }
@@ -24417,7 +24577,7 @@ class Component extends DCLogic {
         tone: 'ask', title: 'PUT BACK ON THE CARD',
         reason: this.fcSats(r.back, u) + ' is back on the card. The payment was not made.'
           + (went > r.back ? ' ' + this.fcSats(went - r.back, u) + ' more went on.' : '')
-          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance, u) + '.' : ''),
+          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(this.fcCardHolds(r.card, u), u) + '.' : ''),
         shut: { label: 'DONE' },
       });
       return;
@@ -24440,7 +24600,7 @@ class Component extends DCLogic {
       this.blockedCard('fc-refunded', {
         tone: 'ask', title: 'BACK ON THE CARD',
         reason: this.fcSats(r.refund, u) + ' is back on the card. The payment was not made.'
-          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance, u) + '.' : ''),
+          + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(this.fcCardHolds(r.card, u), u) + '.' : ''),
         shut: { label: 'DONE' },
       });
       return;
@@ -24461,7 +24621,7 @@ class Component extends DCLogic {
     this.blockedCard('fc-on', {
       tone: 'ask', title: 'ON THE CARD',
       reason: this.fcSats(went, u) + ' went onto the card.'
-        + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(r.card.balance, u) + '.' : '')
+        + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(this.fcCardHolds(r.card, u), u) + '.' : '')
         + (moved ? ' The card is now at ' + this.mintNameOf(now) + '.' : '')
         // an amount of too many pieces is rounded up, so the card has fewer to sign for and is quicker to use
         + ((o && o.rounded > 0) ? ' ' + this.fcSats(o.rounded, u) + ' more than you asked for, so the card holds fewer pieces and is quicker to use.' : ''),
@@ -24527,7 +24687,9 @@ class Component extends DCLogic {
     // with the price, so that a limit this phone set in dollars is kept at those dollars (08a-flashcard.js, `cardLook`)
     /* (none for a dollar card on show: its limits are dollars, and are never re-pegged; the wallet holds to that whatever it is
      * sent, since the card read may be another) */
-    const price = (this.state.fc && this.state.fc.unit === 'usd') ? 0 : (this.px && this.px()) || 0;
+    // (software 1.23: every card's rate follows the price, a dollar card's too, so the price is sent for a card of it)
+    // (and never another phone's price, or one too old to trust, for a card's rate: `fcRatePrice`)
+    const price = (this.state.fc && this.state.fc.unit === 'usd' && !this.state.fc.v123) ? 0 : (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0);
     this.fcTap({}, (link, on, progress) => W.cardLook(link, { mine: true, price, change: true, real: true, on, progress })
       .then((card) => {
         if (card && card.owes && card.owes.wrote > 0) link.doneText = 'Done.';
@@ -24535,6 +24697,8 @@ class Component extends DCLogic {
       }))
       .then((card) => {
         this.fcShow(card, open);
+        // (software 1.23: a rate far from the card's is asked about once, `fcRateAsk`)
+        if (card && card.rateAsk) this.fcRateAsk(card);
         // change a till never handed over has been fetched and put on: said in passing, as change put back always is
         if (card && card.owes && card.owes.wrote > 0) { this.haptic && this.haptic('success'); this.refreshBalance(); this.loadHistory(); }
         // its owner, online, and its money near its date: the renewal is offered now
@@ -24592,8 +24756,13 @@ class Component extends DCLogic {
       // whether this phone is its owner, which the card was asked (a till does not ask)
       ownedHere: card.mine === true,
       mint: (card.record && card.record.mint) || '',
-      // the units it holds, where its software says (none does yet: `fcTwoUnits`)
-      units: (card.info && Array.isArray(card.info.units)) ? card.info.units.slice() : null,
+      /* Software 1.23: dollars and sats at its one mint. `v123`: the card is of it, and its ceiling is cents for both its currencies
+       * (`cents`); `units`: the two it holds (or may: format 5), for `fcTwoUnits`, or the one; `bal`: what it holds in each; `rate`: the
+       * sats a dollar its sats payments are weighed at, where it said (to its owner). */
+      v123: !!(card.info && card.info.units), cents: !!(card.info && card.info.cents),
+      units: (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null,
+      bal: card.units ? { usd: card.units.usd.balance, sat: card.units.sat.balance } : null,
+      rate: (card.info && card.info.rateSaid) ? Number(card.info.rate) || 0 : 0,
       recoverable: !!(card.record && card.record.refundKey),
       mine: !!(W && W.cardIsMine(card)),
       first: dates.length ? Math.min.apply(null, dates) : 0,
@@ -24611,7 +24780,8 @@ class Component extends DCLogic {
       // the design it is drawn in: what the card says, or what this phone wrote down for it (`FoxyWallet.cardLook`)
       design: String(card.design || ''),
       // what it holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those
-      above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0) : 0,
+      // (a card of 1.23 says its limit in cents: `fcAbove` weighs each piece in them)
+      above: card.mine === true ? this.fcAbove(card, (card.tap && card.tap.limited) ? card.tap.limit : 0, (card.info && card.info.cents) ? 'usd' : '') : 0,
       // the change it made for itself that no till has handed back, as its owner's read left it (08a-flashcard.js, `cardOwnerChange`)
       // (in the card's own unit: `amount`, which is the sats of a bitcoin card's and the cents of a dollar card's)
       // (and each opening by its number on the card, with whether it may be given up: `fcGiveUp`)
@@ -24879,9 +25049,16 @@ class Component extends DCLogic {
   /* WHAT WILL THIS CARD HOLD? (25-render-confirm-and-blocked.js, `renderCurrency`, its `card` flow): the two balances' own
    * cards, each with what this phone holds of it, which is what can be loaded. The pick is this card's and nobody's
    * remembered choice (`currencyPick` writes nothing for it); `then(unit)` goes on with it. Back is the card's screen. */
-  fcUnitAsk(then) {
+  fcUnitAsk(then, card) {
     this._fcUnitThen = then;
-    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]) }));
+    this.setState(p => ({ screen: 'currency', currencyFlow: 'card', currencyNext: p.screen, stack: p.stack.concat([p.screen]), curCard: card || null }));
+  }
+
+  /* Which of a card's two currencies (software 1.23): the same CURRENCY screen, asked in this flow's words. `o`: { question, foot, bal (the
+   * figures each card shows: the card's own, or this phone's where the money comes from it), short ({ unit: why it cannot }, greyed and
+   * not offered), why (said when a greyed one is tapped) }. `then(unit)` goes on with the one chosen; back is where it was asked from. */
+  fcPickUnit(o, then) {
+    this.fcUnitAsk(then, Object.assign({ question: '', foot: '', bal: null, short: {}, why: '' }, o || {}));
   }
 
   /* Set-up, in `unit` ('' at a mint with one balance, which the wallet takes as bitcoin). */
@@ -24942,6 +25119,20 @@ class Component extends DCLogic {
     if (!this.fcReady('Adding funds')) return;
     // one at a time: the pieces of the last ADD FUNDS are still being made (a second sheet would take the reader from the first's)
     if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
+    this._fcFlowUnit = null;
+    /* A card of software 1.23 at a mint with both currencies takes either: which is asked first, on the CURRENCY screen with what this
+     * phone holds of each (what can be added), and then SET AMOUNT in it. */
+    const fc = this.state.fc;
+    if (fc && fc.v123 && this.twoUnitsOn && this.twoUnitsOn()) {
+      const none = (u) => !(this.unitBalance(u) > 0);
+      this.fcPickUnit({
+        question: 'ADD WHICH TO THE CARD?',
+        foot: 'From what this phone holds. The card keeps dollars and bitcoin side by side.',
+        short: { usd: none('usd') ? 'NONE ON THIS PHONE' : '', sat: none('sat') ? 'NONE ON THIS PHONE' : '' },
+        why: 'This phone holds none of that to add.',
+      }, (u) => { this._fcFlowUnit = u; this.fcAmount('cardAdd'); });
+      return;
+    }
     this.fcAmount('cardAdd');
   }
 
@@ -24975,8 +25166,9 @@ class Component extends DCLogic {
      * wrote. */
     const run = { closed: false };
     this._fcAdding = run;
-    // in the card's own unit: a dollar card is loaded from this phone's dollars, in cents
-    const u = (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+    // in the card's own unit: a dollar card is loaded from this phone's dollars, in cents (a card of 1.23: the currency chosen, `fcUnit`)
+    const u = (this.state.fc && this.state.fc.v123) ? this.fcUnit() : (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+    const v123 = !!(this.state.fc && this.state.fc.v123);
     this.stageScreen('cardReady', {
       art: 'card', title: 'GETTING<br>IT READY', amount: this.stageMoney(sats, u),
       body: 'Keep the card nearby. You will be asked to tap it in a moment.',
@@ -24988,7 +25180,7 @@ class Component extends DCLogic {
     const there = String((card && card.record && card.record.mint) || '').replace(/\/+$/, '');
     const here = String(W.mintUrl || '').replace(/\/+$/, '');
     const moving = !!(there && here && there !== here && !((card.pieces || []).length));
-    W.cardPrepare(card, sats, Object.assign({ moving }, u === 'usd' ? { unit: u } : {})).then((made) => {
+    W.cardPrepare(card, sats, Object.assign({ moving }, (u === 'usd' || v123) ? { unit: u } : {})).then((made) => {
       if (this._fcAdding === run) this._fcAdding = null;
       // said by this flow, so not announced as a payment sent (16-history-lists.js)
       if (made && made.hash) this.txIsNew(made.hash);
@@ -24997,7 +25189,7 @@ class Component extends DCLogic {
         this.toast(this.fcPrice(this.fcAmt(made), u) + ' is ready for the card. It goes on at the next tap.');
         return;
       }
-      this.fcWriteRun(pin, Object.assign({ sats: this.fcAmt(made), owner: !!owner, asked: sats, rounded: Number(made.rounded) || 0 }, u === 'usd' ? { unit: u } : {}));
+      this.fcWriteRun(pin, Object.assign({ sats: this.fcAmt(made), owner: !!owner, asked: sats, rounded: Number(made.rounded) || 0 }, (u === 'usd' || v123) ? { unit: u } : {}));
     }, (e) => {
       if (this._fcAdding === run) this._fcAdding = null;
       this.hideStage('cardReady');
@@ -25012,7 +25204,27 @@ class Component extends DCLogic {
   fcWithdraw() {
     if (!this.fcReady('Withdrawing')) return;
     const fc = this.state.fc;
-    if (!(fc.balance > 0)) { this.toast('There is nothing on this card.', true); return; }
+    this._fcFlowUnit = null;
+    /* A card of software 1.23 that holds both currencies: which is asked first, on the CURRENCY screen with what the card holds of each,
+     * and then SET AMOUNT in it. One that holds one is taken off in that one. */
+    if (fc.v123 && fc.bal && this.fcTwoUnits(fc)) {
+      const have = (u) => fc.bal[u] > 0;
+      if (!have('usd') && !have('sat')) { this.toast('There is nothing on this card.', true); return; }
+      if (have('usd') && have('sat')) {
+        this.fcPickUnit({
+          question: 'WITHDRAW WHICH?',
+          foot: 'From the card into this phone, in the same currency.',
+          bal: { usd: fc.bal.usd, sat: fc.bal.sat },
+          short: { usd: '', sat: '' },
+        }, (u) => { this._fcFlowUnit = u; this.fcAmount('cardWd'); });
+        return;
+      }
+      this._fcFlowUnit = have('usd') ? 'usd' : 'sat';
+      this.fcAmount('cardWd');
+      return;
+    }
+    if (fc.v123 && fc.bal) this._fcFlowUnit = fc.bal.usd > 0 && !(fc.bal.sat > 0) ? 'usd' : fc.bal.sat > 0 && !(fc.bal.usd > 0) ? 'sat' : null;
+    if (!(fc.balance > 0) && !(fc.v123 && fc.bal && (fc.bal.usd > 0 || fc.bal.sat > 0))) { this.toast('There is nothing on this card.', true); return; }
     this.fcAmount('cardWd');
   }
 
@@ -25038,6 +25250,8 @@ class Component extends DCLogic {
   fcWithdrawRun(sats, pin, before, again, unit) {
     const W = this.fcW();
     const u = unit || this.fcUnit();
+    // (a card of 1.23: the currency chosen is named to the wallet, and stays named for the taps for the rest)
+    const named = !!(unit || (this.state.fc && this.state.fc.v123 && this._fcFlowUnit));
     const prior = Math.round(Number(before) || 0);
     /* What came off in this tap's sheet, as it is cut short and taken up again
      * in the same sheet (`again` below), and what is still to take. */
@@ -25080,7 +25294,9 @@ class Component extends DCLogic {
                    if (e && e.card === 'partial' && Number(e.left) > 0) { absorb(e); return 'Hold for the rest.'; }
                    return (e && e.card === 'gone') ? 'Tap behind the phone.' : '';
                  } },
-               (link, on, progress) => W.cardWithdraw(link, ask ? { pin, sats: ask, on, progress, keepSheet: true } : { pin, on, progress, keepSheet: true })
+               // (a card of 1.23: in the currency chosen, `unit`; all of it in that one)
+               (link, on, progress) => W.cardWithdraw(link, Object.assign(ask ? { pin, sats: ask, on, progress, keepSheet: true } : { pin, on, progress, keepSheet: true },
+                                                                          named ? { unit: u } : {}))
                  .then((r) => this.fcChangeInSheet(link, on, progress, r, pin)))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
@@ -25216,7 +25432,8 @@ class Component extends DCLogic {
    * its words) has the old rule's words. Anything else, and a card not read yet, has the newest. */
   fcShaped() {
     const c = this._fcCard;
-    return !(c && c.info && c.info.format === 4 && c.info.shaped === false);
+    // (format 5, a card of 1.23 that holds both units, is format 4 in this)
+    return !(c && c.info && (c.info.format === 4 || c.info.format === 5) && c.info.shaped === false);
   }
 
   /* ---- the daily limit ---------------------------------------------------------
@@ -25294,7 +25511,8 @@ class Component extends DCLogic {
     const sats = ((this.state.fcLimit || {}).sats) || 0;
     /* A dollar card's limit is cents, said as the dollars they are, with nothing under them: no price is in it, and it is
      * never kept at anything (`fcLimitRun`). */
-    const U = this.fcUnit();
+    // (a card of 1.23: in the unit it was typed in, `fcLimitUnit`)
+    const U = this.fcLimitUnit();
     const fig = (n) => (U === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
     const secondary = { label: 'CANCEL', go: () => this.fcLimitCancel() };
     if (this._fcLimitNoPin) {
@@ -25329,7 +25547,8 @@ class Component extends DCLogic {
         ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
         : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
         + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
-        + (this.fcAbove(this._fcCard, sats) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats), U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
+        + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (this.state.fc && this.state.fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
+        + this.fcAboveKept(this._fcCard, sats, U)
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
       secondary, cta: 'CONFIRM', ctaTone: 'go',
       go: () => this.fcLimitConfirmed(),
@@ -25359,17 +25578,36 @@ class Component extends DCLogic {
     /* A limit on one tap, lower than pieces the card holds: with the PIN the
      * card's money is recut under it in the same tap (the wallet's
      * cardSetLimit), so the PIN is asked first. Zero is a choice: NO LIMIT. */
-    if (done && this._fcLimitTap && sats > 0 && this.fcAbove(this._fcCard, sats) > 0) {
+    if (done && this._fcLimitTap && sats > 0 && this.fcAbove(this._fcCard, sats, this.fcLimitUnit(), true) > 0) {
       this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (pin) => done(sats, usd, pin));
       return;
     }
     if (done) done(sats, usd);
   }
 
+  /* A card of 1.23 that holds both currencies is not recut under a new limit on one payment (the wallet's `cardSetLimit` skips it: taking
+   * its money off would take both and put back one). What it holds in pieces larger than the limit, in each currency, is said as it is:
+   * they stay, and a till holds the card longer for them. '' for any other card, or none above. */
+  fcAboveKept(card, limit, unit) {
+    const W = this.fcW ? this.fcW() : null;
+    if (!card || !card.info || !card.info.cents || !W || !W.cardBoth || !W.cardBoth(card) || !W.cardInUnit) return '';
+    const each = ['usd', 'sat'].map((u) => ({ u, n: this.fcAbove(W.cardInUnit(card, u), limit, unit) })).filter((x) => x.n > 0);
+    if (!each.length) return '';
+    return 'It holds ' + each.map((x) => this.fcBoth(x.n, x.u)).join(' and ') + ' in pieces larger than that. On a card that holds both currencies they are not recut: they stay as they are, and a till holds the card longer to pay with them. ';
+  }
+
   /* What a card holds in pieces larger than `limit`: the pieces a till holds
    * longer for. Only a card cut deep is cut to a limit; 0 for any other. */
-  fcAbove(card, limit) {
+  /* (A card of 1.23: `limit` is in `unit` (cents for 'usd'), and each piece is weighed against it in cents at the card's rate, the figure said
+   * in the card's record's currency (the wallet's `cardAboveFor`). `recut`: for the promise that the pieces are recut under a new limit,
+   * which a card of both currencies is not: 0 for it.) */
+  fcAbove(card, limit, unit, recut) {
     if (!card || !card.info || !card.info.wide || !card.info.many || !(limit > 0)) return 0;
+    const W = this.fcW ? this.fcW() : null;
+    if (card.info.cents && W && W.cardAboveFor) {
+      if (recut && W.cardBoth && W.cardBoth(card)) return 0;
+      return W.cardAboveFor(card, limit, unit || '', (this.px && this.px()) || 0);
+    }
     return (card.pieces || []).reduce((n, x) => (Number(x.amount) > limit ? n + Number(x.amount) : n), 0);
   }
 
@@ -25409,13 +25647,15 @@ class Component extends DCLogic {
     const line = (x) => {
       const said = [];
       const put = x.loaded > 0 || x.loads > 0;
+      // (software 1.23: each entry is of one currency, which the card says, bit 5 of its flags: its figures are in that one)
+      const XU = (x.unit === 'usd' || x.unit === 'sat') ? x.unit : U;
       /* An opening of the card's own change given up in the tap (software 1.22, bit 4 of its flags): a line of its own, after the
        * tap's other line where it had anything else. */
       const gaveUp = x.letGo ? when(x) + ': change owed to the card given up' : '';
       if (gaveUp && !(x.sats > 0 || x.pieces > 0 || put || x.refused || x.noPin || x.waited || x.tamper || x.clock)) return gaveUp;
       // what it signed for (which is the pieces, and may be more than the price), unless the tap only put money on
-      if (x.sats > 0 || x.pieces > 0 || !put) said.push(this.fcPrice(x.sats, U) + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : ''));
-      if (put) said.push(this.fcPrice(x.loaded, U) + ' put on');
+      if (x.sats > 0 || x.pieces > 0 || !put) said.push(this.fcPrice(x.sats, XU) + (x.pieces ? ', ' + n(x.pieces, 'piece', 'pieces') : ''));
+      if (put) said.push(this.fcPrice(x.loaded, XU) + ' put on');
       if (x.noPin) said.push('no PIN');
       if (x.waited) said.push('over the per tap limit');
       if (x.refused) said.push(x.refused + ' refused');
@@ -25446,7 +25686,10 @@ class Component extends DCLogic {
         + 'Kept by the card itself. No phone or terminal can change it.'
         + (guest ? ' Shown as a guest: nothing of it is kept on this phone.' : '') + '\n\n' + since
         + log.last.map(line).join('\n')
-        + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.sats, U) + ' signed for, ' + log.refused + ' refused.'
+        + '\n\nIn all: ' + n(log.taps, 'tap', 'taps') + ', ' + this.fcPrice(log.sats, U)
+        // (software 1.23: and what was signed for in its other currency, apart, never added in)
+        + ((Number(log.other) > 0 && log.otherUnit) ? ' and ' + this.fcPrice(log.other, log.otherUnit === 'usd' ? 'usd' : 'sat') : '')
+        + ' signed for, ' + log.refused + ' refused.'
         + ((U !== 'usd' && ((this.px && this.px()) || 0) > 0) ? '\n\nIn dollars at the price now.' : '')
         + receipts,
       shut: { label: 'CLOSE' },
@@ -25476,13 +25719,17 @@ class Component extends DCLogic {
      * was told it under a signature: it goes in the first column, and the second has none. */
     const blocks = list.some((r) => r.told !== undefined);
     // a dollar card's receipts count cents (the card's own figures, which name no unit)
-    const col = (fc.unit === 'usd' || (fc.receipts && fc.receipts.unit === 'usd')) ? 'cents' : 'sats';
+    const col0 = (fc.unit === 'usd' || (fc.receipts && fc.receipts.unit === 'usd')) ? 'cents' : 'sats';
+    /* (a card of software 1.23 says each receipt's unit, which may be either: the column is then the amount, each with its unit after it) */
+    const mixed = list.some((r) => r.unit === 'usd' || r.unit === 'sat');
+    const col = mixed ? 'amount (cents or sats, as said)' : col0;
+    const amt = (r) => (mixed ? r.sats + ' ' + (r.unit === 'usd' ? 'cents' : r.unit === 'sat' ? 'sats' : col0) : String(r.sats));
     const text = (blocks
       ? ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, as the phone that tapped it told the card), block time (UTC, the card’s clock), ' + col + ', sha256 of the message signed, first output (B_)']
         .concat(list.map((r) => '#' + r.n + ', ' + (r.told !== undefined ? (r.told > 0 ? iso(r.told) : '-') : iso(r.time)) + ', '
-          + (r.told !== undefined ? (r.time > 0 ? 'block ' + iso(r.time) : '-') : '-') + ', ' + r.sats + ', ' + r.hash + ', ' + r.out))
+          + (r.told !== undefined ? (r.time > 0 ? 'block ' + iso(r.time) : '-') : '-') + ', ' + amt(r) + ', ' + r.hash + ', ' + r.out))
       : ['Foxy card receipts', 'card ' + fc.key, 'payment, time (UTC, by the card’s clock), ' + col + ', sha256 of the message signed, first output (B_)']
-        .concat(list.map((r) => '#' + r.n + ', ' + iso(r.time) + ', ' + r.sats + ', ' + r.hash + ', ' + r.out)))
+        .concat(list.map((r) => '#' + r.n + ', ' + iso(r.time) + ', ' + amt(r) + ', ' + r.hash + ', ' + r.out)))
       .join('\n');
     const copied = this.copySecret ? this.copySecret(text) : false;
     this.toast(copied ? 'Receipts copied.' : 'Could not copy the receipts.', !copied);
@@ -25512,21 +25759,219 @@ class Component extends DCLogic {
 
   /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked, unless the card holds
    * pieces larger than a new limit on one tap (`pin`): then its money is recut under the limit in the same tap. */
-  fcLimitRun(sats, tap, usd, pin) {
+  /* `answer`: the owner's answer to the rate guard (software 1.23: `rate-far`, `fcRateFar`), { rateOk } or { keepRate }. */
+  fcLimitRun(sats, tap, usd, pin, answer) {
     const W = this.fcW();
     // 'nopin': the no PIN limit (software 1.16 and on), whose dollars are kept like the limit on one tap's
     const np = tap === 'nopin';
+    /* A card of software 1.23: one figure for both its currencies, kept in cents on the card, written with the rate at this phone's price;
+     * typed in dollars it is those dollars exactly, typed in sats it is turned into cents at that rate (`unit`). Nothing is kept here to
+     * follow the price: the rate does that. */
+    const v123 = !!(this.state.fc && this.state.fc.v123);
+    const lu = this.fcLimitUnit();
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
-    const keep = this.fcUnit() === 'usd' ? 0 : usd;
+    const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
+    const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
     this.fcTap({}, (link, on, progress) => {
       on('writing');
-      return W.cardSetLimit(link, np ? { sats, noPin: true, usd: keep, on, progress } : { sats, tap: !!tap, usd: tap ? keep : 0, pin, on, progress });
+      return W.cardSetLimit(link, Object.assign(np ? { sats, noPin: true, usd: keep, on, progress } : { sats, tap: !!tap, usd: (tap || v123) ? keep : 0, pin, on, progress }, more));
     })
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast((np ? 'No PIN limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
-      }, (e) => this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin) }));
+      }, (e) => {
+        // the rate guard: asked once, and the limit written with the answer
+        if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a)); return; }
+        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer) });
+      });
+  }
+
+  /* ---- SWAP between a card's two balances (software 1.23) ------------------------------------------------------------
+   *
+   * The card cannot reach a mint, and a swap between dollars and bitcoin is the mint's, which takes longer than a card is held. So it is
+   * this phone's own SWAP (26i-swap.js) with the card at each end: the amount on SET AMOUNT in the currency that leaves, the swap's own
+   * confirmation (YOU ARE GETTING, YOU ARE SPENDING, FEE, the mint's rate), then
+   *
+   *   tap 1, the PIN    what the swap spends, its fee with it, taken off the card in that currency, as WITHDRAW takes it;
+   *   no card           the swap at the mint, on this phone, at the rate shown while it holds (a new one for what came off where not);
+   *   tap 2             what arrived put on the card in the other currency, as ADD FUNDS puts it on, under the PIN and the owner's say.
+   *
+   * Cut short anywhere, the money is in this phone, in whichever currency it was then, and the screen offers to put it on the card or
+   * leave it. Only the card's owner's phone swaps. */
+  fcSwap() {
+    const fc = this.state.fc;
+    if (!fc || !fc.v123 || !fc.bal) return;
+    if (!this.fcReady('Swapping')) return;
+    if (fc.ownedHere === false) { this.fcFailed({ card: 'not-owner' }); return; }
+    if (!this.twoUnitsOn || !this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
+    const from = fc.bal.usd > 0 || !(fc.bal.sat > 0) ? 'usd' : 'sat';
+    if (!(fc.bal[from] > 0)) { this.toast('There is nothing on this card to swap.', true); return; }
+    this._swapCard = { key: fc.key, bal: { usd: fc.bal.usd, sat: fc.bal.sat } };
+    console.log('[foxy] card: SWAP opened on the card, from ' + this.unitWord(from).toLowerCase());
+    // as home's SWAP opens (26i-swap.js, `goSwap`), from the card's balances
+    this._swapAhead = null;
+    this._swapProbed = {};
+    this._swapProbeWanted = null;
+    clearTimeout(this._swapTypedT);
+    this._swapTypedT = null;
+    this.setState(p => ({
+      screen: 'swap', stack: p.stack.concat([p.screen]),
+      swapFrom: from, swapTo: from === 'usd' ? 'sat' : 'usd',
+      swapQuote: null, swapNewRate: false, swapAmount: 0, swapAll: false,
+      swapErr: '', swapErrAmount: false, swapQuoting: false, swapBusy: false, swapResult: null,
+      swapRequotes: 0, swapLapsed: false, swapProbing: false,
+    }));
+    this.swapProbe(from);
+  }
+
+  // SWAP pressed on the confirmation of a card's swap (26i-swap.js, `swapGo`): the PIN, then the first tap
+  fcSwapGo(q) {
+    const W = this.fcW();
+    const sc = this._swapCard;
+    const { from, to } = this.swapUnits();
+    if (!W || !sc || !q) return;
+    if (this.moneyBusy && this.moneyBusy()) { this.toast('Something else is moving money right now. Try again in a moment.', true); return; }
+    const total = Math.round(Number(q.total) || 0);
+    this.fcPinOr({
+      title: 'CARD PIN',
+      subtitle: 'To take ' + this.fcBoth(total, from) + ' off the card for the swap. Then tap the card again to put on what the swap brings.',
+      cta: 'TAKE ' + this.fcPrice(total, from) + ' OFF',
+    }, (pin) => {
+      this.setState({ swapBusy: true, swapErr: '', swapErrAmount: false });
+      let took = 0;
+      this.fcTap({ amount: this.stageMoney(total, from), warm: true },
+                 (link, on, progress) => W.cardWithdraw(link, { pin, sats: total, unit: from, on, progress, only: sc.key }))
+        .then((r) => {
+          took = this.fcAmt(r);
+          if (r && r.hash) this.txIsNew(r.hash);
+          this.refreshBalance();
+          // the swap at the mint, with no card: at the rate shown while it holds, a new one for what came off where not
+          const fresh = Number(q.expiresAt) - Date.now() > (this.SWAP_MARGIN_MS || 15000);
+          this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '\u2026', 120000);
+          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took)).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
+          return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
+        })
+        .then((sw) => {
+          this.hideMelt();
+          this.refreshBalance();
+          this.loadHistory();
+          this.setState({ swapBusy: false, swapQuote: null });
+          if (sw && sw.state === 'pending') { this._swapCard = null; this.swapStillGoing(sw); return; }
+          if (!(sw && sw.state === 'done')) { this.fcSwapBack(took, from, pin); return; }
+          /* (what the mint's fee reserve did not use came back to this phone in the currency that left: it goes back on the card in the
+           * same tap, `back`) */
+          const left = Math.max(0, took - Math.round(Number(sw.from && sw.from.amount) || 0));
+          this.fcSwapOn(Math.round(Number(sw.to && sw.to.amount) || 0), to, pin, sw, left > 0 ? { amount: left, unit: from } : null);
+        }, (e) => {
+          this.hideMelt();
+          this.setState({ swapBusy: false });
+          // nothing came off the card: said as any card's refusal is, and the confirmation stays
+          if (!(took > 0)) { this.fcFailed(e, { taken: true, again: () => this.fcSwapGo(q) }); return; }
+          this.fcSwapBack(took, from, pin);
+        });
+    });
+  }
+
+  // the swap was not made: what came off the card is in this phone, in the currency it left in, to put back or keep
+  fcSwapBack(took, unit, pin) {
+    this._swapCard = null;
+    this.setState({ screen: 'flashcard', stack: [] });
+    this.haptic && this.haptic('warning');
+    this.blockedCard('fc-swap-back', {
+      tone: 'warn', title: 'NOT SWAPPED',
+      reason: this.fcBoth(took, unit) + ' came off the card and is in this phone. Put it back on the card, or leave it in this phone.',
+      retry: 'PUT IT BACK', go: () => this.fcSwapOn(took, unit, pin, null),
+      shut: { label: 'LEAVE IT', pill: true },
+    });
+  }
+
+  // the second tap: what the swap brought (or what came off, put back) onto the card, in its currency
+  /* `back`: what the mint's fee reserve did not use, { amount, unit } in the currency that left, put back on in the same tap; where it
+   * cannot be made for the card it stays in this phone, and the swap's end says so. */
+  fcSwapOn(amount, unit, pin, sw, back) {
+    const W = this.fcW();
+    if (!W || !(amount > 0)) return;
+    let made = null, backOn = 0;
+    this.fcTap({ amount: this.stageMoney(amount, unit), warm: true }, (link, on) => {
+      on('mint');
+      return W.cardLook(link, { short: true }).then((card) => W.cardPrepare(card, amount, { unit }).then((m) => {
+        if (!(back && back.amount > 0)) return m;
+        if (m && m.hash) this.txIsNew(m.hash);
+        return W.cardPrepare(card, back.amount, { unit: back.unit }).then((b) => {
+          backOn = back.amount;
+          if (b && b.hash) this.txIsNew(b.hash);
+          return m;
+        }, (eB) => { console.warn('[foxy] card: the swap fee’s unused part stays in this phone:', (eB && eB.message) || eB); return m; });
+      })).then((m) => {
+        made = m;
+        if (m && m.hash) this.txIsNew(m.hash);
+        on('writing');
+        return W.cardWrite(link, { pin: pin || undefined, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
+      });
+    }).then((r) => {
+      this._swapCard = null;
+      this.refreshBalance();
+      this.loadHistory();
+      this.haptic && this.haptic('success');
+      if (r && r.card) this.fcShow(r.card);
+      if (back && back.amount > 0) {
+        this.toast(backOn > 0 ? this.fcBoth(backOn, back.unit) + ' of the mint’s fee was not used and is back on the card.'
+          : this.fcBoth(back.amount, back.unit) + ' of the mint’s fee was not used. It is in this phone.');
+      }
+      if (sw) { this.setState({ swapBusy: false, swapResult: sw, screen: 'swapDone', stack: ['flashcard'] }); return; }
+      this.setState({ screen: 'flashcard', stack: [] });
+      this.toast(this.fcBoth(amount, unit) + ' is back on the card.');
+    }, (e) => {
+      this.refreshBalance();
+      this.loadHistory();
+      // made for the card and not written: it goes on at the card's next tap, as anything made for a card does
+      if (made) { this._swapCard = null; this.setState({ screen: 'flashcard', stack: [] }); this.fcStillWaiting({ noPin: !pin }); return; }
+      this.haptic && this.haptic('warning');
+      this.blockedCard('fc-swap-left', {
+        tone: 'warn', title: sw ? 'SWAPPED, NOT ON THE CARD' : 'NOT ON THE CARD',
+        reason: this.fcBoth(amount, unit) + ' is in this phone. Tap the card to put it on, or leave it in this phone.'
+          + ((e && e.message) ? ' ' + String(e.message) : ''),
+        retry: 'TAP CARD', go: () => this.fcSwapOn(amount, unit, pin, sw, back),
+        shut: { label: 'LEAVE IT', pill: true, tap: () => { this._swapCard = null; } },
+      });
+    });
+  }
+
+  /* ---- the rate (software 1.23) ------------------------------------------------------------------------------------------
+   *
+   * A card of 1.23 weighs a payment in sats in cents, at a rate its owner's phone writes from the price it shows, and its owner's phone
+   * keeps that near the market without a word (08a-flashcard.js, `cardRepeg23`). A price more than twice the one the card last knew, or
+   * under half of it, is asked about once before it is written: a wrong price is the one way the owner's own phone could loosen the card's
+   * ceiling for sats. Never on the first rate a card is given. */
+  fcRateWords(now, was) {
+    return 'Bitcoin\u2019s price is now $' + this.group(Math.round(Number(now) || 0)) + '; the card last knew $' + this.group(Math.round(Number(was) || 0)) + '. Update it?';
+  }
+
+  // from CHANGE LIMIT (the wallet's `rate-far`): YES writes this phone's rate with the limit, NO keeps the card's
+  fcRateFar(e, then) {
+    this.haptic && this.haptic('warning');
+    this.blockedCard('fc-rate-far', {
+      tone: 'ask', title: 'BITCOIN PRICE',
+      reason: this.fcRateWords(e.now, e.was),
+      retry: 'YES', go: () => then({ rateOk: true }),
+      shut: { label: 'NO', pill: true, tap: () => then({ keepRate: true }) },
+    });
+  }
+
+  // from the owner's read (`card.rateAsk`): YES is one tap that writes the rate, NO is not asked again at this price
+  fcRateAsk(card) {
+    const W = this.fcW();
+    const a = card && card.rateAsk;
+    if (!W || !a) return;
+    this.blockedCard('fc-rate-ask', {
+      tone: 'ask', title: 'BITCOIN PRICE',
+      reason: this.fcRateWords(a.now, a.was),
+      retry: 'YES', go: () => this.fcTap({}, (link, on) => { on('writing'); return W.cardSetRate(link, { price: a.now }); })
+        .then((c) => { this.fcShow(c); this.haptic && this.haptic('success'); this.toast('The card has the new price.'); },
+              (e) => this.fcFailed(e, { again: () => this.fcRateAsk(card) })),
+      shut: { label: 'NO', pill: true, tap: () => { if (W.cardRateNo) W.cardRateNo(card.key, a.rate); } },
+    });
   }
 
   /* ---- its mint -------------------------------------------------------------
@@ -25560,7 +26005,8 @@ class Component extends DCLogic {
     if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
     /* A dollar card's dollars do not move between mints by Lightning (`cardMoveQuote` refuses one): they come off to this
      * phone's own dollars, and go on again at the new mint. An empty one is told its new mint, as any is. */
-    if (fc.unit === 'usd' && fc.balance > 0) {
+    // (a card of software 1.23 holding dollars beside its bitcoin is the same: its dollars come off and go on again)
+    if ((fc.unit === 'usd' && fc.balance > 0) || (fc.v123 && this.fcHeld(fc, 'usd') > 0)) {
       this.blockedCard('fc-usd-move', {
         tone: 'warn', title: 'A DOLLAR CARD',
         reason: 'This card holds dollars at ' + this.mintNameOf(fc.mint) + '. Take them off with WITHDRAW, switch, and load it again at the new mint.',
@@ -25825,9 +26271,9 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     this.fcPinOr({
       title: 'CARD PIN',
-      subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days: ' + this.fcBoth(fc.balance, fc.unit) + '.',
+      subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days: ' + this.fcWholeWords(fc) + '.',
       cta: 'RENEW',
-    }, (pin) => this.fcTap({ amount: this.stageMoney(fc.balance, fc.unit), warm: true },
+    }, (pin) => this.fcTap({ amount: this.fcWholeStage(fc), warm: true },
       (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
       .then((r) => {
         (r.hashes || []).forEach(h => this.txIsNew(h));
@@ -25855,7 +26301,7 @@ class Component extends DCLogic {
     if (this._fcRefreshAsked[fc.key]) return;
     if (!(W.cardOnline && W.cardOnline()) || this.offlineNow()) return;
     // (a locked card cannot give its money up to be renewed until its owner has opened it)
-    if (!(fc.mine && fc.recoverable && fc.balance > 0) || fc.locked) return;
+    if (!(fc.mine && fc.recoverable && this.fcAnyMoney(fc)) || fc.locked) return;
     const now = Math.floor(Date.now() / 1000);
     if (!(fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400 && fc.first > now + 600)) return;
     const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -25995,11 +26441,11 @@ class Component extends DCLogic {
     // a locked card is not asked whether this phone is its owner; its own word is the proof, at the tap
     if (fc.ownedHere === false && !fc.locked) { this.fcFailed({ card: 'not-owner' }); return; }
     // the money comes off at the card's own mint
-    if (fc.balance > 0 && !this.fcReady('Resetting a card')) return;
+    if (this.fcAnyMoney(fc) && !this.fcReady('Resetting a card')) return;
     this.blockedCard('fc-reset', {
       tone: 'warn', title: 'RESET CARD',
       reason: 'This takes the card back to how it was in its packet. Its PIN, its owner, its limits and its log are wiped, and it gets a new key. It is then anyone\u2019s to set up.\n\n'
-        + (fc.balance > 0 ? 'The ' + this.fcBoth(fc.balance, fc.unit) + ' on it comes off to this phone first.\n\n' : '')
+        + (this.fcAnyMoney(fc) ? 'The ' + this.fcWholeWords(fc) + ' on it ' + (/ and /.test(this.fcWholeWords(fc)) ? 'come' : 'comes') + ' off to this phone first.\n\n' : '')
         + 'This cannot be undone.\n\nDo you wish to continue?',
       retry: 'CONTINUE', go: () => this.fcResetGo(),
       shut: { label: 'CANCEL' },
@@ -26010,10 +26456,10 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     if (!fc) return;
     // the PIN is the card's, for the money to come off and for a locked card; an empty one that is not locked is reset with this phone's proof alone
-    if (!(fc.locked || fc.balance > 0)) { this.fcResetRun(''); return; }
+    if (!(fc.locked || this.fcAnyMoney(fc))) { this.fcResetRun(''); return; }
     this.fcPinOr({
       title: 'CARD PIN',
-      subtitle: fc.balance > 0 ? 'To take ' + this.fcBoth(fc.balance, fc.unit) + ' off the card and reset it.' : 'To reset the card. It is locked.',
+      subtitle: this.fcAnyMoney(fc) ? 'To take ' + this.fcWholeWords(fc) + ' off the card and reset it.' : 'To reset the card. It is locked.',
       cta: 'RESET CARD',
     }, (pin) => this.fcResetRun(pin));
   }
@@ -26022,9 +26468,8 @@ class Component extends DCLogic {
     const W = this.fcW();
     const fc = this.state.fc;
     if (!W || !fc) return;
-    const money = fc.balance > 0;
-    const u = fc.unit;
-    this.fcTap({ amount: money ? this.stageMoney(fc.balance, u) : '', warm: money },
+    const money = this.fcAnyMoney(fc);
+    this.fcTap({ amount: money ? this.fcWholeStage(fc) : '', warm: money },
       (link, on, progress) => {
         // the card is held through the money coming off and the reset: the steps that say it may go are not said
         const held = (step, info) => { if (step !== 'done' && step !== 'checking') on(step, info); };
@@ -26044,11 +26489,14 @@ class Component extends DCLogic {
         if (e && e.withdrew > 0) {
           if (e.hash) this.txIsNew(e.hash);
           this.fcMoved({});
-          if (this.state.fc) this.setState({ fc: Object.assign({}, this.state.fc, { balance: 0, count: 0 }) });
+          if (this.state.fc) this.setState({ fc: Object.assign({}, this.state.fc, { balance: 0, count: 0 }, this.state.fc.bal ? { bal: { usd: 0, sat: 0 } } : {}) });
           this.haptic && this.haptic('warning');
+          // (in the currency it came off in, and a card of both its other apart: `e.unit`, `e.also`)
+          const came = [this.fcBoth(e.withdrew, e.unit === 'usd' ? 'usd' : 'sat')].concat((Array.isArray(e.also) ? e.also : []).filter((x) => x && this.fcAmt(x) > 0)
+            .map((x) => this.fcBoth(this.fcAmt(x), x.unit === 'usd' ? 'usd' : 'sat'))).join(' and ');
           this.blockedCard('fc-reset-part', {
             tone: 'warn', title: 'EMPTY, BUT NOT RESET',
-            reason: this.fcBoth(e.withdrew, u) + ' came off the card into this phone. The card is not reset yet: tap it again to finish.',
+            reason: came + ' came off the card into this phone. The card is not reset yet: tap it again to finish.',
             chip: 'Hold it still until the phone says to remove it.',
             retry: 'TAP CARD', go: () => this.fcResetGo(), shut: { label: 'LATER' },
           });
@@ -26156,6 +26604,10 @@ class Component extends DCLogic {
    * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
   fcSendPrepare(card, sats, unit, alt) {
     const W = this.fcW();
+    /* A card of software 1.23 takes the currency sent where it holds it already, or where it is its record's: dollars onto its dollars,
+     * as they are (a new currency on it is its holder's to start, and a phone that is not its owner would be refused). */
+    const cu = W.cardUnits ? W.cardUnits(card) : null;
+    if (cu && (unit === 'usd' || unit === 'sat') && cu.some((x) => x.unit === unit)) return W.cardPrepare(card, sats, { unit });
     const holdsUsd = !!(card.record && card.record.unit === 'usd');
     if (unit === 'usd' && !holdsUsd && alt) {
       // a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them
@@ -26195,7 +26647,9 @@ class Component extends DCLogic {
     let setUp = false;
     this.fcTap({ amount: this.stageMoney(sats, unit), warm: true }, (link, on) => {
       on('writing');
-      return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin })
+      // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
+      return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
+                                    tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) })
         .then((card) => { setUp = true; on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
         .then((m) => {
           made = m;
@@ -26449,10 +26903,25 @@ class Component extends DCLogic {
   }
 
   // SEND, the tile on the card's screen
-  fcOutOpen() {
+  fcOutOpen(picked) {
     if (!this.fcReady('Paying from the card')) return;
     const fc = this.state.fc;
-    if (!(fc.balance > 0)) { this.toast('There is nothing on this card.', true); return; }
+    /* A card of software 1.23 that holds both: which pays is asked first, every time, on the CURRENCY screen with what the card holds of
+     * each (never chosen for the holder), and the payment is quoted and paid in it (`fcUnit`). One that holds one pays in that one. */
+    if (!picked) {
+      this._fcFlowUnit = null;
+      if (fc.v123 && fc.bal) {
+        const has = (u) => fc.bal[u] > 0;
+        if (has('usd') && has('sat')) {
+          this.fcPickUnit({ question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. You are asked every time.',
+                            bal: { usd: fc.bal.usd, sat: fc.bal.sat }, short: { usd: '', sat: '' } },
+                          (u) => { this._fcFlowUnit = u; this.fcOutOpen(true); });
+          return;
+        }
+        this._fcFlowUnit = has('usd') ? 'usd' : has('sat') ? 'sat' : null;
+      }
+    }
+    if (!(this.fcHeld(fc, this.fcUnit()) > 0)) { this.toast('There is nothing on this card.', true); return; }
     this.setState(p => ({
       screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: 'card', tokenMode: false,
       amount: '', asset: '', unit: 'USD', recipient: '', recipientKind: '', emailDraft: '', note: '', noteDraft: '',
@@ -26489,7 +26958,8 @@ class Component extends DCLogic {
     /* A dollar card pays in dollars, as a melt of its cents at the card's mint (the quote was asked in dollars,
      * 03-send.js `quoteSendFee`), and its total is in cents; a bitcoin card's is in sats, as ever. A quote in the other unit
      * (asked before the card was read) is not paid with. */
-    const unit = fc.unit === 'usd' ? 'usd' : 'sat';
+    // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)
+    const unit = this.fcUnit() === 'usd' ? 'usd' : 'sat';
     const inUnit = !!q && (q.unit || 'sat') === unit;
     let send = null;
     if (inUnit && ask && ask.inv && q.bolt11 === ask.inv) send = { to, key: fc.key, quote: q, unit };
@@ -26498,7 +26968,7 @@ class Component extends DCLogic {
     }
     if (!send) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
     const total = W.cardOutTotal ? W.cardOutTotal(q.amount, q.feeReserve, unit) : q.amount + q.feeReserve;
-    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance, cardUnit: unit }, { taken: true }); return; }
+    if (total > this.fcHeld(fc, unit)) { this.fcFailed({ card: 'not-enough', balance: this.fcHeld(fc, unit), cardUnit: unit }, { taken: true }); return; }
     // Tor can drop while the confirmation sits open: given a moment to come back, as a payment from this phone is (`startSend`)
     const G = window.FoxyGate;
     const fresh = (G && G.recheck) ? G.recheck() : null;
@@ -26816,7 +27286,7 @@ class Component extends DCLogic {
      * under what it holds how much of its limit is left. LIMITS is where
      * it is changed. */
     // a card with under FC_RENEW_DAYS left before its date: said where the money waiting for a card is said, and renewed from there
-    if (on && fc && near && !past && fc.balance > 0) {
+    if (on && fc && near && !past && this.fcAnyMoney(fc)) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }
 
@@ -26844,9 +27314,9 @@ class Component extends DCLogic {
       { label: 'LIMITS', tap: () => this.fcSetLimit(),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
     ]).concat(!(fc && fc.hasRecord && this.fcTwoUnits(fc)) ? [] : [
-      /* SWAP, for a card that holds two balances, as home has it at a mint with two. No card does yet: every card's
-       * software holds one unit, and what two would take is not built, so the tap only says so. */
-      { label: 'SWAP', tap: () => this.toast('This card cannot swap yet.', true),
+      /* SWAP, for a card that holds two balances (software 1.23), as home has it at a mint with two: a withdrawal of the one, the swap at
+       * the mint on this phone, and a load of the other, a tap at each end (`fcSwap`). */
+      { label: 'SWAP', tap: () => this.fcSwap(),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ]).concat(restore);
 
@@ -26889,6 +27359,11 @@ class Component extends DCLogic {
     const U = (fc && fc.unit === 'usd') ? 'usd' : 'sat';
     const usdCard = U === 'usd';
     const sat1 = (this.satUsd && this.satUsd()) || 0;
+    /* Software 1.23: a card that holds both currencies (or may) shows both pills, the dollar pill with its worth in sats under it and the
+     * bitcoin pill with its worth in dollars, at the market price (`two`); its ceiling is cents for both together, said once, in dollars,
+     * under them (`LU`). A card of one unit shows its one pill, as ever. */
+    const two = !!(fc && fc.hasRecord && fc.v123 && fc.bal && this.fcTwoUnits(fc));
+    const LU = (fc && fc.cents) ? 'usd' : U;
     // the limit line has a card to be on, and says nothing of a blocked one
     const limitShown = !!fc && !!fc.hasRecord && fc.pin !== 'blocked';
     // what the balance says now: what the card holds, or, while it counts after money went on or off, where it has got to
@@ -26897,11 +27372,11 @@ class Component extends DCLogic {
      * after a bar: "NO LIMIT | NO PIN". A card whose one limit is a daily one (set by an older Foxy) says nothing of limits at all:
      * this phone sets no daily limit, and says nothing about one. */
     const limitBase = !(fc && fc.hasRecord) ? '' : (
-      tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, U)
+      tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
       // another phone's card keeps its per tap limit to its owner: it is not said to have none
-      : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? (noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U) : '')
+      : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? (noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, LU) : '')
       // only a no PIN limit: it is the one thing to say (with the per tap limit it has its own line below)
-      : noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U)
+      : noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, LU)
       : (Number(fc.limit) > 0) ? '' : 'NO LIMIT');
     const limitLine = (fc && fc.hasRecord && noPinCard) ? (limitBase ? limitBase + ' | NO PIN' : 'NO PIN') : limitBase;
     return {
@@ -26928,7 +27403,23 @@ class Component extends DCLogic {
       fcMintName: (fc && fc.hasRecord) ? String(this.mintNameOf(fc.mint) || '').toUpperCase() : '',
       /* A dollar card has home's dollar pill instead: frost and dark ink, its cents big, and their worth in sats under them at the
        * market price where there is one, as home has it (display only: the card holds dollars). */
-      fcPillRows: (fc && fc.hasRecord && usdCard) ? [{
+      fcPillRows: two ? [{
+        ...this.USD_PILL,
+        label: 'This card\u2019s history',
+        big: this.usd(fc.bal.usd / 100),
+        small: sat1 ? '\u20bf ' + this.group(Math.round(fc.bal.usd / 100 / sat1)) : '',
+        glow: '0 10px 24px rgba(0,0,0,.3)',
+        tap: () => this.fcHistory(),
+        badge: false,
+      }, {
+        ...this.BTC_PILL,
+        label: 'This card\u2019s history',
+        big: this.group(fc.bal.sat),
+        small: px > 0 ? '$' + this.usd((fc.bal.sat / 1e8) * px) + ' USD' : '',
+        glow: '0 10px 24px rgba(0,0,0,.3)',
+        tap: () => this.fcHistory(),
+        badge: false,
+      }] : (fc && fc.hasRecord && usdCard) ? [{
         ...this.USD_PILL,
         label: 'This card\u2019s history',
         big: this.usd(shown / 100),
@@ -26947,7 +27438,8 @@ class Component extends DCLogic {
         badge: false,
       }] : [],
       // what the card holds, in words: the pill's figure with its sign
-      fcBalance: !fc ? '' : usdCard ? '$ ' + this.usd(shown / 100) : '\u20bf ' + this.group(shown),
+      fcBalance: !fc ? '' : two ? '$ ' + this.usd(fc.bal.usd / 100) + ' \u00b7 \u20bf ' + this.group(fc.bal.sat)
+        : usdCard ? '$ ' + this.usd(shown / 100) : '\u20bf ' + this.group(shown),
       /* The limit line is on the card's own face, at its bottom left, where its design has BEARER at the bottom right (build/markup.html;
        * with the card's badge above it where it has one), in dollars first as the balance is. */
       fcLimitShown: limitShown && !!limitLine,
@@ -26955,7 +27447,9 @@ class Component extends DCLogic {
       fcLimitLine: limitLine,
       // under the balance, for a card with a PIN that pays some without it: how much, and what is left of it (today, before 1.21; till the PIN is next given, from it)
       fcNoPinShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && !!noPin,
-      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, U) + ' \u00b7 LEFT ' + (fc.pinFirst ? '' : 'TODAY ') + (noPin.left > 0 || !px || usdCard ? this.fcPrice(noPin.left, U) : '$0.00') : '',
+      // (software 1.23: for both its currencies together, in dollars, `LU`)
+      fcNoPinLine: noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 LEFT ' + (fc.pinFirst ? '' : 'TODAY ') + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00')
+        + (two ? ' \u00b7 BOTH CURRENCIES' : '') : '',
       // under the limits, where the card holds pieces larger than its limit on one tap
       fcAboveShown: !!fc && !!fc.hasRecord && fc.pin !== 'blocked' && (fc.above || 0) > 0,
       fcAboveLine: (fc && fc.above > 0) ? this.fcPrice(fc.above, U).toUpperCase() + ' IN PIECES ABOVE THE LIMIT \u00b7 A TILL HOLDS LONGER FOR THOSE' : '',
@@ -27658,6 +28152,8 @@ class Component extends DCLogic {
   /* SWAP, from home's button or the menu's row (swapStart). Starts from the
    * balance that has something in it: dollars when both do, as drawn. */
   goSwap() {
+    // (home's own SWAP: this phone's balances, not a card's, `fcSwap`)
+    this._swapCard = null;
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
     const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
@@ -27729,6 +28225,20 @@ class Component extends DCLogic {
     return { from: from, to: from === 'usd' ? 'sat' : 'usd' };
   }
 
+  /* For a card's SWAP (26f-flashcard.js, `fcSwap`): what of `u` comes off the card before the swap is run, for the mint to be asked a rate
+   * for it while it is still on the card (the wallet's `swapQuote`, `coming`). Nothing for this phone's own SWAP. */
+  swapComing(u) {
+    const c = this._swapCard;
+    return (c && c.bal) ? { coming: Math.max(0, Math.round(Number(c.bal[u === 'sat' ? 'sat' : 'usd']) || 0)) } : {};
+  }
+
+  /* What there is to swap in `u`: this phone's balance, or, for a card's SWAP (26f-flashcard.js, `fcSwap`), what the card holds of it. */
+  swapHave(u) {
+    const c = this._swapCard;
+    if (c && c.bal) return Math.max(0, Math.round(Number(c.bal[u === 'sat' ? 'sat' : 'usd']) || 0));
+    return this.unitBalance(u);
+  }
+
   /* NEXT on the swap screen: SET AMOUNT, in dollars whichever way it goes,
    * since dollars are what people think in. Without a price ever seen there
    * is nothing to convert dollars with, so bitcoin leaving is typed in sats,
@@ -27737,7 +28247,7 @@ class Component extends DCLogic {
   swapToAmount() {
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
-    if (!(this.unitBalance(from) > 0)) {
+    if (!(this.swapHave(from) > 0)) {
       this.toast('You have no ' + this.unitWord(from).toLowerCase() + ' to swap.', true);
       return;
     }
@@ -27817,7 +28327,7 @@ class Component extends DCLogic {
     if (this.offlineNow() || !this.twoUnitsOn() || this._swapRun || s.swapBusy) return;
     const { from, to } = this.swapUnits();
     const amount = this.swapTyped();
-    if (!(amount > 0) || amount > this.unitBalance(from)) return;
+    if (!(amount > 0) || amount > this.swapHave(from)) return;
     const had = this.swapAheadMine();
     if (had && (had.asking || this.swapAheadFor(had))) return;
     if (this._swapAheadOut) { this._swapAheadWaiting = true; return; }
@@ -27838,7 +28348,7 @@ class Component extends DCLogic {
     };
     this._swapAhead = mine;
     console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, from) + ' as it is typed');
-    const opts = { paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) };
+    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) }, this.swapComing(from));
     const ask = this._swapAheadOut = W.swapQuote(from, to, amount, opts).then((q) => {
       mine.q = q;
       mine.asking = false;
@@ -27908,7 +28418,7 @@ class Component extends DCLogic {
   swapNext(all) {
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
-    const have = this.unitBalance(from);
+    const have = this.swapHave(from);
     /* A quote asked ahead for these very keys is for the figure they meant
      * when it was asked: that figure is the swap's, even though its answer
      * has since moved the rate the keys would convert at. */
@@ -27949,7 +28459,8 @@ class Component extends DCLogic {
       return;
     }
     // the amount handed over, not read back from state the same moment it was set
-    this.swapAsk(false, amount, !!all);
+    // (a card's SWAP: ALL OF IT is the card's, asked as that figure, never as all of this phone's)
+    this.swapAsk(false, amount, this._swapCard ? false : !!all);
   }
 
   /* The mint's rate for this swap. `again` is a rate asked for because the
@@ -27966,7 +28477,7 @@ class Component extends DCLogic {
     const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
     this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
     // out with the mint until it answers: nothing is asked ahead beside it (`swapProbe`, `swapAheadAsk`)
-    const asked = this._swapAskOut = W.swapQuote(from, to, amount, all ? { all: true } : {});
+    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : {}, this.swapComing(from)));
     asked.then(() => {}, () => {}).then(() => { if (this._swapAskOut === asked) this._swapAskOut = null; });
     asked.then(q => {
       // an answer for an older question is dropped; one for a screen that has gone only ends the wait
@@ -27974,6 +28485,12 @@ class Component extends DCLogic {
       if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
       console.log('[foxy] swap: quoted ' + this.unitFigure(q.total, from) + ' for ' + this.unitFigure(q.get, to)
         + (again ? ' (a new rate)' : ''));
+      // (a card's SWAP: what the swap spends, its fee with it, comes off the card, which has to hold it)
+      if (this._swapCard && Number(q.total) > this.swapHave(from)) {
+        this.setState({ swapQuoting: false, swapQuote: null, swapErrAmount: true,
+          swapErr: 'With the fee that is ' + this.unitFigure(q.total, from) + ', more than the card holds. Swap a little less.' });
+        return;
+      }
       this._swapQuotedAt = Date.now();
       this.setState({ swapQuoting: false, swapQuote: q, swapNewRate: !!again });
       this.swapClock();
@@ -28030,6 +28547,8 @@ class Component extends DCLogic {
     const s = this.state;
     const q = s.swapQuote;
     if (!q || s.swapBusy || s.swapQuoting || this._swapRun) return;
+    // a card's SWAP: a tap at each end of this phone's own swap (26f-flashcard.js)
+    if (this._swapCard && this.fcSwapGo) { this.fcSwapGo(q); return; }
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     /* A new rate has only just replaced the old one: a tap in that moment was
      * meant for the old rate, so it is not taken for the new one. */
@@ -28419,8 +28938,8 @@ class Component extends DCLogic {
       label: label, name: this.unitWord(u), text: text,
     });
     const rows = sc === 'swap' ? [
-      pill('FROM', from, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(from), from)),
-      pill('TO', to, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(to), to)),
+      pill('FROM', from, s.hidden ? '••••••' : this.unitFigure(this.swapHave(from), from)),
+      pill('TO', to, s.hidden ? '••••••' : this.unitFigure(this.swapHave(to), to)),
     ] : [];
     const r = s.swapResult || null;
     const done = (sc === 'swapDone' && r) ? [
@@ -28433,7 +28952,7 @@ class Component extends DCLogic {
     const feeUnit = r && r.from && r.from.unit === 'sat' ? 'sat' : 'usd';
     const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
-    const canGo = sc === 'swap' && !this.offlineNow() && this.unitBalance(from) > 0;
+    const canGo = sc === 'swap' && !this.offlineNow() && this.swapHave(from) > 0;
     return {
       isSwap: sc === 'swap',
       swapRows: rows,
@@ -28654,8 +29173,9 @@ class Component extends DCLogic {
   fcSetUpStepsRun(c) {
     const W = this.fcW();
     if (!W) return;
+    // (and the price: a card of software 1.23 keeps its numbers in cents and is given its rate at it, 08a-flashcard.js `cardSetUpCents`)
     const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
-                                      tapUsd: c.tapUsd, noPinUsd: c.noPinUsd });
+                                      tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
     if (c.unit) how.unit = c.unit;
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {

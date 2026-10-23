@@ -373,9 +373,9 @@ const STATES = [
     A.setState({ fc: null });
     await settle();
     ok(/CARD BALANCE/.test(text()), 'and so does the screen before a card is tapped');
-    // a card of today reports no units: fcShow keeps none
+    // a card before software 1.23 reports no units, and fcShow keeps none; one of 1.23 the units the wallet sorted its pieces into (`cardUnits`)
     const src = app.slice(app.indexOf('  fcShow(card, open) {'));
-    ok(/units: \(card\.info && Array\.isArray\(card\.info\.units\)\) \? card\.info\.units\.slice\(\) : null/.test(src),
+    ok(/units: \(W && W\.cardUnits && W\.cardUnits\(card\)\) \? W\.cardUnits\(card\)\.map\(\(x\) => x\.unit\) : null/.test(src),
       'a card is read with the units its software reports, and none where it reports none');
   }
 

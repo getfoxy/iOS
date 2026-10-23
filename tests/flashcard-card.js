@@ -11,6 +11,7 @@
  *     const card = makeCard({ window, key });  // window: the page's (its CashuTS signs); key: 64 hex
  *     makeCard({ window, format: 4 })            // the card that signs once for a payment: software 1.20 (`software: 19` and before are the cards before it)
  *     makeCard({ window, format: 4, software: 22 })   // 1.22, the card of a holder with no phone (`software: 21` is 1.21): see PIN_FIRST and GUESTS
+ *     makeCard({ window, format: 4, software: 23 })   // 1.23, dollars and sats on one card at its one mint: see UNITS (`book: false`, a card refused its book)
  *     makeCard({ window, format: 4, proofRoom: false })   // the card of 1.20 that was refused the room for the mint's proofs: it stores a piece and keeps no proof
  *     makeCard({ window, format: 4, floorBits: 0x207fffff })   // the least work a block header must show: the real floor unless a test mines its own headers
  *     const answer = await card.send('b001000000');
@@ -138,11 +139,32 @@ function makeCard(opts) {
    *        (6985), with the holder's say (the owner's grant, or with no owner the history held for: 6982), and refuses it with no PIN (6A80);
    *        RESET_CARD with P1 = 1 and P2 = an opening's number gives that opening up (the owner's proof over "FoxyCard/reset", the nonce and
    *        the number; with no owner the number alone under the PIN and the hold), writing bit 4 (0x10) of the tap's log flags. */
-  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22);
-  const GUESTS = PIN_FIRST && o.software === 22;
+  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22 || o.software === 23);
+  const GUESTS = PIN_FIRST && (o.software === 22 || o.software === 23);
+  /* 1.23 (`UNITS`, asked for by name: `software: 23`), dollars and sats on one card at its one mint (the card repository's
+   * docs/FOXY-CARD-KEYSETS.md, held to applet/src/main/java/me/flashapp/cashu/CashuApplet.java and UnitsTest.java):
+   *   - the book: a table of six entries (a keyset's eight bytes and a state byte: 40 in use, 80 the mark, bit 0 the unit code), the
+   *     last payment's unit (80 the record's, A0 the other, 00 none), the other unit's count of what was signed for and each receipt's
+   *     unit. Made by the first SET_CARD that gets through (`book: false` is a card refused the room: a card of one unit in every way);
+   *   - LOAD_PROOF with P2 = 1 puts the unit (00 sats, 01 dollars) before the pieces (82/163/244, 178 with P1 = 1); P2 = 0 is the
+   *     record's unit; any other P2 6B00. A keyset in the table as the other unit 6A9B; a new keyset of the other unit, not the last
+   *     payment's, without the holder's say (the owner's grant, or with no owner the history held for) 6A9D; no entry free, or a third
+   *     live one without the mark, after a reclaim 6A9C; pieces in sats on a card with a limit set and no rate 6A99, before any is read;
+   *   - every limit in cents: a payment in sats is weighed at the rate, ceil(S x 100 / R), the whole for the allowance and what leaves
+   *     the card for the day and the wait; a sats payment with a limit set and no rate 6A99 at the first SIGN, before the PIN;
+   *   - SET_LIMIT 0x34 sixteen bytes (day, one payment, allowance, rate) and 0x33 twelve (one payment, allowance, rate); the old lengths
+   *     only on a dollars record (6700 on sats); the rate kept at record offset 156, masked in GET_CARD, said in GET_INFO P1 = 3 to the
+   *     holder only;
+   *   - SPEND_ALL_BEGIN of places of both units, or of a place of no entry, 6A9A;
+   *   - GET_INFO byte 8 (and GET_CARD byte 0) 5 while an entry in use is of the other unit, else 4; P1 = 3, 51 bytes; GET_CARD P1 = 2,
+   *     the table; GET_BALANCE P1 = 0 the record's unit, P1 = 1 each unit, sats first; GET_LOG P1 = 2 (the other unit's count after
+   *     the head) and P1 = 3 (each receipt and its unit); a log entry's bit 5 (20) the other unit, a tap of both units two entries;
+   *   - the reclaim (entries nothing on the card names, let go) at CLEAR_SPENT, at a load that finds the table full, and at SET_CARD,
+   *     which takes a unit of 00 or 01 only (6A80) and lets drafted openings go first. */
+  const UNITS = PIN_FIRST && o.software === 23;
   // the askings a claim and a history are held for (the applet's CLAIM_ASKINGS and HISTORY_ASKINGS)
   const CLAIM_ASKINGS = 6, HISTORY_ASKINGS = 10;
-  const VERSION = GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const VERSION = UNITS ? 23 : GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -220,6 +242,11 @@ function makeCard(opts) {
      * proof for each place, 96 bytes as hex (e || s || r) or '' for none: null until the first SET_CARD reserves the room, and for good on a card
      * that is refused it. A place that is freed keeps the record it had until the next piece comes; only an unspent place is ever served. */
     tagOff: false, dleq: null,
+    /* 1.23: the book (null until the first SET_CARD that gets through, and for good with `book: false`): `table`, six entries of
+     * { keyset (16 hex), state }; `last`, the last payment's unit (0x80 the record's, 0xA0 the other, 0 none); `other`, the other
+     * unit's count of what was signed for, ever; `units`, each receipt's unit, beside the sixteen. And the rate, sats per dollar
+     * (0 none), which is the record's (offset 156): written by SET_LIMIT, kept by SET_CARD, zeroed by RESET. */
+    book: null, rate: 0,
     // that the card has paid since it was last tapped (permanent): the next tap may put pieces on with no PIN, for the change
     changeDue: false,
     // the tap's own: what was verified, the nonce the card last gave (hex, good for one try), whether the owner has allowed
@@ -314,16 +341,60 @@ function makeCard(opts) {
   /* The log's entry for this time in the field, begun (the count of taps up by one, its place in the ring cleared and
    * given the clock) if nothing in it has been written down yet. */
   const stop = (n) => Math.min(4294967295, n);
-  const logEntry = () => {
-    if (!s.tapOpen) s.log.taps = stop(s.log.taps + 1);
+  /* 1.23: an entry is of one unit. `unit` is 0x20 for the other unit than the record's, 0 for the record's, and 'any' for a write that
+   * has no amount (the let-go), which takes the tap's entry whatever its unit; a tap whose entry is of the other unit begins a new one. */
+  const logEntry = (unit) => {
+    const u = (UNITS && unit !== undefined) ? unit : 'any';
+    const now = (((s.log.taps & 0xff) - 1) & 7);
+    const fresh = !s.tapOpen || (u !== 'any' && ((s.log.ring[now].flags || 0) & 0x20) !== u);
+    if (fresh) s.log.taps = stop(s.log.taps + 1);
     const at = (((s.log.taps & 0xff) - 1) & 7);
-    if (!s.tapOpen) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: s.timeMarked ? 4 : 0, loads: 0, loaded: 0, told: s.told }; s.tapOpen = true; }
+    if (fresh) { s.log.ring[at] = { time: s.now, sats: 0, pieces: 0, refused: 0, flags: (s.timeMarked ? 4 : 0) | (u === 0x20 ? 0x20 : 0), loads: 0, loaded: 0, told: s.told }; s.tapOpen = true; }
     return s.log.ring[at];
+  };
+  /* ---- the book (1.23) ---- */
+  const ENTRIES = 6;
+  const entryOf = (keyset) => (s.book ? s.book.table.findIndex((x) => (x.state & 0x40) !== 0 && x.keyset === keyset) : -1);
+  // a place's unit code as the table has its keyset: -1 where no entry has it (a place of no unit); a card with no book, the record's
+  const placeUnit = (slot) => {
+    if (!s.book) return s.record.unit;
+    const e = entryOf(slot.data.substr(0, 16));
+    return e < 0 ? -1 : (s.book.table[e].state & 1);
+  };
+  const logUnit = (unit) => (UNITS && unit >= 0 && unit !== s.record.unit ? 0x20 : 0);
+  const cardFormat = () => (UNITS && s.book && s.book.table.some((x) => (x.state & 0x40) !== 0 && (x.state & 1) !== s.record.unit) ? 5 : FORMAT);
+  // a free entry for a new keyset, or -1: none free, or (not `marked`) a third without the mark (the cheap count, dead entries and all)
+  const freeEntry = (marked) => {
+    let free = -1, unmarked = 0;
+    for (let e = ENTRIES - 1; e >= 0; e--) {
+      const st = s.book.table[e].state;
+      if ((st & 0x40) === 0) free = e; else if ((st & 0x80) === 0) unmarked += 1;
+    }
+    return !marked && unmarked >= 2 ? -1 : free;
+  };
+  // every entry that no unspent place and no opening (drafted or owed) names is let go
+  const reclaim = () => {
+    if (!s.book) return;
+    const live = {};
+    s.slots.forEach((x) => { if (x.status === 1) { const e = entryOf(x.data.substr(0, 16)); if (e >= 0) live[e] = true; } });
+    s.openings.forEach((x) => { if (x.state !== 'empty') { const e = entryOf(x.keyset); if (e >= 0) live[e] = true; } });
+    s.book.table.forEach((x, e) => { if (!live[e] && x.state !== 0) s.book.table[e] = { keyset: '00'.repeat(8), state: 0 }; });
+    s.reclaims = (s.reclaims || 0) + 1;
+  };
+  const freshBook = () => ({ table: Array.from({ length: ENTRIES }, () => ({ keyset: '00'.repeat(8), state: 0 })), last: 0, other: 0, units: Array.from({ length: 16 }, () => 0) });
+  // a limit set (the day's, one payment's or the allowance) and no rate: a card that can weigh no payment in sats
+  const limitWithNoRate = () => UNITS && s.rate === 0 && (s.record.limit !== 0 || s.tapLimit !== 0 || s.noPinLimit !== 0);
+  // sats turned into cents at the rate, rounded up, a quotient past four bytes taken as FF FF FF FF (the applet's `toCents`)
+  const toCents = (sats) => {
+    if (!(s.rate > 0)) return sats;
+    const q = (BigInt(sats) * 100n + BigInt(s.rate) - 1n) / BigInt(s.rate);
+    return q > 4294967295n ? 4294967295 : Number(q);
   };
   /* A spend over a limit, written down and then refused: the third in a run inside one tap's ten seconds of the clock
    * marks the tap and counts the run. A clock that is behind the run's start (a new time key) begins a new run. */
   const refuse = (sw) => {
-    const e = logEntry();
+    // (1.23: in an entry of the payment's unit, `payFlag`, which a refusal is only ever of)
+    const e = logEntry(s.payFlag);
     s.log.refused = stop(s.log.refused + 1);
     if (e.refused < 255) e.refused += 1;
     /* A new run: the first there has been, a clock behind the run's start, ten seconds on from it, and (from 1.15) every refusal on a card that has
@@ -386,7 +457,7 @@ function makeCard(opts) {
     const day = value.readUInt32BE(0);
     const tap = both ? value.readUInt32BE(4) : 0;
     // 1.16's twelve bytes carry the no-PIN allowance after them; a card with no PIN has none to set (there is no PIN for it to be an allowance against)
-    const allowed = value.length === 12 ? value.readUInt32BE(8) : null;
+    const allowed = value.length >= 12 ? value.readUInt32BE(8) : null;
     if (allowed !== null && allowed !== 0 && s.pinState === 0) return '6985';
     // the limit on one payment asks no clock, and so needs no time; the day's does
     if (!HEADERS && (day !== 0 || (!PACED && both && tap !== 0)) && s.now === 0) return '6a92';
@@ -395,6 +466,8 @@ function makeCard(opts) {
     if (both && tap !== s.tapLimit) { s.tapLimit = tap; if (!PACED) { s.tapStart = s.now; s.tapSpent = 0; } }
     // an allowance that changes counts from nothing, in the window as it stands (the window is the day's, and stays)
     if (allowed !== null && allowed !== s.noPinLimit) { s.noPinLimit = allowed; s.noPinSpent = 0; }
+    // 1.23: sixteen bytes carry the rate after them, which begins no window and no count
+    if (value.length === 16) s.rate = value.readUInt32BE(12);
     return '9000';
   };
   const u32of = (n) => u32(Number(n));
@@ -469,7 +542,8 @@ function makeCard(opts) {
     switch (ins) {
       case 0x01: {
         const n = (st) => s.slots.filter((x) => x.status === st).length;
-        return [1, VERSION, SLOTS, n(1), n(2), n(0), SEALED ? 255 : MANY ? 127 : WIDE ? 63 : QUICK ? 31 : PACED ? 15 : 7, s.pinState, FORMAT, s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
+        // (1.23: byte 8 is the card's format worked out at each asking, 5 while it holds a keyset of the other unit)
+        return [1, VERSION, SLOTS, n(1), n(2), n(0), SEALED ? 255 : MANY ? 127 : WIDE ? 63 : QUICK ? 31 : PACED ? 15 : 7, s.pinState, cardFormat(), s.tries, s.locked ? 1 : 0, s.record.set ? 1 : 0]
           .map((v) => ('0' + v.toString(16)).slice(-2)).join('') + u32(s.record.limit) + (s.owner ? '01' : '00')
           // (1.21: byte 29 says change is owed to the card, which any reader may write back; up to 1.20, the tap after a payment)
           + u32(s.now) + u32(s.windowStart) + u32(s.spent) + ((PIN_FIRST ? s.openings.some((x) => x.state === 'pending') : s.changeGrant) ? '01' : '00')
@@ -478,11 +552,32 @@ function makeCard(opts) {
           // 1.16: the allowance and what is spent of it, to anybody (a till needs them to know whether to ask for the PIN); before it, zeros
           // 1.19: P1 = 2 is those forty-two bytes and then the NFC tag's state, to anyone; P1 = 1 and 0 are what they were, whatever it is, and any other P1 is the thirty bytes
           // (1.22: and to the PIN of a card with no owner, in a tap that read its history)
-          + ((p1 === 1 || (TAG && p1 === 2)) ? u32(QUICK && !s.grant && !(GUESTS && !s.owner && s.verified && s.tapRead) ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
-          + (TAG && p1 === 2 ? (s.tagOff ? '01' : '00') : '') + '9000';
+          + ((p1 === 1 || (TAG && p1 === 2) || (UNITS && p1 === 3)) ? u32(QUICK && !s.grant && !(GUESTS && !s.owner && s.verified && s.tapRead) ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
+          + (TAG && (p1 === 2 || (UNITS && p1 === 3)) ? (s.tagOff ? '01' : '00') : '')
+          /* 1.23, P1 = 3: the book's format (01, 00 with none), the rate (to whom the limit on one payment is said, zeros to anyone else),
+           * the entries in use, those without the mark, and the last payment's unit: 51 bytes */
+          + (UNITS && p1 === 3 ? (s.book ? '01' : '00')
+            + u32((s.grant || (!s.owner && s.verified && s.tapRead)) ? s.rate : 0)
+            + ('0' + (s.book ? s.book.table.filter((x) => (x.state & 0x40) !== 0).length : 0).toString(16)).slice(-2)
+            + ('0' + (s.book ? s.book.table.filter((x) => (x.state & 0x40) !== 0 && (x.state & 0x80) === 0).length : 0).toString(16)).slice(-2)
+            + ('0' + (s.book ? s.book.last : 0).toString(16)).slice(-2) : '') + '9000';
       }
       case 0x10: return pub + '9000';
-      case 0x11: return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
+      case 0x11: {
+        if (!UNITS) return u32(s.slots.reduce((a, x) => (x.status === 1 ? (a + amountOf(x)) % 4294967296 : a), 0)) + '9000';
+        /* 1.23: P1 = 0 the record's unit's sum; P1 = 1 how many units, then for each (sats first) its code, pieces and sum. A place of no
+         * entry is in no sum. */
+        const sums = [{ n: 0, sum: 0 }, { n: 0, sum: 0 }];
+        s.slots.forEach((x) => {
+          if (x.status !== 1) return;
+          const u = placeUnit(x);
+          if (u < 0) return;
+          sums[u].n += 1; sums[u].sum = (sums[u].sum + amountOf(x)) % 4294967296;
+        });
+        if (p1 !== 1) return u32(sums[s.record.unit === 1 ? 1 : 0].sum) + '9000';
+        const held = [0, 1].filter((u) => sums[u].n > 0);
+        return ('0' + held.length.toString(16)).slice(-2) + held.map((u) => '0' + u + ('0' + (sums[u].n & 0xff).toString(16)).slice(-2) + u32(sums[u].sum)).join('') + '9000';
+      }
       case 0x12: return ('0' + s.slots.filter((x) => x.status !== 0).length.toString(16)).slice(-2) + '9000';
       case 0x13: {
         if (p1 >= SLOTS) return '6a83';
@@ -499,10 +594,16 @@ function makeCard(opts) {
         return hex(mine) + sign(digest) + '9000';
       }
       case 0x16: {
+        // 1.23, P1 = 2: the table, a count and each entry in use, its nine bytes, in the table's order (00 alone with no book)
+        if (UNITS && p1 === 2) {
+          const used = s.book ? s.book.table.filter((x) => (x.state & 0x40) !== 0) : [];
+          return ('0' + used.length.toString(16)).slice(-2) + used.map((x) => x.keyset + ('0' + x.state.toString(16)).slice(-2)).join('') + '9000';
+        }
         const mint = Buffer.from(s.record.mint, 'latin1');
         // where the time key was (65 bytes): from 1.15 the hardest header's bits (4, as a header carries them: little-endian), the last header's hash (32) and zeros (29)
         const clockBytes = HEADERS ? hex(Buffer.from(u32(s.hardest), 'hex').reverse()) + s.headerHash + '00'.repeat(29) : s.record.timeKey;
-        return '0' + FORMAT + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
+        // (1.23: byte 0 the card's format, and the rate, kept in the first four of the 29 zeros, is not said here)
+        return '0' + cardFormat() + (s.record.set ? '01' : '00') + ('0' + s.record.unit.toString(16)).slice(-2) + u32(s.record.limit)
           + s.record.refund + clockBytes + ('0' + mint.length.toString(16)).slice(-2) + hex(mint)
           + (DESIGN ? (s.record.design ? hex(Buffer.from(s.record.design, 'latin1')) : '000000') : '') + '9000';
       }
@@ -513,7 +614,7 @@ function makeCard(opts) {
          * tap that paid, the first nine askings in a row answered 6A98, the tenth answered, and then open for the rest of the tap. */
         let guest = false;
         if (GUESTS && !s.owner && s.pinState !== 0) {
-          if (p1 !== 0 && p1 !== 1) return '6a86';
+          if (p1 !== 0 && p1 !== 1 && !(UNITS && (p1 === 2 || p1 === 3))) return '6a86';
           if (!s.verified) return '6982';
           if (s.tapPaid) return '6985';
           if (!s.tapRead) {
@@ -524,7 +625,9 @@ function makeCard(opts) {
           }
           guest = true;
         }
-        if (QUICK && p1 === 1) {
+        // (1.23: P1 = 3 is the receipts with each one's unit after it, 78 bytes a receipt)
+        const withUnits = UNITS && p1 === 3;
+        if (QUICK && (p1 === 1 || withUnits)) {
           // the receipts: the count of every payment signed, then up to three, newest first, from P2 back. The owner's grant and nothing less
           if (s.pinState !== 0 && !s.grant && !guest) return '6982';
           const n = s.receipts.count, kept = n < 16 ? n : 16, last = (((n & 0xff) - 1) & 15);
@@ -532,14 +635,17 @@ function makeCard(opts) {
           for (let k = p2; k < kept && k < p2 + 3; k++) {
             const r = s.receipts.ring[(last - k) & 15];
             said += u32(r.time) + (HEADERS ? u32(r.told || 0) : '') + u32(r.sats) + r.hash + r.out;
+            if (withUnits) said += ('0' + (s.book ? s.book.units[(last - k) & 15] : 0).toString(16)).slice(-2);
           }
           return said + '9000';
         }
-        if (QUICK && p1 !== 0) return '6a86';
+        if (QUICK && p1 !== 0 && !(UNITS && p1 === 2)) return '6a86';
         if (s.pinState !== 0 && !s.verified && !s.grant) return '6982';
         const held = s.log.taps < 8 ? s.log.taps : 8;
         const newest = (((s.log.taps & 0xff) - 1) & 7);
         let out = u32(s.log.taps) + u32(s.log.sats) + u32(s.log.refused) + u32(s.log.tampers);
+        // 1.23, P1 = 2: and the other unit's count of what was signed for, ever (zeros with no book)
+        if (UNITS && p1 === 2) out += u32(s.book ? s.book.other : 0);
         for (let k = 0; k < held; k++) {
           const e = s.log.ring[(newest - k) & 7];
           // the quicker card's entry is sixteen bytes: what was put on in the tap after what was signed for
@@ -653,8 +759,16 @@ function makeCard(opts) {
           if (slot.status === 2) return '6985';
           for (let j = 0; j < i; j++) if (list[j] === list[i]) return '6a80';
           if (dateOf(slot) !== dateOf(s.slots[list[0]])) return '6a80';
+          /* 1.23: one unit a payment. The first place's unit is looked up, and a place of no entry is of none; every other place only
+           * where its keyset is not the first's. */
+          if (UNITS) {
+            if (i === 0) { if (placeUnit(slot) < 0) return '6a9a'; }
+            else if (slot.data.substr(0, 16) !== s.slots[list[0]].data.substr(0, 16) && placeUnit(slot) !== placeUnit(s.slots[list[0]])) return '6a9a';
+          }
           sum += amountOf(slot);
         }
+        // the payment's unit, as a refusal written in the log says it (1.23)
+        s.payFlag = logUnit(placeUnit(s.slots[list[0]]));
         const carry = sum > 4294967295;
         const total = carry ? 4294967295 : sum;
         // a sum that wraps is past any allowance: with a PIN set and not shown it is the PIN's to ask for, and the log writes no refusal for a reader without it
@@ -722,6 +836,21 @@ function makeCard(opts) {
         const pay = s.all;
         // what leaves the card for good: the pieces less the change it made for itself (the pieces whole, before 1.12)
         const net = pay.total - pay.change;
+        /* 1.23: the figures the limits are held to, in cents, at the first SIGN and the last (`centsOfPayment`): a dollar payment's are its
+         * own, a sats payment's turned at the rate, each rounded up; a sats payment with a limit set and no rate is refused 6A99 and given
+         * up, before the PIN is asked. Before 1.23 they are the payment's own. */
+        let cents = { total: pay.total, net };
+        const unitCode = placeUnit(s.slots[pay.list[0]]);
+        pay.flag = logUnit(unitCode);
+        s.payFlag = pay.flag;
+        if (UNITS && unitCode === 0 && (pay.waits === null || pay.waits === 0)) {
+          if (s.rate === 0) {
+            if (limitWithNoRate()) { s.all = null; return '6a99'; }
+          } else {
+            cents = { total: toCents(pay.total), net: toCents(net) };
+          }
+        }
+        pay.cents = cents;
         if (pay.waits === null) {
           /* 1.12: the day's limit and the wait are held to it, and worked out at the first command, when the change is
            * known. Refused (over the day, or for want of a time), the payment is given up. */
@@ -732,15 +861,16 @@ function makeCard(opts) {
              * Otherwise 6a94, which signs nothing, gives the payment up as a limit does, and is nothing in the log (not a refusal
              * over a limit, not a tamper). Asked before the limits, so that a reader with no PIN writes nothing in the log. */
             if (s.pinState !== 0 && !s.verified) {
-              const counted = s.now >= s.windowStart + DAY ? 0 : s.noPinSpent;
+              // (1.21 and on: the allowance's count is renewed by the PIN, not by the day: ALLOWANCE_RENEWS_ON_PIN)
+              const counted = (!PIN_FIRST && s.now >= s.windowStart + DAY) ? 0 : s.noPinSpent;
               // (1.21: a payment counts as the whole of its pieces, change and all)
-              if (s.pinState !== 1 || s.noPinLimit === 0 || counted + (PIN_FIRST ? pay.total : net) > s.noPinLimit) { s.all = null; return '6a94'; }
+              if (s.pinState !== 1 || s.noPinLimit === 0 || counted + (PIN_FIRST ? cents.total : cents.net) > s.noPinLimit) { s.all = null; return '6a94'; }
               pay.noPin = true;
             }
           }
-          const refused = overLimits(net, false);
+          const refused = overLimits(cents.net, false);
           if (refused) { s.all = null; return refused; }
-          pay.waits = waitsFor(net, pay.carry, pay.changes, s.tapPaid && !s.grant);
+          pay.waits = waitsFor(cents.net, pay.carry, pay.changes, s.tapPaid && !s.grant);
           pay.waited = pay.waits > 0;
         }
         // the wait: one signature of work to a command, and how many are still to come in place of the signature
@@ -751,29 +881,35 @@ function makeCard(opts) {
           return '0001' + '9000';
         }
         s.all = null;
-        const no = overLimits(net, false);
+        const no = overLimits(cents.net, false);
         if (no) return no;
         // a chip whose transaction is full (a card before 1.8, where a test says how much it holds): refused, nothing burned
         if (BURN_MOST && !MANY && pay.list.length > BURN_MOST) return '6a96';
         // the day's window begins at the first spend when the daily limit or (1.16) the no-PIN allowance is set, and when it turns both counts go to nothing
-        const dayBegins = (s.record.limit !== 0 || (NOPIN && s.noPinLimit !== 0)) && s.now >= s.windowStart + DAY;
+        /* (1.21 and on: the window serves the daily limit alone, and a new day sets the allowance's count to nothing only for a payment
+         * made with the PIN, whose giving has renewed it already: ALLOWANCE_RENEWS_ON_PIN) */
+        const dayBegins = (s.record.limit !== 0 || (NOPIN && !PIN_FIRST && s.noPinLimit !== 0)) && s.now >= s.windowStart + DAY;
         const sig = sign(sha256(Buffer.from(pay.text, 'utf8')));
-        if (dayBegins) { s.windowStart = s.now; s.spent = 0; if (NOPIN) s.noPinSpent = 0; }
-        if (s.record.limit !== 0) s.spent = s.spent + net;
-        if (NOPIN && pay.noPin) s.noPinSpent = stop(s.noPinSpent + (PIN_FIRST ? pay.total : net));
+        if (dayBegins) { s.windowStart = s.now; s.spent = 0; if (NOPIN && !(PIN_FIRST && pay.noPin)) s.noPinSpent = 0; }
+        // (1.23: the counts in cents; the log, its counts and the receipt in the payment's own unit, and say it)
+        if (s.record.limit !== 0) s.spent = s.spent + cents.net;
+        if (NOPIN && pay.noPin) s.noPinSpent = stop(s.noPinSpent + (PIN_FIRST ? cents.total : cents.net));
         pay.list.forEach((i) => { s.slots[i].status = 2; });
         // a payment in this time in the field: the next one in it is slowed, unless the owner's grant is in its tap (1.13)
         s.tapPaid = true;
         // the change the card made for itself is signed for now: its openings stay until the pieces are back
         s.openings.forEach((x) => { if (x.state === 'draft') x.state = 'pending'; });
         s.changeDue = true;
-        { const e = logEntry(); e.sats = stop(e.sats + net); e.pieces = Math.min(255, e.pieces + pay.list.length); s.log.sats = stop(s.log.sats + net);
+        { const e = logEntry(pay.flag); e.sats = stop(e.sats + net); e.pieces = Math.min(255, e.pieces + pay.list.length);
+          if (pay.flag === 0x20 && s.book) s.book.other = stop(s.book.other + net); else s.log.sats = stop(s.log.sats + net);
+          if (UNITS && s.book) s.book.last = pay.flag === 0x20 ? 0xa0 : 0x80;
           if (pay.waited) e.flags |= 2;
           // 1.16: a payment signed for under the allowance (a PIN set and not shown) is marked; one made on a card with no PIN has no PIN to be without
           if (NOPIN && pay.noPin) e.flags |= 8; }
         // its receipt: when, how much leaves the card, the hash of what was signed, and where the first of it went
         if (QUICK) {
           s.receipts.ring[s.receipts.count & 15] = { time: s.now, told: s.told, sats: net, hash: hex(sha256(Buffer.from(pay.text, 'utf8'))), out: pay.out || '00'.repeat(33) };
+          if (UNITS && s.book) s.book.units[s.receipts.count & 15] = pay.flag === 0x20 ? 0xa0 : 0x80;
           s.receipts.count = stop(s.receipts.count + 1);
         }
         // kept, for a terminal whose answer is lost on the air (SPEND_ALL_AGAIN); and what it was over, for a test to read
@@ -836,7 +972,21 @@ function makeCard(opts) {
         /* One piece, or (the quicker card) up to three end to end: each as one alone would be, in order. 1.20: with P1 = 1, one piece and the mint's proof
          * for it, 177 bytes exactly and nothing else different; any other P1 is the load it was, and leaves its pieces with no proof. */
         const withProof = PROOFS && p1 === 1;
-        if (withProof ? data.length !== 177 : (data.length < 81 || data.length % 81 !== 0 || data.length > (QUICK ? 243 : 81))) return '6700';
+        /* 1.23: P2 = 1 puts the pieces' unit first (00 sats, 01 dollars), and everything after it is read one byte on; P2 = 0 is the
+         * record's unit; any other P2 6B00, before anything is read. */
+        const shift = UNITS ? p2 : 0;
+        if (UNITS && p2 !== 0 && p2 !== 1) return '6b00';
+        const body = data.subarray(shift);
+        if (withProof ? body.length !== 177 : (body.length < 81 || body.length % 81 !== 0 || body.length > (QUICK ? 243 : 81))) return '6700';
+        let unit = s.record.unit;
+        if (shift) {
+          unit = data[0];
+          if (unit !== 0 && unit !== 1) return '6a80';
+          // a card refused the room for its book is a card of one unit: the record's and no other
+          if (!s.book && unit !== s.record.unit) return '6a9c';
+        }
+        // sats onto a card with a limit and no rate: none of them could be paid, and a card with no owner could never be set again while they are on it
+        if (UNITS && unit === 0 && limitWithNoRate()) return '6a99';
         const one = (piece, proof) => {
           const at = s.slots.findIndex((x) => x.status === 0);
           if (at < 0) return '6a84';
@@ -845,8 +995,28 @@ function makeCard(opts) {
           if ((piece[44] !== 2 && piece[44] !== 3) || piece.readUInt32BE(8) === 0 || (proof && proof.every((v) => v === 0))) return '6a80';
           // a piece is on the card once: the card signs a piece's secret, which its nonce makes, and takes its amount on the
           // terminal's word, so a nonce that is in any slot, spent or not, is refused (a freed slot holds nothing)
+          /* 1.23: the table. A keyset entered as the other unit 6A9B; a new keyset is entered as the record's unit or the last payment's under
+           * the PIN alone, and as either with the holder's say in the tap (marked), else 6A9D; no entry free, or a third live one without the
+           * mark, the table reclaimed and asked again, 6A9C. The nonce is still the last thing looked at. */
+          let entry = -1, state = 0;
+          if (UNITS && s.book) {
+            const ks = hex(piece.subarray(0, 8));
+            const e = entryOf(ks);
+            if (e >= 0) {
+              if ((s.book.table[e].state & 1) !== unit) return '6a9b';
+            } else {
+              const say = s.owner ? s.grant : s.tapRead;
+              const last = s.book.last === 0x80 ? s.record.unit : s.book.last === 0xa0 ? 1 - s.record.unit : -1;
+              if (!say && unit !== s.record.unit && unit !== last) return '6a9d';
+              entry = freeEntry(say);
+              if (entry < 0) { reclaim(); entry = freeEntry(say); if (entry < 0) return '6a9c'; }
+              state = 0x40 | unit | (say ? 0x80 : 0);
+            }
+          }
           const nonce = hex(piece.subarray(12, 44));
           if (s.slots.some((x) => x.status !== 0 && x.data.substr(24, 64) === nonce)) return '6a94';
+          // a new keyset's entry, before anything of the place
+          if (entry >= 0) s.book.table[entry] = { keyset: hex(piece.subarray(0, 8)), state };
           // the place's record is its piece's proof or zeros, and is written before the place's data (a card with no room for proofs writes nothing)
           if (s.dleq) s.dleq[at] = proof ? hex(proof) : '';
           s.slots[at] = { status: 1, data: hex(piece) };
@@ -858,15 +1028,15 @@ function makeCard(opts) {
         };
         // the first that cannot be stored stops it: first, with its own word; after others, they stand and are the answer
         let stored = '', put = 0, n = 0;
-        for (let k = 0; k * 81 < data.length && !(withProof && k > 0); k++) {
-          const got = one(data.subarray(k * 81, k * 81 + 81), withProof ? data.subarray(81) : null);
+        for (let k = 0; k * 81 < body.length && !(withProof && k > 0); k++) {
+          const got = one(body.subarray(k * 81, k * 81 + 81), withProof ? body.subarray(81) : null);
           if (typeof got === 'string') { if (k === 0) return got; break; }
           stored += ('0' + got.toString(16)).slice(-2);
-          put += data.readUInt32BE(k * 81 + 8);
+          put += body.readUInt32BE(k * 81 + 8);
           n += 1;
         }
-        // the quicker card's own account of it: what was put on in this tap
-        if (QUICK && n > 0) { const e = logEntry(); e.loaded = stop((e.loaded || 0) + put); e.loads = Math.min(255, (e.loads || 0) + n); }
+        // the quicker card's own account of it: what was put on in this tap (1.23: in an entry of the pieces' unit)
+        if (QUICK && n > 0) { const e = logEntry(logUnit(unit)); e.loaded = stop((e.loaded || 0) + put); e.loads = Math.min(255, (e.loads || 0) + n); }
         // with a proof: the place, and whether the proof was kept
         return stored + (withProof ? (s.dleq ? '01' : '00') : '') + '9000';
       }
@@ -877,6 +1047,8 @@ function makeCard(opts) {
         // 1.16: a card with no PIN is freed by whoever holds it, as it is loaded
         let freed = 0;
         s.slots.forEach((x) => { if (x.status === 2) { x.status = 0; x.data = ''; freed += 1; } });
+        // 1.23: and the table, every entry nothing on the card names let go
+        if (UNITS) reclaim();
         return ('0' + freed.toString(16)).slice(-2) + '9000';
       }
       case 0x32: {
@@ -908,6 +1080,8 @@ function makeCard(opts) {
             design = Buffer.from(d).toString('latin1');
           }
         }
+        // 1.23: the unit is sats or dollars and no other
+        if (UNITS && rec[0] !== 0 && rec[0] !== 1) return '6a80';
         const refund = rec.subarray(1, 34);
         if (refund[0] === 0) { if (refund.some((v) => v !== 0)) return '6a80'; }
         else if (refund[0] !== 2 && refund[0] !== 3) return '6a80';
@@ -918,6 +1092,14 @@ function makeCard(opts) {
         const newKey = !HEADERS && hex(timeKey) !== s.record.timeKey;
         // 1.20: the room for the mint's proofs is reserved here, by the first SET_CARD that gets this far, once (a card that is refused it works as a card with none)
         if (PROOFS && s.dleq === null && o.proofRoom !== false) s.dleq = Array.from({ length: SLOTS }, () => '');
+        /* 1.23: the book is reserved the same way (`book: false` a card refused it); change drafted for a payment never signed is let go,
+         * the table reclaimed (nothing names any entry now) and the last payment's unit forgotten. The rate and every limit stay. */
+        if (UNITS) {
+          if (s.book === null && o.book !== false) s.book = freshBook();
+          s.openings.forEach((x, k) => { if (x.state === 'draft') s.openings[k] = { state: 'empty' }; });
+          reclaim();
+          if (s.book) s.book.last = 0;
+        }
         s.record = { set: true, unit: rec[0], limit: s.record.limit, refund: hex(refund), timeKey: HEADERS ? s.record.timeKey : hex(timeKey), mint: rec.subarray(100, 100 + mintLen).toString('latin1'), design: design };
         /* From 1.15 a new record lets the ratchet go: the hardest difficulty the card has taken is set to nothing and the next header sets it afresh, the one
          * way out for a card whose network has fallen under a quarter of its best. The clock itself, its window and the last header's hash stay. */
@@ -937,9 +1119,12 @@ function makeCard(opts) {
           if (owed()) return '6a8d';
           const held = heldIfTaken();
           if (held) return held;
-          if (data.length !== 4 && data.length !== 8) return '6700';
+          /* 1.23: twelve bytes, the one payment's limit, the allowance and the rate; four and eight only on a dollars record (figures in
+           * the record's unit, which is cents there), 6700 on a sats one */
+          if (UNITS ? (data.length !== 12 && (s.record.unit !== 1 || (data.length !== 4 && data.length !== 8))) : (data.length !== 4 && data.length !== 8)) return '6700';
           s.tapLimit = data.readUInt32BE(0);
-          if (data.length === 8) { s.noPinLimit = data.readUInt32BE(4); s.noPinSpent = 0; }
+          if (data.length >= 8) { s.noPinLimit = data.readUInt32BE(4); s.noPinSpent = 0; }
+          if (data.length === 12) s.rate = data.readUInt32BE(8);
           return '9000';
         }
         if (unspent()) return '6a8d';
@@ -951,7 +1136,9 @@ function makeCard(opts) {
         if (!s.owner) return '6a90';
         const got = ownerProof('FoxyCard/set-limit', data);
         if (got.sw) return got.sw;
-        if (got.value.length !== 4 && got.value.length !== 8 && !(NOPIN && got.value.length === 12)) return '6700';
+        const len = got.value.length;
+        // 1.23: sixteen bytes with the rate; the old lengths only on a dollars record
+        if (UNITS ? (len !== 16 && (s.record.unit !== 1 || (len !== 4 && len !== 8 && len !== 12))) : (len !== 4 && len !== 8 && !(NOPIN && len === 12))) return '6700';
         return writeLimit(got.value);
       }
       case 0x35: {
@@ -1004,7 +1191,7 @@ function makeCard(opts) {
           const harder = !seen || own < targetOf(s.hardest);
           s.now = time;
           // a day's limit set before the card had seen a header: its window begins at this one
-          if ((s.record.limit !== 0 || (NOPIN && s.noPinLimit !== 0)) && s.windowStart === 0) s.windowStart = time;
+          if ((s.record.limit !== 0 || (NOPIN && !PIN_FIRST && s.noPinLimit !== 0)) && s.windowStart === 0) s.windowStart = time;
           if (harder) s.hardest = bits;
           s.headerHash = hex(shown);
         }
@@ -1184,7 +1371,7 @@ function makeCard(opts) {
           const x = s.openings[p2];
           if (x.state !== 'pending') return '6a88';
           if (s.slots.some((y) => y.status !== 0 && y.data.substr(24, 64) === x.nonce)) { s.openings[p2] = { state: 'empty' }; return '6a94'; }
-          logEntry().flags |= 0x10;
+          logEntry('any').flags |= 0x10;
           s.openings[p2] = { state: 'empty' };
           return '9000';
         }
@@ -1202,6 +1389,9 @@ function makeCard(opts) {
         // the NFC tag is on again (1.19) and the mint's proofs are zeros (1.20): none is a place's now, and none is for the next owner to read
         s.tagOff = false;
         if (s.dleq) s.dleq = s.dleq.map(() => '');
+        // 1.23: the book zeroed (the same store, not made again) and the rate with the record
+        if (s.book) s.book = freshBook();
+        s.rate = 0;
         s.record = { set: false, unit: 0, limit: 0, refund: '00'.repeat(33), timeKey: '00'.repeat(65), mint: '', design: '' };
         s.windowStart = 0; s.spent = 0; s.noPinLimit = 0; s.noPinSpent = 0; s.tapLimit = 0; s.tapStart = 0; s.tapSpent = 0;
         s.log = { taps: 0, sats: 0, refused: 0, tampers: 0, runAt: 0, run: 0,
@@ -1260,7 +1450,8 @@ function makeCard(opts) {
         if (s.dleq) s.dleq[at] = hex(data.subarray(130, 194)) + x.r;
         s.slots[at] = { status: 1, data: piece };
         s.openings[p1] = { state: 'empty' };
-        if (QUICK) { const le = logEntry(); le.loaded = stop((le.loaded || 0) + x.amount); le.loads = Math.min(255, (le.loads || 0) + 1); }
+        // (1.23: in an entry of the opening's keyset's unit; it enters nothing in the table)
+        if (QUICK) { const le = logEntry(logUnit(placeUnit(s.slots[at]))); le.loaded = stop((le.loaded || 0) + x.amount); le.loads = Math.min(255, (le.loads || 0) + 1); }
         s.mended = (s.mended || 0) + (bound ? 0 : 1);
         return ('0' + at.toString(16)).slice(-2) + (s.dleq ? '01' : '00') + piece + '9000';
       }
@@ -1314,7 +1505,7 @@ function makeCard(opts) {
     loseAnswerOf(ins, nth) { loseAt = { ins: String(ins).toLowerCase(), nth: nth || 1 }; },
     /* Another card with this one's key and everything on it as it is now: what a copied card would be. */
     copy() {
-      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION < 20) || VERSION >= 21 ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS, proofRoom: o.proofRoom });
+      const twin = makeCard({ window: o.window, key: priv, pinKey: pinPriv, format: FORMAT, places: SLOTS, software: (WIDE && !MANY) ? 7 : (MANY && !SEALED) ? 8 : (SEALED && !DESIGN) ? 9 : (VERSION >= 10 && VERSION < 20) || VERSION >= 21 ? VERSION : undefined, burnMost: BURN_MOST, floorBits: FLOOR_BITS, proofRoom: o.proofRoom, book: o.book });
       Object.assign(twin.state, JSON.parse(JSON.stringify(s)), { verified: false, nonce: null, grant: false, changeGrant: false, selected: false, tapOpen: false, tapPaid: false, tapClaimed: false, tapRead: false, held: { what: '', n: 0, key: '' }, told: 0 });
       return twin;
     },

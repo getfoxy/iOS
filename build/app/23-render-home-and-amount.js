@@ -562,9 +562,10 @@
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
       amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
-      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice((s.fc && s.fc.balance) || 0, s.fc && s.fc.unit) + ')'
+      // (a card of software 1.23: all of the currency chosen, `fcUnit`)
+      amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
-        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
+        : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
         : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);

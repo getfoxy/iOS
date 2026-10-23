@@ -4,7 +4,9 @@
     /* The pure parts, for the screens and the tests. */
     cardSecret: function (nonce, cardKey, date, refundKey, format) { return cardSecret(nonce, cardKey, date, refundKey, format); },
     cardParse: { info: cardInfoOf, record: cardRecordOf, slot: cardSlotOf, page: cardPageOf, short: cardShortOf, seal: cardSeal, pinBlock: cardPinBlock, piece: cardPieceBytes, proof: cardProofOf, shortId: cardShortId, day: cardDayOf,
-                 noPin: cardNoPinOf, tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse },
+                 noPin: cardNoPinOf, tap: cardTapOf, log: cardLogOf, receipts: cardReceiptsOf, header: headerParse,
+                 // (1.23: GET_CARD P1 = 2, the table of keysets; GET_BALANCE P1 = 1, each unit's pieces and sum)
+                 table: cardTableOf, balances: cardBalancesOf },
     /* The clock of a card of software 1.15 and on is the newest Bitcoin block header it has been shown, and this phone keeps
      * the newest it can get, from two block explorers over Tor (08b-block-headers.js). A tap uses what is kept and never
      * waits for the fetch. `headerKept` is { hex, time, hash, bits, at } or null; `headerRefresh` fetches if what is kept is
@@ -36,7 +38,8 @@
     cardPickAll: function (w, have, want, cap, card, tapCap, exactOnly, least) { return cardPickAll(w, have, want, cap, card, tapCap, exactOnly, least); },
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
-    cardDeepLadder: function (sats, most, biggest, have) { return cardDeepLadder(sats, most, biggest, have); },
+    // (`depth`: four for a card of 1.23 that holds both units, eight where not given)
+    cardDeepLadder: function (sats, most, biggest, have, depth) { return cardDeepLadder(sats, most, biggest, have, depth); },
     /* What a card holds, as the amounts of its pieces, for cutting more for it. */
     cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
     // (`unit`: the card's; a dollar card's largest piece is the dollar keyset's, in cents)
@@ -61,6 +64,21 @@
      * any other card with a PIN, and for every card before 1.16. The card's own answer at its signature (`pin-needed`) is
      * the truth: this is what the read says. A till knows `net` to be at least the price and the mint's fee. */
     cardNeedsPin: function (card, net) { return cardNeedsPin(card, net); },
+
+    /* A card of software 1.23 (dollars and sats at its one mint): what it holds in each, as `cardLook` sorted its pieces, sats first:
+     * [{ unit, balance, pieces }], one entry for each unit it holds or may (a card of format 5 lists both, a card of one unit its record's);
+     * null for a card before 1.23. `cardBoth`: whether it holds both, or may (format 5). `cardInUnit`: the card as one of its units, its
+     * pieces and balance that unit's, for the sums the screens ask (`cardLoadFits`, `cardNeedsPin`). */
+    cardUnits: function (card) {
+      if (!card || !card.units) return null;
+      var ru = card.record && card.record.unit === 'usd' ? 'usd' : 'sat';
+      return ['sat', 'usd'].filter(function (u) { return cardBoth(card) || u === ru || card.units[u].balance > 0; })
+        .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
+    },
+    cardBoth: function (card) { return cardBoth(card); },
+    cardInUnit: function (card, unit) { return cardInUnit(card, unit); },
+    /* The rate a card of 1.23 would be given at `price` (dollars a bitcoin): floor(100,000,000 / price) sats a dollar, 0 for none. */
+    cardRateOf: function (price) { return cardRateOf(price); },
 
     /* What a card says with no PIN (`cardLook`), after telling it the time.
      * `opts.mine`: also whether this phone is its owner (`card.mine`), for a
@@ -155,6 +173,9 @@
         if (noPin && (!card.info.noPinKnown || cardIs121(card))) throw cardError('old-card', 'This card needs a PIN. It cannot be set up without one.');
         // and a card that has a PIN already (a set-up cut off after it) cannot be set up without it: that PIN is not known here
         if (noPin && card.info.pinSet) throw cardError('has-pin', 'This card already has a PIN. Set it up with that PIN.');
+        // (1.23: its figures are cents, and a figure chosen in sats needs a price to be turned into them; said before anything is written;
+        // and limits on a card of bitcoin with no price to write its rate at are refused: its sats could pay nothing until a price came)
+        if (cardIs123(card) && cardSetUpCents(unit, o, tapLimit, noPinLimit).rate <= 0 && limits && unit === 'sat') throw cardNoPrice(true);
         return cardOwnerPub(card.key);
       }).then(function (pub) {
         ownerPub = pub;
@@ -177,6 +198,11 @@
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
         }).then(function () {
           // the holder's numbers, under the PIN, while the card has no owner (1.21 and on)
+          // (1.23: in cents with the rate, twelve bytes, `cardSetUpCents`)
+          if (cardIs123(card)) {
+            var c23 = cardSetUpCents(unit, o, tapLimit, noPinLimit);
+            return (limits || c23.rate > 0) ? cardPinLimits(t, c23.tap, c23.noPin, c23.rate) : null;
+          }
           return (cardIs121(card) && limits) ? cardPinLimits(t, tapLimit, noPinLimit) : null;
         }).then(function () {
           if (!cardIs121(card)) return t.want(cardCommand(CARD_INS.setOwner, 0, ownerPub), 'its owner');
@@ -191,7 +217,8 @@
           return cardLimitTo(t, card.key, 0, tapLimit, (card.info.noPinKnown && !noPin) ? noPinLimit : undefined);
         });
       }).then(function () {
-        if (limits && unit === 'sat') {
+        // (a card of 1.23 keeps its figures in cents and its rate follows the price: no note of dollars is kept for it)
+        if (limits && unit === 'sat' && !cardIs123(card)) {
           cardPaceNote(card.key, tapLimit > 0 ? Number(o.tapUsd) || 0 : 0);
           cardPaceNoPinNote(card.key, noPinLimit > 0 ? Number(o.noPinUsd) || 0 : 0);
         }
@@ -257,6 +284,9 @@
         // a card with its record keeps its PIN (rule 9): it is shown, not set, and a blocked one cannot be; one with none takes the PIN typed now
         var keep = again && card.info.hasRecord;
         if (keep && card.info.pin === 'blocked') throw cardRefused('6983');
+        // (1.23: a figure chosen in sats needs a price to be turned into cents, said before anything is written)
+        // (and limits on a card of bitcoin with no price to write its rate at are refused: with no owner, nothing could give it one later)
+        if (cardIs123(card) && cardSetUpCents(unit, o, tapLimit, noPinLimit).rate <= 0 && (tapLimit > 0 || noPinLimit > 0) && unit === 'sat') throw cardNoPrice(true);
         var design = String((card.record && card.record.design) || o.design || '');
         var record = cardRecordHex('', mint, design, unit);
         cardHolderNote(card.key, true);
@@ -265,6 +295,11 @@
         }).then(function () {
           return t.want(cardCommand(CARD_INS.setCard, 0, record), 'its record');
         }).then(function () {
+          // (1.23: in cents with the rate, twelve bytes)
+          if (cardIs123(card)) {
+            var c23 = cardSetUpCents(unit, o, tapLimit, noPinLimit);
+            return (tapLimit > 0 || noPinLimit > 0 || c23.rate > 0) ? cardPinLimits(t, c23.tap, c23.noPin, c23.rate) : null;
+          }
           return (tapLimit > 0 || noPinLimit > 0) ? cardPinLimits(t, tapLimit, noPinLimit) : null;
         });
       }).then(function () {
@@ -609,18 +644,22 @@
       var pin = '';
       if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var t = cardTalk(link);
-      var withdrew = 0, hash = '', unit = 'sat';
-      var late = function (e) { if (e && typeof e === 'object' && withdrew > 0) { e.withdrew = withdrew; e.unit = unit; e.hash = hash; } throw e; };
+      var withdrew = 0, hash = '', unit = 'sat', also = null;
+      var late = function (e) { if (e && typeof e === 'object' && withdrew > 0) { e.withdrew = withdrew; e.unit = unit; e.hash = hash; if (also) e.also = also; } throw e; };
       return cardResetLook(link, t, Object.assign({}, o, { money: true }), pin).then(function (card) {
         if (!(card.info.unspent > 0)) return null;
         return FoxyWallet.cardWithdraw(link, { pin: pin ? o.pin : undefined, on: o.on, progress: o.progress, hold: true }).then(function (got) {
           // in the card's unit (cents for a dollar card), which `unit` says
           withdrew = got.amount; hash = got.hash; unit = got.unit || 'sat';
+          // (a card of 1.23 that held both: the other, apart, never added in)
+          if (got.also) also = got.also;
         });
       }).then(function () {
         return FoxyWallet.cardReset(link, o);
       }).then(function (r) {
-        return { reset: true, key: r.key, withdrew: withdrew, unit: unit, hash: hash };
+        var out = /** @type {any} */ ({ reset: true, key: r.key, withdrew: withdrew, unit: unit, hash: hash });
+        if (also) out.also = also;
+        return out;
       }).then(null, late);
     },
 
@@ -653,6 +692,17 @@
         if (!card.info.owner) throw cardRefused('6a90');
         if (card.info.locked) throw cardRefused('6986');
         key = card.key;
+        /* A card of 1.23: one figure for both its currencies, in cents, with the rate (`cardSetLimit23`): `opts.unit` the unit `sats` is
+         * in (the record's where not named), `opts.usd` the dollars where typed in them; `opts.rateOk` and `opts.keepRate` answer `rate-far`.
+         * No note of dollars is kept: its figures are cents on the card, and its rate follows the price. */
+        if (cardIs123(card)) {
+          if (npGiven && !card.info.noPinKnown) throw cardError('old-card', 'This card’s software has no limit for payments without a PIN.');
+          if (npGiven && sats > 0 && !card.info.pinSet) throw cardError('no-pin', 'A card with no PIN has no limit for payments without one. Add a PIN first.');
+          return cardSetLimit23(t, card, o, npGiven ? 'noPin' : o.tap ? 'tap' : 'day', sats).then(function () {
+            cardPaceNote(key, 0);
+            cardPaceNoPinNote(key, 0);
+          });
+        }
         /* A dollar card's limits are cents, set in dollars and held in dollars: no note of dollars to follow the price is kept
          * for it (and any there was is cleared), so nothing ever re-pegs it (`cardLook`). */
         dollars = card.record && card.record.unit === 'usd';
@@ -690,7 +740,8 @@
          * that signs for eight at a time, is not cut that way at all. */
         card.aboveLimit = cardAboveLimit(card);
         // (a card with no PIN needs none to be emptied and filled)
-        if (!(o.tap && !npGiven && sats > 0 && (o.pin || !card.info.pinSet) && card.aboveLimit > 0 && cardIsDeep(card))) return card;
+        // (not a card of 1.23 that holds both: its money would come off in two units and go back in one)
+        if (!(o.tap && !npGiven && sats > 0 && (o.pin || !card.info.pinSet) && card.aboveLimit > 0 && cardIsDeep(card)) || cardBoth(card)) return card;
         var on = function (step) { try { if (typeof o.on === 'function') o.on(step); } catch (e) {} };
         return FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on, progress: o.progress, hold: true }).then(function (got) {
           return cardLook(link, { mine: true, short: true }).then(function (c) { return FoxyWallet.cardPrepare(c, got.amount); });
@@ -706,6 +757,26 @@
         });
       });
     },
+
+    /* The rate guard's yes (software 1.23): the card's owner read it and was asked once whether to write a rate more than twice, or under
+     * half, the card's (`card.rateAsk` from `cardLook`, or `rate-far` from `cardSetLimit`), and said yes. One tap: the owner's grant, the
+     * figures as the card has them, and the rate at `opts.price`. Resolves the card as its owner reads it after (short). */
+    cardSetRate: function (link, opts) {
+      var o = opts || {};
+      var t = cardTalk(link);
+      var rate = cardRateOf(cardPriceFor(o.price));
+      if (!(rate > 0)) return Promise.reject(cardError('no-price', 'This phone has no Bitcoin price to give the card.'));
+      return cardLook(link, { short: true, mine: true }).then(function (card) {
+        if (!cardIs123(card)) throw cardError('old-card', 'This card’s software keeps no rate.');
+        if (!card.mine) throw cardRefused('6a91');
+        return cardLimit23(t, card, { rate: rate });
+      }).then(function () {
+        console.log('[foxy] card: its owner said yes, and its rate is set to ' + rate + ' sats a dollar');
+        return cardLook(link, { mine: true, short: true });
+      });
+    },
+    /* The rate guard's no: not asked again at this price (`cardRepeg23`). */
+    cardRateNo: function (key, rate) { if (key && Number(rate) > 0) cardRateDeclined[key] = Number(rate); },
 
     /* The cards this phone has set up or loaded: { key: { mint, refundKey, at } }. */
     cardsKnown: function () { return cardsOnFile(); },
@@ -773,7 +844,8 @@
         }
         try {
           // of a keyset this mint no longer lists, a piece is asked about by the eight bytes there are
-          due.push({ id: cardFullId(w, x.keyset) || x.keyset, amount: x.amount, C: x.C, date: x.date,
+          // (a piece of a card of 1.23 that held both units: among its unit's keysets, as the card's table had it)
+          due.push({ id: cardFullId(w, x.keyset, x.unit || undefined) || x.keyset, amount: x.amount, C: x.C, date: x.date,
                      secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) });
         } catch (e) {}
       });
@@ -830,7 +902,8 @@
             /* A one-signature card's pieces: this phone's key signs once for
              * the pieces of each date, over the swap they come back in, as
              * the card itself would have (`cardSwapPlan`). */
-            if (Number(row.format) === CARD_FORMAT_ALL) {
+            // (format 5, a card of 1.23 that held both units, is filed as 4: its secrets are format 4's)
+            if (cardAllFormat(row.format)) {
               return cardAllGroups(mine, CARD_SWAP_MOST).reduce(function (chain, group) {
                 return chain.then(function () { return cardSwapPlan(uw, group); }).then(function (plan) {
                   // the library's own signer, given the whole message: (proofs, key, logger, message)
@@ -884,9 +957,11 @@
      * card's free places. Null where the wallet cannot say: no wallet, no
      * card, or one that has not been set up. Local, and at once. */
     /* `sats` is in the card's own unit (cents for a dollar card), whose keyset the cut is made with (`cardWalletNow`). */
-    cardLoadFits: function (card, sats) {
+    /* (`unit`: on a card of 1.23 the unit the load is in, either of its two; the card as that unit is cut, `cardInUnit`) */
+    cardLoadFits: function (card, sats, unit) {
       var want = Math.round(Number(sats));
       if (!(want > 0) || !card || !card.info || !card.info.setUp) return null;
+      if (card.units) card = cardInUnit(card, unit || card.record.unit);
       var w = cardWalletNow((card.record && card.record.unit) || 'sat');
       if (!w) return null;
       var cut = cardLoadCut(w, card, want);
@@ -913,9 +988,22 @@
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
       var unit = (card && card.record && card.record.unit) || 'sat';
-      if (opts && opts.unit !== undefined && opts.unit !== null && opts.unit !== '' && unitOf(opts.unit) !== unit) {
+      /* A card of 1.23 holds both units at its one mint: a load of either is made for it, as the card in that unit (`cardInUnit`: its drawer,
+       * its rows, its depth), and the card's own table says at the write whether it may take it. Before 1.23 a card takes its own unit alone. */
+      var asked = (opts && opts.unit !== undefined && opts.unit !== null && opts.unit !== '') ? unitOf(opts.unit) : '';
+      if (card && card.units && (asked === 'sat' || asked === 'usd' || !asked)) {
+        card = cardInUnit(card, asked || unit);
+        unit = card.record.unit;
+      }
+      if (asked && asked !== unit) {
         return Promise.reject(cardError('wrong-unit', 'This card holds ' + balanceWord(unit) + ', so it is loaded from your ' + balanceWord(unit) + '.',
-                                        { cardUnit: unit, askUnit: unitOf(opts.unit) }));
+                                        { cardUnit: unit, askUnit: asked }));
+      }
+      /* Sats for a card of 1.23 that has a limit and no rate, which would refuse them (6A99): said before anything is made, where the card
+       * said its rate (to its holder) and this phone is not its owner, which would give it one at the write. */
+      if (card && card.info && card.info.units && unit === 'sat' && card.info.rateSaid && !(Number(card.info.rate) > 0) && !card.mine
+          && ((Number(card.info.limit) || 0) > 0 || (Number(card.info.tapLimit) || 0) > 0 || (Number(card.info.noPin && card.info.noPin.limit) || 0) > 0)) {
+        return Promise.reject(cardError('no-rate', 'This card cannot take bitcoin until its owner’s phone sets it again. Nothing was put on it.'));
       }
       var w0;
       try { w0 = need(); } catch (e) { return Promise.reject(e); }
@@ -1029,13 +1117,31 @@
           if (o.change && !o.owner) return null;
           // a card with no PIN (1.16) is written by whoever holds it: nothing to give
           if (!asOwner && !pin) return null;
-          if (!asOwner) return cardVerify(t, card, pin);
+          /* (1.23: under the PIN, and with the owner's grant too where this phone is the card's owner, as before every ADD FUNDS of such a
+           * card: the holder's say in the tap, which a new currency on it wants and marks; a phone that is not its owner loads under the
+           * PIN alone, as a till does) */
+          if (!asOwner) {
+            return cardVerify(t, card, pin).then(function () {
+              card.pinGiven = true;
+              if (!(cardIs123(card) && card.info.owner)) return null;
+              return cardGrant(t, card.key).then(function (yes) { if (yes) { card.granted = true; card.mine = true; } }, function (e) {
+                if (e && e.card === 'gone') throw e;
+              });
+            });
+          }
           return cardGrant(t, card.key).then(function (yes) {
             if (!yes) throw cardRefused('6a91');
+            // (1.23: the holder's say in this tap, which marks a keyset it enters, and lets this phone give the card a rate it lacks, `cardLoadSend`)
+            card.granted = true;
           });
         }).then(function () {
           return cardRepointFor(t, card);
-        }).then(function () { return cardWriteOwed(t, card, o.progress); });
+        }).then(function () {
+          // (1.23: the price a rate is written at where the card wants one, and the held tap's askings for the screen)
+          card.price = o.price;
+          card.onHold = o.onHold;
+          return cardWriteOwed(t, card, o.progress);
+        });
       }).then(function (r) {
         wrote = r;
         // after the write, what the card comes to: the short way for an owner as for a till
@@ -1044,8 +1150,11 @@
         // a short read lists no nonces, and says nothing of which pieces have left the card
         if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
         // what went on, in the card's unit: `amount`, and `sats` for a bitcoin card only (`back`, `change` and `refund` are in it too)
-        return { card: card, unit: wrote.unit || 'sat', amount: wrote.amount || 0, sats: wrote.sats, back: wrote.back || 0, change: wrote.change || 0, refund: wrote.refund || 0,
-                 left: wrote.left.length, why: wrote.why || '' };
+        var out = /** @type {any} */ ({ card: card, unit: wrote.unit || 'sat', amount: wrote.amount || 0, sats: wrote.sats, back: wrote.back || 0, change: wrote.change || 0, refund: wrote.refund || 0,
+                 left: wrote.left.length, why: wrote.why || '' });
+        // (a card of 1.23 written in both units in the tap: the other, apart)
+        if (wrote.also) out.also = wrote.also;
+        return out;
       });
     },
 
@@ -1062,7 +1171,7 @@
         if (!o.owner && (o.pin === undefined || o.pin === null || o.pin === '') && card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
         return FoxyWallet.cardPrepare(card, (o.amount !== undefined && o.amount !== null) ? o.amount : o.sats, { unit: o.unit });
       }).then(function () {
-        return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin });
+        return FoxyWallet.cardWrite(link, { owner: !!o.owner, pin: o.pin, price: o.price, onHold: o.onHold });
       });
     },
 
@@ -1265,9 +1374,25 @@
      * its result carries the card as the tap knows it instead: what was read at
      * its start less the pieces it signed for (`cardAfterTake`). It is on the
      * error too, if the mint has not answered (`after`, on `waiting`). */
+    /* (A card of 1.23 that holds both units: `opts.unit` the one taken from, `opts.sats` in it; all of it with no unit named is both, one
+     * after the other in the same tap, the second said in `also` (in its own unit, never added in) and its entry in `alsoHash`.) */
     cardWithdraw: function (link, opts) {
+      var o0 = opts || {};
       // the holder's own: where this phone is the card's owner, the day's limit is lifted, with its proof, for the taking, and put back
-      return cardTake(link, Object.assign({ all: !(opts && opts.sats), lift: true }, opts || {}), 'from card').then(function (r) {
+      return cardTake(link, Object.assign({ all: !(opts && opts.sats), lift: true }, opts || {}, o0.unit ? { from: o0.unit } : {}), 'from card').then(function (r) {
+        if (!(r && r.more)) return r;
+        return cardTake(link, Object.assign({}, o0, { all: true, lift: true, sats: undefined, from: r.more }), 'from card').then(function (r2) {
+          r.also = [cardGot(r2.unit, r2.amount)];
+          r.alsoHash = r2.hash;
+          if (r2.card) r.card = r2.card;
+          return r;
+        }, function (e) {
+          // the first unit is in this phone; the other is still on the card, and the next taking-off takes it
+          console.warn('[foxy] card: its ' + balanceWord(r.more) + ' did not come off in the same tap:', (e && e.message) || e);
+          r.moreLeft = r.more;
+          return r;
+        });
+      }).then(function (r) {
         // the card has been let go once it signed (`opts.hold` keeps it), and is not read again: the next tap shows it as it is
         if (!(opts && opts.hold)) return r;
         return FoxyWallet.cardLook(link, { mine: true }).then(function (card) { r.card = card; return r; }, function () { return r; });
@@ -1290,7 +1415,19 @@
         hashes.push(got.hash);
         if (typeof o.on === 'function') { try { o.on('writing'); } catch (e) {} }
         // in the card's own unit: cents for a dollar card
-        return cardLook(link).then(function (card) { return FoxyWallet.cardPrepare(card, got.amount); });
+        /* (a card of 1.23 that held both: each comes off in its own unit, `got.also`, and each goes back on in it, made apart and written in
+         * the one tap) */
+        return cardLook(link).then(function (card) {
+          var again = [{ unit: got.unit || 'sat', amount: got.amount }].concat(Array.isArray(got.also) ? got.also : []).filter(function (x) { return x && x.amount > 0; });
+          if (!card.units) return FoxyWallet.cardPrepare(card, got.amount);
+          // (one currency came off: it goes back on in that one, which is not always the record's)
+          if (again.length < 2) return FoxyWallet.cardPrepare(card, got.amount, { unit: got.unit || 'sat' });
+          return again.reduce(function (chain, x) {
+            return chain.then(function (prev) {
+              return FoxyWallet.cardPrepare(card, x.amount, { unit: x.unit }).then(function (m) { if (prev) hashes.push(prev.hash); return m; });
+            });
+          }, Promise.resolve(/** @type {any} */ (null)));
+        });
       }).then(function (made) {
         hashes.push(made.hash);
         // the limit was put back when the money came off, and what it was signed for then is no more than that day's
@@ -1305,6 +1442,26 @@
      * much of that the mint says is gone. Rejects `other-mint`, `no-route`. */
     /* What a card holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those. */
     cardAboveLimit: function (card) { return cardAboveLimit(card); },
+    /* What a card cut deep holds, in its record's currency, in pieces larger than `limit` (in `unit`, the record's where not named: cents for
+     * 'usd'), for the screen's line and the limit's confirmation. On a card of 1.23 the limit and each piece are weighed in cents, as the card
+     * weighs them, at the card's rate where it said it, else this phone's price (`price`); a piece with no rate to weigh it at counts for
+     * nothing. A card before 1.23 compares the figures as they are. */
+    cardAboveFor: function (card, limit, unit, price) {
+      if (!card || !card.info || !card.info.wide || !card.info.many) return 0;
+      var lim = Math.max(0, Math.round(Number(limit) || 0));
+      if (!(lim > 0)) return 0;
+      var ru = (card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+      var pieces = (card.units && card.units[ru]) ? card.units[ru].pieces : (card.pieces || []);
+      if (!card.info.cents) return pieces.reduce(function (n, x) { return satsOf(x.amount) > lim ? n + satsOf(x.amount) : n; }, 0);
+      var rate = cardRateNow(card, price);
+      var limSaid = cardCentsOf(lim, unit ? (unitOf(unit) || 'sat') : ru, rate);
+      if (limSaid === null) return 0;
+      var limC = Number(limSaid);
+      return pieces.reduce(function (n, x) {
+        var c = cardCentsOf(x.amount, ru, rate);
+        return (c !== null && c > limC) ? n + satsOf(x.amount) : n;
+      }, 0);
+    },
 
     cardCheck: function (card) {
       var w;

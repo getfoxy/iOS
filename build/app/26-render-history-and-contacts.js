@@ -20,10 +20,11 @@
      * The list, the running balance on each row and the card at the top all
      * follow it, each in its own unit. A swap between them is two rows, one
      * in each tab, each with the other leg's figure under it. */
-    const two = !!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard;
-    /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card holds
-     * one kind, so its list has no tabs. */
-    const usdCard = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
+    /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card of one kind
+     * has no tabs; a card of software 1.23 that holds both has them, DOLLARS or BITCOIN, each line in its own unit (`cardTwo`). */
+    const cardTwo = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.v123 && s.fc.bal && this.fcTwoUnits && this.fcTwoUnits(s.fc));
+    const two = (!!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard) || cardTwo;
+    const usdCard = !!ofCard && !cardTwo && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
     const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : usdCard ? 'usd' : 'sat';
     const A = ((two || usdCard) && this.histAuditIn) ? this.histAuditIn(tab) : usdCard && this.histAuditUsd ? this.histAuditUsd() : this.histAudit();
     const balOf = A.balOf, balNow = A.balNow, run = A.run;

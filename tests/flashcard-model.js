@@ -12,6 +12,8 @@
  * for every three pieces (1.14), keeps its clock in Bitcoin block headers (1.15), has an optional PIN and a no-PIN
  * allowance (1.16), can be reset by its owner (1.17), waits four askings for each further limit's worth (1.18), answers as an
  * NFC tag its owner can switch off (1.19), and keeps the mint's proof with each piece, for a phone to read and check (1.20).
+ * And the part of the 1.23 recording (-123) that is 1.23's own: the table of keysets, the labelled loads, the ceiling in cents with its rate,
+ * the format byte by what the card holds, and the new refusals (6A99 to 6A9D).
  * The others are the same of the cards before it: -118 (before the tag and the proofs), -117 (before its four askings), -116 (before RESET and its ten-signature wait), -115 (whose PIN was a must), -113 (which took one wait off
  * for each piece of change), -112 (which waited four signatures to a limit's
  * worth and for change within it), -111 (before it made its own change), -110
@@ -51,7 +53,10 @@ const ctx = loadReal({});
 const W = ctx.W, CT = ctx.window.CashuTS;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest();
 
-async function replay(T, format, places, software) {
+/* `prime(card)`, where given: the model made, and set as the recording's card was when the part replayed begins (1.23's part of its
+ * recording begins on a card just reset, whose clock and book the reset kept). `least`: the size the part replayed is held to,
+ * where it is a part. */
+async function replay(T, format, places, software, prime, least) {
   /* Which software the recording is of is in its first SELECT, which the applet answered with its version. A recording of the
    * latest card (1.20) is replayed at the model's default, and each earlier recording at its own software (18, 17, 16, ...),
    * since the model's default moves on with the card. The recording says what it is of: the card repository's
@@ -67,6 +72,7 @@ async function replay(T, format, places, software) {
     if (minor > 0 && minor < 20) software = minor;
   }
   const card = makeCard({ window: ctx.window, format, places, software, noPhoneClock: true });
+  if (prime) prime(card);
   let exact = 0, verified = 0;
   // the key the recording's card had (every recording was made under the simulator, whose card has the one key)
   const recorded = (T.find((x) => x.kind === 'key') || {}).data;
@@ -185,6 +191,14 @@ async function replay(T, format, places, software) {
         ok(newest.hash === sha256(Buffer.from(card.state.lastText, 'utf8')).toString('hex'), e.name + ': the newest receipt is the hash of the message last signed');
       }
       verified += 1;
+    } else if (e.kind === 'receipt-units') {
+      /* 1.23's receipts with their units (GET_LOG P1 = 3): the count, then 78 bytes a receipt, its unit last. All of it the recording's
+       * to the byte but the hash, which is over the card's own key. */
+      ok(data.length === e.data.length && data.slice(0, 8) === e.data.slice(0, 8), e.name + ': the count of payments, and as many receipts', data.slice(0, 8) + ' / ' + e.data.slice(0, 8));
+      for (let at = 8; at + 156 <= data.length; at += 156) {
+        ok(data.substr(at, 24) === e.data.substr(at, 24) && data.substr(at + 88, 68) === e.data.substr(at + 88, 68), e.name + ': a receipt’s clock, worth, first output and unit');
+      }
+      verified += 1;
     } else if (e.kind === 'again') {
       ok(data === card.state.lastSig, e.name + ': the last signature, again');
       verified += 1;
@@ -198,7 +212,8 @@ async function replay(T, format, places, software) {
       ok(false, e.name + ': a kind of answer this test knows', e.kind);
     }
   }
-  ok(T.length >= 100 && exact >= 90 && verified >= 12, 'the transcript is the whole conversation', T.length + ' exchanges, ' + exact + ' exact, ' + verified + ' verified');
+  const most = least || { n: 100, exact: 90, verified: 12 };
+  ok(T.length >= most.n && exact >= most.exact && verified >= most.verified, 'the transcript is the whole conversation', T.length + ' exchanges, ' + exact + ' exact, ' + verified + ' verified');
   return { n: T.length, exact, verified };
 }
 
@@ -219,7 +234,24 @@ async function replay(T, format, places, software) {
   const wide = await replay(read('flashcard-transcript-17.json'), 4, undefined, 7);
   const narrow = await replay(read('flashcard-transcript-16.json'), 4, 64);
   const before = await replay(read('flashcard-transcript-3.json'), 3);
-  const all = [now, fourMore, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
+  /* 1.23 (tests/fixtures/flashcard-transcript-123.json is the card repository's spec/vectors/transcript.json at 1.23): its own part, from
+   * the reset after which every command of the book is asked (a plain load and a labelled one, 6A9B, 6A9C, 6A9D, 6A9A, 6A99, the table,
+   * the rate written and masked, GET_INFO P1 = 3, GET_BALANCE P1 = 1, GET_LOG P1 = 2 and 3, a sats payment weighed in cents, the reclaim,
+   * the PIN form's twelve bytes and the old lengths refused on a sats record). What comes before it in that recording is 1.21's and
+   * 1.22's change made by the card and loaded back, whose blinded messages name the applet's own key and are not this model's to answer;
+   * the reset kept the card's clock, its last header and its book, which the model is given. */
+  const T123 = read('flashcard-transcript-123.json');
+  const from = T123.findIndex((x) => /GET_INFO P1 = 3 on a card just reset/.test(x.name));
+  ok(from > 0, 'the 1.23 recording has its own part, from a card just reset');
+  const part = [T123[0]].concat(T123.slice(from)).map((x) => (/GET_LOG P1 = 3: the receipts with their units/.test(x.name) ? Object.assign({}, x, { kind: 'receipt-units' }) : x));
+  const clock = T123[from].data.substr(34, 8);
+  const lastHash = (T123.find((x, i) => i > from && /GET_CARD with a rate set/.test(x.name)) || { data: '' }).data.substr(88, 64);
+  const units = await replay(part, 4, undefined, 23, (c) => {
+    c.state.now = parseInt(clock, 16);
+    c.state.headerHash = lastHash;
+    c.state.book = { table: Array.from({ length: 6 }, () => ({ keyset: '00'.repeat(8), state: 0 })), last: 0, other: 0, units: Array.from({ length: 16 }, () => 0) };
+  }, { n: 90, exact: 80, verified: 10 });
+  const all = [units, now, fourMore, reset, optional, headers, oneEach, fourSigns, quicker, designed, sealed, plain, wide, narrow, before];
   const T = { length: all.reduce((n, r) => n + r.n, 0) }, exact = all.reduce((n, r) => n + r.exact, 0), verified = all.reduce((n, r) => n + r.verified, 0);
 
   // the model's own extras

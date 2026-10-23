@@ -77,6 +77,8 @@
   /* SWAP, from home's button or the menu's row (swapStart). Starts from the
    * balance that has something in it: dollars when both do, as drawn. */
   goSwap() {
+    // (home's own SWAP: this phone's balances, not a card's, `fcSwap`)
+    this._swapCard = null;
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
     const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
@@ -148,6 +150,20 @@
     return { from: from, to: from === 'usd' ? 'sat' : 'usd' };
   }
 
+  /* For a card's SWAP (26f-flashcard.js, `fcSwap`): what of `u` comes off the card before the swap is run, for the mint to be asked a rate
+   * for it while it is still on the card (the wallet's `swapQuote`, `coming`). Nothing for this phone's own SWAP. */
+  swapComing(u) {
+    const c = this._swapCard;
+    return (c && c.bal) ? { coming: Math.max(0, Math.round(Number(c.bal[u === 'sat' ? 'sat' : 'usd']) || 0)) } : {};
+  }
+
+  /* What there is to swap in `u`: this phone's balance, or, for a card's SWAP (26f-flashcard.js, `fcSwap`), what the card holds of it. */
+  swapHave(u) {
+    const c = this._swapCard;
+    if (c && c.bal) return Math.max(0, Math.round(Number(c.bal[u === 'sat' ? 'sat' : 'usd']) || 0));
+    return this.unitBalance(u);
+  }
+
   /* NEXT on the swap screen: SET AMOUNT, in dollars whichever way it goes,
    * since dollars are what people think in. Without a price ever seen there
    * is nothing to convert dollars with, so bitcoin leaving is typed in sats,
@@ -156,7 +172,7 @@
   swapToAmount() {
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
-    if (!(this.unitBalance(from) > 0)) {
+    if (!(this.swapHave(from) > 0)) {
       this.toast('You have no ' + this.unitWord(from).toLowerCase() + ' to swap.', true);
       return;
     }
@@ -236,7 +252,7 @@
     if (this.offlineNow() || !this.twoUnitsOn() || this._swapRun || s.swapBusy) return;
     const { from, to } = this.swapUnits();
     const amount = this.swapTyped();
-    if (!(amount > 0) || amount > this.unitBalance(from)) return;
+    if (!(amount > 0) || amount > this.swapHave(from)) return;
     const had = this.swapAheadMine();
     if (had && (had.asking || this.swapAheadFor(had))) return;
     if (this._swapAheadOut) { this._swapAheadWaiting = true; return; }
@@ -257,7 +273,7 @@
     };
     this._swapAhead = mine;
     console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, from) + ' as it is typed');
-    const opts = { paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) };
+    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) }, this.swapComing(from));
     const ask = this._swapAheadOut = W.swapQuote(from, to, amount, opts).then((q) => {
       mine.q = q;
       mine.asking = false;
@@ -327,7 +343,7 @@
   swapNext(all) {
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     const { from } = this.swapUnits();
-    const have = this.unitBalance(from);
+    const have = this.swapHave(from);
     /* A quote asked ahead for these very keys is for the figure they meant
      * when it was asked: that figure is the swap's, even though its answer
      * has since moved the rate the keys would convert at. */
@@ -368,7 +384,8 @@
       return;
     }
     // the amount handed over, not read back from state the same moment it was set
-    this.swapAsk(false, amount, !!all);
+    // (a card's SWAP: ALL OF IT is the card's, asked as that figure, never as all of this phone's)
+    this.swapAsk(false, amount, this._swapCard ? false : !!all);
   }
 
   /* The mint's rate for this swap. `again` is a rate asked for because the
@@ -385,7 +402,7 @@
     const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
     this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
     // out with the mint until it answers: nothing is asked ahead beside it (`swapProbe`, `swapAheadAsk`)
-    const asked = this._swapAskOut = W.swapQuote(from, to, amount, all ? { all: true } : {});
+    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : {}, this.swapComing(from)));
     asked.then(() => {}, () => {}).then(() => { if (this._swapAskOut === asked) this._swapAskOut = null; });
     asked.then(q => {
       // an answer for an older question is dropped; one for a screen that has gone only ends the wait
@@ -393,6 +410,12 @@
       if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
       console.log('[foxy] swap: quoted ' + this.unitFigure(q.total, from) + ' for ' + this.unitFigure(q.get, to)
         + (again ? ' (a new rate)' : ''));
+      // (a card's SWAP: what the swap spends, its fee with it, comes off the card, which has to hold it)
+      if (this._swapCard && Number(q.total) > this.swapHave(from)) {
+        this.setState({ swapQuoting: false, swapQuote: null, swapErrAmount: true,
+          swapErr: 'With the fee that is ' + this.unitFigure(q.total, from) + ', more than the card holds. Swap a little less.' });
+        return;
+      }
       this._swapQuotedAt = Date.now();
       this.setState({ swapQuoting: false, swapQuote: q, swapNewRate: !!again });
       this.swapClock();
@@ -449,6 +472,8 @@
     const s = this.state;
     const q = s.swapQuote;
     if (!q || s.swapBusy || s.swapQuoting || this._swapRun) return;
+    // a card's SWAP: a tap at each end of this phone's own swap (26f-flashcard.js)
+    if (this._swapCard && this.fcSwapGo) { this.fcSwapGo(q); return; }
     if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
     /* A new rate has only just replaced the old one: a tap in that moment was
      * meant for the old rate, so it is not taken for the new one. */
@@ -838,8 +863,8 @@
       label: label, name: this.unitWord(u), text: text,
     });
     const rows = sc === 'swap' ? [
-      pill('FROM', from, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(from), from)),
-      pill('TO', to, s.hidden ? '••••••' : this.unitFigure(this.unitBalance(to), to)),
+      pill('FROM', from, s.hidden ? '••••••' : this.unitFigure(this.swapHave(from), from)),
+      pill('TO', to, s.hidden ? '••••••' : this.unitFigure(this.swapHave(to), to)),
     ] : [];
     const r = s.swapResult || null;
     const done = (sc === 'swapDone' && r) ? [
@@ -852,7 +877,7 @@
     const feeUnit = r && r.from && r.from.unit === 'sat' ? 'sat' : 'usd';
     const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
-    const canGo = sc === 'swap' && !this.offlineNow() && this.unitBalance(from) > 0;
+    const canGo = sc === 'swap' && !this.offlineNow() && this.swapHave(from) > 0;
     return {
       isSwap: sc === 'swap',
       swapRows: rows,
