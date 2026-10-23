@@ -1215,6 +1215,8 @@ class Component extends DCLogic {
       this._sendWaited = null;
       if (lightning && this.offlineNow()) this.notOnlineCard();
     }
+    // paying from a card that holds both currencies: which pays is asked first, where both could (26f-flashcard.js, `fcOutUnitAsk`)
+    if (this.fcOutUnitAsk && this.fcOutUnitAsk()) return;
     this.quoteSendFee();
     this.feeQuotesAgain();
   }
@@ -1997,8 +1999,8 @@ class Component extends DCLogic {
   bootWallet() {
     this.mirrorConsole();
     this.watchEdgeSwipe();
-    // and the swipe between home and the card (26f-flashcard.js)
-    this.fcWatchSwipe();
+    // what an earlier build kept of the cards for a swipe between home and the card is cleared (26f-flashcard.js)
+    this.fcDropOldStores();
     // Tor comes first. Until it connects, or the person chooses to continue
     // unprotected, the native side refuses every mint call, price and address
     // lookup; the gate's screens only say why.
@@ -13841,7 +13843,7 @@ class Component extends DCLogic {
       toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
       mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
-      histRingInk: string, histRingInk2: string, histRing: string,
+      histRingInk: string, histRingInk2: string, histRing: string, goCard: () => void,
     }} */ (this.renderValsBase());
     /* Home's four buttons, icons only: SPLIT, CONTACTS, HISTORY, SETTINGS. SETTINGS
      * lays its own four, labelled, over the same places: RESTORE, BACKUP, the
@@ -13919,7 +13921,7 @@ class Component extends DCLogic {
         dim: this.offlineNow() ? '0.38' : '1' },
     ] : []);
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or HISTORY. */
+     * SCAN, PASTE or CARD; HISTORY is its first row. */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -14005,8 +14007,19 @@ class Component extends DCLogic {
     v.histRingInk2 = (atRisk || short || changeTodo) ? 'rgba(255,92,92,.28)'
       : waiting ? 'rgba(247,147,26,.28)' : 'transparent';
     v.histRing = (atRisk || waiting || short || changeTodo) ? 'foxyRing 1.5s linear infinite' : 'none';
+    /* HISTORY is the first row of the menu, and carries that ring; the menu button carries it too, where the backup's red ring is not
+     * already turning on it, so it is seen from home. */
+    if (!unbacked) {
+      v.menuRingInk = v.histRingInk;
+      v.menuRingInk2 = v.histRingInk2;
+      v.menuRing = v.histRing;
+    }
+    /* CARD, the round button at the top left: the card's screen, which asks for the card to be tapped (26f-flashcard.js,
+     * `goFlashcard`); with no card yet, the same tap shows a new card's set-up. */
+    v.goCard = () => this.goFlashcard();
     /* The drawer, in this order:
      *
+     *   HISTORY, with the ring that says something there needs looking at
      *   BACKUP (only while the words are unverified — verified, it lives at
      *     the foot of SETTINGS)
      *   HIDE BALANCE · SPLIT A BILL · CONTACTS
@@ -14036,7 +14049,9 @@ class Component extends DCLogic {
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const inSettings = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
-    v.menuItems = /** @type {any[]} */ (verified ? [] : [backupRow]).concat([
+    const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
+      ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -14064,9 +14079,7 @@ class Component extends DCLogic {
        * exact amount at all — the one question an offline payer has and no other
        * screen answers. */
       { label: 'YOUR CHANGE', path: MENU_ICON.change, tap: shut(() => this.goChange()) },
-      /* A card that holds ecash: what is on it, money on and off it, and the
-       * cards this phone can take back (26f-flashcard.js). */
-      { label: 'FLASHCARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard({ kept: true })) },
+      /* (A card that holds ecash is home's round button at the top left, CARD: `goCard`.) */
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
       { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
@@ -16666,9 +16679,8 @@ class Component extends DCLogic {
     };
   }
 
-  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot,
-   * and HOME | CARD at the foot of home and the card's screen (26f-flashcard.js). `look` is the chosen half's: 'frost', the pale
-   * frost pill, or 'fur', the fox's orange. */
+  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot.
+   * `look` is the chosen half's: 'frost', the pale frost pill, or 'fur', the fox's orange. */
   segLook(on, look) {
     if (!on) return { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' };
     return look === 'fur'
@@ -21900,13 +21912,13 @@ class Component extends DCLogic {
    *                                      share to a tap, and a share the mint
    *                                      has vouched for is ticked and the
    *                                      screen moves on to the next payer;
-   *   MENU > FLASHCARD                   a holder's own card: what it holds,
+   *   CARD (home, top left)              a holder's own card: what it holds,
    *                                      money on and off it, its PIN and its
    *                                      limit, and the cards this phone can
    *                                      take back if they are lost.
    *   a card's address, from outside     a card held to the phone raises one
    *                                      address and iOS opens Foxy with it:
-   *                                      the same as MENU > FLASHCARD, if it is
+   *                                      the same as CARD on home, if it is
    *                                      a moment for it (`cardTapped`);
    *   SEND > FLASHCARD                   money onto any card held to this phone
    *                                      (`fcSendCard`);
@@ -22139,7 +22151,7 @@ class Component extends DCLogic {
     return d.getDate() + ' ' + this.FC_MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   }
 
-  /* FLASHCARD in the menu asks for the card at once: the phone's own sheet
+  /* CARD, home's round button at the top left, asks for the card at once: the phone's own sheet
    * comes up with no screen of ours to read first. A card tapped, and the
    * screen is that card. The sheet dismissed, and the person is where they
    * were: there is no screen for no card.
@@ -22147,20 +22159,11 @@ class Component extends DCLogic {
    * Except where cards can be taken back (FC_RECOVERABLE): a lost card
    * cannot be tapped, so the screen with no card on it is opened first and
    * stays when the sheet goes, with the cards this phone loaded listed on it. */
-  goFlashcard(o) {
-    // a card read on an earlier visit is not shown again: it may be somebody else's
+  goFlashcard() {
+    // a card read on an earlier visit is not shown again: it may be somebody else's, and what it held may have changed
     this._fcCard = null;
-    this._fcThen = null;
     clearInterval(this._fcRollT);
     if (this.state.fcRoll) this.setState({ fcRoll: null });
-    /* The swipe and MENU > FLASHCARD (`kept`): this phone's own card as it was last read here, at once, with no tap (`fcKeptRead`); a tap
-     * of the card refreshes it, and anything that needs the card itself asks for the tap first (`fcNeedCard`). A card tapped from outside
-     * Foxy is read, as before: it may be another card. */
-    const kept = (o && o.kept) ? this.fcKeptRead() : null;
-    if (kept) {
-      this.setState(p => ({ fc: kept, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
-      return;
-    }
     if (this.FC_RECOVERABLE) {
       // (from the card's own screen, which a card's address can come to, it is not put on the stack again)
       this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
@@ -22179,7 +22182,7 @@ class Component extends DCLogic {
    * banner opens Foxy, or brings it forward, with that address. iOS gives no
    * session with the card; it gives the address, and the phone passes on one
    * thing, `FoxyWallet._cardTapped()`: a card was tapped. Nothing of the address
-   * comes with it. What is done is what MENU > FLASHCARD does (`goFlashcard`:
+   * comes with it. What is done is what CARD on home does (`goFlashcard`:
    * the screen, the phone's sheet, the card still behind the phone), when it is
    * a moment for that. `cardTapRule` is the one place that says whether it is:
    *
@@ -22577,6 +22580,15 @@ class Component extends DCLogic {
     const sats = this.fcTyped();
     // FLASHCARD on the send screen has no card on show: the card is the one held to the phone when NEXT is pressed
     if (!fc && flow !== 'cardSend') { this.back(); return; }
+    /* SEND > FLASHCARD from home at a mint with two balances, the send not started in either: the figure is kept in both (dollars
+     * exactly or at the price, and sats), and the card held to the phone decides (`fcSendRun`, `fig`): the one currency it holds, or,
+     * for a card that takes both, the question which, where both of this phone's balances could pay. */
+    if (flow === 'cardSend' && this.twoUnitsOn && this.twoUnitsOn() && !(this.walletNow && this.walletNow('send'))) {
+      const fig = { usd: this.centsTyped(), sat: this.wantedSats() };
+      if (!(fig.usd > 0) && !(fig.sat > 0)) { this.toast('Type an amount first.', true); return; }
+      this.fcSendRun(0, '', '', null, fig);
+      return;
+    }
     if (!(sats > 0)) { this.toast('Type an amount first.', true); return; }
     /* In sats, whatever the screen was typed in. The line under the figure
      * says the same thing in red, but it is worked out in dollars and has
@@ -24368,8 +24380,10 @@ class Component extends DCLogic {
       .then((r) => this.fcWrote(r, opt),
             /* Not the owner after all (another card was tapped), or not the tap
              * after a payment after all: the PIN is what writes then. */
-            (e) => ((opt.owner && e && e.card === 'not-owner') || (opt.change && e && e.card === 'pin-needed'))
-              ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false }))
+            /* And a card that wants its PIN where none was given (a card of 1.21 and on wants it for every load, its owner's too): the
+             * PIN is asked, and what is waiting for the card is written with it; nothing is made again. */
+            (e) => ((opt.owner && e && e.card === 'not-owner') || (opt.change && e && e.card === 'pin-needed') || (!pin && e && e.card === 'pin-needed'))
+              ? this.fcWriteAsk(Object.assign({}, opt, { pin: true, owner: false, change: false, noPin: false }))
               : (e && e.card === 'cancelled')
                 ? this.fcStillWaiting(opt)
                 /* The card left after some pieces went on: the sheet again by
@@ -24747,7 +24761,7 @@ class Component extends DCLogic {
     return Math.round(r.from + (fc.balance - r.from) * (1 - Math.pow(1 - t, 3)));
   }
 
-  /* ---- MENU > FLASHCARD: reading a card ---------------------------------- */
+  /* ---- CARD on home: reading a card ------------------------------------- */
 
   /* `open`: the card's screen is opened by what is read (the menu's way in).
    *
@@ -24779,7 +24793,7 @@ class Component extends DCLogic {
         if (card && card.owes && card.owes.wrote > 0) { this.haptic && this.haptic('success'); this.refreshBalance(); this.loadHistory(); }
         // its owner, online, and its money near its date: the renewal is offered now
         this.fcRefreshMaybe(card);
-      }, (e) => { this._fcThen = null; this.fcFailed(e, { again: () => this.fcRead(open) }); });
+      }, (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
   /* What a card said, kept for the screen. Only on the FLASHCARD screen, or
@@ -24801,8 +24815,6 @@ class Component extends DCLogic {
        * limits and every figure the screen says of it are in that unit: cents for a dollar card. */
       unit: (card.record && card.record.unit === 'usd') ? 'usd' : 'sat',
       key: card.key, balance: card.balance, count: (card.pieces || []).length,
-      // when it was read: the age a kept read is shown with (`fcKeptRead`)
-      readAt: Date.now(),
       room: card.info.empty + card.info.spent,
       pin: card.info.pin, locked: !!card.info.locked, hasRecord: !!card.info.hasRecord,
       /* software 1.16 and on: the PIN is optional. `setUp`: the card has its record (and, before 1.16, a PIN); `pinSet`: it has a PIN (a blocked one does);
@@ -24873,15 +24885,9 @@ class Component extends DCLogic {
       owes: (card.owes && card.owes.parts && card.owes.parts.length) ? { amount: this.fcAmt(card.owes), parts: card.owes.parts, openings: card.owes.openings || [] } : null,
     } });
     this.fcOwesLater(card);
-    this.fcNoteCard(card);
-    this.fcKeepRead(this.state.fc);
     if ((card.pieces || []).length) { this.fcCheck(card); this.fcReal(card); }
     // ecash found for this card is asked of the mint, and the line about it redrawn if any of it was not owed after all
     if (W && W.cardOwedCheck) W.cardOwedCheck(card).then((gone) => { if (gone) this.forceUpdate(); }, () => {});
-    // what was pressed on a kept read, which needed the card itself (`fcNeedCard`): done now, if this is that card
-    const then = this._fcThen;
-    this._fcThen = null;
-    if (then && then.key === card.key && this.state.screen === 'flashcard') then.go();
   }
 
   /* What the line under the balance says of the change the card is owed (`fc.owes`), by where it stands. */
@@ -25235,9 +25241,21 @@ class Component extends DCLogic {
    * till writes change. The daily limit is not touched by putting money on. */
   fcAddPin(sats) {
     const fc = this.state.fc;
-    // (from 1.21 every load wants the PIN, the owner's own included)
-    if (fc && fc.ownedHere && !fc.pinFirst) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
+    /* (from 1.21 every load wants the PIN, the owner's own included: decided from the card just read, `fcCardPinFirst`, and never from a
+     * figure of the screen's that may not be there) */
+    if (fc && fc.ownedHere && !this.fcCardPinFirst()) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
     this.fcAddAskPin(sats);
+  }
+
+  /* Whether the card in hand is of software 1.21 or later, whose every load wants its PIN: from the card as it was read (its version,
+   * which the wallet's `pinFirst` is worked out from); a card with no version said is taken to want it, so the PIN is asked, not refused. */
+  fcCardPinFirst() {
+    const info = this._fcCard && this._fcCard.info;
+    if (!info) return true;
+    if (info.pinFirst === true) return true;
+    const v = String(info.version || '').split('.');
+    if (v.length < 2 || !v[0]) return true;
+    return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21);
   }
 
   fcAddAskPin(sats) {
@@ -25409,6 +25427,15 @@ class Component extends DCLogic {
             partCard(took, sats ? ask : 0);
             return;
           }
+        }
+        // a card that wants its PIN where none was given: asked for, and the withdrawal run again with it
+        if (e && e.card === 'pin-needed' && !pin && took === prior) {
+          this.fcAskPin({
+            title: 'ENTER PIN TO WITHDRAW',
+            subtitle: (sats ? this.fcBoth(sats, u) : 'Everything') + ' from the card to this phone.',
+            cta: sats ? 'WITHDRAW ' + this.fcPrice(sats, u) : 'WITHDRAW ALL',
+          }, (p) => this.fcWithdrawRun(sats, p, before, again, unit));
+          return;
         }
         if (!(e && e.card === 'partial')) { this.fcFailed(e, opt); return; }
         /* Cut short where the phone could not keep the sheet up (an older one):
@@ -26573,9 +26600,8 @@ class Component extends DCLogic {
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         if (r && r.withdrew > 0) this.fcMoved({});
-        // the card on show is not that card any more, and nothing kept of it is shown again
+        // the card on show is not that card any more
         this._fcCard = null;
-        this.fcForgetRead(fc.key);
         this.setState({ fc: null, screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
         this.haptic && this.haptic('success');
         this.toast('The card is reset.');
@@ -26627,11 +26653,14 @@ class Component extends DCLogic {
    * the wallet refuses one of the other kind before anything is made for it (`cardPrepare`, `wrong-unit`). `alt`: typed in
    * dollars, what a bitcoin card is loaded with instead ({ sats, have }: the sats at this phone's price, and its bitcoin);
    * a dollar card typed in sats is refused as ever. */
-  fcSendRun(sats, pin, unit, alt) {
+  /* `fig`: { usd, sat }, where the send was not started in either balance (unit ''): the figure in each, and the currency is chosen
+   * once the card is read (`fcSendUnit`). */
+  fcSendRun(sats, pin, unit, alt, fig) {
     const W = this.fcW();
     if (!W) return;
     let made = null;
-    this.fcTap({ amount: this.stageMoney(sats, unit), warm: true },
+    const typedUsd = this.state.unit !== 'SATS';
+    this.fcTap({ amount: unit ? this.stageMoney(sats, unit) : typedUsd ? this.stageMoney(fig.usd, 'usd') : this.stageMoney(fig.sat, 'sat'), warm: true },
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
@@ -26656,6 +26685,23 @@ class Component extends DCLogic {
             n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord });
             throw n;
           }
+          /* Not started in a currency: the card's own (one currency), or, for a card that takes both, the one of this phone's that can
+           * pay, or the question which where both can: the sheet ends calmly, nothing made, and the CURRENCY screen asks. */
+          if (!unit && fig) {
+            const pick = this.fcSendUnit(card, fig);
+            if (pick.ask) {
+              const q = /** @type {any} */ (new Error('Which currency to send.'));
+              q.card = 'choose-unit';
+              q.sheetText = 'Choose a currency';
+              q.pinSet = !!card.info.pinSet;
+              throw q;
+            }
+            unit = pick.unit;
+            sats = fig[unit];
+            alt = null;
+          }
+          // a card set up for the other currency alone is refused before its PIN is asked
+          if (unit && !pin) this.fcSendGuard(card, unit, alt);
           // a card that has a PIN is asked for it before any money is made for it: the sheet ends saying so
           if (card.info.pinSet && !pin) {
             const x = /** @type {any} */ (new Error('The card wants its PIN first.'));
@@ -26677,8 +26723,21 @@ class Component extends DCLogic {
         this.setState({ screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
         this.fcWrote(r, { rounded: Number(made && made.rounded) || 0 });
       }, (e) => {
-        if (e && e.card === 'pin-needed' && !pin && !made) { this.fcSendAsk(sats, unit, alt); return; }
-        if (e && e.card === 'needs-set-up' && !made) { this.fcSendSetUp(sats, unit, alt, e.info); return; }
+        if (e && e.card === 'choose-unit' && !made && fig) {
+          this.fcPickUnit({ question: 'SEND WHICH TO THE CARD?', foot: 'This card holds dollars and bitcoin. You are asked when both could pay.',
+                            short: { usd: fig.usd > this.fcHave('usd') ? 'NOT ENOUGH' : '', sat: fig.sat > this.fcHave('sat') ? 'NOT ENOUGH' : '' },
+                            why: 'This phone does not hold that much of it.' },
+                          (u) => { if (e.pinSet) this.fcSendAsk(fig[u], u, null); else this.fcSendRun(fig[u], '', u, null); });
+          return;
+        }
+        // (not started in a currency, and decided by the card: what is asked again is in the one decided)
+        if (e && e.card === 'pin-needed' && !pin && !made) { this.fcSendAsk(sats, unit || 'sat', alt); return; }
+        if (e && e.card === 'needs-set-up' && !made) {
+          // (a new card, not started in a currency: the one typed in, where this phone holds it)
+          if (!unit && fig) { const u = typedUsd && fig.usd > 0 && fig.usd <= this.fcHave('usd') ? 'usd' : 'sat'; this.fcSendSetUp(fig[u], u, null, e.info); return; }
+          this.fcSendSetUp(sats, unit, alt, e.info);
+          return;
+        }
         if (made) {
           // the pieces exist and are owed to that card; they go on at its next tap
           this.refreshBalance();
@@ -26691,18 +26750,21 @@ class Component extends DCLogic {
           this.fcFailed(e, { again: () => ((e && e.card === 'wrong-pin') ? this.fcWriteAsk({}) : this.fcWriteRun(pin || '', {})) });
           return;
         }
-        this.fcFailed(e, { again: () => (pin ? this.fcSendAsk(sats, unit, alt) : this.fcSendRun(sats, '', unit, alt)) });
+        this.fcFailed(e, { again: () => (pin ? this.fcSendAsk(sats, unit || 'sat', alt) : this.fcSendRun(sats, '', unit, alt, fig)) });
       });
   }
 
-  /* The pieces for the card held to the phone, in its unit (`fcSendRun`). Typed in dollars, a bitcoin card is loaded with the sats
-   * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
-  fcSendPrepare(card, sats, unit, alt) {
+  // what this phone holds to send in `unit`: cents of its dollars, or its sats
+  fcHave(unit) {
+    return unit === 'usd' ? Math.max(0, Math.round(Number(this.state.balUsdCents) || 0)) : Math.floor((this.balNow() && this.balNow().sats) || 0);
+  }
+
+  /* A card of 1.23 its owner set up on this phone to hold one currency (`cardHold`) takes that one alone from here: the other is refused
+   * before anything is made, and before its PIN is asked, in the wallet's words for a card of the other kind. A bitcoin card typed in
+   * dollars is loaded with their sats (`alt`). A card set up for both, or holding both, is never refused here: it takes either. */
+  fcSendGuard(card, unit, alt) {
     const W = this.fcW();
-    /* A card of 1.23 its owner set up on this phone to hold one currency (`cardHold`) takes that one alone from here: the other is
-     * refused before anything is made, in the wallet's words for a card of the other kind. A bitcoin card typed in dollars is loaded
-     * with their sats, as below. */
-    const only = (W.cardHold && W.cardHold(card)) || '';
+    const only = (W && W.cardHold && W.cardHold(card)) || '';
     const from = unit === 'usd' ? 'usd' : 'sat';
     if ((only === 'usd' || only === 'sat') && from !== only && !(only === 'sat' && alt)) {
       const wu = /** @type {any} */ (new Error('This card holds ' + (only === 'usd' ? 'dollars' : 'bitcoin') + ', so it is loaded from your '
@@ -26711,6 +26773,31 @@ class Component extends DCLogic {
       wu.cardUnit = only;
       throw wu;
     }
+  }
+
+  /* SEND > FLASHCARD not started in a currency (`fig`: the figure in each): which the card read takes it in. A card of software 1.23 that
+   * takes both (its owner set it up here for both, or it holds both or may: `cardHold`, `cardUnits`) is sent the one of this phone's
+   * balances that covers the figure, or asks which (`ask`) where both do; any other card its own currency, as it always was (a one-currency
+   * card of 1.23 its owner set up here: that one). Where nothing covers it, the currency that came nearest, and the wallet says it is short. */
+  fcSendUnit(card, fig) {
+    const W = this.fcW();
+    const hold = (W && W.cardHold && W.cardHold(card)) || '';
+    const cu = (W && W.cardUnits && W.cardUnits(card)) || null;
+    const v123 = !!(card && card.info && card.info.units);
+    const both = v123 && hold !== 'usd' && hold !== 'sat' && (hold === 'both' || !!(cu && cu.length === 2) || !!(W && W.cardBoth && W.cardBoth(card)));
+    const own = (hold === 'usd' || hold === 'sat') ? hold : (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+    if (!both) return { unit: own };
+    const covers = ['usd', 'sat'].filter((u) => fig[u] > 0 && fig[u] <= this.fcHave(u));
+    if (covers.length === 2) return { ask: true };
+    if (covers.length === 1) return { unit: covers[0] };
+    return { unit: this.state.unit === 'SATS' ? 'sat' : (fig.usd > 0 ? 'usd' : 'sat') };
+  }
+
+  /* The pieces for the card held to the phone, in its unit (`fcSendRun`). Typed in dollars, a bitcoin card is loaded with the sats
+   * those dollars are at this phone's price, from this phone's bitcoin (`alt`). */
+  fcSendPrepare(card, sats, unit, alt) {
+    const W = this.fcW();
+    this.fcSendGuard(card, unit, alt);
     /* A card of software 1.23 takes the currency sent where it holds it already, or where it is its record's: dollars onto its dollars,
      * as they are (a new currency on it is its holder's to start, and a phone that is not its owner would be refused). */
     const cu = W.cardUnits ? W.cardUnits(card) : null;
@@ -26883,177 +26970,24 @@ class Component extends DCLogic {
       reason: 'Only the phone that loaded this card can take its money back if it is lost, after its date.' });
   }
 
-  /* ---- a swipe between home and the card ---------------------------------------------------------------------------
+  /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * Once this phone has a card (one it set up, or one it owns, the newest it has seen), a swipe across home to the left opens that
-   * card's screen as MENU > FLASHCARD does, with the card as this phone last read it and how long ago (`fcKeptRead`; a tap of the card
-   * reads it again), and a swipe to the right on the card's screen comes back home. The same two ways are a two-way pill at the foot
-   * of both screens, HOME | CARD, the one on show raised (`pageTabs`). The swipe that starts at the left edge is the back gesture (`watchEdgeSwipe`) and
-   * is left to it; a swipe that starts in something that scrolls sideways, or in a field, is not this one; and nothing happens over
-   * a pad, a card or a sheet, or in the middle of a card's flow. */
-  FC_LAST = 'foxy.flashcard.last';
-  FC_SWIPE = { edge: 24, travel: 72, slop: 48, ms: 700 };
-  /* The last read of each card this phone owns or set up, by its key: { at, fc }, `fc` the screen's own figures (`fcShow`'s state.fc).
-   *
-   * What is kept is what the card's screen shows and nothing that can spend: its public key, its mint's address, its balance in each
-   * currency and how many pieces, its limits and PIN state (set or not, never the PIN), the dates of its pieces, the mint's word and
-   * when, the block its clock is at, the change it is owed (amounts and where each stands), and, for its owner, its own log and the
-   * receipts this phone already keeps (08a-flashcard.js, `foxy.flashcard.receipts`). No piece, secret, proof or signature of the card's
-   * money is in it: those are on the card and are read from it at each tap, and a kept read moves nothing. A card read as a guest, or
-   * one this phone neither owns nor set up, is never kept (the guest's path keeps nothing on the phone); a card that is reset is
-   * forgotten. FC_READS_MAX cards, the newest. */
-  FC_READS = 'foxy.flashcard.reads';
-  FC_READS_MAX = 8;
-  FC_KEEP = ['unit', 'key', 'balance', 'count', 'readAt', 'room', 'pin', 'locked', 'hasRecord', 'setUp', 'pinSet', 'noPinKnown', 'noPin',
-    'pinFirst', 'guests', 'limit', 'day', 'tap', 'log', 'receipts', 'clockAhead', 'headers', 'clock', 'owner', 'resetKnown', 'ownedHere',
-    'mint', 'v123', 'cents', 'units', 'bal', 'only', 'both', 'rate', 'recoverable', 'mine', 'first', 'last', 'check', 'checkedAt', 'proofs', 'real',
-    'design', 'above', 'owes'];
+   * Home's round button at the top left is the CARD button: it opens the card's screen as a card's address does (`goFlashcard`),
+   * which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
+   * button in the same place, which comes back home (`fcGoHome`). There is no swipe between the two. */
+  // the stores an earlier build kept for a swipe between home and the card: a card's last read and the newest card; cleared once
+  FC_OLD_STORES = ['foxy.flashcard.reads', 'foxy.flashcard.last'];
 
-  fcReads() {
-    if (!this._fcReads) {
-      let o = null;
-      try { o = JSON.parse(localStorage.getItem(this.FC_READS) || 'null'); } catch (e) {}
-      this._fcReads = (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
-    }
-    return this._fcReads;
+  fcDropOldStores() {
+    this.FC_OLD_STORES.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
   }
 
-  fcReadsSave() {
-    try { localStorage.setItem(this.FC_READS, JSON.stringify(this.fcReads())); } catch (e) {}
-  }
-
-  // the screen's figures for a card (state.fc), kept in memory and in the store, where they are this phone's own card's to keep
-  fcKeepRead(fc) {
-    if (!fc || !fc.key || fc.memo || fc.guestRead || fc.forHolder || !(fc.mine || fc.ownedHere === true)) return;
-    if (fc === this._fcKeptFc) return;
-    this._fcKeptFc = fc;
-    const keep = {};
-    this.FC_KEEP.forEach((k) => { if (fc[k] !== undefined) keep[k] = fc[k]; });
-    // (the change it is owed, by amount and where it stands; which opening is which is the card's, and is read at the tap that acts on it)
-    if (keep.owes) keep.owes = { amount: keep.owes.amount, parts: keep.owes.parts, openings: [] };
-    const all = this.fcReads();
-    all[fc.key] = { at: Number(fc.readAt) || Date.now(), fc: keep };
-    Object.keys(all).sort((a, b) => (all[b].at || 0) - (all[a].at || 0)).slice(this.FC_READS_MAX).forEach((k) => { delete all[k]; });
-    this.fcReadsSave();
-  }
-
-  fcForgetRead(key) {
-    const all = this.fcReads();
-    if (key && all[key]) { delete all[key]; this.fcReadsSave(); }
-    const last = this.fcLastCard();
-    if (last && last.key === key) { try { localStorage.removeItem(this.FC_LAST); } catch (e) {} }
-    this._fcLastMemo = null;
-  }
-
-  /* The swipe's card as this phone last read it, for the screen at once (`memo`: when it was read), or null where it has none. What the
-   * mint was still being asked when it was kept is not left asking: the screen says it is not verified, until the card is read again. */
-  fcKeptRead() {
-    const last = this.fcLastCard();
-    const r = last && this.fcReads()[last.key];
-    if (!r || !r.fc || r.fc.key !== last.key) return null;
-    const fc = Object.assign({}, r.fc, { memo: Number(r.at) || Date.now(), guestRead: false, forHolder: false });
-    if (fc.check === 'asking') fc.check = 'off';
-    if (fc.real === 'asking') fc.real = 'unproven';
-    return fc;
-  }
-
-  /* What is pressed on a kept read and needs the card itself (to move money, change its PIN or limits, and so on) asks for the tap
-   * first, as MENU > FLASHCARD always did, and is done once that same card has been read. */
-  fcNeedCard(go) {
-    const fc = this.state.fc;
-    if (!fc || !fc.memo) { go(); return; }
-    this._fcThen = { key: fc.key, go };
-    this.fcRead();
-  }
-
-  // whether there is a card for the swipe, asked at each drawing of home and the card's screen: looked up at most once a few seconds
-  fcSwipeCard() {
-    const m = this._fcLastMemo;
-    if (m && Date.now() - m.t < 3000) return m.v;
-    const v = !!this.fcLastCard();
-    this._fcLastMemo = { t: Date.now(), v };
-    return v;
-  }
-
-  // the newest card this phone set up or owns, as it last showed it: { key, at }, or null
-  fcLastCard() {
-    try {
-      const o = JSON.parse(localStorage.getItem(this.FC_LAST) || 'null');
-      if (o && typeof o.key === 'string' && /^0[23][0-9a-f]{64}$/.test(o.key)) return o;
-    } catch (e) {}
-    const W = this.fcW();
-    const rows = (W && W.cardsList) ? (W.cardsList() || []) : [];
-    return rows.length ? { key: rows[0].key, at: rows[0].seen || rows[0].at || 0 } : null;
-  }
-
-  // a card this phone owns or set up, shown: the newest for the swipe
-  fcNoteCard(card) {
-    const W = this.fcW();
-    if (!card || !card.key || !(card.mine === true || (W && W.cardIsMine && W.cardIsMine(card)))) return;
-    try { localStorage.setItem(this.FC_LAST, JSON.stringify({ key: card.key, at: Date.now() })); } catch (e) {}
-    this._fcLastMemo = null;
-  }
-
-  fcWatchSwipe() {
-    if (this._fcSwipeOn) return;
-    this._fcSwipeOn = true;
-    const S = this.FC_SWIPE;
-    let live = false, x0 = 0, y0 = 0, t0 = 0;
-    const start = (e) => {
-      const t = e.touches && e.touches[0];
-      live = !!t && e.touches.length === 1 && t.clientX > S.edge && this.fcSwipeFrom(e.target);
-      if (t) { x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); }
-    };
-    const end = (e) => {
-      if (!live) return;
-      live = false;
-      const t = e.changedTouches && e.changedTouches[0];
-      if (!t) return;
-      const dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
-      if (Math.abs(dx) < S.travel || dy > S.slop || Date.now() - t0 > S.ms) return;
-      this.fcSwipe(dx < 0 ? 'left' : 'right');
-    };
-    document.addEventListener('touchstart', start, { passive: true });
-    document.addEventListener('touchend', end, { passive: true });
-    this._fcSwipeOff = () => {
-      document.removeEventListener('touchstart', start);
-      document.removeEventListener('touchend', end);
-      this._fcSwipeOn = false;
-    };
-  }
-
-  // whether a touch that starts on `target` may be this swipe: not in a field, and not in anything that scrolls sideways
-  fcSwipeFrom(target) {
-    for (let n = /** @type {any} */ (target); n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
-      const tag = String(n.tagName || '');
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
-      if (n.scrollWidth > n.clientWidth + 1) {
-        let ox = '';
-        try { ox = window.getComputedStyle(n).overflowX; } catch (e) {}
-        if (ox === 'auto' || ox === 'scroll') return false;
-      }
-    }
+  // HOME, the round button at the top left of the card's screen
+  fcGoHome() {
+    if (this._pinLocked || this.cardTapOver() || this.cardFlowBusy()) return false;
+    this._fcCard = null;
+    this.setState({ screen: 'home', stack: [], fc: null, open0: false });
     return true;
-  }
-
-  /* A swipe, `dir` 'left' or 'right': home to the card, the card to home. Answers whether it did anything. */
-  fcSwipe(dir) {
-    const s = this.state;
-    if (this._pinLocked || s.open0 || this.cardTapOver() || this.cardFlowBusy()) return false;
-    if (s.screen === 'home' && dir === 'left') {
-      if (!this.fcLastCard()) return false;
-      console.log('[foxy] swipe: to the card');
-      this.goFlashcard({ kept: true });
-      return true;
-    }
-    if (s.screen === 'flashcard' && dir === 'right') {
-      console.log('[foxy] swipe: home');
-      this._fcCard = null;
-      this._fcThen = null;
-      this.setState({ screen: 'home', stack: [], fc: null });
-      return true;
-    }
-    return false;
   }
 
   /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
@@ -27094,25 +27028,18 @@ class Component extends DCLogic {
   }
 
   // SEND, the tile on the card's screen, and SCAN under it (the same camera); PASTE brings what it read (`pasted`), taken as the camera takes it
-  fcOutOpen(picked, pasted) {
+  fcOutOpen(pasted) {
     if (!this.fcReady('Paying from the card')) return;
     const fc = this.state.fc;
-    /* A card of software 1.23 that holds both: which pays is asked first, every time, on the CURRENCY screen with what the card holds of
-     * each (never chosen for the holder), and the payment is quoted and paid in it (`fcUnit`). One that holds one pays in that one. */
-    if (!picked) {
-      this._fcFlowUnit = null;
-      if (fc.v123 && fc.bal) {
-        const has = (u) => fc.bal[u] > 0;
-        if (has('usd') && has('sat')) {
-          this.fcPickUnit({ question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. You are asked every time.',
-                            bal: { usd: fc.bal.usd, sat: fc.bal.sat }, short: { usd: '', sat: '' } },
-                          (u) => { this._fcFlowUnit = u; this.fcOutOpen(true, pasted); });
-          return;
-        }
-        this._fcFlowUnit = has('usd') ? 'usd' : has('sat') ? 'sat' : null;
-      }
-    }
-    if (!(this.fcHeld(fc, this.fcUnit()) > 0)) { this.toast('There is nothing on this card.', true); return; }
+    /* The way to pay first (the camera, PASTE, CONTACTS, TYPE, or the card's WITHDRAW): no currency is asked before it. A card of software
+     * 1.23 that holds both is asked which pays once what is paid is known, and only where both could pay it (`fcOutUnitAsk`, on the
+     * confirmation); WITHDRAW asks its own question. One that holds one pays in that one. */
+    this._fcFlowUnit = null;
+    this._fcOutUnitFor = '';
+    this._fcOutAsking = false;
+    const both = !!(fc.v123 && fc.bal && fc.bal.usd > 0 && fc.bal.sat > 0);
+    if (fc.v123 && fc.bal && !both) this._fcFlowUnit = fc.bal.usd > 0 ? 'usd' : fc.bal.sat > 0 ? 'sat' : null;
+    if (!both && !(this.fcHeld(fc, this.fcUnit()) > 0)) { this.toast('There is nothing on this card.', true); return; }
     this.setState(p => ({
       screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: 'card', tokenMode: false,
       amount: '', asset: '', unit: 'USD', recipient: '', recipientKind: '', emailDraft: '', note: '', noteDraft: '',
@@ -27129,9 +27056,55 @@ class Component extends DCLogic {
       .then((t) => {
         const text = String(t || '').trim();
         if (!text) { this.toast('There is nothing to paste.', true); return; }
-        this.fcNeedCard(() => this.fcOutOpen(false, text));
+        this.fcOutOpen(text);
       })
       .catch(() => this.toast('Could not read the clipboard. Try scan.', true));
+  }
+
+  /* A card of software 1.23 that holds both, paying from SEND: which pays, asked on the confirmation once what is paid is known (the
+   * wallet's own rule, 08a-flashcard.js `cardPayUnit`): where both of the card's balances cover it, the CURRENCY screen asks, and the
+   * fee is asked in the one chosen; where one does, that one, with nothing asked; where neither does, its bitcoin, and NEXT says what
+   * the card holds. Answers whether the question is up (nothing is quoted meanwhile). Asked again for another payment. */
+  fcOutUnitAsk() {
+    const s = this.state;
+    const fc = s.fc;
+    if (s.screen !== 'sendConfirm' || !this.fcOutMode() || !fc || !(fc.v123 && fc.bal && fc.bal.usd > 0 && fc.bal.sat > 0)) return false;
+    const ask = this.sendAsk ? this.sendAsk() : null;
+    if (!ask) return false;
+    if (this._fcOutUnitFor === ask.key && (this._fcFlowUnit === 'usd' || this._fcFlowUnit === 'sat')) return false;
+    const W = this.fcW();
+    const sats = ask.inv ? Math.round(Number(W && W.amountOf ? W.amountOf(ask.inv) : 0) || 0) : Math.round(Number(ask.sats) || 0);
+    const px = Number(this.px && this.px()) || 0;
+    const cents = px > 0 ? Math.ceil(sats / 1e8 * px * 100) : 0;
+    // (with no price, whether the dollars cover it is not known here: they are offered, and the card's own total says at NEXT)
+    const covers = { sat: fc.bal.sat >= sats, usd: px > 0 ? fc.bal.usd >= cents : true };
+    if (covers.sat && covers.usd) {
+      /* Asked already: chosen and on its way (`currencyPick` takes the question down first), or backed out of, the question still
+       * waiting for an answer, which is a way back from this payment: back past the confirmation to where it came from. */
+      if (this._fcOutAsking) {
+        if (!this._fcUnitThen) return true;
+        this._fcUnitThen = null;
+        this._fcOutAsking = false;
+        this.back();
+        return true;
+      }
+      this._fcOutAsking = true;
+      this.fcPickUnit({ question: 'PAY FROM WHICH?', foot: 'This card holds dollars and bitcoin. You are asked when both could pay.',
+                        bal: { usd: fc.bal.usd, sat: fc.bal.sat }, short: { usd: '', sat: '' } },
+                      (u) => {
+                        this._fcOutAsking = false;
+                        this._fcFlowUnit = u;
+                        this._fcOutUnitFor = ask.key;
+                        // the fee is asked again, in the currency chosen
+                        this._quotedFor = null;
+                        this.forceUpdate();
+                      });
+      return true;
+    }
+    this._fcFlowUnit = covers.usd && !covers.sat ? 'usd' : 'sat';
+    this._fcOutUnitFor = ask.key;
+    this._quotedFor = null;
+    return false;
   }
 
   /* WITHDRAW, the row on SEND MONEY in card mode: back to the card's screen, out of card mode, and the withdrawal as the
@@ -27266,6 +27239,9 @@ class Component extends DCLogic {
     if (!W || !W.connected) { this.offlineNo('Paying from the card'); return; }
     /* A dollar card pays Lightning, by a melt of its dollars: a mint's payment on chain is in sats (16a-onchain.js), and is
      * not made from one. Said before the mint is asked anything. */
+    // (a card of 1.23 that holds bitcoin as well pays an address from its bitcoin: nothing to ask, only sats go on chain)
+    const fc0 = this.state.fc;
+    if (fc0 && fc0.v123 && fc0.bal && fc0.bal.sat > 0) this._fcFlowUnit = 'sat';
     if (this.fcUnit() === 'usd') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
@@ -27304,14 +27280,14 @@ class Component extends DCLogic {
     if (!this.fcReady('Paying from the card')) return;
     const fc = s.fc;
     // (a dollar card never reaches the on-chain confirmation: `fcOutAddress` says so first)
-    if (fc.unit === 'usd') { this.fcOutAddress(''); return; }
+    if (this.fcUnit() === 'usd') { this.fcOutAddress(''); return; }
     const plan = s.ocPlan;
     const pick = plan ? plan.options.filter(o => o.index === s.ocFee)[0] : null;
     if (!plan || !pick) { this.toast('Foxy is still asking the mint for the fee.', true); return; }
     // this one already handed to the mint: it is followed, and not paid twice
     if (s.ocBusy || (W.onchainSending && W.onchainSending().some(r => r && r.quote === plan.id))) { this.showPayPending(); return; }
     const total = W.cardOutTotal ? W.cardOutTotal(plan.sats, pick.fee) : plan.sats + pick.fee;
-    if (total > fc.balance) { this.fcFailed({ card: 'not-enough', balance: fc.balance }, { taken: true }); return; }
+    if (total > this.fcHeld(fc, 'sat')) { this.fcFailed({ card: 'not-enough', balance: this.fcHeld(fc, 'sat') }, { taken: true }); return; }
     const send = { to: plan.address, key: fc.key, onchain: { plan, fee: pick.index } };
     const G = window.FoxyGate;
     const fresh = (G && G.recheck) ? G.recheck() : null;
@@ -27402,15 +27378,6 @@ class Component extends DCLogic {
     const fc = (on && s.fc) || null;
     const now = Math.floor(Date.now() / 1000);
     const DIM = 'rgba(var(--ink-rgb),.55)';
-    // what the screen says of this phone's own card is kept as it changes (the mint's word, a write's new balance): `fcKeepRead`
-    if (fc && !fc.memo) this.fcKeepRead(fc);
-    /* HOME | CARD at the foot of home and the card's screen, once this phone has a card for the swipe: the one on show raised in the
-     * pale frost pill, the other dimmed; a tap on the other does what the swipe does (`fcSwipe`) */
-    const home = sc === 'home';
-    const tabs = (home || on) && this.fcSwipeCard();
-    // a kept read: what pressing anything that needs the card itself does first (`fcNeedCard`)
-    const need = (go) => () => this.fcNeedCard(go);
-    const memo = !!(fc && fc.memo);
     const AMBER = '#F7931A';
     const RED = '#FF5C5C';
 
@@ -27502,7 +27469,7 @@ class Component extends DCLogic {
      * it is changed. */
     // a card with under FC_RENEW_DAYS left before its date: said where the money waiting for a card is said, and renewed from there
     if (on && fc && near && !past && this.fcAnyMoney(fc)) {
-      notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: need(() => this.fcRenew()) });
+      notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
     }
 
     /* RESET, for the card's owner (software 1.17 and on): a locked card is not asked whether this phone owns it, so it is offered to
@@ -27546,25 +27513,29 @@ class Component extends DCLogic {
     const two = !!(fc && fc.hasRecord && fc.v123 && fc.bal && this.fcTwoUnits(fc));
     const LU = (fc && fc.cents) ? 'usd' : U;
     /* The card's MENU, at the top right, home's own menu button and drawer (build/markup.html, `open0`): the card's settings, in this
-     * order. LIMITS, with what the card pays without its PIN under it; CHANGE PIN (ADD PIN on a card that has none); RESTORE LOST
+     * order. HISTORY, what has been done with this card on this phone (`fcHistory`: its own log and the tampers it marked, for its
+     * owner), the clock as home's HISTORY row has it; LIMITS, with what the card pays without its PIN under it; CHANGE PIN (ADD PIN on a card that has none); RESTORE LOST
      * CARD, for a card of software 1.21 and on, what restoring it would do if it were lost (`fcRestoreThis`); RESET, for its owner
      * (software 1.17 and on). LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
-     * change them. HISTORY, what has been done with this card on this phone, is the round button at the top left. */
+     * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
     // (software 1.23: for both its currencies together, in dollars, `LU`)
     const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 '
       + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.pinFirst ? '' : ' today')
       + (two ? ' \u00b7 both currencies' : '');
-    const menu = !(fc && fc.hasRecord) ? [] : [].concat(!usable ? [] : [
-      { label: 'LIMITS', sub: noPinSub, tap: shut(need(() => this.fcSetLimit())),
+    const menu = !(fc && fc.hasRecord) ? [] : [
+      { label: 'HISTORY', sub: '', tap: shut(() => this.fcHistory()),
+        path: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z' },
+    ].concat(!usable ? [] : [
+      { label: 'LIMITS', sub: noPinSub, tap: shut(() => this.fcSetLimit()),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
-      { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(need(() => (addable ? this.fcPinAdd() : this.fcChangePin()))),
+      { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
     ]).concat(!fc.pinFirst ? [] : [
       { label: 'RESTORE LOST CARD', sub: '', tap: shut(() => this.fcRestoreThis()),
         path: 'M12 3.8v10.4m0 0-4.2-4.2m4.2 4.2 4.2-4.2M4.6 15.4v2.8a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.8' },
     ]).concat(!resettable ? [] : [
-      { label: 'RESET', sub: '', tap: shut(need(() => this.fcReset())),
+      { label: 'RESET', sub: '', tap: shut(() => this.fcReset()),
         path: 'M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4' },
     ]).map((m) => Object.assign({ indent: '0', glow: 'none', ringInk: 'transparent', ringInk2: 'transparent', ring: 'none' }, m));
     /* The row at the bottom, home's own row of three (21-render-values.js, `homeButtonsTwo`): SCAN and PASTE pay from the card,
@@ -27576,14 +27547,14 @@ class Component extends DCLogic {
      * the reason when pressed: there is nothing on the other side to swap with until money of each has been added. */
     const swapEarly = swappable && !fc.both && !!fc.bal && !(fc.bal.usd > 0 && fc.bal.sat > 0);
     const buttons = !usable ? [] : [
-      { label: 'SCAN', tap: need(() => this.fcOutOpen()), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
+      { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
       { label: 'PASTE', tap: () => this.fcOutPaste(), spin: 'none', dim: '1', pasteHere: '',
         path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
       { label: 'SWAP', spin: 'none', pasteHere: '',
         dim: (!swappable || swapEarly || this.offlineNow()) ? '0.38' : '1',
         tap: swapEarly ? () => this.toast('Add both dollars and bitcoin to the card to swap between them.', true)
-          : swappable ? need(() => this.fcSwap()) : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
+          : swappable ? () => this.fcSwap() : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ];
     // the limit line has a card to be on, and says nothing of a blocked one
@@ -27676,14 +27647,12 @@ class Component extends DCLogic {
       /* And under those, what can be done about it (software 1.22): FINISH THIS CHANGE where a till's key kept it off the card and the
        * mint's answer is here, and GIVE UP THIS CHANGE for each opening that cannot be finished, and only for those. */
       fcChangeRows: (!!fc && !!fc.hasRecord && fc.pin !== 'blocked' && owes.length > 0) ? [].concat(
-        this.fcMendAmount(fc) > 0 ? [{ name: 'FINISH THIS CHANGE (' + this.fcPrice(this.fcMendAmount(fc), U) + ')', sub: 'With the card\u2019s PIN', text: '', ink: 'var(--ink)', tap: need(() => this.fcMend()) }] : [],
+        this.fcMendAmount(fc) > 0 ? [{ name: 'FINISH THIS CHANGE (' + this.fcPrice(this.fcMendAmount(fc), U) + ')', sub: 'With the card\u2019s PIN', text: '', ink: 'var(--ink)', tap: () => this.fcMend() }] : [],
         ((fc.owes && fc.owes.openings) || []).filter((x) => x && x.giveUp).map((x) => ({
-          name: 'GIVE UP THIS CHANGE (' + this.fcPrice(x.amount, U) + ')', sub: '', text: '', ink: 'var(--ink)', tap: need(() => this.fcGiveUp(x)) }))) : [],
+          name: 'GIVE UP THIS CHANGE (' + this.fcPrice(x.amount, U) + ')', sub: '', text: '', ink: 'var(--ink)', tap: () => this.fcGiveUp(x) }))) : [],
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
-      // what has been done with this card, on this phone: from the round button at the top left, and from its pill; only for a card that is one
-      fcHistoryVis: (fc && fc.hasRecord) ? 'visible' : 'hidden',
-      fcHistory: () => this.fcHistory(),
+      // (what has been done with this card, on this phone, is HISTORY at the top of its menu, and its pill)
       // the bottom row, SCAN / PASTE / SWAP, and the MENU at the top right, which is the close button where it has no rows
       fcRowShown: buttons.length > 0,
       fcButtons: buttons,
@@ -27705,11 +27674,11 @@ class Component extends DCLogic {
       // a holder's card with no owner (software 1.22): what it is, and its two buttons
       fcGuest: guest,
       fcGuestLine: 'This card belongs to whoever holds it. It is not tied to any phone.',
-      fcGuestView: need(() => this.fcGuestView()),
-      fcGuestTie: need(() => this.fcGuestTie()),
+      fcGuestView: () => this.fcGuestView(),
+      fcGuestTie: () => this.fcGuestTie(),
       fcBlocked: blocked,
       fcUnblock: unblock,
-      fcUnblockTap: need(() => this.fcChangePin()),
+      fcUnblockTap: () => this.fcChangePin(),
       /* A blocked card's money: gone, where the card is cash; the loader's to
        * take back, where it is not (and here, where this phone can). */
       fcBlockedLine: (fc && fc.ownedHere)
@@ -27723,21 +27692,13 @@ class Component extends DCLogic {
         : 'Too many wrong PINs. Only the phone that loaded it can take its money back, after its date.',
       fcUsable: usable,
       fcTap: () => this.fcRead(),
-      fcAdd: need(() => this.fcAdd()),
+      fcAdd: () => this.fcAdd(),
       // SEND: a payment from the card, on the send screen (`fcOutOpen`); the card's WITHDRAW is a row there
-      fcSend: need(() => this.fcOutOpen()),
-      fcWithdraw: need(() => this.fcWithdraw()),
-      fcSetUp: need(() => this.fcSetUp()),
-      /* A kept read (`fcKeptRead`): under the money, when it was read, and the card's picture reads it again when pressed */
-      fcMemoShown: memo,
-      fcMemoLine: memo ? 'As read ' + this.agoWords(Date.now() - fc.memo) + ' \u00b7 tap the card to refresh' : '',
-      fcCardTap: () => { if (this.state.fc && this.state.fc.memo) this.fcRead(); },
-      pageTabsShown: tabs,
-      pageTabs: tabs ? [['home', 'HOME', home, 'right'], ['card', 'CARD', on, 'left']].map(([key, label, chosen, dir]) => Object.assign(
-        this.segLook(chosen, 'frost'), {
-          key, label, pressed: chosen ? 'true' : 'false',
-          tap: () => { if (!chosen && this.fcSwipe(dir)) { if (this.haptic) this.haptic('light'); } },
-        })) : [],
+      fcSend: () => this.fcOutOpen(),
+      fcWithdraw: () => this.fcWithdraw(),
+      fcSetUp: () => this.fcSetUp(),
+      // HOME, the round button at the top left
+      fcHome: () => { if (this.fcGoHome() && this.haptic) this.haptic('light'); },
     };
   }
 

@@ -32239,6 +32239,8 @@
       /* A card of 1.23 holds both units at its one mint: a load of either is made for it, as the card in that unit (`cardInUnit`: its drawer,
        * its rows, its depth), and the card's own table says at the write whether it may take it. Before 1.23 a card takes its own unit alone. */
       var asked = (opts && opts.unit !== undefined && opts.unit !== null && opts.unit !== '') ? unitOf(opts.unit) : '';
+      // (a card of 1.23 read without its pieces sorted by unit is sorted here, so it is never taken for a card of its record's unit alone)
+      if (card && cardIs123(card) && card.record && !card.units) cardSortUnits(card);
       if (card && card.units && (asked === 'sat' || asked === 'usd' || !asked)) {
         card = cardInUnit(card, asked || unit);
         unit = card.record.unit;

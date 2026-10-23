@@ -19,7 +19,7 @@
       toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
       mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
-      histRingInk: string, histRingInk2: string, histRing: string,
+      histRingInk: string, histRingInk2: string, histRing: string, goCard: () => void,
     }} */ (this.renderValsBase());
     /* Home's four buttons, icons only: SPLIT, CONTACTS, HISTORY, SETTINGS. SETTINGS
      * lays its own four, labelled, over the same places: RESTORE, BACKUP, the
@@ -97,7 +97,7 @@
         dim: this.offlineNow() ? '0.38' : '1' },
     ] : []);
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or HISTORY. */
+     * SCAN, PASTE or CARD; HISTORY is its first row. */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -183,8 +183,19 @@
     v.histRingInk2 = (atRisk || short || changeTodo) ? 'rgba(255,92,92,.28)'
       : waiting ? 'rgba(247,147,26,.28)' : 'transparent';
     v.histRing = (atRisk || waiting || short || changeTodo) ? 'foxyRing 1.5s linear infinite' : 'none';
+    /* HISTORY is the first row of the menu, and carries that ring; the menu button carries it too, where the backup's red ring is not
+     * already turning on it, so it is seen from home. */
+    if (!unbacked) {
+      v.menuRingInk = v.histRingInk;
+      v.menuRingInk2 = v.histRingInk2;
+      v.menuRing = v.histRing;
+    }
+    /* CARD, the round button at the top left: the card's screen, which asks for the card to be tapped (26f-flashcard.js,
+     * `goFlashcard`); with no card yet, the same tap shows a new card's set-up. */
+    v.goCard = () => this.goFlashcard();
     /* The drawer, in this order:
      *
+     *   HISTORY, with the ring that says something there needs looking at
      *   BACKUP (only while the words are unverified — verified, it lives at
      *     the foot of SETTINGS)
      *   HIDE BALANCE · SPLIT A BILL · CONTACTS
@@ -214,7 +225,9 @@
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const inSettings = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
-    v.menuItems = /** @type {any[]} */ (verified ? [] : [backupRow]).concat([
+    const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
+      ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -242,9 +255,7 @@
        * exact amount at all — the one question an offline payer has and no other
        * screen answers. */
       { label: 'YOUR CHANGE', path: MENU_ICON.change, tap: shut(() => this.goChange()) },
-      /* A card that holds ecash: what is on it, money on and off it, and the
-       * cards this phone can take back (26f-flashcard.js). */
-      { label: 'FLASHCARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard({ kept: true })) },
+      /* (A card that holds ecash is home's round button at the top left, CARD: `goCard`.) */
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
       { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },

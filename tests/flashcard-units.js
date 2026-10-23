@@ -43,6 +43,10 @@
  *      shows the two rows and the old words; a set-up for somebody else asks no currency. The choice drives the card's screen: BOTH
  *      shows two pills at nothing from the moment set-up ends, the ceiling said for both and SWAP greyed with its reason while a
  *      side is empty; DOLLARS or BITCOIN one pill and no question; a phone that did not set it up shows what the card holds
+ *   18 what the owner found: ADD FUNDS asks the PIN of a card of 1.21 and on from the card just read, and a load the card refuses
+ *      for want of it asks for it; SEND > FLASHCARD to a card of both in the currency the send was started in, or asked once the card
+ *      is read, a card of one currency still refusing the other; the card's SEND asks the way to pay first and the currency only on
+ *      the confirmation, where both could pay
  *
  * Every page ends with its books per unit off by 0. */
 const fs = require('fs');
@@ -1130,6 +1134,152 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          a.state.screen + ' ' + (cardUp(a) && cardUp(a).title));
       void c;
     }
+  }
+
+  /* ---- 18: what the owner found trying the card screens (ADD FUNDS's PIN, SEND > FLASHCARD to a card of both, the card's SEND) ---- */
+  if (want(18)) {
+    const H = await funded({ units: ['sat', 'usd'] }, 50000);
+    await fundUsd(H, 20000);
+    const R = await funded({ units: ['sat', 'usd'], sharedMint: H.mint, words: OTHER_WORDS }, 0);
+    const lifted = () => new Function('return {' + [['01-ui-basics.js', 'currencyPick(unit) {'], ['01-ui-basics.js', 'unitWord(unit) {'],
+      ['01-ui-basics.js', 'unitFigure(amount, unit) {'], ['01-ui-basics.js', 'centsTyped() {']].map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')();
+    const phone = (o) => {
+      const a = appOn(H, { screen: 'home' }, o);
+      Object.assign(a, (o && o.send) ? {} : lifted());
+      if (o && o.send) Object.assign(a, { currencyPick: lifted().currencyPick, unitWord: lifted().unitWord, unitFigure: lifted().unitFigure });
+      a.price = PRICE;
+      a.twoUnitsOn = () => true;
+      a.unitBalance = (u) => (u === 'usd' ? 20000 : 50000);
+      a.satUsd = () => PRICE / 1e8;
+      return a;
+    };
+    const both = newCard(H, undefined, { format: 4, software: 23 });
+    both.tap();
+    await H.W.cardSetUp(both, { pin: '1234', unit: 'usd', hold: 'both', price: PRICE });
+    const usdOnly = newCard(H, undefined, { format: 4, software: 23 });
+    usdOnly.tap();
+    await H.W.cardSetUp(usdOnly, { pin: '1234', unit: 'usd', hold: 'usd', price: PRICE });
+    const readOn = async (a, c) => {
+      H.nfc = c;
+      c.tap();
+      a.setState({ screen: 'home', stack: [], fc: null, curCard: null });
+      a._fcCard = null;
+      a.goFlashcard();
+      await until('the card read', () => !!a.state.fc && a.state.fc.key === c.key && !(a._fcTaps > 0));
+      await uiSettle();
+    };
+
+    // ADD FUNDS on a card of 1.21 and on asks the PIN, decided from the card just read, whatever the screen's figures say
+    {
+      const a = phone();
+      await readOn(a, both);
+      ok(a.state.fc.ownedHere === true && a.fcCardPinFirst() === true, 'the owner’s card of 1.23, just read: every load wants its PIN');
+      delete a.state.fc.pinFirst;
+      a.fcAddPin(300);
+      ok(!!pad(a) && pad(a).title === 'CARD PIN' && /^ADD /.test(pad(a).cta), 'ADD FUNDS asks the PIN, with nothing of the screen’s to say so', pad(a) && pad(a).cta);
+      pad(a).back();
+      const was = a._fcCard;
+      ok([['1.20', false], ['1.21', true], ['1.23', true], ['2.0', true], ['', true]].every(([ver, want]) => {
+        a._fcCard = { info: { version: ver } };
+        return a.fcCardPinFirst() === want;
+      }) && (a._fcCard = null, a.fcCardPinFirst() === true), 'before 1.21 the owner’s proof loads; from 1.21, or where the card said no version, the PIN is asked');
+      a._fcCard = was;
+      // a load the card answers with "wants its PIN" where none was given: the PIN is asked, and what was made goes on with it
+      a._fcFlowUnit = 'usd';
+      both.tap();
+      a.fcAddRun(250, '', true);
+      await until('the PIN pad after the card asked for it', () => !!pad(a) && !(a._fcTaps > 0));
+      ok(pad(a).title === 'CARD PIN' && /^PUT \$2\.50 ON CARD$/.test(pad(a).cta) && !cardUp(a), 'a load refused for want of the PIN asks the PIN, no refusal shown', pad(a).cta);
+      both.tap();
+      pad(a).type('1234');
+      await until('the dollars to go on', () => !(a._fcTaps > 0) && !pad(a) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd === 250);
+      ok(a.state.fc.bal.usd === 250 && (H.W.cardOwed() || []).length === 0, 'and they go on with it, nothing left owed and nothing made twice', JSON.stringify(a.state.fc.bal));
+    }
+
+    // SEND > FLASHCARD from home onto a card set up for both: in the currency the send was started in, or asked where it was not
+    {
+      const sendTo = async (c, wallet, amount, unit) => {
+        const a = phone();
+        a.walletNow = () => wallet;
+        a.state.balUsdCents = 20000;
+        await a.refreshBalance();
+        a.setState({ screen: 'amount', stack: ['home', 'sendHow'], flow: 'cardSend', amount, unit });
+        H.nfc = c;
+        c.tap();
+        a.fcAmountNext();
+        await until('the sheet to end', () => !(a._fcTaps > 0) && (!!pad(a) || !!cardUp(a) || a.state.screen !== 'amount'));
+        return a;
+      };
+      let a = await sendTo(both, 'sat', '500', 'SATS');
+      ok(!!pad(a) && !cardUp(a), 'started in bitcoin, a card of both: no refusal, its PIN asked', cardUp(a) && cardUp(a).reason);
+      both.tap();
+      pad(a).type('1234');
+      await until('the sats on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      both.tap();
+      let look = await H.W.cardLook(both, { mine: true, price: PRICE });
+      ok(look.units.sat.balance === 500 && look.units.usd.balance === 250, 'and the sats go on beside its dollars', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
+      a = await sendTo(both, 'usd', '1.00', 'USD');
+      both.tap();
+      pad(a).type('1234');
+      await until('the dollars on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      both.tap();
+      look = await H.W.cardLook(both, { mine: true, price: PRICE });
+      ok(look.units.usd.balance === 350 && look.units.sat.balance === 500, 'started in dollars, the dollars go on', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
+      // not started in either, both of this phone's balances could pay: the card is read, and the CURRENCY screen asks which
+      a = await sendTo(both, '', '1.00', 'USD');
+      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'SEND WHICH TO THE CARD?' && !pad(a) && !cardUp(a),
+         'not started in a currency: the card read, the CURRENCY screen asks which, nothing made yet', a.state.screen);
+      a.currencyPick('sat');
+      ok(a.state.screen === 'amount' && !!pad(a) && /1,000/.test(pad(a).sub), 'bitcoin chosen: its PIN, for the sats the dollars typed come to', pad(a) && pad(a).sub);
+      both.tap();
+      pad(a).type('1234');
+      await until('the sats on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      both.tap();
+      look = await H.W.cardLook(both, { mine: true, price: PRICE });
+      ok(look.units.sat.balance === 1500 && look.units.usd.balance === 350, 'and they go on', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
+      // a card its owner set up for dollars alone: the guard stays
+      a = await sendTo(usdOnly, 'sat', '500', 'SATS');
+      ok(!!cardUp(a) && /holds dollars, so it is loaded from your dollars/.test(cardUp(a).reason) && !pad(a), 'a card set up for dollars alone still refuses bitcoin, nothing made', cardUp(a) && cardUp(a).reason);
+      // and not started in a currency, the one currency it holds, with nothing asked
+      a = await sendTo(usdOnly, '', '1.00', 'USD');
+      ok(a.state.screen !== 'currency' && !!pad(a) && /\$1\.00/.test(pad(a).sub), 'not started in a currency, a card of dollars alone is sent dollars, nothing asked', pad(a) && pad(a).sub);
+      pad(a).back();
+      await settle();
+    }
+
+    // SEND on the card's screen: the way to pay first, and which currency only on the confirmation, only where both could pay
+    {
+      const a = phone({ send: true });
+      await readOn(a, both);
+      ok(a.state.fc.bal.usd > 0 && a.state.fc.bal.sat > 0, 'a card that holds both');
+      vals(a).fcSend();
+      ok(a.state.screen === 'sendHow' && a.state.sendFrom === 'card' && !a.state.curCard && !a._fcFlowUnit, 'SEND opens the ways to pay, no currency asked first', a.state.screen);
+      // a bill pasted on SEND MONEY in card mode, as tests/flashcard-send.js pastes one
+      const bill = async (sats) => {
+        a.acceptTarget('lnbc' + (sats * 10) + 'n1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq');
+        ok(a.state.screen === 'sendConfirm', 'the bill of ' + sats + ' sats on the confirmation', a.state.screen);
+      };
+      await bill(500);
+      ok(a.fcOutUnitAsk() === true && a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'PAY FROM WHICH?',
+         'a bill both could pay: PAY FROM WHICH? on the confirmation, once the bill is known', a.state.screen);
+      a.currencyPick('usd');
+      ok(a.state.screen === 'sendConfirm' && a._fcFlowUnit === 'usd' && a.fcUnit() === 'usd' && a.fcOutUnitAsk() === false, 'dollars chosen: back on the confirmation, paid in dollars');
+      a.back();
+      await bill(2000);
+      ok(a.fcOutUnitAsk() === false && a.state.screen === 'sendConfirm' && a._fcFlowUnit === 'usd', 'a bill only the dollars cover: no question, the dollars', String(a._fcFlowUnit));
+      a.back();
+      // backed out of the question: back past the confirmation
+      await bill(300);
+      ok(a.fcOutUnitAsk() === true && a.state.screen === 'currency', 'asked again for another bill', a.state.screen);
+      a.back();
+      ok(a.state.screen === 'sendConfirm', 'backed out of PAY FROM WHICH?', a.state.screen);
+      a.fcOutUnitAsk();
+      ok(a.state.screen === 'sendHow', 'and the confirmation goes too: back to the ways to pay', a.state.screen);
+      // WITHDRAW, the way to pay that is the card's own: its own question, asked once
+      a.fcOutWithdraw();
+      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'WITHDRAW WHICH?', 'WITHDRAW asks its own question, the only one', a.state.curCard && a.state.curCard.question);
+    }
+    await settle();
   }
 
   console.log(failed ? failed + ' flashcard-units check(s) failed, ' + passed + ' passed' : 'all flashcard-units checks pass (' + passed + ')');

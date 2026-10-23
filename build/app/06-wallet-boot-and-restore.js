@@ -6,8 +6,8 @@
   bootWallet() {
     this.mirrorConsole();
     this.watchEdgeSwipe();
-    // and the swipe between home and the card (26f-flashcard.js)
-    this.fcWatchSwipe();
+    // what an earlier build kept of the cards for a swipe between home and the card is cleared (26f-flashcard.js)
+    this.fcDropOldStores();
     // Tor comes first. Until it connects, or the person chooses to continue
     // unprotected, the native side refuses every mint call, price and address
     // lookup; the gate's screens only say why.

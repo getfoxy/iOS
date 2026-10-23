@@ -382,6 +382,8 @@
       this._sendWaited = null;
       if (lightning && this.offlineNow()) this.notOnlineCard();
     }
+    // paying from a card that holds both currencies: which pays is asked first, where both could (26f-flashcard.js, `fcOutUnitAsk`)
+    if (this.fcOutUnitAsk && this.fcOutUnitAsk()) return;
     this.quoteSendFee();
     this.feeQuotesAgain();
   }

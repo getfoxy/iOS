@@ -357,7 +357,7 @@ const STATES = [
     ok(v.fcPillRows.length === 1 && q.sym === '₿' && q.big === '2,048' && /^\$\d+\.\d\d USD$/.test(q.small),
       'its pill is home’s bitcoin pill, the card’s sats big and their dollar worth under', JSON.stringify([q.big, q.small]));
     ok(!!shieldEl() && shieldEl().getAttribute('data-shield') === 'secure', 'the shield sits on the card’s money card too');
-    eq(v.fcMenuItems.map((b) => b.label), ['LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: LIMITS, CHANGE PIN, RESET in its menu');
+    eq(v.fcMenuItems.map((b) => b.label), ['HISTORY', 'LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: HISTORY, LIMITS, CHANGE PIN, RESET in its menu');
     eq(v.fcButtons.map((b) => b.label + ' ' + b.dim), ['SCAN 1', 'PASTE 1', 'SWAP 0.38'], 'and SWAP greyed in its bottom row');
     ok([undefined, null, [], ['sat']].every((u) => A.fcTwoUnits({ units: u }) === false) && A.fcTwoUnits(null) === false,
       'no card that reports one unit, or none, holds two balances');
@@ -422,23 +422,48 @@ const STATES = [
       'and is headed by the name alone, with no MINT under it and no chevron', fcBlock);
   }
 
-  // ---- 7. HOME | CARD at the foot of both screens, and no snow on the money card or the card's picture ----------
+  // ---- 8. CARD at the top left of home, HOME at the top left of the card's screen, HISTORY first in each MENU; no pill, no snow ----
   {
-    /* The two-way pill (history's DOLLARS | BITCOIN: a dark track, the chosen half raised) is the first thing in each screen's
-     * bottom group, which is laid out bottom first, so it sits below SCAN / PASTE / SWAP at the group's own spacing. The dots
-     * and "Swipe left for your card" are gone. */
-    const tabs = markup.split('<sc-if value="{{ pageTabsShown }}">');
-    const block = (i) => tabs[i].slice(0, tabs[i].indexOf('</sc-if>') + 8);
-    ok(tabs.length === 3 && block(1) === block(2), 'the HOME | CARD pill is in the markup twice, home’s and the card screen’s, letter for letter');
-    const hist = markup.slice(markup.indexOf('<sc-for list="{{ histTabs }}"'), markup.indexOf('</sc-for>', markup.indexOf('<sc-for list="{{ histTabs }}"')));
-    const halfStyle = (t) => (t.match(/style="flex:1;height:50px;[^"]*"/) || [''])[0];
-    ok(!!halfStyle(hist) && halfStyle(block(1)) === halfStyle(hist)
-       && block(1).indexOf('padding:4px;border-radius:30px;background:var(--chip);border:1px solid rgba(var(--ink-rgb),.1)') > 0,
-      'and its track and halves are history’s DOLLARS | BITCOIN, the same height and style');
-    const foot = (row) => markup.slice(markup.lastIndexOf('<div style="flex:none;padding:10px 22px 26px', markup.indexOf(row)), markup.indexOf(row));
-    ok(/column-reverse;align-items:center;gap:18px">\n<sc-if value="\{\{ pageTabsShown \}\}">[^\n]*\n$/.test(foot('<sc-if value="{{ homeOneMint }}">'))
-       && /column-reverse;align-items:center;gap:18px">\n<sc-if value="\{\{ pageTabsShown \}\}">[^\n]*\n$/.test(foot('<sc-if value="{{ fcRowShown }}">')),
-      'on both screens it opens the bottom group, so it sits below SCAN / PASTE / SWAP, 18px from it');
+    route = ROUTE();
+    w.FoxyWallet = wallet(false);
+    A.setState({ screen: 'home', stack: [], fc: null, open0: false, walletLive: true, routeAt: Date.now() });
+    await settle();
+    const q = (sel) => w.document.querySelector(sel);
+    const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    const CARD_ICON = 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4';
+    const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
+    const cardBtn = q('[aria-label="Card"]');
+    ok(!!cardBtn && cardBtn.style.left === '22px' && cardBtn.style.top === '56px' && !!cardBtn.querySelector('path[d="' + CARD_ICON + '"]') && !q('[aria-label="History"]'),
+      'home: the round button at the top left is CARD, with the card drawing the menu had, and there is no HISTORY button there', cardBtn ? cardBtn.innerHTML : 'none');
+    const went = [];
+    const realGo = A.goFlashcard;
+    A.goFlashcard = function () { went.push([...arguments]); };
+    click(cardBtn);
+    A.goFlashcard = realGo;
+    ok(went.length === 1 && went[0].length === 0, 'CARD opens the card’s screen as a card’s address does (`goFlashcard`, which asks for the tap)', JSON.stringify(went));
+    const v = V();
+    ok(v.menuItems[0].label === 'HISTORY' && v.menuItems[0].path === CLOCK && !v.menuItems.some((m) => m.label === 'FLASHCARD'),
+      'home’s MENU starts with HISTORY, with the clock, and has no FLASHCARD row', v.menuItems.map((m) => m.label).join());
+    ok(v.menuItems[0].ringInk === v.histRingInk && v.menuItems[0].ring === v.histRing && (v.menuRing === v.histRing || v.menuRing === 'foxyRing 1.15s linear infinite'),
+      'and HISTORY carries the ring the history button had, as does the menu button where the backup’s ring is not on it');
+    A.setState({ open0: true });
+    await settle();
+    const firstRow = [...w.document.querySelectorAll('div')].find((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
+    ok(!!firstRow && /HISTORY/.test(firstRow.textContent), 'drawn as the first row of the drawer', firstRow ? firstRow.textContent : 'none');
+    click(firstRow);
+    await settle();
+    ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);
+    // the card's screen: HOME at the top left goes home
+    A.setState({ screen: 'flashcard', stack: ['home'], fc: null, open0: false });
+    await settle();
+    const homeBtn = q('[aria-label="Home"]');
+    ok(!!homeBtn && homeBtn.style.left === '22px' && homeBtn.style.top === '56px' && homeBtn.style.visibility !== 'hidden' && !q('[aria-label="This card’s history"]'),
+      'the card’s screen: the round button at the top left is HOME, shown before any card is read', homeBtn ? homeBtn.getAttribute('style') : 'none');
+    click(homeBtn);
+    await settle();
+    ok(A.state.screen === 'home' && !A.state.fc && A.state.stack.length === 0, 'and HOME is home', A.state.screen);
+    ok(markup.indexOf('pageTabs') < 0 && markup.indexOf('data-page-tab') < 0 && markup.indexOf('fcMemo') < 0 && markup.indexOf('fcCardTap') < 0,
+      'the HOME | CARD pill, the “As read” line and the pressable card picture are gone from the markup');
     ok(markup.indexOf('swipeDot') < 0 && markup.indexOf('Swipe left for your card') < 0, 'the dots and the swipe hint are gone from both screens');
     ok(markup.indexOf('data-snow-cap') < 0 && !/foxySnow(Drape|Pile|Clump)/.test(markup + app),
       'no snow settles on the money card or on the card’s picture any more');

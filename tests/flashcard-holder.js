@@ -13,8 +13,9 @@
  *                       of its own), `cardGuestLook` (VIEW AS GUEST, nothing kept) and `cardClaim` (TIE OWNERSHIP);
  *   the screens         driven as a person drives them (flashcard-ui-kit.js): the owner's set-up, its PIN pads, YES and NO
  *                       and SET AMOUNT for each; SEND > FLASHCARD to a new card, which this phone sets up for its holder and does not
- *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; the swipe between home and
- *                       the card; and no daily limit anywhere on the card's screen.
+ *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; CARD at the top left of home
+ *                       and HOME at the top left of the card's screen, HISTORY first in each MENU, a tap asked for every time;
+ *                       and no daily limit anywhere on the card's screen.
  *
  * And the set-up's two amounts in the card's own money, on SET AMOUNT: a dollar card's in dollars only, a bitcoin card's in dollars
  * first with the screen's swap to sats, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
@@ -38,8 +39,6 @@ const ins = (c) => c.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) => a.sli
 const sw = (r) => String(r).slice(-4);
 const card4 = (ctx, software) => newCard(ctx, undefined, { format: 4, software });
 // whether a phone keeps any of a card's history: what it read of its log, or its receipts
-// the last reads this phone keeps for the swipe (26f-flashcard.js, FC_READS)
-const kept = (ctx) => { try { return JSON.parse(ctx.storage.getItem('foxy.flashcard.reads') || '{}') || {}; } catch (e) { return {}; } };
 const keptFor = (ctx, key) => ['foxy.flashcard.receipts', 'foxy.flashcard.logseen'].some((k) => {
   try { return !!(JSON.parse(ctx.storage.getItem(k) || '{}') || {})[key]; } catch (e) { return true; }
 });
@@ -312,9 +311,9 @@ function amt(a) {
     v = vals(holder);
     ok(v.fcUsable && !v.fcGuest && /^PER TAP LIMIT \$20\.00/.test(v.fcLimitLine) && v.fcNoPinShown === undefined && /^No PIN up to \$5\.00 · \$[\d,.]+ left$/.test(limitsSub(v)) && v.fcDayShown === undefined,
        'its screen: the per tap limit on its face, the no PIN limit and what is left of it under LIMITS in its menu, and nothing of a day', [v.fcLimitLine, limitsSub(v)].join(' | '));
-    ok(menuOf(v) === 'LIMITS,CHANGE PIN,RESTORE LOST CARD,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
-       'the MENU at the top right, in place of the close button, holds LIMITS, CHANGE PIN, RESTORE LOST CARD and RESET, in that order', menuOf(v));
-    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcMenuItems.slice(1).every((k) => k.sub === ''),
+    ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN,RESTORE LOST CARD,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
+       'the MENU at the top right, in place of the close button, holds HISTORY, LIMITS, CHANGE PIN, RESTORE LOST CARD and RESET, in that order', menuOf(v));
+    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcMenuItems.filter((k) => k.label !== 'LIMITS').every((k) => k.sub === ''),
        'each row a tap with its own drawing, and only LIMITS has a line under it');
     // (MENU is home's own button, `toggleMenu`, which turns `open0`)
     ok(v.fcMenuOpen === false && (holder.setState({ open0: true }), vals(holder).fcMenuOpen === true) && (holder.setState({ open0: false }), vals(holder).fcMenuOpen === false),
@@ -519,7 +518,7 @@ function amt(a) {
     v = vals(friend);
     ok(friend.state.fc.guestRead && v.fcBalance === '₿ 1,500' && /^NO PIN UP TO/.test(v.fcLimitLine), 'and the screen shows the balance with it', v.fcLimitLine);
     ok(!keptFor(G, cash.key), 'nothing of the history is kept on the friend’s phone');
-    ok(!kept(G)[cash.key] && !friend.fcKeptRead(), 'and no read of the card is kept for the swipe: a guest’s read is kept nowhere');
+    ok(G.storage.getItem('foxy.flashcard.reads') === null, 'and no read of the card is kept anywhere: a guest’s read is kept nowhere');
     // a tap that paid: the card's 6985, said in plain words
     cash.state.tapPaid = true;
     G.nfc = { send: (a) => cash.send(a), tap: () => {} };
@@ -568,57 +567,29 @@ function amt(a) {
        'on the phone that loaded cards: the list of CARDS YOU LOADED, the take-back of each', String(v.fcRows.length));
   }
 
-  /* ---- B10: a swipe between home and the card, the HOME | CARD pill, and the card as it was last read --------------- */
+  /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, HISTORY in each MENU, and a tap asked for -- */
   {
+    const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
+    // a phone with no card: CARD is there all the same, and opens the card's screen asking for a card, as MENU > FLASHCARD did
     const fresh = await funded({ sharedMint: H.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
     const a = appOn(fresh);
-    ok(a.fcSwipe('left') === false && a.state.screen === 'home', 'a phone with no card: a swipe on home does nothing');
-    ok(!vals(a).pageTabsShown && vals(a).pageTabs.length === 0, 'and home shows no HOME | CARD pill');
-    H.storage.removeItem('foxy.flashcard.reads');
-    const b = appOn(H);
-    ok(!!b.fcLastCard(), 'a phone that set a card up has a newest card');
-    let v = vals(b);
-    // the pill: HOME on the left and CARD on the right, the one on show raised in the pale frost pill, the other dimmed
-    const FROST = 'linear-gradient(160deg,#D6EEF7,#B9DCEA)';
-    const tabsAre = (w, onKey) => w.pageTabsShown && w.pageTabs.length === 2
-      && w.pageTabs.map((t) => t.key + ':' + t.label).join(',') === 'home:HOME,card:CARD'
-      && w.pageTabs.every((t) => (t.key === onKey)
-        ? (t.bg === FROST && t.ink === '#10161B' && t.pressed === 'true')
-        : (t.bg === 'transparent' && t.ink === 'rgba(var(--ink-rgb),.55)' && t.pressed === 'false'));
-    ok(tabsAre(v, 'home') && !('swipeDots' in v) && !('swipeHintShown' in v),
-       'home shows HOME | CARD with HOME raised, and no dots and no hint', JSON.stringify(v.pageTabs && v.pageTabs.map((t) => [t.key, t.pressed])));
-    ok(JSON.stringify(v.pageTabs[0].bg) === JSON.stringify(b.segLook(true, 'frost').bg) && v.pageTabs[1].bg === b.segLook(false, 'frost').bg,
-       'the halves are drawn by segLook, the same as history’s DOLLARS | BITCOIN');
-    H.nfc = null;
-    H.sheet.length = 0;
-    b.fcWatchSwipe();
-    const doc = H.window.document;
-    const touch = (kind, x, y) => {
-      const ev = new H.window.Event(kind, { bubbles: true });
-      ev[kind === 'touchend' ? 'changedTouches' : 'touches'] = [{ clientX: x, clientY: y }];
-      doc.body.dispatchEvent(ev);
-    };
-    touch('touchstart', 300, 400);
-    touch('touchend', 150, 410);
-    ok(b.state.screen === 'flashcard' && H.sheet.some((x) => /^begin: /.test(x)), 'a swipe to the left with no read of the card kept asks for the card, as MENU > FLASHCARD did', H.sheet.join(' / '));
-    await settle();
-    v = vals(b);
-    ok(tabsAre(v, 'card'), 'the card’s screen shows the same pill with CARD raised');
-    touch('touchstart', 100, 400);
-    touch('touchend', 260, 395);
-    ok(b.state.screen === 'home' && !b.state.fc, 'and a swipe to the right on the card’s screen is home again');
-    ok(H.storage.getItem('foxy.flashcard.swipes') === null, 'the swipe counts nothing any more (the hint is gone)');
-    touch('touchstart', 10, 400);
-    touch('touchend', 200, 400);
-    ok(b.state.screen === 'home', 'a swipe that starts at the left edge is the back gesture’s, not this one');
-    touch('touchstart', 300, 400);
-    touch('touchend', 260, 400);
-    ok(b.state.screen === 'home', 'a short movement is not a swipe');
-    b.state.open0 = true;
-    ok(b.fcSwipe('left') === false && b.state.screen === 'home', 'with the menu open, nothing');
-    b.state.open0 = false;
+    // (home's CARD button and its MENU's HISTORY are pinned on the mounted app: tests/home-shield.js; CARD is `goFlashcard`)
+    let v = vals(a);
+    ok(!('pageTabs' in v) && !('pageTabsShown' in v), 'home has no HOME | CARD pill');
+    const blank = card4(fresh, 22);
+    fresh.nfc = blank;
+    fresh.sheet.length = 0;
+    blank.tap();
+    a.goFlashcard();
+    ok(a.state.screen === 'flashcard' && fresh.sheet.some((x) => /^begin: /.test(x)), 'CARD asks for a card to be tapped, on the card’s screen', fresh.sheet.join(' / '));
+    await until('the new card to be read', () => a.state.fc && a.state.fc.key === blank.key && !(a._fcTaps > 0));
+    ok(vals(a).fcNew && vals(a).fcNewSetUp, 'and a new card tapped shows its set-up, as MENU > FLASHCARD did');
+    ok(typeof vals(a).fcHome === 'function' && vals(a).fcMenuItems.length === 0, 'the card’s screen has HOME at the top left; a new card has no menu');
+    vals(a).fcHome();
+    ok(a.state.screen === 'home' && !a.state.fc && a.state.stack.length === 0, 'HOME is home again');
 
-    // a card this phone owns, with money on it, read once
+    // a card this phone owns, with money on it
+    const b = appOn(H);
     const own = card4(H, 22);
     own.tap();
     await H.W.cardSetUp(own, { pin: '1357' });
@@ -629,75 +600,34 @@ function amt(a) {
     await settle();
     H.nfc = own;
     own.tap();
+    H.sheet.length = 0;
     b.goFlashcard();
+    ok(b.state.screen === 'flashcard' && !b.state.fc && H.sheet.some((x) => /^begin: /.test(x)), 'CARD asks for the tap: nothing of the card is shown before it is read');
     await until('the owned card read', () => b.state.fc && b.state.fc.key === own.key && b.state.fc.balance === 700);
-    const read = vals(b).fcBalance;
-    const k = kept(H)[own.key];
-    ok(!!k && k.fc.balance === 700 && b.fcLastCard().key === own.key, 'its read is kept for the swipe, by the card’s key', JSON.stringify(k && k.fc.balance));
-    ok(!!k && !/"(secret|C|nonce|dleq|witness|proofs)"\s*:\s*[\[{"]/.test(JSON.stringify(k)) && !('pieces' in k.fc),
-       'and what is kept is the screen’s figures, with no piece, secret or proof of the card’s money', JSON.stringify(k));
-    b.setState({ screen: 'home', stack: [], fc: null });
-    b._fcCard = null;
-    H.nfc = null;
-    H.sheet.length = 0;
-    touch('touchstart', 300, 400);
-    touch('touchend', 150, 410);
     v = vals(b);
-    ok(b.state.screen === 'flashcard' && !H.sheet.some((x) => /^begin: /.test(x)) && b.state.fc && b.state.fc.memo && v.fcBalance === read,
-       'a swipe to the card shows it at once as it was last read, with no tap', v.fcBalance + ' / ' + H.sheet.join(' / '));
-    ok(v.fcMemoShown && v.fcMemoLine === 'As read a moment ago · tap the card to refresh' && v.fcPillRows.length === 1,
-       'with its pill, and a line under it saying when it was read and that a tap of the card refreshes it', v.fcMemoLine);
-    ok(tabsAre(v, 'card'), 'and CARD raised');
-    touch('touchstart', 100, 400);
-    touch('touchend', 260, 395);
-    ok(b.state.screen === 'home', 'a swipe to the right is home again');
-    // the pill's taps: CARD on home is the swipe to the card (from its last read), HOME on the card's screen the swipe home
-    v = vals(b);
-    v.pageTabs[0].tap();
-    ok(b.state.screen === 'home', 'HOME on home, the half already raised, does nothing');
-    H.sheet.length = 0;
-    v.pageTabs[1].tap();
-    v = vals(b);
-    ok(b.state.screen === 'flashcard' && b.state.fc && b.state.fc.memo && v.fcBalance === read && !H.sheet.some((x) => /^begin: /.test(x)) && tabsAre(v, 'card'),
-       'CARD on home opens the card’s screen at once as it was last read, CARD raised', v.fcBalance + ' / ' + H.sheet.join(' / '));
-    v.pageTabs[1].tap();
-    ok(b.state.screen === 'flashcard', 'CARD on the card’s screen does nothing');
-    v.pageTabs[0].tap();
-    ok(b.state.screen === 'home' && !b.state.fc && b.state.stack.length === 0 && tabsAre(vals(b), 'home'), 'HOME on the card’s screen is home again, HOME raised');
-    b.state.open0 = true;
-    vals(b).pageTabs[1].tap();
-    ok(b.state.screen === 'home', 'with the menu open, CARD does nothing, as the swipe');
-    b.state.open0 = false;
-    b._fcSwipeOff();
-
-    // Foxy started again: the stored read, with its age
-    const all = kept(H);
-    all[own.key].at = Date.now() - 3 * 60000;
-    H.storage.setItem('foxy.flashcard.reads', JSON.stringify(all));
-    const c = appOn(H);
-    H.sheet.length = 0;
-    c.goFlashcard({ kept: true });
-    v = vals(c);
-    ok(c.state.screen === 'flashcard' && !H.sheet.length && v.fcBalance === read && v.fcMemoLine === 'As read 3 minutes ago · tap the card to refresh',
-       'after a relaunch MENU > FLASHCARD shows the stored read the same way, with its age', v.fcMemoLine);
-    // ADD FUNDS on a kept read asks for the card first, then goes on
-    H.nfc = own;
-    own.tap();
-    v.fcAdd();
-    ok(H.sheet.some((x) => /^begin: /.test(x)), 'ADD FUNDS on a kept read asks for the tap of the card first', H.sheet.join(' / '));
-    await until('the amount screen', () => c.state.screen === 'amount' && c.state.flow === 'cardAdd');
-    ok(c.state.stack.indexOf('flashcard') >= 0 && !c.state.fc.memo, 'and once the card is read, ADD FUNDS goes on to SET AMOUNT');
-    // a tap of the card's picture refreshes a kept read
-    const d = appOn(H);
-    d.goFlashcard({ kept: true });
+    ok(v.fcBalance === '₿ 700' && !('fcMemoShown' in v) && !('fcMemoLine' in v) && !('fcCardTap' in v), 'the card as read, with no “As read” line and no picture to press', v.fcBalance);
+    ok(H.storage.getItem('foxy.flashcard.reads') === null, 'and no read of the card is kept on the phone');
+    ok(/^HISTORY,LIMITS,CHANGE PIN/.test(menuOf(v)) && v.fcMenuItems[0].path === CLOCK, 'the card’s MENU starts with HISTORY, the clock', menuOf(v));
+    b.setState({ open0: true });
+    vals(b).fcMenuItems[0].tap();
+    ok(b.state.screen === 'history' && b.state.histCard === own.key && !b.state.open0, 'HISTORY in the card’s menu is the card’s own history');
+    b.back();
+    ok(b.state.screen === 'flashcard' && b.state.fc && b.state.fc.key === own.key, 'and back is the card’s screen');
+    vals(b).fcHome();
+    ok(b.state.screen === 'home' && !b.state.fc && b.state.stack.length === 0, 'HOME on the card’s screen is home');
+    // CARD again: the same card is asked for again, not shown from before
     H.sheet.length = 0;
     own.tap();
-    vals(d).fcCardTap();
-    await until('the refreshed read', () => d.state.fc && !d.state.fc.memo && d.state.fc.key === own.key);
-    ok(H.sheet.some((x) => /^begin: /.test(x)) && !vals(d).fcMemoShown, 'pressing the card’s picture reads it again, and the line goes');
-    // a reset card is forgotten
-    d.fcForgetRead(own.key);
-    ok(!kept(H)[own.key], 'a card forgotten (as a reset does) keeps no read');
+    b.goFlashcard();
+    ok(b.state.screen === 'flashcard' && !b.state.fc && H.sheet.some((x) => /^begin: /.test(x)), 'CARD again asks for the tap again');
+    await until('the card read again', () => b.state.fc && b.state.fc.key === own.key && !(b._fcTaps > 0));
+    vals(b).fcHome();
+    // nothing of a swipe is left: no listener, no store; what an earlier build kept is cleared at start
+    ok(typeof b.fcWatchSwipe !== 'function' && typeof b.fcSwipe !== 'function' && typeof b.fcKeptRead !== 'function', 'there is no swipe and no kept read');
+    H.storage.setItem('foxy.flashcard.reads', '{"x":{}}');
+    H.storage.setItem('foxy.flashcard.last', '{"key":"x"}');
+    b.fcDropOldStores();
+    ok(H.storage.getItem('foxy.flashcard.reads') === null && H.storage.getItem('foxy.flashcard.last') === null, 'an earlier build’s kept reads are cleared');
   }
 
   /* ======== a first payer's set-up cut short, and the model's order ================================================ */
@@ -864,8 +794,8 @@ function amt(a) {
   }
 
   /* ---- B11: what the owner chose at set-up drives the card's screen (software 1.23) ---------------------------------------
-   * BOTH: two pills from the moment set-up ends, each at nothing, ADD FUNDS asking which and SWAP greyed while a side is empty; the read
-   * kept for the swipe keeps it so. DOLLARS: one pill, and ADD FUNDS asks nothing. */
+   * BOTH: two pills from the moment set-up ends, each at nothing, ADD FUNDS asking which and SWAP greyed while a side is empty; each read
+   * of it shows it so. DOLLARS: one pill, and ADD FUNDS asks nothing. */
   {
     const U = await funded({ units: ['sat', 'usd'] }, 0);
     const twoCard = card4(U, 23);
@@ -894,9 +824,10 @@ function amt(a) {
     ok((v.fcButtons.find((x) => x.label === 'SWAP') || {}).dim === '0.38', 'and SWAP greyed while a side is empty');
     a.fcAdd();
     ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks which', a.state.screen);
-    const k = kept(U)[twoCard.key];
-    ok(!!k && Array.isArray(k.fc.units) && k.fc.units.length === 2 && k.fc.both === false && k.fc.only === '',
-       'the read kept for the swipe keeps both pills and what SWAP needs', JSON.stringify(k && [k.fc.units, k.fc.both, k.fc.only]));
+    a.back();
+    // read again from home's CARD, as every time: the two pills again, from the card and this phone's note of what it was set up to hold
+    v = await readIt(twoCard);
+    ok(v.fcPillRows.length === 2 && U.storage.getItem('foxy.flashcard.reads') === null, 'read again, both pills again, and nothing of it kept on the phone');
     v = await readIt(oneCard);
     ok(v.fcPillRows.length === 1 && v.fcPillRows[0].big === '0.00', 'a card set up for dollars shows one pill', JSON.stringify(v.fcPillRows.map((x) => x.big)));
     a.fcAdd();

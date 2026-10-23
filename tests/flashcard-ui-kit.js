@@ -64,7 +64,7 @@ const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => l
   // the phone's own on-chain screens, which a card in card mode pays a bitcoin address through
   + '\n' + read(['26b-onchain.js']);
 const MONEY_PARTS = liftFrom(read(['03-send.js']), 'money(sats, fiatCents) {');
-// the two-way pill's halves (HOME | CARD at the foot of home and the card's screen), shared with history's DOLLARS | BITCOIN
+// the two-way pill's halves, history's DOLLARS | BITCOIN
 const SEG_PART = liftFrom(read(['26-render-history-and-contacts.js']), 'segLook(on, look) {');
 const RECEIVE_SIGS = {
   '12-receive.js': ['wantedAmount() {', 'stopReceive() {', 'openUsdReceive(cents) {', 'usdInvoiceUp(inv, mine) {', 'recvClockTick(mine) {', 'recvRequote(mine) {'],

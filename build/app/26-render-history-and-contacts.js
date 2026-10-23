@@ -235,9 +235,8 @@
     };
   }
 
-  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot,
-   * and HOME | CARD at the foot of home and the card's screen (26f-flashcard.js). `look` is the chosen half's: 'frost', the pale
-   * frost pill, or 'fur', the fox's orange. */
+  /* One half of the two-way pill (a dark track, the chosen half raised, the other dimmed): history's DOLLARS | BITCOIN at the foot.
+   * `look` is the chosen half's: 'frost', the pale frost pill, or 'fur', the fox's orange. */
   segLook(on, look) {
     if (!on) return { bg: 'transparent', blend: 'normal', ink: 'rgba(var(--ink-rgb),.55)', shadow: 'none' };
     return look === 'fur'
