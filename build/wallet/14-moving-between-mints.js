@@ -682,7 +682,8 @@
             return FoxyWallet.claimQuote(m.quote, m.amount, m.lock, using).then(function (sats) {
               dropMoveNote(m.quote);
               total += Number(sats) || 0;
-              console.log('[foxy] finished an interrupted crossing:', sats, 'sats at', hostOf(m.to));
+              // in the crossing's own unit: a dollar crossing's figure is cents, said as dollars
+              console.log('[foxy] finished an interrupted crossing: ' + cardSaid(sats, mu) + ' at ' + hostOf(m.to));
               moveLanded(m, sats);
             }, function (e) {
               console.warn('[foxy] could not finish a crossing to', hostOf(m.to), 'yet:', e && e.message);

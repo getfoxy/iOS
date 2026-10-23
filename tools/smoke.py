@@ -596,7 +596,8 @@ needs = [
      and 'warmSession.invalidateAndCancel()' in warm_fn.group(1),
      "the spare's kept session is not let go when a newer one replaces it or its request fails"),
     (bool(take_fn) and 'stale?.session.invalidateAndCancel()' in take_fn.group(1)
-     and 'kept.circuit == circuit' in take_fn.group(1) and 'warmFor' in take_fn.group(1),
+     and 'kept.circuit == circuit' in take_fn.group(1) and 'warmUsable(age:' in take_fn.group(1)
+     and 'static let warmFor: TimeInterval = 30\n' in route_src,
      "the spare's kept session is handed to a request on another circuit, or kept when stale"),
     (bool(start_fn) and 'startOnce(kept, request' in start_fn.group(1),
      "the spare's kept session is used other than through startOnce, which lets it go"),

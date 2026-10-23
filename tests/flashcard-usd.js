@@ -660,6 +660,28 @@ async function pay(R, card, asks, o) {
     await B.R.W.claimUnclaimed();
     await settle();
     booksGood('16c', B.H, B.R);
+    /* A phone that holds bitcoin whose person picked dollars for this one receive at the till (`kept`, the app's `recvPicked`): the
+     * dollar card's payment kept offline stays dollars, and nothing is swapped; the same payment with nothing picked is swapped. */
+    {
+      const P = await world({ load: 2000 });
+      P.R.W.setWalletChoice({ hold: 'bitcoin' });
+      const usdP = sum(usdPile(P.R));
+      offline(P.R);
+      const kp = await pay(P.R, P.card, [{ unit: 'usd', amount: 260 }], { offline: true, kept: true });
+      const ep = entryOf(P.R, kp.hash);
+      ok(kp.kept === true && kp.unit === 'usd' && kp.amount === 260 && !ep.convert && converts(P.R).length === 0,
+         '16: a phone that holds bitcoin, dollars picked for this receive: kept in dollars, nothing to be swapped', JSON.stringify({ kept: kp.kept, convert: ep.convert, converts: converts(P.R).length }));
+      const kn = await pay(P.R, P.card, [{ unit: 'usd', amount: 140 }], { offline: true });
+      const en = entryOf(P.R, kn.hash);
+      ok(kn.kept === true && en.convert === 'owed' && converts(P.R).filter((x) => 'req-' + x.id === kn.hash).length === 1,
+         '16: and with nothing picked, the next is owed its swap into sats, as the phone holds', JSON.stringify({ convert: en.convert }));
+      online(P.R);
+      await P.R.W.claimUnclaimed();
+      await settle();
+      ok(sum(usdPile(P.R)) === usdP + 400 && entryOf(P.R, kp.hash).cardKept === 'settled' && !entryOf(P.R, kp.hash).convert,
+         '16: online, both settle into the dollar pile; the picked one is never to be swapped', JSON.stringify({ pile: sum(usdPile(P.R)) - usdP }));
+      booksGood('16d', P.H, P.R);
+    }
     // the till has never seen the mint's dollar keys: refused at once, nothing asked of the mint
     const N = await world({ load: 1000 });
     const strip = (m) => {

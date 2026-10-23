@@ -44,6 +44,10 @@
       };
       // for the connection diary: the moment the route opens or shuts
       noteRouteChange(wasOpen);
+      /* The route went from open to shut: Tor drops the circuits it had, the spare's among them (and the phone lets go of the
+       * connection it kept for it, Route.dropWarm). Kept, it was handed to the next job on the route's return as ready, and that
+       * job rode a circuit Tor no longer had; let go, the return opens a new one. */
+      if (wasOpen && !routeOpen()) dropSpare();
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }

@@ -561,6 +561,59 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     coming(q.W);
   }
 
+  /* A spare that was ready when the route went: Tor dropped its circuit, so it is let go as the route shuts, and the route coming
+   * back opens a new one (the review: it was kept, and the next job rode a circuit Tor no longer had). */
+  {
+    const q = page({ spare: true });
+    q.W._spareAfterMs = 0;
+    await q.W.connect(MINT, null, null, { remember: true });
+    up(q.W);
+    await soon(() => q.W._spare() !== '', 3000);
+    const old = q.W._spare();
+    ok(old !== '', 'connected: a spare is ready', old);
+    q.W._spareAfterMs = 86400000;
+    dark(q.W);
+    ok(q.W._spare() === '', 'the route shuts: the ready spare is let go', q.W._spare());
+    coming(q.W);
+    const mark = q.requests.length;
+    up(q.W);
+    const warmed = q.requests.slice(mark).filter((r) => r.warm);
+    await soon(() => q.W._spare() !== '', 3000);
+    ok(warmed.length === 1 && warmed[0].circuit !== old && q.W._spare() === warmed[0].circuit,
+       'and the route coming back opens a new one, on a circuit of its own', JSON.stringify([old, warmed.map((r) => r.circuit), q.W._spare()]));
+  }
+
+  /* A job that took the spare while it was being opened is told when the spare then fails: its entry says so, the diary says so,
+   * and whoever asked to hear is told the label. */
+  {
+    const q = page({ spare: true, holdWarm: () => {} });   // the spare's own request is never answered
+    q.W._spareAfterMs = 86400000;
+    await q.W.connect(MINT, null, null, { remember: true });
+    await q.W.claim((await q.W.invoice(500, '')).hash);
+    const bolt11 = (await q.W.invoice(40, '')).bolt11;
+    const told = [];
+    q.W._onSpareFailed = (label) => told.push(label);
+    const diary = [];
+    const con = q.window.console, log = con.log;
+    con.log = (...a) => { diary.push(a.join(' ')); };
+    q.W._spareWaitMs = 80;
+    dark(q.W); coming(q.W);
+    const mark = q.requests.length;
+    up(q.W);
+    const warmed = q.requests.slice(mark).filter((r) => r.warm);
+    await q.W.quoteFee(bolt11);
+    const quoted = q.requests.slice(mark).find((r) => /\/v1\/melt\/quote\/bolt11$/.test(r.url));
+    ok(!!quoted && warmed.length === 1 && quoted.circuit === warmed[0].circuit && q.W._spareRode(quoted.circuit) === 'opening',
+       'a fee quote takes the spare while it is being opened', JSON.stringify([quoted && quoted.circuit, warmed.map((r) => r.circuit)]));
+    await soon(() => told.length > 0, 2000);
+    con.log = log;
+    ok(told.length === 1 && told[0] === warmed[0].circuit && q.W._spareRode(warmed[0].circuit) === 'failed'
+       && diary.some((l) => /the circuit a job took while it was being opened was not answered on/.test(l)),
+       'the spare then fails: the job that took it is told, and the diary says so', JSON.stringify([told, q.W._spareRode(warmed[0].circuit)]));
+    ok(q.requests.slice(mark).filter((r) => r.warm).length === 1, 'and it is not tried again for that job');
+    q.W._onSpareFailed = null;
+  }
+
   /* And the claim a return makes of a payment kept with no route: on the spare, the walk's first swap. */
   {
     const payer = page({});

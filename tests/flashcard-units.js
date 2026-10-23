@@ -1097,6 +1097,63 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await settle();
     }
 
+    /* The swap's second tap is held to the card on the screen (`fcSwapOn`'s key, the wallet's `only`): another card at the reader, with
+     * the same PIN, is refused before anything is made for it; nothing goes on it or is owed to it, and TAP CARD on the right card puts the
+     * swap's sats on it. */
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await setUpAs(a, c, 2);
+      await add(H, c, 600, 'usd');
+      const c2 = newCard(H, undefined, { format: 4, software: 23 });
+      await setUpAs(screens(), c2, 2);
+      await add(H, c2, 300, 'usd');
+      H.nfc = c;
+      c.tap();
+      a.fcRead();
+      await until('the card read with its dollars', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.key === c.key && a.state.fc.bal && a.state.fc.bal.usd === 600);
+      await uiSettle();
+      a.offlineNow = () => false;
+      Object.assign(a, new Function('return {' + [['26i-swap.js', 'swapUnits() {'], ['26i-swap.js', 'swapComing(u) {'], ['26i-swap.js', 'swapHave(u) {']]
+        .map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')());
+      a.swapProbe = () => {};
+      vals(a).fcButtons.find((x) => x.label === 'SWAP').tap();
+      await uiSettle();
+      const q = await H.W.swapQuote('usd', 'sat', 300, a.swapComing('usd'));
+      c.tap();
+      a.fcSwapGo(q);
+      await until('the PIN pad', () => !!pad(a));
+      pad(a).type('1234');
+      await until('the dollars to come off', () => !!a._swapRun || a.state.screen === 'swapDone' || !!cardUp(a));
+      const c2before = JSON.stringify(c2.balance());
+      H.nfc = c2;
+      c2.tap();
+      await until('the swap and the second tap', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || !!cardUp(a)));
+      await uiSettle();
+      ok(a.state.screen !== 'swapDone' && !!cardUp(a) && cardUp(a).title === 'A DIFFERENT CARD'
+         && /That is not the card on the screen\. Nothing was put on it\./.test(cardUp(a).reason),
+         'another card at the swap’s second tap: refused, and the screen says it is not the card on the screen', JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
+      ok(JSON.stringify(c2.balance()) === c2before && !H.W.cardOwed().some((r) => r.card === c2.key),
+         'nothing went on the other card, and nothing is owed to it', JSON.stringify([c2before, c2.balance(), H.W.cardOwed().map((r) => r.card === c2.key)]));
+      {
+        c2.tap();
+        const s2 = await H.W.cardLook(c2, { mine: true, price: PRICE });
+        ok(s2.units.usd.balance === 300 && !(s2.units.sat && s2.units.sat.balance > 0), 'the other card holds what it held', JSON.stringify([s2.units.usd.balance, s2.units.sat && s2.units.sat.balance]));
+      }
+      H.nfc = c;
+      c.tap();
+      cardUp(a).press('TAP CARD');
+      await until('the second tap on the right card', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || (!!cardUp(a) && cardUp(a).title !== 'A DIFFERENT CARD')));
+      await uiSettle();
+      ok(a.state.screen === 'swapDone' && !cardUp(a), 'TAP CARD on the card on the screen: the swap is put on it', JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
+      c.tap();
+      const s1 = await H.W.cardLook(c, { mine: true, price: PRICE });
+      ok(s1.units.usd.balance > 0 && s1.units.usd.balance < 600 && s1.units.sat.balance > 0 && !H.W.cardOwed().some((r) => r.card === c2.key),
+         'the card on the screen holds the swap’s sats; the other card was never owed them', JSON.stringify([s1.units.usd.balance, s1.units.sat.balance]));
+      booksGood('a card’s swap with another card at its second tap', H);
+      await settle();
+    }
+
     /* BOTH with a no-PIN allowance: the ceiling is said for both currencies from the start. Read on another phone (one that did not set
      * it up), the card falls back to what it holds: one pill while it holds one currency, two once it holds both. */
     {

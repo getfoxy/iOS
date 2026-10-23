@@ -1012,6 +1012,12 @@
       /* `opts.visit`: made on a card's visit to its own mint, as part of it (`cardLoadAcross`): not held for this phone to be home,
        * which is what everything else started during a visit waits for (99-proof-lock-and-export.js). */
       var onVisit = !!(opts && opts.visit && cardAway);
+      /* `opts.only`: the key of the card these pieces are for (a card's swap, whose second tap is held to the card on the screen,
+       * 26f-flashcard.js `fcSwapOn`). Any other card read at the tap is refused (`wrong-card`) before anything is made for it, so
+       * nothing is owed to it and nothing is written on it. */
+      if (opts && opts.only && !(card && card.key === opts.only)) {
+        return Promise.reject(cardError('wrong-card', 'That is not the card on the screen. Nothing was put on it.'));
+      }
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
       var unit = (card && card.record && card.record.unit) || 'sat';
@@ -1382,6 +1388,11 @@
     cardCrossQuote: function (at, bolt11, unit, card) { return cardCrossQuote(at, bolt11, unit, card); },
     // a card at another mint loaded from this phone: what it costs, asked of both mints (`cardLoadCrossQuote`), and the load made (`cardLoadAcross`)
     cardLoadQuote: function (at, amount, opts) { return cardLoadCrossQuote(at, amount, opts); },
+    /* The same plan's invoice, paid from this phone's other balance (`payUnit`): this phone's mint asked again, the card's mint not. */
+    cardLoadRepay: function (plan, payUnit) {
+      if (!plan || !plan.invoice || !plan.mintQuote) return Promise.reject(new Error('No load to quote.'));
+      return cardLoadCrossPay(plan, unitOf(payUnit) || 'sat');
+    },
     cardLoadAcross: function (plan, card, onStage) { return cardLoadAcross(plan, card, onStage); },
     /* this phone at a card's mint for what is done there, and home after (`cardVisit`: resolves { end }, `end()` resolving once
      * home); whether a card's visit has it away now; and what card payments left at other mints, settled there (`cardAwayLeft`) */

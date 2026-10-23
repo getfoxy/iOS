@@ -73,6 +73,17 @@ final class RouteTests: XCTestCase {
         XCTAssertFalse(called, "the refused request's answer was never asked for")
     }
 
+    /// The spare's kept connection goes to a job only within thirty seconds of being made, and only on Tor's listener of then:
+    /// a mint closes an idle connection sooner than five minutes, and a melt or a swap is not sent again on one closed under it.
+    func testTheSparesConnectionIsKeptThirtySecondsAtMost() {
+        XCTAssertEqual(Route.warmFor, 30)
+        XCTAssertTrue(Route.warmUsable(age: 0, sameListener: true))
+        XCTAssertTrue(Route.warmUsable(age: 30, sameListener: true))
+        XCTAssertFalse(Route.warmUsable(age: 31, sameListener: true))
+        XCTAssertFalse(Route.warmUsable(age: 4 * 60, sameListener: true), "four idle minutes: a connection the mint has closed")
+        XCTAssertFalse(Route.warmUsable(age: 1, sameListener: false))
+    }
+
     func testMintAddressesAreHttpsOrHttpToAnOnion() {
         XCTAssertNil(Route.urlProblem(url("https://mint.minibits.cash/Bitcoin")))
         XCTAssertNil(Route.urlProblem(url("HTTPS://Mint.Example.com:3338/v1/info")))

@@ -263,9 +263,10 @@ What bounds the bridge:
 - **The storage check before the page runs** (`WebStore`, `WebStoreCheck`). A
   blank page at the same address, which runs nothing of its own
   (`default-src 'none'`), is asked whether the page's store holds the wallet.
-  When it does not, the store the page was using at `file://` (the folder
-  WebKit's salt names for it), or failing that the fullest store on the phone
-  that this install may take, is copied in first, read from a copy of WebKit's
+  When it does not (it holds no money or history: settings alone do not count),
+  a store carrying this install's mark (the newest), else the store the page was
+  using at `file://` (the folder WebKit's salt names for it), or failing that
+  the fullest store on the phone that this install may take, is copied in first, read from a copy of WebKit's
   files with SQLite, never in place, and nothing is ever deleted. After the
   first move only a store that carries this install's mark may be taken, and
   never one taken before, so a wallet the person erased is not brought back from
@@ -274,7 +275,11 @@ What bounds the bridge:
   cannot be read stops the check: the page is not started on an empty wallet,
   and Foxy says it could not open the stored wallet. From the third failed check
   in a row the page starts on its own store as it is, with nothing recorded and
-  every store left on the phone, so a damaged store never locks the person out.
+  every store left on the phone, so a damaged store never locks the person out;
+  after that nothing is marked or settled until a copy is made, so the old
+  wallet can still be carried in, and the page is never opened on a copy cut
+  off part way. The check's page dying counts as a failed check, twice a launch
+  at most before the launch goes as a failed check does.
   Nor is the page started, or anything decided, while the phone is locked, when
   the stores cannot be read.
 - **One address opens Foxy from outside, and none of it reaches the page.** A Foxy card

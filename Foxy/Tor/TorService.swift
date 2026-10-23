@@ -206,6 +206,9 @@ enum TorService {
     private static var setUpBegan: Date?
     /// The set-up running now came from Foxy's return from the background.
     private static var setUpOnReturn = false
+    /// How many times the set-up running now connected a silent control link
+    /// again (`TorReturn.reconnectsDeadLink`).
+    private static var deadLinks = 0
     /// The set-up's diary is written until then: the whole set-up, and a few
     /// seconds past its circuit, which is where the first requests go.
     private static var diaryUntil = Date.distantPast
@@ -319,6 +322,7 @@ enum TorService {
         // a set-up of its own, for the diary: the new link's set-up continues this one (`continuing`)
         setUpBegan = Date()
         setUpOnReturn = false
+        deadLinks = 0
         diaryUntil = Date().addingTimeInterval(60)
         step("restart (\(reason)): a new control link, then the set-up")
         if deadline == nil { armDeadline() }      // the clock already running is kept
@@ -614,6 +618,10 @@ enum TorService {
         if !continuing || setUpBegan == nil {
             setUpBegan = Date()
             setUpOnReturn = returning
+            deadLinks = 0
+        } else {
+            // the same set-up on a link connected since: a new link, not one iOS took away (`TorReturn.linkAnswerWait`)
+            setUpOnReturn = false
         }
         diaryUntil = Date().addingTimeInterval(60)
         askedCircuits = []
@@ -687,16 +695,26 @@ enum TorService {
                 networkOff(gen, ctrl)
             }
         }
-        let wait = TorReturn.linkAnswerWait(onReturn: setUpOnReturn)
+        let wait = TorReturn.linkAnswerWait(onReturn: setUpOnReturn, relinked: deadLinks)
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             guard gen == setUpGen, !answered else { return }
+            /* Connected again twice already in this set-up: the link is slow, not dead. It is waited on (its answer, when it
+             * comes, goes on with the set-up), under the set-up's clock, rather than torn down and Tor's network switched
+             * off once more. */
+            guard TorReturn.reconnectsDeadLink(relinked: deadLinks) else {
+                print("[foxy] tor: the control link is slow to answer; waiting on it (connected again \(deadLinks) times already)")
+                step("the control link said nothing in \(String(format: "%.1f", wait)) s; waiting on it, connected again \(deadLinks) times already")
+                return
+            }
             answered = true
+            deadLinks += 1
             print("[foxy] tor: the control link is not answering — connecting it again; Tor thread \(threadState(thread))")
             step("the control link said nothing in \(String(format: "%.1f", wait)) s; connecting it again")
             controller = nil                      // first: its observers now answer for nothing
             closeLink(ctrl)                       // the link only; Tor keeps running
             setUpPending = true
-            armDeadline()
+            keepClock = true                      // the set-up continues on the new link (`continuing`), its clock kept
+            if deadline == nil { armDeadline() }
             connectControl()
         }
     }
@@ -2029,6 +2047,9 @@ enum TorService {
     /// SETCONF: a single `250 OK`, or a refusal. `ok` is false on no answer.
     private static func setConf(_ ctrl: TorController, _ args: [String], timeout: TimeInterval = 10,
                                 done: @escaping (_ ok: Bool, _ message: String) -> Void) {
+        /* Tor's network going off closes every connection through it: the spare's kept connection to the mint (Route's warm
+         * session) is let go with it, so the route coming back opens a new one instead of handing a job one Tor dropped. */
+        if args.contains("DisableNetwork=1") { Route.dropWarm() }
         control(ctrl, "SETCONF", args, timeout: timeout, claims: { c, l in
             c.count == 1 && ((c[0] == 250 && l.first == "OK") || c[0] >= 500)
         }, done: { c, l in

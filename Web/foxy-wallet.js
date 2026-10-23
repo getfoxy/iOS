@@ -2512,7 +2512,7 @@
     var rode = spareRode(circuit);
     // handed to the phone, which may still hold it back (its own "[foxy] net:" line says whether it went out)
     console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt)
-      + ' ms after it, on the warmed circuit: ' + (rode === 'ready' ? 'yes' : rode === 'opening' ? 'yes (still being opened)' : 'no'));
+      + ' ms after it, on the warmed circuit: ' + (rode === 'ready' ? 'yes' : rode === 'opening' ? 'yes (still being opened)' : rode === 'failed' ? 'yes (taken being opened, and it failed)' : 'no'));
   }
 
   /* ---- a route that is on its way ------------------------------------------
@@ -3899,8 +3899,9 @@
   var spareGen = 0;
   /* The labels a job took from the spare, newest last, and whether the mint
    * had answered on it yet: for the connection diary's line on the first
-   * request after the route opens (`noteRequestLeft`). Labels only. */
-  var spareTaken = /** @type {Array<{ label: string, ready: boolean }>} */ ([]);
+   * request after the route opens (`noteRequestLeft`). Labels only. `failed`:
+   * taken while it was being opened, and then not answered on (`warmSpare`). */
+  var spareTaken = /** @type {Array<{ label: string, ready: boolean, failed?: boolean }>} */ ([]);
 
   function spareReady() {
     return !!(spare && wallet && spare.mint === mintOf(wallet) && Date.now() - spare.at < SPARE_FOR_MS);
@@ -3917,14 +3918,28 @@
 
   /* Whether `label` came from the spare: '' when it did not, 'ready' when the
    * mint had answered on it when it was taken, 'opening' when it was still
-   * being opened. */
+   * being opened, 'failed' when it was taken being opened and then was not
+   * answered on. */
   function spareRode(label) {
     var l = String(label || '');
     if (!l) return '';
     for (var i = spareTaken.length - 1; i >= 0; i--) {
-      if (spareTaken[i].label === l) return spareTaken[i].ready ? 'ready' : 'opening';
+      if (spareTaken[i].label === l) return spareTaken[i].failed ? 'failed' : spareTaken[i].ready ? 'ready' : 'opening';
     }
     return '';
+  }
+
+  /* The job that took `label` while it was being opened is told it failed: its entry says so (`spareRode`), the diary says so, and
+   * whoever asked to hear (`FoxyWallet._onSpareFailed`, the label) is told. Its requests on that circuit are its own to wait on, as any
+   * job's are; the next job is given a circuit of its own (`warmSpareSoon`). */
+  function spareFailedForJob(label, why) {
+    for (var i = spareTaken.length - 1; i >= 0; i--) {
+      if (spareTaken[i].label === label) { spareTaken[i].failed = true; break; }
+    }
+    console.log('[foxy] the circuit a job took while it was being opened was not answered on (' + why + '); that job goes on on it, and the next is given another');
+    if (typeof FoxyWallet._onSpareFailed === 'function') {
+      try { FoxyWallet._onSpareFailed(label); } catch (e) { console.warn('[foxy] spare failed watcher:', e && e.message); }
+    }
   }
 
   /* Open one, unless one is ready or on its way. Two tries at most, each on a
@@ -3965,9 +3980,10 @@
         if (opening.taken) return false;
         spare = { label: label, mint: at, at: Date.now() };
         return true;
-      }, function () {
+      }, function (e) {
         over();
-        // one a job took is that job's to wait on, and not tried again for it
+        // one a job took is that job's to wait on, and not tried again for it; the job is told
+        if (opening.taken) spareFailedForJob(label, (e && e.message) || 'no answer');
         if (left > 0 && mine() && !opening.taken) return tryOne(left - 1);
         if (gen === spareGen) console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
         return false;
@@ -16522,10 +16538,11 @@
     }
     /* Whether a wallet that holds just the other unit takes this in that unit once it has settled (08c-units.js): sats paid to
      * one that holds dollars, or dollars paid to one that holds bitcoin. Decided before the entry is written, so that the entry
-     * says so from the first, as a request's does. */
+     * says so from the first, as a request's does. `opts.kept`: the till's person picked this receive's unit for it (the app's
+     * `recvPicked`), so what is paid in it stays in it, as a request's `kept` does. */
     var owes = false;
     try {
-      var p = { id: row.id, unit: unit, mint: mintOf(w), purpose: 'card-offline', terms: opts.terms || null };
+      var p = { id: row.id, unit: unit, mint: mintOf(w), purpose: 'card-offline', terms: opts.terms || null, kept: opts.kept === true };
       owes = convertDue(p) && convertOwe(p, worth);
     } catch (eConv) { console.warn('[foxy] card: a payment kept offline was not set to be swapped into the unit held:', (eConv && eConv.message) || eConv); }
     try {
@@ -18149,18 +18166,29 @@
       var lock = quoteLock(dest);
       return withTimeout(createQuote(dest, issue, undefined, lock), 25000, hostOf(to) + ' invoice').then(function (mq) {
         if (lock) mq.foxyLock = lock;
-        return FoxyWallet.quoteFee(mq.request, { unit: pu }).then(function (kq) {
-          if (!kq) throw new Error(hostOf(home) + ' could not say what paying ' + hostOf(to) + ' costs.');
-          var mn = FoxyWallet.payNeed(kq.amount, kq.feeReserve, { unit: pu });
-          var total = mn ? mn.need : kq.amount + kq.feeReserve;
-          var worth = Math.round(kq.amount * want / issue);
-          console.log('[foxy] card: ' + cardSaid(land, cu) + ' to go on a card at ' + hostOf(to) + ' (' + cardSaid(issue, cu) + ' asked there); '
-                      + hostOf(home) + ' pays it with at most ' + cardSaid(total, pu));
-          return { mint: to, home: home, cardUnit: cu, payUnit: pu, amount: want, land: land, issue: issue, invoice: mq.request,
-                   mintQuote: mq, melt: kq, total: total, worth: worth, fee: Math.max(0, total - worth),
-                   short: !!(mn && !mn.ok), why: (mn && !mn.ok) ? mn.why : '', at: Date.now() };
-        });
+        return cardLoadCrossPay({ mint: to, home: home, cardUnit: cu, amount: want, land: land, issue: issue, invoice: mq.request, mintQuote: mq }, pu);
       });
+    });
+  }
+
+  /* The plan's invoice at the card's mint, paid from this phone's balance in `pu`: this phone's mint's melt quote for it, the most that
+   * leaves this phone (`total`), and the fee over what goes on the card (`land`, the pieces as cut, which can differ from the amount
+   * asked: `worth` is what that is worth in `pu`). Also for a plan already made, quoted again in this phone's other balance
+   * (`cardLoadRepay`, 21a-flashcard.js): the same invoice, nothing asked of the card's mint again. */
+  function cardLoadCrossPay(base, pu) {
+    var to = base.mint, home = base.home, cu = unitOf(base.cardUnit) || 'sat';
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    if (canonicalMint(mintUrl || '') !== home) return Promise.reject(new Error('This phone is not at ' + hostOf(home) + ' now.'));
+    return FoxyWallet.quoteFee(base.invoice, { unit: pu }).then(function (kq) {
+      if (!kq) throw new Error(hostOf(home) + ' could not say what paying ' + hostOf(to) + ' costs.');
+      var mn = FoxyWallet.payNeed(kq.amount, kq.feeReserve, { unit: pu });
+      var total = mn ? mn.need : kq.amount + kq.feeReserve;
+      var worth = Math.round(kq.amount * base.land / base.issue);
+      console.log('[foxy] card: ' + cardSaid(base.land, cu) + ' to go on a card at ' + hostOf(to) + ' (' + cardSaid(base.issue, cu) + ' asked there); '
+                  + hostOf(home) + ' pays it with at most ' + cardSaid(total, pu));
+      return { mint: to, home: home, cardUnit: cu, payUnit: pu, amount: base.amount, land: base.land, issue: base.issue, invoice: base.invoice,
+               mintQuote: base.mintQuote, melt: kq, total: total, worth: worth, fee: Math.max(0, total - worth),
+               short: !!(mn && !mn.ok), why: (mn && !mn.ok) ? mn.why : '', at: Date.now() };
     });
   }
 
@@ -19928,6 +19956,10 @@
       };
       // for the connection diary: the moment the route opens or shuts
       noteRouteChange(wasOpen);
+      /* The route went from open to shut: Tor drops the circuits it had, the spare's among them (and the phone lets go of the
+       * connection it kept for it, Route.dropWarm). Kept, it was handed to the next job on the route's return as ready, and that
+       * job rode a circuit Tor no longer had; let go, the return opens a new one. */
+      if (wasOpen && !routeOpen()) dropSpare();
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }
@@ -21928,7 +21960,8 @@
             return FoxyWallet.claimQuote(m.quote, m.amount, m.lock, using).then(function (sats) {
               dropMoveNote(m.quote);
               total += Number(sats) || 0;
-              console.log('[foxy] finished an interrupted crossing:', sats, 'sats at', hostOf(m.to));
+              // in the crossing's own unit: a dollar crossing's figure is cents, said as dollars
+              console.log('[foxy] finished an interrupted crossing: ' + cardSaid(sats, mu) + ' at ' + hostOf(m.to));
               moveLanded(m, sats);
             }, function (e) {
               console.warn('[foxy] could not finish a crossing to', hostOf(m.to), 'yet:', e && e.message);
@@ -32440,6 +32473,12 @@
       /* `opts.visit`: made on a card's visit to its own mint, as part of it (`cardLoadAcross`): not held for this phone to be home,
        * which is what everything else started during a visit waits for (99-proof-lock-and-export.js). */
       var onVisit = !!(opts && opts.visit && cardAway);
+      /* `opts.only`: the key of the card these pieces are for (a card's swap, whose second tap is held to the card on the screen,
+       * 26f-flashcard.js `fcSwapOn`). Any other card read at the tap is refused (`wrong-card`) before anything is made for it, so
+       * nothing is owed to it and nothing is written on it. */
+      if (opts && opts.only && !(card && card.key === opts.only)) {
+        return Promise.reject(cardError('wrong-card', 'That is not the card on the screen. Nothing was put on it.'));
+      }
       var want = Math.round(Number(sats));
       if (!(want > 0)) return Promise.reject(cardError('bad-amount', 'Ask for an amount above zero.'));
       var unit = (card && card.record && card.record.unit) || 'sat';
@@ -32810,6 +32849,11 @@
     cardCrossQuote: function (at, bolt11, unit, card) { return cardCrossQuote(at, bolt11, unit, card); },
     // a card at another mint loaded from this phone: what it costs, asked of both mints (`cardLoadCrossQuote`), and the load made (`cardLoadAcross`)
     cardLoadQuote: function (at, amount, opts) { return cardLoadCrossQuote(at, amount, opts); },
+    /* The same plan's invoice, paid from this phone's other balance (`payUnit`): this phone's mint asked again, the card's mint not. */
+    cardLoadRepay: function (plan, payUnit) {
+      if (!plan || !plan.invoice || !plan.mintQuote) return Promise.reject(new Error('No load to quote.'));
+      return cardLoadCrossPay(plan, unitOf(payUnit) || 'sat');
+    },
     cardLoadAcross: function (plan, card, onStage) { return cardLoadAcross(plan, card, onStage); },
     /* this phone at a card's mint for what is done there, and home after (`cardVisit`: resolves { end }, `end()` resolving once
      * home); whether a card's visit has it away now; and what card payments left at other mints, settled there (`cardAwayLeft`) */
@@ -33375,6 +33419,11 @@
     _onPrivacy: null,
     onPrivacy: function (fn) { FoxyWallet._onPrivacy = fn; },
 
+    /* A job took the spare circuit while it was being opened, and the spare then failed: told the circuit's label
+     * (03-seed-counters-logs.js, `spareFailedForJob`). */
+    /** @type {?function(string): void} */
+    _onSpareFailed: null,
+
     /* A payment found some of this wallet's ecash already spent and removed
      * it: { sats, mint }. */
     /** @type {?function(*): void} */
@@ -33618,6 +33667,8 @@
     _askAgainWait: function (u, least, first) { return askAgainWait(u, least, first); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
+    /* For the tests: whether a job's circuit came from the spare, and how it went (`spareRode`). */
+    _spareRode: function (label) { return spareRode(label); },
 
     nativeRequest: function (opts) {
       var o = opts || {};

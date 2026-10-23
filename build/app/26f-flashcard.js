@@ -1690,7 +1690,11 @@
                  /* (a card of software 1.23 that holds both: the currency its holder chose for this payment, `fcPayChoose`; the card it
                   * was chosen for alone, and for a few minutes) */
                  const from = (this._fcFrom && Date.now() - this._fcFrom.at < 180000) ? this._fcFrom : null;
+                 /* (this receive's unit, picked by the person for it, 12-receive.js `recvPicked`: what is paid in it stays in it, and a
+                  * payment kept offline is not swapped into the unit the phone holds) */
+                 const picked = !send && !xm && !!(this.recvPicked && this.recvPicked(usd ? 'usd' : 'sat'));
                  return W.cardPay(link, Object.assign(asking, { pin, on: onPay, progress, offline: !!offline, keepSheet: !offline },
+                                                      picked ? { kept: true } : {},
                                                       from ? { from: from.unit, fromKey: from.key } : {},
                                                       send ? { holdFor: true, only: send.key }
                                                         : btcHold ? { holdFor: true, holdKeep: true, only: terms.key }
@@ -3404,6 +3408,16 @@
      * is asked nothing: SET AMOUNT in that one. */
     const fc = this.state.fc;
     if (fc && fc.v123 && fc.only) { this._fcFlowUnit = fc.only; this.fcAmount('cardAdd'); return; }
+    /* A card of both at another mint: which goes on it is asked the same way, with nothing greyed, since either of this phone's balances
+     * pays for it there (`fcXlQuote` asks which, where both can) */
+    if (fc && fc.v123 && this.fcAddAway() && this.fcTakesBoth(this._fcCard)) {
+      this.fcPickUnit({
+        question: 'ADD WHICH TO THE CARD?',
+        foot: 'The card keeps dollars and bitcoin side by side. Either of this phone’s balances can pay for it.',
+        short: { usd: '', sat: '' },
+      }, (u) => { this._fcFlowUnit = u; this.fcAmount('cardAdd'); });
+      return;
+    }
     if (fc && fc.v123 && this.twoUnitsOn && this.twoUnitsOn()) {
       const none = (u) => !(this.unitBalance(u) > 0);
       this.fcPickUnit({
@@ -4197,17 +4211,17 @@
           this.loadHistory();
           this.setState({ swapBusy: false, swapQuote: null });
           if (sw && sw.state === 'pending') { this.fcSwapPending(sw, took, from); return; }
-          if (!(sw && sw.state === 'done')) { this.fcSwapBack(took, from, pin); return; }
+          if (!(sw && sw.state === 'done')) { this.fcSwapBack(took, from, pin, sc.key); return; }
           /* (what the mint's fee reserve did not use came back to this phone in the currency that left: it goes back on the card in the
            * same tap, `back`) */
           const left = Math.max(0, took - Math.round(Number(sw.from && sw.from.amount) || 0));
-          this.fcSwapOn(Math.round(Number(sw.to && sw.to.amount) || 0), to, pin, sw, left > 0 ? { amount: left, unit: from } : null);
+          this.fcSwapOn(Math.round(Number(sw.to && sw.to.amount) || 0), to, pin, sw, left > 0 ? { amount: left, unit: from } : null, sc.key);
         }, (e) => {
           this.hideMelt();
           this.setState({ swapBusy: false });
           // nothing came off the card: said as any card's refusal is, and the confirmation stays
           if (!(took > 0)) { this.fcFailed(e, { taken: true, again: () => this.fcSwapGo(q) }); return; }
-          this.fcSwapBack(took, from, pin);
+          this.fcSwapBack(took, from, pin, sc.key);
         });
     });
   }
@@ -4232,14 +4246,15 @@
   }
 
   // the swap was not made: what came off the card is in this phone, in the currency it left in, to put back or keep
-  fcSwapBack(took, unit, pin) {
+  // (`key`: the card it came off, which PUT IT BACK puts it on and no other)
+  fcSwapBack(took, unit, pin, key) {
     this._swapCard = null;
     this.setState({ screen: 'flashcard', stack: [] });
     this.haptic && this.haptic('warning');
     this.blockedCard('fc-swap-back', {
       tone: 'warn', title: 'NOT SWAPPED',
       reason: this.fcBoth(took, unit) + ' came off the card and is in this phone. Put it back on the card, or leave it in this phone.',
-      retry: 'PUT IT BACK', go: () => this.fcSwapOn(took, unit, pin, null),
+      retry: 'PUT IT BACK', go: () => this.fcSwapOn(took, unit, pin, null, null, key),
       shut: { label: 'LEAVE IT', pill: true },
     });
   }
@@ -4247,16 +4262,20 @@
   // the second tap: what the swap brought (or what came off, put back) onto the card, in its currency
   /* `back`: what the mint's fee reserve did not use, { amount, unit } in the currency that left, put back on in the same tap; where it
    * cannot be made for the card it stays in this phone, and the swap's end says so. */
-  fcSwapOn(amount, unit, pin, sw, back) {
+  /* `key`: the card the swap is for (the one whose first tap it took from). The second tap is held to it: another card at the reader
+   * is refused by the wallet before anything is made (`wrong-card`, `cardPrepare`'s `only`), so nothing is owed to that card or
+   * written on it, and the screen asks for the right card again. */
+  fcSwapOn(amount, unit, pin, sw, back, key) {
     const W = this.fcW();
     if (!W || !(amount > 0)) return;
     let made = null, backOn = 0;
+    const only = key || undefined;
     this.fcTap({ amount: this.stageMoney(amount, unit), warm: true }, (link, on) => {
       on('mint');
-      return W.cardLook(link, { short: true }).then((card) => W.cardPrepare(card, amount, { unit }).then((m) => {
+      return W.cardLook(link, { short: true }).then((card) => W.cardPrepare(card, amount, { unit, only }).then((m) => {
         if (!(back && back.amount > 0)) return m;
         if (m && m.hash) this.txIsNew(m.hash);
-        return W.cardPrepare(card, back.amount, { unit: back.unit }).then((b) => {
+        return W.cardPrepare(card, back.amount, { unit: back.unit, only }).then((b) => {
           backOn = back.amount;
           if (b && b.hash) this.txIsNew(b.hash);
           return m;
@@ -4286,11 +4305,22 @@
       // made for the card and not written: it goes on at the card's next tap, as anything made for a card does
       if (made) { this._swapCard = null; this.setState({ screen: 'flashcard', stack: [] }); this.fcStillWaiting({ noPin: !pin }); return; }
       this.haptic && this.haptic('warning');
+      // another card at the second tap: nothing was made for it or put on it; the money is in this phone for the right card
+      if (e && e.card === 'wrong-card') {
+        this.blockedCard('fc-swap-left', {
+          tone: 'warn', title: 'A DIFFERENT CARD',
+          reason: 'That is not the card on the screen. Nothing was put on it. ' + this.fcBoth(amount, unit)
+            + ' is in this phone. Tap the card on the screen to put it on, or leave it in this phone.',
+          retry: 'TAP CARD', go: () => this.fcSwapOn(amount, unit, pin, sw, back, key),
+          shut: { label: 'LEAVE IT', pill: true, tap: () => { this._swapCard = null; } },
+        });
+        return;
+      }
       this.blockedCard('fc-swap-left', {
         tone: 'warn', title: sw ? 'SWAPPED, NOT ON THE CARD' : 'NOT ON THE CARD',
         reason: this.fcBoth(amount, unit) + ' is in this phone. Tap the card to put it on, or leave it in this phone.'
           + ((e && e.message) ? ' ' + String(e.message) : ''),
-        retry: 'TAP CARD', go: () => this.fcSwapOn(amount, unit, pin, sw, back),
+        retry: 'TAP CARD', go: () => this.fcSwapOn(amount, unit, pin, sw, back, key),
         shut: { label: 'LEAVE IT', pill: true, tap: () => { this._swapCard = null; } },
       });
     });
@@ -5057,15 +5087,22 @@
   fcSendUnit(card, fig) {
     const W = this.fcW();
     const hold = (W && W.cardHold && W.cardHold(card)) || '';
-    const cu = (W && W.cardUnits && W.cardUnits(card)) || null;
-    const v123 = !!(card && card.info && card.info.units);
-    const both = v123 && hold !== 'usd' && hold !== 'sat' && (hold === 'both' || !!(cu && cu.length === 2) || !!(W && W.cardBoth && W.cardBoth(card)));
+    const both = this.fcTakesBoth(card);
     const own = (hold === 'usd' || hold === 'sat') ? hold : (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
     if (!both) return { unit: own };
     const covers = ['usd', 'sat'].filter((u) => fig[u] > 0 && fig[u] <= this.fcHave(u));
     if (covers.length === 2) return { ask: true };
     if (covers.length === 1) return { unit: covers[0] };
     return { unit: this.state.unit === 'SATS' ? 'sat' : (fig.usd > 0 ? 'usd' : 'sat') };
+  }
+
+  // whether the card read takes both currencies: a card of 1.23 set up for both, or holding both or able to (`cardHold`, `cardUnits`, `cardBoth`)
+  fcTakesBoth(card) {
+    const W = this.fcW();
+    const hold = (W && W.cardHold && W.cardHold(card)) || '';
+    const cu = (W && W.cardUnits && W.cardUnits(card)) || null;
+    const v123 = !!(card && card.info && card.info.units);
+    return v123 && hold !== 'usd' && hold !== 'sat' && (hold === 'both' || !!(cu && cu.length === 2) || !!(W && W.cardBoth && W.cardBoth(card)));
   }
 
   /* The pieces for the card held to the phone, in its unit (`fcSendRun`). Typed in dollars, a bitcoin card is loaded with the sats
@@ -5138,9 +5175,17 @@
   /* SEND > FLASHCARD's tap found the card at another mint (`fcSendRun`): the figure typed, in the card's unit, and the balance of this
    * phone's that pays. A dollar card is loaded with the dollars typed (a figure typed in sats is not a dollar amount: said, and nothing
    * is asked); a bitcoin card with the sats typed, or with the sats the dollars typed are at this phone's price, as at its own mint. */
-  fcXlSend(card, pin, sats, unit, alt, fig, typedUsd, cents) {
-    const typed = unit || (typedUsd ? 'usd' : 'sat');
-    const cu = this.fcXlUnit(card, typed);
+  /* A card of both, the send not started in a currency (`fig`): which goes on the card is asked first, as at its own mint (`chosen`), with
+   * nothing greyed: either of this phone's balances pays for it there, and which is the confirmation's to settle (`fcXlQuote`). */
+  fcXlSend(card, pin, sats, unit, alt, fig, typedUsd, cents, chosen) {
+    if (fig && !unit && !chosen && this.fcTakesBoth(card)) {
+      this.fcPickUnit({ question: 'SEND WHICH TO THE CARD?', foot: 'This card holds dollars and bitcoin. Either of this phone’s balances can pay for it.',
+                        short: { usd: '', sat: '' } },
+                      (u) => this.fcXlSend(card, pin, sats, unit, alt, fig, typedUsd, cents, u));
+      return;
+    }
+    const typed = chosen || unit || (typedUsd ? 'usd' : 'sat');
+    const cu = (chosen === 'usd' || chosen === 'sat') ? chosen : this.fcXlUnit(card, typed);
     let amount = 0;
     let pay = unit === 'usd' ? 'usd' : 'sat';
     if (cu === 'usd') {
@@ -5164,11 +5209,14 @@
       } else amount = sats;
     }
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
-    this.fcXlBegin({ from: 'send', card, pin: (card.info && card.info.pinSet) ? String(pin || '') : '', cardUnit: cu, payUnit: pay, amount });
+    // (a send started in one of this phone's balances pays from it: not asked again, though the other pays where it cannot, `fcXlQuote`)
+    this.fcXlBegin({ from: 'send', card, pin: (card.info && card.info.pinSet) ? String(pin || '') : '', cardUnit: cu, payUnit: pay, amount, payFixed: !!unit && !fig });
   }
 
   /* ADD FUNDS on the screen of a card at another mint: the amount typed is in the card's unit (`fcUnit`), and this phone pays from its
-   * dollars where it loads dollars and holds some at a mint with two balances, from its bitcoin otherwise. */
+   * dollars where it loads dollars and holds some at a mint with two balances, from its bitcoin otherwise: first asked, and the other
+   * asked too where this phone has two balances, so that one that cannot pay gives way to one that can, and where both can the person
+   * is asked which (`fcXlQuote`). */
   fcXlAdd(amount) {
     const card = this._fcCard;
     const fc = this.state.fc;
@@ -5187,7 +5235,7 @@
       from: o.from === 'add' ? 'add' : 'send', mint: this.fcMintKey(card.record.mint), home: this.fcMintKey(W.mintUrl),
       key: String(card.key || ''), cardUnit: o.cardUnit === 'usd' ? 'usd' : 'sat', payUnit: o.payUnit === 'usd' ? 'usd' : 'sat',
       amount: Math.round(Number(o.amount) || 0), pinSet: !!(card.info && card.info.pinSet), pin: String(o.pin || ''),
-      plan: null, err: '', short: false, busy: false,
+      plan: null, err: '', short: false, busy: false, payFixed: !!o.payFixed,
     };
     // the card as read, in memory only: its pieces are cut at its mint from it, and made for it there (`cardLoadQuote`, `cardPrepare`)
     this._fcXlCard = card;
@@ -5214,9 +5262,38 @@
     const live = () => run === this._fcXlRun && !!this.state.fcXl && this.state.fcXl.key === x0.key;
     const put = (more) => { if (live()) this.setState({ fcXl: Object.assign({}, this.state.fcXl, more) }); };
     put({ plan: null, err: '', short: false });
+    const show = (plan) => put({ plan, payUnit: plan.payUnit === 'usd' ? 'usd' : 'sat', short: !!plan.short,
+                                 err: plan.short ? String(plan.why || 'This phone does not hold enough for that.') : '' });
     Promise.resolve().then(() => W.cardLoadQuote(x0.mint, x0.amount, { cardUnit: x0.cardUnit, payUnit: x0.payUnit, card: this._fcXlCard || undefined })).then((plan) => {
-      put({ plan, short: !!plan.short, err: plan.short ? String(plan.why || 'This phone does not hold enough for that.') : '' });
-    }, (e) => {
+      if (!live()) return;
+      /* This phone's other balance, where it has two and holds some of the other: the same invoice quoted from it. One that cannot pay
+       * gives way to one that can (never a greyed button while the other could pay); where both can, the person is asked which, the
+       * same question as a payment's (`fcPickUnit`), unless the send was started in one (`payFixed`). */
+      const other = plan.payUnit === 'usd' ? 'sat' : 'usd';
+      if (!(this.twoUnitsOn && this.twoUnitsOn()) || !(this.fcHave(other) > 0) || !W.cardLoadRepay) { show(plan); return; }
+      return W.cardLoadRepay(plan, other).then((alt) => {
+        if (!live()) return;
+        if (plan.short && !alt.short) {
+          const word = (u) => (u === 'usd' ? 'dollars' : 'bitcoin');
+          console.log('[foxy] card: this phone\u2019s ' + word(plan.payUnit) + ' cannot cover the load at another mint; its ' + word(other) + ' pays it');
+          show(alt);
+          return;
+        }
+        if (plan.short || alt.short || x0.payFixed) { show(plan); return; }
+        show(plan);
+        this.fcPickUnit({ question: 'PAY FROM WHICH?', foot: 'Either of this phone’s balances can pay for this. You are asked when both could pay.',
+                          bal: { usd: this.fcHave('usd'), sat: this.fcHave('sat') }, short: { usd: '', sat: '' } },
+                        (u) => {
+                          if (!live()) return;
+                          show(u === plan.payUnit ? plan : alt);
+                          // chosen: a quote asked again before the load (`fcXlGo`) keeps it, and does not ask again
+                          put({ payFixed: true });
+                        });
+      }, (e2) => {
+        console.warn('[foxy] card: the other balance could not be quoted for the load:', (e2 && e2.message) || e2);
+        show(plan);
+      });
+    }).then(null, (e) => {
       if (!live()) return;
       if (e && e.card) {
         this.setState(p => ({ fcXl: null, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1) }));
@@ -5236,7 +5313,8 @@
     const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
     const p = x.plan;
     const known = !!p;
-    const on = fig(x.amount, cu);
+    // what the card will get: the pieces as cut at its mint (`plan.land`), which can differ from the amount typed
+    const on = fig(this.fcXlLand(x), cu);
     const rows = [
       this.cfRow('ON THE CARD', on.main, { sub: on.sub }),
       this.cfRow('FEE, PAID BY YOU', x.err && !known ? 'UNKNOWN' : known ? 'UP TO ' + fig(p.fee, pu).main : 'CHECKING…',
@@ -5264,6 +5342,12 @@
     });
   }
 
+  // what goes on the card: the plan's pieces as cut (`land`) once it is known, the amount typed before
+  fcXlLand(x) {
+    const land = Math.round(Number(x && x.plan && x.plan.land) || 0);
+    return land > 0 ? land : Math.round(Number(x && x.amount) || 0);
+  }
+
   /* PUT ... ON CARD: the PIN where the card wants one and none was typed (on its own screen, its owner's proof where the card takes it,
    * as ADD FUNDS at its own mint), then the load. A quote that has gone stale is asked again first, so the fee shown is the one paid. */
   fcXlGo() {
@@ -5273,10 +5357,11 @@
     if (this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXlOffline(); return; }
     if (!this.fcQuoteFresh(x.plan.melt) || Date.now() - Number(x.plan.at || 0) > 60000) { this.fcXlOpen(x); return; }
     const fc = this.state.fc;
-    const price = this.fcPrice(x.amount, x.cardUnit);
+    const land = this.fcXlLand(x);
+    const price = this.fcPrice(land, x.cardUnit);
     if (x.from === 'add' && fc && fc.key === x.key && fc.ownedHere && !this.fcCardPinFirst()) { this.fcXlRun(x, '', true); return; }
     if (!x.pinSet || x.pin) { this.fcXlRun(x, x.pin, false); return; }
-    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put ' + this.fcBoth(x.amount, x.cardUnit) + ' on the card.', cta: 'PUT ' + price + ' ON CARD' },
+    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put ' + this.fcBoth(land, x.cardUnit) + ' on the card.', cta: 'PUT ' + price + ' ON CARD' },
                   (pin) => this.fcXlRun(x, pin, false));
   }
 
@@ -5297,7 +5382,7 @@
       : { fcXl: null, screen: 'home', stack: [], flow: 'receive', amount: '', unit: 'USD' });
     // the pieces it leaves owed to the card at its mint go on from any mint this phone is at (`fcWriteAsk`)
     this._fcXmAt = Object.assign({}, this._fcXmAt || {}, { [x.mint]: true });
-    if (this.showMelt) this.showMelt('Moving ' + this.fcPrice(x.amount, x.cardUnit) + ' to ' + to + '…', 0, { mint: to });
+    if (this.showMelt) this.showMelt('Moving ' + this.fcPrice(this.fcXlLand(x), x.cardUnit) + ' to ' + to + '…', 0, { mint: to });
     Promise.resolve().then(() => W.cardLoadAcross(plan, card, () => {})).then((done) => {
       if (this.hideMelt) this.hideMelt();
       const made = done.made;
@@ -5341,7 +5426,11 @@
     const said = String((e ? (W && W.reason ? W.reason(e) : e.message) : '') || 'That did not work.').trim().replace(/\.?$/, '.');
     console.log('[foxy] card: the load at ' + x.mint + ' did not reach the card — ' + said);
     this.haptic && this.haptic('error');
-    if (e && e.pending) {
+    /* (a payment that failed with its melt still held is on its way as much as one not answered: `cardLoadAcross` passes the error
+     * on, and the wallet keeps the melt until the mint says either way) */
+    const held = !!(x && x.plan && x.plan.invoice && W && W.pendingMelts
+      && W.pendingMelts().some((m) => m && m.bolt11 && String(m.bolt11).toLowerCase() === String(x.plan.invoice).toLowerCase()));
+    if (e && (e.pending || (held && !e.movePaid))) {
       this.blockedCard('fc-xl-waiting', {
         tone: 'warn', title: 'NOT ON THE CARD',
         reason: 'The payment to ' + to + ' has not finished. Foxy holds the money until the mint says either way. Nothing went on the card.',

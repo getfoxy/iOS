@@ -249,6 +249,15 @@ enum Route {
         return remaining > holdReserve
     }
 
+    /// How long the spare's kept connection may wait for its job: thirty seconds.
+    static let warmFor: TimeInterval = 30
+
+    /// Whether the spare's kept connection may be handed to a job's request:
+    /// on the listener Tor has now, and made `warmFor` ago at most.
+    static func warmUsable(age: TimeInterval, sameListener: Bool) -> Bool {
+        sameListener && age <= warmFor
+    }
+
 #if canImport(Tor)
     /* The connection the spare circuit made, kept for the job that takes it.
      *
@@ -267,8 +276,11 @@ enum Route {
      * started through `startOnce`, which lets the session go once that task
      * has started, as every session's. A newer spare's replaces it. It is let
      * go unused when Foxy is put away (`shutDoor`), when Tor's listener has
-     * moved since it was made, after five minutes, and when the spare's own
-     * request fails. What it carries across is the spare's public question
+     * moved since it was made, after thirty seconds (`warmFor`: mints close an
+     * idle connection sooner than five minutes, and a melt or a swap, a POST,
+     * is not sent again on one closed under it), when Tor's network goes off
+     * (TorService's DisableNetwork=1: every connection through Tor goes with
+     * it), and when the spare's own request fails. What it carries across is the spare's public question
      * and the job, which already share the circuit: nothing a job did not
      * already share. */
     private struct Warm {
@@ -279,7 +291,6 @@ enum Route {
         let at: TimeInterval
     }
     private static let warm = Locked<Warm?>(nil)
-    static let warmFor: TimeInterval = 5 * 60
 
     /// The spare's request, on a session kept for its circuit's job.
     private static func startWarm(_ request: URLRequest, circuit: String,
@@ -316,7 +327,7 @@ enum Route {
         var stale: Warm?
         warm.exchange { kept in
             guard let kept else { return nil }
-            if now - kept.at > warmFor || kept.port != TorService.socksPort {
+            if !warmUsable(age: now - kept.at, sameListener: kept.port == TorService.socksPort) {
                 stale = kept
                 return nil
             }
@@ -328,8 +339,9 @@ enum Route {
         return taken?.session
     }
 
-    /// Let go of the kept session: Foxy is being put away.
-    private static func dropWarm() {
+    /// Let go of the kept session: Foxy is being put away, or Tor's network is
+    /// going off (TorService.setConf).
+    static func dropWarm() {
         warm.exchange { _ in nil }?.session.invalidateAndCancel()
     }
 #endif

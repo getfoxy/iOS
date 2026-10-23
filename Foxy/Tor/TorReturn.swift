@@ -225,7 +225,20 @@ enum TorReturn {
     /// and connecting again costs a fraction of one. Elsewhere (RETRY, a
     /// network back, a restart of direct) Tor may be busy loading, and the
     /// three seconds stay.
-    static func linkAnswerWait(onReturn: Bool) -> TimeInterval { onReturn ? 1 : 3 }
+    ///
+    /// `relinked`: how many times this set-up has connected its link again
+    /// already. A link connected again is new, not one iOS took away, and is
+    /// given the three seconds: a slow but live link was torn down again and
+    /// again at one second each, on every return.
+    static func linkAnswerWait(onReturn: Bool, relinked: Int = 0) -> TimeInterval { onReturn && relinked == 0 ? 1 : 3 }
+
+    /// A set-up connects a silent control link again at most this many times;
+    /// after that it waits on the link it has (the set-up's clock still runs),
+    /// rather than switching Tor's network off again on each new link.
+    static let deadLinkReconnects = 2
+
+    /// Whether a silent link is connected again, `relinked` times done already.
+    static func reconnectsDeadLink(relinked: Int) -> Bool { relinked < deadLinkReconnects }
 
     // MARK: Direct's patience, out with no circuit
 

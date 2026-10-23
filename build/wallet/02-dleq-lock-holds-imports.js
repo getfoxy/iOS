@@ -728,7 +728,7 @@
     var rode = spareRode(circuit);
     // handed to the phone, which may still hold it back (its own "[foxy] net:" line says whether it went out)
     console.log('[foxy] tor gate: the first request since the route opened was handed to the phone ' + (Date.now() - routeOpenedAt)
-      + ' ms after it, on the warmed circuit: ' + (rode === 'ready' ? 'yes' : rode === 'opening' ? 'yes (still being opened)' : 'no'));
+      + ' ms after it, on the warmed circuit: ' + (rode === 'ready' ? 'yes' : rode === 'opening' ? 'yes (still being opened)' : rode === 'failed' ? 'yes (taken being opened, and it failed)' : 'no'));
   }
 
   /* ---- a route that is on its way ------------------------------------------

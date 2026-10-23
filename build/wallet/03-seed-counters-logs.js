@@ -1315,8 +1315,9 @@
   var spareGen = 0;
   /* The labels a job took from the spare, newest last, and whether the mint
    * had answered on it yet: for the connection diary's line on the first
-   * request after the route opens (`noteRequestLeft`). Labels only. */
-  var spareTaken = /** @type {Array<{ label: string, ready: boolean }>} */ ([]);
+   * request after the route opens (`noteRequestLeft`). Labels only. `failed`:
+   * taken while it was being opened, and then not answered on (`warmSpare`). */
+  var spareTaken = /** @type {Array<{ label: string, ready: boolean, failed?: boolean }>} */ ([]);
 
   function spareReady() {
     return !!(spare && wallet && spare.mint === mintOf(wallet) && Date.now() - spare.at < SPARE_FOR_MS);
@@ -1333,14 +1334,28 @@
 
   /* Whether `label` came from the spare: '' when it did not, 'ready' when the
    * mint had answered on it when it was taken, 'opening' when it was still
-   * being opened. */
+   * being opened, 'failed' when it was taken being opened and then was not
+   * answered on. */
   function spareRode(label) {
     var l = String(label || '');
     if (!l) return '';
     for (var i = spareTaken.length - 1; i >= 0; i--) {
-      if (spareTaken[i].label === l) return spareTaken[i].ready ? 'ready' : 'opening';
+      if (spareTaken[i].label === l) return spareTaken[i].failed ? 'failed' : spareTaken[i].ready ? 'ready' : 'opening';
     }
     return '';
+  }
+
+  /* The job that took `label` while it was being opened is told it failed: its entry says so (`spareRode`), the diary says so, and
+   * whoever asked to hear (`FoxyWallet._onSpareFailed`, the label) is told. Its requests on that circuit are its own to wait on, as any
+   * job's are; the next job is given a circuit of its own (`warmSpareSoon`). */
+  function spareFailedForJob(label, why) {
+    for (var i = spareTaken.length - 1; i >= 0; i--) {
+      if (spareTaken[i].label === label) { spareTaken[i].failed = true; break; }
+    }
+    console.log('[foxy] the circuit a job took while it was being opened was not answered on (' + why + '); that job goes on on it, and the next is given another');
+    if (typeof FoxyWallet._onSpareFailed === 'function') {
+      try { FoxyWallet._onSpareFailed(label); } catch (e) { console.warn('[foxy] spare failed watcher:', e && e.message); }
+    }
   }
 
   /* Open one, unless one is ready or on its way. Two tries at most, each on a
@@ -1381,9 +1396,10 @@
         if (opening.taken) return false;
         spare = { label: label, mint: at, at: Date.now() };
         return true;
-      }, function () {
+      }, function (e) {
         over();
-        // one a job took is that job's to wait on, and not tried again for it
+        // one a job took is that job's to wait on, and not tried again for it; the job is told
+        if (opening.taken) spareFailedForJob(label, (e && e.message) || 'no answer');
         if (left > 0 && mine() && !opening.taken) return tryOne(left - 1);
         if (gen === spareGen) console.log('[foxy] no circuit to ' + hostOf(at) + ' could be made ready ahead of time');
         return false;

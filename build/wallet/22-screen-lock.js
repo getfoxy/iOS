@@ -159,6 +159,11 @@
     _onPrivacy: null,
     onPrivacy: function (fn) { FoxyWallet._onPrivacy = fn; },
 
+    /* A job took the spare circuit while it was being opened, and the spare then failed: told the circuit's label
+     * (03-seed-counters-logs.js, `spareFailedForJob`). */
+    /** @type {?function(string): void} */
+    _onSpareFailed: null,
+
     /* A payment found some of this wallet's ecash already spent and removed
      * it: { sats, mint }. */
     /** @type {?function(*): void} */
@@ -402,6 +407,8 @@
     _askAgainWait: function (u, least, first) { return askAgainWait(u, least, first); },
     /* For the tests: whether a circuit is ready, and its label. */
     _spare: function () { return spareReady() ? /** @type {{ label: string }} */ (spare).label : ''; },
+    /* For the tests: whether a job's circuit came from the spare, and how it went (`spareRode`). */
+    _spareRode: function (label) { return spareRode(label); },
 
     nativeRequest: function (opts) {
       var o = opts || {};

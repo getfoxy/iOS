@@ -217,6 +217,18 @@ final class TorReturnTests: XCTestCase {
         XCTAssertEqual(TorReturn.linkAnswerWait(onReturn: false), 3)
     }
 
+    /// A slow but live link on a return: torn down at one second, the new link is given three, and a set-up connects a silent link
+    /// again twice at most, then waits on the one it has.
+    func testALinkConnectedAgainIsGivenTheFullWaitAndIsConnectedAgainTwiceAtMost() {
+        XCTAssertEqual(TorReturn.linkAnswerWait(onReturn: true, relinked: 0), 1)
+        XCTAssertEqual(TorReturn.linkAnswerWait(onReturn: true, relinked: 1), 3)
+        XCTAssertEqual(TorReturn.linkAnswerWait(onReturn: false, relinked: 2), 3)
+        XCTAssertEqual(TorReturn.deadLinkReconnects, 2)
+        XCTAssertTrue(TorReturn.reconnectsDeadLink(relinked: 0))
+        XCTAssertTrue(TorReturn.reconnectsDeadLink(relinked: 1))
+        XCTAssertFalse(TorReturn.reconnectsDeadLink(relinked: 2))
+    }
+
     // MARK: Direct's patience
 
     func testNoRelayConnectionRestartsAsBefore() {

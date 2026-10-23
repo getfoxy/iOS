@@ -24,6 +24,8 @@ final class WebHostController: UIViewController {
     /// Which check is current; an answer for an older one is dropped.
     private var storeRun = 0
     private var unlockWait: NSObjectProtocol?
+    /// How many times the store check's page died this launch (WebStoreCheck.restartAfterDeath).
+    private var checkDeaths = 0
     /// A check is under way: only then may the web view be on the check page.
     private var checking = false
     /// The check page's load, to tell its failure from the page's own.
@@ -539,17 +541,26 @@ final class WebHostController: UIViewController {
         case .locked:
             openStore()                          // waits for the unlock, then checks again
         case .failed(let why):
-            let failures = WebStore.noteFailure(.standard)
-            let next = WebStoreCheck.afterFailure(failures)
-            if next.open {
-                print("[foxy] web store: THE CHECK FAILED \(failures) TIMES IN A ROW (\(why)); the page starts on its own store as it is, nothing recorded, every store left on the phone; the next launch checks again")
-                loadStaged()
-                return
-            }
-            print("[foxy] web store: THE PAGE IS NOT STARTED (\(failures) failed check(s) in a row):", why)
-            hideSplash()
-            showFatal(next.message)
+            storeFailed(why, failures: WebStore.noteFailure(.standard))
         }
+    }
+
+    /// A check that could not be finished, counted already: the message, or the
+    /// page on its own store as it is (and then nothing marked or settled until
+    /// a copy is made); never on a store holding a copy cut off part way.
+    private func storeFailed(_ why: String, failures: Int) {
+        checking = false
+        checkNavigation = nil
+        let next = WebStoreCheck.afterFailure(failures, copying: WebStore.state(.standard).copying)
+        if next.open {
+            print("[foxy] web store: THE CHECK FAILED \(failures) TIMES IN A ROW (\(why)); the page starts on its own store as it is, nothing recorded, every store left on the phone; the next launch checks again, and nothing is marked or settled until a copy is made")
+            WebStore.noteOpenedAsIs(.standard)
+            loadStaged()
+            return
+        }
+        print("[foxy] web store: THE PAGE IS NOT STARTED (\(failures) failed check(s) in a row):", why)
+        hideSplash()
+        showFatal(next.message)
     }
 
     private func showFatal(_ text: String) {
@@ -1278,6 +1289,14 @@ final class WebHostController: UIViewController {
          * see the splash image for three or four seconds, and then the home
          * screen"). Nothing was reconnecting, so there was nothing to wait
          * for. */
+        /* the launch's store check waiting for the unlock (openStore): a suspended app can miss the unlock's notice, and the page
+         * would never load; the check starts here too once the phone's files can be read */
+        if let token = unlockWait, UIApplication.shared.isProtectedDataAvailable {
+            NotificationCenter.default.removeObserver(token)
+            unlockWait = nil
+            print("[foxy] web store: back in front and unlocked; the check waiting for the unlock starts")
+            openStore()
+        }
         // back: a putting-away still waiting stops here, and requests may leave again
         parkRun += 1
         // and the seed kept for it is dropped: a visit reads its own, through Face ID
@@ -1503,10 +1522,18 @@ extension WebHostController: WKNavigationDelegate {
     /// with it, so a fresh one is loaded, and the seed kept for its secrets and
     /// any typed words go too. Without this the screen was left blank.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        // ended during the store check: the check starts again, with nothing of the last one's
+        /* ended during the store check: counted as a failed check, and the check starts again, with nothing of the last one's, a
+         * few times a launch (WebStoreCheck.restartAfterDeath); then as a failed check, never round for ever */
         if WebStore.isCheck(webView.url) {
-            print("[foxy] the store check's page ended; checking again")
-            openStore()
+            checkDeaths += 1
+            let failures = WebStore.noteFailure(.standard)
+            if WebStoreCheck.restartAfterDeath(checkDeaths) {
+                print("[foxy] the store check's page ended (\(checkDeaths) this launch); checking again")
+                openStore()
+                return
+            }
+            storeRun += 1                        // nothing of the ended check answers now
+            storeFailed("the store check's page ended \(checkDeaths) times", failures: failures)
             return
         }
         print("[foxy] the page's process ended; loading it again")

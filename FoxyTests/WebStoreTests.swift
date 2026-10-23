@@ -259,9 +259,9 @@ final class WebStoreTests: XCTestCase {
 
     func testAStoreThatHoldsTheWalletIsKept() {
         let other = fake("Default/a/a", keys: 99)
-        let d = WebStore.decide(.init(marked: false, keys: 3), scan: .init(buckets: [other]), state: state(moved: false))
+        let d = WebStore.decide(.init(marked: false, keys: 3, money: true), scan: .init(buckets: [other]), state: state(moved: false))
         guard case .keep(_, let markIt, _) = d else { return XCTFail("\(d)") }
-        XCTAssertTrue(markIt, "never copied over a store that holds something of the wallet's")
+        XCTAssertTrue(markIt, "never copied over a store that holds money or history")
     }
 
     func testTheOriginFileIsReadForTheLog() {
@@ -537,6 +537,33 @@ final class WebStoreTests: XCTestCase {
         XCTAssertEqual(left?.intValue, 0)
     }
 
+    func testTheCheckTellsSettingsFromMoneyAndACopyWritesOverSettingsAndPutsThemBackOnFailure() throws {
+        let root = try webRoot()
+        let (view, waiter, _) = webView(root: root)
+        load(view, waiter, WebStore.checkURL)
+        var args = WebStore.arguments(mark: mark)
+        _ = js(view, "localStorage.clear(); localStorage.setItem('foxy.intro.seen', '1'); return true;")
+        var probe = js(view, WebStore.checkScript, args) as? [String: Any]
+        XCTAssertEqual((probe?["keys"] as? NSNumber)?.intValue, 1)
+        XCTAssertEqual(probe?["money"] as? Bool, false, "a setting is not money or history")
+        // a copy that fails puts the setting back as it was
+        args["items"] = [["foxy.intro.seen", "2"], ["foxy.cashu.log", "[1]"], ["foxy.cashu.log", "[2]"]]
+        let failed = js(view, WebStore.copyScript, args) as? [String: Any]
+        XCTAssertNotNil(failed?["error"])
+        XCTAssertEqual(js(view, "return [localStorage.length, localStorage.getItem('foxy.intro.seen')];") as? [AnyHashable], [1, "1"])
+        // one that works writes over it
+        args["items"] = [["foxy.intro.seen", "2"], ["foxy.cashu.log", "[1]"]]
+        let copied = js(view, WebStore.copyScript, args) as? [String: Any]
+        XCTAssertEqual((copied?["copied"] as? NSNumber)?.intValue, 2, "\(String(describing: copied))")
+        probe = js(view, WebStore.checkScript, WebStore.arguments(mark: mark)) as? [String: Any]
+        XCTAssertEqual(probe?["marked"] as? Bool, true)
+        XCTAssertEqual(probe?["money"] as? Bool, true)
+        // and never over money or history
+        _ = js(view, "localStorage.clear(); localStorage.setItem('foxy.cashu.proofs.https://m.example', '[{}]'); return true;")
+        let held = js(view, WebStore.copyScript, args) as? [String: Any]
+        XCTAssertEqual(held?["skipped"] as? String, "holds")
+    }
+
     // MARK: The review's cases
 
     func testAStoreThatCouldNotBeReadStopsTheCheckInsteadOfCountingAsNone() {
@@ -547,7 +574,9 @@ final class WebStoreTests: XCTestCase {
         }
         // a store that is the page's own, or holds the wallet, is still kept: nothing is taken then
         guard case .keep = WebStore.decide(.init(marked: true, keys: 0), scan: unread, state: state(moved: true)) else { return XCTFail() }
-        guard case .keep = WebStore.decide(.init(marked: false, keys: 4), scan: unread, state: state(moved: false)) else { return XCTFail() }
+        guard case .keep = WebStore.decide(.init(marked: false, keys: 4, money: true), scan: unread, state: state(moved: false)) else { return XCTFail() }
+        // one that holds settings alone is not: it waits, as an empty one does
+        guard case .wait = WebStore.decide(.init(marked: false, keys: 1), scan: unread, state: state(moved: false)) else { return XCTFail() }
     }
 
     func testADamagedStoreIsUnreadAndAStoreWithNoTableIsEmpty() throws {
@@ -663,6 +692,124 @@ final class WebStoreTests: XCTestCase {
         found = WebStore.Scan(buckets: [live])
         found.fileStores = [live.path]
         guard case .keep = WebStore.decide(.init(marked: false, keys: 0), scan: found, state: state(moved: true)) else { return XCTFail() }
+    }
+
+    // MARK: The second review's cases
+
+    /// Opened as it is after three failed checks, the page writes a setting or two (the intro seen) into its near-empty store.
+    /// That store is not the wallet: the file:// wallet is still carried in, and nothing is marked or settled meanwhile.
+    func testAStoreOfSettingsAloneIsCopiedIntoAndOnlyMoneyOrHistoryIsKeptAsIs() {
+        let used = fake("Default/file/file", keys: 57)
+        var found = WebStore.Scan(buckets: [used])
+        found.fileStores = [used.path]
+        let d = WebStore.decide(.init(marked: false, keys: 1), scan: found, state: state(moved: false))
+        guard case .copy(let pick, _, let why) = d else { return XCTFail("a store of settings was kept beside the wallet: \(d)") }
+        XCTAssertEqual(pick.path, used.path)
+        XCTAssertTrue(why.contains("holds no money or history"), why)
+        // after the move, the marked store from before is carried into one of settings alone as well
+        let before = fake("Default/m/m", keys: 57, marked: true)
+        guard case .copy(let q, _, _) = WebStore.decide(.init(marked: false, keys: 2), scan: .init(buckets: [before]), state: state(moved: true)) else { return XCTFail() }
+        XCTAssertEqual(q.path, before.path)
+        // settings alone and nothing to carry in: kept and marked, as an empty store is
+        guard case .keep(_, let markIt, _) = WebStore.decide(.init(marked: false, keys: 2), scan: .init(), state: state(moved: true)) else { return XCTFail() }
+        XCTAssertTrue(markIt)
+        // money or history: kept, never copied over
+        guard case .keep = WebStore.decide(.init(marked: false, keys: 2, money: true), scan: found, state: state(moved: false)) else { return XCTFail() }
+    }
+
+    func testAfterOpeningAsIsNothingIsMarkedOrSettledUntilACopyIsMade() {
+        let used = fake("Default/file/file", keys: 57)
+        var found = WebStore.Scan(buckets: [used], unread: ["Default/x/x: could not open"])
+        found.fileStores = [used.path]
+        var st = state(moved: false)
+        st.asIs = true
+        // the store got money in the sessions opened as it is: kept, but not marked, so the move is not settled on it
+        guard case .keep(_, let markIt, let settle) = WebStore.decide(.init(marked: false, keys: 5, money: true), scan: found, state: st) else { return XCTFail() }
+        XCTAssertFalse(markIt)
+        XCTAssertFalse(settle)
+        // a store marked before: not settled while anything could still be carried in
+        guard case .keep(_, let m2, let s2) = WebStore.decide(.init(marked: true, keys: 5, money: true), scan: found, state: st) else { return XCTFail() }
+        XCTAssertFalse(m2)
+        XCTAssertFalse(s2)
+        // the store is still the empty one: the wallet is copied in (and the copy clears the hold, WebStoreCheck.run)
+        guard case .copy(let pick, _, _) = WebStore.decide(.init(marked: false, keys: 1), scan: found, state: st) else { return XCTFail() }
+        XCTAssertEqual(pick.path, used.path)
+        // nothing left on the phone that could be carried in: marked and settled as ever
+        guard case .keep(_, _, let s3) = WebStore.decide(.init(marked: true, keys: 5), scan: .init(), state: st) else { return XCTFail() }
+        XCTAssertTrue(s3)
+        guard case .keep(_, let m4, _) = WebStore.decide(.init(marked: false, keys: 5, money: true), scan: .init(), state: st) else { return XCTFail() }
+        XCTAssertTrue(m4)
+        // remembered across launches
+        let suite = "webstore-asis-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(WebStore.state(defaults).asIs)
+        WebStore.noteOpenedAsIs(defaults)
+        XCTAssertTrue(WebStore.state(defaults).asIs)
+        WebStore.clearAsIs(defaults)
+        XCTAssertFalse(WebStore.state(defaults).asIs)
+    }
+
+    func testTheFileStoreThePageUsedIsCopiedEvenBesideAStoreThatCouldNotBeRead() {
+        let used = fake("Default/file/file", keys: 57)
+        var found = WebStore.Scan(buckets: [used], unread: ["Default/x/x: could not open"])
+        found.fileStores = [used.path]
+        guard case .copy(let pick, _, _) = WebStore.decide(.init(marked: false, keys: 0), scan: found, state: state(moved: false)) else { return XCTFail() }
+        XCTAssertEqual(pick.path, used.path)
+        // not the salt's store (or it holds nothing): nothing is taken beside one that could not be read
+        let other = fake("Default/o/o", keys: 57)
+        var unnamed = WebStore.Scan(buckets: [other], unread: ["Default/x/x: could not open"])
+        unnamed.fileStores = ["Default/empty/empty"]
+        guard case .wait = WebStore.decide(.init(marked: false, keys: 0), scan: unnamed, state: state(moved: false)) else { return XCTFail() }
+    }
+
+    /// Before the move settles, the page's store from before a re-keying (with this install's mark) beats the file:// store it was
+    /// copied from: copying that one again would bring back what was spent since and hide what was received. After it, between two
+    /// marked stores, the newest.
+    func testAMarkedStoreOutranksTheStoreItWasCopiedFromAndTheNewestMarkedWins() {
+        let used = fake("Default/file/file", keys: 57, age: 86400)
+        let own = fake("Default/own/own", keys: 40, marked: true, age: 60)
+        var found = WebStore.Scan(buckets: [used, own])
+        found.fileStores = [used.path]
+        var st = state(moved: false)
+        st.pending = used.path
+        guard case .copy(let pick, let others, _) = WebStore.decide(.init(marked: false, keys: 0), scan: found, state: st) else { return XCTFail() }
+        XCTAssertEqual(pick.path, own.path, "the marked store, not the file:// one it was copied from")
+        XCTAssertEqual(others.map(\.path), [used.path])
+        // after the move: two marked stores, the older fuller
+        let older = fake("Default/a/a", keys: 60, marked: true, age: 7200)
+        let newer = fake("Default/b/b", keys: 30, marked: true, age: 10)
+        guard case .copy(let p2, _, _) = WebStore.decide(.init(marked: false, keys: 0), scan: .init(buckets: [older, newer]), state: state(moved: true)) else { return XCTFail() }
+        XCTAssertEqual(p2.path, newer.path, "the newest marked store, not the one with the most keys")
+        XCTAssertEqual(WebStore.candidates([used, older, newer, own], state: state(moved: false)).map(\.path), [newer.path, own.path, older.path, used.path])
+    }
+
+    func testACopyCutOffPartWayIsNeverKeptAndNeverOpenedAsIs() {
+        // the review's case: a copy cut off, nothing on the phone left to copy again
+        let d = WebStore.decide(.init(marked: false, keys: 4, copying: true), scan: .init(), state: state(moved: true))
+        guard case .wait = d else { return XCTFail("a cut-off copy was kept: \(d)") }
+        guard case .wait = WebStore.decide(.init(marked: false, keys: 4, copying: true, money: true), scan: .init(), state: state(moved: false)) else { return XCTFail() }
+        // its source still there: copied again
+        let source = fake("Default/s/s", keys: 57)
+        guard case .copy = WebStore.decide(.init(marked: false, keys: 4, copying: true, money: true), scan: .init(buckets: [source]), state: state(moved: false)) else { return XCTFail() }
+        // and three failed checks in a row never open the page on it
+        XCTAssertTrue(WebStoreCheck.afterFailure(WebStore.failuresBeforeOpening).open)
+        let refused = WebStoreCheck.afterFailure(WebStore.failuresBeforeOpening + 5, copying: true)
+        XCTAssertFalse(refused.open)
+        XCTAssertTrue(refused.message.contains("Nothing was removed"), refused.message)
+        let suite = "webstore-copying-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        WebStore.noteCopying(true, defaults)
+        XCTAssertTrue(WebStore.state(defaults).copying)
+        WebStore.noteCopying(false, defaults)
+        XCTAssertFalse(WebStore.state(defaults).copying)
+    }
+
+    func testTheCheckPageDyingRestartsTheCheckTwiceALaunchThenEndsAsAFailedCheck() {
+        XCTAssertTrue(WebStoreCheck.restartAfterDeath(1))
+        XCTAssertTrue(WebStoreCheck.restartAfterDeath(2))
+        XCTAssertFalse(WebStoreCheck.restartAfterDeath(3))
     }
 
     func testTheScanNamesTheStoresTheSaltPointsAt() throws {

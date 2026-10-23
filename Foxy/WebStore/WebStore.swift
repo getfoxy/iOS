@@ -41,8 +41,18 @@ import CryptoKit
 /// the mark in the page's store: WebKit writes the store to disk after the
 /// copy has answered, in another process, and an app that ends before that
 /// leaves an empty store that is simply copied into again. A store that cannot
-/// be read stops the check rather than being taken as no store, and the check
-/// is never settled while the phone is locked.
+/// be read stops the check rather than being taken as no store (except that
+/// the `file://` store the page was using, read, is still carried in), and the
+/// check is never settled while the phone is locked.
+///
+/// WHAT IS KEPT AS IT IS. Only a page's store that holds money or history (a
+/// pile, the log, words) is kept without a copy; one that holds only settings
+/// (the intro seen, say) is copied into as an empty one is. A store with a
+/// copy cut off part way in it is never kept. And after the page was opened
+/// on its store as it is (three failed checks in a row), nothing is marked or
+/// settled until a copy is made: a page that opened on a near-empty store
+/// would otherwise settle the move on it, and the old wallet could never be
+/// carried in.
 enum WebStore {
 
     // MARK: The page's address
@@ -83,6 +93,14 @@ enum WebStore {
     /// From this many failed checks in a row the page is started on its own
     /// store as it is, with nothing settled, rather than never again.
     static let failuresBeforeOpening = 3
+    /// The page was started on its own store as it is (`failuresBeforeOpening`):
+    /// nothing is marked or settled until a copy is made, or nothing on the
+    /// phone is left that could be.
+    static let asIsKey = "foxy.webStore.asIs"
+    /// A copy into the page's store was started and has not answered (the
+    /// page's process or the app ended part way), or the page's store was
+    /// found holding such a copy: the page is never opened on it as it is.
+    static let copyingKey = "foxy.webStore.copying"
 
     struct State: Equatable {
         var moved: Bool
@@ -90,6 +108,10 @@ enum WebStore {
         var mark: String
         var pending: String? = nil
         var lastCheck: Date? = nil
+        /// The page was opened on its store as it is, and no copy made since.
+        var asIs = false
+        /// A copy into the page's store was left cut off.
+        var copying = false
     }
 
     /// The state, with a mark made the first time it is asked for.
@@ -103,7 +125,26 @@ enum WebStore {
                      taken: Set(defaults.stringArray(forKey: takenKey) ?? []),
                      mark: mark,
                      pending: defaults.string(forKey: pendingKey),
-                     lastCheck: defaults.object(forKey: lastCheckKey) as? Date)
+                     lastCheck: defaults.object(forKey: lastCheckKey) as? Date,
+                     asIs: defaults.bool(forKey: asIsKey),
+                     copying: defaults.bool(forKey: copyingKey))
+    }
+
+    /// The page is started on its own store as it is, after failed checks.
+    static func noteOpenedAsIs(_ defaults: UserDefaults) {
+        defaults.set(true, forKey: asIsKey)
+    }
+
+    /// A copy was made, or nothing is left on the phone to make one from: the
+    /// store may be marked and settled again.
+    static func clearAsIs(_ defaults: UserDefaults) {
+        defaults.removeObject(forKey: asIsKey)
+    }
+
+    /// Whether a copy into the page's store is cut off (started and not
+    /// answered, or seen part way in the store), for the open-as-is rule.
+    static func noteCopying(_ on: Bool, _ defaults: UserDefaults) {
+        if on { defaults.set(true, forKey: copyingKey) } else { defaults.removeObject(forKey: copyingKey) }
     }
 
     /// The page's store was found carrying this install's mark: the move is
@@ -449,6 +490,9 @@ enum WebStore {
         /// A copy into it was started and never finished (the app or the
         /// page's process ended part way): what it holds is a part of a wallet.
         var copying = false
+        /// It holds money or history (`isMoney`: a pile, the log, words), not
+        /// only settings: the one kind of store kept without a copy.
+        var money = false
     }
 
     enum Decision: Equatable {
@@ -464,17 +508,22 @@ enum WebStore {
         case wait(String)
     }
 
-    /// The stores this install may take, best first: the most money and
-    /// history, then the most of the wallet's keys (the fullest), then the
-    /// newest, then the largest. Fullest before newest because a store that
-    /// was opened empty and had a restore run into it is newer than the
-    /// wallet it lost, and holds a fraction of it. A store copied from at an
-    /// earlier check whose copy was never seen on disk (`pending`) may be
-    /// taken again.
+    /// The stores this install may take, best first. A store carrying this
+    /// install's mark first, the newest of them first: it is the page's own
+    /// store from before a re-keying, and the newest is the one the page used
+    /// last (a store it was copied from is older and holds what was spent
+    /// since). Then the unmarked: the most money and history, then the most of
+    /// the wallet's keys (the fullest), then the newest, then the largest.
+    /// Fullest before newest there because a store that was opened empty and
+    /// had a restore run into it is newer than the wallet it lost, and holds a
+    /// fraction of it. A store copied from at an earlier check whose copy was
+    /// never seen on disk (`pending`) may be taken again.
     static func candidates(_ all: [Bucket], state: State) -> [Bucket] {
         all.filter { $0.tier > 0 && (!state.taken.contains($0.path) || $0.path == state.pending)
                      && (!state.moved || $0.contents.marked) }
             .sorted { a, b in
+                if a.contents.marked != b.contents.marked { return a.contents.marked }
+                if a.contents.marked, a.modified != b.modified { return a.modified > b.modified }
                 if a.tier != b.tier { return a.tier > b.tier }
                 if a.contents.keys != b.contents.keys { return a.contents.keys > b.contents.keys }
                 if a.modified != b.modified { return a.modified > b.modified }
@@ -494,24 +543,42 @@ enum WebStore {
     }
 
     static func decide(_ probe: Probe, scan: Scan, state: State) -> Decision {
+        let list = candidates(scan.buckets, state: state)
+        /* Opened as it is after failed checks, and no copy made since: kept without a mark or a settling while anything on the
+         * phone could still be carried in (a store that could not be read, or one this install may take). */
+        let held = state.asIs && (!scan.unread.isEmpty || !list.isEmpty)
+        let heldWords = "; the page was opened on it as it is after failed checks, so nothing is marked or settled until a copy is made"
         if probe.marked {
+            if held { return .keep("the page's store carries this install's mark" + heldWords, mark: false, settle: false) }
             return .keep("the page's store is this install's own (\(probe.keys) keys of the wallet)", mark: false, settle: true)
         }
-        if probe.keys > 0 && !probe.copying {
-            return .keep("the page's store already holds \(probe.keys) keys of the wallet", mark: true, settle: false)
+        // kept as it is only when it holds money or history; a store of settings alone is copied into as an empty one is
+        if probe.keys > 0 && probe.money && !probe.copying {
+            return .keep("the page's store already holds \(probe.keys) keys of the wallet, money or history among them" + (held ? heldWords : ""),
+                         mark: !held, settle: false)
         }
-        // from here the page's store is empty: nothing is taken as no store while one could not be read
-        if !scan.unread.isEmpty {
-            return .wait("the page's store is empty and \(scan.unread.count) store(s) on the phone could not be read")
-        }
-        let list = candidates(scan.buckets, state: state)
-        // before the move: the file:// store the page was using, when it holds the wallet's money or history
-        if !state.moved, let used = list.first(where: { scan.fileStores.contains($0.path) && $0.tier == 2 }) {
+        let what = probe.copying ? "holds a copy cut off part way" : probe.keys > 0 ? "holds no money or history" : "is empty"
+        // before the move: the file:// store the page was using, when it holds the wallet's money or history and was read,
+        // even beside a store that could not be read; never while a store carries this install's mark (the page's own from before)
+        if !state.moved, !list.contains(where: { $0.contents.marked }),
+           let used = list.first(where: { scan.fileStores.contains($0.path) && $0.tier == 2 }) {
             let others = list.filter { $0.path != used.path && $0.tier == 2 }
             return .copy(used, others: others,
-                         why: "the page's store at \(origin) is new and empty, and this is the store the page was using at file:// (named by WebKit's salt)")
+                         why: "the page's store at \(origin) \(what), and this is the store the page was using at file:// (named by WebKit's salt)")
+        }
+        // from here: nothing is taken as no store while one could not be read
+        if !scan.unread.isEmpty {
+            return .wait("the page's store \(what) and \(scan.unread.count) store(s) on the phone could not be read")
         }
         guard let pick = list.first else {
+            // a copy cut off part way is never kept as the wallet
+            if probe.copying {
+                return .wait("the page's store holds a copy cut off part way and the store it came from is not on the phone to copy again")
+            }
+            if probe.keys > 0 {
+                return .keep("the page's store holds \(probe.keys) keys of the wallet, no money or history, and no store of this install's is elsewhere",
+                             mark: true, settle: false)
+            }
             return .keep(state.moved ? "the page's store is empty and no store of this install's is elsewhere"
                                      : "the page's store is empty and nothing on the phone holds a wallet (a fresh install)",
                          mark: true, settle: false)
@@ -519,12 +586,12 @@ enum WebStore {
         let others = list.dropFirst().filter { $0.tier == 2 }
         let ofHow = list.count == 1 ? "the only store" : "the fullest of \(list.count) stores"
         let why: String
-        if state.moved {
-            why = "the page's store is empty, and this is \(ofHow) carrying this install's mark: the page's store from before"
+        if state.moved || pick.contents.marked {
+            why = "the page's store \(what), and this is \(pick.contents.marked && list.count > 1 ? "the newest of the stores" : ofHow) carrying this install's mark: the page's store from before"
         } else if !scan.fileStores.isEmpty {
-            why = "the page's store at \(origin) is new and empty, the store the page was using at file:// holds no money or history, and this is \(ofHow) on the phone holding the wallet"
+            why = "the page's store at \(origin) \(what), the store the page was using at file:// holds no money or history, and this is \(ofHow) on the phone holding the wallet"
         } else {
-            why = "the page's store at \(origin) is new and empty, and this is \(ofHow) on the phone holding the wallet"
+            why = "the page's store at \(origin) \(what), and this is \(ofHow) on the phone holding the wallet"
         }
         return .copy(pick, others: Array(others), why: why)
     }
@@ -548,7 +615,8 @@ enum WebStore {
     /// Takes `notTheWallet`, `emptyValues`, `markKey` and `mark` as arguments.
     static let countScript = """
     var skip = new Set(notTheWallet), empty = new Set(emptyValues);
-    function walletKeys() {
+    // `money`: only the keys that are money or history (`isMoney`: a pile, the log, words)
+    function walletKeys(money) {
       var n = 0;
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
@@ -557,6 +625,7 @@ enum WebStore {
         if (name.indexOf('foxy.') !== 0 || skip.has(name)) continue;
         var v = localStorage.getItem(k);
         if (v === null || empty.has(v)) continue;
+        if (money && !(name === 'foxy.cashu.proofs' || name.indexOf('foxy.cashu.proofs.') === 0 || name === 'foxy.cashu.log' || name === 'foxy.seed.v1')) continue;
         n++;
       }
       return n;
@@ -566,7 +635,7 @@ enum WebStore {
 
     static let checkScript = countScript + """
     var at = localStorage.getItem(markKey);
-    return { marked: at === mark, copying: at === 'copying:' + mark, keys: walletKeys(), items: localStorage.length };
+    return { marked: at === mark, copying: at === 'copying:' + mark, keys: walletKeys(), money: walletKeys(true) > 0, items: localStorage.length };
     """
 
     static let markScript = """
@@ -574,8 +643,9 @@ enum WebStore {
     return localStorage.getItem(markKey) === mark;
     """
 
-    /// Copies `items` in only while the store is still empty of the wallet
-    /// and unmarked, reads every one back, then marks it. While it copies the
+    /// Copies `items` in only while the store still holds no money or history
+    /// and is unmarked (settings alone are written over), reads every one
+    /// back, then marks it. While it copies the
     /// mark says `copying:`, so a copy cut off part way is seen as one at the
     /// next check, cleared and made again, never kept as a wallet. Any failure
     /// takes back what it set, so the store is left as it was found.
@@ -583,13 +653,15 @@ enum WebStore {
     var at = localStorage.getItem(markKey);
     if (at === mark) return { skipped: 'marked' };
     if (at === 'copying:' + mark) localStorage.clear();
-    else if (walletKeys() > 0) return { skipped: 'holds' };
-    var set = [];
+    else if (walletKeys(true) > 0) return { skipped: 'holds' };
+    var set = [], was = {};
     try {
       localStorage.setItem(markKey, 'copying:' + mark);
       // the mark is this check's to write, last; a mark in the items is the old store's
       for (var i = 0; i < items.length; i++) {
         if (items[i][0] === markKey) continue;
+        // (a setting the store held already is put back as it was if the copy fails)
+        if (!Object.prototype.hasOwnProperty.call(was, items[i][0])) was[items[i][0]] = localStorage.getItem(items[i][0]);
         localStorage.setItem(items[i][0], items[i][1]);
         set.push(items[i][0]);
       }
@@ -600,7 +672,9 @@ enum WebStore {
       localStorage.setItem(markKey, mark);
       return { copied: set.length, keys: walletKeys() };
     } catch (e) {
-      for (var r = 0; r < set.length; r++) { try { localStorage.removeItem(set[r]); } catch (x) {} }
+      for (var r = 0; r < set.length; r++) {
+        try { if (was[set[r]] === null) localStorage.removeItem(set[r]); else localStorage.setItem(set[r], was[set[r]]); } catch (x) {}
+      }
       try { localStorage.removeItem(markKey); } catch (x) {}
       return { error: String((e && e.name ? e.name + ': ' + e.message : e)) };
     }

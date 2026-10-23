@@ -343,5 +343,26 @@ ok(/if \(!this\._lockedOnce && this\.pinLock\) this\.pinLock\(\);/.test(read('bu
 ok(/\}, 13000\);/.test(read('build/app/19-update-keypad-balance.js')) && /\}, 13000\);/.test(read('Web/foxy-receive-progress.js')),
    'STOP WAITING appears after thirteen seconds, not eight');
 
+// the second review's native findings, pinned where the rule is not a pure function the Swift tests can reach
+{
+  const view = read('Foxy/FoxyWebView.swift');
+  const tor = read('Foxy/Tor/TorService.swift');
+  const routeSrc = read('Foxy/Network/Route.swift');
+  ok(/@objc private func appBecameActive\(\) \{[\s\S]{0,1400}?if let token = unlockWait, UIApplication\.shared\.isProtectedDataAvailable \{\s*NotificationCenter\.default\.removeObserver\(token\)\s*unlockWait = nil[\s\S]{0,160}?openStore\(\)/.test(view),
+     'a store check waiting for the unlock starts when Foxy comes back to the front unlocked, not only on the unlock’s notice');
+  ok(/if WebStore\.isCheck\(webView\.url\) \{\s*checkDeaths \+= 1\s*let failures = WebStore\.noteFailure\(\.standard\)\s*if WebStoreCheck\.restartAfterDeath\(checkDeaths\) \{[\s\S]{0,200}?openStore\(\)\s*return\s*\}[\s\S]{0,200}?storeFailed\(/.test(view),
+     'the store check’s page dying counts a failed check, and starts the check again a few times a launch, then ends as a failed check does');
+  ok(/let next = WebStoreCheck\.afterFailure\(failures, copying: WebStore\.state\(\.standard\)\.copying\)\s*if next\.open \{[\s\S]{0,400}?WebStore\.noteOpenedAsIs\(\.standard\)\s*loadStaged\(\)/.test(view),
+     'opened as it is after failed checks: never on a copy cut off part way, and nothing marked or settled after it until a copy is made');
+  ok(/guard TorReturn\.reconnectsDeadLink\(relinked: deadLinks\) else \{[\s\S]{0,500}?return\s*\}\s*answered = true\s*deadLinks \+= 1[\s\S]{0,600}?keepClock = true[^\n]*\n\s*if deadline == nil \{ armDeadline\(\) \}\s*connectControl\(\)/.test(tor)
+     && /let wait = TorReturn\.linkAnswerWait\(onReturn: setUpOnReturn, relinked: deadLinks\)/.test(tor)
+     && /deadLinks = 0\s*\} else \{[^\n]*\n[^\n]*\n\s*setUpOnReturn = false\s*\}/.test(tor),
+     'a silent control link is connected again twice a set-up at most, the set-up’s clock kept, and the new link given the full wait');
+  ok(/if args\.contains\("DisableNetwork=1"\) \{ Route\.dropWarm\(\) \}/.test(tor) && /\n    static func dropWarm\(\) \{/.test(routeSrc),
+     'Tor’s network going off lets go of the spare’s kept connection');
+  ok(/const picked = !send && !xm && !!\(this\.recvPicked && this\.recvPicked\(usd \? 'usd' : 'sat'\)\);[\s\S]{0,300}?picked \? \{ kept: true \} : \{\}/.test(read('build/app/26f-flashcard.js'))
+     && /kept: opts\.kept === true \};/.test(read('build/wallet/08a-flashcard.js')),
+     'a card’s payment to a receive whose unit the person picked is kept in that unit, offline too');
+}
 console.log('\n' + (failed ? failed + ' kept-token check(s) failed' : 'all kept-token checks pass'));
 process.exit(failed ? 1 : 0);

@@ -57,8 +57,14 @@ records of one-time moves, with a value that is not empty, `[]`, `{}`, `null`,
 `Library/WebKit` is read from a copy, its database and write-ahead log cloned
 into `tmp/` and opened there, and counted the same way. Then:
 
-- the store carries the mark, or holds something of the wallet's: it is the
-  page's store, and is marked if it was not;
+- the store carries the mark, or holds money or history (a proof pile, the
+  log, words): it is the page's store, and is marked if it was not. A store
+  holding only settings (the intro seen, say) is not kept for that: it is
+  treated as an empty one, and a copy writes over it;
+- before the move is settled, the store the page was using at `file://` (below)
+  holds money or history and was read: it is copied in, even when another store
+  on the phone could not be read, unless a store carrying this install's mark
+  is on the phone;
 - it is empty and a store on the phone could not be read: nothing is decided
   or recorded, and the page is not started (below);
 - it is empty: the best store this install may take is copied in whole, key by
@@ -69,7 +75,11 @@ into `tmp/` and opened there, and counted the same way. Then:
   URL-safe base64 with no padding, so the folder is computed, not guessed.
   Otherwise, and before the move, any store on the phone; after the move, only
   a store carrying the mark (the page's own store from before a re-keying), and
-  never one taken before. Best is the one holding money or history, then the
+  never one taken before. Best is a store carrying the mark, the newest of them
+  (the page's own from before a re-keying, which beats the older store it was
+  copied from, before the move settles as after: copying that one again would
+  bring back what was spent since). Among unmarked stores best is the one
+  holding money or history, then the
   most keys (the fullest: a store opened empty and restored into is newer than
   the wallet it lost and holds a fraction of it), then the newest, then the
   largest. Any other store it could have taken that holds money or history is
@@ -91,7 +101,10 @@ and left as it is.
 
 While a copy is under way the mark reads `copying:` and the mark, so a copy cut
 off part way (the app or the page's process ended) is seen at the next check,
-cleared and made again, and never kept as a wallet. Nothing is merged and
+cleared and made again, and never kept as a wallet: with no store left to copy
+it from, the check waits rather than keep it. `foxy.webStore.copying` says such
+a copy may be in the page's store (a copy started and not answered, or one
+seen part way), and the page is never opened on it as it is (below). Nothing is merged and
 nothing is deleted. Values are read as WebKit writes
 them, a blob of UTF-16 code units, little-endian, or as text. The mark is
 `foxy-store-mark`, a random value kept in `UserDefaults` as `foxy.webStore.mark`;
@@ -112,8 +125,18 @@ its stored wallet"); the next launch tries again. The second time the message
 says that a third failure opens Foxy without it; from the third failed check in
 a row (`foxy.webStore.failures`) the page starts on its own store as it is, with
 nothing recorded and every store left on the phone, and each launch checks
-again, so a damaged store never locks the person out. While the phone is locked
-the page waits for the unlock, and a check the lock interrupts decides nothing
+again, so a damaged store never locks the person out. After that
+(`foxy.webStore.asIs`) nothing is marked or settled until a copy is made, or
+until nothing on the phone could still be carried in: a page opened on a
+near-empty store would otherwise settle the move on it, and the old wallet
+could never be taken. The one exception to opening as it is: a store holding a
+copy cut off part way is never opened on (`foxy.webStore.copying`); Foxy says
+it could not finish carrying the wallet over. The check's page ending (its
+process died) counts as a failed check, and starts the check again twice a
+launch at most. While the phone is locked
+the page waits for the unlock (from the unlock's notice, or from Foxy coming
+back to the front unlocked, which a suspended app sees when it missed the
+notice), and a check the lock interrupts decides nothing
 and is made again after it. A database WebKit made with no table in it holds
 nothing; one that cannot be opened or read is a store that could not be read.
 

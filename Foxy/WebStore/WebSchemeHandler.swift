@@ -225,8 +225,16 @@ enum WebStoreCheck {
     /// started anyway. From `failuresBeforeOpening` failed checks in a row the
     /// page starts on its own store as it is, with nothing recorded, so a
     /// store that can never be read does not lock the person out; every store
-    /// is left on the phone as it is, and each launch checks again.
-    static func afterFailure(_ failures: Int) -> (open: Bool, message: String) {
+    /// is left on the phone as it is, and each launch checks again (and marks
+    /// or settles nothing until a copy is made, `WebStore.asIsKey`).
+    /// `copying`: the page's store holds a copy cut off part way
+    /// (`WebStore.copyingKey`). The page is never opened on that: it is a part
+    /// of a wallet, which the next check would clear to copy again, taking
+    /// whatever was received in it meanwhile.
+    static func afterFailure(_ failures: Int, copying: Bool = false) -> (open: Bool, message: String) {
+        if copying {
+            return (false, "Foxy could not finish carrying its stored wallet over.\n\nNothing was removed. Close Foxy and open it again.")
+        }
         if failures >= WebStore.failuresBeforeOpening {
             return (true, "")
         }
@@ -235,6 +243,14 @@ enum WebStoreCheck {
             : ""
         return (false, "Foxy could not open its stored wallet.\n\nNothing was changed or removed. Close Foxy and open it again." + again)
     }
+
+    /// The check's page ending (its process died) restarts the check this many
+    /// times in a launch, each counted as a failed check; after that the launch
+    /// goes the way a failed check does (`afterFailure`), never round again.
+    static let restartsAfterDeath = 2
+
+    /// Whether the check starts again after its page's `deaths`th death this launch.
+    static func restartAfterDeath(_ deaths: Int) -> Bool { deaths <= restartsAfterDeath }
 
     static func run(in webView: WKWebView, scan: WebStore.Scan, state: WebStore.State, setup: Setup,
                     log: @escaping (String) -> Void = { print("[foxy] web store: " + $0) },
@@ -258,8 +274,10 @@ enum WebStoreCheck {
                 return
             }
             let copying = found["copying"] as? Bool ?? false
+            let money = found["money"] as? Bool ?? false
             if copying { log("the page's store holds a copy that was cut off part way; it is made again") }
-            switch WebStore.decide(WebStore.Probe(marked: marked, keys: keys, copying: copying), scan: scan, state: state) {
+            WebStore.noteCopying(copying, setup.defaults)
+            switch WebStore.decide(WebStore.Probe(marked: marked, keys: keys, copying: copying, money: money), scan: scan, state: state) {
             case .wait(let why):
                 log("NOTHING DECIDED: \(why); the page is not started on an empty store")
                 done(.failed("a stored wallet could not be read"))
@@ -268,6 +286,8 @@ enum WebStoreCheck {
                 for other in WebStore.changedSince(scan, state: state) {
                     log("ANOTHER STORE CHANGED SINCE THE LAST LAUNCH and holds money or history; it is left as it is: \(WebStore.describe(other))")
                 }
+                // marked or settled: nothing is held back any more for a page opened as it is
+                if mark || settle { WebStore.clearAsIs(setup.defaults) }
                 if settle {
                     if let pending = state.pending { log("the copy from \(WebStore.short(pending)) is on disk: that store is taken") }
                     WebStore.noteSettled(setup.defaults)
@@ -296,12 +316,16 @@ enum WebStoreCheck {
                         }
                         var copyArgs = args
                         copyArgs["items"] = got.items
+                        // until it answers, the store may hold a part of the copy: never opened on as it is
+                        WebStore.noteCopying(true, setup.defaults)
                         webView.callAsyncJavaScript(WebStore.copyScript, arguments: copyArgs, in: nil, in: .page) { copied in
                             guard case .success(let value) = copied, let r = value as? [String: Any] else {
                                 log("the copy did not answer; nothing is taken as copied")
                                 done(.failed("the stored wallet could not be copied"))
                                 return
                             }
+                            // answered: copied whole, skipped before writing, or taken back
+                            WebStore.noteCopying(false, setup.defaults)
                             if let skipped = r["skipped"] as? String {
                                 log("nothing copied: the page's store changed under the check (\(skipped))")
                                 WebStore.noteChecked(setup.defaults)
@@ -315,6 +339,7 @@ enum WebStoreCheck {
                             }
                             // taken once a later launch sees the copy, marked, on disk
                             WebStore.notePending(pick.path, setup.defaults)
+                            WebStore.clearAsIs(setup.defaults)
                             WebStore.noteChecked(setup.defaults)
                             log("took \(n) items into \(WebStore.origin) from \(WebStore.describe(pick)): \(why)")
                             if got.repaired > 0 {

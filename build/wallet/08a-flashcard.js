@@ -6197,10 +6197,11 @@
     }
     /* Whether a wallet that holds just the other unit takes this in that unit once it has settled (08c-units.js): sats paid to
      * one that holds dollars, or dollars paid to one that holds bitcoin. Decided before the entry is written, so that the entry
-     * says so from the first, as a request's does. */
+     * says so from the first, as a request's does. `opts.kept`: the till's person picked this receive's unit for it (the app's
+     * `recvPicked`), so what is paid in it stays in it, as a request's `kept` does. */
     var owes = false;
     try {
-      var p = { id: row.id, unit: unit, mint: mintOf(w), purpose: 'card-offline', terms: opts.terms || null };
+      var p = { id: row.id, unit: unit, mint: mintOf(w), purpose: 'card-offline', terms: opts.terms || null, kept: opts.kept === true };
       owes = convertDue(p) && convertOwe(p, worth);
     } catch (eConv) { console.warn('[foxy] card: a payment kept offline was not set to be swapped into the unit held:', (eConv && eConv.message) || eConv); }
     try {
@@ -7824,18 +7825,29 @@
       var lock = quoteLock(dest);
       return withTimeout(createQuote(dest, issue, undefined, lock), 25000, hostOf(to) + ' invoice').then(function (mq) {
         if (lock) mq.foxyLock = lock;
-        return FoxyWallet.quoteFee(mq.request, { unit: pu }).then(function (kq) {
-          if (!kq) throw new Error(hostOf(home) + ' could not say what paying ' + hostOf(to) + ' costs.');
-          var mn = FoxyWallet.payNeed(kq.amount, kq.feeReserve, { unit: pu });
-          var total = mn ? mn.need : kq.amount + kq.feeReserve;
-          var worth = Math.round(kq.amount * want / issue);
-          console.log('[foxy] card: ' + cardSaid(land, cu) + ' to go on a card at ' + hostOf(to) + ' (' + cardSaid(issue, cu) + ' asked there); '
-                      + hostOf(home) + ' pays it with at most ' + cardSaid(total, pu));
-          return { mint: to, home: home, cardUnit: cu, payUnit: pu, amount: want, land: land, issue: issue, invoice: mq.request,
-                   mintQuote: mq, melt: kq, total: total, worth: worth, fee: Math.max(0, total - worth),
-                   short: !!(mn && !mn.ok), why: (mn && !mn.ok) ? mn.why : '', at: Date.now() };
-        });
+        return cardLoadCrossPay({ mint: to, home: home, cardUnit: cu, amount: want, land: land, issue: issue, invoice: mq.request, mintQuote: mq }, pu);
       });
+    });
+  }
+
+  /* The plan's invoice at the card's mint, paid from this phone's balance in `pu`: this phone's mint's melt quote for it, the most that
+   * leaves this phone (`total`), and the fee over what goes on the card (`land`, the pieces as cut, which can differ from the amount
+   * asked: `worth` is what that is worth in `pu`). Also for a plan already made, quoted again in this phone's other balance
+   * (`cardLoadRepay`, 21a-flashcard.js): the same invoice, nothing asked of the card's mint again. */
+  function cardLoadCrossPay(base, pu) {
+    var to = base.mint, home = base.home, cu = unitOf(base.cardUnit) || 'sat';
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    if (canonicalMint(mintUrl || '') !== home) return Promise.reject(new Error('This phone is not at ' + hostOf(home) + ' now.'));
+    return FoxyWallet.quoteFee(base.invoice, { unit: pu }).then(function (kq) {
+      if (!kq) throw new Error(hostOf(home) + ' could not say what paying ' + hostOf(to) + ' costs.');
+      var mn = FoxyWallet.payNeed(kq.amount, kq.feeReserve, { unit: pu });
+      var total = mn ? mn.need : kq.amount + kq.feeReserve;
+      var worth = Math.round(kq.amount * base.land / base.issue);
+      console.log('[foxy] card: ' + cardSaid(base.land, cu) + ' to go on a card at ' + hostOf(to) + ' (' + cardSaid(base.issue, cu) + ' asked there); '
+                  + hostOf(home) + ' pays it with at most ' + cardSaid(total, pu));
+      return { mint: to, home: home, cardUnit: cu, payUnit: pu, amount: base.amount, land: base.land, issue: base.issue, invoice: base.invoice,
+               mintQuote: base.mintQuote, melt: kq, total: total, worth: worth, fee: Math.max(0, total - worth),
+               short: !!(mn && !mn.ok), why: (mn && !mn.ok) ? mn.why : '', at: Date.now() };
     });
   }
 
