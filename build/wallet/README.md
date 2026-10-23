@@ -24,7 +24,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `13-restore.js` | 464 | `scanSeed`, `adoptScan` |
 | `14-moving-between-mints.js` | 719 | `mintHost`, `moveQuote`, `sweepQuote`, `transferQuote`, `moveRun`, `carryBegin`, `carryEnd`, `carryJobsOpen`, `carryHome`, `carryRefund`, `carryResume`, `crossingsWaiting`, `catchUpCrossings`, `pendingMove`, `pendingMoves`, `finishMove` |
 | `15-receiving.js` | 1270 | `invoice`, `watchKick`, `watch`, `claim`, `_claimOnce`, `sweepQuotes`, `_sweepHeldNow`, `_sweepQuotesOnce`, `retryRefusedClaim`, `recoverIssued`, `recoverSwaps`, `_recoverSwapsOnce`, `pendingQuotes`, `quarantined`, `unquarantine`, `quarantinedSats`, `quarantinedUnknown`, `clearQuarantine`, `pendingMelts`, `askMint`, `sweepMelts`, `_sweepMeltsOnce` |
-| `16-sending.js` | 726 | `pay`, `_meltChangeFits`, `lookupLnurl`, `payLnurl`, `payAddress` |
+| `16-sending.js` | 733 | `pay`, `_meltChangeFits`, `lookupLnurl`, `payLnurl`, `payAddress` |
 | `16a-onchain.js` | 743 | `onchainLimits`, `onchainKnown`, `onchainAddress`, `onchainSeen`, `onchainClaim`, `onchainWatching`, `onchainDue`, `onchainAsked`, `onchainQuote`, `onchainNeed`, `onchainPay`, `onchainSending`, `onchainFollow`, `bip21`, `readAddress` |
 | `16b-two-balances.js` | 1075 | `mintUnits`, `twoUnits`, `walletIn`, `unitKeysOffline`, `walletChoice`, `setWalletChoice`, `balanceOf`, `heldIn`, `recoveringIn`, `topUpFeesIn`, `mintRate`, `quoteFeeBoth`, `_sendUnitToken`, `_swapPass`, `_swapPaceWait`, `_swapPaced`, `_swapNote`, `swapProbe`, `swapQuote`, `swapRun`, `unitSwapsPending`, `swapUnits`, `convertOne`, `_convertDue`, `convertWantsPrice`, `convertsOwed` |
 | `17-backup.js` | 138 | `reconcile` |

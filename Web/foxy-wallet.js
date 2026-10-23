@@ -23378,6 +23378,13 @@
              * reserve less the change, which left out the melt inputs' own fee
              * (NUT-02) and the split's — about 2 sats low on a live mint. */
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
+            /* One line for the log: what the mint kept of its reserve, and what came back. The owner asked after a card paid
+             * his dollar code whether Forge had charged anything, and the log said only what was reserved. */
+            try {
+              console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: paid ' + formatAmount(quote.amount, unit) + ', reserved '
+                + formatAmount(Math.max(0, Number(quote.fee_reserve) || 0), unit) + ', the mint kept ' + formatAmount(Math.max(0, feeSats), unit)
+                + ', ' + formatAmount(sumProofs(change || []), unit) + ' back as change');
+            } catch (eLog) { /* a line for the log, nothing more */ }
             if (heldId) FoxyWallet.cardOutDone(heldId);
             // in the unit paid from (hard rule 4): a usd row is cents, with sats at 0
             logTx(unitRow(unit, swapMarks(swapId ? { swap: swapId, mintRate: (opts && opts.mintRate) || rateHere, swapCard: (opts && opts.swapCard) || undefined } : null, {
