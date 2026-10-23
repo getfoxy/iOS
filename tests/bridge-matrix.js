@@ -218,9 +218,11 @@ if (!failures.length) ok('every row matches its handler, and every handler its r
 /* ---- 4. the frame gate, which covers all of them -------------------------- */
 
 const frame = body('answers');
-if (!frame || !/isMainFrame && originProtocol == "file"/.test(frame)) {
-  fail('FoxyBridge.answers no longer refuses subframes and non-file origins');
-} else ok('every message still has to come from the main frame of a file: page');
+const store = fs.readFileSync(path.join(ROOT, 'Foxy', 'WebStore', 'WebStore.swift'), 'utf8');
+if (!frame || !/isMainFrame && originProtocol == WebStore\.scheme && originHost == WebStore\.host/.test(frame)
+    || !/static let scheme = "foxy-app"\n/.test(store) || !/static let host = "wallet"\n/.test(store)) {
+  fail('FoxyBridge.answers no longer refuses subframes and every origin but foxy-app://wallet');
+} else ok('every message still has to come from the main frame of the page at foxy-app://wallet');
 
 /* ---- what this does not check -------------------------------------------- */
 

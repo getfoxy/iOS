@@ -13,6 +13,22 @@ final class WebHostController: UIViewController {
     private let bridge = FoxyBridge()
     private var splash: UIImageView?
 
+    /* The page is served at foxy-app://wallet (WebStore), from the staged
+     * folder only, so its storage is keyed by a name that no move of the app's
+     * folder can change. */
+    private let pageServer = WebSchemeHandler(root: { WebHostController.webDirectory })
+    /// The launch's check of the page's store (WebStore): the stores on the
+    /// phone, read off the main queue, and whether the check page has loaded.
+    private var storeScan: (WebStore.Scan, WebStore.State)?
+    private var checkPageLoaded = false
+    /// Which check is current; an answer for an older one is dropped.
+    private var storeRun = 0
+    private var unlockWait: NSObjectProtocol?
+    /// A check is under way: only then may the web view be on the check page.
+    private var checking = false
+    /// The check page's load, to tell its failure from the page's own.
+    private var checkNavigation: WKNavigation?
+
     /// The green at the top of the splash art. Everything that could show a
     /// bare frame — the host view, the web view before it paints — is set to
     /// this rather than black, so there is nothing dark to flash.
@@ -64,6 +80,8 @@ final class WebHostController: UIViewController {
         // WebAudio; without this iOS refuses to start the context until a tap
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(bridge, name: "foxy")
+        // the page's own address, answered here and never by the network
+        config.setURLSchemeHandler(pageServer, forURLScheme: WebStore.scheme)
 
         // The proofs live in this store, and they are the money. By default iOS copies it
         // into iCloud and iTunes backups, so the whole wallet leaves the phone
@@ -393,7 +411,7 @@ final class WebHostController: UIViewController {
     private func load() {
         // before the page's first load writes any storage (SeedMigrationWindow)
         SeedMigrationWindow.noteLaunch()
-        guard let index = stageWebFiles() else {
+        guard stageWebFiles() != nil else {
             showMissingBundle()
             return
         }
@@ -413,7 +431,7 @@ final class WebHostController: UIViewController {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "FoxyNetBlockOff") {
             DebugLog.both("[netblock]", "rule list DISABLED for a control run")
-            loadStaged(index)
+            openStore()
             return
         }
         #endif
@@ -432,16 +450,98 @@ final class WebHostController: UIViewController {
                     return
                 }
                 self.webView.configuration.userContentController.add(list)
-                self.loadStaged(index)
+                self.openStore()
             }
         }
     }
 
-    private func loadStaged(_ index: URL) {
-        let readRoot = index.deletingLastPathComponent()
-        print("[foxy] loading", index.path)
+    /// The page, once its store has been checked (openStore).
+    private func loadStaged() {
+        print("[foxy] loading", WebStore.indexURL.absoluteString)
         SeedVault.pageWillLoad()                  // nothing kept for the page before carries over
-        webView.loadFileURL(index, allowingReadAccessTo: readRoot)
+        webView.load(URLRequest(url: WebStore.indexURL))
+    }
+
+    /// Before the page runs: is its store the wallet's? (WebStore)
+    ///
+    /// A blank page at the page's own address is loaded first, and while it
+    /// loads the stores on the phone are read off the main queue. When both
+    /// are there, WebStoreCheck asks the page's store whether it holds the
+    /// wallet, carries a stored wallet in if it must, and only then is the
+    /// page loaded. A store that cannot be read or carried stops the launch
+    /// with a message, rather than starting the page on an empty wallet; from
+    /// the third such launch in a row the page starts on its own store as it
+    /// is, with nothing recorded (WebStoreCheck.afterFailure).
+    ///
+    /// Not while the phone is locked: the stores are unreadable then (their
+    /// protection is completeUnlessOpen), and a page started then would find
+    /// nothing. It waits for the unlock.
+    private func openStore() {
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            print("[foxy] web store: the phone is locked; the page waits for it to be unlocked")
+            guard unlockWait == nil else { return }
+            unlockWait = NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                if let token = self.unlockWait { NotificationCenter.default.removeObserver(token) }
+                self.unlockWait = nil
+                self.openStore()
+            }
+            return
+        }
+        guard let setup = Self.storeSetup else { loadStaged(); return }
+        storeRun += 1
+        let run = storeRun
+        storeScan = nil
+        checkPageLoaded = false
+        checking = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let scan = WebStoreCheck.scan(setup)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, run == self.storeRun else { return }
+                self.storeScan = scan
+                self.checkStore(setup)
+            }
+        }
+        checkNavigation = webView.load(URLRequest(url: WebStore.checkURL))
+    }
+
+    private static var storeSetup: WebStoreCheck.Setup? {
+        WebStoreCheck.Setup.live(unlocked: { UIApplication.shared.isProtectedDataAvailable })
+    }
+
+    private func checkStore(_ setup: WebStoreCheck.Setup? = WebHostController.storeSetup) {
+        guard checkPageLoaded, let found = storeScan, let setup else { return }
+        storeScan = nil                          // one check per launch
+        let run = storeRun
+        WebStoreCheck.run(in: webView, scan: found.0, state: found.1, setup: setup) { [weak self] result in
+            guard let self, run == self.storeRun else { return }
+            self.storeCheckEnded(result)
+        }
+    }
+
+    /// The end of a check: the page, a wait for the unlock, or a message.
+    private func storeCheckEnded(_ result: WebStoreCheck.Result) {
+        checking = false
+        checkNavigation = nil
+        switch result {
+        case .ready:
+            loadStaged()
+        case .locked:
+            openStore()                          // waits for the unlock, then checks again
+        case .failed(let why):
+            let failures = WebStore.noteFailure(.standard)
+            let next = WebStoreCheck.afterFailure(failures)
+            if next.open {
+                print("[foxy] web store: THE CHECK FAILED \(failures) TIMES IN A ROW (\(why)); the page starts on its own store as it is, nothing recorded, every store left on the phone; the next launch checks again")
+                loadStaged()
+                return
+            }
+            print("[foxy] web store: THE PAGE IS NOT STARTED (\(failures) failed check(s) in a row):", why)
+            hideSplash()
+            showFatal(next.message)
+        }
     }
 
     private func showFatal(_ text: String) {
@@ -549,7 +649,7 @@ final class WebHostController: UIViewController {
     /// Called when the controller appears and again when the page finishes loading, so
     /// a link that launched Foxy lands as soon as there is something to land on.
     func flushDeepLink() {
-        guard let hash = Self.pendingDeepLink, let webView, webView.url != nil else { return }
+        guard let hash = Self.pendingDeepLink, let webView, WebStore.isIndex(webView.url) else { return }
         Self.pendingDeepLink = nil
         print("[deeplink] #" + hash)
         /* applyDeepLink clears the hash once it has acted, so the same link twice in a
@@ -1332,6 +1432,16 @@ final class WebHostController: UIViewController {
     /// WKWebView keeps localStorage under Library/WebKit. Both attributes are
     /// applied to the directory and to everything already inside it, since the
     /// store exists before this runs on every launch after the first.
+    ///
+    /// Except WebKit's `salt` files, which are kept until the first unlock
+    /// after a restart (the protection most of the app's files have) rather
+    /// than unreadable whenever the phone is locked. WebKit names each origin's
+    /// store folder with a hash salted by that file, and a salt it cannot read
+    /// it deletes and makes again: every store is then looked for under a new
+    /// name and found empty, while the old one sits beside it. That is how a
+    /// wallet came up empty after an install, if WebKit started with the phone
+    /// locked (WebStore checks for it whatever the cause). The salt is not the
+    /// wallet's and says nothing of it; it only scrambles folder names.
     static func protectWebStore() {
         let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
         guard let root = lib.first?.appendingPathComponent("WebKit") else { return }
@@ -1343,9 +1453,11 @@ final class WebHostController: UIViewController {
             do { try u.setResourceValues(values) }
             catch { print("[foxy] could not exclude from backup:", url.lastPathComponent, error) }
 
+            let protection: FileProtectionType = url.lastPathComponent == "salt"
+                ? .completeUntilFirstUserAuthentication : .completeUnlessOpen
             do {
                 try FileManager.default.setAttributes(
-                    [.protectionKey: FileProtectionType.completeUnlessOpen],
+                    [.protectionKey: protection],
                     ofItemAtPath: url.path)
             } catch {
                 print("[foxy] could not set file protection:", url.lastPathComponent, error)
@@ -1359,7 +1471,7 @@ final class WebHostController: UIViewController {
         if let walk = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
             for case let child as URL in walk { apply(child) }
         }
-        print("[foxy] web store excluded from backups, protection completeUnlessOpen")
+        print("[foxy] web store excluded from backups, protection completeUnlessOpen (WebKit's salt: until first unlock)")
     }
 }
 
@@ -1368,6 +1480,12 @@ extension WebHostController: WKNavigationDelegate {
     /// with it, so a fresh one is loaded, and the seed kept for its secrets and
     /// any typed words go too. Without this the screen was left blank.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        // ended during the store check: the check starts again, with nothing of the last one's
+        if WebStore.isCheck(webView.url) {
+            print("[foxy] the store check's page ended; checking again")
+            openStore()
+            return
+        }
         print("[foxy] the page's process ended; loading it again")
         SeedVault.forgetUnlock()
         bridge.pageGone()
@@ -1394,23 +1512,27 @@ extension WebHostController: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
-        // The staged copy under Library/Caches/web, and nothing above it. A
-        // prefix of the real directory, both sides standardized and with
-        // symlinks resolved: a substring test also let through any path that
-        // merely contained "/Caches/web/", and "web/../" climbed out of it.
-        if url.isFileURL, url.pathExtension == "html", let dir = Self.webDirectory {
-            let root = dir.standardizedFileURL.resolvingSymlinksInPath().path
-            let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-            if path.hasPrefix(root.hasSuffix("/") ? root : root + "/") {
-                decisionHandler(.allow)
-                return
-            }
+        // The staged copy under Library/Caches/web, at foxy-app://wallet, and
+        // nothing above it; and the blank page the store check runs in
+        // (WebSchemeHandler.allowsNavigation). A prefix of the real directory,
+        // both sides standardized and with symlinks resolved: a substring test
+        // also let through any path that merely contained "/Caches/web/", and
+        // "web/../" climbed out of it. A file URL is not the page any more.
+        if let dir = Self.webDirectory, WebSchemeHandler.allowsNavigation(to: url, root: dir, checking: checking) {
+            decisionHandler(.allow)
+            return
         }
         print("[foxy] navigation refused:", url.absoluteString.prefix(120))
         decisionHandler(.cancel)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // the blank page of the store check: the page itself comes after it
+        if WebStore.isCheck(webView.url) {
+            checkPageLoaded = true
+            checkStore()
+            return
+        }
         // WebKit sets the scroll view's zoom range from the page as it loads: held at 1 again
         webView.scrollView.minimumZoomScale = 1
         webView.scrollView.maximumZoomScale = 1
@@ -1444,11 +1566,22 @@ extension WebHostController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if checkFailed(navigation, error) { return }
         hideSplash()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if checkFailed(navigation, error) { return }
         hideSplash()
+    }
+
+    /// The check page did not load: the check ends as failed, with its message,
+    /// rather than a blank screen.
+    private func checkFailed(_ navigation: WKNavigation!, _ error: Error) -> Bool {
+        guard checking, let navigation, navigation === checkNavigation else { return false }
+        storeRun += 1                            // a scan still under way is dropped
+        storeCheckEnded(.failed("the check page did not load: \(error.localizedDescription)"))
+        return true
     }
 }
 

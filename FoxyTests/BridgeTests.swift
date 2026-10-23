@@ -91,10 +91,13 @@ final class BridgeTests: XCTestCase {
     }
 
     func testOnlyTheStagedPagesMainFrameIsAnswered() {
-        XCTAssertTrue(FoxyBridge.answers(isMainFrame: true, originProtocol: "file"))
-        XCTAssertFalse(FoxyBridge.answers(isMainFrame: false, originProtocol: "file"))
-        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: "https"))
-        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: ""))
+        XCTAssertTrue(FoxyBridge.answers(isMainFrame: true, originProtocol: "foxy-app", originHost: "wallet"))
+        XCTAssertFalse(FoxyBridge.answers(isMainFrame: false, originProtocol: "foxy-app", originHost: "wallet"))
+        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: "foxy-app", originHost: "other"))
+        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: "file", originHost: ""),
+                       "the file:// page Foxy used to be is not answered")
+        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: "https", originHost: "wallet"))
+        XCTAssertFalse(FoxyBridge.answers(isMainFrame: true, originProtocol: "", originHost: ""))
     }
 
     func testMintRequestsAreGetOrPost() {

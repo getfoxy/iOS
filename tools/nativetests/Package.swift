@@ -30,6 +30,13 @@
 // background, is a module too, FoxyTorReturn: it needs no Tor. TorReturnTests imports it
 // as FoxyTorReturn here and as Foxy in the app.
 //
+// Foxy/WebStore/WebStore.swift and WebSchemeHandler.swift, the page's fixed address, the
+// handler that serves the staged page there and the check that carries a stored wallet
+// to it, are a module too, FoxyWebStore: they need WebKit and SQLite, which the Mac
+// has, and nothing of the app. WebStoreTests imports it as FoxyWebStore here and as
+// Foxy in the app, and runs a real WKWebView on the Mac (no network: nothing it loads
+// leaves the handler).
+//
 // libsecp256k1 is Vendor/secp256k1 (Sources/CSecp256k1's src and include are
 // links to it), compiled with the defines and optimisation project.yml gives it.
 // tools/check-all.sh runs this, and GitHub's checks run it on macOS.
@@ -74,9 +81,13 @@ let package = Package(
             name: "FoxyTorReturn",
             path: "Sources/FoxyTorReturn"
         ),
+        .target(
+            name: "FoxyWebStore",
+            path: "Sources/FoxyWebStore"
+        ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary", "FoxyTorReturn"],
+            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary", "FoxyTorReturn", "FoxyWebStore"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -99,6 +110,7 @@ let package = Package(
                 "CardTapDeliveryTests.swift",
                 "NetDiaryTests.swift",
                 "TorReturnTests.swift",
+                "WebStoreTests.swift",
             ]
         ),
     ]

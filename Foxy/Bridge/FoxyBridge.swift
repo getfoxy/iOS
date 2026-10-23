@@ -463,19 +463,23 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         return .run(handler, id: id, body: body)
     }
 
-    /// The page Foxy staged, in its own main frame, and nothing else. The
-    /// page's policy refuses frames and navigation is locked to that file,
-    /// so this should never refuse anything; if it does, a frame or another
-    /// page asked for the seed, the camera or the network, and gets none.
-    static func answers(isMainFrame: Bool, originProtocol: String) -> Bool {
-        isMainFrame && originProtocol == "file"
+    /// The page Foxy staged, in its own main frame, and nothing else: the
+    /// origin foxy-app://wallet that WebSchemeHandler serves it at (WebStore),
+    /// scheme and host both. The page's policy refuses frames and navigation is
+    /// locked to the staged files, so this should never refuse anything; if it
+    /// does, a frame or another page asked for the seed, the camera or the
+    /// network, and gets none. A file:// page, which the page was before, is
+    /// refused like any other.
+    static func answers(isMainFrame: Bool, originProtocol: String, originHost: String) -> Bool {
+        isMainFrame && originProtocol == WebStore.scheme && originHost == WebStore.host
     }
 
     func userContentController(_ controller: WKUserContentController,
                                didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
         guard Self.answers(isMainFrame: message.frameInfo.isMainFrame,
-                           originProtocol: message.frameInfo.securityOrigin.protocol) else {
-            print("[foxy] bridge message refused:", message.frameInfo.securityOrigin.protocol,
+                           originProtocol: origin.protocol, originHost: origin.host) else {
+            print("[foxy] bridge message refused:", origin.protocol, origin.host,
                   message.frameInfo.isMainFrame ? "main frame" : "subframe")
             return
         }

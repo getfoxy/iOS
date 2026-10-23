@@ -10,7 +10,9 @@ The wallet keeps things in four places. Nothing is on a server.
   NUT-13 counters (`foxy-counters.json`).
 - **`UserDefaults`** — which Tor transport last connected (`foxy.tor.transport`
   and its `.since`), how the seed is kept (`foxy.seed.protection`), two
-  one-time flags (`foxy.seedMigrate.closed`, `foxy.counters.imported`), and
+  one-time flags (`foxy.seedMigrate.closed`, `foxy.counters.imported`), the
+  storage check's record (`foxy.webStore.moved`, `.taken`, `.mark`, `.pending`,
+  `.lastCheck`, `.failures`, below), and
   Debug-build test switches. Nothing about money.
 
 The third column is the one that matters: **whether the seed brings it back.**
@@ -34,6 +36,86 @@ phone is locked, never moved to another device or to iCloud Keychain. The seed
 item behind Face ID also needs the person (`.userPresence`).
 
 ## localStorage
+
+**Where it is.** WebKit keeps a page's localStorage by the page's origin, in
+`Library/WebKit/…/<hash>/<hash>/LocalStorage/localstorage.sqlite3`, the folder
+names salted hashes of the origin. The page is served at `foxy-app://wallet`
+(`Foxy/WebStore/WebSchemeHandler.swift`), a fixed name; it was `file://` before.
+After one install the page once opened an empty store under a new folder name
+while the whole wallet sat beside it under the old one, for the same origin. The
+likeliest cause is WebKit's `salt` file: unreadable while the phone was locked
+(it had `completeUnlessOpen` like the rest of the store), WebKit deletes it and
+makes another, and every folder name changes. The salt is now kept readable after
+the first unlock (below), but the check does not depend on the cause:
+
+**The storage check** (`Foxy/WebStore/WebStore.swift`, at every launch before the
+page runs). A blank page at `foxy-app://wallet` asks the page's store two
+things: does it carry this install's mark, and how many of the wallet's keys
+hold something (every `foxy.` or `flash.` key but `foxy.schema` and the two
+records of one-time moves, with a value that is not empty, `[]`, `{}`, `null`,
+`""` or `0`: the page's own reinstall test). Meanwhile every store under
+`Library/WebKit` is read from a copy, its database and write-ahead log cloned
+into `tmp/` and opened there, and counted the same way. Then:
+
+- the store carries the mark, or holds something of the wallet's: it is the
+  page's store, and is marked if it was not;
+- it is empty and a store on the phone could not be read: nothing is decided
+  or recorded, and the page is not started (below);
+- it is empty: the best store this install may take is copied in whole, key by
+  key, read back, and marked. Before the move to `foxy-app://wallet` is settled
+  that is the store the page was using at `file://`, when it holds money or
+  history: WebKit names an origin's folder `<h>/<h>`, `h` the SHA-256 of the
+  origin's text (`file://`) and the 8-byte `salt` file beside the folders, in
+  URL-safe base64 with no padding, so the folder is computed, not guessed.
+  Otherwise, and before the move, any store on the phone; after the move, only
+  a store carrying the mark (the page's own store from before a re-keying), and
+  never one taken before. Best is the one holding money or history, then the
+  most keys (the fullest: a store opened empty and restored into is newer than
+  the wallet it lost and holds a fraction of it), then the newest, then the
+  largest. Any other store it could have taken that holds money or history is
+  named in the log and left as it is;
+- nothing to take: the empty store is marked and the page starts, a fresh
+  install.
+
+Nothing is recorded as settled at the check that copies or marks: WebKit writes
+the store to disk later, in another process, and an app that ends first leaves
+an empty, unmarked store. The store copied from is kept as `foxy.webStore.pending`;
+the next launch that finds the mark in the page's store records the move as
+settled (`foxy.webStore.moved`) and that store as taken. Until then an empty
+store is simply copied into again.
+
+At every launch, a store outside the page's own that holds money or history and
+was changed after the last launch's check (`foxy.webStore.lastCheck`), such as
+the `file://` store an older Foxy used in between, is named in the log, loudly,
+and left as it is.
+
+While a copy is under way the mark reads `copying:` and the mark, so a copy cut
+off part way (the app or the page's process ended) is seen at the next check,
+cleared and made again, and never kept as a wallet. Nothing is merged and
+nothing is deleted. Values are read as WebKit writes
+them, a blob of UTF-16 code units, little-endian, or as text. The mark is
+`foxy-store-mark`, a random value kept in `UserDefaults` as `foxy.webStore.mark`;
+it is not under `foxy.`, so the wallet's erase leaves it and an erased wallet is
+not refilled. `foxy.webStore.moved` says the move is settled, and
+`foxy.webStore.taken` lists the stores taken, by their folder under
+`Library/WebKit`, which does not change when the app's folder moves. The log
+says which store was taken and why:
+
+    [foxy] web store: 2 store(s) on the phone, 1 holding money or history; the move to foxy-app://wallet is not settled yet
+    [foxy] web store: the page used WebsiteData/Default/AbCdEfGh…/AbCdEfGh… at file://
+    [foxy] web store: took 57 items into foxy-app://wallet from WebsiteData/Default/AbCdEfGh…/AbCdEfGh… (origin file, 57 items, 49 keys of the wallet, 6 proof piles, 8203 KB, modified 2026-10-22T18:03:00Z): the page's store at foxy-app://wallet is new and empty, and this is the store the page was using at file:// (named by WebKit's salt)
+    [foxy] web store: the page's store is this install's own (49 keys of the wallet)
+    [foxy] web store: the copy from WebsiteData/Default/AbCdEfGh…/AbCdEfGh… is on disk: that store is taken
+
+A copy that fails is taken back and the page is not started ("Foxy could not open
+its stored wallet"); the next launch tries again. The second time the message
+says that a third failure opens Foxy without it; from the third failed check in
+a row (`foxy.webStore.failures`) the page starts on its own store as it is, with
+nothing recorded and every store left on the phone, and each launch checks
+again, so a damaged store never locks the person out. While the phone is locked
+the page waits for the unlock, and a check the lock interrupts decides nothing
+and is made again after it. A database WebKit made with no table in it holds
+nothing; one that cannot be opened or read is a store that could not be read.
 
 **Versions.** `foxy.schema` counts the storage migrations this device has
 been through (`SCHEMA_STEPS` at the top of `build/wallet/00-header-and-mint-errors.js`):
@@ -256,11 +338,14 @@ everything under it, before the web view is built (`protectWebStore()` in
 
 - **excluded from iCloud and iTunes backups** (`isExcludedFromBackup`)
 - **file protection `completeUnlessOpen`** — unreadable while the device is
-  locked, except across a lock that happens with the file already open
+  locked, except across a lock that happens with the file already open; except
+  WebKit's `salt` files, which are `completeUntilFirstUserAuthentication`. A salt
+  WebKit cannot read it replaces, and every store's folder name changes with it
+  (above, "Where it is"). The salt is not the wallet's and says nothing of it.
 
-Confirmed on device by the log line at launch:
+The log line at launch:
 
-    [foxy] web store excluded from backups, protection completeUnlessOpen
+    [foxy] web store excluded from backups, protection completeUnlessOpen (WebKit's salt: until first unlock)
 
 The page's old `seedRead` and `seedWrite`, which the rules below once
 described, no longer exist; native reads and writes the seed itself

@@ -44,7 +44,7 @@ things the web cannot do — including every network request.
 | UI | `Web/index.html` | every screen; built from `build/app/` (joined into `build/foxy-app.js`), `build/markup.html` and the renderer `build/foxy-render.js` |
 | Wallet | `Web/foxy-wallet.js` | ecash protocol, keys, storage, and the hook every mint call goes through; joined from `build/wallet/` |
 | Gate | `Web/foxy-tor-gate.js` | the screens shown while Tor connects or cannot; decides nothing |
-| Host | `Foxy/FoxyWebView.swift` | stages `Web/` into Caches, blocks the page's network, covers the app-switcher snapshot, detects a reinstall, and takes a card's address (`Foxy/Flashcard/CardAddress.swift`) |
+| Host | `Foxy/FoxyWebView.swift`, `Foxy/WebStore/` | stages `Web/` into Caches and serves it at `foxy-app://wallet`, checks the page's storage before the page runs, blocks the page's network, covers the app-switcher snapshot, detects a reinstall, and takes a card's address (`Foxy/Flashcard/CardAddress.swift`) |
 | Bridge | `Foxy/Bridge/`, `Foxy/Tor/`, `Foxy/Network/`, `Foxy/Keychain/`, `Foxy/Scanner/`, `Foxy/Bluetooth/`, `Foxy/Nostr/`, `Foxy/TorSeed/` | camera, clipboard, share, notifications, keychain, Bluetooth tap to pay, Nostr delivery, and the network: `TorService`, `Bridges`, `Route`, `OrbotLink`, the onion inbox and post, and the relay directory a first run starts Tor from |
 | Tor | Tor 0.4.9.12, built here from signed sources (`tools/build-tor.sh`), with Tor.framework 409.11.2's Objective-C wrapper, as a local CocoaPods pod | the Tor daemon, in the app's process |
 | Transports | `Vendor/IPtProxy.xcframework` | obfs4 and Snowflake, built from source by `tools/build-iptproxy.sh` |
@@ -77,7 +77,7 @@ Each action is one function, named in a table
 tests (`sh tools/unit-tests.sh`) fail if the table and the list above differ.
 
 **What each action needs before it acts.** Every message is refused unless it
-came from the main frame of a `file:` page (`FoxyBridge.answers`), so the rows
+came from the main frame of the page at `foxy-app://wallet` (`FoxyBridge.answers`), so the rows
 below are what stands in front of an action *after* that. `tests/bridge-matrix.js`
 holds this table to the code: a gate added or removed without a row fails it, and
 so does a row claiming a gate the handler does not have. Read "—" as "nothing
@@ -238,15 +238,45 @@ What bounds the bridge:
     A stronger design would serve a restore's secrets only for outputs the mint
     has signed.
 
-- **It answers only the staged page's main frame**, with a `file` security
-  origin. A subframe, or any other origin, gets nothing.
+- **It answers only the staged page's main frame**, with the security origin
+  `foxy-app://wallet`, scheme and host both. A subframe, or any other origin
+  (a `file:` page included), gets nothing.
 - **Native questions come one at a time.** Allowing a host, replacing or
   deleting the seed, and continuing without Tor wait in one queue of iOS
   alerts, so none is drawn over another; one gone without an answer is a no. A
   second seed change (a create, migrate, adopt or wipe) while one is waiting is
   refused. A replace waiting on its alert gives up after two minutes, as a no,
   and takes the alert down.
-- **Navigation is locked** to `.html` file URLs under `Library/Caches/web/`.
+- **Navigation is locked** to the staged `.html` files under
+  `Library/Caches/web/`, at `foxy-app://wallet`, and the blank page the
+  storage check runs in (`WebSchemeHandler.allowsNavigation`).
+- **The page's address is a fixed name, served by the app.** `WebSchemeHandler`
+  (`Foxy/WebStore/`) answers `foxy-app://wallet/…` from the staged folder and
+  nothing above it: GET only; no port or user in the address; no `..`, no
+  encoded slash that climbs out, no link that points out, no hidden file (the
+  page hash leaves those out), no folder. Everything else is refused with no
+  body. It was a file URL before, and WebKit keyed the page's storage by an
+  origin the app does not control; once, after an install, the page opened an
+  empty store beside the full one. The scheme is answered inside the app and
+  never reaches the network, so the content rule list and the dead-end proxy
+  below are unchanged and still cover everything else.
+- **The storage check before the page runs** (`WebStore`, `WebStoreCheck`). A
+  blank page at the same address, which runs nothing of its own
+  (`default-src 'none'`), is asked whether the page's store holds the wallet.
+  When it does not, the store the page was using at `file://` (the folder
+  WebKit's salt names for it), or failing that the fullest store on the phone
+  that this install may take, is copied in first, read from a copy of WebKit's
+  files with SQLite, never in place, and nothing is ever deleted. After the
+  first move only a store that carries this install's mark may be taken, and
+  never one taken before, so a wallet the person erased is not brought back from
+  an old store. Nothing is recorded as settled until a later launch finds the
+  copy, marked, on disk. A copy that fails is taken back, and a store that
+  cannot be read stops the check: the page is not started on an empty wallet,
+  and Foxy says it could not open the stored wallet. From the third failed check
+  in a row the page starts on its own store as it is, with nothing recorded and
+  every store left on the phone, so a damaged store never locks the person out.
+  Nor is the page started, or anything decided, while the phone is locked, when
+  the stores cannot be read.
 - **One address opens Foxy from outside, and none of it reaches the page.** A Foxy card
   answers as an NFC tag carrying `https://getfoxy.io/card`, the same on every card
   (`CARD.md`, *Tapping a card to open Foxy*). A build signed with
@@ -992,7 +1022,7 @@ Details and test results: `SEED-HANDLING.md`.
 | proofs, log, notes, contacts, counter, PIN hash and wrong-PIN count | web view localStorage, `Library/WebKit` | **excluded** | `completeUnlessOpen` |
 | the install marker | `Application Support/foxy.install` | **included**, on purpose (below) | `completeFileProtection` |
 | Tor's state | `Application Support/tor` | excluded | directory mode 0700 |
-| the web files | `Library/Caches/web/` | — | copied fresh from the app bundle every launch; hold nothing of the wallet's |
+| the web files | `Library/Caches/web/` | — | copied fresh from the app bundle every launch, served at `foxy-app://wallet`; hold nothing of the wallet's |
 
 ### A Tor bug and the seed
 
