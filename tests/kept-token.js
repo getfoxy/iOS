@@ -267,7 +267,7 @@ ok(/hash: hash, at: Date\.now\(\), swapped: split\.swapped \}\);\n[\s\S]{0,200}i
 ok(/var shaped = \(isFinite\(expect\) && expect > 0 && !\(opts && opts\.plain\)\)/.test(read('build/wallet/19-bill-split.js'))
    && /plain: \/\^carry:\/\.test\(String\(p\.purpose \|\| ''\)\) \}\)/.test(read('build/wallet/20-helpers.js'))
    && /if \(plain\) all\[id\]\.plain = true;/.test(read('build/wallet/07-request-delivery.js'))
-   && /plain: !!one\.plain, visit: true \}\)/.test(read('build/wallet/20-helpers.js')),
+   && /plain: !!one\.plain, visit: true(?:, now: now)? \}\)/.test(read('build/wallet/20-helpers.js')),
    'a payment taken to be carried home is received as the fewest pieces, late or not');
 
 // The receiver tells only the payers still owed the door byte, drops one that
