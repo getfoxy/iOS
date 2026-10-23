@@ -517,7 +517,7 @@ function amt(a) {
        'the card’s own log, said to be shown as a guest, with the money put on and nothing to copy', card(friend).reason);
     card(friend).press('CLOSE');
     v = vals(friend);
-    ok(friend.state.fc.guestRead && v.fcBalance === '₿ 1,500' && /^NO PIN UP TO/.test(v.fcLimitLine), 'and the screen shows the balance with it', v.fcLimitLine);
+    ok(friend.state.fc.guestRead && v.fcBalance === '₿ 1,500' && !/NO PIN UP TO/.test(v.fcLimitLine || '') && !v.fcLimitShown, 'and the screen shows the balance with it, and nothing of the no-PIN limit on the card’s face', v.fcLimitLine);
     ok(!keptFor(G, cash.key), 'nothing of the history is kept on the friend’s phone');
     ok(G.storage.getItem('foxy.flashcard.reads') === null, 'and no read of the card is kept anywhere: a guest’s read is kept nowhere');
     // a tap that paid: the card's 6985, said in plain words
@@ -848,7 +848,7 @@ function amt(a) {
   }
 
   /* ---- B11: what the owner chose at set-up drives the card's screen (software 1.23) ---------------------------------------
-   * BOTH: two pills from the moment set-up ends, each at nothing, ADD FUNDS asking which and SWAP greyed while a side is empty; each read
+   * BOTH: two pills from the moment set-up ends, each at nothing, ADD FUNDS asking which and SWAP greyed while it holds nothing; each read
    * of it shows it so. DOLLARS: one pill, and ADD FUNDS asks nothing. */
   {
     const U = await funded({ units: ['sat', 'usd'] }, 0);
@@ -875,7 +875,7 @@ function amt(a) {
     let v = await readIt(twoCard);
     ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '0.00' && v.fcPillRows[1].big === '0',
        'a card set up for both shows two pills at nothing before anything is on it', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-    ok((v.fcButtons.find((x) => x.label === 'SWAP') || {}).dim === '0.38', 'and SWAP greyed while a side is empty');
+    ok((v.fcButtons.find((x) => x.label === 'SWAP') || {}).dim === '0.38', 'and SWAP greyed while the card holds nothing');
     a.fcAdd();
     ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks which', a.state.screen);
     a.back();

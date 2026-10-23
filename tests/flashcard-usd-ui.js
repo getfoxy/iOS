@@ -6,7 +6,7 @@
  * A card holds one kind of money, chosen when it is set up: bitcoin, or the mint's dollars. The wallet's side is
  * tests/flashcard-usd.js. This is the screens over it:
  *
- *   1  set-up at a mint with two balances asks WHAT WILL THIS CARD HOLD? on the CURRENCY screen, writes nothing of the
+ *   1  set-up at a mint with two balances asks WHAT WILL THIS CARD HOLD? on the CURRENCY screen (no balances on the tiles), writes nothing of the
  *      phone's own choice, and sets the card up in dollars; at a mint with one balance nothing is asked
  *   2  the card's screen: one dollar pill, no SWAP, its limits in dollars whatever the price
  *   3  ADD FUNDS: the dollar keypad, capped by this phone's dollars, the stage in dollars
@@ -233,8 +233,8 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
        'SET UP at a mint with two balances: the CURRENCY screen first, nothing tapped yet', holder.state.screen + ' ' + holder.state.currencyFlow);
     let cv = holder.renderCurrency({ s: holder.state, sc: 'currency' });
     ok(cv.curTitle === 'CURRENCY' && cv.curQuestion === 'WHAT WILL THIS CARD HOLD?' && cv.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN'
-       && cv.curCards[0].balance === '$ 200.00' && cv.curCards[1].balance === '₿ 5,000',
-       'it asks WHAT WILL THIS CARD HOLD?, with the two balances and what this phone holds of each (what can be loaded)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
+       && cv.curCards[0].balance === '' && cv.curCards[1].balance === '',
+       'it asks WHAT WILL THIS CARD HOLD?, with the two balances and no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
     ok(/RESET the card/.test(cv.curFoot), 'and says the card holds one, changed by RESET and setting it up again', cv.curFoot);
     // back is the card's screen, with nothing tapped
     cv.curBack();

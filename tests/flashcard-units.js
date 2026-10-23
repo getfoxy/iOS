@@ -1004,8 +1004,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const swapB = vb.fcButtons.find((x) => x.label === 'SWAP');
       a.toasts.length = 0;
       swapB.tap();
-      ok(swapB.dim === '0.38' && a.state.screen === 'flashcard' && a.toasts[0] === 'Add both dollars and bitcoin to the card to swap between them.',
-         'SWAP is offered, greyed, and says why while a side is empty', JSON.stringify([swapB.dim, a.toasts]));
+      ok(swapB.dim === '0.38' && a.state.screen === 'flashcard' && a.toasts[0] === 'Put money on the card to swap.',
+         'SWAP is offered, greyed, and says why while the card holds nothing', JSON.stringify([swapB.dim, a.toasts]));
       a.fcAdd();
       ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?' && !a.state.curBoth,
          'ADD FUNDS on it asks which currency, with no BOTH among them', a.state.screen);
@@ -1023,9 +1023,63 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       vb = vals(a);
       ok(vb.fcPillRows.length === 2 && vb.fcPillRows[0].big === '0.00' && vb.fcPillRows[1].big === a.group(a.state.fc.bal.sat),
          'still two pills: the dollars at nothing, the sats as they are', JSON.stringify(vb.fcPillRows.map((x) => x.big)));
+      const swapS = vb.fcButtons.find((x) => x.label === 'SWAP');
+      ok(swapS.dim === (a.offlineNow() ? '0.38' : '1'), 'and SWAP is not greyed once one side holds something: it swaps into the empty one', swapS.dim);
       a.fcAdd();
       ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks again the next time');
       a.back();
+    }
+
+    /* BOTH holding $10.00 and ₿0 (the owner's card): SWAP is offered, opens from dollars into bitcoin, and the two taps swap part of the
+     * dollars into sats on the empty side; the card then holds both. */
+    {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await setUpAs(a, c, 2);
+      await add(H, c, 1000, 'usd');
+      c.tap();
+      a.fcRead();
+      await until('the card read with its dollars', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd === 1000);
+      await uiSettle();
+      a.offlineNow = () => false;
+      // the swap screen's own (26i-swap.js): its units and what the card has to swap; the rate is asked below, not probed
+      Object.assign(a, new Function('return {' + [['26i-swap.js', 'swapUnits() {'], ['26i-swap.js', 'swapComing(u) {'], ['26i-swap.js', 'swapHave(u) {']]
+        .map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')());
+      a.swapProbe = () => {};
+      let v = vals(a);
+      ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '10.00' && v.fcPillRows[1].big === '0' && a.state.fc.bal.sat === 0,
+         'BOTH with $10.00 and ₿0: two pills', JSON.stringify(v.fcPillRows.map((x) => x.big)));
+      const sb = v.fcButtons.find((x) => x.label === 'SWAP');
+      a.toasts.length = 0;
+      ok(sb.dim === '1', 'SWAP is not greyed', sb.dim);
+      sb.tap();
+      ok(a.state.screen === 'swap' && a.state.swapFrom === 'usd' && a.state.swapTo === 'sat' && a.swapHave('usd') === 1000 && !a.toasts.length,
+         'SWAP opens the swap screen from dollars into bitcoin, with the card’s $10.00 to swap', JSON.stringify([a.state.screen, a.state.swapFrom, a.toasts]));
+      await uiSettle();
+      const q = await H.W.swapQuote('usd', 'sat', 400, a.swapComing('usd'));
+      ok(q && q.total > 0 && q.total <= 1000, 'the mint quotes the card’s dollars', JSON.stringify(q && q.total));
+      c.tap();
+      a.fcSwapGo(q);
+      await until('the PIN pad', () => !!pad(a));
+      pad(a).type('1234');
+      await until('the dollars to come off', () => !!a._swapRun || a.state.screen === 'swapDone' || !!cardUp(a));
+      c.tap();
+      await until('the swap and the second tap', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || !!cardUp(a)));
+      await uiSettle();
+      ok(a.state.screen === 'swapDone' && !cardUp(a), 'SWAPPED: both taps made', JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
+      c.tap();
+      const seen = await H.W.cardLook(c, { mine: true, price: PRICE });
+      ok(seen.units.usd.balance > 0 && seen.units.usd.balance < 1000 && seen.units.sat.balance > 0,
+         'the card holds both now: the dollars left and the sats the swap brought', JSON.stringify([seen.units.usd.balance, seen.units.sat.balance]));
+      a.setState({ screen: 'flashcard', stack: [] });
+      c.tap();
+      a.fcRead();
+      await until('the card read again', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat > 0);
+      await uiSettle();
+      v = vals(a);
+      ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big !== '10.00' && v.fcPillRows[1].big !== '0',
+         'and its screen shows both', JSON.stringify(v.fcPillRows.map((x) => x.big)));
+      await settle();
     }
 
     /* BOTH with a no-PIN allowance: the ceiling is said for both currencies from the start. Read on another phone (one that did not set

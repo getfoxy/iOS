@@ -2096,8 +2096,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.noPinLimit === 500 && n.state.record.limit === 0 && pins() === 0 && owner.toasts.indexOf('No PIN limit set.') >= 0,
        'the card has an allowance of 500 and no PIN was sent', String(n.state.noPinLimit));
     v = vals(owner);
-    ok(v.fcLimitLine === 'NO PIN UP TO ₿500' && v.fcNoPinShown === undefined && limitsSub(v) === 'No PIN up to ₿500 · ₿500 left today',
-       'its face says the limit, and LIMITS in its menu what is left of it today', [v.fcLimitLine, limitsSub(v)].join(' | '));
+    ok(v.fcLimitLine === '' && !v.fcLimitShown && v.fcNoPinShown === undefined && limitsSub(v) === 'No PIN up to ₿500 · ₿500 left today',
+       'its face says nothing of the no-PIN limit, and LIMITS in its menu says it and what is left of it today', [v.fcLimitLine, limitsSub(v)].join(' | '));
 
     /* at a till: within it, one tap and no PIN; over what is left of it, the PIN; the card's own word is the truth */
     n.sent.length = 0;

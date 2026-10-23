@@ -5712,9 +5712,10 @@
      * `fcSwap`). On a card of one currency SWAP is greyed and says why when pressed; offline it is greyed as home's is, and the
      * swap says why itself. */
     const swappable = !!(fc && this.fcTwoUnits(fc));
-    /* A card shown with two pills because it was set up for both, and holding nothing yet of one of them, is offered SWAP greyed, with
-     * the reason when pressed: there is nothing on the other side to swap with until money of each has been added. */
-    const swapEarly = swappable && !fc.both && !!fc.bal && !(fc.bal.usd > 0 && fc.bal.sat > 0);
+    /* A card of two currencies swaps whenever either holds something: from the side with money into the other, which may be empty
+     * (the card then holds both); where both hold, the swap screen's own from and to choose. Only a card that holds nothing at all is
+     * offered SWAP greyed, with the reason when pressed. */
+    const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
@@ -5722,7 +5723,7 @@
         path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
       { label: 'SWAP', spin: 'none', pasteHere: '',
         dim: (!swappable || swapEarly || this.offlineNow()) ? '0.38' : '1',
-        tap: swapEarly ? () => this.toast('Add both dollars and bitcoin to the card to swap between them.', true)
+        tap: swapEarly ? () => this.toast('Put money on the card to swap.', true)
           : swappable ? () => this.fcSwap() : () => this.toast('This card holds one currency, so there is nothing to swap.', true),
         path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ];
@@ -5730,15 +5731,16 @@
     const limitShown = !!fc && !!fc.hasRecord && fc.pin !== 'blocked';
     // what the balance says now: what the card holds, or, while it counts after money went on or off, where it has got to
     const shown = this.fcBalanceShown(fc, s);
-    /* The line on the card's face: its limit on one payment, or its no-PIN limit, or NO LIMIT. A card with no PIN says so beside it,
-     * after a bar: "NO LIMIT | NO PIN". A card whose one limit is a daily one (set by an older Foxy) says nothing of limits at all:
-     * this phone sets no daily limit, and says nothing about one. */
+    /* The line on the card's face: its limit on one payment, or NO LIMIT. A card with no PIN says so beside it, after a bar:
+     * "NO LIMIT | NO PIN". What it pays without its PIN is not on the face: the LIMITS row of the menu says it, under it. A card whose
+     * one limit is a daily one (set by an older Foxy) says nothing of limits at all: this phone sets no daily limit, and says nothing
+     * about one. */
     const limitBase = !(fc && fc.hasRecord) ? '' : (
       tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
       // another phone's card keeps its per tap limit to its owner: it is not said to have none
-      : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? (noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, LU) : '')
-      // only a no PIN limit: it is the one thing to say (with the per tap limit it has its own line below)
-      : noPin ? 'NO PIN UP TO ' + this.fcPrice(noPin.limit, LU)
+      : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? ''
+      // only a no PIN limit: the face says nothing of it (the LIMITS row does)
+      : noPin ? ''
       : (Number(fc.limit) > 0) ? '' : 'NO LIMIT');
     const limitLine = (fc && fc.hasRecord && noPinCard) ? (limitBase ? limitBase + ' | NO PIN' : 'NO PIN') : limitBase;
     return {

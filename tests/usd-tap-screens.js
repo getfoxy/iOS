@@ -103,7 +103,7 @@ let made = 0;
 function phone(role, o) {
   const opt = Object.assign({ sat: 0, usd: 0, online: true }, o || {});
   const st = { sat: opt.sat, usd: opt.usd, online: opt.online, kept: [], open: {}, txs: [],
-    choice: Object.assign({ hold: 'both', recv: 'usd', send: 'usd' }, opt.choice || {}) };
+    choice: Object.assign({ hold: 'both', recv: '', send: '' }, opt.choice || {}) };
   const rec = { creqs: [], invoices: [], pays: [], tokens: [], claims: 0, shortfalls: [], priceAsks: 0, cards: [] };
   const paidFns = [];
   const next = () => { made += 1; return made; };
@@ -141,7 +141,8 @@ function phone(role, o) {
     mintUnits: () => ['sat', 'usd'],
     twoUnits: () => true,
     walletChoice: () => Object.assign({}, st.choice),
-    setWalletChoice(p) { if (p.recv) st.choice.recv = p.recv; if (p.send) st.choice.send = p.send; },
+    // as the real wallet (16b-two-balances.js): no receive or send balance is kept any more
+    setWalletChoice(p) { if (p && (p.recv !== undefined || p.send !== undefined)) throw new Error('no balance is kept for receiving or sending'); if (p && p.hold) st.choice.hold = p.hold; },
     // the dollar pill: the pile and the dollars kept offline, in cents; never a sat in it
     balanceOf: (u) => (u === 'usd' ? st.usd + keptUsd() : st.sat),
     keptIn: (u) => (u === 'usd' ? keptUsd() : 0),
@@ -331,8 +332,11 @@ function document_clear(w) {
 }
 
 /* The receiver: RECEIVE, five dollars typed, NEXT. */
-async function receiveFive(R) {
+async function receiveFive(R, unit) {
   R.V().goReceive(); await settle();
+  // two balances: every receive asks on CURRENCY which it lands in (nothing is remembered); answered as the person would
+  eq([R.A.state.screen, R.A.state.currencyFlow], ['currency', 'receive'], 'RECEIVE asks on CURRENCY which balance it lands in');
+  R.A.currencyPick(unit || 'usd'); await settle();
   ['5', '0', '0'].forEach((k) => R.A.press(k));
   R.V().next(); await settle(); await settle();
 }
@@ -379,7 +383,10 @@ function wire(Rw, Pw, R) {
     ok(!Rw.rec.creqs.some((c) => c.opts && Number(c.opts.usd) > 0), 'and never the old sat request priced in dollars');
     const code = R.A.cashuRequest();
     eq([!!code, (Rw.decodeRequest(code) || {}).unit], [true, 'usd'], 'the code on screen is that request');
-    ok(!/₿/.test(String(v.confirmAmount) + String(v.confirmAlt || '')), 'no bitcoin figure on a dollar request');
+    /* The owner's change of 2026-10-22 puts what the dollars come to in sats under them, at this phone's price
+     * (24-render-receive-and-send.js `confirmAlt`): a line to read, never the request's unit (pinned just above). */
+    ok(!/₿/.test(String(v.confirmAmount)) && (!v.confirmAlt || /^₿ [\d,]+$/.test(v.confirmAlt)),
+      'the dollar figure leads, and anything under it is only what it comes to in sats', JSON.stringify([v.confirmAmount, v.confirmAlt]));
     // on the air
     R.A.setState({ tapArmed: true }); await settle();
     let offer = null;
@@ -414,7 +421,7 @@ function wire(Rw, Pw, R) {
     const rv = R.V();
     eq([R.A.state.screen, R.A.state.paidUnit, rv.paidHeadline, rv.paidAddedLabel, rv.paidAddedTo], ['paid', 'usd', '$ 5.00', 'ADDED TO', 'DOLLARS'],
       'the receiver: PAYMENT RECEIVED, $ 5.00, ADDED TO DOLLARS');
-    eq(Rw.st.choice.recv, 'usd', 'the next receive starts in dollars, the unit it was paid in');
+    eq([Rw.st.choice.recv, R.A.state.wallet || ''], ['', 'usd'], 'nothing is remembered: the dollar pick is this receive\'s only');
     R.A.refreshUsd(); await settle();
     eq(R.A.state.balUsdCents, 500, 'the dollar pill counts the dollars kept offline');
     R.A.setState({ screen: 'home', stack: [] }); await settle();
@@ -706,13 +713,11 @@ function wire(Rw, Pw, R) {
       eq((Rw.decodeRequest(offer.req) || {}).unit, 'usd', 'with the dollar unit inside its request');
       R.A.stopReceive();
       // and a sat receive's offer still carries the receiver's price, as before
-      const Rs = phone('receiver', { online: true, choice: { recv: 'sat' } });
+      const Rs = phone('receiver', { online: true });
       wire(Rs, Pw, R);
       await R.fresh(Rs);
       quiet();
-      R.V().goReceive(); await settle();
-      ['5', '0', '0'].forEach((k) => R.A.press(k));
-      R.V().next(); await settle(); await settle();
+      await receiveFive(R, 'sat');
       R.A.setState({ tapArmed: true }); await settle();
       let so = null;
       try { so = JSON.parse(link.offer); } catch (e) { so = null; }

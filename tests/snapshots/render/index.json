@@ -516,8 +516,8 @@
  },
  "flashcard, a card with a PIN and a limit for paying without it": {
   "file": "338-flashcard-a-card-with-a-pin-and-a-limit-for-paying-without-it.html",
-  "markup": "8a5a60f97c4f757a6a0bc327814b9e5a23ec44d69a441592ce0809ffbe46a126",
-  "vals": "52f5668547e22f780fa6752ba455de6e177acbcbf83267965487a2e9fc73c617"
+  "markup": "ec3e2c3516fd6e90b31f6d33e781d1f255d1e4b52206b5f4c5474653ddfef34e",
+  "vals": "b07783a3dd4a287468fd2fe8c5a9d469af818415f826f875242c16f173adbda2"
  },
  "flashcard, a card with a PIN and a limit for paying without it, beside the limit on one tap (and a daily limit, not said)": {
   "file": "514-flashcard-a-card-with-a-pin-and-a-limit-for-paying-without-it-beside-the-limit-on-one-tap-and-a-daily-limit-not-said.html",
@@ -541,13 +541,13 @@
  },
  "flashcard, a card of software 1.21 of this phone’s, with RESTORE in its row": {
   "file": "515-flashcard-a-card-of-software-1-21-of-this-phone-s-with-restore-in-its-row.html",
-  "markup": "8a5a60f97c4f757a6a0bc327814b9e5a23ec44d69a441592ce0809ffbe46a126",
-  "vals": "bfb86cb72259088a6983f71055b03f7aff5a3df6e0cc129a8ec47b43b521ddf7"
+  "markup": "ec3e2c3516fd6e90b31f6d33e781d1f255d1e4b52206b5f4c5474653ddfef34e",
+  "vals": "3097c8d8a0d63c4bf54aad053434b459b1a9d6823058223ef133f20eec2fb51a"
  },
  "flashcard, a holder’s card with no owner, with VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE": {
   "file": "516-flashcard-a-holder-s-card-with-no-owner-with-view-as-guest-and-tie-ownership-to-this-phone.html",
-  "markup": "03748d149a8bcf6556039028d67e2abe494ae77d92309ef93ff88e7b021176c5",
-  "vals": "9cc21af949deb80744ce64a9a593aab73228cb635b0d6fba306cb86ea6eb8fd6"
+  "markup": "6c895590653e1bee786db19981480237dd0e4ec8e9773f0609d53666c94b38f6",
+  "vals": "49284f979e5867c8dd827893c803582efe8b93954db1de9c8301d4a115129de8"
  },
  "flashcard, a holder’s card after a guest’s view": {
   "file": "517-flashcard-a-holder-s-card-after-a-guest-s-view.html",
