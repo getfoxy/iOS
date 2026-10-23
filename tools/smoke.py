@@ -1129,7 +1129,7 @@ else:
 host26 = open(os.path.join('Foxy', 'FoxyWebView.swift'), encoding='utf8').read()
 leaving = re.search(r'func appEnteredBackground\(\)(.*?)\n    }\n', host26, re.S)
 parking = re.search(r'static func backgrounded\((.*?)\n    }\n', tor_src, re.S)
-returning = re.search(r'static func resumed\(away: TimeInterval\)(.*?)\n    }\n', tor_src, re.S)
+returning = re.search(r'static func resumed\(away given: TimeInterval, leftKnown: Bool = true\)(.*?)\n    }\n', tor_src, re.S)
 problems26 = []
 if not leaving or 'torBackgrounded' not in leaving.group(1) or 'beginBackgroundTask' not in leaving.group(1):
     problems26.append('going to the background no longer takes Tor off the network under a background task')
