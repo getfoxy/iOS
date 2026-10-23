@@ -284,7 +284,7 @@
     const s = this.state;
     /* A dollar card's own amounts (ADD FUNDS, WITHDRAW, LIMITS), and money onto a card from the dollar balance: cents,
      * typed in dollars exactly, as the card holds them (26f-flashcard.js, `fcTypedUnit`). */
-    if (s.screen === 'amount' && /^card(Add|Wd|Limit|Send)$/.test(String(s.flow))) return !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
+    if (s.screen === 'amount' && /^card(Add|Wd|Limit|Send|SuNoPin|SuTap)$/.test(String(s.flow))) return !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
     if (s.screen !== 'amount' || (s.flow !== 'receive' && s.flow !== 'send')) return false;
     if (!(this.twoUnitsOn && this.twoUnitsOn())) return false;
     if (this.walletNow(s.flow === 'receive' ? 'receive' : 'send') !== 'usd') return false;
@@ -548,6 +548,9 @@
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
+        // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
+        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
+        : s.flow === 'cardSuTap' ? 'What is the most this card should pay in one tap straight away?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
         // a till cap, from SETTINGS (26j-till-caps.js)
@@ -560,6 +563,9 @@
       amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
       amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
       hideSkip: true,
+      /* The set-up's max per tap: what the figure typed means in seconds, under it, as it is typed (26j-card-wheel.js, `fcSuAmountLine`). */
+      amountLine: this.fcSuAmountLine ? this.fcSuAmountLine() : '',
+      amountLineShown: !!(this.fcSuAmountLine && this.fcSuAmountLine()),
       /* A second answer under NEXT, for the card question that has one that is
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */

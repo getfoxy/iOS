@@ -178,6 +178,8 @@ class Component extends DCLogic {
     }, extra || {}));
   }
   back() {
+    // a card's set-up asking an amount: back is its question (26j-card-wheel.js)
+    if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     this.setState(p => {
       const next = p.stack.length
         ? { screen: p.stack[p.stack.length - 1], stack: p.stack.slice(0, -1) }

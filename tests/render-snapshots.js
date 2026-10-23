@@ -276,6 +276,10 @@ function representative(logic) {
   add('fcLimitConfirm, no limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 0 } }, { wallet: CARDS() }));
   add('fcLimitConfirm, a per tap limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 2000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; } }));
   add('amount, a card\u2019s limit for paying without its PIN, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '10', unit: 'USD', fc: FC({ noPinKnown: true }) }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
+  // a card's set-up asks its two amounts on the same keypad (26j-card-wheel.js), the max per tap with its seconds under the figure
+  add('amount, the set-up\u2019s no PIN amount, nothing typed yet', at('amount', { flow: 'cardSuNoPin', amount: '', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
+  add('amount, the set-up\u2019s max per tap, its seconds under the figure', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
+  add('amount, the set-up\u2019s max per tap on a dollar card', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: 'usd' }; } }));
   add('fcLimitConfirm, a limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   add('fcLimitConfirm, a limit for paying without the PIN, kept in dollars', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000, usd: 5 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   add('fcLimitConfirm, no limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
@@ -994,16 +998,10 @@ function cards() {
   // a limit's first step (no daily limit is asked for), what making this phone a card's owner says, and what a till says when a card cannot cover a payment
   add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
-  /* A card's set-up from software 1.21 (26j-card-wheel.js): its two questions, the wheel for each, the PIN pad for a card set up for
+  /* A card's set-up from software 1.21 (26j-card-wheel.js): its two questions, SET AMOUNT for each, the PIN pad for a card set up for
    * somebody else; then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning, and RESTORE on a cash card. */
   add('card: set-up, small amounts without the PIN', (a) => { a._fcSu = { unit: '' }; a.fcSuNoPin(); });
   add('card: set-up, a max per tap', (a) => { a._fcSu = { unit: '' }; a.fcSuTap(); });
-  add('overlay: the set-up\u2019s wheel, the no PIN amount', (a) => { a._fcSu = { unit: '' }; a.fcSuWheel('noPin', () => {}, () => {}); },
-    { wallet: { cardSession: () => Promise.resolve() } });
-  add('overlay: the set-up\u2019s wheel, the max per tap and its seconds', (a) => { a._fcSu = { unit: '' }; a.fcSuWheel('tap', () => {}, () => {}); },
-    { wallet: { cardSession: () => Promise.resolve() } });
-  add('overlay: the set-up\u2019s wheel, a dollar card\u2019s max per tap', (a) => { a._fcSu = { unit: 'usd' }; a.fcSuWheel('tap', () => {}, () => {}); },
-    { wallet: { cardSession: () => Promise.resolve() } });
   add('overlay: CREATE A PIN, for a card set up for its holder', (a) => a.fcSetUpSteps({ other: true, unit: 'sat', run() {} }));
   add('card: tie ownership to this phone, the warning', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
   add('card: restore lost card, a cash card', (a) => { a.state.fc = { key: '02' + 'ab'.repeat(32), recoverable: false }; a.fcRestoreThis(); },

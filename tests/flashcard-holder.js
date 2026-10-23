@@ -12,12 +12,12 @@
  *   the wallet          `cardSetUp` with the holder's two numbers, `cardSetUpFor` (the first paying phone, no owner, no key
  *                       of its own), `cardGuestLook` (VIEW AS GUEST, nothing kept) and `cardClaim` (TIE OWNERSHIP);
  *   the screens         driven as a person drives them (flashcard-ui-kit.js): the owner's set-up, its PIN pads, YES and NO
- *                       and the wheel; SEND > FLASHCARD to a new card, which this phone sets up for its holder and does not
+ *                       and SET AMOUNT for each; SEND > FLASHCARD to a new card, which this phone sets up for its holder and does not
  *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; the swipe between home and
  *                       the card; and no daily limit anywhere on the card's screen.
  *
- * And the set-up's wheels in the card's own money: a dollar card's in dollars only, a bitcoin card's in dollars or sats by the switch
- * above them, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
+ * And the set-up's two amounts in the card's own money, on SET AMOUNT: a dollar card's in dollars only, a bitcoin card's in dollars
+ * first with the screen's swap to sats, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
  * exact pieces (the change these cards make for themselves, mended or given up, is tests/flashcard-mend.js). */
 const { funded, newCard, why, OTHER_WORDS } = require('./flashcard-kit');
 const { appOn, until, pad, card, vals, settle, keyIn } = require('./flashcard-ui-kit');
@@ -44,23 +44,17 @@ const keptFor = (ctx, key) => ['foxy.flashcard.receipts', 'foxy.flashcard.logsee
   try { return !!(JSON.parse(ctx.storage.getItem(k) || '{}') || {})[key]; } catch (e) { return true; }
 });
 
-/* The wheel that is up (26j-card-wheel.js): its title, question, figures, the line under it, its button, and a figure tapped. */
-function wheel(a) {
-  const root = a._fcWheelEl;
-  if (!root || !root.parentNode) return null;
-  const kids = Array.from(root.children);
-  const click = (el) => el.dispatchEvent(new (el.ownerDocument.defaultView.Event)('click', { bubbles: true }));
-  const rows = Array.from(root.querySelectorAll('[data-wheel-row]'));
+/* SET AMOUNT, while the set-up asks one of its two amounts (26j-card-wheel.js, `fcSuAmount`): which, the unit on the screen, the unit
+ * the card takes, what is typed, and the line under it; `type(figure, unit)` puts a figure on it as the keypad would ('USD' a dollar
+ * string, 'SATS' whole sats; the swap is the screen's own, so the unit is said), `next()` is NEXT and `back()` the round back button. */
+function amt(a) {
+  const s = a.state;
+  if (s.screen !== 'amount' || !/^cardSu(NoPin|Tap)$/.test(String(s.flow))) return null;
   return {
-    title: kids[0].textContent, question: kids[1].textContent,
-    rows: rows.map((r) => r.textContent),
-    mains: rows.map((r) => r.querySelector('[data-wheel-main]').textContent),
-    chosen: rows.map((r) => r.querySelector('[data-wheel-main]').style.opacity).indexOf('1'),
-    line: root.querySelector('[data-wheel-line]').textContent,
-    cta: root.querySelector('[data-wheel-cta]').textContent,
-    pick(main) { const r = rows.filter((x) => x.querySelector('[data-wheel-main]').textContent === main)[0]; click(r); },
-    set() { click(root.querySelector('[data-wheel-cta]')); },
-    back() { click(root.querySelector('[data-wheel-back]')); },
+    flow: s.flow, unit: s.unit, cardUnit: a.fcTypedUnit(), amount: s.amount, line: a.fcSuAmountLine(),
+    type(fig, unit) { a.setState({ amount: String(fig), unit: unit || s.unit }); return amt(a); },
+    next() { a.fcAmountNext(); },
+    back() { a.back(); },
   };
 }
 
@@ -291,26 +285,25 @@ function wheel(a) {
     ok(card(holder) && card(holder).title === 'SMALL AMOUNTS' && card(holder).reason === 'Do you want to pay small amounts without entering your PIN?' && card(holder).has('YES') && card(holder).has('NO'),
        'at a mint with one balance, no currency is asked: next, "Do you want to pay small amounts without entering your PIN?" YES or NO', card(holder) && card(holder).all);
     card(holder).press('YES');
-    let w = wheel(holder);
-    ok(w && w.title === 'NO PIN AMOUNT' && w.mains[0] === '$0.00' && w.mains[w.mains.length - 1] === '$20.00' && w.mains[w.chosen] === '$2.00' && w.cta === 'SET $2.00',
-       'YES turns a wheel from $0 to $20, standing at $2.00, with SET $2.00 under it', w && w.mains.join(' '));
-    ok(w.rows[w.chosen] === '$2.00₿ 3,333', 'each figure has its sats under it, at this phone’s price', w.rows[w.chosen]);
-    w.back();
-    ok(!wheel(holder) && card(holder) && card(holder).title === 'SMALL AMOUNTS', 'the wheel’s back button is the question again');
+    let s = amt(holder);
+    ok(s && s.flow === 'cardSuNoPin' && s.unit === 'USD' && s.amount === '' && s.cardUnit === 'sat' && holder.state.stack.slice(-1)[0] === 'flashcard' && s.line === '',
+       'YES opens SET AMOUNT for the no-PIN amount, as LIMITS does: empty, in dollars first, for a card that holds sats, and no seconds line', JSON.stringify(s));
+    s.back();
+    ok(!amt(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'SMALL AMOUNTS', 'its round back button is the question again, over the card’s screen as it was');
     card(holder).press('YES');
-    wheel(holder).pick('$5.00');
-    ok(wheel(holder).cta === 'SET $5.00' && wheel(holder).mains[wheel(holder).chosen] === '$5.00', 'a figure tapped is the one chosen, and the button says it');
-    wheel(holder).set();
-    ok(card(holder) && card(holder).title === 'MAX PER TAP' && card(holder).reason === 'Do you want to set a max per tap?', 'then "Do you want to set a max per tap?"', card(holder) && card(holder).all);
+    amt(holder).next();
+    ok(amt(holder) && holder.toasts.slice(-1)[0] === 'Type an amount first.', 'NEXT with nothing typed is refused, as on LIMITS', holder.toasts.slice(-1)[0]);
+    amt(holder).type('5.00').next();
+    ok(!amt(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'MAX PER TAP' && card(holder).reason === 'Do you want to set a max per tap?',
+       'NEXT carries it on: "Do you want to set a max per tap?", over the card’s screen', card(holder) && card(holder).all);
     card(holder).press('YES');
-    w = wheel(holder);
-    ok(w.title === 'MAX PER TAP' && w.mains[w.chosen] === '$10.00' && w.line === 'It will take 13 seconds to pay $40.00.',
-       'YES turns the wheel for the limit, at $10.00, with the seconds a payment of four limits waits under it', w.line);
-    w.pick('$20.00');
-    ok(wheel(holder).line === 'It will take 13 seconds to pay $80.00.' && wheel(holder).cta === 'SET $20.00', 'turned, the line follows the figure', wheel(holder).line);
+    s = amt(holder);
+    ok(s && s.flow === 'cardSuTap' && s.unit === 'USD' && s.amount === '' && s.line === '', 'YES opens SET AMOUNT for the limit on one payment, empty, with no line before a figure', JSON.stringify(s));
+    ok(amt(holder).type('10.00').line === 'It will take 13 seconds to pay $40.00.', 'typed, the line under it says the seconds a payment of four limits waits', amt(holder).line);
+    ok(amt(holder).type('20.00').line === 'It will take 13 seconds to pay $80.00.', 'and follows the figure as it is typed', amt(holder).line);
     c.tap();
     H.sheet.length = 0;
-    wheel(holder).set();
+    amt(holder).next();
     await until('the card to be set up', () => !!c.state.owner && holder.state.fc && holder.state.fc.ownedHere === true);
     ok(c.state.pin === hexOf('2580') && c.state.noPinLimit === Math.round(5 / 60000 * 1e8) && c.state.tapLimit === Math.round(20 / 60000 * 1e8) && c.state.record.limit === 0,
        'one tap wrote the PIN, the no-PIN amount and the limit on one payment in sats at the price, and no daily limit', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
@@ -371,64 +364,53 @@ function wheel(a) {
     card(holder).press('CLOSE');
   }
 
-  /* ---- the wheels' unit, by what the card holds (the owner's rule of 2026-10-22) --------------------------------------------
-   * A dollar card's limits are chosen in dollars and nothing else; a bitcoin card's in dollars or in sats, by a DOLLARS / SATS switch
-   * above the wheel, the other unit under each figure; what the card is sent is what it takes (cents, or sats) either way. */
+  /* ---- the two amounts' unit, by what the card holds (the owner's rule of 2026-10-22) --------------------------------------------
+   * A dollar card's amounts are typed in dollars and nothing else; a bitcoin card's in dollars first or in sats by SET AMOUNT's own swap;
+   * what the card is sent is what it takes (cents, or sats) either way. */
   {
-    const a = appOn(H);
+    const a = appOn(H, { screen: 'flashcard' });
     a.price = 60000;
-    const units = () => {
-      const sw = a._fcWheelEl && a._fcWheelEl.querySelector('[data-wheel-units]');
-      return sw ? Array.from(sw.children).map((x) => x.textContent + (x.getAttribute('aria-pressed') ? '*' : '')).join(' ') : '';
-    };
-    const switchTo = (key) => {
-      const seg = a._fcWheelEl.querySelector('[data-wheel-unit="' + key + '"]');
-      seg.dispatchEvent(new (seg.ownerDocument.defaultView.Event)('click', { bubbles: true }));
-    };
-    // a bitcoin card: the switch, dollars first; SATS turns both wheels into sats, their dollars under them
+    // a bitcoin card: dollars first; typed in sats, both amounts are sats, and no dollars are kept for them
     let chose = null;
     a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
     card(a).press('YES');
-    ok(units() === 'DOLLARS* SATS' && wheel(a).mains[wheel(a).chosen] === '$2.00' && wheel(a).rows[wheel(a).chosen] === '$2.00₿ 3,333',
-       'a bitcoin card’s wheel has DOLLARS / SATS above it, in dollars first with the sats under each', units() + ' | ' + wheel(a).rows[wheel(a).chosen]);
-    switchTo('sat');
-    let w = wheel(a);
-    ok(units() === 'DOLLARS SATS*' && w.mains[0] === '₿ 0' && w.mains[w.mains.length - 1] === '₿ 20,000' && w.mains[w.chosen] === '₿ 2,000'
-       && w.rows[w.chosen] === '₿ 2,000$1.20' && w.cta === 'SET ₿ 2,000', 'SATS: the wheel’s steps in sats, standing at 2,000, its dollars under each, and SET ₿ 2,000', w.rows[w.chosen]);
-    w.set();
+    ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'sat', 'a bitcoin card’s SET AMOUNT opens in dollars, for sats', JSON.stringify(amt(a)));
+    amt(a).type('2000', 'SATS').next();
     card(a).press('YES');
-    w = wheel(a);
-    ok(units() === 'DOLLARS SATS*' && w.mains[w.chosen] === '₿ 10,000' && w.line === 'It will take 13 seconds to pay ₿ 40,000.',
-       'the choice stands for the limit on one payment, and its seconds line is in sats', units() + ' | ' + w.line);
-    w.pick('₿ 20,000');
-    ok(wheel(a).line === 'It will take 13 seconds to pay ₿ 80,000.' && wheel(a).cta === 'SET ₿ 20,000', 'turned, the line follows in sats', wheel(a).line);
-    switchTo('usd');
-    ok(units() === 'DOLLARS* SATS' && wheel(a).line === 'It will take 13 seconds to pay $40.00.', 'and DOLLARS turns it back, the line in dollars', wheel(a).line);
-    switchTo('sat');
-    wheel(a).pick('₿ 50,000');
-    wheel(a).set();
-    ok(chose && chose.noPin === 2000 && chose.noPinUsd === 0 && chose.tapLimit === 50000 && chose.tapUsd === 0,
-       'what the card is sent is the sats chosen, and no dollars are kept for figures chosen in sats', JSON.stringify(chose));
-    // a dollar card: dollars and nothing else, with nothing under them, price or not
+    ok(amt(a).flow === 'cardSuTap' && amt(a).type('10000', 'SATS').line === 'It will take 13 seconds to pay ₿ 40,000.', 'swapped to sats, the seconds line is in sats', amt(a).line);
+    ok(amt(a).type('20000', 'SATS').line === 'It will take 13 seconds to pay ₿ 80,000.', 'and follows the figure in sats', amt(a).line);
+    ok(amt(a).type('10.00', 'USD').line === 'It will take 13 seconds to pay $40.00.', 'swapped back, the line is in dollars', amt(a).line);
+    amt(a).type('50000', 'SATS').next();
+    ok(chose && chose.noPin === 2000 && chose.noPinUsd === 0 && chose.tapLimit === 50000 && chose.tapUsd === 0 && a.state.screen === 'flashcard',
+       'what the card is sent is the sats typed, and no dollars are kept for figures typed in sats', JSON.stringify(chose));
+    // typed in dollars, a bitcoin card is sent their sats, and the dollars are kept, as LIMITS keeps them
+    chose = null;
+    a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
+    pad(a).type('2580'); pad(a).type('2580');
+    card(a).press('YES');
+    amt(a).type('2.00').next();
+    card(a).press('YES');
+    amt(a).type('10.00').next();
+    ok(chose && chose.noPin === Math.round(2 / 60000 * 1e8) && chose.noPinUsd === 2 && chose.tapLimit === Math.round(10 / 60000 * 1e8) && chose.tapUsd === 10,
+       'typed in dollars: their sats at the price, and the dollars kept', JSON.stringify(chose));
+    // a dollar card: dollars and nothing else, price or not
     chose = null;
     a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
     card(a).press('YES');
-    w = wheel(a);
-    ok(units() === '' && w.mains[w.chosen] === '$2.00' && w.rows.every((r) => /^\$[0-9.]+$/.test(r)), 'a dollar card’s wheel is in dollars only: no switch, and no sats under any figure', w.rows.slice(0, 3).join(' '));
-    w.set();
+    ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'usd', 'a dollar card’s SET AMOUNT is in dollars, for cents', JSON.stringify(amt(a)));
+    amt(a).type('2.00').next();
     card(a).press('YES');
-    w = wheel(a);
-    ok(w.line === 'It will take 13 seconds to pay $40.00.' && units() === '', 'its limit too, its seconds line in dollars', w.line);
-    w.set();
+    ok(amt(a).type('10.00').line === 'It will take 13 seconds to pay $40.00.', 'its limit too, its seconds line in dollars', amt(a).line);
+    amt(a).next();
     ok(chose && chose.noPin === 200 && chose.tapLimit === 1000 && chose.noPinUsd === 0 && chose.tapUsd === 0, 'and the card is sent cents', JSON.stringify(chose));
     a.price = 0;
     a.fcSetUpSteps({ unit: 'usd', run: () => {} });
     pad(a).type('2580'); pad(a).type('2580');
     card(a).press('YES');
-    ok(units() === '' && wheel(a).mains[wheel(a).chosen] === '$2.00' && wheel(a).rows.every((r) => /^\$/.test(r)), 'with no Bitcoin price a dollar card is still in dollars, never sats', wheel(a).rows.slice(0, 2).join(' '));
-    wheel(a).back();
+    ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'usd', 'with no Bitcoin price a dollar card is still in dollars, never sats', JSON.stringify(amt(a)));
+    amt(a).back();
     card(a).press('NO');
     card(a).press('NO');
     // LIMITS takes its figure on the SET AMOUNT keypad: a dollar card's in dollars with no swap, a bitcoin card's in dollars with the swap to sats
@@ -450,8 +432,8 @@ function wheel(a) {
     a.fcSetUpSteps({ unit: 'sat', run: () => {} });
     pad(a).type('2580'); pad(a).type('2580');
     card(a).press('YES');
-    ok(units() === '' && wheel(a).mains[wheel(a).chosen] === '₿ 2,000' && wheel(a).rows[wheel(a).chosen] === '₿ 2,000', 'a bitcoin card with no price: sats, no switch, nothing under them', wheel(a).rows[wheel(a).chosen]);
-    wheel(a).back();
+    ok(amt(a).unit === 'SATS' && amt(a).cardUnit === 'sat', 'a bitcoin card with no price: SET AMOUNT in sats', JSON.stringify(amt(a)));
+    amt(a).back();
     card(a).press('NO');
     card(a).press('NO');
   }
@@ -476,7 +458,10 @@ function wheel(a) {
     pad(payer).type('8642');
     ok(card(payer) && card(payer).title === 'SMALL AMOUNTS', 'then the same two questions');
     card(payer).press('YES');
-    wheel(payer).set();
+    ok(amt(payer) && amt(payer).flow === 'cardSuNoPin' && payer.state.stack.indexOf('amount') < 0, 'YES opens SET AMOUNT in place of SEND’s keypad', JSON.stringify(payer.state.stack));
+    amt(payer).type('2.00').next();
+    ok(payer.state.screen === 'amount' && payer.state.flow === 'cardSend' && payer.state.amount === '1500' && payer.state.unit === 'SATS',
+       'NEXT puts SEND’s keypad back as it was, under the next question', JSON.stringify([payer.state.flow, payer.state.amount]));
     card(payer).press('NO');
     cash.tap();
     await until('the money to be on the card', () => cash.balance() === 1500 && payer.state.screen === 'home');
@@ -776,7 +761,8 @@ function wheel(a) {
        'a card another phone set up for its holder is not set up again here: money goes on it with its PIN');
 
     // the screens: SEND > FLASHCARD, cut before the holder's numbers, TRY AGAIN writes them and then the money
-    const wheelSet = (a) => wheel(a).set();
+    // SET AMOUNT for each, at what the wheel stood at: $2.00 without the PIN, $10.00 on one payment
+    const wheelSet = (a) => amt(a).type(amt(a).flow === 'cardSuTap' ? '10.00' : '2.00', 'USD').next();
     const payer = appOn(R);
     payer.price = 60000;
     await payer.refreshBalance();

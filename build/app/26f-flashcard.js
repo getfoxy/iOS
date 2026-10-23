@@ -646,6 +646,8 @@
   fcTypedUnitFor(flow) {
     // (a card of 1.23's limit: dollars, or dollars and sats where it holds bitcoin, `fcLimitUnit`)
     if (String(flow) === 'cardLimit') return this.fcLimitUnit();
+    // (the two amounts of a card's set-up: in what the card will hold, 26j-card-wheel.js `fcSuUnitNow`)
+    if (/^cardSu(NoPin|Tap)$/.test(String(flow))) return this.fcSuUnitNow();
     if (/^card(Add|Wd)$/.test(String(flow))) return this.fcUnit();
     if (flow === 'cardSend') return (this.twoUnitsOn && this.twoUnitsOn() && this.walletNow && this.walletNow('send') === 'usd') ? 'usd' : 'sat';
     return 'sat';
@@ -678,6 +680,8 @@
 
   fcAmountNext() {
     const flow = String(this.state.flow);
+    // the set-up's two amounts carry on the set-up (26j-card-wheel.js), with no card on show to check them against
+    if (/^cardSu(NoPin|Tap)$/.test(flow)) { this.fcSuAmountNext(); return; }
     const fc = this.state.fc;
     // in the unit it is typed in: sats for a bitcoin card, whatever the screen showed; cents, exactly, for a dollar card
     const unit = this.fcTypedUnit();
@@ -2631,8 +2635,8 @@
    * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
   cardFlowBusy() {
     return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard()
-      // (the set-up's wheel, 26j-card-wheel.js)
-      || !!(this._fcWheelEl && this._fcWheelEl.parentNode);
+      // (the set-up's SET AMOUNT, 26j-card-wheel.js)
+      || !!(this.fcSuAsking && this.fcSuAsking());
   }
 
   // a card's PIN pad, asked for a tap, is still up
@@ -3231,7 +3235,7 @@
       return;
     }
     /* A card of 1.21 and on holds no money without a PIN: the owner's steps, in his order (26j-card-wheel.js): the PIN twice, what
-     * it holds, then its two numbers on the wheel, and one tap. */
+     * it holds, then its two numbers on SET AMOUNT, and one tap. */
     if (fc.pinFirst) { this.fcSetUpSteps({}); return; }
     /* At a mint with two balances the card is asked what it will hold first, on the CURRENCY screen, every time: a card
      * holds one kind, chosen here and changed only by RESET and setting it up again. At a mint with one, nothing is asked:

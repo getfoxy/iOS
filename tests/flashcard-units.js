@@ -931,6 +931,30 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await uiSettle();
     };
 
+    /* YES to each question opens SET AMOUNT (26j-card-wheel.js, `fcSuAmount`), in the unit the card will hold, and NEXT carries the figure
+     * into the one tap: a card of 1.23 keeps both in cents, a dollar card's typed in dollars, a bitcoin card's typed in dollars too. */
+    for (const [i, name] of [[0, 'DOLLARS'], [1, 'BITCOIN']]) {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await toCurrency(a, c);
+      cur(a).curCards[i].tap();
+      cardUp(a).press('YES');
+      const unitNow = a.fcTypedUnit();
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '' && unitNow === (i === 0 ? 'usd' : 'sat'),
+         name + ': YES opens SET AMOUNT for the no-PIN amount, empty and in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      a.setState({ amount: '2.00' });
+      a.fcAmountNext();
+      ok(a.state.screen === 'flashcard' && cardUp(a) && cardUp(a).title === 'MAX PER TAP', name + ': NEXT is the next question, over the card’s screen');
+      cardUp(a).press('YES');
+      a.setState({ amount: '10.00' });
+      ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 13 seconds to pay $40.00.', name + ': the limit’s SET AMOUNT, its seconds under the figure', a.fcSuAmountLine());
+      c.tap();
+      a.fcAmountNext();
+      await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
+      await uiSettle();
+      ok(c.state.noPinLimit === 200 && c.state.tapLimit === 1000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+    }
+
     // BOTH: three cards of one shape, the words; a dollar record, and ADD FUNDS asks which, sats going on after
     {
       const a = screens();
