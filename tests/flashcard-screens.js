@@ -3191,27 +3191,27 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const known = Object.keys(H.W.cardsKnown())[0];
     const stranger = '02' + 'ab'.repeat(32);
     ok(!!known && H.W.cardName(known) === '' && H.W.cardName(stranger) === '' && H.W.cardName('') === '' && H.W.cardName(undefined) === '', 'a card has no name until it is given one', known);
-    ok(H.W.cardSetName(known, '  Lunch  ') === 'Lunch' && H.W.cardName(known) === 'Lunch' && H.W.cardsKnown()[known].name === 'Lunch',
+    ok(H.W.cardSetName(known, '  Lunch  ') === 'LUNCH' && H.W.cardName(known) === 'LUNCH' && H.W.cardsKnown()[known].name === 'LUNCH',
        'cardSetName keeps it trimmed, on the card’s row on file', JSON.stringify(H.W.cardsKnown()[known].name));
-    ok(H.W.cardSetName(known, 'A name much longer than twenty-four letters') === 'A name much longer than' && Array.from(H.W.cardName(known)).length <= 24,
+    ok(H.W.cardSetName(known, 'A name much longer than twenty-four letters') === 'A NAME MUCH LONGER THAN' && Array.from(H.W.cardName(known)).length <= 24,
        'cut at 24 characters (and trimmed after the cut)', H.W.cardName(known));
-    ok(H.W.cardSetName(known, 'Café ☕ card') === 'Café ☕ card' && H.W.cardName(known) === 'Café ☕ card', 'and kept as typed otherwise', H.W.cardName(known));
-    ok(H.W.cardSetName(stranger, 'Mum') === 'Mum' && H.W.cardName(stranger) === 'Mum' && !H.W.cardKnownHere(stranger) && !H.W.cardsKnown()[stranger],
+    ok(H.W.cardSetName(known, 'Café ☕ card') === 'CAFÉ ☕ CARD' && H.W.cardName(known) === 'CAFÉ ☕ CARD', 'and kept as typed otherwise', H.W.cardName(known));
+    ok(H.W.cardSetName(stranger, 'Mum') === 'MUM' && H.W.cardName(stranger) === 'MUM' && !H.W.cardKnownHere(stranger) && !H.W.cardsKnown()[stranger],
        'a card with no row here (one set up for somebody else) is named in a note of its own, and is not made a card this phone knows');
     ok(H.W.cardSetName(stranger, '   ') === '' && H.W.cardName(stranger) === '', 'a name of nothing takes it off');
 
     // where the app names a card: CARDS YOU LOADED and money waiting (`fcName`), the card screen's title, home's history rows
     const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
     H.W.cardSetName(known, 'Lunch');
-    ok(a.fcName(known) === 'Lunch' && a.fcName(stranger) === 'CARD ··' + stranger.slice(-4).toUpperCase(),
+    ok(a.fcName(known) === 'LUNCH' && a.fcName(stranger) === 'CARD ··' + stranger.slice(-4).toUpperCase(),
        'fcName says the kept name first, and the last four of the key for a card with none, as before', a.fcName(stranger));
     a.FC_RECOVERABLE = true;
     a.setState({ fc: null });
-    const row = vals(a).fcRows.filter((r) => r.name === 'Lunch')[0];
+    const row = vals(a).fcRows.filter((r) => r.name === 'LUNCH')[0];
     ok(!!row, 'the card is named in the list of cards this phone loaded', vals(a).fcRows.map((r) => r.name).join());
     a.setState({ fc: { key: known, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0, check: 'ok', checkedAt: Date.now() } });
     v = vals(a);
-    ok(v.fcTitle === 'Lunch' && v.fcVerifiedShown, 'the card screen’s title is its name, the Verified line under it', v.fcTitle + ' / ' + v.fcVerified);
+    ok(v.fcTitle === 'LUNCH' && v.fcVerifiedShown, 'the card screen’s title is its name, the Verified line under it', v.fcTitle + ' / ' + v.fcVerified);
     a.setState({ fc: { key: stranger, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0 } });
     ok(vals(a).fcTitle === 'FLASHCARD', 'a card with no name keeps FLASHCARD');
     // home's history rows, where a card is named (16-history-lists.js `txWho`)
@@ -3223,8 +3223,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(h.txWho({ memo: 'to card', card: stranger, dir: 'out' }) === 'To card' && h.txWho({ memo: 'card', card: stranger, dir: 'in' }) === 'From a card',
        'a card with no name keeps its row’s words');
     H.W.cardSetName(stranger, 'Mum');
-    ok(h.txWho({ memo: 'to card', card: stranger, dir: 'out' }) === 'To Mum' && h.txWho({ memo: 'from card', card: known, dir: 'in' }) === 'From Lunch'
-       && h.txWho({ memo: 'paid from card', fromCard: known, dir: 'out' }) === 'Paid from Lunch',
+    ok(h.txWho({ memo: 'to card', card: stranger, dir: 'out' }) === 'To MUM' && h.txWho({ memo: 'from card', card: known, dir: 'in' }) === 'From LUNCH'
+       && h.txWho({ memo: 'paid from card', fromCard: known, dir: 'out' }) === 'Paid from LUNCH',
        'a named card is named in the history rows that name a card', h.txWho({ memo: 'to card', card: stranger, dir: 'out' }));
     // the welcome's SET UP CARD: NAME CARD, then the set-up; SKIP goes on with no name, and none is kept
     let went = 0;

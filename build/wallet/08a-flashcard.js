@@ -2298,12 +2298,13 @@
   /* A card's name, given on this phone (NAME CARD in the set-up, RENAME CARD in the card's menu; 26j-card-wheel.js `fcNameOpen`). The card is
    * told nothing of it: it is this phone's word for the card, kept as `name` on the card's row here (`CARDS`), and, for a card this phone
    * has no row for (one set up for somebody else, which is never on that list, and must not be put on it), in a note of its own by the
-   * card's key (`CARD_NAMES`). Trimmed and cut at CARD_NAME_MAX characters, and kept as typed otherwise; '' takes the name off. */
+   * card's key (`CARD_NAMES`). Trimmed, cut at CARD_NAME_MAX characters and put in capitals, as a card's name is shown everywhere;
+   * '' takes the name off. */
   var CARD_NAMES = 'foxy.flashcard.names';
   var CARD_NAME_MAX = 24;
   function cardNameClean(name) {
     var t = String(name === undefined || name === null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
-    return Array.from(t).slice(0, CARD_NAME_MAX).join('').trim();
+    return Array.from(t).slice(0, CARD_NAME_MAX).join('').trim().toUpperCase();
   }
   function cardNameNotes() {
     var all = load(CARD_NAMES, {});

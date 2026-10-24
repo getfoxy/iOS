@@ -357,20 +357,20 @@ function amt(a) {
        'its screen: the limit as a rate on its face, the no PIN limit and what is left of it under LIMITS in its menu, nothing of a day, and no welcome', [v.fcLimitLine, limitsSub(v)].join(' | '));
     ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
        'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN and RESET, in that order: no RESTORE, a card being read is not lost', menuOf(v));
-    ok(H.W.cardName(c.key) === 'Lunch card' && H.W.cardsKnown()[c.key].name === 'Lunch card' && v.fcTitle === 'Lunch card' && v.fcVerifiedShown === true,
+    ok(H.W.cardName(c.key) === 'LUNCH CARD' && H.W.cardsKnown()[c.key].name === 'LUNCH CARD' && v.fcTitle === 'LUNCH CARD' && v.fcVerifiedShown === true,
        'the name typed on NAME CARD is kept on the card’s row on this phone, trimmed, once the card is set up, and is the card screen’s title, with the Verified line under it', JSON.stringify([H.W.cardName(c.key), v.fcTitle, v.fcVerified]));
     ok(c.state.record && !JSON.stringify(c.state).includes('Lunch'), 'the card itself is told nothing of it');
     // RENAME CARD: the same screen, the name filled in; NEXT keeps the new one, back leaves it as it was
     holder.setState({ open0: true });
     vals(holder).fcMenuItems.filter((k) => k.label === 'RENAME CARD')[0].tap();
     let rn = named(holder);
-    ok(rn && rn.title === 'RENAME CARD' && rn.draft === 'Lunch card' && !rn.grey && !rn.skipShown && rn.mode === 'rename' && !holder.state.open0 && holder.state.stack.slice(-1)[0] === 'flashcard',
+    ok(rn && rn.title === 'RENAME CARD' && rn.draft === 'LUNCH CARD' && !rn.grey && !rn.skipShown && rn.mode === 'rename' && !holder.state.open0 && holder.state.stack.slice(-1)[0] === 'flashcard',
        'RENAME CARD in the menu opens the same screen, titled RENAME CARD, with the name filled in and no SKIP', JSON.stringify(rn));
     rn.type('Coffee').back();
-    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'Lunch card', 'back leaves it as it was', H.W.cardName(c.key));
+    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'LUNCH CARD', 'back leaves it as it was', H.W.cardName(c.key));
     holder.fcRename();
     named(holder).type('Coffee card').next();
-    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'Coffee card' && vals(holder).fcTitle === 'Coffee card',
+    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'COFFEE CARD' && vals(holder).fcTitle === 'COFFEE CARD',
        'NEXT keeps the new name, and the card’s screen is titled with it', vals(holder).fcTitle);
     v = vals(holder);
     ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcMenuItems.filter((k) => k.label !== 'LIMITS').every((k) => k.sub === ''),
@@ -595,7 +595,7 @@ function amt(a) {
     ok(payer.state.fc.ownedHere === false && payer.state.fc.mine === false && v.fcGuest && !v.fcUsable && v.fcBalance === '₿ 1,500'
        && v.fcGuestLine === 'This card belongs to whoever holds it. It is not tied to any phone.',
        'and read on that phone it is not its own: its balance, and VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE, and nothing to move its money', v.fcBalance);
-    ok(R.W.cardName(cash.key) === 'Mum' && !R.W.cardsKnown()[cash.key] && v.fcTitle === 'Mum' && !(v.fcMenuItems || []).some((k) => k.label === 'RENAME CARD'),
+    ok(R.W.cardName(cash.key) === 'MUM' && !R.W.cardsKnown()[cash.key] && v.fcTitle === 'MUM' && !(v.fcMenuItems || []).some((k) => k.label === 'RENAME CARD'),
        'the name typed for the holder’s card is kept on this phone with no row of the card made for it, and titles its screen; it has no RENAME CARD, not being this phone’s', JSON.stringify([R.W.cardName(cash.key), v.fcTitle, menuOf(v)]));
     ok(!(v.fcMenuItems || []).some((k) => /RESTORE/.test(k.label)), 'and no RESTORE in its menu: a card being read is not lost', menuOf(v));
     // a new card of 1.21 cannot be set up for somebody else: it takes no money with no owner
