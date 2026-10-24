@@ -264,6 +264,11 @@
     /** @type {?function(any): void} */
     _onCardKeptLost: null,
     onCardKeptLost: function (fn) { FoxyWallet._onCardKeptLost = fn; },
+    /* A card's restore asked before its date came due and was taken back: { key, unit, amount, sats, hash }, `amount` 0 where
+     * nothing was left on the card (21a-flashcard.js, `cardRestoreDue`). */
+    /** @type {?function(any): void} */
+    _onCardRestored: null,
+    onCardRestored: function (fn) { FoxyWallet._onCardRestored = fn; },
     onTrustSettled: function (fn) { FoxyWallet._onTrustSettled = fn; },
     /** @type {?function(any): void} */
     _onLateClaim: null,

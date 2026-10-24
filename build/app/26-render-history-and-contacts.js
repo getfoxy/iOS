@@ -212,7 +212,13 @@
       /* On a card of both currencies its list has the tabs, and each row the figure in its own unit (`histRowTwo`), signed as the
        * card saw it and with no wallet balance beside it, as on a card of one. */
       cardTwo ? { amtText: (unfinished(t) ? '' : dirOf(t) === 'in' ? '+ ' : '- ') + this.unitFigure(t.unit === 'usd' ? Math.round(Number(t.amount) || 0) : Math.round(Number(t.sats) || 0), unitOf(t)),
-                  balText: '' } : {})).map(r => Object.assign(r, {
+                  balText: '' } : {},
+      /* A card's restore waiting for its date (26f-flashcard.js `fcRestoreRows`): the amount coming back stands in the amount
+       * column as any row's figure does, in the pending amber, and the standing line says when it unlocks (UNLOCKS IN 28D)
+       * instead of "Pending"; no running balance, since it is in none. It opens what the restore waits for, with CANCEL RESTORE. */
+      t.restore ? { metaRail: this.fcUnlockWords ? this.fcUnlockWords(t.restoreDate) : 'Pending', metaColor: 'var(--btc-ink)',
+                    amtText: t.restoreAmt || '', amtSub: t.restoreSub || '', balText: '', amtColor: 'var(--btc-ink)',
+                    open: () => this.fcRestorePending(t.restore) } : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',

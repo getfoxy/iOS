@@ -10,7 +10,10 @@
  *   2. a note, where there is one, is what the card says, in place of
  *      "ecash" or the start of an invoice, on the same one line;
  *   3. the detail screen adds a note where there is none and changes one
- *      where there is.
+ *      where there is;
+ *   7. a card's restore asked before its date is a pending row in home's
+ *      history, "Restoring <the card>", the amount coming back in its column, UNLOCKS IN 28D on
+ *      would be, and in no balance.
  * The methods are lifted out of build/foxy-app.js, as tap-held.js does.
  */
 const fs = require('fs');
@@ -274,6 +277,65 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
      names(view(false, 'sat', old).rows) + ' / ' + names(view(true, 'sat', old).rows));
   global.window = { FoxyWallet: { heldSats: () => 0 } };
   ok('with no word from the wallet about cards, home hides only what a card paid from its own screen', view(false).rows.length === 8, names(view(false).rows));
+}
+
+console.log('\n7. a card restored before its date: pending in home’s history, and in no balance');
+{
+  /* RESTORE on a row of CARDS YOU LOADED before the card's date (26f-flashcard.js `fcRestoreAsk`) puts a row in home's history
+   * (`fcRestoreRows`, read in by `loadHistory`): "Restoring <the card's name, or card>", what it held in the amount column,
+   * dollars first, with UNLOCKS IN 28D on the standing line (`fcUnlockWords`: days rounded up, then hours, then minutes, then UNLOCKING), no
+   * running balance, and the books stepping over it. It opens the restore's own card (`fcRestorePending`: CANCEL RESTORE). */
+  const a = lift(['renderHistory(c) {', 'histAudit() {', 'fcRestoreRows(here) {', 'fcUnlockWords(date) {', 'fcPrice(n, unit) {', 'fcSats(n, unit) {',
+                  'fcAmt(x) {', 'fcUnitOf(x) {', 'txLabel(d, now) {', 'txStamp(d, now) {', 'txDay(d, now) {', 'txClock(d) {']);
+  global.CTA_INK = () => '#fff';
+  const KEY = '02lost', DOLLAR = '02dollar';
+  const now = Math.floor(Date.now() / 1000);
+  let restores = [
+    { key: KEY, name: 'Lunch money', mint: 'https://m.test', unit: 'sat', amount: 20000, sats: 20000, date: now + 28 * 86400 - 600, asked: now - 2 * 86400 },
+    { key: DOLLAR, name: '', mint: 'https://m.test/', unit: 'usd', amount: 1250, sats: 0, date: now + 3 * 3600 - 60, asked: now - 60 },
+    { key: '02elsewhere', name: '', mint: 'https://n.test', unit: 'sat', amount: 5, sats: 5, date: now + 600, asked: now },
+  ];
+  global.window = { __foxyClock24: false, FoxyWallet: { cardSession: () => {}, cardKnownHere: (k) => k === KEY || k === DOLLAR, heldSats: () => 0,
+    cardRestores: () => restores, cardName: (k) => (restores.filter((r) => r.key === k)[0] || {}).name || '' } };
+  const opened = [];
+  Object.assign(a, {
+    fcW: () => global.window.FoxyWallet, px: () => 60000, usd: (v) => v.toFixed(2), group: (n) => String(n),
+    histAuditIn: function () { return this.histAudit(); }, histAuditUsd: function () { return this.histAudit(); },
+    stageMoney: (n) => '₿ ' + n, money: (n) => ({ main: '₿ ' + n, sub: '' }), txFiat: () => 0,
+    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), topUpFeeSats: () => 0, recoveringSats: () => 0,
+    unitMoney: (n, u) => (u === 'usd' ? '$' + (n / 100).toFixed(2) : String(n)), unitLabel: (u) => u,
+    unitFigure: (n, u) => (u === 'usd' ? '$' + (n / 100).toFixed(2) : '₿ ' + n), unitWord: (u) => (u === 'usd' ? 'DOLLARS' : 'BITCOIN'),
+    homePills: () => ['usd', 'sat'], segLook: () => ({}), twoUnitsOn: () => false,
+    openTx: () => {}, openPendingSplit: () => {}, fcRestorePending: (k) => opened.push(k), goSwitchMint: () => {}, go: () => {}, setState: () => {}, histRef: () => {},
+  });
+  const pend = a.fcRestoreRows('https://m.test');
+  ok('one row for each restore waiting at this mint, and none for another mint’s', pend.length === 2 && pend.every((r) => r.pending && r.dir === 'in' && !r.card),
+     JSON.stringify(pend.map((r) => r.name)));
+  const paid = { hash: 'h1', time: '9:22 AM', fee: 0, card: '', fromCard: '', name: 'alice@example.com', memo: 'lunch', dir: 'in', sats: 50000, changeSats: 0, changeState: '' };
+  const s = { screen: 'history', stack: ['home'], histFilter: 'all', history: [{ label: 'TODAY', items: pend.concat([paid]) }], historyComplete: true, balSats: 50000 };
+  a.state = s;
+  const v = a.renderHistory({ s, sc: 'history' });
+  const rows = [].concat(...v.historyGroups.map((g) => g.items));
+  const lunch = rows.filter((r) => /^Restoring Lunch money/.test(r.name))[0] || {};
+  const dollars = rows.filter((r) => /^Restoring card/.test(r.name))[0] || {};
+  ok('the row names the card only: "Restoring Lunch money"', lunch.name === 'Restoring Lunch money', lunch.name);
+  ok('what comes back stands in the amount column, dollars first, as every row’s figure does', /^\+\s?\$\s?12\.00$/.test(lunch.amtText || ''), lunch.amtText);
+  ok('the standing line says when it unlocks instead of "Pending": UNLOCKS IN 28D (days rounded up)', lunch.line2 === 'UNLOCKS IN 28D', lunch.line2);
+  ok('in the pending amber, with no running balance', lunch.amtColor === 'var(--btc-ink)' && lunch.line2Color === 'var(--btc-ink)'
+     && lunch.tileBg === 'var(--btc-ink)' && lunch.balText === '', JSON.stringify([lunch.amtColor, lunch.line2Color, lunch.balText]));
+  ok('a card with no name is "card"; a dollar card’s figure in its dollars with nothing under it, under a day in hours',
+     dollars.name === 'Restoring card' && /^\+\s?\$\s?12\.50$/.test(dollars.amtText || '') && dollars.amtSub === '' && dollars.line2 === 'UNLOCKS IN 3H',
+     dollars.name + ' / ' + dollars.amtText + ' / ' + dollars.amtSub + ' / ' + dollars.line2);
+  ok('home keeps the rows: they name no card on file, so they are not left to a card’s list', rows.length === 3, rows.map((r) => r.name).join(', '));
+  ok('and the books step over them: in no balance, the history still ADDS UP', v.histAuditTitle === 'ADDS UP', v.histAuditTitle + ' / ' + v.histAuditBody);
+  lunch.open();
+  ok('the row opens the restore’s own card, with CANCEL RESTORE', opened.join() === KEY, opened.join());
+  ok('under an hour in minutes, and UNLOCKING once its date has come',
+     a.fcUnlockWords(now + 9 * 60 - 5) === 'UNLOCKS IN 9M' && a.fcUnlockWords(now + 86400 + 1) === 'UNLOCKS IN 2D' && a.fcUnlockWords(now - 1) === 'UNLOCKING',
+     [a.fcUnlockWords(now + 9 * 60 - 5), a.fcUnlockWords(now + 86400 + 1), a.fcUnlockWords(now - 1)].join(', '));
+  ok('the history read from the wallet puts them at the top, as a bill being collected', /this\.fcRestoreRows\(here\)\.forEach\(r => buckets\.TODAY\.unshift\(r\)\)/.test(method('loadHistory() {')));
+  restores = [];
+  ok('cancelled or taken back, the row is gone', a.fcRestoreRows('https://m.test').length === 0);
 }
 
 console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');

@@ -681,6 +681,38 @@ function amt(a) {
     const v = vals(holderApp);
     ok(!card(holderApp) && holderApp.state.screen === 'flashcard' && !holderApp.state.fc && v.fcHasRows && v.fcRows.length >= 2,
        'on the phone that loaded cards: the list of CARDS YOU LOADED, the take-back of each', String(v.fcRows.length));
+
+    /* RESTORE before the card's date (the owner's word): its row offers RESTORE, which is written down and nothing else; the row
+     * then says when it unlocks, and opens CANCEL RESTORE, which forgets it. The pending row in home's history is history-notes §7;
+     * the take-back on the date, tests/flashcard-takeback.js. */
+    const lc = newCard(H);
+    await H.W.cardSetUp(lc, { pin: '1234', recoverable: true });
+    lc.tap();
+    await H.W.cardAdd(lc, { sats: 1024, pin: '1234' });
+    const held = H.W.cardsList().filter((r) => r.key === lc.key)[0];
+    const b0 = await H.W.balanceSats();
+    holderApp.fcRowCard(held);
+    ok(card(holderApp) && card(holderApp).has('RESTORE') && /RESTORE brings it back to this phone then, by itself\./.test(card(holderApp).reason),
+       'a card’s row before its date offers RESTORE', card(holderApp) && card(holderApp).all);
+    card(holderApp).press('RESTORE');
+    await settle();
+    const asked = H.W.cardRestores().filter((r) => r.key === held.key)[0];
+    ok(!!asked && card(holderApp) && card(holderApp).title === 'RESTORING'
+       && card(holderApp).reason === holderApp.fcPrice(held.amount, held.unit) + ' from ' + holderApp.fcName(held.key) + ' comes back to this phone on '
+         + holderApp.fcDay(held.date) + '. Until then it is in your history as pending, and not in your balance.',
+       'RESTORE writes the restore down and says when the money comes back, and that it is in no balance till then', card(holderApp) && card(holderApp).all);
+    ok((await H.W.balanceSats()) === b0, 'and the balance is as it was', String((await H.W.balanceSats()) - b0));
+    card(holderApp).press('DONE');
+    const listed = (vals(holderApp).fcRows || []).filter((r) => r.name === holderApp.fcName(held.key))[0] || {};
+    ok(/^UNLOCKS IN \d+D$/.test(listed.text || ''), 'its row in CARDS YOU LOADED says when it unlocks', listed.text);
+    holderApp.fcRowCard(H.W.cardsList().filter((r) => r.key === held.key)[0]);
+    ok(card(holderApp) && card(holderApp).title === 'RESTORING' && card(holderApp).has('CANCEL RESTORE') && /It is not in your balance until then\./.test(card(holderApp).reason),
+       'opened again, the row is the restore waiting, with CANCEL RESTORE', card(holderApp) && card(holderApp).all);
+    card(holderApp).press('CANCEL RESTORE');
+    const after = H.W.cardsList().filter((r) => r.key === held.key)[0];
+    ok(!H.W.cardRestores().some((r) => r.key === held.key) && after.amount === held.amount && after.date === held.date && !after.takenBack
+       && holderApp.toasts.slice(-1)[0] === 'The restore is cancelled.' && !card(holderApp),
+       'CANCEL RESTORE forgets the restore, and nothing else changes', JSON.stringify(after));
   }
 
   /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, the swipe for each, HISTORY in each MENU, a tap asked for -- */
