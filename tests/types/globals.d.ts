@@ -8,6 +8,7 @@ interface Window {
   FoxyGate: any;         // Web/foxy-tor-gate.js
   webkit: any;           // WKWebView's message handlers, present only in the app
   __foxyUptime: any;     // set by the native side: seconds up and a process marker
+  __foxyCardHoldSecs?: number; // a local test build only: a shorter hold on a card's pieces (RigHold); absent, thirty days
   __foxyRequestIdHosts?: string[]; // a Debug build's -FoxyRequestIdHosts: the test mints sent a request mark
   msCrypto: any;         // an old browser's name for crypto, never on iOS
 }

@@ -2197,7 +2197,7 @@
     return walk.then(function () {
       var proven = 0, none = 0, away = 0, fake = 0, odd = 0, near = 0;
       // (the card's own phone, being paid by it, holds it to its own margin, as `cardUsable` did)
-      var floor = cardOfflineNow(card, true) + (cardMine(card) ? CARD_OWN_MARGIN : CARD_DATE_MARGIN);
+      var floor = cardOfflineNow(card, true) + (cardMine(card) ? cardOwnMargin() : cardDateMargin());
       read.forEach(function (x) {
         var p = x.p, d = cardDleqOf(x.d);
         // none given, or an answer that was not whole: nothing says this piece is the mint's, and nothing says it is not
@@ -2379,23 +2379,40 @@
   /* Thirty days, for a piece on a recoverable card: after it, the key that
    * loaded the card may take the piece back. A piece this close to its date is
    * not taken in payment (some mints stop honouring the card's own key then). */
-  var CARD_DATE_AHEAD = 30 * 24 * 3600;
+  /* The hold: how far ahead a piece's date is set, thirty days. A test build may shorten it (the native side sets
+   * `window.__foxyCardHoldSecs`, a Debug-only key of a local build; never in the app as shipped): every margin below
+   * scales with it, so a ten-minute hold behaves as the thirty-day one does, only faster. Read at use, never kept. */
+  var CARD_HOLD_DEFAULT = 30 * 24 * 3600;
+  function cardHoldSecs() {
+    var h = 0;
+    try { h = Math.round(Number(typeof window !== 'undefined' && window.__foxyCardHoldSecs) || 0); } catch (e) { h = 0; }
+    return h > 0 ? h : CARD_HOLD_DEFAULT;
+  }
+  function cardDateAhead() { return cardHoldSecs(); }
+  // the receiver's margin offline: a week of the thirty days, scaled
+  function cardDateMargin() { return Math.round(cardHoldSecs() * 7 / 30); }
+  // the owner's own margin: ten minutes of the thirty days; of a shorter hold, a twentieth, ten seconds at least
+  function cardOwnMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? 10 * 60 : Math.max(10, Math.round(h / 20)); }
+  // a one-signature card keeps a date that is still twenty of the thirty days off, scaled
+  function cardDateReuse() { return Math.round(cardHoldSecs() * 20 / 30); }
   /* A week: what a phone with no route needs left on a piece. It keeps what the
    * card signed until it is online again, and has to reach the mint before the
    * piece's date, when its loader may take it back. */
-  var CARD_DATE_MARGIN = 7 * 24 * 3600;
+  // (CARD_DATE_MARGIN became cardDateMargin(), which scales with the hold)
   /* A day: what a phone with a route needs. It swaps the pieces in at once, so
    * the date only has to be far enough off that the swap is not answered after
    * it. A week here would stop a card that only meets strangers from paying
    * three weeks after its money went on, a week before its date. */
   var CARD_ONLINE_MARGIN = 24 * 3600;
+  // a day of the thirty days when the receiver is online; of a shortened hold, a thirtieth, ten seconds at least
+  function cardOnlineMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? CARD_ONLINE_MARGIN : Math.max(10, Math.round(h / 30)); }
   /* Those margins are a stranger's: they keep a receiver from taking a piece
    * its loader could take back before the receiver's swap is made. The phone
    * that holds the card's refund key is that loader, and has nobody to guard
    * against but the clock: ten minutes, so a swap begun before the date is not
    * answered after it. Without this a holder could not empty or renew their
    * own card in its last days. */
-  var CARD_OWN_MARGIN = 10 * 60;
+  // (CARD_OWN_MARGIN became cardOwnMargin())
   /* Twenty days: a card its owner reads online with less than this left on its
    * money is renewed for thirty days more (the owner's refresh, on the card's
    * screen). A top-up keeps a date only while it has this much left too
@@ -4190,7 +4207,7 @@
    * route it is `cardOfflineNow`. */
   function cardUsable(card, w, own, now, offline) {
     if (!(Number(now) > 0)) now = Math.floor(Date.now() / 1000);
-    var margin = own ? CARD_OWN_MARGIN : (offline ? CARD_DATE_MARGIN : CARD_ONLINE_MARGIN);
+    var margin = own ? cardOwnMargin() : (offline ? cardDateMargin() : cardOnlineMargin());
     var out = /** @type {{ pieces: any[], stale: number, foreign: number }} */ ({ pieces: [], stale: 0, foreign: 0 });
     var cu = (card.record && card.record.unit) || 'sat';
     var at = mintOf(w), sets = keysetsOf(at, w);
@@ -4896,7 +4913,7 @@
   // a swap signed with this phone's own key (a card taken back): no card's bound, only how many pieces a swap is asked to take
   var CARD_SWAP_MOST = 32;
   // a top-up keeps the card's date while it is this far off, and takes a new one after: the line the owner's refresh renews at
-  var CARD_DATE_REUSE = 20 * 24 * 3600;
+  // (CARD_DATE_REUSE became cardDateReuse())
 
   function cardSwapRow(id) {
     return cardStore(CARD_SWAPS).filter(function (r) { return r && r.id === id; })[0] || null;
@@ -5084,7 +5101,7 @@
   function cardSwapWrite(plan, asked) {
     var row = cardSwapRowOf(plan, asked);
     // rows nothing has come back for in longer than any card's date is off are let fall
-    var old = Date.now() - (CARD_DATE_AHEAD + 35 * 24 * 3600) * 1000;
+    var old = Date.now() - (cardDateAhead() + 35 * 24 * 3600) * 1000;
     // never sent on a write that did not land: the card is not asked for a signature nothing could use
     mustSave(CARD_SWAPS, cardStore(CARD_SWAPS).filter(function (r) { return r && r.id !== plan.id && !(Number(r.at) < old); }).concat([row]), true);
   }
@@ -5383,7 +5400,7 @@
    * what was put on it last week. */
   function cardDateFor(card) {
     var now = Math.floor(Date.now() / 1000);
-    var fresh = now + CARD_DATE_AHEAD;
+    var fresh = now + cardDateAhead();
     if (!cardIsAll(card)) return fresh;
     var held = 0;
     (card.pieces || []).forEach(function (x) { if (x && Number(x.date) > held) held = Number(x.date); });
@@ -5398,7 +5415,7 @@
         });
       } catch (e) {}
     });
-    return held >= now + CARD_DATE_REUSE ? held : fresh;
+    return held >= now + cardDateReuse() ? held : fresh;
   }
 
   /* The sizes of the outputs the card is asked to make for itself (software
@@ -6517,7 +6534,7 @@
             console.log('[foxy] card: the mint had made a kept payment’s swap already; it is this phone’s');
             return ours(cardKeptAmt(rec));
           }
-          var back = first > 0 && now >= first - CARD_OWN_MARGIN;
+          var back = first > 0 && now >= first - cardOwnMargin();
           return cardKeptEnd(id, rec, back ? 'unwound' : 'spent', why);
         }, function (eFind) {
           // the mint could not say whose the swap was: nothing is decided on that
@@ -6533,7 +6550,7 @@
       return Promise.resolve(cardKeptEnd(id, rec, 'retired', why));
     }
     if (mintSaid && /signature|witness|locktime/i.test(why)) {
-      return Promise.resolve(cardKeptEnd(id, rec, (first > 0 && now >= first - CARD_OWN_MARGIN) ? 'unwound' : 'retired', 'signature: ' + why, 'signature'));
+      return Promise.resolve(cardKeptEnd(id, rec, (first > 0 && now >= first - cardOwnMargin()) ? 'unwound' : 'retired', 'signature: ' + why, 'signature'));
     }
     /* The mint's fee or keys changed since the tap. Not decided by a wallet built from storage, whose keys may be old: the
      * real connect says. Seen either by this wallet's own keys (the swap could not be set out as signed, or the fee on the

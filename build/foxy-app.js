@@ -13921,6 +13921,9 @@ class Component extends DCLogic {
       logs: 'M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11.5h6M9 14.5h6M9 17.5h3',
       // a payment card: its outline, the stripe across it, a short line of print
       card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
+      // the card, its lower right corner given to an arrow coming round: a lost card's money brought back
+      cardBack: 'M11 18.5H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1h14.8a2.1 2.1 0 0 1 2.1 2.1V11M2.5 10h19M6 15h3'
+        + 'M14 17a3.5 3.5 0 1 0 1-2.5M14.6 12.6v1.9h1.9',
       // two arrows, one each way: one balance into the other
       swap: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
       // home's RECEIVE and SEND arrows, so the rows that set them read as theirs
@@ -14094,7 +14097,10 @@ class Component extends DCLogic {
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
-    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
+    /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
+     * CARDS YOU LOADED list, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+    const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
+    v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -22096,6 +22102,12 @@ class Component extends DCLogic {
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // how near its date a card's own phone starts saying RENEW: a card's money is good for thirty days, and is renewed with twenty left
   FC_RENEW_DAYS = 20;
+  // the renewal threshold in seconds: twenty of the hold's thirty days, scaled with a shortened hold (the wallet's `cardHoldSecs`)
+  fcRenewSecs() {
+    const W = this.fcW ? this.fcW() : null;
+    const hold = (W && W.cardHoldSecs) ? Number(W.cardHoldSecs()) || 0 : 0;
+    return hold > 0 ? Math.round(hold * 20 / 30) : this.FC_RENEW_DAYS * 86400;
+  }
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
   /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
@@ -26928,7 +26940,7 @@ class Component extends DCLogic {
     // (a locked card cannot give its money up to be renewed until its owner has opened it)
     if (!(fc.mine && fc.recoverable && this.fcAnyMoney(fc)) || fc.locked) return;
     const now = Math.floor(Date.now() / 1000);
-    if (!(fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400 && fc.first > now + 600)) return;
+    if (!(fc.first > 0 && fc.first - now < this.fcRenewSecs() && fc.first > now + 600)) return;
     const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (!here || (there && there !== here)) return;
@@ -27810,11 +27822,8 @@ class Component extends DCLogic {
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
    *
-   * From the welcome of a new card and from a card's own row of buttons: the take-back of a lost card's dated pieces by the phone
-   * that loaded them (`fcRowCard`, `fcTakeBack`), as the list of CARDS YOU LOADED offers it. A card on screen that is cash (no
-   * refund key in its record, which is every card a phone set up for somebody else) says that it cannot be, and why. */
-  FC_CASH_LINE = 'This card is cash: it was set up with no key that can take its money back, so if it is lost its money cannot be restored.';
-
+   * From home's MENU (21-render-values.js): the take-back of a lost card's dated pieces by the phone that loaded them (`fcRowCard`,
+   * `fcTakeBack`), as the list of CARDS YOU LOADED offers it. Not on a card's own screens: a card being read is not lost. */
   fcRestoreLost() {
     const W = this.fcW();
     if (!W) return;
@@ -27827,18 +27836,6 @@ class Component extends DCLogic {
     // the list of CARDS YOU LOADED, on the card screen with no card on it: a lost card cannot be tapped
     this._fcCard = null;
     this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
-  }
-
-  // RESTORE on a card's own screen: what restoring would do for this card
-  fcRestoreThis() {
-    const fc = this.state.fc;
-    const W = this.fcW();
-    if (!fc || !W) return;
-    if (!fc.recoverable) { this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD', reason: this.FC_CASH_LINE }); return; }
-    const row = (W.cardsList() || []).filter((r) => r.key === fc.key)[0];
-    if (row) { this.fcRowCard(row); return; }
-    this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
-      reason: 'Only the phone that loaded this card can take its money back if it is lost, after its date.' });
   }
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
@@ -28391,7 +28388,7 @@ class Component extends DCLogic {
     const noPinCard = !!fc && !!fc.setUp && !fc.pinSet;
     // what a card with a PIN pays without it in a day: the no PIN limit and what is left of it today
     const noPin = (fc && fc.setUp && fc.pinSet && fc.noPin && fc.noPin.known && fc.noPin.set) ? fc.noPin : null;
-    const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
+    const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.fcRenewSecs();
     const past = near && fc.first <= now;
 
     /* One line on the card's own face, for what is true of the card itself
@@ -28459,9 +28456,9 @@ class Component extends DCLogic {
     const LU = (fc && fc.cents) ? 'usd' : U;
     /* The card's MENU, at the top right, home's own menu button and drawer (build/markup.html, `open0`): the card's settings, in this
      * order. HISTORY, what has been done with this card on this phone (`fcHistory`: its own log and the tampers it marked, for its
-     * owner), the clock as home's HISTORY row has it; LIMITS, with what the card pays without its PIN under it; CHANGE PIN (ADD PIN on a card that has none); RESTORE LOST
-     * CARD, for a card of software 1.21 and on, what restoring it would do if it were lost (`fcRestoreThis`); RESET, for its owner
-     * (software 1.17 and on). LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
+     * owner), the clock as home's HISTORY row has it; RENAME CARD; LIMITS, with what the card pays without its PIN under it; CHANGE PIN
+     * (ADD PIN on a card that has none); RESET, for its owner (software 1.17 and on). Restoring a lost card is home's MENU's: a card
+     * being read is not lost. LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
      * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
     // (software 1.23: for both its currencies together, in dollars, `LU`)
@@ -28482,9 +28479,6 @@ class Component extends DCLogic {
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
-    ]).concat(!fc.pinFirst ? [] : [
-      { label: 'RESTORE LOST CARD', sub: '', tap: shut(() => this.fcRestoreThis()),
-        path: 'M12 3.8v10.4m0 0-4.2-4.2m4.2 4.2 4.2-4.2M4.6 15.4v2.8a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.8' },
     ]).concat(!resettable ? [] : [
       { label: 'RESET', sub: '', tap: shut(() => this.fcReset()),
         path: 'M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4' },
@@ -28620,7 +28614,7 @@ class Component extends DCLogic {
       fcMenuItems: menu,
       fcMenuOpen: on && !!s.open0 && menu.length > 0,
       fcNew: fresh,
-      /* SET UP CARD and RESTORE LOST CARD, but not on a card whose set-up this phone began for its holder: sending it money finishes
+      /* SET UP CARD, but not on a card whose set-up this phone began for its holder: sending it money finishes
        * that set-up (`fcSendRun`), and this phone does not become its owner */
       fcNewSetUp: fresh && !holderCut,
       fcNewLine: holderCut
@@ -28628,8 +28622,6 @@ class Component extends DCLogic {
         : (fc && fc.pin === 'set' && !fc.hasRecord)
         ? 'Its set-up was cut short. Finish it to put money on it.'
         : 'Welcome to Foxy Card. Set it up to put money on it.',
-      // the welcome's second button, and the card screen's with no card on it: the cards this phone can take back (`fcRestoreLost`)
-      fcRestore: () => this.fcRestoreLost(),
       // a holder's card with no owner (software 1.22): what it is, and its two buttons
       fcGuest: guest,
       fcGuestLine: 'This card belongs to whoever holds it. It is not tied to any phone.',
@@ -30682,11 +30674,11 @@ class Component extends DCLogic {
 
   /* ---- WELCOME TO YOUR CASHU CARD ------------------------------------------------------------------------------------------
    *
-   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD, RESTORE LOST CARD and CANCEL. Drawn over the
+   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD and CANCEL. Drawn over the
    * card's screen for a card read there that this phone can set up (`fcWelcomeCard`; a set-up this phone began for a card's holder is
    * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FLASHCARD
-   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). RESTORE LOST CARD is the
-   * list of cards this phone can take back (`fcRestoreLost`); CANCEL is HOME from the card's screen, and SEND's keypad from SEND. */
+   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). CANCEL is HOME from the card's
+   * screen, and SEND's keypad from SEND. Restoring a lost card is home's MENU's (`fcRestoreLost`). */
   fcWelcomeCard(s) {
     const fc = s && s.fc;
     return !!fc && !fc.setUp && fc.pin !== 'blocked' && !(fc.forHolder && fc.pinSet);
@@ -30743,7 +30735,6 @@ class Component extends DCLogic {
       fpLine: line,
       fpLineShown: !!line,
       fpSetUp: () => this.fcWelcomeSetUp(),
-      fpRestore: () => this.fcRestoreLost(),
       fpCancel: () => this.fcWelcomeCancel(),
       fpRows: limits ? this.fcLimitRows() : [],
       fpBack: () => this.fcLimitsLeave(),

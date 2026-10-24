@@ -287,7 +287,7 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
 
 /* The card screens of the owner's designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
- *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD, RESTORE LOST CARD and CANCEL by their labels;
+ *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD and CANCEL by their labels;
  *   limits    CARD LIMITS: its rows ("LABEL | sub | value | unit"), and a row pressed by its label, or CLOSE;
  *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back, and the
  *             plain button under NEXT (`alt`: SKIP in the set-up, NO LIMIT on LIMITS) pressed by `skip()`. */
@@ -295,7 +295,9 @@ const screens = (a) => a.renderCardScreens({ s: a.state, sc: a.state.screen });
 function welcome(a) {
   const v = screens(a);
   if (!v.isFcPanel || !v.fpWelcome) return null;
-  const go = { 'SET UP CARD': v.fpSetUp, 'RESTORE LOST CARD': v.fpRestore, CANCEL: v.fpCancel };
+  const go = { 'SET UP CARD': v.fpSetUp, CANCEL: v.fpCancel };
+  // (RESTORE LOST CARD is home's MENU's: a welcome that still offered it would show here)
+  if ('fpRestore' in v) go['RESTORE LOST CARD'] = v.fpRestore;
   return { line: v.fpLine, design: v.fpDesign, buttons: Object.keys(go).join(), press(label) { go[label](); } };
 }
 function limits(a) {

@@ -83,6 +83,12 @@
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // how near its date a card's own phone starts saying RENEW: a card's money is good for thirty days, and is renewed with twenty left
   FC_RENEW_DAYS = 20;
+  // the renewal threshold in seconds: twenty of the hold's thirty days, scaled with a shortened hold (the wallet's `cardHoldSecs`)
+  fcRenewSecs() {
+    const W = this.fcW ? this.fcW() : null;
+    const hold = (W && W.cardHoldSecs) ? Number(W.cardHoldSecs()) || 0 : 0;
+    return hold > 0 ? Math.round(hold * 20 / 30) : this.FC_RENEW_DAYS * 86400;
+  }
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
   /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
@@ -4915,7 +4921,7 @@
     // (a locked card cannot give its money up to be renewed until its owner has opened it)
     if (!(fc.mine && fc.recoverable && this.fcAnyMoney(fc)) || fc.locked) return;
     const now = Math.floor(Date.now() / 1000);
-    if (!(fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400 && fc.first > now + 600)) return;
+    if (!(fc.first > 0 && fc.first - now < this.fcRenewSecs() && fc.first > now + 600)) return;
     const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (!here || (there && there !== here)) return;
@@ -5797,11 +5803,8 @@
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
    *
-   * From the welcome of a new card and from a card's own row of buttons: the take-back of a lost card's dated pieces by the phone
-   * that loaded them (`fcRowCard`, `fcTakeBack`), as the list of CARDS YOU LOADED offers it. A card on screen that is cash (no
-   * refund key in its record, which is every card a phone set up for somebody else) says that it cannot be, and why. */
-  FC_CASH_LINE = 'This card is cash: it was set up with no key that can take its money back, so if it is lost its money cannot be restored.';
-
+   * From home's MENU (21-render-values.js): the take-back of a lost card's dated pieces by the phone that loaded them (`fcRowCard`,
+   * `fcTakeBack`), as the list of CARDS YOU LOADED offers it. Not on a card's own screens: a card being read is not lost. */
   fcRestoreLost() {
     const W = this.fcW();
     if (!W) return;
@@ -5814,18 +5817,6 @@
     // the list of CARDS YOU LOADED, on the card screen with no card on it: a lost card cannot be tapped
     this._fcCard = null;
     this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
-  }
-
-  // RESTORE on a card's own screen: what restoring would do for this card
-  fcRestoreThis() {
-    const fc = this.state.fc;
-    const W = this.fcW();
-    if (!fc || !W) return;
-    if (!fc.recoverable) { this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD', reason: this.FC_CASH_LINE }); return; }
-    const row = (W.cardsList() || []).filter((r) => r.key === fc.key)[0];
-    if (row) { this.fcRowCard(row); return; }
-    this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
-      reason: 'Only the phone that loaded this card can take its money back if it is lost, after its date.' });
   }
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
@@ -6378,7 +6369,7 @@
     const noPinCard = !!fc && !!fc.setUp && !fc.pinSet;
     // what a card with a PIN pays without it in a day: the no PIN limit and what is left of it today
     const noPin = (fc && fc.setUp && fc.pinSet && fc.noPin && fc.noPin.known && fc.noPin.set) ? fc.noPin : null;
-    const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.FC_RENEW_DAYS * 86400;
+    const near = !!fc && fc.mine && fc.first > 0 && fc.first - now < this.fcRenewSecs();
     const past = near && fc.first <= now;
 
     /* One line on the card's own face, for what is true of the card itself
@@ -6446,9 +6437,9 @@
     const LU = (fc && fc.cents) ? 'usd' : U;
     /* The card's MENU, at the top right, home's own menu button and drawer (build/markup.html, `open0`): the card's settings, in this
      * order. HISTORY, what has been done with this card on this phone (`fcHistory`: its own log and the tampers it marked, for its
-     * owner), the clock as home's HISTORY row has it; LIMITS, with what the card pays without its PIN under it; CHANGE PIN (ADD PIN on a card that has none); RESTORE LOST
-     * CARD, for a card of software 1.21 and on, what restoring it would do if it were lost (`fcRestoreThis`); RESET, for its owner
-     * (software 1.17 and on). LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
+     * owner), the clock as home's HISTORY row has it; RENAME CARD; LIMITS, with what the card pays without its PIN under it; CHANGE PIN
+     * (ADD PIN on a card that has none); RESET, for its owner (software 1.17 and on). Restoring a lost card is home's MENU's: a card
+     * being read is not lost. LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
      * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
     // (software 1.23: for both its currencies together, in dollars, `LU`)
@@ -6469,9 +6460,6 @@
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
-    ]).concat(!fc.pinFirst ? [] : [
-      { label: 'RESTORE LOST CARD', sub: '', tap: shut(() => this.fcRestoreThis()),
-        path: 'M12 3.8v10.4m0 0-4.2-4.2m4.2 4.2 4.2-4.2M4.6 15.4v2.8a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.8' },
     ]).concat(!resettable ? [] : [
       { label: 'RESET', sub: '', tap: shut(() => this.fcReset()),
         path: 'M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4' },
@@ -6607,7 +6595,7 @@
       fcMenuItems: menu,
       fcMenuOpen: on && !!s.open0 && menu.length > 0,
       fcNew: fresh,
-      /* SET UP CARD and RESTORE LOST CARD, but not on a card whose set-up this phone began for its holder: sending it money finishes
+      /* SET UP CARD, but not on a card whose set-up this phone began for its holder: sending it money finishes
        * that set-up (`fcSendRun`), and this phone does not become its owner */
       fcNewSetUp: fresh && !holderCut,
       fcNewLine: holderCut
@@ -6615,8 +6603,6 @@
         : (fc && fc.pin === 'set' && !fc.hasRecord)
         ? 'Its set-up was cut short. Finish it to put money on it.'
         : 'Welcome to Foxy Card. Set it up to put money on it.',
-      // the welcome's second button, and the card screen's with no card on it: the cards this phone can take back (`fcRestoreLost`)
-      fcRestore: () => this.fcRestoreLost(),
       // a holder's card with no owner (software 1.22): what it is, and its two buttons
       fcGuest: guest,
       fcGuestLine: 'This card belongs to whoever holds it. It is not tied to any phone.',

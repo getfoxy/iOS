@@ -546,11 +546,11 @@
 
   /* ---- WELCOME TO YOUR CASHU CARD ------------------------------------------------------------------------------------------
    *
-   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD, RESTORE LOST CARD and CANCEL. Drawn over the
+   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD and CANCEL. Drawn over the
    * card's screen for a card read there that this phone can set up (`fcWelcomeCard`; a set-up this phone began for a card's holder is
    * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FLASHCARD
-   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). RESTORE LOST CARD is the
-   * list of cards this phone can take back (`fcRestoreLost`); CANCEL is HOME from the card's screen, and SEND's keypad from SEND. */
+   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). CANCEL is HOME from the card's
+   * screen, and SEND's keypad from SEND. Restoring a lost card is home's MENU's (`fcRestoreLost`). */
   fcWelcomeCard(s) {
     const fc = s && s.fc;
     return !!fc && !fc.setUp && fc.pin !== 'blocked' && !(fc.forHolder && fc.pinSet);
@@ -607,7 +607,6 @@
       fpLine: line,
       fpLineShown: !!line,
       fpSetUp: () => this.fcWelcomeSetUp(),
-      fpRestore: () => this.fcRestoreLost(),
       fpCancel: () => this.fcWelcomeCancel(),
       fpRows: limits ? this.fcLimitRows() : [],
       fpBack: () => this.fcLimitsLeave(),

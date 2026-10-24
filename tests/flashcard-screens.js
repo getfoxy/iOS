@@ -3165,9 +3165,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpCancel();
     ok(a.state.screen === 'home' && !a.state.fc, 'CANCEL is HOME', a.state.screen);
     a.setState({ screen: 'flashcard', stack: ['home'], fc: { key: 'k1', setUp: false, pin: 'none' } });
-    a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpRestore();
-    ok((a.state.screen === 'flashcard' && !a.state.fc) || (card(a) && card(a).title === 'RESTORE LOST CARD'), 'RESTORE LOST CARD is the restore it always was', a.state.screen);
-    if (card(a)) card(a).press('CLOSE');
+    ok(!('fpRestore' in a.renderCardScreens({ s: a.state, sc: 'flashcard' })), 'and no RESTORE LOST CARD on the welcome: that is home’s MENU’s');
   }
   /* ---- NAME CARD: a card's name on this phone (26j-card-wheel.js `fcNameOpen`, the wallet's `cardName` and `cardSetName`) ---- */
   {

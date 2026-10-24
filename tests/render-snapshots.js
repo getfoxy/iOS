@@ -420,13 +420,14 @@ function representative(logic) {
   add('flashcard, a card with a PIN and no limit for paying without it', at('flashcard', { fc: FC({ noPinKnown: true, noPin: Object.assign({}, NOPIN, { set: false, limit: 0, spent: 0, left: 0, turns: 0 }) }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on its owner\u2019s phone, with UNBLOCK', at('flashcard', { fc: FC({ pin: 'blocked' }) }, { wallet: CARDS() }));
   add('flashcard, a blocked card, on another phone', at('flashcard', { fc: FC({ pin: 'blocked', ownedHere: false, owner: true }) }, { wallet: CARDS() }));
-  /* Software 1.21 and 1.22: RESTORE in the owner's row; and the card of a holder with no phone, read on any Foxy, with its balance and VIEW AS
+  /* Software 1.21 and 1.22: the owner's card (no RESTORE in its menu: that is home's); and the card of a holder with no phone, read on any
+   * Foxy, with its balance and VIEW AS
    * GUEST and TIE OWNERSHIP TO THIS PHONE, and the same card after a guest's view (its log, and its limit on one tap read under the PIN). */
-  add('flashcard, a card of software 1.21 of this phone\u2019s, with RESTORE in its row', at('flashcard', { fc: FC({ pinFirst: true, resetKnown: true, noPinKnown: true, noPin: NOPIN }) }, { wallet: CARDS() }));
+  add('flashcard, a card of software 1.21 of this phone\u2019s', at('flashcard', { fc: FC({ pinFirst: true, resetKnown: true, noPinKnown: true, noPin: NOPIN }) }, { wallet: CARDS() }));
   const GUEST = { owner: false, ownedHere: false, mine: false, recoverable: false, guests: true, pinFirst: true, noPinKnown: true, noPin: NOPIN, first: 0, last: 0 };
   add('flashcard, a holder\u2019s card with no owner, with VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE', at('flashcard', { fc: FC(GUEST) }, { wallet: CARDS() }));
   add('flashcard, a holder\u2019s card after a guest\u2019s view', at('flashcard', { fc: FC(Object.assign({}, GUEST, { guestRead: true, tap: { known: true, limited: true, limit: 2000, spent: 0, left: null, turns: 0, noTime: false, paced: true } })) }, { wallet: CARDS() }));
-  add('flashcard, a new card: welcome, SET UP CARD and RESTORE LOST CARD', at('flashcard', { fc: FC({ setUp: false, hasRecord: false, pin: 'none', pinSet: false, owner: false, ownedHere: false, balance: 0, count: 0, pinFirst: true, guests: true }) }, { wallet: CARDS() }));
+  add('flashcard, a new card: welcome, SET UP CARD and CANCEL', at('flashcard', { fc: FC({ setUp: false, hasRecord: false, pin: 'none', pinSet: false, owner: false, ownedHere: false, balance: 0, count: 0, pinFirst: true, guests: true }) }, { wallet: CARDS() }));
   add('flashcard, a cash card the mint says is spent', at('flashcard', { fc: FC({ recoverable: false, mine: false, first: 0, last: 0, check: { spent: 1024 } }) }, { wallet: CARDS() }));
   add('flashcard, somebody else\u2019s card, past its date, no connection', at('flashcard', { fc: FC({ mine: false, first: 1700000000, last: 1700000000, check: 'off', locked: true }) }, { wallet: CARDS() }));
   add('home, working offline', at('home', { series: SERIES, range: '1D' }, { wallet: OFFLINE }));
@@ -1051,12 +1052,9 @@ function cards() {
   add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
   /* A card's set-up from software 1.21 (26j-card-wheel.js): the PIN pad for a card set up for somebody else (its two amounts are SET AMOUNT
-   * and MAX SPEND PER SECOND, above, with no question first); then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning, and
-   * RESTORE on a cash card. */
+   * and MAX SPEND PER SECOND, above, with no question first); then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning. */
   add('overlay: CREATE A PIN, for a card set up for its holder', (a) => a.fcSetUpSteps({ other: true, unit: 'sat', run() {} }));
   add('card: tie ownership to this phone, the warning', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
-  add('card: restore lost card, a cash card', (a) => { a.state.fc = { key: '02' + 'ab'.repeat(32), recoverable: false }; a.fcRestoreThis(); },
-    { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
   add('card: restore lost card, a phone that loaded none', (a) => a.fcRestoreLost(), { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
   // a card of software before 1.16 is asked for a PIN when it is set up (a card of 1.16 and on is not: it is set up with none), and the pad that adds a PIN says what a card with none is
   add('overlay: a new card\u2019s PIN, for a card of software before 1.16', (a) => { a.state.fc = { noPinKnown: false, pinSet: false, setUp: false }; a.fcSetUp(); });

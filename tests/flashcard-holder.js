@@ -273,10 +273,10 @@ function amt(a) {
     holder.goFlashcard();
     await until('the new card to be read', () => !!holder.state.fc);
     let v = vals(holder);
-    ok(v.fcNew && v.fcNewLine === 'Welcome to Foxy Card. Set it up to put money on it.' && typeof v.fcSetUp === 'function' && typeof v.fcRestore === 'function' && !v.fcGuest,
-       'a new card is welcomed, with SET UP CARD and RESTORE LOST CARD', v.fcNewLine);
-    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,RESTORE LOST CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FL1',
-       'it lands on WELCOME TO YOUR CASHU CARD, over the card’s screen: the card’s picture, SET UP CARD, RESTORE LOST CARD and CANCEL', JSON.stringify(welcome(holder)));
+    ok(v.fcNew && v.fcNewLine === 'Welcome to Foxy Card. Set it up to put money on it.' && typeof v.fcSetUp === 'function' && !('fcRestore' in v) && !v.fcGuest,
+       'a new card is welcomed, with SET UP CARD and no RESTORE LOST CARD (that is home’s MENU’s)', v.fcNewLine);
+    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FL1',
+       'it lands on WELCOME TO YOUR CASHU CARD, over the card’s screen: the card’s picture, SET UP CARD and CANCEL', JSON.stringify(welcome(holder)));
     welcome(holder).press('SET UP CARD');
     let nm = named(holder);
     ok(nm && !pad(holder) && holder.state.screen === 'fcName' && nm.title === 'NAME CARD' && nm.draft === '' && nm.grey && nm.skipShown && nm.mode === 'su'
@@ -355,8 +355,8 @@ function amt(a) {
     v = vals(holder);
     ok(v.fcUsable && !v.fcGuest && v.fcLimitLine === 'PER SECOND LIMIT $5' && !welcome(holder) && v.fcNoPinShown === undefined && /^No PIN up to \$5\.00 · \$[\d,.]+ left$/.test(limitsSub(v)) && v.fcDayShown === undefined,
        'its screen: the limit as a rate on its face, the no PIN limit and what is left of it under LIMITS in its menu, nothing of a day, and no welcome', [v.fcLimitLine, limitsSub(v)].join(' | '));
-    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESTORE LOST CARD,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
-       'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN, RESTORE LOST CARD and RESET, in that order', menuOf(v));
+    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
+       'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN and RESET, in that order: no RESTORE, a card being read is not lost', menuOf(v));
     ok(H.W.cardName(c.key) === 'Lunch card' && H.W.cardsKnown()[c.key].name === 'Lunch card' && v.fcTitle === 'Lunch card' && v.fcVerifiedShown === true,
        'the name typed on NAME CARD is kept on the card’s row on this phone, trimmed, once the card is set up, and is the card screen’s title, with the Verified line under it', JSON.stringify([H.W.cardName(c.key), v.fcTitle, v.fcVerified]));
     ok(c.state.record && !JSON.stringify(c.state).includes('Lunch'), 'the card itself is told nothing of it');
@@ -422,8 +422,12 @@ function amt(a) {
     limits(holder).press('CLOSE');
     ok(!limits(holder) && holder.state.screen === 'flashcard' && !card(holder), 'CLOSE is the card’s screen again');
 
-    // B9 from the card's row: a card this phone can take back says when; a cash card says it cannot be
-    holder.fcRestoreThis();
+    // B9 from home's MENU (RESTORE LOST CARD, `fcRestoreLost`): the list of CARDS YOU LOADED, and this card's row says when it can be taken back
+    ok(typeof holder.fcRestoreThis === 'undefined', 'the card’s screen has no restore of its own');
+    holder.fcRestoreLost();
+    const lostRow = (vals(holder).fcRows || []).length ? H.W.cardsList().filter((r) => r.key === n.key)[0] : null;
+    ok(!holder.state.fc && holder.state.screen === 'flashcard' && !!lostRow, 'RESTORE LOST CARD opens CARDS YOU LOADED, with this card in it', String((vals(holder).fcRows || []).length));
+    holder.fcRowCard(lostRow);
     ok(card(holder) && /when this phone last saw it/.test(card(holder).reason) && card(holder).title === holder.fcName(n.key),
        'RESTORE on a card this phone set up: its row of CARDS YOU LOADED, saying what it held and when it can be taken back', card(holder) && card(holder).all);
     card(holder).press('CLOSE');
@@ -541,7 +545,7 @@ function amt(a) {
     ok(payer.state.screen === 'amount' && payer.state.flow === 'cardSend', 'SEND > FLASHCARD asks for the amount first');
     keyIn(payer, 1500);
     await until('the welcome', () => !!welcome(payer));
-    ok(payer.state.screen === 'fcWelcome' && welcome(payer).buttons === 'SET UP CARD,RESTORE LOST CARD,CANCEL' && !pad(payer)
+    ok(payer.state.screen === 'fcWelcome' && welcome(payer).buttons === 'SET UP CARD,CANCEL' && !pad(payer)
        && welcome(payer).line === 'Set it up for the person who holds it. The money goes on in the same tap.',
        'a new card held to the phone lands on WELCOME TO YOUR CASHU CARD, a screen of its own over SEND’s keypad, saying whose it will be', JSON.stringify(welcome(payer)));
     welcome(payer).press('CANCEL');
@@ -593,10 +597,7 @@ function amt(a) {
        'and read on that phone it is not its own: its balance, and VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE, and nothing to move its money', v.fcBalance);
     ok(R.W.cardName(cash.key) === 'Mum' && !R.W.cardsKnown()[cash.key] && v.fcTitle === 'Mum' && !(v.fcMenuItems || []).some((k) => k.label === 'RENAME CARD'),
        'the name typed for the holder’s card is kept on this phone with no row of the card made for it, and titles its screen; it has no RENAME CARD, not being this phone’s', JSON.stringify([R.W.cardName(cash.key), v.fcTitle, menuOf(v)]));
-    payer.fcRestoreThis();
-    ok(card(payer) && card(payer).reason === 'This card is cash: it was set up with no key that can take its money back, so if it is lost its money cannot be restored.',
-       'RESTORE on a cash card says, in one sentence, that it cannot be restored and why', card(payer) && card(payer).reason);
-    card(payer).press('CLOSE');
+    ok(!(v.fcMenuItems || []).some((k) => /RESTORE/.test(k.label)), 'and no RESTORE in its menu: a card being read is not lost', menuOf(v));
     // a new card of 1.21 cannot be set up for somebody else: it takes no money with no owner
     const new21 = card4(H, 21);
     R.nfc = new21;
@@ -668,7 +669,7 @@ function amt(a) {
        'the claim, Keep holding at every asking: this phone owns the card now, with its own key in it, and its screen is an owner’s', friend.toasts.slice(-1)[0]);
   }
 
-  /* ---- B9: RESTORE LOST CARD from the welcome ------------------------------------------------------------------------ */
+  /* ---- B9: RESTORE LOST CARD from home's MENU -------------------------------------------------------------------------- */
   {
     const fresh = await funded({ sharedMint: H.mint, words: 'army van defense carry jealous true garbage claim echo media make crunch' }, 0);
     const empty = appOn(fresh, { screen: 'flashcard' });

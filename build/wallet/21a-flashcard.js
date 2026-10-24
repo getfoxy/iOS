@@ -795,6 +795,8 @@
     /* The cards on file here: those this phone set up with a key to take their money back, and those it claimed (TIE OWNERSHIP),
      * { key: { mint, refundKey, at, ... } }. Not a card it only loaded, nor one it set up as cash for somebody else. */
     cardsKnown: function () { return cardsOnFile(); },
+    // the hold a card's pieces are dated ahead by, in seconds (thirty days; a local test build may shorten it)
+    cardHoldSecs: function () { return cardHoldSecs(); },
     // the last card read in any flow (its key and info), or null
     cardLastRead: function () { return lastCardRead; },
 

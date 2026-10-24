@@ -357,7 +357,7 @@ const STATES = [
     ok(v.fcPillRows.length === 1 && q.sym === '₿' && q.big === '2,048' && /^\$\d+\.\d\d USD$/.test(q.small),
       'its pill is home’s bitcoin pill, the card’s sats big and their dollar worth under', JSON.stringify([q.big, q.small]));
     ok(!!shieldEl() && shieldEl().getAttribute('data-shield') === 'secure', 'the shield sits on the card’s money card too');
-    eq(v.fcMenuItems.map((b) => b.label), ['HISTORY', 'LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: HISTORY, LIMITS, CHANGE PIN, RESET in its menu');
+    eq(v.fcMenuItems.map((b) => b.label), ['HISTORY', 'LIMITS', 'CHANGE PIN', 'RESET'], 'a card of today: HISTORY, LIMITS, CHANGE PIN, RESET in its menu, and no RESTORE (home’s MENU has it)');
     eq(v.fcButtons.map((b) => b.label + ' ' + b.dim), ['SCAN 1', 'PASTE 1'], 'and no SWAP in its bottom row: the card holds one currency');
     ok([undefined, null, [], ['sat']].every((u) => A.fcTwoUnits({ units: u }) === false) && A.fcTwoUnits(null) === false,
       'no card that reports one unit, or none, holds two balances');
@@ -453,6 +453,39 @@ const STATES = [
     click(firstRow);
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);
+    /* RESTORE LOST CARD, after HISTORY, in the menu's own row with a drawing of its own: the money of a card this phone loaded, taken back
+     * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, CARDS YOU LOADED opens on the card's screen. */
+    A.setState({ screen: 'home', stack: [], open0: false });
+    await settle();
+    const rv = V().menuItems[1];
+    ok(!!rv && rv.label === 'RESTORE LOST CARD' && /^M/.test(rv.path) && rv.path !== CARD_ICON && rv.path !== CLOCK
+       && V().menuItems.filter((m) => /RESTORE LOST CARD/.test(m.label)).length === 1,
+      'home’s MENU has RESTORE LOST CARD right after HISTORY, with a drawing of its own', V().menuItems.map((m) => m.label).join());
+    const said = [];
+    const realBlocked = A.blockedCard;
+    A.blockedCard = function (kind, spec) { said.push([kind, spec]); };
+    A.setState({ open0: true });
+    await settle();
+    const restoreRow = () => [...w.document.querySelectorAll('div')].find((d) => d.style.height === '60px' && d.style.borderRadius === '18px'
+      && /RESTORE LOST CARD/.test(d.textContent));
+    ok(!!restoreRow(), 'drawn as a row of the drawer, in the menu’s row style');
+    click(restoreRow());
+    await settle();
+    ok(said.length === 1 && said[0][1].title === 'RESTORE LOST CARD' && /^This phone has set up no card whose money it can take back\./.test(said[0][1].reason)
+       && A.state.screen === 'home' && !A.state.open0,
+      'on a phone with no card on file: the menu closes and a card says this phone has set up no card whose money it can take back', JSON.stringify(said));
+    const cardsWas = w.FoxyWallet.cardsList;
+    w.FoxyWallet.cardsList = () => [{ key: '02' + 'ab'.repeat(32), sats: 500, unit: 'sat' }];
+    A.setState({ open0: true });
+    await settle();
+    click(restoreRow());
+    await settle();
+    ok(said.length === 1 && A.state.screen === 'flashcard' && !A.state.fc && A.state.stack.join() === 'home' && !A.state.open0,
+      'with a card on file: CARDS YOU LOADED opens on the card’s screen with no card on it, over home', JSON.stringify([A.state.screen, A.state.stack]));
+    w.FoxyWallet.cardsList = cardsWas;
+    A.blockedCard = realBlocked;
+    A.setState({ screen: 'home', stack: [], fc: null, open0: false });
+    await settle();
     // the card's screen: HOME at the top left goes home
     A.setState({ screen: 'flashcard', stack: ['home'], fc: null, open0: false });
     await settle();

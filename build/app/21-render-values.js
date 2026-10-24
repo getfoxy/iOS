@@ -54,6 +54,9 @@
       logs: 'M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11.5h6M9 14.5h6M9 17.5h3',
       // a payment card: its outline, the stripe across it, a short line of print
       card: 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4',
+      // the card, its lower right corner given to an arrow coming round: a lost card's money brought back
+      cardBack: 'M11 18.5H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1h14.8a2.1 2.1 0 0 1 2.1 2.1V11M2.5 10h19M6 15h3'
+        + 'M14 17a3.5 3.5 0 1 0 1-2.5M14.6 12.6v1.9h1.9',
       // two arrows, one each way: one balance into the other
       swap: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
       // home's RECEIVE and SEND arrows, so the rows that set them read as theirs
@@ -227,7 +230,10 @@
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
-    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
+    /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
+     * CARDS YOU LOADED list, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+    const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
+    v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
