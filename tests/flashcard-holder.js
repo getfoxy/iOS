@@ -22,7 +22,7 @@
  * first with the screen's swap to sats, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
  * exact pieces (the change these cards make for themselves, mended or given up, is tests/flashcard-mend.js). */
 const { funded, newCard, why, OTHER_WORDS } = require('./flashcard-kit');
-const { appOn, until, pad, card, vals, settle, keyIn, welcome, limits, speed } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, vals, settle, keyIn, welcome, limits, speed, named } = require('./flashcard-ui-kit');
 
 let failed = 0;
 // the card's MENU, at the top right: its rows, and what LIMITS says under it (what the card pays without its PIN)
@@ -278,8 +278,27 @@ function amt(a) {
     ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,RESTORE LOST CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FL1',
        'it lands on WELCOME TO YOUR CASHU CARD, over the card’s screen: the card’s picture, SET UP CARD, RESTORE LOST CARD and CANCEL', JSON.stringify(welcome(holder)));
     welcome(holder).press('SET UP CARD');
-    ok(pad(holder) && pad(holder).title === 'CREATE A PIN' && pad(holder).sub === 'Four to eight digits. The card asks for it when it pays.' && !pad(holder).hasCancel,
-       'SET UP CARD asks CREATE A PIN, on the card PIN pad, with the way out at the top', pad(holder) && pad(holder).title);
+    let nm = named(holder);
+    ok(nm && !pad(holder) && holder.state.screen === 'fcName' && nm.title === 'NAME CARD' && nm.draft === '' && nm.grey && nm.skipShown && nm.mode === 'su'
+       && holder.state.stack.slice(-1)[0] === 'flashcard',
+       'SET UP CARD asks NAME CARD first, over the card’s screen: the field empty, NEXT grey, SKIP under it', JSON.stringify(nm));
+    nm.next();
+    ok(named(holder) && holder.toasts.slice(-1)[0] === 'Type a name first.' && !pad(holder), 'NEXT with nothing typed is refused', holder.toasts.slice(-1)[0]);
+    nm = named(holder).type('   ');
+    ok(nm.grey, 'and spaces alone are no name: NEXT stays grey');
+    nm = named(holder).type('Lunch card');
+    ok(nm.draft === 'Lunch card' && !nm.grey, 'a name typed lights NEXT', JSON.stringify(nm));
+    nm.back();
+    ok(!named(holder) && !pad(holder) && holder.state.screen === 'flashcard' && welcome(holder) && !holder._fcSu, 'its round back button is the welcome again, nothing asked', holder.state.screen);
+    welcome(holder).press('SET UP CARD');
+    ok(named(holder) && named(holder).draft === '', 'SET UP CARD again: NAME CARD empty');
+    named(holder).type('Lunch card').next();
+    ok(pad(holder) && pad(holder).title === 'CREATE A PIN' && pad(holder).sub === 'Four to eight digits. The card asks for it when it pays.' && !pad(holder).hasCancel && !named(holder),
+       'NEXT with a name asks CREATE A PIN, on the card PIN pad, with the way out at the top', pad(holder) && pad(holder).title);
+    pad(holder).back();
+    ok(!pad(holder) && named(holder) && named(holder).draft === 'Lunch card' && holder.state.stack.slice(-1)[0] === 'flashcard',
+       'the PIN pad’s round back button is NAME CARD again, with the name as it was typed', JSON.stringify(named(holder)));
+    named(holder).next();
     pad(holder).type('2580');
     ok(pad(holder).title === 'RE-ENTER PIN', 'then RE-ENTER PIN');
     pad(holder).type('2581');
@@ -293,6 +312,10 @@ function amt(a) {
     ok(!amt(holder) && !card(holder) && !holder._fcSu && holder.state.screen === 'flashcard' && welcome(holder) && c.state.pin !== hexOf('2580') && !c.state.owner,
        'its round back button leaves the set-up, to the card’s screen and its welcome as they were, nothing written', JSON.stringify([holder.state.screen, holder.state.stack]));
     welcome(holder).press('SET UP CARD');
+    // (a name longer than the cap is cut as it is typed, and kept trimmed)
+    nm = named(holder).type('  The card in the blue wallet, upstairs');
+    ok(Array.from(nm.draft).length === 24 && nm.draft === '  The card in the blue w', 'a name is cut at 24 characters as it is typed', JSON.stringify(nm.draft));
+    named(holder).type('  Lunch card ').next();
     pad(holder).type('2580');
     pad(holder).type('2580');
     amt(holder).next();
@@ -332,8 +355,24 @@ function amt(a) {
     v = vals(holder);
     ok(v.fcUsable && !v.fcGuest && v.fcLimitLine === 'PER SECOND LIMIT $5' && !welcome(holder) && v.fcNoPinShown === undefined && /^No PIN up to \$5\.00 · \$[\d,.]+ left$/.test(limitsSub(v)) && v.fcDayShown === undefined,
        'its screen: the limit as a rate on its face, the no PIN limit and what is left of it under LIMITS in its menu, nothing of a day, and no welcome', [v.fcLimitLine, limitsSub(v)].join(' | '));
-    ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN,RESTORE LOST CARD,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
-       'the MENU at the top right, in place of the close button, holds HISTORY, LIMITS, CHANGE PIN, RESTORE LOST CARD and RESET, in that order', menuOf(v));
+    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESTORE LOST CARD,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
+       'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN, RESTORE LOST CARD and RESET, in that order', menuOf(v));
+    ok(H.W.cardName(c.key) === 'Lunch card' && H.W.cardsKnown()[c.key].name === 'Lunch card' && v.fcTitle === 'Lunch card' && v.fcVerifiedShown === true,
+       'the name typed on NAME CARD is kept on the card’s row on this phone, trimmed, once the card is set up, and is the card screen’s title, with the Verified line under it', JSON.stringify([H.W.cardName(c.key), v.fcTitle, v.fcVerified]));
+    ok(c.state.record && !JSON.stringify(c.state).includes('Lunch'), 'the card itself is told nothing of it');
+    // RENAME CARD: the same screen, the name filled in; NEXT keeps the new one, back leaves it as it was
+    holder.setState({ open0: true });
+    vals(holder).fcMenuItems.filter((k) => k.label === 'RENAME CARD')[0].tap();
+    let rn = named(holder);
+    ok(rn && rn.title === 'RENAME CARD' && rn.draft === 'Lunch card' && !rn.grey && !rn.skipShown && rn.mode === 'rename' && !holder.state.open0 && holder.state.stack.slice(-1)[0] === 'flashcard',
+       'RENAME CARD in the menu opens the same screen, titled RENAME CARD, with the name filled in and no SKIP', JSON.stringify(rn));
+    rn.type('Coffee').back();
+    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'Lunch card', 'back leaves it as it was', H.W.cardName(c.key));
+    holder.fcRename();
+    named(holder).type('Coffee card').next();
+    ok(!named(holder) && holder.state.screen === 'flashcard' && H.W.cardName(c.key) === 'Coffee card' && vals(holder).fcTitle === 'Coffee card',
+       'NEXT keeps the new name, and the card’s screen is titled with it', vals(holder).fcTitle);
+    v = vals(holder);
     ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && v.fcMenuItems.filter((k) => k.label !== 'LIMITS').every((k) => k.sub === ''),
        'each row a tap with its own drawing, and only LIMITS has a line under it');
     // (MENU is home's own button, `toggleMenu`, which turns `open0`)
@@ -511,6 +550,12 @@ function amt(a) {
     keyIn(payer, 1500);
     await until('the welcome again', () => !!welcome(payer));
     welcome(payer).press('SET UP CARD');
+    ok(named(payer) && named(payer).title === 'NAME CARD' && named(payer).skipShown && payer.state.stack.slice(-1)[0] === 'fcWelcome' && !pad(payer),
+       'a card set up for its holder from SEND > FLASHCARD is asked NAME CARD first too, over the welcome', JSON.stringify(payer.state.stack));
+    named(payer).back();
+    ok(!named(payer) && payer.state.screen === 'fcWelcome' && welcome(payer), 'whose back button is the welcome again');
+    welcome(payer).press('SET UP CARD');
+    named(payer).type('Mum').next();
     ok(pad(payer) && pad(payer).title === 'CREATE A PIN' && /The person who holds it types the PIN they want/.test(pad(payer).sub) && /not this phone’s/.test(pad(payer).sub) && R.W.cardOwed().length === 0,
        'a new card held to the phone: nothing is made for it, and the set-up begins with CREATE A PIN, saying whose PIN it is', pad(payer).sub);
     ok(R.sheet.some((x) => x === 'end: Set up the card first'), 'the sheet ended calmly, saying the card is to be set up first', R.sheet.slice(-1)[0]);
@@ -522,6 +567,7 @@ function amt(a) {
     ok(!amt(payer) && !payer._fcSu && payer.state.screen === 'fcWelcome' && welcome(payer) && payer.state.flow === 'cardSend' && payer.state.amount === '1500' && payer.state.unit === 'SATS' && cash.state.pinState === 0,
        'its round back button leaves the set-up for the welcome, SEND’s figure kept as it was, nothing written', JSON.stringify([payer.state.screen, payer.state.flow, payer.state.amount]));
     welcome(payer).press('SET UP CARD');
+    named(payer).type('Mum').next();
     pad(payer).type('8642'); pad(payer).type('8642');
     amt(payer).type('2.00').next();
     ok(speed(payer) && speed(payer).mode === 'su' && payer.state.stack.slice(-1)[0] === 'fcWelcome', 'NEXT is MAX SPEND PER SECOND, over the welcome', JSON.stringify(payer.state.stack));
@@ -545,6 +591,8 @@ function amt(a) {
     ok(payer.state.fc.ownedHere === false && payer.state.fc.mine === false && v.fcGuest && !v.fcUsable && v.fcBalance === '₿ 1,500'
        && v.fcGuestLine === 'This card belongs to whoever holds it. It is not tied to any phone.',
        'and read on that phone it is not its own: its balance, and VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE, and nothing to move its money', v.fcBalance);
+    ok(R.W.cardName(cash.key) === 'Mum' && !R.W.cardsKnown()[cash.key] && v.fcTitle === 'Mum' && !(v.fcMenuItems || []).some((k) => k.label === 'RENAME CARD'),
+       'the name typed for the holder’s card is kept on this phone with no row of the card made for it, and titles its screen; it has no RENAME CARD, not being this phone’s', JSON.stringify([R.W.cardName(cash.key), v.fcTitle, menuOf(v)]));
     payer.fcRestoreThis();
     ok(card(payer) && card(payer).reason === 'This card is cash: it was set up with no key that can take its money back, so if it is lost its money cannot be restored.',
        'RESTORE on a cash card says, in one sentence, that it cannot be restored and why', card(payer) && card(payer).reason);
@@ -674,7 +722,7 @@ function amt(a) {
     v = vals(b);
     ok(v.fcBalance === '₿ 700' && !('fcMemoShown' in v) && !('fcMemoLine' in v) && !('fcCardTap' in v), 'the card as read, with no “As read” line and no picture to press', v.fcBalance);
     ok(H.storage.getItem('foxy.flashcard.reads') === null, 'and no read of the card is kept on the phone');
-    ok(/^HISTORY,LIMITS,CHANGE PIN/.test(menuOf(v)) && v.fcMenuItems[0].path === CLOCK, 'the card’s MENU starts with HISTORY, the clock', menuOf(v));
+    ok(/^HISTORY,(RENAME CARD,)?LIMITS,CHANGE PIN/.test(menuOf(v)) && v.fcMenuItems[0].path === CLOCK, 'the card’s MENU starts with HISTORY, the clock', menuOf(v));
     b.setState({ open0: true });
     vals(b).fcMenuItems[0].tap();
     ok(b.state.screen === 'history' && b.state.histCard === own.key && !b.state.open0, 'HISTORY in the card’s menu is the card’s own history');
@@ -819,6 +867,8 @@ function amt(a) {
     const throughWelcome = async (a, what) => {
       await until(what + ', after the welcome', () => !!welcome(a));
       welcome(a).press('SET UP CARD');
+      // (NAME CARD first: SKIP, no name)
+      if (named(a)) named(a).skip();
       return until(what, () => !!pad(a));
     };
     const payer = appOn(R);

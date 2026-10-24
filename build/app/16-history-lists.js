@@ -358,6 +358,17 @@
   CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card',
                  'card, offline': 'From a card', 'card, offline \u2014 not settled': 'From a card' };
 
+  // the same with the card's name after them (NAME CARD, 26j-card-wheel.js): "To Lunch card"
+  CARD_NAMED = { 'card': 'From ', 'to card': 'To ', 'from card': 'From ', 'card, not completed': 'Not completed: ', 'paid from card': 'Paid from ',
+                 'card, offline': 'From ', 'card, offline \u2014 not settled': 'From ' };
+
+  // the name this phone gave the card an entry is for (the wallet's `cardName`), or ''
+  txCardName(t) {
+    const W = window.FoxyWallet;
+    const key = String((t && (t.card || t.fromCard)) || '');
+    try { return (key && W && typeof W.cardName === 'function') ? String(W.cardName(key) || '') : ''; } catch (e) { return ''; }
+  }
+
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
   txWho(t) {
@@ -366,8 +377,11 @@
     if (m) return m[0];
     // the row clearing history leaves behind: the balance that was there
     if (t.memo === 'opening') return 'Balance carried forward';
-    // the wallet's own words for money that moved by a card (08a-flashcard.js)
-    if (this.CARD_MEMOS[t.memo]) return this.CARD_MEMOS[t.memo];
+    // the wallet's own words for money that moved by a card (08a-flashcard.js), with the card's name where this phone gave it one
+    if (this.CARD_MEMOS[t.memo]) {
+      const named = this.txCardName(t);
+      return named ? (this.CARD_NAMED[t.memo] || 'From ') + named : this.CARD_MEMOS[t.memo];
+    }
     if (t.memo && t.memo.trim() && t.memo !== 'Foxy') return t.memo.trim();
     return t.dir === 'in' ? 'Received' : 'Sent';
   }
@@ -420,7 +434,7 @@
         const meta = W.tagsFor(t.hash) || {};
         /* The take-back of a lost card (RESTORE LOST CARD, `lost`) is in home's list, the one list it can be in, and says what it
          * was: "From card" alone read as a card tapped here. */
-        const who = t.lost ? 'Taken back from a lost card' : (meta.to || this.txWho(t));
+        const who = t.lost ? (this.txCardName(t) ? 'Taken back from ' + this.txCardName(t) : 'Taken back from a lost card') : (meta.to || this.txWho(t));
         buckets[key].push({
           name: who,
           /* The detail screen gets the whole address where there is one.

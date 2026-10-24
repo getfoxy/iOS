@@ -180,6 +180,8 @@ class Component extends DCLogic {
   back() {
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
+    // NAME CARD: the welcome again, or the card's screen (26j-card-wheel.js, `fcNameBack`)
+    if (this.fcNameBack && this.fcNameBack()) return;
     /* Back off the card's own screen, the edge swipe's way home among them: the card shown there is left behind, as HOME leaves it
      * (26f-flashcard.js `fcGoHome`), so nothing later reads it as the card in hand (`fcPinInfo`). Not on a screen above it, which
      * comes back to it. */

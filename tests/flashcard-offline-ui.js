@@ -42,7 +42,7 @@ const lift = (src, sig) => {
 };
 const HISTORY_SIGS = ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
                       'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
-                      'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {'];
+                      'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {'];
 const RENDER_SIGS = ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo('];
 const QUEUE = [[appFile('12-receive.js'), 'announcePayment(ev) {'], [appFile('15-paid-wake-keyboard.js'), 'nextPaidScreen() {'],
                [appFile('15-paid-wake-keyboard.js'), 'queueLater() {'], [appFile('15-paid-wake-keyboard.js'), 'paidDismissed() {']];
@@ -69,6 +69,8 @@ function till(ctx, start) {
   Object.assign(a, hist, view, queue);
   // the wallet's words for money that moved by a card, as the history names them (a field of the class, 16-history-lists.js)
   a.CARD_MEMOS = new Function('return ' + /\n  CARD_MEMOS = (\{[\s\S]*?\});/.exec(appFile('16-history-lists.js'))[1])();
+  // (and the same with a card's name after them, NAME CARD)
+  a.CARD_NAMED = new Function('return ' + /\n  CARD_NAMED = (\{[\s\S]*?\});/.exec(appFile('16-history-lists.js'))[1])();
   a.SPLIT_SCREENS = [];
   a.QUEUE_RETRY_MS = 40;
   a.PASTE_SETTLE_MS = 0;

@@ -264,8 +264,9 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
        'a tap opens the phone’s sheet, reads the card through it and closes it', P.sheet.join(' | '));
     P.sheet.length = 0;
     const refused = await W.cardSession('Hold the card', (link) => W.cardSetLimit(link, { sats: 1 })).then(() => null, (e) => e);
-    ok(refused && refused.card === 'no-owner' && /^begin: Hold the card \| error: /.test(P.sheet.join(' | ')),
-       'what the card refuses is said on the sheet as it closes, and comes back as it was', P.sheet.join(' | '));
+    // (a refusal the app's screen explains ends the sheet with its tick and "Card read", not in red: the owner's rule, 2026-10-24)
+    ok(refused && refused.card === 'no-owner' && P.sheet.join(' | ') === 'begin: Hold the card | end: Card read',
+       'what the card refuses comes back as it was, and the sheet closes calmly with "Card read" for the screen to explain', P.sheet.join(' | '));
     P.sheet.length = 0;
     // set once the tap has begun: the card arriving is what clears what it was told before
     const left = await W.cardSession('Hold the card', (link) => { tapped.leaveAfter(3); return W.cardLook(link); }).then(() => null, (e) => e);

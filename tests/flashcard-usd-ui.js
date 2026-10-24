@@ -74,7 +74,7 @@ const LIFTS = [
   ['24-render-receive-and-send.js', ['renderPaid(c) {', 'renderPaidBase(c) {']],
   ['16-history-lists.js', ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
                            'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
-                           'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {']],
+                           'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {']],
   ['26-render-history-and-contacts.js', ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo(']],
   ['12-receive.js', ['announcePayment(ev) {']],
   ['15-paid-wake-keyboard.js', ['nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {']],
@@ -93,6 +93,8 @@ function screenOn(ctx, start) {
   Object.assign(a, lifted);
   a.USD_PILL = USD_PILL;
   a.CARD_MEMOS = new Function('return ' + /\n  CARD_MEMOS = (\{[\s\S]*?\});/.exec(appFile('16-history-lists.js'))[1])();
+  // (and the same with a card's name after them, NAME CARD)
+  a.CARD_NAMED = new Function('return ' + /\n  CARD_NAMED = (\{[\s\S]*?\});/.exec(appFile('16-history-lists.js'))[1])();
   a.SPLIT_SCREENS = [];
   a.QUEUE_RETRY_MS = 40;
   a.PASTE_SETTLE_MS = 0;

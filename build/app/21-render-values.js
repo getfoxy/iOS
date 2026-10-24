@@ -422,6 +422,7 @@
       ...this.renderMints(c),
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
+      ...this.renderCardName(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),
       ...this.renderBackup(c),

@@ -12636,6 +12636,47 @@
     mustSave(CARDS, all);
   }
 
+  /* A card's name, given on this phone (NAME CARD in the set-up, RENAME CARD in the card's menu; 26j-card-wheel.js `fcNameOpen`). The card is
+   * told nothing of it: it is this phone's word for the card, kept as `name` on the card's row here (`CARDS`), and, for a card this phone
+   * has no row for (one set up for somebody else, which is never on that list, and must not be put on it), in a note of its own by the
+   * card's key (`CARD_NAMES`). Trimmed and cut at CARD_NAME_MAX characters, and kept as typed otherwise; '' takes the name off. */
+  var CARD_NAMES = 'foxy.flashcard.names';
+  var CARD_NAME_MAX = 24;
+  function cardNameClean(name) {
+    var t = String(name === undefined || name === null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+    return Array.from(t).slice(0, CARD_NAME_MAX).join('').trim();
+  }
+  function cardNameNotes() {
+    var all = load(CARD_NAMES, {});
+    return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
+  }
+  function cardNameOf(cardKey) {
+    if (typeof cardKey !== 'string' || !cardKey) return '';
+    var row = cardsOnFile()[cardKey];
+    var own = row && typeof row.name === 'string' ? cardNameClean(row.name) : '';
+    if (own) return own;
+    var noted = cardNameNotes()[cardKey];
+    return typeof noted === 'string' ? cardNameClean(noted) : '';
+  }
+  function cardNameKeep(cardKey, name) {
+    if (typeof cardKey !== 'string' || !cardKey) return '';
+    var n = cardNameClean(name);
+    var all = cardsOnFile();
+    var notes = cardNameNotes();
+    if (all[cardKey]) {
+      var row = all[cardKey];
+      if (n) row.name = n; else delete row.name;
+      all[cardKey] = row;
+      mustSave(CARDS, all);
+      // (one place for it: a note from before the card had a row here goes)
+      if (Object.prototype.hasOwnProperty.call(notes, cardKey)) { delete notes[cardKey]; save(CARD_NAMES, notes); }
+      return n;
+    }
+    if (n) notes[cardKey] = n; else if (Object.prototype.hasOwnProperty.call(notes, cardKey)) delete notes[cardKey]; else return n;
+    mustSave(CARD_NAMES, notes);
+    return n;
+  }
+
   /* The same for a card as `cardLook` gave it: 'usd' or 'sat' where it was set up here to hold that one and holds nothing of the
    * other; 'both' where it was set up for both, or holds the other or may (format 5: it was given some, here or on another phone);
    * '' where this phone made it no promise (not its row, a row whose key is not on the card, a card before 1.23, nothing chosen). */
@@ -16083,7 +16124,10 @@
       var all = load(store, {});
       if (all && typeof all === 'object' && !Array.isArray(all) && Object.prototype.hasOwnProperty.call(all, key)) { delete all[key]; save(store, all); }
     };
-    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_REAL, CARD_DESIGNS, CARD_LOG_SEEN, CARD_FOR_HOLDER].forEach(drop);
+    [CARD_PACE, CARD_RECEIPTS, CARD_LIFTED, CARD_CHECKED, CARD_REAL, CARD_DESIGNS, CARD_LOG_SEEN, CARD_FOR_HOLDER, CARD_NAMES].forEach(drop);
+    // (and its name: a card reset is set up again, and named again there)
+    var rows = cardsOnFile();
+    if (rows[key] && Object.prototype.hasOwnProperty.call(rows[key], 'name')) { delete rows[key].name; save(CARDS, rows); }
     if (!abandon) return;
     var keep = function (r) { return !(r && r.card === key); };
     var owed = cardStore(CARD_OWED);
@@ -32265,6 +32309,11 @@
     cardKnownHere: function (key) {
       return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
     },
+
+    /* A card's name on this phone ('' for none: the app then says what it always said), and naming it (`name` '' takes it off). The
+     * name is cut at 24 characters and trimmed; what is kept is answered. Nothing is told to the card. */
+    cardName: function (key) { return cardNameOf(key); },
+    cardSetName: function (key, name) { return cardNameKeep(key, name); },
 
     /* The same, for a screen: what each held when last seen, and when it can
      * be taken back. Newest first. Each in the unit it holds (`unit`, a row from

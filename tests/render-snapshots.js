@@ -286,6 +286,9 @@ function representative(logic) {
   add('flashcard, a new card: WELCOME TO YOUR CASHU CARD', at('flashcard', { fc: FC(NEWCARD) }, { wallet: CARDS() }));
   add('flashcard, a set-up cut short: the welcome, saying so', at('flashcard', { fc: FC(Object.assign({}, NEWCARD, { pin: 'set', pinSet: true })) }, { wallet: CARDS() }));
   add('fcWelcome, a new card met by SEND > FLASHCARD', at('fcWelcome', { fcWelcome: { sats: 1500, unit: 'sat', alt: null, info: null }, flow: 'cardSend', amount: '1500', unit: 'SATS' }, { wallet: CARDS() }));
+  add('fcName, NAME CARD in the set-up, empty, SKIP under NEXT', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: '' }));
+  add('fcName, NAME CARD with a name typed', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: 'Lunch card' }));
+  add('fcName, RENAME CARD with the name filled in', at('fcName', { fcNaming: { mode: 'rename', key: '' }, fcNameDraft: 'Lunch card' }));
   add('fcSpeed, MAX SPEND PER SECOND, the set-up at $5, SKIP under NEXT', at('fcSpeed', { fcSpeed: { mode: 'su', unit: 'usd', r: 5 } }));
   add('fcSpeed, MAX SPEND PER SECOND, LIMITS at $25, NO LIMIT under NEXT', at('fcSpeed', { fcSpeed: { mode: 'limit', unit: 'sat', r: 25 }, fc: FC({ tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
   const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 1500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };

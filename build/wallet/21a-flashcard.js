@@ -805,6 +805,11 @@
       return typeof key === 'string' && !!key && Object.prototype.hasOwnProperty.call(cardsOnFile(), key);
     },
 
+    /* A card's name on this phone ('' for none: the app then says what it always said), and naming it (`name` '' takes it off). The
+     * name is cut at 24 characters and trimmed; what is kept is answered. Nothing is told to the card. */
+    cardName: function (key) { return cardNameOf(key); },
+    cardSetName: function (key, name) { return cardNameKeep(key, name); },
+
     /* The same, for a screen: what each held when last seen, and when it can
      * be taken back. Newest first. Each in the unit it holds (`unit`, a row from
      * before cards held dollars is bitcoin): `amount`, and `sats` the same for a

@@ -118,8 +118,9 @@
     return (W && W.cardSession) ? W : null;
   }
 
-  /* A card has no name. The last four characters of its key tell two apart. */
-  fcName(key) { return 'CARD ··' + String(key || '').slice(-4).toUpperCase(); }
+  /* A card's name: the one given it on this phone (NAME CARD, 26j-card-wheel.js `fcNameKept`), or, for a card with none, the last four
+   * characters of its key, which tell two apart. */
+  fcName(key) { return this.fcNameKept(key) || 'CARD ··' + String(key || '').slice(-4).toUpperCase(); }
 
   /* A card holds one kind of money, bitcoin or dollars, chosen when it is set up (21a-flashcard.js, `cardSetUp`). Every figure
    * below is in the unit it is given: sats where none is named, as every caller from before cards held dollars, and cents for
@@ -3572,6 +3573,7 @@
     /* A card of 1.21 takes this phone as its owner only after about ten seconds of asking: each asking says Keep holding again. */
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
+        this.fcNameSettle(card && card.key);
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
@@ -5197,7 +5199,8 @@
             const n = /** @type {any} */ (new Error('The card is new.'));
             n.card = 'needs-set-up';
             n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
-            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord });
+            // (and its key, for the name typed for it on NAME CARD, 26j-card-wheel.js `fcNameSettle`)
+            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord, key: card.key });
             throw n;
           }
           /* A card whose money is at another mint than this phone's: loaded there, online, from this phone's balance (`fcXlBegin`), with
@@ -5699,7 +5702,7 @@
       // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
       return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                     tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) })
-        .then((card) => { setUp = true; on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
+        .then((card) => { setUp = true; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
         .then((m) => {
           made = m;
           if (m && m.hash) this.txIsNew(m.hash);
@@ -6452,10 +6455,16 @@
     const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 '
       + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.pinFirst ? '' : ' today')
       + (two ? ' \u00b7 both currencies' : '');
+    // (a card this phone set up or claimed: the wallet's `cardKnownHere`)
+    const renamable = !!(fc && fc.key && W && typeof W.cardKnownHere === 'function' && W.cardKnownHere(fc.key));
     const menu = !(fc && fc.hasRecord) ? [] : [
       { label: 'HISTORY', sub: '', tap: shut(() => this.fcHistory()),
         path: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z' },
-    ].concat(!usable ? [] : [
+    ].concat(!renamable ? [] : [
+      // RENAME CARD: its name on this phone (26j-card-wheel.js `fcRename`), for a card this phone set up or claimed
+      { label: 'RENAME CARD', sub: '', tap: shut(() => this.fcRename()),
+        path: 'M4 20h4.2L19.4 8.8a2 2 0 0 0 0-2.8l-1.4-1.4a2 2 0 0 0-2.8 0L4 15.8V20ZM13.8 6l4.2 4.2' },
+    ]).concat(!usable ? [] : [
       { label: 'LIMITS', sub: noPinSub, tap: shut(() => this.fcSetLimit()),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
@@ -6510,6 +6519,8 @@
     return {
       isFlashcard: on,
       fcVerified: verified[0], fcVerifiedInk: verified[1], fcVerifiedShown: !!verified[0],
+      // the screen's title: the card's name on this phone (NAME CARD), FLASHCARD for a card with none, and with no card
+      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'FLASHCARD',
       // which design the card on screen is drawn in (FC_DESIGNS)
       fcDesign: this.fcDesignOf(fc),
       // a card that has been read says what it is on its own face

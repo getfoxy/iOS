@@ -23,7 +23,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, limits } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, limits, named } = require('./flashcard-ui-kit');
 
 /* The app's own announcement of a payment (12-receive.js) and the queue that raises them one at a time (15-paid-wake-keyboard.js), lifted out of their
  * files and given to an app made of the card's parts, which has neither. A confirmation raised is the screen going to 'paid' with its amount. */
@@ -164,7 +164,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === undefined && v.fcDayLeft === undefined, 'and under it, that it has no limit, with nothing to say of a day: the card screens have no daily limit', v.fcLimitLine);
-  ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE'
+  ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE'
      && histFirst(v) && v.fcResetVis === undefined && v.fcReset === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcMenuItems[0].tap === 'function' && !hasReset(holder),
      'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY first in its MENU and HOME at the top left, SCAN, PASTE and SWAP under them, and a MENU of HISTORY, LIMITS and CHANGE PIN: RESET is in the menu for a card of 1.17 and not for this older one');
@@ -959,7 +959,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const sizes = (k) => k.pieces.map((x) => x.amount).sort((a, b) => a - b).join();
     ok(shown.balance === real.balance && sizes(shown) === sizes(real) && shown.info.unspent === real.info.unspent && holder.state.fc.count === real.pieces.length,
        'the screen says what the card says when it is read: the card as the sheet read it after its change went on, whole pieces and all', shown.balance + ' / ' + real.balance);
-    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcMenuItems.length === 3 && !hasReset(holder),
+    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcMenuItems.length === 4 && !hasReset(holder),
        'and it is still this phone’s card: the owner’s buttons are there (the read after the change is not the owner’s read, and what only that says is kept)');
     // what is left comes off again, so that what follows has the card as it was
     c.tap();
@@ -1164,7 +1164,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(11 * 86400000);
   v = vals(holder);
-  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcMenuItems.length === 3,
+  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcMenuItems.length === 4,
      'with under twenty days to run the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
@@ -1983,7 +1983,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line', owner.state.screen);
     await look();
     v = vals(owner);
-    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'HISTORY,LIMITS,ADD PIN,RESET' && histFirst(v) && v.fcLimitLine === 'NO LIMIT | NO PIN',
+    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,ADD PIN,RESET' && histFirst(v) && v.fcLimitLine === 'NO LIMIT | NO PIN',
        'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, with RESET last (a card of 1.17 and on), and HISTORY first in it', menuOf(v));
     owner.fcSetLimit();
     ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT',
@@ -2031,7 +2031,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     card(owner).press('CLOSE');
     await look();
     const addPads = watchPads(owner);
-    vals(owner).fcMenuItems[2].tap();
+    vals(owner).fcMenuItems.filter((k) => k.label === 'ADD PIN')[0].tap();
     ok(pad(owner).title === 'CHOOSE A PIN' && pad(owner).sub === 'A card with no PIN is cash to whoever holds it. Four to eight digits.' && !pad(owner).has('NO PIN'),
        'ADD PIN asks CHOOSE A PIN, and says in one line that a card with no PIN is cash to whoever holds it', pad(owner) && pad(owner).sub);
     pad(owner).type('4321');
@@ -2048,7 +2048,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.pinState === 1 && n.state.pin === Buffer.from('4321').toString('hex') && n.state.noPinLimit === 0 && owner.state.fc.pinSet === true && owner.state.screen === 'flashcard',
        'one tap gave the card the PIN, with no allowance, and said so in a line', owner.toasts.slice(-1)[0]);
     v = vals(owner);
-    ok(menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
+    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
 
     /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
@@ -2301,9 +2301,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await setUpWith(owner, H2, n, '1234');
     await look(owner, H2, n);
     v = vals(owner);
-    ok(owner.state.fc.resetKnown === true && menuOf(v) === 'HISTORY,LIMITS,CHANGE PIN,RESET' && histFirst(v),
+    ok(owner.state.fc.resetKnown === true && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && histFirst(v),
        'a card of 1.17 read by its owner: HOME at the top left, and a MENU of HISTORY, LIMITS, CHANGE PIN and RESET', menuOf(v));
-    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcMenuItems.map((k) => k.path)).size === 4, 'each a row with its own drawing');
+    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcMenuItems.map((k) => k.path)).size === 5, 'each a row with its own drawing');
     ok(owner.state.fc.headers === true && v.fcBlockShown === undefined && v.fcBlockLine === undefined && VERIFIED_AT.test(v.fcVerified),
        'a card whose clock is block headers says no block under the time it was verified: the screen has no block line', v.fcVerified);
     const HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
@@ -2356,7 +2356,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const old16 = newCard(H2, undefined, { format: 4, software: 16 });
     await setUpWith(owner, H2, old16, '1234');
     await look(owner, H2, old16);
-    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && menuOf(vals(owner)) === 'HISTORY,LIMITS,CHANGE PIN', 'a card of software 1.16 has no RESET: its menu has HISTORY and the two it can offer');
+    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && menuOf(vals(owner)) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN', 'a card of software 1.16 has no RESET: its menu has HISTORY and the two it can offer');
     owner.fcReset();
     ok(card(owner) && card(owner).title === 'NOT ON THIS CARD', 'and pressed anyway it says it cannot', card(owner) && card(owner).all);
     card(owner).press('CLOSE');
@@ -3168,6 +3168,81 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpRestore();
     ok((a.state.screen === 'flashcard' && !a.state.fc) || (card(a) && card(a).title === 'RESTORE LOST CARD'), 'RESTORE LOST CARD is the restore it always was', a.state.screen);
     if (card(a)) card(a).press('CLOSE');
+  }
+  /* ---- NAME CARD: a card's name on this phone (26j-card-wheel.js `fcNameOpen`, the wallet's `cardName` and `cardSetName`) ---- */
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const markup = fs.readFileSync(path.join(__dirname, '..', 'build', 'markup.html'), 'utf8');
+    const block = (flag) => { const at = markup.indexOf('<sc-if value="{{ ' + flag + ' }}">'); return at < 0 ? '' : markup.slice(at, markup.indexOf('\n</sc-if>', at)); };
+    const typeBlock = block('isSendType'), nameBlock = block('isFcName');
+    const inputOf = (b) => (b.match(/<input [^>]*>/) || [''])[0];
+    const styleOf = (el) => (el.match(/ style="([^"]*)"/) || ['', ''])[1];
+    ok(!!nameBlock && /\{\{ fnTitle \}\}/.test(nameBlock) && nameBlock.indexOf('What should we call this card?') >= 0,
+       'NAME CARD is a screen of its own, its title bound (NAME CARD, or RENAME CARD) and its question: What should we call this card?');
+    ok(/sc-camel-auto-focus="\{\{ wantFocus \}\}"/.test(inputOf(nameBlock)) && /sc-camel-auto-focus="\{\{ wantFocus \}\}"/.test(inputOf(typeBlock))
+       && /\{\{ showKb \}\}/.test(nameBlock) && /sc-camel-enter-key-hint="done"/.test(inputOf(nameBlock)) && styleOf(inputOf(nameBlock)) === styleOf(inputOf(typeBlock)),
+       'its field is SEND > TYPE’s: focused on arrival by the same flag, so the keyboard is up, the same caret and Done key, the same look', inputOf(nameBlock));
+    ok(/sc-camel-on-click="\{\{ fnNext \}\}"[^>]*>NEXT</.test(nameBlock) && /\{\{ fnSkipShown \}\}"><div sc-camel-on-click="\{\{ fnSkip \}\}"[^>]*>SKIP</.test(nameBlock)
+       && /sc-camel-on-click="\{\{ back \}\}"/.test(nameBlock) && !/CANCEL/.test(nameBlock),
+       'NEXT, with SKIP under it in the set-up, and the round back button as the way out');
+    ok(/\{\{ fcTitle \}\}<\/div><sc-if value="\{\{ fcVerifiedShown \}\}">/.test(markup) && !/>FLASHCARD<\/div><sc-if value="\{\{ fcVerifiedShown \}\}">/.test(markup),
+       'the card screen’s title is bound, with the Verified line under it as before');
+
+    // the wallet: kept on the card's row where it has one, in a note of its own where not; trimmed, cut at 24, '' takes it off
+    const known = Object.keys(H.W.cardsKnown())[0];
+    const stranger = '02' + 'ab'.repeat(32);
+    ok(!!known && H.W.cardName(known) === '' && H.W.cardName(stranger) === '' && H.W.cardName('') === '' && H.W.cardName(undefined) === '', 'a card has no name until it is given one', known);
+    ok(H.W.cardSetName(known, '  Lunch  ') === 'Lunch' && H.W.cardName(known) === 'Lunch' && H.W.cardsKnown()[known].name === 'Lunch',
+       'cardSetName keeps it trimmed, on the card’s row on file', JSON.stringify(H.W.cardsKnown()[known].name));
+    ok(H.W.cardSetName(known, 'A name much longer than twenty-four letters') === 'A name much longer than' && Array.from(H.W.cardName(known)).length <= 24,
+       'cut at 24 characters (and trimmed after the cut)', H.W.cardName(known));
+    ok(H.W.cardSetName(known, 'Café ☕ card') === 'Café ☕ card' && H.W.cardName(known) === 'Café ☕ card', 'and kept as typed otherwise', H.W.cardName(known));
+    ok(H.W.cardSetName(stranger, 'Mum') === 'Mum' && H.W.cardName(stranger) === 'Mum' && !H.W.cardKnownHere(stranger) && !H.W.cardsKnown()[stranger],
+       'a card with no row here (one set up for somebody else) is named in a note of its own, and is not made a card this phone knows');
+    ok(H.W.cardSetName(stranger, '   ') === '' && H.W.cardName(stranger) === '', 'a name of nothing takes it off');
+
+    // where the app names a card: CARDS YOU LOADED and money waiting (`fcName`), the card screen's title, home's history rows
+    const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
+    H.W.cardSetName(known, 'Lunch');
+    ok(a.fcName(known) === 'Lunch' && a.fcName(stranger) === 'CARD ··' + stranger.slice(-4).toUpperCase(),
+       'fcName says the kept name first, and the last four of the key for a card with none, as before', a.fcName(stranger));
+    a.FC_RECOVERABLE = true;
+    a.setState({ fc: null });
+    const row = vals(a).fcRows.filter((r) => r.name === 'Lunch')[0];
+    ok(!!row, 'the card is named in the list of cards this phone loaded', vals(a).fcRows.map((r) => r.name).join());
+    a.setState({ fc: { key: known, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0, check: 'ok', checkedAt: Date.now() } });
+    v = vals(a);
+    ok(v.fcTitle === 'Lunch' && v.fcVerifiedShown, 'the card screen’s title is its name, the Verified line under it', v.fcTitle + ' / ' + v.fcVerified);
+    a.setState({ fc: { key: stranger, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0 } });
+    ok(vals(a).fcTitle === 'FLASHCARD', 'a card with no name keeps FLASHCARD');
+    // home's history rows, where a card is named (16-history-lists.js `txWho`)
+    const hist = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '16-history-lists.js'), 'utf8');
+    const lift = (sig) => { const from = hist.indexOf('\n  ' + sig) + 1; return hist.slice(from, hist.indexOf('\n  }\n', from) + 4); };
+    const memos = hist.slice(hist.indexOf('  CARD_MEMOS = '), hist.indexOf('\n  // best guess at who'));
+    const Hist = new Function('window', 'return class {\n' + memos + '\n' + lift('txCardName(t) {') + '\n' + lift('txWho(t) {') + '\n};')(H.window);
+    const h = new Hist();
+    ok(h.txWho({ memo: 'to card', card: stranger, dir: 'out' }) === 'To card' && h.txWho({ memo: 'card', card: stranger, dir: 'in' }) === 'From a card',
+       'a card with no name keeps its row’s words');
+    H.W.cardSetName(stranger, 'Mum');
+    ok(h.txWho({ memo: 'to card', card: stranger, dir: 'out' }) === 'To Mum' && h.txWho({ memo: 'from card', card: known, dir: 'in' }) === 'From Lunch'
+       && h.txWho({ memo: 'paid from card', fromCard: known, dir: 'out' }) === 'Paid from Lunch',
+       'a named card is named in the history rows that name a card', h.txWho({ memo: 'to card', card: stranger, dir: 'out' }));
+    // the welcome's SET UP CARD: NAME CARD, then the set-up; SKIP goes on with no name, and none is kept
+    let went = 0;
+    a.fcSetUp = () => { went += 1; };
+    a.setState({ screen: 'flashcard', stack: ['home'], fc: { key: 'k9', setUp: false, pin: 'none' } });
+    a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpSetUp();
+    ok(named(a) && named(a).title === 'NAME CARD' && went === 0, 'SET UP CARD is NAME CARD first');
+    named(a).skip();
+    ok(!named(a) && went === 1 && a.state.screen === 'flashcard' && a._fcNameSu && a._fcNameSu.name === '', 'SKIP goes on to the set-up with no name');
+    a.fcNameSettle('k9');
+    ok(H.W.cardName('k9') === '' && !a._fcNameSu, 'and the card set up has none');
+    a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpSetUp();
+    named(a).type('Gym').next();
+    a.fcNameSettle('another-card');
+    ok(went === 2 && H.W.cardName('another-card') === '' && H.W.cardName('k9') === '', 'a name typed for one card is never given to another');
+    H.W.cardSetName(stranger, ''); H.W.cardSetName(known, '');
   }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);

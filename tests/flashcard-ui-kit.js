@@ -149,6 +149,7 @@ function appOn(ctx, start, o) {
   // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes a step back in it; back off the card's screen leaves the card behind
   a.back = () => {
     if (a.fcSuAmountBack && a.fcSuAmountBack()) return;
+    if (a.fcNameBack && a.fcNameBack()) return;
     const st = a.state.stack;
     if (a.state.screen === 'flashcard' && (st.length ? st[st.length - 1] : 'home') !== 'flashcard' && st.slice(0, -1).indexOf('flashcard') < 0) a._fcCard = null;
     a.state.screen = st.length ? st[st.length - 1] : 'home'; a.state.stack = st.slice(0, -1);
@@ -318,6 +319,20 @@ function speed(a) {
   };
 }
 
+/* NAME CARD (26j-card-wheel.js, `renderCardName`), as a person sees it, or null: its title, what is in the field, whether NEXT is grey
+ * and SKIP is under it; a name typed (`type`, as the field's change), NEXT, SKIP and the round back button (`back`, the app's own). */
+function named(a) {
+  const v = a.renderCardName({ s: a.state, sc: a.state.screen });
+  if (!v.isFcName) return null;
+  return {
+    title: v.fnTitle, draft: v.fnDraft, grey: v.fnBg !== 'var(--acc)', skipShown: v.fnSkipShown, mode: a.state.fcNaming && a.state.fcNaming.mode,
+    type(t) { v.onFnType({ target: { value: t } }); return named(a); },
+    next() { a.renderCardName({ s: a.state, sc: a.state.screen }).fnNext(); },
+    skip() { a.renderCardName({ s: a.state, sc: a.state.screen }).fnSkip(); },
+    back() { a.back(); },
+  };
+}
+
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed };
+module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed, named };

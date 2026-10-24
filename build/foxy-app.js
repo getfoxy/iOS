@@ -182,6 +182,8 @@ class Component extends DCLogic {
   back() {
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
+    // NAME CARD: the welcome again, or the card's screen (26j-card-wheel.js, `fcNameBack`)
+    if (this.fcNameBack && this.fcNameBack()) return;
     /* Back off the card's own screen, the edge swipe's way home among them: the card shown there is left behind, as HOME leaves it
      * (26f-flashcard.js `fcGoHome`), so nothing later reads it as the card in hand (`fcPinInfo`). Not on a screen above it, which
      * comes back to it. */
@@ -10929,6 +10931,17 @@ class Component extends DCLogic {
   CARD_MEMOS = { 'card': 'From a card', 'to card': 'To card', 'from card': 'From card', 'card, not completed': 'Card, not completed', 'paid from card': 'Paid from card',
                  'card, offline': 'From a card', 'card, offline \u2014 not settled': 'From a card' };
 
+  // the same with the card's name after them (NAME CARD, 26j-card-wheel.js): "To Lunch card"
+  CARD_NAMED = { 'card': 'From ', 'to card': 'To ', 'from card': 'From ', 'card, not completed': 'Not completed: ', 'paid from card': 'Paid from ',
+                 'card, offline': 'From ', 'card, offline \u2014 not settled': 'From ' };
+
+  // the name this phone gave the card an entry is for (the wallet's `cardName`), or ''
+  txCardName(t) {
+    const W = window.FoxyWallet;
+    const key = String((t && (t.card || t.fromCard)) || '');
+    try { return (key && W && typeof W.cardName === 'function') ? String(W.cardName(key) || '') : ''; } catch (e) { return ''; }
+  }
+
   // best guess at who the other side was: a lightning address if one shows up
   // in the payment's metadata, otherwise the memo, otherwise the rail
   txWho(t) {
@@ -10937,8 +10950,11 @@ class Component extends DCLogic {
     if (m) return m[0];
     // the row clearing history leaves behind: the balance that was there
     if (t.memo === 'opening') return 'Balance carried forward';
-    // the wallet's own words for money that moved by a card (08a-flashcard.js)
-    if (this.CARD_MEMOS[t.memo]) return this.CARD_MEMOS[t.memo];
+    // the wallet's own words for money that moved by a card (08a-flashcard.js), with the card's name where this phone gave it one
+    if (this.CARD_MEMOS[t.memo]) {
+      const named = this.txCardName(t);
+      return named ? (this.CARD_NAMED[t.memo] || 'From ') + named : this.CARD_MEMOS[t.memo];
+    }
     if (t.memo && t.memo.trim() && t.memo !== 'Foxy') return t.memo.trim();
     return t.dir === 'in' ? 'Received' : 'Sent';
   }
@@ -10991,7 +11007,7 @@ class Component extends DCLogic {
         const meta = W.tagsFor(t.hash) || {};
         /* The take-back of a lost card (RESTORE LOST CARD, `lost`) is in home's list, the one list it can be in, and says what it
          * was: "From card" alone read as a card tapped here. */
-        const who = t.lost ? 'Taken back from a lost card' : (meta.to || this.txWho(t));
+        const who = t.lost ? (this.txCardName(t) ? 'Taken back from ' + this.txCardName(t) : 'Taken back from a lost card') : (meta.to || this.txWho(t));
         buckets[key].push({
           name: who,
           /* The detail screen gets the whole address where there is one.
@@ -14273,6 +14289,7 @@ class Component extends DCLogic {
       ...this.renderMints(c),
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
+      ...this.renderCardName(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),
       ...this.renderBackup(c),
@@ -22114,8 +22131,9 @@ class Component extends DCLogic {
     return (W && W.cardSession) ? W : null;
   }
 
-  /* A card has no name. The last four characters of its key tell two apart. */
-  fcName(key) { return 'CARD ··' + String(key || '').slice(-4).toUpperCase(); }
+  /* A card's name: the one given it on this phone (NAME CARD, 26j-card-wheel.js `fcNameKept`), or, for a card with none, the last four
+   * characters of its key, which tell two apart. */
+  fcName(key) { return this.fcNameKept(key) || 'CARD ··' + String(key || '').slice(-4).toUpperCase(); }
 
   /* A card holds one kind of money, bitcoin or dollars, chosen when it is set up (21a-flashcard.js, `cardSetUp`). Every figure
    * below is in the unit it is given: sats where none is named, as every caller from before cards held dollars, and cents for
@@ -25568,6 +25586,7 @@ class Component extends DCLogic {
     /* A card of 1.21 takes this phone as its owner only after about ten seconds of asking: each asking says Keep holding again. */
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
+        this.fcNameSettle(card && card.key);
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
@@ -27193,7 +27212,8 @@ class Component extends DCLogic {
             const n = /** @type {any} */ (new Error('The card is new.'));
             n.card = 'needs-set-up';
             n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
-            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord });
+            // (and its key, for the name typed for it on NAME CARD, 26j-card-wheel.js `fcNameSettle`)
+            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord, key: card.key });
             throw n;
           }
           /* A card whose money is at another mint than this phone's: loaded there, online, from this phone's balance (`fcXlBegin`), with
@@ -27695,7 +27715,7 @@ class Component extends DCLogic {
       // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
       return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                     tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) })
-        .then((card) => { setUp = true; on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
+        .then((card) => { setUp = true; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
         .then((m) => {
           made = m;
           if (m && m.hash) this.txIsNew(m.hash);
@@ -28448,10 +28468,16 @@ class Component extends DCLogic {
     const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 '
       + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.pinFirst ? '' : ' today')
       + (two ? ' \u00b7 both currencies' : '');
+    // (a card this phone set up or claimed: the wallet's `cardKnownHere`)
+    const renamable = !!(fc && fc.key && W && typeof W.cardKnownHere === 'function' && W.cardKnownHere(fc.key));
     const menu = !(fc && fc.hasRecord) ? [] : [
       { label: 'HISTORY', sub: '', tap: shut(() => this.fcHistory()),
         path: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z' },
-    ].concat(!usable ? [] : [
+    ].concat(!renamable ? [] : [
+      // RENAME CARD: its name on this phone (26j-card-wheel.js `fcRename`), for a card this phone set up or claimed
+      { label: 'RENAME CARD', sub: '', tap: shut(() => this.fcRename()),
+        path: 'M4 20h4.2L19.4 8.8a2 2 0 0 0 0-2.8l-1.4-1.4a2 2 0 0 0-2.8 0L4 15.8V20ZM13.8 6l4.2 4.2' },
+    ]).concat(!usable ? [] : [
       { label: 'LIMITS', sub: noPinSub, tap: shut(() => this.fcSetLimit()),
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
@@ -28506,6 +28532,8 @@ class Component extends DCLogic {
     return {
       isFlashcard: on,
       fcVerified: verified[0], fcVerifiedInk: verified[1], fcVerifiedShown: !!verified[0],
+      // the screen's title: the card's name on this phone (NAME CARD), FLASHCARD for a card with none, and with no card
+      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'FLASHCARD',
       // which design the card on screen is drawn in (FC_DESIGNS)
       fcDesign: this.fcDesignOf(fc),
       // a card that has been read says what it is on its own face
@@ -30161,7 +30189,7 @@ class Component extends DCLogic {
         title: 'CARD PIN',
         subtitle: 'This card’s set-up was cut short. The person who holds it types their PIN to finish it.',
         warn: warn || '',
-        onBack: () => { this._fcSu = null; },
+        onBack: () => { this._fcSu = null; this.fcNameAgain(); },
       }, (a) => { su.pin = a; this.fcSuUnit(); });
       return;
     }
@@ -30171,7 +30199,7 @@ class Component extends DCLogic {
         ? 'This card is new. The person who holds it types the PIN they want, four to eight digits: it is their PIN, and the card stays theirs, not this phone’s.'
         : 'Four to eight digits. The card asks for it when it pays.',
       warn: warn || '',
-      onBack: () => { this._fcSu = null; },
+      onBack: () => { this._fcSu = null; this.fcNameAgain(); },
     }, (a) => this.fcAskPin({
       title: 'RE-ENTER PIN',
       subtitle: su.other ? 'The person who holds the card types the same PIN again.' : 'The same PIN again.',
@@ -30338,6 +30366,7 @@ class Component extends DCLogic {
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
     this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
+        this.fcNameSettle(card && card.key);
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
@@ -30518,6 +30547,139 @@ class Component extends DCLogic {
     else this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true);
   }
 
+  /* ---- NAME CARD ----------------------------------------------------------------------------------------------------------
+   *
+   * The card's name, on this phone only (the wallet's `cardName`, kept on the card's row; the card is told nothing): asked first in the
+   * set-up, right after SET UP CARD on the welcome (`fcWelcomeSetUp`), for this phone's card and for one set up for its holder from SEND
+   * > FLASHCARD alike; and again from RENAME CARD in the card's menu (`fcRename`), with the name it has filled in. The screen is SEND >
+   * TYPE's: the one field, the keyboard up and the field focused on arrival, NEXT under it, grey until something is typed. In the set-up
+   * SKIP under NEXT goes on with no name; NEXT goes on with the name, which is kept once the card is set up (`fcNameSettle`). The round
+   * back button is the welcome again, or the card's screen from RENAME CARD. A name is cut at FC_NAME_MAX characters and trimmed;
+   * a card with none is called what it always was (26f-flashcard.js `fcName`, and FLASHCARD over its screen). */
+  FC_NAME_MAX = 24;
+
+  // `mode` 'su' (the set-up's step, `then` its next) or 'rename'; `key` the card's, where it is known
+  fcNameOpen(mode, key, then, draft) {
+    this._fcNameThen = typeof then === 'function' ? then : null;
+    if (mode === 'su') this._fcNameSu = null;
+    this.setState(p => ({ screen: 'fcName', stack: p.screen === 'fcName' ? p.stack : p.stack.concat([p.screen]),
+                          fcNaming: { mode: mode === 'rename' ? 'rename' : 'su', key: String(key || '') },
+                          fcNameDraft: this.fcNameCut(draft || '') }));
+  }
+
+  // what may be typed: no more than FC_NAME_MAX characters (as they are seen, not as they are stored)
+  fcNameCut(v) {
+    return Array.from(String(v || '')).slice(0, this.FC_NAME_MAX).join('');
+  }
+
+  // the name as it is kept: trimmed, and cut
+  fcNameClean(v) {
+    return this.fcNameCut(String(v || '').trim()).trim();
+  }
+
+  // the name this phone keeps for a card, or ''
+  fcNameKept(key) {
+    const W = /** @type {any} */ (window).FoxyWallet;
+    return (key && W && typeof W.cardName === 'function') ? String(W.cardName(key) || '') : '';
+  }
+
+  fcNameType(e) {
+    this.setState({ fcNameDraft: this.fcNameCut(e && e.target ? e.target.value : '') });
+  }
+
+  // off NAME CARD, to the screen under it
+  fcNameLeave() {
+    this._fcNameThen = null;
+    this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1), fcNaming: null }));
+  }
+
+  /* NEXT: with a name only. From RENAME CARD, kept at once and the card's screen again; in the set-up, held for the card being set up
+   * and on to its next step. */
+  fcNameNext() {
+    const n = this.state.fcNaming;
+    if (!n || this.state.screen !== 'fcName') return;
+    const name = this.fcNameClean(this.state.fcNameDraft);
+    if (!name) { this.toast('Type a name first.', true); return; }
+    if (n.mode === 'rename') {
+      const W = /** @type {any} */ (window).FoxyWallet;
+      try { if (W && W.cardSetName) W.cardSetName(n.key, name); } catch (e) { this.toast('The name could not be saved on this phone.', true); return; }
+      this.fcNameLeave();
+      return;
+    }
+    this.fcNameGoOn(name);
+  }
+
+  // SKIP under NEXT, in the set-up: no name, and on
+  fcNameSkip() {
+    const n = this.state.fcNaming;
+    if (!n || n.mode !== 'su' || this.state.screen !== 'fcName') return;
+    this.fcNameGoOn('');
+  }
+
+  fcNameGoOn(name) {
+    const n = this.state.fcNaming;
+    const then = this._fcNameThen;
+    this._fcNameSu = { name, key: (n && n.key) || '', then };
+    this.fcNameLeave();
+    if (then) then();
+  }
+
+  // the round back button on NAME CARD (01-ui-basics.js, `back`): the welcome, or the card's screen; true where it was this screen's
+  fcNameBack() {
+    if (this.state.screen !== 'fcName') return false;
+    if (this.state.fcNaming && this.state.fcNaming.mode === 'su') this._fcNameSu = null;
+    this.fcNameLeave();
+    return true;
+  }
+
+  // back off the set-up's first PIN: NAME CARD again, with what was typed there, where the set-up began on it
+  fcNameAgain() {
+    const su = this._fcNameSu;
+    if (!su || typeof su.then !== 'function') return;
+    this._fcNameSu = null;
+    this.fcNameOpen('su', su.key, su.then, su.name);
+  }
+
+  /* The set-up's tap has set the card up: the name typed for it is kept (nothing where SKIP was pressed, or where it was typed for
+   * another card). */
+  fcNameSettle(key) {
+    const su = this._fcNameSu;
+    this._fcNameSu = null;
+    if (!su || !su.name || !key || (su.key && su.key !== key)) return;
+    const W = /** @type {any} */ (window).FoxyWallet;
+    try { if (W && W.cardSetName) W.cardSetName(key, su.name); } catch (e) { console.warn('[foxy] card: its name could not be kept on this phone'); }
+  }
+
+  // RENAME CARD, in the card's menu, for a card this phone set up or claimed (the wallet's `cardKnownHere`)
+  fcRename() {
+    const fc = this.state.fc;
+    if (!fc || !fc.key) return;
+    this.fcNameOpen('rename', fc.key, null, this.fcNameKept(fc.key));
+  }
+
+  /** @param {RenderContext} c */
+  renderCardName(c) {
+    const { s, sc } = c;
+    const on = sc === 'fcName';
+    const n = (on && s.fcNaming) || null;
+    const ok = on && !!this.fcNameClean(s.fcNameDraft);
+    return {
+      isFcName: on,
+      fnTitle: n && n.mode === 'rename' ? 'RENAME CARD' : 'NAME CARD',
+      fnDraft: on ? String(s.fcNameDraft || '') : '',
+      onFnType: (e) => this.fcNameType(e),
+      fnSkipShown: !!n && n.mode === 'su',
+      fnSkip: () => this.fcNameSkip(),
+      fnNext: () => this.fcNameNext(),
+      // NEXT, as SEND > TYPE's: the accent once there is a name, grey until then
+      fnActSh: ok ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -2px 0 rgba(0,0,0,.16),0 5px 12px rgba(var(--acc-rgb),.3)' : 'none',
+      fnSh: ok ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
+      fnAnim: ok ? 'shineLoop 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
+      fnBg: ok ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      fnInk: ok ? CTA_INK(s) : 'rgba(var(--ink-rgb),.4)',
+    };
+  }
+
   /* ---- WELCOME TO YOUR CASHU CARD ------------------------------------------------------------------------------------------
    *
    * What a new card is met with, the one way into its set-up: its picture, SET UP CARD, RESTORE LOST CARD and CANCEL. Drawn over the
@@ -30535,13 +30697,19 @@ class Component extends DCLogic {
                           fcWelcome: { sats, unit, alt: alt || null, info: info || null } }));
   }
 
+  /* SET UP CARD: NAME CARD first (`fcNameOpen`), then the set-up's own steps, for this phone's card or for the holder's. */
   fcWelcomeSetUp() {
     const w = this.state.screen === 'fcWelcome' ? this.state.fcWelcome : null;
-    if (w) { this.fcSendSetUp(w.sats, w.unit, w.alt, w.info); return; }
-    this.fcSetUp();
+    const fc = this.state.fc;
+    const key = w ? String((w.info && w.info.key) || '') : String((fc && fc.key) || '');
+    this.fcNameOpen('su', key, () => {
+      if (w) { this.fcSendSetUp(w.sats, w.unit, w.alt, w.info); return; }
+      this.fcSetUp();
+    });
   }
 
   fcWelcomeCancel() {
+    this._fcNameSu = null;
     if (this.state.screen === 'fcWelcome') {
       this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1), fcWelcome: null }));
       return;

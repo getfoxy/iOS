@@ -256,8 +256,8 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
   ok('home keeps a till’s receipt of someone else’s card: the till’s own income', home.rows.some((r) => r.name === 'card payment' && r.amtText === '+₿ 2000'), names(home.rows));
   ok('home keeps the take-back of a lost card, named for what it was: that card’s own list cannot be opened',
      home.rows.some((r) => r.name === 'Taken back from a lost card' && r.amtText === '+₿ 700'), names(home.rows));
-  ok('the history read from the wallet carries `lost`, and names such a row for what it was',
-     /lost: !!t\.lost,/.test(method('loadHistory() {')) && /const who = t\.lost \? 'Taken back from a lost card' :/.test(method('loadHistory() {')));
+  ok('the history read from the wallet carries `lost`, and names such a row for what it was (by the card’s name, where this phone gave it one)',
+     /lost: !!t\.lost,/.test(method('loadHistory() {')) && /const who = t\.lost \? \(this\.txCardName\(t\) \? 'Taken back from ' \+ this\.txCardName\(t\) : 'Taken back from a lost card'\) :/.test(method('loadHistory() {')));
   ok('home still ADDS UP: the books walk the card’s rows too, shown or not', home.v.histAuditTitle === 'ADDS UP', home.v.histAuditTitle + ' / ' + home.v.histAuditBody);
   const sats = view(true, 'sat'), usd = view(true, 'usd');
   ok('the card’s BITCOIN tab: the swap’s second tap, the payment from its screen, the load, and the take-back; no swap leg',
