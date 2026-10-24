@@ -463,13 +463,14 @@ function amt(a) {
        'NEXT puts SEND’s keypad back as it was, under the next question', JSON.stringify([payer.state.flow, payer.state.amount]));
     card(payer).press('NO');
     cash.tap();
-    await until('the money to be on the card', () => cash.balance() === 1500 && payer.state.screen === 'home');
+    await until('the money to be on the card', () => cash.balance() === 1500 && payer.state.screen === 'paid');
     ok(!cash.state.owner && cash.state.record.refund === '00'.repeat(33) && cash.state.pin === hexOf('8642') && cash.state.noPinLimit === Math.round(2 / 60000 * 1e8) && cash.state.tapLimit === 0,
        'one tap: the holder’s PIN, no owner, no refund key, a no-PIN amount of $2.00, and the 1,500 under the PIN', JSON.stringify([cash.state.noPinLimit, cash.balance()]));
     ok(!ins(cash).includes('43') && !R.W.cardsKnown()[cash.key] && payer.toasts.indexOf('The card is set up for the person who holds it.') >= 0,
        'no claim was asked for, the phone keeps no row of it, and the screen says whose card it is', payer.toasts.slice(-2).join(' / '));
-    ok(card(payer) && card(payer).reason === '\u20bf1,500 went onto the card.', 'and what went on, as any money put on a card is said', card(payer) && card(payer).reason);
-    card(payer).press('DONE');
+    // (the app's success screen, ON THE CARD, as every load that ends at Home: the owner's rule)
+    ok(payer.state.screen === 'paid' && payer.state.paidSays === 'ON THE CARD' && payer.state.paidAmount === 1500, 'and what went on, on the success screen as any money put on a card is said', JSON.stringify([payer.state.screen, payer.state.paidSays, payer.state.paidAmount]));
+    payer.setState({ screen: 'home', stack: [] }); if (payer.paidDismissed) payer.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     // read on the same phone's FLASHCARD screen: somebody else's card
     cash.tap();
     payer.goFlashcard();

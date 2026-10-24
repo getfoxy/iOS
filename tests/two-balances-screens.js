@@ -360,7 +360,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([A.state.screen, A.state.currencyFlow], ['currency', 'receive'], 'a receive: CURRENCY first, before SET AMOUNT');
     const v = V();
     eq([v.curTitle, v.curQuestion], ['CURRENCY', 'What do you want to receive?'], 'its title and question');
-    eq(v.curCards.map((k) => [k.name, k.balance]), [['DOLLARS', '$ 42.05'], ['BITCOIN', '₿ 50,000']], 'two big cards with the balances');
+    // (a receive's tiles show no balances: what is held says nothing about what to receive — the owner, 2026-10-23)
+    eq(v.curCards.map((k) => [k.name, k.balance]), [['DOLLARS', ''], ['BITCOIN', '']], 'two big cards, no balances on a receive');
     v.curCards[0].tap();
     await settle();
     ok(A.state.screen === 'amount' && A.state.wallet === 'usd' && A.state.unit === 'USD', 'DOLLARS: SET AMOUNT, starting in dollars');

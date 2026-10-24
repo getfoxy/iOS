@@ -1170,12 +1170,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
   pad(holder).type('4321');
-  await until('the card to be renewed', () => card(holder) && card(holder).title === 'ON THE CARD');
+  await until('the card to be renewed', () => holder.state.screen === 'paid' && holder.state.paidSays === 'ON THE CARD');
   ok(rc.balance() === 1024 && !renewLine(vals(holder)) && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).length === 2
      && history(H).filter((e) => entriesBefore.indexOf(e.hash) < 0).every((e) => holder.seen[e.hash]),
-     'renewed in one tap: the same 1,024, thirty days on, its two entries not announced', card(holder).reason);
+     'renewed in one tap: the same 1,024, thirty days on, its two entries not announced', String(holder.state.paidAmount));
   ok(rc.state.record.limit === 0, 'and the limit is what it was', String(rc.state.record.limit));
-  card(holder).press('DONE');
+  holder.setState({ screen: 'home', stack: [] }); if (holder.paidDismissed) holder.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
 
   // a month after that the card is lost
   move(45 * 86400000);
@@ -2485,12 +2485,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        * read was its own of 1.20, so the card is read first, and a card with no PIN is asked for none (it was asked for one it has
        * not got, and the PIN typed was dropped). */
       ok(!pad(owner) && H2.sheet[0] === 'begin: Tap behind the phone.', 'NEXT brings the sheet up at once: no PIN pad for a card not known to want one', (pad(owner) && pad(owner).cta) + ' | ' + H2.sheet[0]);
-      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await until('the money to be on the card', () => owner.state.screen === 'paid' && owner.state.paidSays === 'ON THE CARD');
       await settle();
-      ok(free.balance() === 700 && owner.state.screen === 'home' && owner.state.stack.length === 0 && /^₿700 went onto the card\.$/.test(card(owner).reason) && (await H2.W.balanceSats()) < had - 699,
-         'a card with no PIN took the money in that tap, and the person is home with the card saying so', card(owner).reason + ' | ' + free.balance());
+      ok(free.balance() === 700 && owner.state.paidAmount === 700 && owner.state.stack.slice(-1)[0] === 'home' && (await H2.W.balanceSats()) < had - 699,
+         'a card with no PIN took the money in that tap, and ON THE CARD, the success screen, says so over Home', owner.state.paidAmount + ' | ' + free.balance());
       ok(H2.W.cardOwed().length === 0 && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1, 'in one sheet, and nothing is left owed', H2.sheet.join(' / '));
-      card(owner).press('DONE');
+      owner.setState({ screen: 'home', stack: [] }); if (owner.paidDismissed) owner.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
+      ok(owner.state.screen === 'home' && owner.state.stack.length === 0, 'DONE: home');
       // a card with a PIN ends the sheet asking for it, and the pad comes up
       owner.setState({ screen: 'sendHow', stack: ['home'] });
       owner.fcSendCard();
@@ -2512,10 +2513,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await until('the PIN pad again', () => !!pad(owner));
       ok(/ON CARD$/.test(pad(owner).cta), 'TRY AGAIN asks for the PIN to put it on', pad(owner).cta);
       pad(owner).type('1234');
-      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await until('the money to be on the card', () => owner.state.screen === 'paid' && owner.state.paidSays === 'ON THE CARD');
       await settle();
       ok(keyed.balance() === 500 && H2.W.cardOwed().length === 0, 'and with the right one it is on', String(keyed.balance()));
-      card(owner).press('DONE');
+      owner.setState({ screen: 'home', stack: [] }); if (owner.paidDismissed) owner.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
       /* and with its PIN right the first time. The card last read is this one, this phone's own of 1.21 with a PIN: known to want it,
        * so the PIN comes before any sheet, and the card is tapped once */
       owner.setState({ screen: 'sendHow', stack: ['home'] });
@@ -2526,13 +2527,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       ok(pad(owner).cta === 'TAP CARD' && !H2.sheet.some((x) => /^begin:/.test(x)) && owner.fcSendPinFirst() === true,
          'a card of 1.21 just read: the PIN pad first, before any sheet, and TAP CARD writes it in the one tap', pad(owner).cta + ' | ' + H2.sheet.join(' / '));
       pad(owner).type('1234');
-      await until('the money to be on the card', () => card(owner) && card(owner).title === 'ON THE CARD');
+      await until('the money to be on the card', () => owner.state.screen === 'paid' && owner.state.paidSays === 'ON THE CARD');
       await settle();
-      ok(keyed.balance() === 800 && owner.state.screen === 'home' && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1, 'the right PIN writes it, in one sheet', String(keyed.balance()) + ' | ' + H2.sheet.join(' / '));
+      ok(keyed.balance() === 800 && owner.state.paidAmount === 300 && H2.sheet.filter((x) => /^begin:/.test(x)).length === 1, 'the right PIN writes it, in one sheet', String(keyed.balance()) + ' | ' + H2.sheet.join(' / '));
       const lastRead = H2.W.cardLastRead();
       ok(!!lastRead && lastRead.key === keyed.key && lastRead.info.pinFirst === true && lastRead.info.version === '1.21',
          'the wallet keeps the last card read in any flow, its key and what it said (`cardLastRead`)', JSON.stringify(lastRead && [lastRead.key === keyed.key, lastRead.info.version]));
-      card(owner).press('DONE');
+      owner.setState({ screen: 'home', stack: [] }); if (owner.paidDismissed) owner.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
       // offline, it says why
       owner.offline = true;
       owner.setState({ screen: 'sendHow', stack: ['home'] });

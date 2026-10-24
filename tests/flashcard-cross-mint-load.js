@@ -185,11 +185,12 @@ async function world(o) {
     ok(spec(a).cta === 'PUT ₿ 1,000 ON CARD' && !spec(a).ctaBusy, 'the button says what it does, with the amount', spec(a).cta);
     spec(a).go();
     await waitFor(() => k.balance() === cardBefore + 1000, 40000);
-    await waitFor(() => !!card(a) && card(a).title === 'ON THE CARD', 20000);
+    await waitFor(() => a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD', 20000);
     await home(R);
     await settle();
     ok(!pad(a) && begins(R) === 2, 'no PIN asked again, and one more tap wrote it: two taps in all', String(begins(R)));
-    ok(card(a).reason === '₿1,000 went onto the card.' && a.state.screen === 'home', 'said as any load from SEND is, at Home', card(a).reason);
+    ok(a.state.paidAmount === 1000 && a.state.stack.slice(-1)[0] === 'home', 'said as any load from SEND is: ON THE CARD on the success screen, over Home', JSON.stringify([a.state.paidAmount, a.state.stack]));
+    a.setState({ screen: 'home', stack: [] }); if (a.paidDismissed) a.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     const spent = atB - R.W.balanceAt(MINT2);
     const meltRow = (await R.W.transactions(50)).filter((t) => t.dir === 'out' && bare(t.mint) === MINT2)[0] || {};
     ok(spent === 1002 && spent <= x.plan.total && Number(meltRow.feeSats) === 2,
@@ -203,7 +204,6 @@ async function world(o) {
     ok(!!load && bare(load.mint) === MINT && load.sats === 1000 && R.W.cardKnownHere(k.key) && !!melt && !melt.card && !melt.fromCard && !!claim && !claim.card && bare(claim.mint) === MINT,
        'the load’s row names the card (its own list has it, home’s leaves it out), and the crossing’s rows are this phone’s',
        JSON.stringify(rows.slice(0, 4).map((t) => [t.dir, t.memo, t.card ? 'card' : '', bare(t.mint)])));
-    card(a).press('DONE');
     booksGood('the owner’s card at another mint', R);
   }
 
@@ -509,11 +509,20 @@ async function world(o) {
     a.fcSendCard();
     a.state.amount = '1.00'; a.state.unit = 'USD';
     a.fcAmountNext();
+    /* The owner's rule (2026-10-23): both of this phone's balances could pay $1.00, so which pays is asked right after the amount,
+     * before any card is read; then the PIN where the card is known to want it, one read, and, the card holding both, which goes on it. */
     await until('the question', () => a.state.screen === 'currency');
-    ok(a.state.curCard && a.state.curCard.question === 'SEND WHICH TO THE CARD?' && !a.state.curCard.short.usd && !a.state.curCard.short.sat && begins(R) === 1,
-       'SEND to a card of both at another mint: read once, then SEND WHICH TO THE CARD?, with nothing greyed', JSON.stringify(a.state.curCard));
+    ok(a.state.curCard && a.state.curCard.question === 'SEND WHICH TO THE CARD?' && /Either balance could pay/.test(a.state.curCard.foot || '') && begins(R) === 0,
+       'SEND from a phone whose two balances both cover it: which pays, asked after the amount and before any card is read', JSON.stringify(a.state.curCard));
     a.currencyPick('sat');
-    // (both of this phone's balances could pay: which is asked next, `fcXlQuote`)
+    await until('the PIN pad, or the card’s question', () => !!pad(a) || a.state.screen === 'currency' || a.state.screen === 'fcXlConfirm');
+    if (pad(a)) pad(a).type('2468');
+    await until('the card’s question', () => (a.state.screen === 'currency' && a.state.curCard && !/Either balance/.test(a.state.curCard.foot || '')) || a.state.screen === 'fcXlConfirm');
+    if (a.state.screen === 'currency' && a.state.curCard.question === 'SEND WHICH TO THE CARD?') {
+      ok(!a.state.curCard.short.usd && !a.state.curCard.short.sat && begins(R) === 1, 'read once: a card of both asks which goes on it, with nothing greyed', JSON.stringify(a.state.curCard));
+      a.currencyPick('sat');
+    }
+    // (the paying balance was chosen already: PAY FROM WHICH? only where the flow still asks it)
     await until('the confirmation, or the question which pays', () => a.state.screen === 'currency' || (a.state.screen === 'fcXlConfirm' && !!(a.state.fcXl && a.state.fcXl.plan)));
     if (a.state.screen === 'currency') {
       ok(a.state.curCard.question === 'PAY FROM WHICH?', 'then which of this phone’s balances pays, both able to', a.state.curCard.question);
@@ -525,15 +534,16 @@ async function world(o) {
        'bitcoin chosen: the sats the dollars typed are at this phone’s price go on the card', JSON.stringify({ cu: x.cardUnit, amount: x.amount }));
     const satsOn = x.plan.land;
     spec(a).go();
-    await until('the PIN pad', () => !!pad(a));
-    pad(a).type('2468');
-    await waitFor(() => !!card(a) && card(a).title === 'ON THE CARD', 40000);
+    // (the PIN was typed before the read where the card was known to want it: then no pad here, the write goes on the PIN it has)
+    await until('the PIN pad, or the write', () => !!pad(a) || (a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD'));
+    if (pad(a)) pad(a).type('2468');
+    await waitFor(() => a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD', 40000);
     await home(R);
     await settle();
     k.tap();
     let seen = await R.W.cardLook(k, { mine: true, price: 60000 });
     ok(seen.units && seen.units.sat && seen.units.sat.balance === satsOn, 'the sats are on the card, in bitcoin', JSON.stringify(seen.units && { sat: seen.units.sat && seen.units.sat.balance }));
-    card(a).press('DONE');
+    a.setState({ screen: 'home', stack: [] }); if (a.paidDismissed) a.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     // ADD FUNDS on its screen: which goes on it, asked first, with nothing greyed
     await readCard(a, k);
     a.fcAdd();

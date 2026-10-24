@@ -1286,6 +1286,8 @@
       return;
     }
     this._heldConfirm = null;
+    // a card's VERIFYING over the code comes down with the confirmation (26f-flashcard.js, `fcCardVerifying`)
+    if (this.hideStage) this.hideStage('paidCheck');
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',

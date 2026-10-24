@@ -122,7 +122,11 @@ async function bitcoinReceive(till, R, n) {
   till.asking = n;
   return q;
 }
-const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) && !ctx.window.document.getElementById('foxy-stage'));
+// (VERIFYING over the code after a cross-mint payment, `fcCardVerifying`, is no card stage: it waits for the mint, as the test does)
+const tapDone = (a, ctx) => until('the tap to be over', () => {
+  const st = ctx.window.document.getElementById('foxy-stage');
+  return !(a._fcTaps > 0) && (!st || st.getAttribute('data-stage') === 'paidCheck');
+});
 const home = (R) => until('the till to be home at B', () => bare(R.W.mintUrl) === MINT2);
 const spec = (a) => a.fcXmSpec();
 const rowOf = (a, label) => (spec(a).rows || []).filter((r) => r.label === label)[0] || {};

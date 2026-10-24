@@ -45,6 +45,8 @@
     } else if (s.sendSlow || s.sendPct) {
       this.setState({ sendSlow: false, sendPct: 0 });
     }
+    // a card's VERIFYING over a code (26f-flashcard.js, `fcCardVerifying`) comes down with the confirmation, or with home, whichever way in
+    if ((s.screen === 'paid' || s.screen === 'home') && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
     console.log('[foxy] screen ' + (prevState.screen || '?') + ' \u2192 ' + s.screen
       + ' after ' + held + 'ms, back stack ' + ((s.stack && s.stack.length) || 0)
       + (flags.length ? ' | ' + flags.join(' ') : ''));

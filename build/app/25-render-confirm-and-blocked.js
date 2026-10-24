@@ -161,6 +161,8 @@
     }
     const three = units.length > 2;
     const setUp = cardFlow && !cc;
+    // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
+    const receiving = !cardFlow && s.flow === 'receive';
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
@@ -169,8 +171,8 @@
         sym: LOOK[u].sym,
         name: u === 'both' ? 'BOTH' : this.unitWord(u),
         // (setting a card up shows no balances: they would read as what the card already holds)
-        balance: setUp ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
-        labelShown: u !== 'both' && !setUp,
+        balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
+        labelShown: u !== 'both' && !setUp && !receiving,
         badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
         balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
         tag: tag, tagShown: !!tag,

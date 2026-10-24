@@ -1374,9 +1374,19 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       pad(a).type('1234');
       await until('the dollars-only card to refuse', () => !(a._fcTaps > 0) && !!cardUp(a));
       ok(!!cardUp(a) && /holds dollars, so it is loaded from your dollars/.test(cardUp(a).reason) && !pad(a), 'a card set up for dollars alone still refuses bitcoin, nothing made', cardUp(a) && cardUp(a).reason);
-      // and not started in a currency, the one currency it holds, with nothing asked
+      /* Not started in a currency, and both of this phone's balances could pay $1.00: the currency is asked after the amount (the
+       * owner's rule, 2026-10-23), before any card is read; dollars picked, the dollars-only card takes them. */
       a = await sendTo(usdOnly, '', '1.00', 'USD');
-      ok(a.state.screen !== 'currency' && !!pad(a) && /\$1\.00/.test(pad(a).sub), 'not started in a currency, a card of dollars alone is sent dollars, nothing asked', pad(a) && pad(a).sub);
+      ok(a.state.screen === 'currency' && !!a.state.curCard && a.state.curCard.question === 'SEND WHICH TO THE CARD?' && !pad(a),
+         'not started in a currency, both balances covering it: SEND WHICH TO THE CARD? after the amount, before any card', a.state.screen + ' ' + JSON.stringify(a.state.curCard && a.state.curCard.question));
+      a.currencyPick('usd');
+      await until('the PIN pad for the dollars', () => !!pad(a));
+      ok(!!pad(a) && /\$1\.00/.test(pad(a).sub), 'dollars picked: the PIN for $1.00, the card then takes its dollars', pad(a) && pad(a).sub);
+      pad(a).back();
+      await settle();
+      // only one balance could pay: nothing asked, that one goes
+      a = await sendTo(usdOnly, '', '150.00', 'USD');
+      ok(a.state.screen !== 'currency' && !!pad(a) && /\$150\.00/.test(pad(a).sub), 'an amount only the dollars cover: no question, the dollars go', a.state.screen + ' ' + (pad(a) && pad(a).sub));
       pad(a).back();
       await settle();
     }

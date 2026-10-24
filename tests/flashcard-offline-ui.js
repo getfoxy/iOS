@@ -439,11 +439,11 @@ async function keptPay(R, k, sats) {
     const hb = await H.W.balanceSats();
     k.tap();
     pad(owner).type('1234');
-    await until('the card to be renewed', () => card(owner) && card(owner).title === 'ON THE CARD');
+    await until('the card to be renewed', () => owner.state.screen === 'paid' && owner.state.paidSays === 'ON THE CARD');
     const nowS = Math.floor(H.window.Date.now() / 1000);
     ok(k.balance() === 2000 && slotDates(k).length === 1 && Math.abs(slotDates(k)[0] - (nowS + 30 * 86400)) < 600 && (await H.W.balanceSats()) === hb,
        'renewed: the same 2,000, every piece of one date thirty days on', JSON.stringify({ days: ((slotDates(k)[0] - nowS) / 86400).toFixed(2) }));
-    card(owner).press('DONE');
+    owner.setState({ screen: 'home', stack: [] }); if (owner.paidDismissed) owner.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     undo();
     booksGood('the books add up', H);
   }

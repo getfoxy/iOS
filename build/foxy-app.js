@@ -9354,6 +9354,8 @@ class Component extends DCLogic {
       return;
     }
     this._heldConfirm = null;
+    // a card's VERIFYING over the code comes down with the confirmation (26f-flashcard.js, `fcCardVerifying`)
+    if (this.hideStage) this.hideStage('paidCheck');
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',
@@ -12863,6 +12865,8 @@ class Component extends DCLogic {
     } else if (s.sendSlow || s.sendPct) {
       this.setState({ sendSlow: false, sendPct: 0 });
     }
+    // a card's VERIFYING over a code (26f-flashcard.js, `fcCardVerifying`) comes down with the confirmation, or with home, whichever way in
+    if ((s.screen === 'paid' || s.screen === 'home') && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
     console.log('[foxy] screen ' + (prevState.screen || '?') + ' \u2192 ' + s.screen
       + ' after ' + held + 'ms, back stack ' + ((s.stack && s.stack.length) || 0)
       + (flags.length ? ' | ' + flags.join(' ') : ''));
@@ -16408,6 +16412,8 @@ class Component extends DCLogic {
     }
     const three = units.length > 2;
     const setUp = cardFlow && !cc;
+    // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
+    const receiving = !cardFlow && s.flow === 'receive';
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
@@ -16416,8 +16422,8 @@ class Component extends DCLogic {
         sym: LOOK[u].sym,
         name: u === 'both' ? 'BOTH' : this.unitWord(u),
         // (setting a card up shows no balances: they would read as what the card already holds)
-        balance: setUp ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
-        labelShown: u !== 'both' && !setUp,
+        balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
+        labelShown: u !== 'both' && !setUp && !receiving,
         badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
         balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
         tag: tag, tagShown: !!tag,
@@ -22648,7 +22654,22 @@ class Component extends DCLogic {
     if (flow === 'cardSend' && this.twoUnitsOn && this.twoUnitsOn() && !(this.walletNow && this.walletNow('send'))) {
       const fig = { usd: this.centsTyped(), sat: this.wantedSats() };
       if (!(fig.usd > 0) && !(fig.sat > 0)) { this.toast('Type an amount first.', true); return; }
-      this.fcSendRun(0, '', '', null, fig);
+      /* The owner's rule: the amount, then the currency, asked only where both of this phone's balances could pay it; where one
+       * can, that one, with nothing asked; where neither can, said. The card then takes it in the one it holds (`fcSendGuard`). */
+      const canUsd = fig.usd > 0 && fig.usd <= this.fcHave('usd');
+      const canSat = fig.sat > 0 && fig.sat <= this.fcHave('sat');
+      const goIn = (u2) => {
+        const alt2 = u2 === 'usd' ? { sats: fig.sat, have: this.fcHave('sat') } : null;
+        this._fcSendTapped = false;
+        if (this.fcSendPinFirst()) this.fcSendAsk(fig[u2], u2, alt2); else this.fcSendRun(fig[u2], '', u2, alt2);
+      };
+      if (canUsd && canSat) {
+        this.fcPickUnit({ question: 'SEND WHICH TO THE CARD?', foot: 'Either balance could pay. The card takes it in the one it holds.',
+                          short: { usd: '', sat: '' }, why: '' }, goIn);
+        return;
+      }
+      if (canUsd || canSat) { goIn(canUsd ? 'usd' : 'sat'); return; }
+      this.toast('You have ' + this.fcBoth(this.fcHave('usd'), 'usd') + ' and ' + this.fcBoth(this.fcHave('sat'), 'sat') + '.', true);
       return;
     }
     if (!(sats > 0)) { this.toast('Type an amount first.', true); return; }
@@ -23376,7 +23397,7 @@ class Component extends DCLogic {
      * the mint took and read as unpaid, and the owner tapped the card at it again. The receive's watch takes this screen
      * down as it says paid (12-receive.js); a refusal takes it down here, and a payment the mint has not answered keeps it
      * up with that said. */
-    this.fcUsdVerifying(usd, 'The card paid ' + this.fcSats(usd.sats) + '. Foxy is confirming the payment with your mint.', 60000);
+    this.fcUsdVerifying(usd, 'The card paid ' + this.fcPaidWords(usd.sats, 'sat') + '. Foxy is confirming the payment with your mint.', 60000);
     const end = (paid) => {
       usd.melting = false;
       if (paid) usd.landingUntil = Date.now() + 20000; else usd.done = true;
@@ -23388,7 +23409,7 @@ class Component extends DCLogic {
     const waiting = () => {
       usd.melting = false;
       usd.pending = true;
-      this.fcUsdVerifying(usd, 'The card paid ' + this.fcSats(usd.sats) + '. The mint has not answered yet; the dollars land when it does.', 120000);
+      this.fcUsdVerifying(usd, 'The card paid ' + this.fcPaidWords(usd.sats, 'sat') + '. The mint has not answered yet; the dollars land when it does.', 120000);
       this.refreshBalance();
       this.loadHistory();
       this.fcUsdWaiting();
@@ -23421,6 +23442,18 @@ class Component extends DCLogic {
    * is paid already (`fcUsdLanding`). Not drawn where the code is no longer the one on screen. */
   fcUsdVerifying(usd, body, forMs) {
     if (!usd || this.state.invoiceHash !== usd.hash || this.state.screen !== 'confirm') return;
+    this.fcCardVerifying(body, forMs);
+  }
+
+  /* An amount a card paid, said dollars first with the sats in brackets ("$5.00 (₿6,182)"), as the owner reads figures; sats alone
+   * where this phone has no price. A dollar card's cents are dollars alone. */
+  fcPaidWords(amount, unit) {
+    if (unit === 'usd') return this.unitFigure(amount, 'usd');
+    const m = (this.px && this.px() > 0 && this.money) ? this.money(amount) : null;
+    return (m && m.main && /\$/.test(m.main)) ? m.main + ' (' + this.fcSats(amount) + ')' : this.fcSats(amount);
+  }
+
+  fcCardVerifying(body, forMs) {
     const o = { art: 'phone', title: 'Verifying', dots: true, forMs: forMs || 60000, body, button: 'CLOSE', go: () => {} };
     // (the tap screens' `waitingScreen` where the app has it; the stage itself where a page has only the card's methods)
     if (this.waitingScreen) this.waitingScreen('paidCheck', o);
@@ -23662,7 +23695,11 @@ class Component extends DCLogic {
                                                       send ? { holdFor: true, only: send.key }
                                                         : btcHold ? { holdFor: true, holdKeep: true, only: terms.key }
                                                         : xmHold ? { holdFor: true, only: terms.key, feeMost: Math.max(0, Number(terms.cardFee) || 0) } : {}))
-                   .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => this.fcPutBackInSheet(link, on, progress, e, pin));
+                   .then((r) => this.fcChangeInSheet(link, on, progress, r, pin), (e) => {
+                     // a card whose money is at another mint: the read is the news, said on the screen that follows; the sheet ends with a tick, not in red
+                     if (e && e.card === 'other-mint' && !send && !share && !xm) e.sheetText = 'Card read';
+                     return this.fcPutBackInSheet(link, on, progress, e, pin);
+                   });
                })
       .then((r) => {
         // (the currency chosen is this payment's, and the next asks again)
@@ -23672,6 +23709,24 @@ class Component extends DCLogic {
         this.haptic && this.haptic('success');
         // the unit the card paid in, and what it paid in it: a dollar card's cents, a bitcoin card's sats
         const unit = this.fcUnitOf(r);
+        /* VERIFYING from here to PAYMENT RECEIVED: the card's sheet has gone and the code would show as unpaid for the second the
+         * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
+        // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
+        const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
+        /* And only for a card at another mint, whose melt goes on past the tap: at the card's own mint the sats are this phone's as
+         * the sheet closes and PAYMENT RECEIVED follows in the next moment (a dollar code's melt has its own, `fcUsdPay`). */
+        if (!share && !owesChange && xm && this.state.screen === 'confirm') {
+          this.fcCardVerifying('The card paid ' + this.fcPaidWords(this.fcAmt(r), unit) + '. Foxy is confirming the payment with your mint.', 60000);
+          /* A payment settled within the tap (the card's own mint, sats) reaches PAYMENT RECEIVED in the next moment, which takes this
+           * down; one still with a mint (a melt, at the card's mint or for a dollar code) keeps it. Nothing of either a moment on, with
+           * no melt out: down, and the code stands as it was. */
+          setTimeout(() => {
+            if (this.state.screen !== 'confirm' || !(this.stageUp && this.stageUp('paidCheck'))) return;
+            const W2 = this.fcW();
+            const out = !!(W2 && W2.pendingMelts && W2.pendingMelts().length) || this.fcUsdLanding();
+            if (!out) this.hideStage('paidCheck');
+          }, 700);
+        }
         const paid = this.fcAskIn(unit, sats, usd, terms, send);
         /* A dollar card paid a dollar receive in cents, straight into this phone's dollars: the code on screen is not held for
          * it and nothing pays it (`fcMoved`). A bitcoin card paid in sats, which do (`fcUsdPay`). */
@@ -24787,8 +24842,12 @@ class Component extends DCLogic {
     const now = String((r.card && r.card.record && r.card.record.mint) || '').replace(/\/+$/, '');
     const moved = !!(was && now && was !== now);
     // what went on, in the card's own unit (a dollar card's cents are `amount`; its `sats` are 0)
-    const u = this.fcUnitOf(r);
-    const went = this.fcAmt(r);
+    /* The unit of what went on: a card of both loaded with sats says `sats` while its record is in dollars, so a figure of nought in the
+     * card's unit is read again in the other (the success screen once said "$0.00" for 3,094 sats). */
+    const u0 = this.fcUnitOf(r);
+    const went0 = this.fcAmt(r);
+    const u = (went0 > 0 || !(Number(r && r.sats) > 0)) ? u0 : 'sat';
+    const went = went0 > 0 ? went0 : Math.max(0, Math.round(Number(r && r.sats) || 0));
     this.refreshBalance();
     this.loadHistory();
     /* Cut short with some of it written: the sheet comes up again by itself
@@ -24868,17 +24927,24 @@ class Component extends DCLogic {
       if (note) this.toast(note);
       return;
     }
-    /* Money put on a card that is not on show (FLASHCARD on the send screen, which leaves the person at Home) or renewed is said by a
-     * card. A till putting a payer's change back says the change and nothing else. */
-    this.blockedCard('fc-on', {
-      tone: 'ask', title: 'ON THE CARD',
-      reason: this.fcSats(went, u) + ' went onto the card.'
-        + (this.state.screen === 'flashcard' ? ' It now holds ' + this.fcSats(this.fcCardHolds(r.card, u), u) + '.' : '')
-        + (moved ? ' The card is now at ' + this.mintNameOf(now) + '.' : '')
-        // an amount of too many pieces is rounded up, so the card has fewer to sign for and is quicker to use
-        + ((o && o.rounded > 0) ? ' ' + this.fcSats(o.rounded, u) + ' more than you asked for, so the card holds fewer pieces and is quicker to use.' : ''),
-      shut: { label: 'DONE' },
-    });
+    /* Money put on a card that is not on show (FLASHCARD on the send screen, which leaves the person at Home) or renewed ends on the
+     * app's own success screen, ON THE CARD, with its flash, as a payment does (24-render-receive-and-send.js, `renderPaid`): the sheet
+     * that said it was out of place among the other endings (the owner's rule). What the balance cannot say goes in a line after. */
+    // nothing went on (a read after a write that put nothing, a reset): nothing to celebrate
+    if (!(went > 0)) return;
+    this._lastFee = 0;
+    this._lastPay = null;
+    this.setState(p => ({
+      screen: 'paid', stack: p.stack.concat([p.screen]),
+      payOut: true, paidSays: 'ON THE CARD', paidTo: 'FLASHCARD', paidUnit: u, paidAmount: went,
+      paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
+      recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+    }));
+    this.haptic && this.haptic('success');
+    const said = (moved ? 'The card is now at ' + this.mintNameOf(now) + '.' : '')
+      // an amount of too many pieces is rounded up, so the card has fewer to sign for and is quicker to use
+      + ((o && o.rounded > 0) ? (moved ? ' ' : '') + this.fcSats(o.rounded, u) + ' more than you asked for, so the card holds fewer pieces and is quicker to use.' : '');
+    if (said) this.toast(said);
   }
 
   /* ---- the balance counts to what the card holds ---------------------------------------
