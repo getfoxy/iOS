@@ -149,7 +149,7 @@ function later(c, ms) {
   }
 
   /* ---- RESTORE before its date ---------------------------------------------
-   * Asked from CARDS YOU LOADED before the card's date (26f-flashcard.js `fcRestoreAsk`): written down on the card's row and
+   * Asked before the card's date (26f-flashcard.js `fcRestoreAsk`, kept; RESTORE CARD does not offer it now): written down on the card's row and
    * nothing else, in no balance, forgotten by CANCEL RESTORE, kept across a launch, and taken back by itself once its date has
    * come, by the connection's sweep (`cardRestoreDue`), as TAKE IT BACK takes it. */
   {

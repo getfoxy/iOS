@@ -582,7 +582,8 @@
   }
 
   /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title
-   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). */
+   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). And RESTORE CARD, home's RESTORE LOST CARD
+   * (`isFcRestore`, 26f-flashcard.js `fcRestoreLost`): CARD LIMITS' back button and title, and a row for each card (`fcLostRows`). */
   /** @param {RenderContext} c */
   renderCardScreens(c) {
     const { s, sc } = c;
@@ -624,5 +625,8 @@
       fsBack: () => this.fcSpeedBack(),
       fsAltLabel: fs && fs.mode === 'su' ? 'SKIP' : 'NO LIMIT',
       fsAlt: () => this.fcSpeedAlt(),
+      isFcRestore: sc === 'fcRestore',
+      frRows: sc === 'fcRestore' ? this.fcLostRows() : [],
+      frBack: () => this.back(),
     };
   }

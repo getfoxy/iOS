@@ -22,7 +22,7 @@
  * first with the screen's swap to sats, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
  * exact pieces (the change these cards make for themselves, mended or given up, is tests/flashcard-mend.js). */
 const { funded, newCard, why, OTHER_WORDS } = require('./flashcard-kit');
-const { appOn, until, pad, card, vals, settle, keyIn, welcome, limits, speed, named } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, vals, settle, keyIn, welcome, limits, speed, named, restore } = require('./flashcard-ui-kit');
 
 let failed = 0;
 // the card's MENU, at the top right: its rows, and what LIMITS says under it (what the card pays without its PIN)
@@ -422,15 +422,15 @@ function amt(a) {
     limits(holder).press('CLOSE');
     ok(!limits(holder) && holder.state.screen === 'flashcard' && !card(holder), 'CLOSE is the card’s screen again');
 
-    // B9 from home's MENU (RESTORE LOST CARD, `fcRestoreLost`): the list of CARDS YOU LOADED, and this card's row says when it can be taken back
+    // B9 from home's MENU (RESTORE LOST CARD, `fcRestoreLost`): RESTORE CARD, and this card's row, empty, has nothing to restore and cannot be pressed
     ok(typeof holder.fcRestoreThis === 'undefined', 'the card’s screen has no restore of its own');
     holder.fcRestoreLost();
-    const lostRow = (vals(holder).fcRows || []).length ? H.W.cardsList().filter((r) => r.key === n.key)[0] : null;
-    ok(!holder.state.fc && holder.state.screen === 'flashcard' && !!lostRow, 'RESTORE LOST CARD opens CARDS YOU LOADED, with this card in it', String((vals(holder).fcRows || []).length));
-    holder.fcRowCard(lostRow);
-    ok(card(holder) && /when this phone last saw it/.test(card(holder).reason) && card(holder).title === holder.fcName(n.key),
-       'RESTORE on a card this phone set up: its row of CARDS YOU LOADED, saying what it held and when it can be taken back', card(holder) && card(holder).all);
-    card(holder).press('CLOSE');
+    const nName = holder.fcName(n.key).toUpperCase();
+    const nRow = restore(holder) && restore(holder).rows.filter((x) => x.indexOf(nName + ' | ') === 0)[0];
+    ok(!holder.state.fc && holder.state.screen === 'fcRestore' && nRow === nName + ' | Empty when last seen | Nothing To Restore'
+       && restore(holder).ready.indexOf(nName) < 0 && restore(holder).inert && restore(holder).row(nName).ink === 'rgba(var(--ink-rgb),.5)',
+       'RESTORE LOST CARD opens RESTORE CARD, with this card in it: empty, Nothing / To Restore in grey, and no press', nRow);
+    holder.back();
   }
 
   /* ---- the two amounts' unit, by what the card holds (the owner's rule of 2026-10-22) --------------------------------------------
@@ -678,22 +678,36 @@ function amt(a) {
        'RESTORE LOST CARD on a phone that loaded no card says so, and that a card set up for somebody else cannot be restored', card(empty) && card(empty).reason);
     const holderApp = appOn(H, { screen: 'flashcard', fc: { key: 'x', setUp: false } });
     holderApp.fcRestoreLost();
-    const v = vals(holderApp);
-    ok(!card(holderApp) && holderApp.state.screen === 'flashcard' && !holderApp.state.fc && v.fcHasRows && v.fcRows.length >= 2,
-       'on the phone that loaded cards: the list of CARDS YOU LOADED, the take-back of each', String(v.fcRows.length));
+    const rs = restore(holderApp);
+    ok(!card(holderApp) && holderApp.state.screen === 'fcRestore' && !holderApp.state.fc && rs && rs.rows.length >= 2 && rs.rows.length === H.W.cardsList().length && rs.inert,
+       'on the phone that loaded cards: RESTORE CARD, a row for each', rs && rs.rows.join(' / '));
 
-    /* RESTORE before the card's date (the owner's word): its row offers RESTORE, which is written down and nothing else; the row
-     * then says when it unlocks, and opens CANCEL RESTORE, which forgets it. The pending row in home's history is history-notes §7;
-     * the take-back on the date, tests/flashcard-takeback.js. */
+    /* A card loaded and locked till its date: its row says when it unlocks, in amber, and has no press (the owner's rule: only an
+     * unlocked card can be pressed). Hours, then minutes, under a day; days, hours and minutes are rounded up. */
     const lc = newCard(H);
     await H.W.cardSetUp(lc, { pin: '1234', recoverable: true });
     lc.tap();
     await H.W.cardAdd(lc, { sats: 1024, pin: '1234' });
     const held = H.W.cardsList().filter((r) => r.key === lc.key)[0];
+    const lcName = holderApp.fcName(lc.key).toUpperCase();
+    const lcRow = () => restore(holderApp).row(lcName);
+    const days = Math.ceil((held.first - Math.floor(Date.now() / 1000)) / 86400);
+    ok(held.first > 0 && held.first <= held.date && !held.due && lcRow() && lcRow().top === 'Unlocks in' && lcRow().bottom === days + ' Days'
+       && lcRow().ink === '#F7931A' && lcRow().plain && !lcRow().ready && lcRow().tap === null
+       && lcRow().sub === holderApp.fcPrice(1024, 'sat').replace(/^\$/, '$ ') + ' when last seen',
+       'a locked card: Unlocks in / ' + days + ' Days in amber, what it held dollars first, and no press', JSON.stringify(lcRow()));
+    ok(holderApp.fcLockLeft(86400 * 2) === '2 Days' && holderApp.fcLockLeft(86401) === '2 Days' && holderApp.fcLockLeft(86400) === '1 Day'
+       && holderApp.fcLockLeft(3600) === '1 Hour' && holderApp.fcLockLeft(2 * 3600 + 1) === '3 Hours' && holderApp.fcLockLeft(540) === '9 Minutes'
+       && holderApp.fcLockLeft(20) === '1 Minute',
+       'when it unlocks, rounded up: days, then hours, then minutes');
+
+    /* RESTORE before the card's date (the owner's word) is not on RESTORE CARD while it is asked about (`fcRestoreAsk` and the row that
+     * offered it, `fcRowCard`, are kept): what it writes down and what CANCEL RESTORE forgets, driven as that row did. The pending row in
+     * home's history is history-notes §7; the take-back on the date, tests/flashcard-takeback.js. */
     const b0 = await H.W.balanceSats();
     holderApp.fcRowCard(held);
     ok(card(holderApp) && card(holderApp).has('RESTORE') && /RESTORE brings it back to this phone then, by itself\./.test(card(holderApp).reason),
-       'a card’s row before its date offers RESTORE', card(holderApp) && card(holderApp).all);
+       'the kept ask (`fcRowCard`, opened by nothing on screen now) offers RESTORE before the card’s date', card(holderApp) && card(holderApp).all);
     card(holderApp).press('RESTORE');
     await settle();
     const asked = H.W.cardRestores().filter((r) => r.key === held.key)[0];
@@ -703,8 +717,8 @@ function amt(a) {
        'RESTORE writes the restore down and says when the money comes back, and that it is in no balance till then', card(holderApp) && card(holderApp).all);
     ok((await H.W.balanceSats()) === b0, 'and the balance is as it was', String((await H.W.balanceSats()) - b0));
     card(holderApp).press('DONE');
-    const listed = (vals(holderApp).fcRows || []).filter((r) => r.name === holderApp.fcName(held.key))[0] || {};
-    ok(/^UNLOCKS IN \d+D$/.test(listed.text || ''), 'its row in CARDS YOU LOADED says when it unlocks', listed.text);
+    ok(lcRow() && lcRow().top === 'Unlocks in' && lcRow().bottom === days + ' Days' && lcRow().tap === null,
+       'a card with a restore asked is the same locked row on RESTORE CARD, with no press', JSON.stringify(lcRow()));
     holderApp.fcRowCard(H.W.cardsList().filter((r) => r.key === held.key)[0]);
     ok(card(holderApp) && card(holderApp).title === 'RESTORING' && card(holderApp).has('CANCEL RESTORE') && /It is not in your balance until then\./.test(card(holderApp).reason),
        'opened again, the row is the restore waiting, with CANCEL RESTORE', card(holderApp) && card(holderApp).all);

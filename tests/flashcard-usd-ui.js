@@ -26,7 +26,7 @@
  *      refused in the card's words
  *   13 the card's own history in dollars, and its books
  *   14 the error map: every new kind, with "Nothing was taken."
- *   15 convert-on-return's words, both ways, and CARDS YOU LOADED for a dollar card
+ *   15 convert-on-return's words, both ways, and RESTORE CARD for a dollar card
  *   16 SEND from a dollar card whose change was not put back in the sheet: TAP TO RECEIVE and CHANGE NOT MADE YET, in dollars
  *   17 a dollar card at a bitcoin receive online, at a dollar fee mint, to a receiver with no dollars: the card pays the fee
  *      of the very pieces melted, and the receiver nothing; refused there, PAID IN DOLLARS with every cent the card paid;
@@ -46,7 +46,7 @@ const fs = require('fs');
 const path = require('path');
 const { page, funded, newCard, settle, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
 const { booksWrong } = require('./harness');
-const { appOn, until, pad, card, explainer, behind, vals, limits, speed, welcome } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, behind, vals, limits, speed, welcome, restore } = require('./flashcard-ui-kit');
 
 let failed = 0, passed = 0;
 const ok = (good, name, detail) => {
@@ -930,7 +930,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(/\$20\.00 in a day/.test(x.r), 'a daily limit in dollars', x.r);
   }
 
-  /* ---- 15: convert-on-return's words, and CARDS YOU LOADED ----------------------------------------------------------- */
+  /* ---- 15: convert-on-return's words, and RESTORE CARD ---------------------------------------------------------------- */
   {
     const { R, till } = W2.R ? W2 : await world();
     const runs = [];
@@ -966,16 +966,15 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     till.cardKeptLostCard({ unit: 'usd', amount: 592, sats: 0, cause: 'spent', date: 0 });
     ok(card(till) && /the \$ 5\.92 this card paid/.test(card(till).reason), 'a dollar card’s payment that did not settle is said in dollars', card(till) && card(till).reason);
     shut(till);
-    // CARDS YOU LOADED: a dollar card's row in dollars
+    // RESTORE CARD: a dollar card's row in dollars, locked till its date
     const { H, holder } = W2;
-    holder.setState({ screen: 'flashcard', stack: ['home'], fc: null });
+    holder.setState({ screen: 'home', stack: [], fc: null });
     holder._fcCard = null;
-    const rows = vals(holder).fcRows;
-    const mine = rows.filter((r) => r.name === holder.fcName(H.nfc.key))[0];
-    ok(mine && /^\$ \d+\.\d\d when last seen$/.test(mine.sub), 'CARDS YOU LOADED: a dollar card’s row in dollars', mine && mine.sub);
-    mine.tap();
-    ok(card(holder) && /^\$ \d+\.\d\d when this phone last saw it\./.test(card(holder).reason), 'and opened, in dollars', card(holder) && card(holder).reason);
-    shut(holder);
+    holder.fcRestoreLost();
+    const mine = restore(holder) && restore(holder).row(holder.fcName(H.nfc.key).toUpperCase());
+    ok(mine && /^\$ \d+\.\d\d when last seen$/.test(mine.sub) && mine.top === 'Unlocks in' && !mine.ready && mine.tap === null,
+       'RESTORE CARD: a dollar card’s row in dollars, locked, with no press', mine && mine.sub);
+    holder.setState({ screen: 'flashcard', stack: ['home'] });
     booksGood('the last of it', W2.H);
   }
 
@@ -1201,9 +1200,11 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const realTb = H.W.cardTakeBack;
     H.W.cardTakeBack = () => Promise.resolve({ unit: 'usd', amount: 1500, sats: 0, hash: 'tb', later: 200 });
     holder.fcTakeBack(k.key);
-    await until('TAKE BACK said', () => !!card(holder) && card(holder).title === 'BACK IN YOUR WALLET');
-    ok(card(holder).reason === '$ 15.00 from the card is in this phone now. $ 2.00 more can be taken back later.', 'TAKE BACK, in dollars', card(holder).reason);
-    shut(holder);
+    await until('TAKE BACK said', () => holder.state.screen === 'paid');
+    ok(holder.state.paidSays === 'RESTORED' && holder.state.paidUnit === 'usd' && holder.state.paidAmount === 1500 && !holder.state.payOut
+       && holder.toasts.slice(-1)[0] === '$ 2.00 more can be taken back from the card later.',
+       'TAKE BACK, in dollars: RESTORED, $15.00 on the success screen, and what is not due yet in a line', JSON.stringify([holder.state.paidAmount, holder.toasts.slice(-1)[0]]));
+    holder.setState({ screen: 'flashcard', stack: ['home'] });
     H.W.cardTakeBack = realTb;
     const realRs = H.W.cardEmptyAndReset;
     H.W.cardEmptyAndReset = () => Promise.reject(Object.assign(new Error('gone'), { card: 'gone', withdrew: 1200, unit: 'usd', hash: 'rs' }));

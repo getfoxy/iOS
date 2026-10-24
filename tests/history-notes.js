@@ -281,7 +281,7 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
 
 console.log('\n7. a card restored before its date: pending in home’s history, and in no balance');
 {
-  /* RESTORE on a row of CARDS YOU LOADED before the card's date (26f-flashcard.js `fcRestoreAsk`) puts a row in home's history
+  /* RESTORE before the card's date (26f-flashcard.js `fcRestoreAsk`, kept; RESTORE CARD does not offer it now) puts a row in home's history
    * (`fcRestoreRows`, read in by `loadHistory`): "Restoring <the card's name, or card>", what it held in the amount column,
    * dollars first, with UNLOCKS IN 28D on the standing line (`fcUnlockWords`: days rounded up, then hours, then minutes, then UNLOCKING), no
    * running balance, and the books stepping over it. It opens the restore's own card (`fcRestorePending`: CANCEL RESTORE). */

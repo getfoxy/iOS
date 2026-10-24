@@ -291,6 +291,16 @@ function representative(logic) {
   add('fcName, RENAME CARD with the name filled in', at('fcName', { fcNaming: { mode: 'rename', key: '' }, fcNameDraft: 'Lunch card' }));
   add('fcSpeed, MAX SPEND PER SECOND, the set-up at $5, SKIP under NEXT', at('fcSpeed', { fcSpeed: { mode: 'su', unit: 'usd', r: 5 } }));
   add('fcSpeed, MAX SPEND PER SECOND, LIMITS at $25, NO LIMIT under NEXT', at('fcSpeed', { fcSpeed: { mode: 'limit', unit: 'sat', r: 25 }, fc: FC({ tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
+  /* RESTORE CARD (home's RESTORE LOST CARD): a ready card on the fur, two locked ones (days, hours), and an empty one with nothing to
+   * restore. Its dates are from now, with an hour's margin, so the words are the same on every run. */
+  const NOW_S = Math.floor(Date.now() / 1000);
+  const LOST = (end, o) => Object.assign({ key: '02' + 'cd'.repeat(30) + end, mint: '', at: 0, seen: 0, unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0, restore: 0 }, o);
+  add('fcRestore, RESTORE CARD: ready, locked and empty cards', at('fcRestore', {}, { wallet: CARDS({ cardName: (k) => (/b4ad$/.test(k) ? 'Brady' : ''), cardsList: () => [
+    LOST('c2c9', { date: NOW_S + 2 * 86400 - 3600, first: NOW_S + 2 * 86400 - 3600 }),
+    LOST('b4ad', { unit: 'usd', amount: 75, date: NOW_S - 3600, first: NOW_S - 3600, due: true }),
+    LOST('f909', { amount: 1200, sats: 1200, date: NOW_S + 3 * 3600 - 600, first: NOW_S + 3 * 3600 - 600, restore: NOW_S - 60 }),
+    LOST('35d8', { date: NOW_S - 86400, first: NOW_S - 86400, due: true }),
+  ] }) }));
   const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 1500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };
   add('fcLimits, CARD LIMITS: $5 per sec, $100 per tap', at('fcLimits', { fc: FC(PACED) }, { wallet: CARDS() }));
   add('fcLimits, CARD LIMITS: none set, a card with no PIN', at('fcLimits', { fc: FC({ pinSet: false, tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));

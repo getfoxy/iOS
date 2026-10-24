@@ -32393,7 +32393,8 @@
           if (x.date) { first = first ? Math.min(first, x.date) : x.date; last = Math.max(last, x.date); }
         });
         return { key: key, mint: row.mint || '', at: row.at || 0, seen: row.seen || 0, unit: unit, amount: sats, sats: unit === 'sat' ? sats : 0,
-                 date: last, due: !!first && first <= now, takenBack: row.takenBack || 0,
+                 // `first` the soonest of its pieces' dates, when the first of it can be taken back (`due` from then)
+                 date: last, first: first, due: !!first && first <= now, takenBack: row.takenBack || 0,
                  // a RESTORE asked before its date and not yet taken back (`cardRestoreAsk`): the second it was asked, 0 for none
                  restore: (!row.takenBack && Number(row.restore) > 0) ? Number(row.restore) : 0 };
       }).sort(function (a, b) { return (b.seen || b.at) - (a.seen || a.at); });

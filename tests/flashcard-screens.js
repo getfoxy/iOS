@@ -23,7 +23,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, limits, named } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, limits, named, restore } = require('./flashcard-ui-kit');
 
 /* The app's own announcement of a payment (12-receive.js) and the queue that raises them one at a time (15-paid-wake-keyboard.js), lifted out of their
  * files and given to an app made of the card's parts, which has neither. A confirmation raised is the screen going to 'paid' with its amount. */
@@ -1120,11 +1120,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   card(till).press('OK');
 
   /* ---- with the switch on: cards that can be taken back -----------------------
-   * Off: no list, and a card that leaves the screen takes the screen with it.
-   * On, as it ships, for the rest of this suite: the list of cards this phone
-   * loaded, set-up with nothing asked, RENEW with under twenty days left, and a
-   * lost card's money taken back. */
-  ok(vals(holder).fcRows.length === 0 && vals(holder).fcHasRows === false, 'switched off, there is no list of cards to take back');
+   * Off: a card that leaves the screen takes the screen with it.
+   * On, as it ships, for the rest of this suite: the screen with no card on
+   * it stays, set-up with nothing asked, RENEW with under twenty days left, and
+   * a lost card's money taken back from RESTORE CARD (home's MENU). */
+  ok(!('fcRows' in vals(holder)) && !('fcHasRows' in vals(holder)), 'the card’s screen has no list of cards to take back: that is RESTORE CARD’s');
   holder.fcGone();
   ok(holder.state.screen === 'home' && !holder.state.fc, 'and a card that is no longer known takes its screen with it');
   holder.FC_RECOVERABLE = true;
@@ -1135,8 +1135,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.goFlashcard();
   await settle();
   v = vals(holder);
-  ok(holder.state.screen === 'flashcard' && v.fcNone && v.fcRows.length === 1 && v.fcRows[0].name === holder.fcName(c.key),
-     'switched on, the sheet dismissed leaves the screen where the cards this phone loaded are listed', v.fcRows.map((r) => r.name).join());
+  ok(holder.state.screen === 'flashcard' && v.fcNone && !holder.state.fc,
+     'switched on, the sheet dismissed leaves the card’s screen with no card on it', holder.state.screen);
   H.nfc = rc;
   holder.fcRead();
   await until('the second card to be read', () => !!holder.state.fc);
@@ -1177,24 +1177,28 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(rc.state.record.limit === 0, 'and the limit is what it was', String(rc.state.record.limit));
   holder.setState({ screen: 'home', stack: [] }); if (holder.paidDismissed) holder.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
 
-  // a month after that the card is lost
+  // a month after that the card is lost: RESTORE LOST CARD, from home's MENU, is RESTORE CARD
   move(45 * 86400000);
   H.nfc = null;                         // the card is lost: nothing answers the sheet
-  holder.state.screen = 'home'; holder.state.stack = [];
-  holder.goFlashcard();
-  await settle();
-  v = vals(holder);
-  const lostRow = (vv) => vv.fcRows.filter((r) => r.name === holder.fcName(rc.key))[0] || {};
-  ok(lostRow(v).text === 'TAKE BACK' && lostRow(v).sub === '₿1,024 when last seen', 'past its date the list offers to take it back', lostRow(v).text);
-  lostRow(v).tap();
-  ok(card(holder).title === 'TAKE IT BACK?' && /lost or blocked/.test(card(holder).reason), 'asked first, and told what it is for', card(holder).reason);
+  holder.state.screen = 'home'; holder.state.stack = []; holder.state.fc = null;
+  holder.fcRestoreLost();
+  const lostName = holder.fcName(rc.key).toUpperCase();
+  const lostRow = () => (restore(holder) ? restore(holder).rows.filter((x) => x.indexOf(lostName + ' | ') === 0)[0] : '') || '';
+  const said = holder.fcPrice(1024, 'sat').replace(/^\$/, '$ ') + ' when last seen';
+  ok(holder.state.screen === 'fcRestore' && holder.state.stack.join() === 'home' && lostRow() === lostName + ' | ' + said + ' | Ready To Restore'
+     && restore(holder).ready[0] === lostName && restore(holder).inert,
+     'past its date its row on RESTORE CARD is ready to restore, first, with what it held (dollars first, where this phone has a price); the rest cannot be pressed', restore(holder) && restore(holder).rows.join(' / '));
   await holder.refreshBalance();
   const beforeBack = holder.have;
-  card(holder).press('TAKE IT BACK');
-  await until('the money to be back', () => card(holder) && card(holder).title === 'BACK IN YOUR WALLET');
-  ok((await H.W.balanceSats()) === beforeBack + 1024 && /₿1,024 from the card/.test(card(holder).reason) && !stage(H), 'and 1,024 sats are back with no card', card(holder).reason);
-  card(holder).press('DONE');
-  ok(lostRow(vals(holder)).sub === 'Taken back', 'the list says so');
+  restore(holder).press(lostName);
+  await until('the money to be back', () => holder.state.screen === 'paid');
+  ok((await H.W.balanceSats()) === beforeBack + 1024 && holder.state.paidSays === 'RESTORED' && holder.state.paidAmount === 1024 && holder.state.paidUnit === 'sat'
+     && !holder.state.payOut && holder.state.recv.live === 'in' && !stage(H) && !card(holder),
+     'pressed, the 1,024 sats are back with no card, and it ends on the success screen: RESTORED, with its flash', JSON.stringify([holder.state.paidSays, holder.state.paidAmount]));
+  holder.state.screen = 'home'; holder.state.stack = [];
+  holder.fcRestoreLost();
+  ok(lostRow() === lostName + ' | Restored to this phone | Nothing To Restore' && restore(holder).ready.length === 0 && restore(holder).inert,
+     'RESTORE CARD says so after, and the row can no longer be pressed', lostRow());
   ok(firstCard.balance() === 0, 'and the first card, empty, had nothing to take back');
   H.window.Date.now = real;
   Date.now = realHere;
@@ -3200,15 +3204,16 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'a card with no row here (one set up for somebody else) is named in a note of its own, and is not made a card this phone knows');
     ok(H.W.cardSetName(stranger, '   ') === '' && H.W.cardName(stranger) === '', 'a name of nothing takes it off');
 
-    // where the app names a card: CARDS YOU LOADED and money waiting (`fcName`), the card screen's title, home's history rows
+    // where the app names a card: RESTORE CARD and money waiting (`fcName`), the card screen's title, home's history rows
     const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
     H.W.cardSetName(known, 'Lunch');
     ok(a.fcName(known) === 'LUNCH' && a.fcName(stranger) === 'CARD ··' + stranger.slice(-4).toUpperCase(),
        'fcName says the kept name first, and the last four of the key for a card with none, as before', a.fcName(stranger));
     a.FC_RECOVERABLE = true;
     a.setState({ fc: null });
-    const row = vals(a).fcRows.filter((r) => r.name === 'LUNCH')[0];
-    ok(!!row, 'the card is named in the list of cards this phone loaded', vals(a).fcRows.map((r) => r.name).join());
+    a.fcRestoreLost();
+    ok(!!(restore(a) && restore(a).row('LUNCH')), 'the card is named, in capitals, on RESTORE CARD', restore(a) && restore(a).rows.join(' / '));
+    a.setState({ screen: 'flashcard', stack: ['home'] });
     a.setState({ fc: { key: known, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0, check: 'ok', checkedAt: Date.now() } });
     v = vals(a);
     ok(v.fcTitle === 'LUNCH' && v.fcVerifiedShown, 'the card screen’s title is its name, the Verified line under it', v.fcTitle + ' / ' + v.fcVerified);

@@ -231,7 +231,7 @@
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
-     * CARDS YOU LOADED list, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+     * RESTORE CARD screen, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
     v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on

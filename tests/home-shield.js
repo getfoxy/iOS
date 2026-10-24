@@ -454,7 +454,7 @@ const STATES = [
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);
     /* RESTORE LOST CARD, after HISTORY, in the menu's own row with a drawing of its own: the money of a card this phone loaded, taken back
-     * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, CARDS YOU LOADED opens on the card's screen. */
+     * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, RESTORE CARD (the owner's design). */
     A.setState({ screen: 'home', stack: [], open0: false });
     await settle();
     const rv = V().menuItems[1];
@@ -475,14 +475,59 @@ const STATES = [
        && A.state.screen === 'home' && !A.state.open0,
       'on a phone with no card on file: the menu closes and a card says this phone has set up no card whose money it can take back', JSON.stringify(said));
     const cardsWas = w.FoxyWallet.cardsList;
-    w.FoxyWallet.cardsList = () => [{ key: '02' + 'ab'.repeat(32), sats: 500, unit: 'sat' }];
+    const backWas = w.FoxyWallet.cardTakeBack;
+    const nowS = Math.floor(Date.now() / 1000);
+    // a card locked for two days, one unlocked and empty, and one unlocked with money (listed last: ready rows come first)
+    const K = (end) => '02' + 'ab'.repeat(30) + end;
+    w.FoxyWallet.cardsList = () => [
+      { key: K('c2c9'), unit: 'sat', amount: 0, sats: 0, date: nowS + 2 * 86400 - 60, first: nowS + 2 * 86400 - 60, due: false, takenBack: 0, restore: 0 },
+      { key: K('f909'), unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0, restore: 0 },
+      { key: K('35d8'), unit: 'usd', amount: 75, sats: 0, date: nowS - 60, first: nowS - 60, due: true, takenBack: 0, restore: 0 },
+    ];
+    let takenBack = '';
+    // (the stand-in wallet has no balance or history to read again after the take-back: those reads are stood in for here)
+    const reads = [A.refreshBalance, A.loadHistory, A.settleAnimate];
+    A.refreshBalance = () => Promise.resolve();
+    A.loadHistory = () => Promise.resolve();
+    A.settleAnimate = () => {};
+    w.FoxyWallet.cardTakeBack = (key) => { takenBack = key; return Promise.resolve({ unit: 'usd', amount: 75, sats: 0, hash: '', later: 0 }); };
     A.setState({ open0: true });
     await settle();
     click(restoreRow());
     await settle();
-    ok(said.length === 1 && A.state.screen === 'flashcard' && !A.state.fc && A.state.stack.join() === 'home' && !A.state.open0,
-      'with a card on file: CARDS YOU LOADED opens on the card’s screen with no card on it, over home', JSON.stringify([A.state.screen, A.state.stack]));
+    const screenEl = q('[data-template="restore"]');
+    const text = screenEl ? screenEl.textContent : '';
+    ok(said.length === 1 && A.state.screen === 'fcRestore' && !A.state.fc && A.state.stack.join() === 'home' && !A.state.open0 && !!screenEl
+       && /RESTORE CARD/.test(text) && /You can reclaim the money on a card once it is unlocked\./.test(text) && /CARDS TIED TO YOUR PHONE/.test(text),
+      'with a card on file: RESTORE CARD opens over home, with its title, its line and CARDS TIED TO YOUR PHONE', JSON.stringify([A.state.screen, A.state.stack]));
+    const rowEls = [...w.document.querySelectorAll('[data-restore-row]')];
+    eq(rowEls.map((d) => d.getAttribute('data-restore-row') + ': ' + d.textContent),
+      ['ready: CARD ··35D8$ 0.75 when last seenReadyTo Restore', 'still: CARD ··C2C9Empty when last seenUnlocks in2 Days', 'still: CARD ··F909Empty when last seenNothingTo Restore'],
+      'its rows: the ready one first on the fur with a chevron, then the locked one, then the empty one');
+    ok(rowEls[0].className.indexOf('fxShine') >= 0 && !!rowEls[0].querySelector('svg') && !rowEls[1].querySelector('svg') && !rowEls[2].querySelector('svg')
+       && rowEls[1].getAttribute('role') === null && rowEls[2].getAttribute('role') === null,
+      'only the ready row is a button, on the fur, with a chevron');
+    const note = q('[data-restore-note]');
+    ok(!!note && note.textContent === 'You can only restore money your card had the last time you connected it to this phone.'
+       && note.style.textAlign === 'center' && note.style.fontSize === '17px' && note.previousElementSibling === rowEls[2],
+      'under the list, centred and grey: what can be restored', note ? note.textContent : 'none');
+    click(rowEls[1]);
+    click(rowEls[2]);
+    await settle();
+    ok(A.state.screen === 'fcRestore' && !takenBack && said.length === 1, 'a locked row and an empty one do nothing when pressed', A.state.screen);
+    click(rowEls[0]);
+    await settle();
+    ok(takenBack === K('35d8') && A.state.screen === 'paid' && A.state.paidSays === 'RESTORED' && A.state.paidUnit === 'usd' && A.state.paidAmount === 75,
+      'the ready row takes its card back and ends on the success screen: RESTORED', JSON.stringify([A.state.screen, A.state.paidSays, takenBack.slice(-4)]));
+    const paidText = (q('#dc-root') || w.document.body).textContent;
+    ok(/RESTORED/.test(paidText) && /ADDED TO/.test(paidText) && /DOLLARS/.test(paidText), 'drawn as the app’s success screen: RESTORED, ADDED TO DOLLARS');
+    V().dismissPaid();
+    await wait(600);
+    await settle();
+    ok(A.state.screen === 'home' && A.state.stack.length === 0, 'and dismissed, it is home', JSON.stringify([A.state.screen, A.state.stack]));
     w.FoxyWallet.cardsList = cardsWas;
+    w.FoxyWallet.cardTakeBack = backWas;
+    [A.refreshBalance, A.loadHistory, A.settleAnimate] = reads;
     A.blockedCard = realBlocked;
     A.setState({ screen: 'home', stack: [], fc: null, open0: false });
     await settle();

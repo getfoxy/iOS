@@ -321,6 +321,27 @@ function speed(a) {
   };
 }
 
+/* RESTORE CARD (26j-card-wheel.js `renderCardScreens`, 26f-flashcard.js `fcLostRows`), as a person sees it, or null: its rows
+ * ("NAME | sub | top bottom"), which of them can be pressed (`ready`: drawn on the fur, with a press; the others have none), a row
+ * pressed by its name (only a ready one: pressing another is a test's mistake, and says so), and the round back button. */
+function restore(a) {
+  const v = screens(a);
+  if (!v.isFcRestore) return null;
+  const rows = v.frRows;
+  return {
+    rows: rows.map((r) => [r.name, r.sub, r.top + ' ' + r.bottom].join(' | ')),
+    ready: rows.filter((r) => r.ready).map((r) => r.name),
+    inert: rows.filter((r) => !r.ready).every((r) => r.plain && r.tap === null),
+    row(name) { return rows.filter((r) => r.name === name)[0] || null; },
+    press(name) {
+      const r = rows.filter((x) => x.name === name)[0];
+      if (!r || !r.ready || typeof r.tap !== 'function') throw new Error('RESTORE CARD: no row to press named ' + name);
+      r.tap();
+    },
+    back() { v.frBack(); },
+  };
+}
+
 /* NAME CARD (26j-card-wheel.js, `renderCardName`), as a person sees it, or null: its title, what is in the field, whether NEXT is grey
  * and SKIP is under it; a name typed (`type`, as the field's change), NEXT, SKIP and the round back button (`back`, the app's own). */
 function named(a) {
@@ -337,4 +358,4 @@ function named(a) {
 
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed, named };
+module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed, named, restore };

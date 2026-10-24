@@ -14104,7 +14104,7 @@ class Component extends DCLogic {
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
-     * CARDS YOU LOADED list, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+     * RESTORE CARD screen, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
     v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
@@ -22293,9 +22293,10 @@ class Component extends DCLogic {
    * screen is that card. The sheet dismissed, and the person is where they
    * were: there is no screen for no card.
    *
-   * Except where cards can be taken back (FC_RECOVERABLE): a lost card
-   * cannot be tapped, so the screen with no card on it is opened first and
-   * stays when the sheet goes, with the cards this phone loaded listed on it. */
+   * Except where cards can be taken back (FC_RECOVERABLE): the screen with
+   * no card on it is opened first and stays when the sheet goes. A lost card
+   * cannot be tapped: its money is taken back from home's MENU, RESTORE LOST
+   * CARD (`fcRestoreLost`), not from this screen. */
   goFlashcard() {
     // a card read on an earlier visit is not shown again: it may be somebody else's, and what it held may have changed
     this._fcCard = null;
@@ -22340,7 +22341,8 @@ class Component extends DCLogic {
    * none of them says anything of the address. */
 
   // the screens on which nothing is in progress: a card's address may take the person away from any of them
-  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint'];
+  // (RESTORE CARD, 'fcRestore', is a list: a take-back under way is its stage, drawn over it)
+  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint', 'fcRestore'];
   // how long a request waits for Foxy to be open before it lapses, and how often it looks again meanwhile
   CARD_TAP_KEEP_MS = 60000;
   CARD_TAP_POLL_MS = 250;
@@ -22881,7 +22883,7 @@ class Component extends DCLogic {
         reason: /offline/.test(said) ? said + safe : 'Its owner must renew it with their own phone before it can pay.' }),
       'past-date': () => ({ tone: 'warn', title: 'ITS DATE HAS PASSED',
         reason: 'This phone can take this card’s money back with no card.',
-        chip: 'FLASHCARD › CARDS YOU LOADED' }),
+        chip: 'MENU › RESTORE LOST CARD' }),
       'empty': () => ({ tone: 'warn', title: 'NO MONEY ON THIS CARD',
         reason: 'It has not been set up, or nothing has been put on it.' }),
       'not-a-card': () => ({ title: 'NOT A FOXY CARD', reason: said }),
@@ -26970,7 +26972,9 @@ class Component extends DCLogic {
   }
 
   /* ---- a lost card ---------------------------------------------------------- */
-  /* A row of CARDS YOU LOADED, in the unit the card was set up in (`row.unit`): a dollar card's is its cents. */
+  /* What a card on file says when opened, in the unit the card was set up in (`row.unit`): a dollar card's is its cents. It was the
+   * row of CARDS YOU LOADED; RESTORE CARD (`fcLostRows`) presses only a ready row, straight to the take-back, and offers no RESTORE
+   * before a card's date, so nothing on screen opens this now. Kept, with `fcRestoreAsk`, while that ask is with the owner. */
   fcRowCard(row) {
     const name = this.fcName(row.key);
     const u = this.fcUnitOf(row);
@@ -27019,13 +27023,20 @@ class Component extends DCLogic {
         this.blockedCard('fc-back', { tone: 'warn', title: 'NOTHING WAS LEFT ON IT', reason: 'Everything this phone put on that card has been spent.' });
         return;
       }
+      /* Back in this phone: the app's own success screen, RESTORED, with its flash, as money that arrives ends (12-receive.js; the
+       * owner's rule), in the card's unit, ADDED TO the balance it went into. DONE there is home. What is not due yet goes in a line. */
+      const got = this.fcAmt(r);
+      this._lastFee = 0;
+      this._lastPay = null;
+      this.setState(p => ({
+        screen: 'paid', stack: p.screen === 'paid' ? p.stack : p.stack.concat([p.screen]),
+        payOut: false, paidSays: 'RESTORED', paidTo: '', paidUnit: u, paidAmount: got,
+        paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
+        asset: 'BITCOIN', unit: 'SATS', amount: String(u === 'usd' ? 0 : got),
+        recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+      }));
       this.haptic && this.haptic('success');
-      this.blockedCard('fc-back', {
-        tone: 'ask', title: 'BACK IN YOUR WALLET',
-        reason: this.fcSats(this.fcAmt(r), u) + ' from the card is in this phone now.'
-          + (r.later > 0 ? ' ' + this.fcSats(r.later, u) + ' more can be taken back later.' : ''),
-        shut: { label: 'DONE' },
-      });
+      if (r.later > 0) this.toast(this.fcSats(r.later, u) + ' more can be taken back from the card later.');
     }, (e) => {
       this.hideStage('cardBack');
       if ((e && e.card) === 'other-mint') {
@@ -27064,7 +27075,7 @@ class Component extends DCLogic {
     });
   }
 
-  // a restore waiting for its date, from its row in home's history or in CARDS YOU LOADED
+  // a restore waiting for its date, from its row in home's history
   fcRestorePending(key) {
     const W = this.fcW();
     const r = W && W.cardRestores ? W.cardRestores().filter((x) => x.key === key)[0] : null;
@@ -27942,8 +27953,12 @@ class Component extends DCLogic {
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
    *
-   * From home's MENU (21-render-values.js): the take-back of a lost card's dated pieces by the phone that loaded them (`fcRowCard`,
-   * `fcTakeBack`), as the list of CARDS YOU LOADED offers it. Not on a card's own screens: a card being read is not lost. */
+   * From home's MENU (21-render-values.js): RESTORE CARD, a screen of its own, 'fcRestore' (the owner's design; drawn by
+   * 26j-card-wheel.js `renderCardScreens`). Under CARDS TIED TO YOUR PHONE a row for each card this phone set up (`fcLostRows`): its
+   * name, what it held when last seen, and on the right whether its money can be taken back. Only an unlocked card with money on it
+   * can be pressed (the owner's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
+   * not come says when it unlocks and cannot be pressed; nor can one with nothing to take back. Not on a card's own screens: a card
+   * being read is not lost. */
   fcRestoreLost() {
     const W = this.fcW();
     if (!W) return;
@@ -27953,9 +27968,52 @@ class Component extends DCLogic {
         reason: 'This phone has set up no card whose money it can take back. A card set up for somebody else is cash, and its money cannot be restored if it is lost.' });
       return;
     }
-    // the list of CARDS YOU LOADED, on the card screen with no card on it: a lost card cannot be tapped
     this._fcCard = null;
-    this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
+    this.setState(p => ({ fc: null, screen: 'fcRestore', stack: p.screen === 'fcRestore' ? p.stack : p.stack.concat([p.screen]), open0: false }));
+  }
+
+  /* RESTORE CARD's rows: { key, name, sub, top, bottom, ink, ready, plain, tap }. The name in capitals (`fcName`: CARD ··C2C9 for a
+   * card with none); what it held when last seen, dollars first (`fcPrice`, a dollar card's cents as they are), or Empty; on the right
+   * Ready / To Restore on the app's fur, Unlocks in / 2 Days in amber, or Nothing / To Restore in grey. A card is unlocked from the
+   * soonest of its pieces' dates (the wallet's `first`, `due` from then), and a restore asked before its date (`row.restore`) is the
+   * same locked row. `tap` only on a ready row: the others are drawn with no press at all. Ready rows first, then the locked ones,
+   * the soonest to unlock first, then the rest; newest first within each, as the wallet lists them. */
+  fcLostRows() {
+    const W = this.fcW();
+    const now = Math.floor(Date.now() / 1000);
+    const list = (W && W.cardsList ? W.cardsList() : null) || [];
+    const rows = list.map((r) => {
+      const had = r.takenBack ? 0 : this.fcAmt(r);
+      const opens = Number(r.first || r.date) || 0;
+      const locked = !r.takenBack && !r.due && opens > now;
+      const ready = !locked && !r.takenBack && !!r.due && had > 0;
+      const shown = this.fcAmt(r);
+      const row = {
+        key: r.key,
+        name: this.fcName(r.key).toUpperCase(),
+        sub: r.takenBack ? 'Restored to this phone'
+          : shown > 0 ? this.fcPrice(shown, this.fcUnitOf(r)).replace(/^\$/, '$ ') + ' when last seen' : 'Empty when last seen',
+        top: ready ? 'Ready' : locked ? 'Unlocks in' : 'Nothing',
+        bottom: locked ? this.fcLockLeft(opens - now) : 'To Restore',
+        ink: ready ? '#fff' : locked ? '#F7931A' : 'rgba(var(--ink-rgb),.5)',
+        ready, plain: !ready,
+        tap: ready ? () => this.fcTakeBack(r.key) : null,
+      };
+      // (the order's own figures are kept off the row: a row is what the screen draws)
+      return { row, rank: ready ? 0 : locked ? 1 : 2, opens };
+    });
+    return rows.map((x, i) => Object.assign(x, { i }))
+      .sort((a, b) => (a.rank - b.rank) || (a.rank === 1 ? a.opens - b.opens : 0) || (a.i - b.i))
+      .map((x) => x.row);
+  }
+
+  // how long until a locked card unlocks, rounded up: 2 Days, 1 Hour, 3 Hours, 9 Minutes
+  fcLockLeft(secs) {
+    const left = Math.max(0, Number(secs) || 0);
+    const say = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+    if (left >= 86400) return say(Math.ceil(left / 86400), 'Day');
+    if (left >= 3600) return say(Math.ceil(left / 3600), 'Hour');
+    return say(Math.max(1, Math.ceil(left / 60)), 'Minute');
   }
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
@@ -28439,7 +28497,6 @@ class Component extends DCLogic {
     const W = on ? this.fcW() : null;
     const fc = (on && s.fc) || null;
     const now = Math.floor(Date.now() / 1000);
-    const DIM = 'rgba(var(--ink-rgb),.55)';
     const AMBER = '#F7931A';
     const RED = '#FF5C5C';
 
@@ -28477,18 +28534,6 @@ class Component extends DCLogic {
         });
       }
     }
-
-    const rows = (!W || fc || !this.FC_RECOVERABLE) ? [] : W.cardsList().map(r => ({
-      name: this.fcName(r.key),
-      // (in the unit the card was set up in: a dollar card's is its cents)
-      sub: r.takenBack ? 'Taken back'
-        : this.fcAmt(r) ? this.fcSats(this.fcAmt(r), this.fcUnitOf(r)) + ' when last seen' : 'Empty when last seen',
-      // only what can be done; the date it waits for is said when the row is opened
-      // (a restore waiting for its date says when it unlocks, as its row in home's history does)
-      text: (!r.takenBack && r.due && this.fcAmt(r) > 0) ? 'TAKE BACK' : (r.restore && !r.due) ? this.fcUnlockWords(r.date) : '',
-      ink: (r.due && this.fcAmt(r) > 0 && !r.takenBack) ? 'var(--acc-ink)' : DIM,
-      tap: () => this.fcRowCard(r),
-    }));
 
     // (software 1.16 and on can be set up without a PIN: `setUp` is a record, and before 1.16 a PIN as well)
     const fresh = !!fc && !fc.setUp && fc.pin !== 'blocked';
@@ -28656,8 +28701,6 @@ class Component extends DCLogic {
       fcNone: on && !fc,
       fcHas: !!fc,
       fcNotes: notes,
-      fcHasRows: rows.length > 0,
-      fcRows: rows,
       /* Home's own money card, for a card that has a mint: headed by the card's mint alone, by the name this
        * phone knows it by (the card's own, from its record, which need not be this phone's), and home's bitcoin
        * pill with the card's sats big and their worth in dollars under them. A card with no mint yet keeps
@@ -28760,7 +28803,7 @@ class Component extends DCLogic {
         : (fc && !fc.recoverable)
         ? 'Too many wrong PINs. This card is cash, so what is on it cannot be got back.'
         : (fc && fc.mine && this.FC_RECOVERABLE)
-        ? 'Too many wrong PINs. This phone can take its money back after its date, from CARDS YOU LOADED.'
+        ? 'Too many wrong PINs. This phone can take its money back after its date, from RESTORE LOST CARD in the menu.'
         : 'Too many wrong PINs. Only the phone that loaded it can take its money back, after its date.',
       fcUsable: usable,
       fcTap: () => this.fcRead(),
@@ -30831,7 +30874,8 @@ class Component extends DCLogic {
   }
 
   /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title
-   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). */
+   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). And RESTORE CARD, home's RESTORE LOST CARD
+   * (`isFcRestore`, 26f-flashcard.js `fcRestoreLost`): CARD LIMITS' back button and title, and a row for each card (`fcLostRows`). */
   /** @param {RenderContext} c */
   renderCardScreens(c) {
     const { s, sc } = c;
@@ -30873,6 +30917,9 @@ class Component extends DCLogic {
       fsBack: () => this.fcSpeedBack(),
       fsAltLabel: fs && fs.mode === 'su' ? 'SKIP' : 'NO LIMIT',
       fsAlt: () => this.fcSpeedAlt(),
+      isFcRestore: sc === 'fcRestore',
+      frRows: sc === 'fcRestore' ? this.fcLostRows() : [],
+      frBack: () => this.back(),
     };
   }
   /* ---- what this phone takes offline before it settles ---------------------
