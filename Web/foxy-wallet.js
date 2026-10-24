@@ -12645,7 +12645,8 @@
   var CARD_NAME_MAX = 24;
   function cardNameClean(name) {
     var t = String(name === undefined || name === null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
-    return Array.from(t).slice(0, CARD_NAME_MAX).join('').trim().toUpperCase();
+    // (in capitals before the cut: a letter's capital can be two, ß as SS, and the cut is of what is kept)
+    return Array.from(t.toUpperCase()).slice(0, CARD_NAME_MAX).join('').trim();
   }
   function cardNameNotes() {
     var all = load(CARD_NAMES, {});
@@ -16183,6 +16184,10 @@
     if (whole) cardLeft(seen, Object.keys(seen).filter(function (n) { return !here[n]; }));
     row.pieces = seen;
     row.seen = Date.now();
+    /* A card taken back and then found and given money again: it holds pieces dated after now, which were never taken back, so it
+     * is not a card whose money came back any more, and RESTORE CARD offers it again on their date (`cardsList`, `cardTakeBack`). */
+    var nowSecs = Math.floor(Date.now() / 1000);
+    if (row.takenBack && (pieces || []).some(function (x) { return x && Number(x.date) > nowSecs; })) delete row.takenBack;
     // how this card writes a piece's secret, for taking it back with no card to ask
     // (format 5, a card of 1.23 that holds both units, writes its secrets as format 4 does, and is filed as 4)
     if (card.info && card.info.format) row.format = cardAllFormat(card.info.format) ? CARD_FORMAT_ALL : card.info.format;
@@ -16234,9 +16239,10 @@
       });
   }
 
-  /* Pieces on file the mint has said are spent: kept, stamped `spent`, and left out of what a screen says the card holds
-   * (`cardsList`), so that figure only ever goes down by the mint's word. Spent is for good. A read of the card that still shows
-   * one writes it down afresh (`cardRemember`), and it is asked about again. */
+  /* Pieces on file the mint has said are spent, or that this phone's take-back has swapped in: kept, stamped `spent`, and left out
+   * of what a screen says the card holds (`cardsList`), so that figure only ever goes down by the mint's word or by money that came
+   * back. Spent is for good. A read of the card that still shows one writes it down afresh (`cardRemember`), and it is asked about
+   * again. */
   function cardFiledSpent(cardKey, nonces) {
     if (!nonces.length) return;
     var all = cardsOnFile();
@@ -32356,6 +32362,12 @@
     cardsKnown: function () { return cardsOnFile(); },
     // the hold a card's pieces are dated ahead by, in seconds (thirty days; a local test build may shorten it)
     cardHoldSecs: function () { return cardHoldSecs(); },
+    /* And the margins that scale with it, in seconds: `ahead` (a piece's date from now), `offline` (what a receiver with no route
+     * needs left), `online` (one with a route), `own` (the card's own phone), `reuse` (a top-up keeps a date this far off). At the
+     * thirty days: 30 d, 7 d, 24 h, 10 min, 20 d. */
+    cardMargins: function () {
+      return { hold: cardHoldSecs(), ahead: cardDateAhead(), offline: cardDateMargin(), online: cardOnlineMargin(), own: cardOwnMargin(), reuse: cardDateReuse() };
+    },
     // the last card read in any flow (its key and info), or null
     cardLastRead: function () { return lastCardRead; },
 
@@ -32398,9 +32410,9 @@
 
     /* RESTORE CARD's look (26f-flashcard.js `fcAskAtMint`): of the pieces this phone knew on a card and has not seen leave it, which
      * the mint still holds unspent. One request for the card (`cardFiledStates`, the take-back's own), and nothing spent or swapped.
-     * Resolves { unit, amount, sats, spent }: what is still at the mint in the unit the card's row says it holds (`amount`, which is
-     * what the take-back would bring back of what is due), `sats` the same for a bitcoin card and 0 for a dollar one, and `spent`
-     * what the mint said is spent, in that unit too. The spent pieces are stamped on the card's row (`cardFiledSpent`), so what the
+     * Resolves { unit, amount, sats, spent }: what is still at the mint in the unit the card's row says it holds (`amount`, all of it,
+     * due or not: the take-back brings what is due and says the rest is for later), `sats` the same for a bitcoin card and 0 for a
+     * dollar one, and `spent` what the mint said is spent, in that unit too. The spent pieces are stamped on the card's row (`cardFiledSpent`), so what the
      * list says it held (`cardsList`) is that much less from now on. A piece the mint calls pending is neither: not at the mint for
      * the take-back, and not spent yet. What the card was given that this phone never saw is not known either way.
      *
@@ -32453,6 +32465,9 @@
      * their own keyset's unit, a dollar card's by the dollar wallet: a card's
      * row holds one unit, and one that somehow holds two has each taken back
      * apart (and said so in the log).
+     * The pieces taken back, and those the mint says are spent, are stamped spent on the card's row (`cardFiledSpent`), so the
+     * list says only what is left; and the row is marked taken back only when nothing is left for later. A card loaded on two
+     * dates is taken back twice, each part on its own date: marked taken back after the first, the rest could not be asked for.
      * Rejects with `card`: unknown, other-mint, no-route, too-soon. */
     cardTakeBack: function (cardKey) {
       var row = cardsOnFile()[cardKey];
@@ -32465,15 +32480,16 @@
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
       var now = Math.floor(Date.now() / 1000);
       var pieces = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
-      var due = [], later = 0, soonest = 0;
+      var due = [], dueNonces = [], later = 0, soonest = 0;
       Object.keys(pieces).forEach(function (nonce) {
         var x = pieces[nonce];
         if (!x || !x.date) return;
         if (x.date > now) {
-          if (!x.gone) { later += satsOf(x.amount); soonest = soonest ? Math.min(soonest, x.date) : x.date; }
+          // (not what the mint has said is spent: that is not coming back on any date)
+          if (!x.gone && !x.spent) { later += satsOf(x.amount); soonest = soonest ? Math.min(soonest, x.date) : x.date; }
           return;
         }
-        try { due.push(cardFiledProof(w, cardKey, row, nonce, x)); } catch (e) {}
+        try { due.push(cardFiledProof(w, cardKey, row, nonce, x)); dueNonces.push(nonce); } catch (e) {}
       });
       if (!due.length) {
         return Promise.reject(later > 0
@@ -32484,6 +32500,8 @@
       return cardFiledStates(w, cardKey, due)
         .then(function (states) {
           var live = due.filter(function (pr, i) { return states[i] === 'UNSPENT'; });
+          var liveNonces = dueNonces.filter(function (n, i) { return states[i] === 'UNSPENT'; });
+          cardFiledSpent(cardKey, dueNonces.filter(function (n, i) { return states[i] === 'SPENT'; }));
           var rowUnit = unitOf(row.unit) || 'sat';
           if (!live.length) return Object.assign(cardGot(rowUnit, 0), { hash: '', later: later });
           return nativeJson('p2pkKey', { index: row.refundIndex }, 60000).then(function (j) {
@@ -32494,8 +32512,10 @@
             // what came back, by unit, and the first row's id
             var totals = {}, firstId = '';
             var done = function () {
+              // what was swapped in is off the card's row; the row is taken back once nothing is left for a later date
+              cardFiledSpent(cardKey, liveNonces);
               var all = cardsOnFile();
-              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
+              if (all[cardKey] && !(later > 0)) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
               Object.keys(totals).forEach(function (u) {
                 console.log('[foxy] card: ' + cardSaid(totals[u], u) + ' taken back from a card with this phone\u2019s own key');
               });
@@ -33359,8 +33379,10 @@
         if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
         /* A refusal the app's own screen explains (the card holds the other currency, is at another mint, has not enough, wants
          * its PIN, is somebody else's): the sheet ends with its tick and "Card read", and the screen says the rest. Red is for the
-         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. (The owner, 2026-10-24.) */
-        var physical = { gone: 1, cancelled: 1, interrupted: 1, lost: 1, timeout: 1, unknown: 1, chip: 1 };
+         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. (The owner, 2026-10-24.) Taken away
+         * too soon includes a card not held long enough (`keep-holding`, 6A98) and one taken away before it signed for all of it
+         * (`partial`). */
+        var physical = { gone: 1, cancelled: 1, interrupted: 1, partial: 1, 'keep-holding': 1, lost: 1, timeout: 1, unknown: 1, chip: 1 };
         if (e && e.card && !physical[String(e.card)]) return bridgeAsk('cardEnd', { text: 'Card read' }, 5000).then(function () { throw e; }, function () { throw e; });
         var say = (e && e.card === 'gone') ? 'Card taken away too soon.' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });

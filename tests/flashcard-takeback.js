@@ -276,6 +276,71 @@ function later(c, ms) {
     H.storage.setItem(CARDS, JSON.stringify(tidy));
   }
 
+  /* ---- a card loaded on two dates -----------------------------------------
+   * A top-up eleven days on is dated thirty days from then: on the first date only the first load can be taken back. That part is
+   * taken back, and the rest stays the card's, offered again on its own date: the row is not marked taken back while something
+   * is left for later (it once was, and RESTORE CARD then said "Restored to this phone" and never offered the rest). */
+  {
+    const DAY = 24 * 3600 * 1000;
+    const c7 = newCard(H);
+    await H.W.cardSetUp(c7, { pin: '1234', recoverable: true });
+    c7.tap();
+    await H.W.cardAdd(c7, { sats: 256, pin: '1234' });
+    const undo7a = later(H, 11 * DAY);
+    c7.tap();
+    await H.W.cardAdd(c7, { sats: 128, pin: '1234' });
+    undo7a();
+    const row0 = H.W.cardsList().filter((c) => c.key === c7.key)[0];
+    ok(row0 && row0.amount === 384 && row0.first < row0.date - 10 * 24 * 3600, 'loaded on two dates eleven days apart, the card’s row has both',
+       JSON.stringify(row0 && [row0.amount, row0.first, row0.date]));
+    const b7 = await bal(H);
+    const undo7b = later(H, MONTH);
+    const first = await H.W.cardTakeBack(c7.key);
+    const row1 = H.W.cardsList().filter((c) => c.key === c7.key)[0];
+    ok(first.amount === 256 && first.later === 128 && (await bal(H)) === b7 + 256, 'on the first date, the first load comes back and the rest is said to be for later',
+       JSON.stringify(first));
+    ok(row1 && !row1.takenBack && row1.amount === 128 && row1.due === false && row1.first === row0.date,
+       'and the card’s row is not marked taken back: it says the 128 left and waits for its own date', JSON.stringify(row1));
+    // RESTORE CARD says so: the row is locked until that date, not "Restored to this phone"
+    const a7 = appOn(H, { screen: 'home', stack: [] });
+    a7.price = 60000;
+    a7.fcRestoreLost();
+    for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0));
+    const r7 = restore(a7) && restore(a7).row(a7.fcName(c7.key).toUpperCase());
+    ok(!!r7 && !r7.ready && r7.top === 'Unlocks in' && r7.sub !== 'Restored to this phone', 'RESTORE CARD shows it locked until the rest’s date',
+       r7 && [r7.sub, r7.top, r7.bottom].join(' | '));
+    undo7b();
+    const undo7c = later(H, MONTH + 11 * DAY);
+    const rest = await H.W.cardTakeBack(c7.key);
+    undo7c();
+    ok(rest.amount === 128 && !(rest.later > 0) && (await bal(H)) === b7 + 384, 'on its own date the rest comes back too', JSON.stringify(rest));
+    ok(H.W.cardsList().filter((c) => c.key === c7.key)[0].takenBack > 0 && H.W.cardsList().filter((c) => c.key === c7.key)[0].amount === 0,
+       'and only then is the row taken back, with nothing left on it');
+  }
+
+  /* ---- the hold and its margins ------------------------------------------
+   * One figure, the hold, that a local test build may shorten (`window.__foxyCardHoldSecs`); at the thirty days every margin is
+   * what it was before it scaled: ahead 30 d, a receiver offline 7 d, online 24 h, the card's own phone 10 min, a top-up's date
+   * kept while 20 d off, renewal offered with 20 d left. */
+  {
+    const D = 24 * 3600;
+    const m = H.W.cardMargins();
+    ok(m.hold === 30 * D && m.ahead === 30 * D && m.offline === 7 * D && m.online === D && m.own === 600 && m.reuse === 20 * D,
+       'at the thirty days the margins are as they were', JSON.stringify(m));
+    const a = appOn(H, { screen: 'home', stack: [] });
+    ok(a.fcRenewSecs() === 20 * D && a.fcOwnSecs() === 600, 'and the app offers renewal with twenty days left, ten minutes before the date at the latest',
+       a.fcRenewSecs() + ' / ' + a.fcOwnSecs());
+    H.window.__foxyCardHoldSecs = 600;
+    const s = H.W.cardMargins();
+    ok(s.hold === 600 && s.ahead === 600 && s.offline === 140 && s.online === 20 && s.own === 30 && s.reuse === 400,
+       'a ten-minute hold scales them all', JSON.stringify(s));
+    ok(a.fcRenewSecs() === 400 && a.fcOwnSecs() === 30 && a.fcRenewSecs() > a.fcOwnSecs(),
+       'and the app’s renewal with it, so a short hold is offered its renewal too (it once kept ten minutes, longer than such a hold’s renewal window)',
+       a.fcRenewSecs() + ' / ' + a.fcOwnSecs());
+    delete H.window.__foxyCardHoldSecs;
+    ok(H.W.cardMargins().hold === 30 * D, 'and with none set, thirty days again');
+  }
+
   // (a wait that ran out is a failure too: `until` says so)
   failed += until.failed;
   console.log('\n' + (failed ? failed + ' flashcard-takeback check(s) failed' : 'all flashcard-takeback checks pass'));

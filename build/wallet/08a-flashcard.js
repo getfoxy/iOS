@@ -2304,7 +2304,8 @@
   var CARD_NAME_MAX = 24;
   function cardNameClean(name) {
     var t = String(name === undefined || name === null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
-    return Array.from(t).slice(0, CARD_NAME_MAX).join('').trim().toUpperCase();
+    // (in capitals before the cut: a letter's capital can be two, ß as SS, and the cut is of what is kept)
+    return Array.from(t.toUpperCase()).slice(0, CARD_NAME_MAX).join('').trim();
   }
   function cardNameNotes() {
     var all = load(CARD_NAMES, {});
@@ -5842,6 +5843,10 @@
     if (whole) cardLeft(seen, Object.keys(seen).filter(function (n) { return !here[n]; }));
     row.pieces = seen;
     row.seen = Date.now();
+    /* A card taken back and then found and given money again: it holds pieces dated after now, which were never taken back, so it
+     * is not a card whose money came back any more, and RESTORE CARD offers it again on their date (`cardsList`, `cardTakeBack`). */
+    var nowSecs = Math.floor(Date.now() / 1000);
+    if (row.takenBack && (pieces || []).some(function (x) { return x && Number(x.date) > nowSecs; })) delete row.takenBack;
     // how this card writes a piece's secret, for taking it back with no card to ask
     // (format 5, a card of 1.23 that holds both units, writes its secrets as format 4 does, and is filed as 4)
     if (card.info && card.info.format) row.format = cardAllFormat(card.info.format) ? CARD_FORMAT_ALL : card.info.format;
@@ -5893,9 +5898,10 @@
       });
   }
 
-  /* Pieces on file the mint has said are spent: kept, stamped `spent`, and left out of what a screen says the card holds
-   * (`cardsList`), so that figure only ever goes down by the mint's word. Spent is for good. A read of the card that still shows
-   * one writes it down afresh (`cardRemember`), and it is asked about again. */
+  /* Pieces on file the mint has said are spent, or that this phone's take-back has swapped in: kept, stamped `spent`, and left out
+   * of what a screen says the card holds (`cardsList`), so that figure only ever goes down by the mint's word or by money that came
+   * back. Spent is for good. A read of the card that still shows one writes it down afresh (`cardRemember`), and it is asked about
+   * again. */
   function cardFiledSpent(cardKey, nonces) {
     if (!nonces.length) return;
     var all = cardsOnFile();

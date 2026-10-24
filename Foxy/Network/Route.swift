@@ -783,9 +783,12 @@ struct AnswerTooLarge: LocalizedError {
 /// two-label mints and contact domains, and still let a three-label public
 /// suffix through.
 enum HostApprovals {
-    /// The mints the app offers by default (build/app DEFAULT_MINTS).
+    /// The mints the app offers by default (build/app DEFAULT_MINTS), the default mint a fresh install
+    /// connects to first among them (forge.flashapp.me, the wallet's `defaultMint`), and the mints that
+    /// were on that list once (WesternBTC and the two test mints): a phone that saved one of those
+    /// while it was listed was never asked about it, and is not asked now.
     static let builtIn: Set<String> = [
-        "mint.minibits.cash", "mint.westernbtc.com",
+        "forge.flashapp.me", "mint.minibits.cash", "mint.westernbtc.com",
         "mint.macadamia.cash", "nofee.testnut.cashu.space", "testnut.cashu.space",
     ]
     /// The two block explorers a card's clock is fetched from, by their onion addresses and, when

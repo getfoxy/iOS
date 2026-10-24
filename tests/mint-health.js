@@ -249,6 +249,26 @@ const fails = (W, mint) => { const r = W.mintHealth(mint); return r ? r.failures
   check('a mint that is answering: no card, nothing in the list', cards.length === 2 && holding.mintDownText('https://mint.back.test') === '',
     'cards ' + cards.length);
 
+  // ---- the mints on the list ask no alert ----------------------------------------------
+  /* A host Foxy has not used waits for an Allow in an iOS alert (Foxy/Network/Route.swift, HostApprovals), which says that if
+   * the person did not just add a mint they should refuse it. A fresh install connects to the wallet's `defaultMint` with nothing
+   * asked, and the switch screen offers DEFAULT_MINTS: every one of them is in the native side's built-in list. */
+  {
+    const root = path.join(__dirname, '..');
+    const swift = fs.readFileSync(path.join(root, 'Foxy', 'Network', 'Route.swift'), 'utf8');
+    const m = /static let builtIn: Set<String> = \[([\s\S]*?)\]/.exec(swift);
+    const builtIn = m ? (m[1].match(/"[^"]+"/g) || []).map((x) => x.slice(1, -1)) : [];
+    const conn = fs.readFileSync(path.join(root, 'build', 'wallet', '10-connection.js'), 'utf8');
+    const dm = /defaultMint: '([^']+)'/.exec(conn);
+    const listSrc = fs.readFileSync(path.join(root, 'build', 'app', '06-wallet-boot-and-restore.js'), 'utf8');
+    const listed = listSrc.slice(listSrc.indexOf('DEFAULT_MINTS = ['), listSrc.indexOf('];', listSrc.indexOf('DEFAULT_MINTS = [')));
+    const hosts = (listed.match(/url: '([^']+)'/g) || []).map((x) => new URL(x.slice(6, -1)).hostname);
+    const missing = hosts.concat(dm ? [new URL(dm[1]).hostname] : ['(no defaultMint)']).filter((h) => builtIn.indexOf(h) < 0);
+    check('the default mint and every mint on the list are approved without an alert (Route.swift builtIn)',
+      builtIn.length > 0 && hosts.length >= 3 && missing.length === 0, 'missing ' + missing.join(', '));
+    check('and the default mint is the list’s first', !!dm && hosts[0] === new URL(dm[1]).hostname, (dm && dm[1]) + ' / ' + hosts[0]);
+  }
+
   results.forEach(r => console.log(r));
   const failed = results.filter(r => r.startsWith('FAIL')).length;
   console.log(failed ? failed + ' mint health check(s) failed' : 'all ' + results.length + ' mint health checks pass');

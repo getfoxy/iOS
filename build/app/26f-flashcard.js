@@ -89,6 +89,13 @@
     const hold = (W && W.cardHoldSecs) ? Number(W.cardHoldSecs()) || 0 : 0;
     return hold > 0 ? Math.round(hold * 20 / 30) : this.FC_RENEW_DAYS * 86400;
   }
+  /* The owner's own margin before a date, the wallet's (`cardMargins`: ten minutes of the thirty days, scaled with a test build's
+   * shorter hold): a renewal is not offered closer to the date than that. */
+  fcOwnSecs() {
+    const W = this.fcW ? this.fcW() : null;
+    const m = (W && W.cardMargins) ? W.cardMargins() : null;
+    return (m && Number(m.own) > 0) ? Number(m.own) : 600;
+  }
   // the longest a payment's confirmation waits for its change to be taken
   FC_HOLD_MS = 150000;
   /* The wait for the mint's word on a card that has signed, which the CHECKING card makes (`fcChecking`) and the screen behind the sheet
@@ -4500,6 +4507,8 @@
     if (!W || !(amount > 0)) return;
     let made = null, backOn = 0;
     const only = key || undefined;
+    // (nothing of an earlier swap's card is kept for this one's SWAPPED, 26i-swap.js `swapDoneClose`)
+    this._fcSwapWrote = null;
     this.fcTap({ amount: this.stageMoney(amount, unit), warm: true }, (link, on) => {
       on('mint');
       return W.cardLook(link, { short: true }).then((card) => W.cardPrepare(card, amount, { unit, only }).then((m) => {
@@ -4923,7 +4932,7 @@
     // (a locked card cannot give its money up to be renewed until its owner has opened it)
     if (!(fc.mine && fc.recoverable && this.fcAnyMoney(fc)) || fc.locked) return;
     const now = Math.floor(Date.now() / 1000);
-    if (!(fc.first > 0 && fc.first - now < this.fcRenewSecs() && fc.first > now + 600)) return;
+    if (!(fc.first > 0 && fc.first - now < this.fcRenewSecs() && fc.first > now + this.fcOwnSecs())) return;
     const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (!here || (there && there !== here)) return;
@@ -4948,6 +4957,8 @@
                                    dots: true, forMs: 90000, button: 'CLOSE' });
     W.cardTakeBack(key).then((r) => {
       this.hideStage('cardBack');
+      // (RESTORE CARD's word from the mint for this card is out of date now: its row says what is on file, what is left for later)
+      if (this._fcAtMint) delete this._fcAtMint[key];
       if (r && r.hash) this.txIsNew(r.hash);
       this.refreshBalance();
       this.loadHistory();

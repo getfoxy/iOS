@@ -682,7 +682,10 @@
     const toCard = (this.state.stack || []).indexOf('flashcard') >= 0;
     this.setState({ screen: toCard ? 'flashcard' : 'home', stack: [], swapResult: null, swapQuote: null });
     // the card as its second tap wrote it, now that its screen is up to take it (26f-flashcard.js, `fcSwapOn`)
-    if (toCard && this._fcSwapWrote && this.fcShow) { const c = this._fcSwapWrote; this._fcSwapWrote = null; this.fcShow(c); }
+    // (taken either way: a card kept from a swap that closed onto home is never shown by a later swap's close)
+    const wrote = this._fcSwapWrote;
+    this._fcSwapWrote = null;
+    if (toCard && wrote && this.fcShow) this.fcShow(wrote);
     if (!toCard) this.settleAnimate('both');
   }
 

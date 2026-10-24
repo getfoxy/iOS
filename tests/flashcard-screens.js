@@ -3200,6 +3200,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(H.W.cardSetName(known, 'A name much longer than twenty-four letters') === 'A NAME MUCH LONGER THAN' && Array.from(H.W.cardName(known)).length <= 24,
        'cut at 24 characters (and trimmed after the cut)', H.W.cardName(known));
     ok(H.W.cardSetName(known, 'Café ☕ card') === 'CAFÉ ☕ CARD' && H.W.cardName(known) === 'CAFÉ ☕ CARD', 'and kept as typed otherwise', H.W.cardName(known));
+    // (cut after the capitals, which can be longer than what was typed: ß is SS)
+    ok(Array.from(H.W.cardSetName(known, 'ß'.repeat(24))).length === 24 && H.W.cardName(known) === 'SS'.repeat(12),
+       'a name whose capitals are longer than it is still kept at 24 characters', H.W.cardName(known));
     ok(H.W.cardSetName(stranger, 'Mum') === 'MUM' && H.W.cardName(stranger) === 'MUM' && !H.W.cardKnownHere(stranger) && !H.W.cardsKnown()[stranger],
        'a card with no row here (one set up for somebody else) is named in a note of its own, and is not made a card this phone knows');
     ok(H.W.cardSetName(stranger, '   ') === '' && H.W.cardName(stranger) === '', 'a name of nothing takes it off');

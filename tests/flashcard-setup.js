@@ -271,6 +271,13 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     // set once the tap has begun: the card arriving is what clears what it was told before
     const left = await W.cardSession('Hold the card', (link) => { tapped.leaveAfter(3); return W.cardLook(link); }).then(() => null, (e) => e);
     ok(left && left.card === 'gone' && /error: Card taken away too soon\./.test(P.sheet.join(' | ')), 'a card taken away mid-tap is said so', P.sheet.join(' | '));
+    // and so, in red, is a card not held long enough (6A98) or taken away before it signed for all of it: the card going wrong, not a refusal
+    for (const code of ['keep-holding', 'partial']) {
+      P.sheet.length = 0;
+      const e2 = await W.cardSession('Hold the card', () => Promise.reject(Object.assign(new Error('The card was not held long enough.'), { card: code }))).then(() => null, (e) => e);
+      ok(e2 && e2.card === code && /^begin: Hold the card \| error: /.test(P.sheet.join(' | ')) && !/Card read/.test(P.sheet.join(' | ')),
+         'a card taken away too soon (' + code + ') ends the sheet in red, not with the tick of a refusal', P.sheet.join(' | '));
+    }
     P.nfc = null;
     ok((await why(W.cardSession('Hold the card', (link) => W.cardLook(link)))) === 'cancelled', 'a sheet dismissed with no card is a tap that was not made');
     P.nfc = 'off';

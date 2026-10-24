@@ -138,6 +138,8 @@ final class RouteTests: XCTestCase {
             XCTAssertTrue(HostApprovals.approves(host, approved: HostApprovals.builtIn, carried: []), host)
         }
         XCTAssertFalse(HostApprovals.approves("cashu.space", approved: HostApprovals.builtIn, carried: []))
+        // the mint a fresh install connects to is asked about by no alert
+        XCTAssertTrue(HostApprovals.approves("forge.flashapp.me", approved: HostApprovals.builtIn, carried: []))
     }
 
     /// The two block explorers a card's clock is fetched from are approved without an alert, by their onion

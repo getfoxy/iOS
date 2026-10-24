@@ -1531,6 +1531,25 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       b.fcSwapPending({ from: { unit: 'usd', amount: 400 } }, 410, 'usd');
       ok(b.state.fc.bal.usd === 1000 && b.state.fc.balance === 1000, 'another card on the screen by then: its figure is left as it is', JSON.stringify(b.state.fc.bal));
     }
+    /* The card a swap's second tap wrote (`_fcSwapWrote`, `fcSwapOn`) is for that swap's SWAPPED to close onto: a SWAPPED that closes
+     * onto home lets it go, so a later swap's close never shows an earlier card. */
+    {
+      const a = appOn(H, { screen: 'swapDone', stack: ['home'] });
+      const shown = [];
+      Object.assign(a, new Function('return {' + liftFrom('26i-swap.js', 'swapDoneClose() {') + '}')());
+      a.fcShow = (c) => shown.push(c && c.key);
+      a.settleAnimate = () => {};
+      a._fcSwapWrote = { key: KEY };
+      a.swapDoneClose();
+      ok(a.state.screen === 'home' && a._fcSwapWrote === null && shown.length === 0, 'SWAPPED closing onto home lets the card it kept go', JSON.stringify([a.state.screen, a._fcSwapWrote, shown]));
+      a.setState({ screen: 'swapDone', stack: ['flashcard'] });
+      a.swapDoneClose();
+      ok(a.state.screen === 'flashcard' && shown.length === 0, 'and a later SWAPPED onto the card’s screen shows no earlier card', JSON.stringify(shown));
+      a._fcSwapWrote = { key: KEY };
+      a.setState({ screen: 'swapDone', stack: ['flashcard'] });
+      a.swapDoneClose();
+      ok(shown.join() === KEY && a._fcSwapWrote === null, 'its own swap’s card it shows, once', JSON.stringify(shown));
+    }
     /* What came off the card for a payment from its screen (`_fcPaidOff`, kept by `fcOutPay`) is for that payment's confirmation to
      * step the card's figure by (`dismissPaid`). A payment not made leaves none behind: the next, a payment on chain that keeps none,
      * stepped the card's figure by the old one. */

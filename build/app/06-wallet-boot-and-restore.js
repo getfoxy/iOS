@@ -609,7 +609,7 @@
 
   allMints() {
     const strip = u => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    /** @type {{ url: string, name: string, host: string, tint: string, logo?: string, test?: boolean }[]} */
+    /** @type {{ url: string, name: string, host: string, tint: string, logo?: string }[]} */
     const out = this.DEFAULT_MINTS.slice();
     const known = out.map(m => strip(m.url));
     const W = window.FoxyWallet;
