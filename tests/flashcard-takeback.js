@@ -10,6 +10,7 @@
  * the page's clock, which the test mint reads too.
  */
 const { page, funded, newCard, binaryLoad, why, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
+const { appOn, until, restore } = require('./flashcard-ui-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -184,6 +185,99 @@ function later(c, ms) {
     undoA(); undoB();
   }
 
+  /* ---- RESTORE CARD asks the mint what is still there -------------------------
+   * Opened with a route, RESTORE CARD asks the mint, one request a card at this mint and by the take-back's own check
+   * (21a-flashcard.js `cardsStillAtMint`), which of the pieces this phone knew are still unspent: the row then says what the
+   * take-back will bring, "at the mint", and nothing is spent or swapped by the asking. A card at another mint is not asked;
+   * an answer that does not come leaves the row as it was; the next opening's "when last seen" is already the smaller figure. */
+  {
+    const asked = (c, p) => c.circuits.filter((x) => x.path === p).length;
+    const CARDS = 'foxy.flashcard.cards';
+    const c6 = newCard(H);
+    await H.W.cardSetUp(c6, { pin: '1234', recoverable: true });
+    c6.tap();
+    await H.W.cardAdd(c6, { sats: 2000, pin: '1234' });
+    // paid with at another phone, which this phone never sees: 1,024 of what it knew is spent at the mint, and the 24 of change unknown here
+    c6.tap();
+    const p6 = await R.W.cardPay(c6, { sats: 1000, pin: '1234' });
+    c6.tap();
+    await R.W.cardWrite(c6, { pin: '1234' });
+    ok(p6.sats === 1000 && c6.balance() === 1000 && H.W.cardsList().filter((c) => c.key === c6.key)[0].amount === 2000,
+       'a card holding 2,000 pays 1,000 at another phone; this phone still has 2,000 on file');
+
+    // a card whose money is at another mint: on file here, never asked about
+    const far = '02' + 'ab'.repeat(32);
+    const filed = JSON.parse(H.storage.getItem(CARDS));
+    filed[far] = Object.assign({}, filed[c6.key], { mint: 'https://n.test', at: 1, seen: 1 });
+    H.storage.setItem(CARDS, JSON.stringify(filed));
+    ok(H.W.cardsList().filter((c) => c.key === far)[0].amount === 2000, 'and a card at another mint is on file with 2,000');
+
+    const undo6 = later(H, MONTH);
+    const a = appOn(H, { screen: 'home', stack: [] });
+    a.price = 60000;
+    const name6 = a.fcName(c6.key).toUpperCase(), farName = a.fcName(far).toUpperCase(), name5 = a.fcName(H.W.cardsList().filter((c) => c.amount > 0 && c.key !== c6.key && c.key !== far)[0].key).toUpperCase();
+    const sub = (n) => (restore(a) && restore(a).row(n) ? restore(a).row(n).sub : '');
+    const atThisMint = H.W.cardsList().filter((c) => !c.takenBack && c.amount > 0 && c.key !== far).length;
+    const checks0 = asked(H, '/v1/checkstate'), swaps0 = asked(H, '/v1/swap'), bal0 = await bal(H);
+    a.fcRestoreLost();
+    ok(sub(name6) === '$ 1.20 when last seen' && restore(a).row(name6).ready && sub(farName) === '$ 1.20 when last seen',
+       'opened, a ready card’s row says what this phone last knew on it, as before', sub(name6));
+    await until('the mint’s word on the card', () => sub(name6) !== '$ 1.20 when last seen');
+    await until('every card at this mint to be asked about', () => asked(H, '/v1/checkstate') - checks0 === atThisMint);
+    for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0));
+    ok(sub(name6) === '$ 0.59 at the mint' && restore(a).row(name6).ready && restore(a).row(name6).top === 'Ready',
+       'the mint answers: the row says the 976 still at the mint, dollars first, and is still ready', sub(name6));
+    ok(asked(H, '/v1/checkstate') - checks0 === atThisMint && atThisMint >= 2,
+       'one request for each card at this mint with pieces on file, and none more', (asked(H, '/v1/checkstate') - checks0) + ' of ' + atThisMint);
+    ok(sub(farName) === '$ 1.20 when last seen', 'a card at another mint is not asked, and its row is as it was', sub(farName));
+    ok(sub(name5) === 'Empty at the mint' && restore(a).row(name5).top === 'Nothing' && !restore(a).row(name5).ready,
+       'a card whose pieces were all taken back elsewhere: Empty at the mint, Nothing / To Restore, no press', sub(name5));
+    ok(asked(H, '/v1/swap') === swaps0 && (await bal(H)) === bal0 && !H.W.cardsList().filter((c) => c.key === c6.key)[0].takenBack,
+       'nothing is swapped, spent or taken back by the asking');
+    ok(H.W.cardsList().filter((c) => c.key === c6.key)[0].amount === 976, 'and the card’s row on file now says the 976 the mint holds',
+       String(H.W.cardsList().filter((c) => c.key === c6.key)[0].amount));
+    ok((await H.W.cardsStillAtMint(far)) === null && asked(H, '/v1/checkstate') - checks0 === atThisMint,
+       'asked by itself, the card at another mint answers nothing and sends nothing');
+
+    // the next opening, and the mint does not answer: the stored answer has trimmed the figure, and the row stays as it is
+    H.deaf = true;
+    const checks1 = asked(H, '/v1/checkstate');
+    // (the card taken back elsewhere has nothing left to ask about now: its pieces are on file as spent)
+    const left1 = H.W.cardsList().filter((c) => !c.takenBack && c.amount > 0 && c.key !== far).length;
+    a.fcRestoreLost();
+    ok(sub(name6) === '$ 0.59 when last seen', 'opened again, the row says the smaller figure at once, as when last seen', sub(name6));
+    await until('the asking to fail', () => asked(H, '/v1/checkstate') - checks1 === left1);
+    for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0));
+    ok(left1 === 1 && sub(name6) === '$ 0.59 when last seen' && restore(a).row(name6).ready && sub(name5) === 'Empty when last seen',
+       'with no answer from the mint the rows are left as they were', sub(name6) + ' / ' + sub(name5));
+    ok((await H.W.cardsStillAtMint(c6.key)) === null, 'and the look answers nothing, never an error');
+    H.deaf = false;
+
+    // offline (the phone's own OFFLINE): nothing is asked, and the rows read as they do
+    a.offline = true;
+    const checks2 = asked(H, '/v1/checkstate');
+    a.fcRestoreLost();
+    for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0));
+    ok(asked(H, '/v1/checkstate') === checks2 && sub(name6) === '$ 0.59 when last seen', 'offline, the mint is not asked and the row reads as when last seen', sub(name6));
+    a.offline = false;
+
+    // a third opening, answered, and the ready row pressed: what the row said is what comes back
+    a.fcRestoreLost();
+    await until('the mint’s word again', () => sub(name6) === '$ 0.59 at the mint');
+    const swaps1 = asked(H, '/v1/swap');
+    restore(a).press(name6);
+    await until('the money to be back', () => a.state.screen === 'paid');
+    ok(a.state.paidAmount === 976 && (await bal(H)) === bal0 + 976 && asked(H, '/v1/swap') > swaps1,
+       'pressed, the 976 the row said comes back', String(a.state.paidAmount));
+    undo6();
+    // (the card at another mint goes, so that nothing after this reads it)
+    const tidy = JSON.parse(H.storage.getItem(CARDS));
+    delete tidy[far];
+    H.storage.setItem(CARDS, JSON.stringify(tidy));
+  }
+
+  // (a wait that ran out is a failure too: `until` says so)
+  failed += until.failed;
   console.log('\n' + (failed ? failed + ' flashcard-takeback check(s) failed' : 'all flashcard-takeback checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

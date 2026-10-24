@@ -5870,6 +5870,42 @@
     save(CARDS, all);
   }
 
+  /* A piece on file (`cardRemember`, by its nonce) as the mint is shown it: its keyset's whole name where this mint lists it (of a
+   * keyset it no longer lists, the eight bytes there are; a piece of a card of 1.23 that held both units among its unit's keysets, as
+   * the card's table had it), and the secret the card wrote for it. Throws where that secret cannot be built (`cardSecret`). */
+  function cardFiledProof(w, cardKey, row, nonce, x) {
+    return { id: cardFullId(w, x.keyset, x.unit || undefined) || x.keyset, amount: x.amount, C: x.C, date: x.date,
+             secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) };
+  }
+
+  /* The mint's word on pieces of a card on file (`cardFiledProof`): one request (NUT-07, by each secret's Y) on the card's own
+   * circuit, answered as the states in the order asked, 'UNSPENT', 'SPENT' or 'PENDING' ('' where the mint said nothing of one).
+   * Nothing is spent by it. The take-back (`cardTakeBack`) asks by it before it swaps, and RESTORE CARD's look
+   * (`cardsStillAtMint`) asks by it and swaps nothing. */
+  function cardFiledStates(w, cardKey, proofs) {
+    var asking = onCircuit(w, 'card:' + cardKey.slice(-16));
+    return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
+      .then(function (states) {
+        return proofs.map(function (pr, i) {
+          var st = (states && states[i]) || {};
+          return String(st.state || st.State || '').toUpperCase();
+        });
+      });
+  }
+
+  /* Pieces on file the mint has said are spent: kept, stamped `spent`, and left out of what a screen says the card holds
+   * (`cardsList`), so that figure only ever goes down by the mint's word. Spent is for good. A read of the card that still shows
+   * one writes it down afresh (`cardRemember`), and it is asked about again. */
+  function cardFiledSpent(cardKey, nonces) {
+    if (!nonces.length) return;
+    var all = cardsOnFile();
+    var row = all[cardKey];
+    if (!row || !row.pieces || typeof row.pieces !== 'object') return;
+    var at = Date.now();
+    nonces.forEach(function (n) { if (row.pieces[n] && !row.pieces[n].spent) row.pieces[n].spent = at; });
+    save(CARDS, all);
+  }
+
   /* What moving `have` sats off a card and out of its mint will take in all
    * at the most, for a plan asked before the card is touched
    * (`transferQuote`'s `quoteOnly`): the money is not in this phone yet, so

@@ -16211,6 +16211,42 @@
     save(CARDS, all);
   }
 
+  /* A piece on file (`cardRemember`, by its nonce) as the mint is shown it: its keyset's whole name where this mint lists it (of a
+   * keyset it no longer lists, the eight bytes there are; a piece of a card of 1.23 that held both units among its unit's keysets, as
+   * the card's table had it), and the secret the card wrote for it. Throws where that secret cannot be built (`cardSecret`). */
+  function cardFiledProof(w, cardKey, row, nonce, x) {
+    return { id: cardFullId(w, x.keyset, x.unit || undefined) || x.keyset, amount: x.amount, C: x.C, date: x.date,
+             secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) };
+  }
+
+  /* The mint's word on pieces of a card on file (`cardFiledProof`): one request (NUT-07, by each secret's Y) on the card's own
+   * circuit, answered as the states in the order asked, 'UNSPENT', 'SPENT' or 'PENDING' ('' where the mint said nothing of one).
+   * Nothing is spent by it. The take-back (`cardTakeBack`) asks by it before it swaps, and RESTORE CARD's look
+   * (`cardsStillAtMint`) asks by it and swaps nothing. */
+  function cardFiledStates(w, cardKey, proofs) {
+    var asking = onCircuit(w, 'card:' + cardKey.slice(-16));
+    return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
+      .then(function (states) {
+        return proofs.map(function (pr, i) {
+          var st = (states && states[i]) || {};
+          return String(st.state || st.State || '').toUpperCase();
+        });
+      });
+  }
+
+  /* Pieces on file the mint has said are spent: kept, stamped `spent`, and left out of what a screen says the card holds
+   * (`cardsList`), so that figure only ever goes down by the mint's word. Spent is for good. A read of the card that still shows
+   * one writes it down afresh (`cardRemember`), and it is asked about again. */
+  function cardFiledSpent(cardKey, nonces) {
+    if (!nonces.length) return;
+    var all = cardsOnFile();
+    var row = all[cardKey];
+    if (!row || !row.pieces || typeof row.pieces !== 'object') return;
+    var at = Date.now();
+    nonces.forEach(function (n) { if (row.pieces[n] && !row.pieces[n].spent) row.pieces[n].spent = at; });
+    save(CARDS, all);
+  }
+
   /* What moving `have` sats off a card and out of its mint will take in all
    * at the most, for a plan asked before the card is touched
    * (`transferQuote`'s `quoteOnly`): the money is not in this phone yet, so
@@ -32349,8 +32385,8 @@
         var sats = 0, first = 0, last = 0;
         Object.keys(pieces).forEach(function (n) {
           var x = pieces[n];
-          // off the card when this phone last read it; kept on file only for the taking back
-          if (!x || x.gone) return;
+          // off the card when this phone last read it, kept on file only for the taking back; or spent, as the mint has said (`cardsStillAtMint`)
+          if (!x || x.gone || x.spent) return;
           sats += satsOf(x.amount);
           if (x.date) { first = first ? Math.min(first, x.date) : x.date; last = Math.max(last, x.date); }
         });
@@ -32358,6 +32394,46 @@
                  // `first` the soonest of its pieces' dates, when the first of it can be taken back (`due` from then)
                  date: last, first: first, due: !!first && first <= now, takenBack: row.takenBack || 0 };
       }).sort(function (a, b) { return (b.seen || b.at) - (a.seen || a.at); });
+    },
+
+    /* RESTORE CARD's look (26f-flashcard.js `fcAskAtMint`): of the pieces this phone knew on a card and has not seen leave it, which
+     * the mint still holds unspent. One request for the card (`cardFiledStates`, the take-back's own), and nothing spent or swapped.
+     * Resolves { unit, amount, sats, spent }: what is still at the mint in the unit the card's row says it holds (`amount`, which is
+     * what the take-back would bring back of what is due), `sats` the same for a bitcoin card and 0 for a dollar one, and `spent`
+     * what the mint said is spent, in that unit too. The spent pieces are stamped on the card's row (`cardFiledSpent`), so what the
+     * list says it held (`cardsList`) is that much less from now on. A piece the mint calls pending is neither: not at the mint for
+     * the take-back, and not spent yet. What the card was given that this phone never saw is not known either way.
+     *
+     * Resolves null, and never rejects: a card not on file or already taken back, one whose money is at a mint this phone is not
+     * connected to (not asked at all), no wallet, no route, no piece to ask about, or no answer from the mint. */
+    cardsStillAtMint: function (cardKey) {
+      var row = cardsOnFile()[cardKey];
+      if (!row || row.takenBack) return Promise.resolve(null);
+      var w;
+      try { w = need(); } catch (e) { return Promise.resolve(null); }
+      if (canonicalMint(row.mint) !== mintOf(w) || !routeOpen()) return Promise.resolve(null);
+      var pieces = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
+      var asked = [], nonces = [];
+      Object.keys(pieces).forEach(function (nonce) {
+        var x = pieces[nonce];
+        if (!x || x.gone || x.spent) return;
+        try { asked.push(cardFiledProof(w, cardKey, row, nonce, x)); nonces.push(nonce); } catch (e) {}
+      });
+      if (!asked.length) return Promise.resolve(null);
+      var unit = unitOf(row.unit) || 'sat';
+      return cardFiledStates(w, cardKey, asked).then(function (states) {
+        var left = 0, spent = 0, gone = [];
+        asked.forEach(function (pr, i) {
+          if (states[i] === 'UNSPENT') left += satsOf(pr.amount);
+          else if (states[i] === 'SPENT') { spent += satsOf(pr.amount); gone.push(nonces[i]); }
+        });
+        cardFiledSpent(cardKey, gone);
+        console.log('[foxy] card: the mint holds ' + cardSaid(left, unit) + ' of what this phone knew on a card' + (spent ? '; ' + cardSaid(spent, unit) + ' of it is spent' : ''));
+        return Object.assign(cardGot(unit, left), { spent: spent });
+      }).then(null, function (e) {
+        console.warn('[foxy] card: the mint did not say what is left of a card: ' + ((e && e.message) || e));
+        return null;
+      });
     },
 
     /* A lost or blocked card's money, taken back with no card.
@@ -32397,12 +32473,7 @@
           if (!x.gone) { later += satsOf(x.amount); soonest = soonest ? Math.min(soonest, x.date) : x.date; }
           return;
         }
-        try {
-          // of a keyset this mint no longer lists, a piece is asked about by the eight bytes there are
-          // (a piece of a card of 1.23 that held both units: among its unit's keysets, as the card's table had it)
-          due.push({ id: cardFullId(w, x.keyset, x.unit || undefined) || x.keyset, amount: x.amount, C: x.C, date: x.date,
-                     secret: cardSecret(nonce, cardKey, x.date, row.refundKey, row.format) });
-        } catch (e) {}
+        try { due.push(cardFiledProof(w, cardKey, row, nonce, x)); } catch (e) {}
       });
       if (!due.length) {
         return Promise.reject(later > 0
@@ -32410,13 +32481,9 @@
           : cardError('nothing', 'Nothing is known to be left on that card.'));
       }
       var CT = window.CashuTS;
-      var asking = onCircuit(w, 'card:' + cardKey.slice(-16));
-      return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(due); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
+      return cardFiledStates(w, cardKey, due)
         .then(function (states) {
-          var live = due.filter(function (pr, i) {
-            var st = (states && states[i]) || {};
-            return String(st.state || st.State || '').toUpperCase() === 'UNSPENT';
-          });
+          var live = due.filter(function (pr, i) { return states[i] === 'UNSPENT'; });
           var rowUnit = unitOf(row.unit) || 'sat';
           if (!live.length) return Object.assign(cardGot(rowUnit, 0), { hash: '', later: later });
           return nativeJson('p2pkKey', { index: row.refundIndex }, 60000).then(function (j) {

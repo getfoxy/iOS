@@ -27809,7 +27809,7 @@ class Component extends DCLogic {
    * name, what it held when last seen, and on the right whether its money can be taken back. Only an unlocked card with money on it
    * can be pressed (the owner's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
    * not come says when it unlocks and cannot be pressed; nor can one with nothing to take back. Not on a card's own screens: a card
-   * being read is not lost. */
+   * being read is not lost. Opened, it asks the mint what is still there (`fcAskAtMint`). */
   fcRestoreLost() {
     const W = this.fcW();
     if (!W) return;
@@ -27821,10 +27821,33 @@ class Component extends DCLogic {
     }
     this._fcCard = null;
     this.setState(p => ({ fc: null, screen: 'fcRestore', stack: p.screen === 'fcRestore' ? p.stack : p.stack.concat([p.screen]), open0: false }));
+    this.fcAskAtMint(rows);
+  }
+
+  /* RESTORE CARD's word from the mint (the owner's ask): on opening, with a route, each card whose money is at the mint this phone is
+   * connected to is asked after, one request a card (21a-flashcard.js `cardsStillAtMint`, the take-back's own check, which spends
+   * and swaps nothing), and its row then says what is still there, "$ 0.60 at the mint" or Empty at the mint, and a ready one takes
+   * that back. Only this opening's answers say "at the mint" (`_fcAtMint`, begun again at each opening): the wallet stamps the pieces
+   * the mint called spent, so the next opening's "when last seen" is already the smaller figure. A card at another mint, one taken
+   * back, offline, an answer that does not come: the row as it was. */
+  fcAskAtMint(list) {
+    const W = this.fcW();
+    const asked = this._fcAtMint = {};
+    if (!W || typeof W.cardsStillAtMint !== 'function' || this.offlineNow()) return;
+    (list || []).forEach((r) => {
+      if (!r || !r.key || r.takenBack) return;
+      Promise.resolve().then(() => W.cardsStillAtMint(r.key)).then((got) => {
+        // (an answer for an opening that is over is not this one's)
+        if (!got || this._fcAtMint !== asked) return;
+        asked[r.key] = got;
+        if (this.state.screen === 'fcRestore') this.forceUpdate();
+      }, () => {});
+    });
   }
 
   /* RESTORE CARD's rows: { key, name, sub, top, bottom, ink, ready, plain, tap }. The name in capitals (`fcName`: CARD ··C2C9 for a
-   * card with none); what it held when last seen, dollars first (`fcPrice`, a dollar card's cents as they are), or Empty; on the right
+   * card with none); what it held when last seen, dollars first (`fcPrice`, a dollar card's cents as they are), or Empty, and once the
+   * mint has answered in this opening (`fcAskAtMint`) what is still there, at the mint, never more than it held; on the right
    * Ready / To Restore on the app's fur, Unlocks in / 2 Days in amber, or Nothing / To Restore in grey. A card is unlocked from the
    * soonest of its pieces' dates (the wallet's `first`, `due` from then). `tap` only on a ready row: the others are drawn with no
    * press at all. Ready rows first, then the locked ones, the soonest to unlock first, then the rest; newest first within each, as
@@ -27833,17 +27856,20 @@ class Component extends DCLogic {
     const W = this.fcW();
     const now = Math.floor(Date.now() / 1000);
     const list = (W && W.cardsList ? W.cardsList() : null) || [];
+    const atMint = this._fcAtMint || {};
     const rows = list.map((r) => {
-      const had = r.takenBack ? 0 : this.fcAmt(r);
+      const mint = r.takenBack ? null : atMint[r.key];
+      const shown = mint ? Math.min(this.fcAmt(mint), this.fcAmt(r)) : this.fcAmt(r);
+      const had = r.takenBack ? 0 : shown;
       const opens = Number(r.first || r.date) || 0;
       const locked = !r.takenBack && !r.due && opens > now;
       const ready = !locked && !r.takenBack && !!r.due && had > 0;
-      const shown = this.fcAmt(r);
+      const when = mint ? ' at the mint' : ' when last seen';
       const row = {
         key: r.key,
         name: this.fcName(r.key).toUpperCase(),
         sub: r.takenBack ? 'Restored to this phone'
-          : shown > 0 ? this.fcPrice(shown, this.fcUnitOf(r)).replace(/^\$/, '$ ') + ' when last seen' : 'Empty when last seen',
+          : shown > 0 ? this.fcPrice(shown, this.fcUnitOf(r)).replace(/^\$/, '$ ') + when : 'Empty' + when,
         top: ready ? 'Ready' : locked ? 'Unlocks in' : 'Nothing',
         bottom: locked ? this.fcLockLeft(opens - now) : 'To Restore',
         ink: ready ? '#fff' : locked ? '#F7931A' : 'rgba(var(--ink-rgb),.5)',
