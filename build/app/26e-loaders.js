@@ -445,7 +445,7 @@
     const para = 'margin:0;font-weight:500;font-size:18px;line-height:1.42;text-align:center;'
       + 'color:rgba(var(--ink-rgb,255,255,255),.84)';
     root.innerHTML = ''
-      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">GET DOLLARS</div>'
+      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">WITHDRAW TO BANK</div>'
       + '<div style="flex:0 0 1px;height:1px;margin:20px 4px 0;background:rgba(var(--ink-rgb,255,255,255),.14)"></div>'
       + '<p style="' + para + ';margin-top:24px">These apps let you sell your bitcoin and deposit dollars into your bank account.</p>'
       + '<div style="margin:28px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:22px 34px;width:fit-content">'

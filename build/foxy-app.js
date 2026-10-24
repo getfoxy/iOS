@@ -14131,7 +14131,7 @@ class Component extends DCLogic {
       /* (A card that holds ecash is home's round button at the top left, CARD: `goCard`.) */
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
-      { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
+      { label: 'WITHDRAW TO BANK', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
       // opens and closes in place; the drawer stays
       { label: 'SETTINGS', path: MENU_ICON.settings, hasChev: true, chevRot: settingsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
         tap: () => this.setState({ menuSettingsOpen: !settingsOpen }) },
@@ -21979,7 +21979,7 @@ class Component extends DCLogic {
     const para = 'margin:0;font-weight:500;font-size:18px;line-height:1.42;text-align:center;'
       + 'color:rgba(var(--ink-rgb,255,255,255),.84)';
     root.innerHTML = ''
-      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">GET DOLLARS</div>'
+      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">WITHDRAW TO BANK</div>'
       + '<div style="flex:0 0 1px;height:1px;margin:20px 4px 0;background:rgba(var(--ink-rgb,255,255,255),.14)"></div>'
       + '<p style="' + para + ';margin-top:24px">These apps let you sell your bitcoin and deposit dollars into your bank account.</p>'
       + '<div style="margin:28px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:22px 34px;width:fit-content">'

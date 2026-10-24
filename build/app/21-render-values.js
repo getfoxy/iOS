@@ -264,7 +264,7 @@
       /* (A card that holds ecash is home's round button at the top left, CARD: `goCard`.) */
       /* Where bitcoin becomes dollars in a bank account: a list of companies
        * and nothing more. Foxy pays none of them itself. */
-      { label: 'GET DOLLARS', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
+      { label: 'WITHDRAW TO BANK', path: MENU_ICON.dollars, tap: shut(() => this.showGetDollars()) },
       // opens and closes in place; the drawer stays
       { label: 'SETTINGS', path: MENU_ICON.settings, hasChev: true, chevRot: settingsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
         tap: () => this.setState({ menuSettingsOpen: !settingsOpen }) },
