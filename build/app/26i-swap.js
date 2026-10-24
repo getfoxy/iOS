@@ -681,6 +681,8 @@
   swapDoneClose() {
     const toCard = (this.state.stack || []).indexOf('flashcard') >= 0;
     this.setState({ screen: toCard ? 'flashcard' : 'home', stack: [], swapResult: null, swapQuote: null });
+    // the card as its second tap wrote it, now that its screen is up to take it (26f-flashcard.js, `fcSwapOn`)
+    if (toCard && this._fcSwapWrote && this.fcShow) { const c = this._fcSwapWrote; this._fcSwapWrote = null; this.fcShow(c); }
     if (!toCard) this.settleAnimate('both');
   }
 

@@ -1406,8 +1406,8 @@
  },
  "two balances: CURRENCY before the first receive": {
   "file": "398-two-balances-currency-before-the-first-receive.html",
-  "markup": "fe397725a68b8d195a789d73f3bcd7b0982fce5e9ffea842b543ef7d59f5a5a1",
-  "vals": "545a5de0d95e741c69dc0defee734986c00aab118b635b3e6632275fb98f8779"
+  "markup": "19b632aac12365b7629a3e8be8d7501ecd7619a1ae5a080b0c3eeb628f5a4244",
+  "vals": "60239217af82ece320414e15aeafb1b8dfd5763ee1e3e41a6f42cd924b0d93df"
  },
  "two balances: SET AMOUNT, a dollars receive": {
   "file": "399-two-balances-set-amount-a-dollars-receive.html",
@@ -1446,8 +1446,8 @@
  },
  "two balances: WALLET, dollars short": {
   "file": "404-two-balances-wallet-dollars-short.html",
-  "markup": "3ffc247901bdf5b5db01dd44460468f077ede11b8ac3bfc16126c6c1a6de824c",
-  "vals": "808eccd4711e7e39f8d63d8732a76122f2c3827c781305fd63c67093c409169a"
+  "markup": "b67eb8f9c1c3ac59aaa78f34e489a584a242476142261e2403c128fab53c6ef4",
+  "vals": "2104410eaf6c8b14848cb5210c9b4618748cb4ffb673210a53fbf0f0306c921d"
  },
  "two balances: paid, ADDED TO DOLLARS": {
   "file": "405-two-balances-paid-added-to-dollars.html",
@@ -1721,13 +1721,13 @@
  },
  "CURRENCY, which currency of a card pays": {
   "file": "532-currency-which-currency-of-a-card-pays.html",
-  "markup": "5e8c4f8185151d486532e9b8ea33e8261cd21f9d4cb0d71be60ee68e99780635",
-  "vals": "24fae6d092d8bba39fca8e50c539284006472a81d08a91c1cd96eedd6fa87c3d"
+  "markup": "aed7695053c74acdf47b924383fef44a9fd230e8dfa516b3c7764036417a9c85",
+  "vals": "2a5a21ba3ddf112753f481bbd058fbc09ac831f101a32b2948a9cba52414edf1"
  },
  "CURRENCY, which currency of a card pays, one too short": {
   "file": "533-currency-which-currency-of-a-card-pays-one-too-short.html",
-  "markup": "8381eb378bf95a99e414a697e65543ebef903cd8df1132742511ac48df20ed83",
-  "vals": "c5cb38fd4031d3cdd67a509bbc8ff036cedc0437cfa752140edf7b9951d363c1"
+  "markup": "a1e2dda685a72ab43d8a01b3adb6af0a78e2063927fc2f12a93f25fd6ca51e63",
+  "vals": "8252693fb64665021301dd1dfa3c6ee0bd13460bed77e485df16351e52f9515c"
  },
  "CURRENCY, setting up a card of software 1.23: dollars, bitcoin or both": {
   "file": "540-currency-setting-up-a-card-of-software-1-23-dollars-bitcoin-or-both.html",
@@ -1736,8 +1736,8 @@
  },
  "CURRENCY, adding to a card of software 1.23": {
   "file": "534-currency-adding-to-a-card-of-software-1-23.html",
-  "markup": "b4165b6f8a88097df307148722a80640bba50223a37904dfaddb538c2721ba99",
-  "vals": "cc409b3fa913e5eba3355f75a96afaacc3b5fb3eb628633254155de1b1f1e5ba"
+  "markup": "c28d25343c3aaa17a04821fea9a8dfbc4222ebce9f30064adfadda4e7de17b05",
+  "vals": "ee9bf2aa58b195750a20cefe3d368d4f6ee7fb59e77360a37756bb87128bdba8"
  },
  "two balances: SWAP, a card’s two balances": {
   "file": "535-two-balances-swap-a-card-s-two-balances.html",

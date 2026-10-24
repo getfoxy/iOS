@@ -141,13 +141,13 @@
       // (the card's, dollars with their sats under them and bitcoin with its dollars, at the market price)
       if (cc && cc.bal) {
         const m = Math.round(Number(cc.bal[u]) || 0), r = this.satUsd ? this.satUsd() : 0;
-        if (u === 'usd') return this.unitFigure(m, 'usd') + (r ? ' \u00b7 \u20bf ' + this.group(Math.round(m / 100 / r)) : '');
-        return this.unitFigure(m, 'sat') + (r ? ' \u00b7 $ ' + this.usd(m * r) : '');
+        if (u === 'usd') return this.unitFigure(m, 'usd');
+        return r ? '$ ' + this.usd(m * r) : this.unitFigure(m, 'sat');
       }
       const n = this.unitBalance(u);
       if (u === 'usd') return this.unitFigure(n, 'usd');
-      // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
-      return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
+      // bitcoin as its dollar worth alone where there is a price (the owner: "show the dollar amount only"), its sats otherwise
+      return (this.satUsd && this.satUsd()) ? '$ ' + this.usd(n * this.satUsd()) : this.unitFigure(n, 'sat');
     };
     // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js)
     const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];

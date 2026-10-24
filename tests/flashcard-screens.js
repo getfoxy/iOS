@@ -1319,8 +1319,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await until('the payment to be made', () => till.state.screen === 'home');
     await settle();
     ok(['Signing piece 1 of 4', 'Signing piece 2 of 4', 'Signing piece 3 of 4', 'Signing piece 4 of 4'].every((t) => R.sheet.indexOf('say: ' + t) >= 0)
-       && R.sheet[R.sheet.length - 1] === 'end:  ' && d.balance() === 40 && !stage(R),
-       'each piece was said on the sheet in turn, the sheet closed with no words once the card had signed (it was paid exactly: nothing to keep it open for), and the screen is down', R.sheet.slice(-3).join(' / '));
+       && R.sheet[R.sheet.length - 1] === 'end:  ' && d.balance() === 40 && (!stage(R) || stage(R) === 'paidCheck'),
+       'each piece was said on the sheet in turn, the sheet closed with no words once the card had signed (it was paid exactly: nothing to keep it open for), and the card screen is down', R.sheet.slice(-3).join(' / '));
     ok(!till._fcCountT, 'and the count stopped with the screen: no timer is left running');
     R.nfc = d;
     ok(R.W.cardOwed().length === 0 && d.state.slots.filter((x) => x.status === 1).length === 2, 'no change was needed: the card was not written to');
@@ -1328,7 +1328,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     // a push with no tap under way changes nothing and breaks nothing
     R.W._card({ stage: 'say', text: 'stray' });
     R.W._card(null);
-    ok(!R.window.document.getElementById('foxy-stage'), 'a push with no tap under way draws nothing');
+    // (VERIFYING may stand over the code for a moment after the tap, `fcCardVerifying`: that is no card screen)
+    const strayStage = R.window.document.getElementById('foxy-stage');
+    ok(!strayStage || strayStage.getAttribute('data-stage') === 'paidCheck', 'a push with no tap under way draws nothing');
 
     /* ---- the screen behind the card sheet, state by state (build/app/26h-tap-screen.js) ---------------------
      * Driven as the wallet and the phone's link drive it: the steps of a tap, and the link's "connected" and "lost". */

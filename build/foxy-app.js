@@ -16402,13 +16402,13 @@ class Component extends DCLogic {
       // (the card's, dollars with their sats under them and bitcoin with its dollars, at the market price)
       if (cc && cc.bal) {
         const m = Math.round(Number(cc.bal[u]) || 0), r = this.satUsd ? this.satUsd() : 0;
-        if (u === 'usd') return this.unitFigure(m, 'usd') + (r ? ' \u00b7 \u20bf ' + this.group(Math.round(m / 100 / r)) : '');
-        return this.unitFigure(m, 'sat') + (r ? ' \u00b7 $ ' + this.usd(m * r) : '');
+        if (u === 'usd') return this.unitFigure(m, 'usd');
+        return r ? '$ ' + this.usd(m * r) : this.unitFigure(m, 'sat');
       }
       const n = this.unitBalance(u);
       if (u === 'usd') return this.unitFigure(n, 'usd');
-      // bitcoin's dollar worth beside it, where there is a price, on the WALLET picker
-      return this.unitFigure(n, 'sat') + (pick && this.satUsd() ? ' · $ ' + this.usd(n * this.satUsd()) : '');
+      // bitcoin as its dollar worth alone where there is a price (the owner: "show the dollar amount only"), its sats otherwise
+      return (this.satUsd && this.satUsd()) ? '$ ' + this.usd(n * this.satUsd()) : this.unitFigure(n, 'sat');
     };
     // (a card's set-up asks from its own list, FC_SETUP_UNITS in 26j-card-wheel.js)
     const units = (cardFlow && Array.isArray(this.FC_SETUP_UNITS)) ? this.FC_SETUP_UNITS.filter((u) => !!LOOK[u]) : ['usd', 'sat'];
@@ -23742,17 +23742,19 @@ class Component extends DCLogic {
          * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
         // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
         const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
-        /* And only for a card at another mint, whose melt goes on past the tap: at the card's own mint the sats are this phone's as
-         * the sheet closes and PAYMENT RECEIVED follows in the next moment (a dollar code's melt has its own, `fcUsdPay`). */
-        if (!share && !owesChange && xm && this.state.screen === 'confirm') {
+        /* For every card payment of the code on screen (the owner's rule: never the code read as unpaid while the mint works): at the
+         * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
+         * sats, sats paying a dollar code) keeps it up until the mint answers. */
+        if (!share && !owesChange && this.state.screen === 'confirm') {
           this.fcCardVerifying('The card paid ' + this.fcPaidWords(this.fcAmt(r), unit) + '. Foxy is confirming the payment with your mint.', 60000);
           /* A payment settled within the tap (the card's own mint, sats) reaches PAYMENT RECEIVED in the next moment, which takes this
            * down; one still with a mint (a melt, at the card's mint or for a dollar code) keeps it. Nothing of either a moment on, with
            * no melt out: down, and the code stands as it was. */
           setTimeout(() => {
-            if (this.state.screen !== 'confirm' || !(this.stageUp && this.stageUp('paidCheck'))) return;
+            if (!(this.stageUp && this.stageUp('paidCheck'))) return;
             const W2 = this.fcW();
-            const out = !!(W2 && W2.pendingMelts && W2.pendingMelts().length) || this.fcUsdLanding();
+            // still the code's screen, with a melt out or the dollars landing: kept; anything else, down
+            const out = this.state.screen === 'confirm' && (!!(W2 && W2.pendingMelts && W2.pendingMelts().length) || this.fcUsdLanding());
             if (!out) this.hideStage('paidCheck');
           }, 700);
         }
@@ -24961,6 +24963,14 @@ class Component extends DCLogic {
      * that said it was out of place among the other endings (the owner's rule). What the balance cannot say goes in a line after. */
     // nothing went on (a read after a write that put nothing, a reset): nothing to celebrate
     if (!(went > 0)) return;
+    /* A payment's change put back on the card (TAP TO RECEIVE, `fcChangeWaiting`; the change tap of a till): the ending is the
+     * payment's own confirmation, held for this and released now, not a success screen of its own (which once came up over it as
+     * ON THE CARD $0.00). A line says the change is back. */
+    if (o && (o.receive || o.change)) {
+      this.toast(this.fcSats(went, u) + ' of change is back on the card.');
+      this.fcReleaseConfirm('the change is back on the card');
+      return;
+    }
     this._lastFee = 0;
     this._lastPay = null;
     this.setState(p => ({
@@ -26370,7 +26380,9 @@ class Component extends DCLogic {
       this.refreshBalance();
       this.loadHistory();
       this.haptic && this.haptic('success');
-      if (r && r.card) this.fcShow(r.card);
+      /* The card as the write read it: shown now where the card's screen is up, and kept for SWAPPED's close onto it (26i-swap.js,
+       * `swapDoneClose`), which is off the card's screen while this runs and found it stale ("I had to go home and rescan"). */
+      if (r && r.card) { this._fcSwapWrote = r.card; this.fcShow(r.card); }
       if (back && back.amount > 0) {
         this.toast(backOn > 0 ? this.fcBoth(backOn, back.unit) + ' of the mint’s fee was not used and is back on the card.'
           : this.fcBoth(back.amount, back.unit) + ' of the mint’s fee was not used. It is in this phone.');
@@ -29741,6 +29753,8 @@ class Component extends DCLogic {
   swapDoneClose() {
     const toCard = (this.state.stack || []).indexOf('flashcard') >= 0;
     this.setState({ screen: toCard ? 'flashcard' : 'home', stack: [], swapResult: null, swapQuote: null });
+    // the card as its second tap wrote it, now that its screen is up to take it (26f-flashcard.js, `fcSwapOn`)
+    if (toCard && this._fcSwapWrote && this.fcShow) { const c = this._fcSwapWrote; this._fcSwapWrote = null; this.fcShow(c); }
     if (!toCard) this.settleAnimate('both');
   }
 
