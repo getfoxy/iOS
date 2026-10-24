@@ -852,11 +852,12 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       till.asking = 1000;
       card.tap();
       till.payByCard();
-      await until('the dollars offered', () => !!cardUp(till) || !!pad(till));
-      const said = pad(till) ? pad(till).sub : (cardUp(till) && cardUp(till).reason) || '';
+      // the PIN pad where the card will want its PIN, or the confirmation a dollar card asked for sats comes up on (`fcOuSpec`)
+      await until('the dollars offered', () => till.state.screen === 'fcOuConfirm' || !!pad(till));
+      const said = pad(till) ? pad(till).sub : till.state.screen === 'fcOuConfirm' ? till.fcOuSpec().subtitle : '';
       ok(/^Its ₿ 200 in bitcoin is not enough\. They asked for ₿ 1,000\./.test(said), 'review 4 again: the till says the card’s bitcoin is short, then what its dollars pay', said);
       card.tap();
-      if (pad(till)) pad(till).type('1234'); else cardUp(till).press('TAP CARD');
+      if (pad(till)) pad(till).type('1234'); else till.fcOuSpec().go();
       await until('the invoice to be paid', () => ['PAID', 'ISSUED'].indexOf(R.mint.quotes[q.hash].state) >= 0, 4000);
       await until('the tap to be over', () => !(till._fcTaps > 0));
       await settle();

@@ -429,6 +429,36 @@
   "markup": "1113d0413c00ebe7483f75addde15e64fe2ccfba297fa1851707f9d817dece2a",
   "vals": "54762a4d986e1b2257267439add2858993eb8dddb846985494b1d946f4a32aa4"
  },
+ "fcOuConfirm, a dollar card asked for sats, at the mint’s rate, held": {
+  "file": "572-fcouconfirm-a-dollar-card-asked-for-sats-at-the-mint-s-rate-held.html",
+  "markup": "4580dac7320484b6d924a257a05101b2d99d0213ffadcb2cdebc6149066bb859",
+  "vals": "8ead42a83f45188a30313fb13324164c9b570aa66616a4921a107463b0910806"
+ },
+ "fcOuConfirm, a card of both whose bitcoin is short": {
+  "file": "573-fcouconfirm-a-card-of-both-whose-bitcoin-is-short.html",
+  "markup": "324cede46d72dc5e16c058408d42ab26724836b2bd90eade5cc7dd1e7681d31f",
+  "vals": "0d261c06544c5c130f5e4c591fd352bdb95733b02a37f06c28b64ac095f4c153"
+ },
+ "fcOuConfirm, the mint’s rate asked again": {
+  "file": "574-fcouconfirm-the-mint-s-rate-asked-again.html",
+  "markup": "f4a2c998883d2e7794f7ee5f046d1d6b660912799101051e1dc0aedfed0ed190",
+  "vals": "90b486fa0854d7e5ee6d15e92edc6a65be6f77de76f76f8a588c391ddef51787"
+ },
+ "fcOuConfirm, the mint’s rate ran out": {
+  "file": "575-fcouconfirm-the-mint-s-rate-ran-out.html",
+  "markup": "f9fc4f57a5a00f973f3e9d6f0f99214574a6c7009b9ca3cdffbcd9d6eb2cf799",
+  "vals": "b4a39dbd6e3d2585a3618d661c29d705cf4307a5546096d3a4dcfd0fcdd22b4f"
+ },
+ "fcOuConfirm, the mint would not say": {
+  "file": "576-fcouconfirm-the-mint-would-not-say.html",
+  "markup": "c3c7b935ff8d688f88a0c376c60b076ed8be95569ef15d8e0753ae2447c1aabb",
+  "vals": "d14aed9bc8d57b08f33e92fe27544ee91bd75c784604750f0e6b5b662dbf50d3"
+ },
+ "fcOuConfirm, a dollar card asked for sats, at this phone’s price": {
+  "file": "577-fcouconfirm-a-dollar-card-asked-for-sats-at-this-phone-s-price.html",
+  "markup": "b580f4b8ba60b2d5e153441114d4b4baf0386b55681dcab20866b4d0a3118c70",
+  "vals": "09b56d85db479923caefe92ffaaae9068ce2f9bc31b87d6130b512390be32df8"
+ },
  "fcXlConfirm, asking both mints what it costs": {
   "file": "546-fcxlconfirm-asking-both-mints-what-it-costs.html",
   "markup": "e5b93d9192412a612a1f5cbfe562dfa08d188845862c047facdd2a78fc5541af",
@@ -2423,11 +2453,6 @@
   "file": "489-overlay-a-dollar-card-s-pin-for-a-dollar-receive.html",
   "markup": "97e1988bea870979bd30b9c0c41511ef17713d26e3fe4fc3f0d7e646743c7d81",
   "vals": "1a990189e4b51a9f8a0ead1ecad225c859fc641040a0dd0dab45b32b847b4d3b"
- },
- "card: this card holds dollars, the sats asked at this phone’s price": {
-  "file": "490-card-this-card-holds-dollars-the-sats-asked-at-this-phone-s-price.html",
-  "markup": "a68165c58f31466dbd696b1807a0f58335a2f1c81cc8c78c9dbc1fd08c6674f1",
-  "vals": "bce4a966f4cc89f8fe84445af1014f92e6594e5f0c8ca045fb86a07d38332528"
  },
  "card: no bitcoin price, for a dollar card": {
   "file": "491-card-no-bitcoin-price-for-a-dollar-card.html",

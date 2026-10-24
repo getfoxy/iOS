@@ -13,9 +13,10 @@
  *   4  a dollar receive paid by a dollar card: CARD before the code exists, the PIN pad in dollars, the cents straight in,
  *      no melt, PAYMENT RECEIVED in dollars, the row in dollars; and with the code up, the code is let go
  *   5  a bitcoin card at a dollar receive before the code: told to tap again, before its PIN and before it signs
- *   6  a dollar card at a bitcoin receive online: the mint's figure, agreed by a second tap, its cents pay the invoice
+ *   6  a dollar card at a bitcoin receive online: the mint's figure on a confirmation (THE CARD PAYS, YOU RECEIVE, FEE, the mint's
+ *      rate held for a countdown and asked again when it runs out), TAP CARD for the second tap, back with nothing taken; its cents pay the invoice
  *   7  offline, a dollar card at a dollar receive: kept, settled once online, in dollars, with no conversion
- *   8  offline, a dollar card at a bitcoin receive: this phone's price and its age, the PIN pad or THIS CARD HOLDS DOLLARS,
+ *   8  offline, a dollar card at a bitcoin receive: this phone's price and its age, the PIN pad or the THIS CARD HOLDS DOLLARS confirmation,
  *      the dollars kept and announced with the sats asked, a price too old or none, keys not seen, a split share, a phone
  *      that holds both
  *   9  CHANGE LIMIT on a dollar card: dollars, no sub line, nothing kept at a price
@@ -216,6 +217,11 @@ async function bitcoinReceive(till, R, n, o) {
 }
 // whatever card is up, put down by its way out
 const shut = (a) => { const c = card(a); if (!c) return; const way = ['CLOSE', 'OK', 'DONE', 'CANCEL', 'LATER'].filter((l) => c.has(l))[0]; if (way) c.press(way); };
+/* The confirmation a dollar card asked for sats comes up on (26f-flashcard.js, `fcOuSpec`): its spec, a row by its label, and
+ * the figure it pays in cents. */
+const ou = (a) => (a.state.screen === 'fcOuConfirm' ? a.confirmSpec() : null);
+const ouRow = (a, label) => ((ou(a) || {}).rows || []).filter((r) => r.label === label)[0] || {};
+const ouCents = (a) => Math.round(Number(/^\$ (\d+\.\d\d)$/.exec(ou(a).amount)[1]) * 100);
 const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) && !ctx.window.document.getElementById('foxy-stage'));
 
 (async () => {
@@ -435,14 +441,44 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     k.tap();
     k.sent.length = 0;
     till.payByCard();
-    await until('the figure to be asked of the mint and said', () => !!card(till));
-    ok(card(till).title === 'THIS CARD HOLDS DOLLARS' && /^They asked for ₿ 7,000\. At m\.test’s rate, that is \$ \d+\.\d\d with its fee\. Tapping the card again pays \$ \d+\.\d\d\.$/.test(card(till).reason)
-       && !signed(k) && k.balance() === cardBefore,
-       'the first tap reads the card and nothing more: the mint’s figure for the sats asked, in dollars, to agree to', card(till).reason);
-    const cents = Math.round(Number(/pays \$ (\d+\.\d\d)/.exec(card(till).reason)[1]) * 100);
+    await until('the figure to be asked of the mint and said', () => !!ou(till));
+    const cf = ou(till);
+    ok(cf.title === 'THIS CARD HOLDS DOLLARS' && cf.amountLabel === 'THE CARD PAYS' && /^\$ \d+\.\d\d$/.test(cf.amount) && cf.amountSub === '₿ 7,000'
+       && cf.subtitle === 'They asked for ₿ 7,000. At m.test’s rate that is ' + cf.amount + ' with its fee.' && !card(till) && !signed(k) && k.balance() === cardBefore,
+       'the first tap reads the card and nothing more: a confirmation, THE CARD PAYS the mint’s figure in dollars with the sats asked under it', JSON.stringify([cf.amount, cf.amountSub, cf.subtitle]));
+    const cents = ouCents(till);
+    const quoted = till.state.fcOu.terms.quote;
+    const rate = Math.round(quoted.rate.usdPerBtc);
+    const feeC = cents - quoted.amount;
+    ok(ouRow(till, 'YOU RECEIVE').value === '₿ 7,000' && ouRow(till, 'FEE').value === '$ ' + (feeC / 100).toFixed(2) && feeC >= 0
+       && ouRow(till, 'FEE').sub === '(₿ ' + till.group(Math.round(feeC * 1e6 / rate)) + ')'
+       && ouRow(till, 'M.TEST’S RATE').value === '₿ 1 = $ ' + till.group(rate) && /^Rate held for \d\d:\d\d$/.test(ouRow(till, 'M.TEST’S RATE').sub)
+       && cf.cta === 'TAP CARD' && !cf.ctaBusy,
+       'its rows: YOU RECEIVE the sats, the FEE in dollars with its sats, the mint’s rate held for a countdown; TAP CARD',
+       JSON.stringify(cf.rows.map((r) => r.label + '=' + r.value + ' ' + r.sub)) + ' ' + cf.cta);
+    // the countdown: the rate is held until the quote has too little left for a payment, and counts down
+    const held0 = ouRow(till, 'M.TEST’S RATE').sub;
+    const realNow0 = Date.now;
+    Date.now = () => realNow0() + 61000;
+    const held1 = ouRow(till, 'M.TEST’S RATE').sub;
+    Date.now = realNow0;
+    const left = (t) => { const m = /(\d\d):(\d\d)$/.exec(t); return Number(m[1]) * 60 + Number(m[2]); };
+    const want = Math.floor((quoted.quote.expiry * 1000 - till.FC_QUOTE_LEFT_MS - Date.now()) / 1000);
+    ok(Math.abs(left(held0) - want) <= 1 && Math.abs(left(held0) - left(held1) - 61) <= 1, 'Rate held for: the quote’s expiry less the time a payment takes, counting down', held0 + ' → ' + held1);
+    // back: the card put away, nothing taken, the receive screen as it was
+    const sheets0 = R.sheet.length;
+    till.back();
+    await settle();
+    ok(till.state.screen === 'confirm' && !signed(k) && k.balance() === cardBefore && !card(till) && !pad(till) && R.sheet.length === sheets0,
+       'back off the confirmation: the receive screen, the card untouched, nothing taken', JSON.stringify([till.state.screen, k.balance(), !!card(till), !!pad(till), R.sheet.slice(sheets0)]));
+    k.tap();
+    k.sent.length = 0;
+    till.payByCard();
+    await until('the confirmation again', () => !!ou(till));
     R.sheet.length = 0;
     k.tap();
-    card(till).press('TAP CARD');
+    ou(till).go();
+    ok(till.state.screen === 'confirm', 'TAP CARD: back to the receive screen, under the card’s sheet', till.state.screen);
     await until('the card to pay and the invoice to be paid', () => R.mint.quotes[q.hash].state === 'PAID' || R.mint.quotes[q.hash].state === 'ISSUED');
     await tapDone(till, R);
     await settle();
@@ -465,10 +501,10 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const usdBefore = usd(R), satBefore = sats(R);
     k.tap();
     till.payByCard();
-    await until('the figure', () => !!card(till));
-    const cents = Math.round(Number(/pays \$ (\d+\.\d\d)/.exec(card(till).reason)[1]) * 100);
+    await until('the figure', () => !!ou(till));
+    const cents = ouCents(till);
     k.tap();
-    card(till).press('TAP CARD');
+    ou(till).go();
     await until('PAID IN DOLLARS', () => card(till) && card(till).title === 'PAID IN DOLLARS');
     await tapDone(till, R);
     await settle();
@@ -580,14 +616,17 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     k2.tap();
     k2.sent.length = 0;
     till.payByCard();
-    await until('THIS CARD HOLDS DOLLARS', () => !!card(till));
-    ok(card(till).title === 'THIS CARD HOLDS DOLLARS'
-       && card(till).reason === 'They asked for ₿ 7,000. At this phone’s Bitcoin price, ₿ 1 = $ 84,571, seen 2 hours ago, that is $ 5.92. Tapping the card again pays $ 5.92.'
-       && card(till).has('TAP CARD') && !signed(k2),
-       'a card with no PIN: the figure, the price and its age, and TAP CARD', card(till).reason);
+    await until('THIS CARD HOLDS DOLLARS', () => !!ou(till));
+    ok(ou(till).title === 'THIS CARD HOLDS DOLLARS' && ou(till).amount === '$ 5.92' && ou(till).amountSub === '₿ 7,000'
+       && ou(till).subtitle === 'They asked for ₿ 7,000. At this phone’s Bitcoin price, seen 2 hours ago, that is $ 5.92.'
+       && ouRow(till, 'YOU RECEIVE').value === '₿ 7,000' && ouRow(till, 'FEE').value === 'NONE'
+       && ouRow(till, 'THIS PHONE’S PRICE').value === '₿ 1 = $ 84,571' && ouRow(till, 'THIS PHONE’S PRICE').sub === 'Seen 2 hours ago'
+       && ouRow(till, 'M.TEST’S RATE').value === undefined && ou(till).cta === 'TAP CARD' && !card(till) && !signed(k2),
+       'a card with no PIN: the confirmation, THE CARD PAYS $ 5.92 (₿ 7,000), this phone’s price and its age, no countdown, and TAP CARD',
+       JSON.stringify([ou(till).subtitle, ou(till).rows.map((r) => r.label + '=' + r.value + ' ' + r.sub)]));
     R.sheet.length = 0;
     k2.tap();
-    card(till).press('TAP CARD');
+    ou(till).go();
     await until('the second tap’s screen', () => !!behind(R));
     ok(behind(R).amount === '$ 5.92' && /^begin: Hold to pay \$ 5\.92$/.test(R.sheet[0] || ''), 'the tap says $ 5.92, and the sheet Hold to pay $ 5.92', behind(R).amount + ' | ' + R.sheet[0]);
     await until('the second payment to be kept', () => R.W.cardKeptWaiting().length === 2);
@@ -602,11 +641,11 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await bitcoinReceive(till, R, 7000, { code: false });
     kd.tap();
     till.payByCard();
-    await until('THIS CARD HOLDS DOLLARS', () => !!card(till));
+    await until('THIS CARD HOLDS DOLLARS', () => !!ou(till));
     R.nfc = ks;
     ks.tap();
     ks.sent.length = 0;
-    card(till).press('TAP CARD');
+    ou(till).go();
     await until('the other card to be refused', () => card(till) && card(till).title === 'THIS CARD HOLDS BITCOIN');
     ok(card(till).reason === 'This is not the dollar card that was tapped first. It holds bitcoin: press CARD again, and it pays the bitcoin asked.'
        && card(till).has('Nothing was taken.') && !signed(ks) && ks.balance() === 3000,
@@ -620,9 +659,9 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await bitcoinReceive(till, R, 7001, { code: false, unit: 'USD', amount: '5.92' });
     k3.tap();
     till.payByCard();
-    await until('THIS CARD HOLDS DOLLARS', () => !!card(till));
-    ok(/that is \$ 5\.92\./.test(card(till).reason), 'typed in dollars, the card is asked the cents typed, not a figure turned round twice', card(till).reason);
-    card(till).press('CANCEL');
+    await until('THIS CARD HOLDS DOLLARS', () => !!ou(till));
+    ok(/that is \$ 5\.92\./.test(ou(till).subtitle) && ou(till).amount === '$ 5.92', 'typed in dollars, the card is asked the cents typed, not a figure turned round twice', ou(till).subtitle);
+    till.back();
 
     // a price over a day old, or none, or no dollar keys seen: refused at the first tap
     R.W._rateAt = Date.now() - 25 * HOUR;
@@ -661,9 +700,9 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await bitcoinReceive(till, R, 7000, { code: false });
     k4.tap();
     till.payByCard();
-    await until('THIS CARD HOLDS DOLLARS', () => !!card(till));
+    await until('THIS CARD HOLDS DOLLARS', () => !!ou(till));
     k4.tap();
-    card(till).press('TAP CARD');
+    ou(till).go();
     await until('PAYMENT RECEIVED', () => till.state.screen === 'paid');
     await tapDone(till, R);
     await settle();
@@ -976,28 +1015,49 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const usdBefore = usd(R), satBefore = sats(R), cardBefore = k.balance();
     k.tap();
     till.payByCard();
-    await until('the figure', () => !!card(till));
-    const cents = Math.round(Number(/pays \$ (\d+\.\d\d)/.exec(card(till).reason)[1]) * 100);
+    await until('the figure', () => !!ou(till));
+    const cents = ouCents(till);
     if (how === 'paid') {
-      ok(card(till).title === 'THIS CARD HOLDS DOLLARS' && felt.indexOf('warning') >= 0 && felt.indexOf('error') < 0,
+      ok(ou(till).title === 'THIS CARD HOLDS DOLLARS' && felt.indexOf('warning') >= 0 && felt.indexOf('error') < 0,
          'the figure to agree to is a step of the payment: felt as one, not as a refusal', JSON.stringify(felt));
     }
     if (how === 'stale') {
       // a minute and more passes before the second tap: the quote the figure came from has under the time a payment takes left
       const quotes = () => R.trace.filter((t) => /\/v1\/melt\/quote\/bolt11/.test(t)).length;
-      const asked = quotes();
-      const realNow = Date.now;
-      Date.now = () => realNow() + 30000;
+      const rateSub = () => ouRow(till, 'M.TEST’S RATE').sub;
+      let asked = quotes();
+      const realNow = Date.now, realWin = R.window.Date.now;
+      // (the wallet's own clock too, which stamps the quote it was given: `fcOuHeld` counts from it)
+      const shift = (ms) => { Date.now = () => realNow() + ms; R.window.Date.now = () => realWin.call(R.window.Date) + ms; };
+      ok(/^Rate held for 00:(19|20)$/.test(rateSub()), 'a quote with a minute left: the rate held for the twenty seconds a payment takes it anyway', rateSub());
+      // the countdown run out with the screen up: the mint asked again by itself, nothing pressed and nothing taken
+      shift(30000);
+      await until('the clock to ask again', () => quotes() > asked && !!ou(till) && ou(till).cta === 'TAP CARD');
+      ok(!signed(k) && k.balance() === cardBefore && /^Rate held for 00:(19|20)$/.test(rateSub()), 'the rate run out on screen: asked again by the countdown, and held afresh', rateSub());
+      // asked again three times with nobody pressing anything: it waits for GET A NEW RATE
+      till.setState({ fcOu: Object.assign({}, till.state.fcOu, { requotes: 3 }) });
+      asked = quotes();
+      shift(60000);
+      await until('the rate to lapse', () => !!ou(till) && ou(till).cta === 'GET A NEW RATE');
+      ok(ou(till).chip === 'The rate ran out. Nothing was taken.' && rateSub() === 'The rate ran out' && quotes() === asked && !signed(k),
+         'three times unpressed: the rate ran out, said, and not asked again until GET A NEW RATE', JSON.stringify([ou(till).chip, rateSub()]));
+      ou(till).go();
+      await until('a new rate', () => quotes() > asked && !!ou(till) && ou(till).cta === 'TAP CARD');
+      ok(/^Rate held for 00:(19|20)$/.test(rateSub()) && !signed(k), 'GET A NEW RATE: the mint asked, the rate held afresh', rateSub());
+      // TAP CARD on a rate that has run out: asked again on the screen, before the card is touched
+      asked = quotes();
+      shift(90000);
       k.tap();
       k.sent.length = 0;
-      card(till).press('TAP CARD');
-      await until('the figure asked again', () => quotes() > asked && !!card(till) && card(till).title === 'THIS CARD HOLDS DOLLARS');
+      ou(till).go();
+      await until('the figure asked again', () => quotes() > asked && !!ou(till) && ou(till).cta === 'TAP CARD');
+      R.window.Date.now = realWin;
       Date.now = realNow;
       ok(!signed(k) && k.balance() === cardBefore, 'a quote about to run out is asked again, and the new figure agreed, before the card is touched', JSON.stringify({ quotes: quotes() - asked }));
       till.FC_QUOTE_LEFT_MS = 30000;
     }
     k.tap();
-    card(till).press('TAP CARD');
+    ou(till).go();
     if (how === 'refused') {
       await until('PAID IN DOLLARS', () => card(till) && card(till).title === 'PAID IN DOLLARS');
       await tapDone(till, R);

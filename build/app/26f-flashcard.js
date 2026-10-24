@@ -1987,9 +1987,7 @@
     const choice = (W.walletChoice && W.walletChoice()) || {};
     const terms = { payUnit: 'usd', pay: q.cents, sats: q.sats, rate: q.rate, ageMs: q.ageMs, seenAt: q.at, own: true,
                     convert: choice.hold === 'bitcoin' };
-    this.fcOtherAgree(e, terms, sats, offline, share, this.fcSatsShort(e)
-      + 'They asked for ' + this.fcFig(q.sats, 'sat') + '. At this phone’s Bitcoin price, ₿ 1 = $ ' + this.group(Math.round(q.rate))
-        + ', seen ' + this.agoWords(q.ageMs) + ', that is ' + this.fcFig(q.cents, 'usd') + '. Tapping the card again pays ' + this.fcFig(q.cents, 'usd') + '.');
+    this.fcOtherAgree(e, terms, sats, offline, share);
   }
 
   /* A card of software 1.23 that holds bitcoin too little for a bitcoin payment, and dollars enough: what it holds in bitcoin, said before
@@ -2000,20 +1998,19 @@
   }
 
   /* The holder agrees by tapping again: with its PIN where the card will want one for this (it has one, and what it pays
-   * without one today does not cover the cents and a cent of the mint's fee), and otherwise from the card that says the
-   * figure, with TAP CARD. */
-  fcOtherAgree(e, terms, sats, offline, share, reason) {
+   * without one today does not cover the cents and a cent of the mint's fee), and otherwise on the confirmation that says the
+   * figure (`fcOuSpec`), with TAP CARD. */
+  fcOtherAgree(e, terms, sats, offline, share) {
     if (e.pinSet && !(Number(e.noPinLeft) >= terms.pay + 1)) {
       this.fcPayAsk(sats, offline, false, share, null, null, terms, 'usd');
       return;
     }
     // a step of the payment, not a refusal: felt as one to look at
     this.haptic && this.haptic('warning');
-    this.blockedCard('fc-other-unit', {
-      tone: 'warn', title: 'THIS CARD HOLDS DOLLARS', reason,
-      retry: 'TAP CARD', go: () => this.fcPayStart(sats, offline, share, null, null, terms),
-      shut: { label: 'CANCEL' },
-    });
+    const x = { e, terms, sats, offline: !!offline, share: share || null, asking: false, err: '', lapsed: false, requotes: 0 };
+    if (this.state.screen === 'fcOuConfirm') this.setState({ fcOu: x });
+    else this.setState(p => ({ screen: 'fcOuConfirm', stack: p.stack.concat([p.screen]), fcOu: x }));
+    this.fcOuClock();
   }
 
   /* Online: the mint's quote for this phone's own invoice in dollars (a melt quote commits to nothing). The card pays its
@@ -2031,22 +2028,8 @@
       if (this.recvRequote) this.recvRequote(this._invoiceRun);
       return;
     }
-    const run = this._invoiceRun;
-    Promise.resolve().then(() => W.quoteFee(bolt11, { unit: 'usd' })).then((q) => {
-      if (!q || !(q.amount > 0)) throw new Error('no quote');
-      // the screen has moved on while the mint was asked: nothing to agree to
-      if (this.state.invoice !== bolt11) return;
-      /* What the card pays: the quote and its reserve, and the mint's fee for spending the very pieces it pays them in, which
-       * are held for this invoice and melted, every one and nothing of this phone's (`cardOutTotal`, as SEND from a card's
-       * screen pays). The receiver pays no fee for being paid, whatever it holds. */
-      const cents = W.cardOutTotal ? W.cardOutTotal(q.amount, q.feeReserve, 'usd')
-        : Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0);
-      // `key` and `read`: the card agreed with, which alone pays it, and what its read said (to ask again by, `fcPayRun`)
-      const terms = { payUnit: 'usd', pay: cents, sats, online: true, bolt11, hash: String(s.invoiceHash || ''), quote: q, run, ends,
-                      key: String(e.key || ''), read: e };
-      this.fcOtherAgree(e, terms, sats, false, null, this.fcSatsShort(e)
-        + 'They asked for ' + this.fcFig(sats, 'sat') + '. At ' + this.fcRateWho() + ', that is ' + this.fcFig(cents, 'usd')
-          + ' with its fee. Tapping the card again pays ' + this.fcFig(cents, 'usd') + '.');
+    this.fcOuQuote(e, sats).then((terms) => {
+      if (terms) this.fcOtherAgree(e, terms, sats, false, null);
     }).catch(() => {
       this.haptic && this.haptic('error');
       this.blockedCard('fc-other-unit', {
@@ -2055,6 +2038,148 @@
         chip: 'Nothing was taken.',
       });
     });
+  }
+
+  /* The mint's figure for the invoice on screen, in dollars: the terms a dollar card pays it on, or null where the screen has moved
+   * on while the mint was asked. Refused, or no figure: an error. */
+  fcOuQuote(e, sats) {
+    const W = this.fcW();
+    const s = this.state;
+    const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
+    const ends = Number(s.recvExpiresAt) || 0;
+    const run = this._invoiceRun;
+    return Promise.resolve().then(() => W.quoteFee(bolt11, { unit: 'usd' })).then((q) => {
+      if (!q || !(q.amount > 0)) throw new Error('no quote');
+      // the screen has moved on while the mint was asked: nothing to agree to
+      if (this.state.invoice !== bolt11) return null;
+      /* What the card pays: the quote and its reserve, and the mint's fee for spending the very pieces it pays them in, which
+       * are held for this invoice and melted, every one and nothing of this phone's (`cardOutTotal`, as SEND from a card's
+       * screen pays). The receiver pays no fee for being paid, whatever it holds. */
+      const cents = W.cardOutTotal ? W.cardOutTotal(q.amount, q.feeReserve, 'usd')
+        : Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0);
+      // `key` and `read`: the card agreed with, which alone pays it, and what its read said (to ask again by, `fcPayRun`)
+      return { payUnit: 'usd', pay: cents, sats, online: true, bolt11, hash: String(s.invoiceHash || ''), quote: q, run, ends,
+               key: String(e.key || ''), read: e };
+    });
+  }
+
+  /* ---- the confirmation for a dollar card asked for sats (`fcOuConfirm`) ----------------------------------------------
+   *
+   * What the card pays, dollars first with the sats asked under them; what this phone receives, the fee, and whose rate made the
+   * one of the other: the mint's online, held for as long as its quote is good for a payment (`fcQuoteFresh`) and asked again when
+   * that runs out, or this phone's own price with no route, with how old it is. TAP CARD is the second tap; the round back
+   * button puts the card away with nothing taken. */
+
+  /* Milliseconds the mint's rate on the confirmation is still held for: until its quote has too little left for a payment
+   * (FC_QUOTE_LEFT_MS before its expiry), and at least the twenty seconds after it was asked that a payment takes it anyway
+   * (`fcPayRun`). null where nothing counts down: a quote with no expiry, and this phone's own price. */
+  fcOuHeld(t) {
+    if (!t || !t.online || !t.quote) return null;
+    const exp = Number(t.quote.quote && t.quote.quote.expiry) || 0;
+    if (!(exp > 0)) return null;
+    const until = Math.max(exp * 1000 - (Number(this.FC_QUOTE_LEFT_MS) || 75000), (Number(t.quote.at) || 0) + 20000);
+    return Math.max(0, until - Date.now());
+  }
+
+  /* The countdown under the rate, once a second while the confirmation is up, and the mint asked again when it runs out, three
+   * times with nobody pressing anything; then it waits for GET A NEW RATE. It stops as soon as the screen has gone or there is
+   * nothing to count. */
+  fcOuClock() {
+    if (this._fcOuT) return;
+    this._fcOuT = setInterval(() => {
+      const x = this.state.fcOu;
+      const held = x ? this.fcOuHeld(x.terms) : null;
+      if (this.state.screen !== 'fcOuConfirm' || !x || x.lapsed || (held === null && !x.asking)) {
+        clearInterval(this._fcOuT);
+        this._fcOuT = null;
+        return;
+      }
+      if (x.asking || x.err) return;
+      if (held > 0) { this.setState({ fcOuTick: Date.now() }); return; }
+      if (x.requotes >= 3) {
+        console.log('[foxy] card: the mint’s rate ran out with nobody looking; waiting for a press');
+        this.setState({ fcOu: Object.assign({}, x, { lapsed: true }) });
+        return;
+      }
+      console.log('[foxy] card: the mint’s rate ran out, so it is asked again');
+      this.fcOuRequote(x.requotes + 1);
+    }, 1000);
+  }
+
+  // the mint asked again for the invoice on screen, with the confirmation up: its figures put on it, or why not
+  fcOuRequote(requotes) {
+    const x0 = this.state.fcOu;
+    if (!x0 || !x0.terms.online) return;
+    const run = (this._fcOuRun = (this._fcOuRun || 0) + 1);
+    const put = (more) => {
+      const x = this.state.fcOu;
+      if (run !== this._fcOuRun || !x || this.state.screen !== 'fcOuConfirm') return;
+      this.setState({ fcOu: Object.assign({}, x, more) });
+    };
+    put({ asking: true, err: '', lapsed: false, requotes: Number(requotes) || 0 });
+    this.fcOuClock();
+    this.fcOuQuote(x0.e, x0.sats).then((terms) => {
+      put(terms ? { asking: false, terms } : { asking: false, err: 'The code on screen changed. Nothing was taken.' });
+    }, () => {
+      put({ asking: false, err: 'The mint could not say what this invoice costs in dollars just now. Nothing was taken.' });
+    });
+  }
+
+  /* TAP CARD: back to the receive screen, and the card's second tap, which pays the figure on the screen; a rate that has run
+   * out, or a code changed under it, is asked again first, on the screen. */
+  fcOuGo() {
+    const x = this.state.fcOu;
+    if (!x || x.asking) return;
+    const t = x.terms;
+    if (t.online && (x.err || x.lapsed || this.fcOuHeld(t) === 0 || this.state.invoice !== t.bolt11)) { this.fcOuRequote(0); return; }
+    this.setState(p => ({ fcOu: null, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'confirm', stack: p.stack.slice(0, -1) }));
+    this.fcPayStart(x.sats, x.offline, x.share, null, null, t);
+  }
+
+  // "02:41": minutes and seconds
+  fcOuClockText(ms) {
+    const n = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+  }
+
+  /* The confirmation (confirmSpec). */
+  /** @returns {ConfirmSpec} */
+  fcOuSpec() {
+    const x = this.state.fcOu || { e: null, terms: { pay: 0, sats: 0 }, sats: 0, asking: false, err: '', lapsed: false };
+    const t = x.terms || {};
+    const own = !t.online;
+    const sats = Math.round(Number(own ? t.sats : x.sats) || 0);
+    const cents = Math.round(Number(t.pay) || 0);
+    const q = t.quote || {};
+    // the mint's rate, off its quote (`quoteFee`), or the cents for the invoice over the sats asked where it names none
+    const rate = own ? Number(t.rate) || 0
+      : (Number(q.rate && q.rate.usdPerBtc) || (sats > 0 ? Number(q.amount) * 1e6 / sats : 0));
+    const satsOf = (c) => (rate > 0 ? Math.round(c * 1e6 / rate) : 0);
+    const usd = (c, n) => ({ main: this.fcFig(c, 'usd'), sub: n > 0 ? '(' + this.fcFig(n, 'sat') + ')' : '' });
+    const fee = own ? 0 : Math.max(0, cents - Math.round(Number(q.amount) || 0));
+    const rateText = rate > 0 ? '₿ 1 = $ ' + this.group(Math.round(rate)) : 'UNKNOWN';
+    const held = this.fcOuHeld(t);
+    const rows = [
+      this.cfRow('YOU RECEIVE', this.fcFig(sats, 'sat')),
+      this.cfRow('FEE', own ? 'NONE' : usd(fee, satsOf(fee)).main, { sub: own ? '' : usd(fee, satsOf(fee)).sub, ink: 'var(--btc-ink)' }),
+      own
+        ? this.cfRow('THIS PHONE’S PRICE', rateText, { sub: 'Seen ' + this.agoWords(t.ageMs) })
+        : this.cfRow(this.fcRateWho().toUpperCase(), rateText, {
+          sub: x.asking ? 'Checking the rate…' : x.lapsed ? 'The rate ran out' : held !== null ? 'Rate held for ' + this.fcOuClockText(held) : '' }),
+    ];
+    const subtitle = this.fcSatsShort(x.e) + 'They asked for ' + this.fcFig(sats, 'sat') + '. '
+      + (own ? 'At this phone’s Bitcoin price, seen ' + this.agoWords(t.ageMs) + ', that is ' + this.fcFig(cents, 'usd') + '.'
+        : 'At ' + this.fcRateWho() + ' that is ' + this.fcFig(cents, 'usd') + ' with its fee.');
+    const base = { title: 'THIS CARD HOLDS DOLLARS', amountLabel: 'THE CARD PAYS', amount: this.fcFig(cents, 'usd'),
+                   // (the shell puts the brackets round it: "(₿ 12,391)")
+                   amountSub: this.fcFig(sats, 'sat'), rows, subtitle };
+    if (x.asking) return Object.assign(base, { cta: 'CHECKING THE RATE…', ctaTone: 'go', ctaBusy: true, go: () => {} });
+    if (x.err) return Object.assign(base, { warn: x.err, cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.fcOuRequote(0) });
+    if (x.lapsed) {
+      return Object.assign(base, { chip: 'The rate ran out. Nothing was taken.', cta: 'GET A NEW RATE', ctaTone: 'go',
+                                   go: () => this.fcOuRequote(0) });
+    }
+    return Object.assign(base, { cta: 'TAP CARD', ctaTone: 'go', go: () => this.fcOuGo() });
   }
 
   /* A dollar card's cents, paying the bitcoin invoice it was tapped for: the mirror of `fcUsdPay`, with the quote the holder

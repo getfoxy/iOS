@@ -320,6 +320,21 @@ function representative(logic) {
   add('fcXmConfirm, a card that does not hold enough', at('fcXmConfirm', { fcXm: XM({ quote: { quote: { quote: 'q' } }, pay: 710, fee: 10, short: true, balance: 500,
     err: 'The card holds \u20bf500, and this needs \u20bf710 with its fee.' }) }, { wallet: CARDS() }));
   add('fcXmConfirm, the card\u2019s mint would not say', at('fcXmConfirm', { fcXm: XM({ err: 'The card\u2019s mint could not say what this costs: it did not answer.' }) }, { wallet: CARDS() }));
+  /* A dollar card asked for sats: the confirmation it comes up on (26f-flashcard.js, `fcOuSpec`), at the mint's rate held for a countdown,
+   * as it is asked again, run out and refused, and at this phone's own price with no route. */
+  const OU_READ = { card: 'other-unit', unit: 'usd', asked: 'sat', message: 'This card holds dollars here, not bitcoin.', mint: MINT, pinSet: false, noPinLeft: 0 };
+  const OU_QUOTE = { amount: 1015, feeReserve: 4, rate: { usdPerBtc: 81924 }, get at() { return Date.now(); },
+                     quote: { quote: 'q', get expiry() { return (Date.now() + 75000 + 161500) / 1000; } } };
+  const OU = (over) => Object.assign({ e: OU_READ, sats: 12391, offline: false, share: null, asking: false, err: '', lapsed: false, requotes: 0,
+    terms: { payUnit: 'usd', pay: 1019, sats: 12391, online: true, bolt11: 'lnbc1', hash: 'h', quote: OU_QUOTE, key: '', read: OU_READ } }, over || {});
+  add('fcOuConfirm, a dollar card asked for sats, at the mint\u2019s rate, held', at('fcOuConfirm', { fcOu: OU() }, { wallet: CARDS() }));
+  add('fcOuConfirm, a card of both whose bitcoin is short', at('fcOuConfirm', { fcOu: OU({ e: Object.assign({}, OU_READ, { satsToo: 200 }) }) }, { wallet: CARDS() }));
+  add('fcOuConfirm, the mint\u2019s rate asked again', at('fcOuConfirm', { fcOu: OU({ asking: true }) }, { wallet: CARDS() }));
+  add('fcOuConfirm, the mint\u2019s rate ran out', at('fcOuConfirm', { fcOu: OU({ lapsed: true }) }, { wallet: CARDS() }));
+  add('fcOuConfirm, the mint would not say', at('fcOuConfirm', { fcOu: OU({ err: 'The mint could not say what this invoice costs in dollars just now. Nothing was taken.' }) },
+    { wallet: CARDS() }));
+  add('fcOuConfirm, a dollar card asked for sats, at this phone\u2019s price', at('fcOuConfirm', { fcOu: OU({ offline: true,
+    terms: { payUnit: 'usd', pay: 592, sats: 7000, rate: 84571, ageMs: 2 * 3600 * 1000, seenAt: 1, own: true, convert: true } }) }, { wallet: CARDS() }));
   // money from this phone onto a card at another mint: the confirmation as both mints are asked, answered, short, and silent
   const XL = (over) => Object.assign({ from: 'send', mint: OTHER, home: MINT, key: KEY_A, cardUnit: 'sat', payUnit: 'sat', amount: 1000, pinSet: true, pin: '',
                                         plan: null, err: '', short: false, busy: false }, over || {});
@@ -1144,8 +1159,8 @@ function cards() {
   add('card: a payment the mint refused, the card to be tapped again', (a) => a.fcFailed({ card: 'putback', owed: 600, limited: true, message: 'x' }, { paying: true, taken: true }));
   add('card: a payment the mint refused, a card with no limit', (a) => a.fcFailed({ card: 'putback', owed: 88, limited: false, message: 'x' }, { paying: true, taken: true }));
   add('card: a withdrawal the mint refused', (a) => a.fcFailed({ card: 'putback', owed: 1024, limited: true, message: 'x' }, { taken: true }));
-  /* A card that holds dollars: the refusals it can meet, said before its PIN, and a dollar card asked for sats, the figure
-   * worked out at this phone's own price or at the mint's rate for the holder to agree to (26f-flashcard.js, `fcOtherUnit`). */
+  /* A card that holds dollars: the refusals it can meet, said before its PIN, and those of a dollar card asked for sats
+   * (26f-flashcard.js, `fcOtherUnit`; the figure it agrees to is the fcOuConfirm screen's, with the confirmations above). */
   add('card error, this card holds dollars', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'usd', message: 'This card holds dollars, so it is paid with the dollars wallet.' },
     { paying: true, taken: true }));
   add('card error, this card holds bitcoin (offline)', (a) => a.fcFailed({ card: 'wrong-unit', cardUnit: 'sat', askUnit: 'usd', message: 'This card holds bitcoin here, not dollars.' },
@@ -1168,7 +1183,6 @@ function cards() {
   const PRICED = (over) => Object.assign({ cardSession: () => Promise.resolve(), twoUnits: () => true, mintUnits: () => ['sat', 'usd'],
     lastPrice: () => ({ rate: 84571, at: 1, ageMs: 2 * 3600 * 1000 }), priceTooOld: () => false, unitKeysOffline: () => true,
     centsFor: (n) => ({ sats: n, cents: 592, rate: 84571, at: 1, ageMs: 2 * 3600 * 1000 }), walletChoice: () => ({ hold: 'bitcoin', recv: 'sat', send: 'sat' }) }, over || {});
-  add('card: this card holds dollars, the sats asked at this phone\u2019s price', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); }, { wallet: PRICED() });
   add('card: no bitcoin price, for a dollar card', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); },
     { wallet: PRICED({ lastPrice: () => ({ rate: 0, at: 0, ageMs: 0 }) }) });
   add('card: the bitcoin price too old, for a dollar card', (a) => { a.state.wallet = 'sat'; a.fcOtherUnit(ASKED_OF, 7000, true, null); },

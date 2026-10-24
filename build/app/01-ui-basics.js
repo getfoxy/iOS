@@ -7,7 +7,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm', 'fcXmConfirm', 'fcXlConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -264,6 +264,8 @@ class Component extends DCLogic {
     if (s.screen === 'fcXmConfirm') return this.fcXmSpec();
     // money from this phone onto a card at another mint: what goes on, what leaves, the fee (26f-flashcard.js)
     if (s.screen === 'fcXlConfirm') return this.fcXlSpec();
+    // a dollar card asked for sats: the dollars it pays for them, at whose rate, before its second tap (26f-flashcard.js)
+    if (s.screen === 'fcOuConfirm') return this.fcOuSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm

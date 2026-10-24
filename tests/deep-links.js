@@ -406,7 +406,7 @@ function screensInTheSource() {
 }
 // where nothing is in progress, and where a payment, an amount being typed, a confirmation or anything else is
 const FREE_SCREENS = ['change', 'contacts', 'fieldLog', 'flashcard', 'history', 'home', 'switchMint', 'txDetail'];
-const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfirm', 'fcLimitConfirm', 'fcLimits', 'fcMoveConfirm', 'fcSpeed', 'fcWelcome', 'fcXmConfirm', 'fcXlConfirm', 'feeTooLow',
+const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfirm', 'fcLimitConfirm', 'fcLimits', 'fcMoveConfirm', 'fcSpeed', 'fcWelcome', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm', 'feeTooLow',
   'importSeed', 'newMint', 'ocConfirm', 'paid', 'priceConfirm', 'reqOffer', 'rsConfirm', 'sendConfirm', 'sendDone', 'sendFail',
   'sendHow', 'sendScan', 'sendType', 'spAllPaid', 'spAmount', 'spAssign', 'spPayer', 'spShares', 'spWaiting', 'spWays', 'tokenOut',
   'trConfirm',
