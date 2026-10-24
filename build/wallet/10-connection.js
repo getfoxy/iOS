@@ -10,8 +10,8 @@
     awayClaiming: function () { return !!claimAway; },
     whenHome: function () { return homeFirst(function () { return Promise.resolve(); }); },
 
-    /* Where a fresh install points itself. Nothing asks; boot just connects. */
-    defaultMint: 'https://mint.minibits.cash/Bitcoin',
+    /* Where a fresh install points itself. Nothing asks; boot just connects. Forge, which issues dollars as well as bitcoin. */
+    defaultMint: 'https://forge.flashapp.me',
 
     /* The mint hosts whose requests carry a test mark (`requestMarkFor`).
      * Empty: only tests, and a debug build launched with -FoxyRequestIdHosts

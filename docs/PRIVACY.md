@@ -20,9 +20,8 @@ onion connection and your IP address stays hidden from it. Requests carry a gene
 User-Agent and no cookies.
 
 - **Cashu mints.** The mints your wallet uses: the default mint
-  (mint.minibits.cash), the other mints Foxy lists (mint.westernbtc.com,
-  mint.macadamia.cash, and two test mints at testnut.cashu.space that issue
-  ecash worth nothing), any mint you add, and the mint behind ecash someone
+  (forge.flashapp.me), the other mints Foxy lists (mint.minibits.cash and
+  mint.macadamia.cash), any mint you add, and the mint behind ecash someone
   sends you. The first time Foxy contacts a host outside its built-in list,
   iOS shows an alert with the host's name, and Foxy contacts it only if you
   tap Allow. A mint receives the ecash requests your wallet makes, the

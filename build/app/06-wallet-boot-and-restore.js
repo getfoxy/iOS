@@ -592,27 +592,19 @@
    * device has connected to since — a QR scan puts a mint here, which is what
    * makes it reachable again after switching away. */
   DEFAULT_MINTS = [
-    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits mint',
-      host: 'mint.minibits.cash', tint: '#4E7BE8' },
-    /* Forge issues dollars as well as bitcoin: the mint where the second
-     * balance, and the question of what to hold, first appear. */
+    /* Forge first: where a fresh install connects (the wallet's `defaultMint`), and the mint that issues dollars as well as
+     * bitcoin, so the second balance and the question of what to hold are there from the start. */
     { url: 'https://forge.flashapp.me', name: 'Flash Forge',
       host: 'forge.flashapp.me', tint: '#C9822F' },
+    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits mint',
+      host: 'mint.minibits.cash', tint: '#4E7BE8' },
     /* Coinos and WesternBTC were here and were taken out, Coinos for being
-     * unreliable. A phone that has used either still lists it, from its own
-     * record of the mints it has connected to. */
+     * unreliable; so were the two public test mints (testnut.cashu.space), whose
+     * fake money has no place on a list a new user picks from. A phone that has
+     * used any of them still lists it, from its own record of the mints it has
+     * connected to, and the test mints keep their warning card when they are. */
     { url: 'https://mint.macadamia.cash', name: 'macadamia Mint',
       host: 'mint.macadamia.cash', tint: '#8A5A2B' },
-    /* Test mints. The ecash they issue is backed by nothing and is worthless
-     * by design — they exist so the money paths can be exercised without
-     * spending anything. Named so that is unmistakable, and last in the list.
-     *
-     * The fee-charging one is not redundant: Foxy's fee handling has only ever
-     * run against a mint that charges none. */
-    { url: 'https://nofee.testnut.cashu.space', name: 'TEST MINT \u00b7 fake money',
-      host: 'nofee.testnut.cashu.space', tint: '#6B6B6B', test: true },
-    { url: 'https://testnut.cashu.space', name: 'TEST MINT \u00b7 fake money, with fees',
-      host: 'testnut.cashu.space', tint: '#6B6B6B', test: true },
   ];
 
   allMints() {
