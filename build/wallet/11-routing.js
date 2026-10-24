@@ -413,12 +413,6 @@
             if (opts && opts.remember === false) return null;
             return FoxyWallet.cardAwayLeft().then(null, function () { return null; });
           })
-          /* And a card's restore asked before its date, whose date has come (21a-flashcard.js, `cardRestoreDue`): at the card's own
-           * mint, this one, and never on a visit. It arms the timer for the next date too, which a launch has none of yet. */
-          .then(function () {
-            if (opts && opts.remember === false) return null;
-            return FoxyWallet.cardRestoreDue();
-          })
           /* And then the page is told the wallet is connected and caught up,
            * whether or not anything was waiting. The small-change pool was
            * topped up only after a payment taken while online, so a phone

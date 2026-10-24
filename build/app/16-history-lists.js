@@ -589,10 +589,6 @@
         });
       }
 
-      /* A card's restore asked before its date (26f-flashcard.js `fcRestoreRows`): pending at the top, as a bill being collected is,
-       * and in no balance until the wallet takes it back on its date, when the take-back's own entry is its row. */
-      if (this.fcRestoreRows) this.fcRestoreRows(here).forEach(r => buckets.TODAY.unshift(r));
-
       const history = ['TODAY', 'YESTERDAY', 'EARLIER']
         .map(label => ({ label: label, items: buckets[label] }))
         .filter(g => g.items.length);

@@ -159,9 +159,7 @@
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */
-        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; })
-        // and a card's restore whose date came while Foxy was put away (21a-flashcard.js, `cardRestoreDue`)
-        .then(function () { return mintUrl ? FoxyWallet.cardRestoreDue() : null; });
+        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; });
     },
 
     /* There is no wallet-wide event stream: a mint has no account to watch.

@@ -2409,11 +2409,6 @@
   "markup": "450e064eec38ae25e3b590fb8d6ca244188aa2d7d485a342e08a552a639a9897",
   "vals": "17455443b8b6def6031fb7d2d4325e06ca606e711ab605b600611417499dd4db"
  },
- "card: take a lost card back": {
-  "file": "290-card-take-a-lost-card-back.html",
-  "markup": "ce141d4505b938a79cde9d0620c68f57ec344e4656c8782d9c60c8a40cc755ad",
-  "vals": "17455443b8b6def6031fb7d2d4325e06ca606e711ab605b600611417499dd4db"
- },
  "card: a payment the mint refused, the card to be tapped again": {
   "file": "293-card-a-payment-the-mint-refused-the-card-to-be-tapped-again.html",
   "markup": "7eb166549c8bfbba3235ace77a441920f7dc0a6df70d1e6aa0dba179b4f12495",

@@ -833,94 +833,8 @@
         });
         return { key: key, mint: row.mint || '', at: row.at || 0, seen: row.seen || 0, unit: unit, amount: sats, sats: unit === 'sat' ? sats : 0,
                  // `first` the soonest of its pieces' dates, when the first of it can be taken back (`due` from then)
-                 date: last, first: first, due: !!first && first <= now, takenBack: row.takenBack || 0,
-                 // a RESTORE asked before its date and not yet taken back (`cardRestoreAsk`): the second it was asked, 0 for none
-                 restore: (!row.takenBack && Number(row.restore) > 0) ? Number(row.restore) : 0 };
+                 date: last, first: first, due: !!first && first <= now, takenBack: row.takenBack || 0 };
       }).sort(function (a, b) { return (b.seen || b.at) - (a.seen || a.at); });
-    },
-
-    /* ---- RESTORE before a card's date ---------------------------------------
-     *
-     * Its owner says the card is lost before its money can be taken back (26f-flashcard.js `fcRestoreAsk`). This phone writes that
-     * down (`restore` on the card's row, 08a-flashcard.js `cardRestoreLater`) and does nothing else: the card and the mint are not
-     * asked, and the money is in no balance. On the card's date (`date`, the last of its pieces': all of what it held is due then)
-     * it is taken back by itself (`cardRestoreDue`), and until then home's history shows it pending. Answers the restore as
-     * `cardRestores` lists it, or null where there is nothing to restore: no row, a card set up as cash, one already taken back,
-     * or one that held nothing when last seen. */
-    cardRestoreAsk: function (cardKey) {
-      var all = cardsOnFile();
-      var row = all[cardKey];
-      if (!row || !row.refundKey || !(row.refundIndex >= 0) || row.takenBack) return null;
-      var listed = FoxyWallet.cardsList().filter(function (r) { return r.key === cardKey; })[0];
-      if (!listed || !(listed.amount > 0)) return null;
-      if (!(Number(row.restore) > 0)) {
-        row.restore = Math.floor(Date.now() / 1000);
-        all[cardKey] = row;
-        mustSave(CARDS, all);
-        console.log('[foxy] card: a restore asked before its date; ' + cardSaid(listed.amount, listed.unit) + ' comes back on its date');
-      }
-      cardRestoreLater();
-      return FoxyWallet.cardRestores().filter(function (r) { return r.key === cardKey; })[0] || null;
-    },
-    // CANCEL RESTORE: the restore forgotten, and nothing else; the card's row stays as it was (`cardsList`)
-    cardRestoreCancel: function (cardKey) {
-      var was = cardRestoreForget(cardKey);
-      if (was) console.log('[foxy] card: a restore cancelled before its date');
-      cardRestoreLater();
-      return was;
-    },
-    /* The restores waiting for their date, newest first: [{ key, name, mint, unit, amount, sats, date, asked }], `amount` what the
-     * card held when last seen in its own unit (`sats` the same for a bitcoin card, 0 for a dollar card), `date` the second it can
-     * all be taken back, `asked` the second the restore was asked. */
-    cardRestores: function () {
-      return FoxyWallet.cardsList().filter(function (r) { return r.restore > 0; }).map(function (r) {
-        return { key: r.key, name: cardNameOf(r.key), mint: r.mint, unit: r.unit, amount: r.amount, sats: r.sats, date: r.date, asked: r.restore };
-      }).sort(function (a, b) { return b.asked - a.asked; });
-    },
-    /* The restores whose date has come, taken back one after another as TAKE IT BACK does (`cardTakeBack`), each told to the page
-     * (`_onCardRestored`: { key, unit, amount, sats, hash }) so its balance and history are read again. Only with a route and at
-     * the card's own mint (this phone's wallet there, never a visit's): one that cannot be taken yet waits for the next try. A
-     * card with nothing left on it has its restore forgotten. Resolves the restores taken; never rejects. One at a time. */
-    cardRestoreDue: function () {
-      if (cardRestoring) return cardRestoring;
-      var now = Math.floor(Date.now() / 1000);
-      var due = FoxyWallet.cardRestores().filter(function (r) { return r.date > 0 && r.date <= now; });
-      if (!due.length) { cardRestoreLater(); return Promise.resolve([]); }
-      var got = [];
-      var tell = function (info) {
-        if (typeof FoxyWallet._onCardRestored !== 'function') return;
-        try { FoxyWallet._onCardRestored(info); } catch (x) { console.warn('[foxy] card-restored watcher:', x && x.message); }
-      };
-      cardRestoring = due.reduce(function (chain, r) {
-        return chain.then(function () {
-          if (!routeOpen()) return null;
-          var w = null;
-          try { w = needLocal(); } catch (e) { return null; }
-          if (canonicalMint(r.mint) !== mintOf(w)) return null;
-          return FoxyWallet.cardTakeBack(r.key).then(function (back) {
-            var info = { key: r.key, unit: back.unit || r.unit, amount: back.amount || 0, sats: back.sats || 0, hash: back.hash || '' };
-            // (all of it spent already: the take-back answers nothing and writes nothing, and the restore is over all the same)
-            cardRestoreForget(r.key);
-            got.push(info);
-            console.log('[foxy] card: a restore came due and ' + cardSaid(info.amount, info.unit) + ' was taken back');
-            tell(info);
-          }, function (e) {
-            var why = (e && e.card) || '';
-            // nothing left on it, or no longer this phone's to take: the restore is over
-            if (why === 'nothing' || why === 'unknown') {
-              cardRestoreForget(r.key);
-              tell({ key: r.key, unit: r.unit, amount: 0, sats: 0, hash: '' });
-              return;
-            }
-            console.warn('[foxy] card: a restore came due and could not be taken back yet (' + (why || 'no answer') + '): ' + ((e && e.message) || e));
-          });
-        });
-      }, Promise.resolve()).then(function () { return got; }, function () { return got; }).then(function (out) {
-        cardRestoring = null;
-        cardRestoreLater();
-        return out;
-      });
-      return cardRestoring;
     },
 
     /* A lost or blocked card's money, taken back with no card.
@@ -991,8 +905,7 @@
             var totals = {}, firstId = '';
             var done = function () {
               var all = cardsOnFile();
-              // (a restore asked before its date is over with it: `cardRestoreDue`)
-              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); delete all[cardKey].restore; save(CARDS, all); }
+              if (all[cardKey]) { all[cardKey].takenBack = Date.now(); save(CARDS, all); }
               Object.keys(totals).forEach(function (u) {
                 console.log('[foxy] card: ' + cardSaid(totals[u], u) + ' taken back from a card with this phone\u2019s own key');
               });

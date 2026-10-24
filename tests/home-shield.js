@@ -480,9 +480,9 @@ const STATES = [
     // a card locked for two days, one unlocked and empty, and one unlocked with money (listed last: ready rows come first)
     const K = (end) => '02' + 'ab'.repeat(30) + end;
     w.FoxyWallet.cardsList = () => [
-      { key: K('c2c9'), unit: 'sat', amount: 0, sats: 0, date: nowS + 2 * 86400 - 60, first: nowS + 2 * 86400 - 60, due: false, takenBack: 0, restore: 0 },
-      { key: K('f909'), unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0, restore: 0 },
-      { key: K('35d8'), unit: 'usd', amount: 75, sats: 0, date: nowS - 60, first: nowS - 60, due: true, takenBack: 0, restore: 0 },
+      { key: K('c2c9'), unit: 'sat', amount: 0, sats: 0, date: nowS + 2 * 86400 - 60, first: nowS + 2 * 86400 - 60, due: false, takenBack: 0 },
+      { key: K('f909'), unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0 },
+      { key: K('35d8'), unit: 'usd', amount: 75, sats: 0, date: nowS - 60, first: nowS - 60, due: true, takenBack: 0 },
     ];
     let takenBack = '';
     // (the stand-in wallet has no balance or history to read again after the take-back: those reads are stood in for here)

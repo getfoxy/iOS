@@ -700,33 +700,6 @@ function amt(a) {
        && holderApp.fcLockLeft(3600) === '1 Hour' && holderApp.fcLockLeft(2 * 3600 + 1) === '3 Hours' && holderApp.fcLockLeft(540) === '9 Minutes'
        && holderApp.fcLockLeft(20) === '1 Minute',
        'when it unlocks, rounded up: days, then hours, then minutes');
-
-    /* RESTORE before the card's date (the owner's word) is not on RESTORE CARD while it is asked about (`fcRestoreAsk` and the row that
-     * offered it, `fcRowCard`, are kept): what it writes down and what CANCEL RESTORE forgets, driven as that row did. The pending row in
-     * home's history is history-notes §7; the take-back on the date, tests/flashcard-takeback.js. */
-    const b0 = await H.W.balanceSats();
-    holderApp.fcRowCard(held);
-    ok(card(holderApp) && card(holderApp).has('RESTORE') && /RESTORE brings it back to this phone then, by itself\./.test(card(holderApp).reason),
-       'the kept ask (`fcRowCard`, opened by nothing on screen now) offers RESTORE before the card’s date', card(holderApp) && card(holderApp).all);
-    card(holderApp).press('RESTORE');
-    await settle();
-    const asked = H.W.cardRestores().filter((r) => r.key === held.key)[0];
-    ok(!!asked && card(holderApp) && card(holderApp).title === 'RESTORING'
-       && card(holderApp).reason === holderApp.fcPrice(held.amount, held.unit) + ' from ' + holderApp.fcName(held.key) + ' comes back to this phone on '
-         + holderApp.fcDay(held.date) + '. Until then it is in your history as pending, and not in your balance.',
-       'RESTORE writes the restore down and says when the money comes back, and that it is in no balance till then', card(holderApp) && card(holderApp).all);
-    ok((await H.W.balanceSats()) === b0, 'and the balance is as it was', String((await H.W.balanceSats()) - b0));
-    card(holderApp).press('DONE');
-    ok(lcRow() && lcRow().top === 'Unlocks in' && lcRow().bottom === days + ' Days' && lcRow().tap === null,
-       'a card with a restore asked is the same locked row on RESTORE CARD, with no press', JSON.stringify(lcRow()));
-    holderApp.fcRowCard(H.W.cardsList().filter((r) => r.key === held.key)[0]);
-    ok(card(holderApp) && card(holderApp).title === 'RESTORING' && card(holderApp).has('CANCEL RESTORE') && /It is not in your balance until then\./.test(card(holderApp).reason),
-       'opened again, the row is the restore waiting, with CANCEL RESTORE', card(holderApp) && card(holderApp).all);
-    card(holderApp).press('CANCEL RESTORE');
-    const after = H.W.cardsList().filter((r) => r.key === held.key)[0];
-    ok(!H.W.cardRestores().some((r) => r.key === held.key) && after.amount === held.amount && after.date === held.date && !after.takenBack
-       && holderApp.toasts.slice(-1)[0] === 'The restore is cancelled.' && !card(holderApp),
-       'CANCEL RESTORE forgets the restore, and nothing else changes', JSON.stringify(after));
   }
 
   /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, the swipe for each, HISTORY in each MENU, a tap asked for -- */

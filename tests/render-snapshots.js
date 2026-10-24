@@ -294,11 +294,11 @@ function representative(logic) {
   /* RESTORE CARD (home's RESTORE LOST CARD): a ready card on the fur, two locked ones (days, hours), and an empty one with nothing to
    * restore. Its dates are from now, with an hour's margin, so the words are the same on every run. */
   const NOW_S = Math.floor(Date.now() / 1000);
-  const LOST = (end, o) => Object.assign({ key: '02' + 'cd'.repeat(30) + end, mint: '', at: 0, seen: 0, unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0, restore: 0 }, o);
+  const LOST = (end, o) => Object.assign({ key: '02' + 'cd'.repeat(30) + end, mint: '', at: 0, seen: 0, unit: 'sat', amount: 0, sats: 0, date: 0, first: 0, due: false, takenBack: 0 }, o);
   add('fcRestore, RESTORE CARD: ready, locked and empty cards', at('fcRestore', {}, { wallet: CARDS({ cardName: (k) => (/b4ad$/.test(k) ? 'Brady' : ''), cardsList: () => [
     LOST('c2c9', { date: NOW_S + 2 * 86400 - 3600, first: NOW_S + 2 * 86400 - 3600 }),
     LOST('b4ad', { unit: 'usd', amount: 75, date: NOW_S - 3600, first: NOW_S - 3600, due: true }),
-    LOST('f909', { amount: 1200, sats: 1200, date: NOW_S + 3 * 3600 - 600, first: NOW_S + 3 * 3600 - 600, restore: NOW_S - 60 }),
+    LOST('f909', { amount: 1200, sats: 1200, date: NOW_S + 3 * 3600 - 600, first: NOW_S + 3 * 3600 - 600 }),
     LOST('35d8', { date: NOW_S - 86400, first: NOW_S - 86400, due: true }),
   ] }) }));
   const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 1500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };
@@ -1166,7 +1166,6 @@ function cards() {
   add('card: a payment the card left part way through, not paid yet', (a) => { a.fcHeldClock = () => {}; a.fcHeldCard(1536, '1234', false); });
   add('card: a payment taken up again that the card could not finish', (a) => a.fcShortHeld({ balance: 1, still: 5, torn: 4, letGo: { sats: 72, made: true } }, 77));
   add('card: how a lost card is treated', (a) => a.fcSetUpKind('1234'), { wallet: { cardSession: () => Promise.resolve(), mintHost: () => 'mint.minibits.cash/Bitcoin' } });
-  add('card: take a lost card back', (a) => a.fcRowCard({ key: '02' + 'b2'.repeat(30) + '9f0e', sats: 1024, date: 1700000000, due: true, takenBack: 0 }));
   add('card: a payment the mint refused, the card to be tapped again', (a) => a.fcFailed({ card: 'putback', owed: 600, limited: true, message: 'x' }, { paying: true, taken: true }));
   add('card: a payment the mint refused, a card with no limit', (a) => a.fcFailed({ card: 'putback', owed: 88, limited: false, message: 'x' }, { paying: true, taken: true }));
   add('card: a withdrawal the mint refused', (a) => a.fcFailed({ card: 'putback', owed: 1024, limited: true, message: 'x' }, { taken: true }));

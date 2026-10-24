@@ -148,53 +148,39 @@ function later(c, ms) {
     ok(b4.sats === 512, 'which it does, with no card', String(b4.sats));
   }
 
-  /* ---- RESTORE before its date ---------------------------------------------
-   * Asked before the card's date (26f-flashcard.js `fcRestoreAsk`, kept; RESTORE CARD does not offer it now): written down on the card's row and
-   * nothing else, in no balance, forgotten by CANCEL RESTORE, kept across a launch, and taken back by itself once its date has
-   * come, by the connection's sweep (`cardRestoreDue`), as TAKE IT BACK takes it. */
+  /* ---- taken back after a launch -----------------------------------------
+   * The card's row on file is the one record of what it held and when it can be taken back: kept across a launch, and the
+   * phone launched again takes the card back on its date as TAKE IT BACK does, once and no more. */
   {
     const c5 = newCard(H);
     await H.W.cardSetUp(c5, { pin: '1234', recoverable: true });
     c5.tap();
     await H.W.cardAdd(c5, { sats: 1024, pin: '1234' });
-    const now = Math.floor(Date.now() / 1000);
     const b0 = await bal(H);
-    const asked = H.W.cardRestoreAsk(c5.key);
-    ok(!!asked && asked.key === c5.key && asked.amount === 1024 && asked.sats === 1024 && asked.unit === 'sat' && asked.date > now + 25 * 24 * 3600 && asked.asked >= now,
-       'a restore asked before the card’s date is written down, with what the card held and the date it can be taken back', JSON.stringify(asked));
-    ok((await bal(H)) === b0, 'and is in no balance', String((await bal(H)) - b0));
-    const row5 = () => H.W.cardsList().filter((c) => c.key === c5.key)[0];
-    ok(row5().restore > 0 && row5().due === false && H.W.cardRestores().length === 1, 'the card’s row says a restore is waiting', JSON.stringify(row5()));
-    ok(H.W.cardRestoreAsk(cash.key) === null, 'a card set up as cash has nothing this phone can restore');
-    ok((await H.W.cardRestoreDue()).length === 0 && H.W.cardRestores().length === 1 && (await bal(H)) === b0, 'before its date the sweep takes nothing');
-    ok(H.W.cardRestoreCancel(c5.key) === true && H.W.cardRestores().length === 0 && row5().restore === 0 && row5().amount === 1024 && !row5().takenBack,
-       'CANCEL RESTORE forgets it, and nothing else changes', JSON.stringify(row5()));
-    H.W.cardRestoreAsk(c5.key);
+    const row5 = H.W.cardsList().filter((c) => c.key === c5.key)[0];
+    ok(row5 && row5.amount === 1024 && row5.due === false && row5.first > 0 && !row5.takenBack,
+       'before its date the card’s row says what it held and is not due', JSON.stringify(row5));
 
-    // the phone launched again: the restore is still there
+    // the phone launched again: the card's row is still there
     const kept = {};
     for (let i = 0; i < H.storage.length; i++) kept[H.storage.key(i)] = H.storage.getItem(H.storage.key(i));
     const H2 = page({ storage: kept, phone: H.phone, sharedMint: H.mint });
     // (the phone's seed was derived once, with the first page's libraries: it derives with those still, as one phone would)
     H.phone.derive = H.window.CashuTS.deriveSecretAndBlindingFactor;
-    const again = H2.W.cardRestores();
-    ok(again.length === 1 && again[0].key === c5.key && again[0].amount === 1024 && again[0].date === asked.date,
-       'launched again, the phone still has the restore waiting', JSON.stringify(again));
-    // a month on (the test mint reads the first page's clock): connected, the sweep takes it back by itself
-    const told = [];
-    H2.W.onCardRestored((info) => told.push(info));
+    const again = H2.W.cardsList().filter((c) => c.key === c5.key)[0];
+    ok(again && again.amount === 1024 && again.date === row5.date && again.first === row5.first,
+       'launched again, the phone still has the card’s row as it was', JSON.stringify(again));
+    // a month on (the test mint reads the first page's clock): connected, the card is taken back
     const undoA = later(H, MONTH), undoB = later(H2, MONTH);
     await H2.W.connect(MINT, null, null, { remember: true });
-    for (let i = 0; i < 400 && !told.length; i++) await new Promise((r) => setTimeout(r, 10));
-    const got = told[0] || {};
+    const got = await H2.W.cardTakeBack(c5.key);
     const entry5 = history(H2).filter((e) => e.hash === got.hash)[0] || {};
-    ok(got.key === c5.key && got.amount === 1024 && got.unit === 'sat' && (await H2.W.balanceSats()) === b0 + 1024,
-       'its date come, the connection’s sweep takes it back by itself, and the page is told', JSON.stringify(got));
+    ok(got.amount === 1024 && got.unit === 'sat' && (await H2.W.balanceSats()) === b0 + 1024,
+       'its date come, the phone launched again takes it back', JSON.stringify(got));
     ok(entry5.dir === 'in' && entry5.sats === 1024 && entry5.lost === true && entry5.card === c5.key,
        'its entry is the ordinary take-back of a lost card', JSON.stringify([entry5.dir, entry5.sats, entry5.lost]));
-    ok(H2.W.cardRestores().length === 0 && H2.W.cardsList().filter((c) => c.key === c5.key)[0].takenBack > 0,
-       'and the restore is over: the card is taken back');
-    ok((await H2.W.cardRestoreDue()).length === 0 && (await H2.W.balanceSats()) === b0 + 1024, 'and is never taken twice');
+    ok(H2.W.cardsList().filter((c) => c.key === c5.key)[0].takenBack > 0, 'and the card’s row says it was taken back');
+    ok((await H2.W.cardTakeBack(c5.key)).amount === 0 && (await H2.W.balanceSats()) === b0 + 1024, 'and it is never taken twice');
     undoA(); undoB();
   }
 

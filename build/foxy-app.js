@@ -2145,8 +2145,6 @@ class Component extends DCLogic {
         if (W.onTrustLost) W.onTrustLost((info) => this.trustLostCard(info));
         // a card's payment taken offline that will not settle now, or is near its date unsettled (11-cards.js)
         if (W.onCardKeptLost) W.onCardKeptLost((info) => this.cardKeptLostCard(info));
-        // a card's restore asked before its date, taken back on the date (26f-flashcard.js `fcRestored`)
-        if (W.onCardRestored) W.onCardRestored((info) => this.fcRestored(info));
         if (W.onTrustSettled) W.onTrustSettled((info) => this.trustSettled(info));
         // the launch screen has gone: the tap may listen now (26d-tap.js)
         if (!this._gateDownHeard) {
@@ -11164,10 +11162,6 @@ class Component extends DCLogic {
         });
       }
 
-      /* A card's restore asked before its date (26f-flashcard.js `fcRestoreRows`): pending at the top, as a bill being collected is,
-       * and in no balance until the wallet takes it back on its date, when the take-back's own entry is its row. */
-      if (this.fcRestoreRows) this.fcRestoreRows(here).forEach(r => buckets.TODAY.unshift(r));
-
       const history = ['TODAY', 'YESTERDAY', 'EARLIER']
         .map(label => ({ label: label, items: buckets[label] }))
         .filter(g => g.items.length);
@@ -16754,13 +16748,7 @@ class Component extends DCLogic {
       /* On a card of both currencies its list has the tabs, and each row the figure in its own unit (`histRowTwo`), signed as the
        * card saw it and with no wallet balance beside it, as on a card of one. */
       cardTwo ? { amtText: (unfinished(t) ? '' : dirOf(t) === 'in' ? '+ ' : '- ') + this.unitFigure(t.unit === 'usd' ? Math.round(Number(t.amount) || 0) : Math.round(Number(t.sats) || 0), unitOf(t)),
-                  balText: '' } : {},
-      /* A card's restore waiting for its date (26f-flashcard.js `fcRestoreRows`): the amount coming back stands in the amount
-       * column as any row's figure does, in the pending amber, and the standing line says when it unlocks (UNLOCKS IN 28D)
-       * instead of "Pending"; no running balance, since it is in none. It opens what the restore waits for, with CANCEL RESTORE. */
-      t.restore ? { metaRail: this.fcUnlockWords ? this.fcUnlockWords(t.restoreDate) : 'Pending', metaColor: 'var(--btc-ink)',
-                    amtText: t.restoreAmt || '', amtSub: t.restoreSub || '', balText: '', amtColor: 'var(--btc-ink)',
-                    open: () => this.fcRestorePending(t.restore) } : {})).map(r => Object.assign(r, {
+                  balText: '' } : {})).map(r => Object.assign(r, {
         line2: r.metaRail || r.metaTime,
         line3: r.metaRail ? r.metaTime : '',
         line2Color: r.metaRail ? r.metaColor : 'rgba(var(--ink-rgb),.45)',
@@ -26972,40 +26960,6 @@ class Component extends DCLogic {
   }
 
   /* ---- a lost card ---------------------------------------------------------- */
-  /* What a card on file says when opened, in the unit the card was set up in (`row.unit`): a dollar card's is its cents. It was the
-   * row of CARDS YOU LOADED; RESTORE CARD (`fcLostRows`) presses only a ready row, straight to the take-back, and offers no RESTORE
-   * before a card's date, so nothing on screen opens this now. Kept, with `fcRestoreAsk`, while that ask is with the owner. */
-  fcRowCard(row) {
-    const name = this.fcName(row.key);
-    const u = this.fcUnitOf(row);
-    const had = this.fcAmt(row);
-    if (row.takenBack) {
-      this.blockedCard('fc-row', { tone: 'ask', title: name, reason: 'Its money was taken back to this phone.' });
-      return;
-    }
-    if (!row.due) {
-      // a restore asked already: what it waits for, and CANCEL RESTORE
-      if (row.restore) { this.fcRestorePending(row.key); return; }
-      // RESTORE, for a card that held money: asked now, taken back by itself on its date (`fcRestoreAsk`)
-      const can = had > 0 && row.date > 0;
-      this.blockedCard('fc-row', Object.assign({
-        tone: 'ask', title: name,
-        reason: (had ? this.fcSats(had, u) + ' when this phone last saw it. ' : 'Empty when this phone last saw it. ')
-          + (row.date ? 'If it is lost or blocked, this phone can take its money back after ' + this.fcDay(row.date) + '.' : '')
-          + (can ? ' RESTORE brings it back to this phone then, by itself.' : ''),
-      }, can ? { retry: 'RESTORE', go: () => this.fcRestoreAsk(row.key), shut: { label: 'CLOSE' } } : {}));
-      return;
-    }
-    this.blockedCard('fc-row', {
-      tone: 'warn', title: 'TAKE IT BACK?',
-      reason: this.fcSats(had, u) + ' was on ' + name + ' when this phone last saw it. '
-        + 'Use this only if the card is lost or blocked.',
-      chip: 'The card will be empty.',
-      retry: 'TAKE IT BACK', go: () => this.fcTakeBack(row.key),
-      shut: { label: 'CANCEL' },
-    });
-  }
-
   fcTakeBack(key) {
     const W = this.fcW();
     if (this.offlineNow()) { this.offlineNo('Taking a card back'); return; }
@@ -27046,109 +27000,6 @@ class Component extends DCLogic {
       }
       this.fcFailed(e, { again: () => this.fcTakeBack(key) });
     });
-  }
-
-  /* ---- a restore asked before the card's date ----------------------------------------------------------------------------
-   *
-   * The owner's word: a card restored before its date is an item in home's history, pending, not in the balance,
-   * saying when it unlocks. RESTORE on a row of CARDS YOU LOADED whose date has not come (`fcRowCard`) asks the wallet to take
-   * the card back on its date (21a-flashcard.js `cardRestoreAsk`); nothing is asked of the card or the mint. Home's history then
-   * has a row for it (`fcRestoreRows`): "Restoring <the card>", what comes back in the amount column, and UNLOCKS IN 28D where
-   * would be (`fcUnlockWords`). On the date the wallet takes it back by itself (`cardRestoreDue`, told here by `fcRestored`), and
-   * the take-back's own entry is the row from then on. The row opens what the restore waits for, with CANCEL RESTORE, which
-   * only forgets it (`cardRestoreCancel`). */
-  fcRestoreAsk(key) {
-    const W = this.fcW();
-    if (!W || !W.cardRestoreAsk) return;
-    const r = W.cardRestoreAsk(key);
-    if (!r) {
-      this.blockedCard('fc-restore', { tone: 'ask', title: this.fcName(key), reason: 'This phone has nothing on that card to restore.' });
-      return;
-    }
-    this.loadHistory();
-    this.forceUpdate();
-    this.blockedCard('fc-restore', {
-      tone: 'ask', title: 'RESTORING',
-      reason: this.fcPrice(this.fcAmt(r), this.fcUnitOf(r)) + ' from ' + this.fcName(key) + ' comes back to this phone on ' + this.fcDay(r.date)
-        + '. Until then it is in your history as pending, and not in your balance.',
-      shut: { label: 'DONE' },
-    });
-  }
-
-  // a restore waiting for its date, from its row in home's history
-  fcRestorePending(key) {
-    const W = this.fcW();
-    const r = W && W.cardRestores ? W.cardRestores().filter((x) => x.key === key)[0] : null;
-    if (!r) { this.loadHistory(); return; }
-    const what = this.fcPrice(this.fcAmt(r), this.fcUnitOf(r)) + ' from ' + this.fcName(key);
-    // its date has come: it is taken back as soon as this phone reaches the card's mint, and TAKE IT BACK is there meanwhile
-    if (!(r.date > Math.floor(Date.now() / 1000))) {
-      this.blockedCard('fc-restore', {
-        tone: 'ask', title: 'RESTORING',
-        reason: what + ' can be taken back now. It comes back to this phone by itself when this phone is online at its mint.',
-        retry: 'TAKE IT BACK', go: () => this.fcTakeBack(key),
-        shut: { label: 'CLOSE' },
-      });
-      return;
-    }
-    this.blockedCard('fc-restore', {
-      tone: 'ask', title: 'RESTORING',
-      reason: what + ' comes back to this phone on ' + this.fcDay(r.date) + '. It is not in your balance until then.',
-      retry: 'CANCEL RESTORE', go: () => this.fcRestoreCancel(key),
-      shut: { label: 'CLOSE' },
-    });
-  }
-
-  fcRestoreCancel(key) {
-    const W = this.fcW();
-    if (W && W.cardRestoreCancel) W.cardRestoreCancel(key);
-    this.loadHistory();
-    this.forceUpdate();
-    this.toast('The restore is cancelled.');
-  }
-
-  /* When a restore unlocks, as the right of its row in home's history says it: in days, rounded up; under a day in hours, under an
-   * hour in minutes; UNLOCKING once its date has come and it is not yet taken back. */
-  fcUnlockWords(date) {
-    const left = (Number(date) || 0) - Math.floor(Date.now() / 1000);
-    if (!(left > 0)) return 'UNLOCKING';
-    if (left >= 86400) return 'UNLOCKS IN ' + Math.ceil(left / 86400) + 'D';
-    if (left >= 3600) return 'UNLOCKS IN ' + Math.ceil(left / 3600) + 'H';
-    return 'UNLOCKS IN ' + Math.max(1, Math.ceil(left / 60)) + 'M';
-  }
-
-  /* Home's history rows for the restores waiting at the mint whose history it is (`here`, its address): pending, so the books and
-   * the balance step over them (16-history-lists.js `histAudit`), and naming no card, so home keeps them (26-render-history-and-contacts.js
-   * `renderHistory`; a row naming a card on file here is that card's business). `restore` is the card's key, `restoreDate` its date. */
-  fcRestoreRows(here) {
-    const W = this.fcW();
-    if (!W || !W.cardRestores) return [];
-    const at = (u) => String(u || '').replace(/\/+$/, '');
-    const now = new Date();
-    return W.cardRestores().filter((r) => !here || !r.mint || at(r.mint) === at(here)).map((r) => {
-      const u = this.fcUnitOf(r);
-      // the title names the card only: what comes back stands in the amount column, as every row's figure does
-      const name = 'Restoring ' + ((W.cardName && W.cardName(r.key)) || 'card');
-      const d = new Date((Number(r.asked) || 0) * 1000);
-      return {
-        name, party: name, note: '', hash: 'restore-' + r.key, card: '', fromCard: '', lost: false, memo: '',
-        dir: 'in', sats: u === 'sat' ? this.fcAmt(r) : 0, fee: 0, unit: u === 'usd' ? 'usd' : '', amount: this.fcAmt(r), feeAmount: 0,
-        mint: r.mint || '', rail: 'Card', time: this.txLabel(d, now), stamp: this.txStamp(d, now),
-        pending: true, token: '', restore: r.key, restoreDate: Number(r.date) || 0,
-        // the figure for the amount column, dollars first as the card screen says it; a bitcoin card's sats under it
-        restoreAmt: '+' + (u === 'usd' ? this.unitFigure(this.fcAmt(r), 'usd') : this.fcPrice(this.fcAmt(r), 'sat')),
-        restoreSub: u === 'usd' ? '' : this.fcSats(this.fcAmt(r)),
-      };
-    });
-  }
-
-  // a restore that came due and was taken back by the wallet (W.onCardRestored; 21a-flashcard.js `cardRestoreDue`)
-  fcRestored(info) {
-    if (info && info.hash) this.txIsNew(info.hash);
-    this.refreshBalance();
-    this.loadHistory();
-    this.forceUpdate();
-    if (info && this.fcAmt(info) > 0) this.toast(this.fcPrice(this.fcAmt(info), this.fcUnitOf(info)) + ' from ' + this.fcName(info.key) + ' is back in your wallet.');
   }
 
   /* The designs a card's face can be drawn in, each by a code of three
@@ -27975,9 +27826,9 @@ class Component extends DCLogic {
   /* RESTORE CARD's rows: { key, name, sub, top, bottom, ink, ready, plain, tap }. The name in capitals (`fcName`: CARD ··C2C9 for a
    * card with none); what it held when last seen, dollars first (`fcPrice`, a dollar card's cents as they are), or Empty; on the right
    * Ready / To Restore on the app's fur, Unlocks in / 2 Days in amber, or Nothing / To Restore in grey. A card is unlocked from the
-   * soonest of its pieces' dates (the wallet's `first`, `due` from then), and a restore asked before its date (`row.restore`) is the
-   * same locked row. `tap` only on a ready row: the others are drawn with no press at all. Ready rows first, then the locked ones,
-   * the soonest to unlock first, then the rest; newest first within each, as the wallet lists them. */
+   * soonest of its pieces' dates (the wallet's `first`, `due` from then). `tap` only on a ready row: the others are drawn with no
+   * press at all. Ready rows first, then the locked ones, the soonest to unlock first, then the rest; newest first within each, as
+   * the wallet lists them. */
   fcLostRows() {
     const W = this.fcW();
     const now = Math.floor(Date.now() / 1000);

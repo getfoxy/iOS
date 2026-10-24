@@ -2337,38 +2337,6 @@
     return n;
   }
 
-  /* A RESTORE asked before a card's date (home's MENU > RESTORE LOST CARD > the card's row; 21a-flashcard.js `cardRestoreAsk`): kept as
-   * `restore` on the card's row here (`CARDS`), the second it was asked, and nothing else. The money is the card's until its date: it
-   * is in no balance, and home's history shows it as a pending row (26f-flashcard.js `fcRestoreRows`). On the date, with a route and
-   * the card's mint the one connected, it is taken back as TAKE IT BACK takes it (`cardRestoreDue`), and the take-back's own entry is
-   * then the row. One timer, armed here and nowhere else, for the soonest date; a restore that is due and cannot be taken yet (no
-   * route, another mint) is asked about again CARD_RESTORE_AGAIN seconds on, and on every connection. No restore left, no timer. */
-  var CARD_RESTORE_AGAIN = 5 * 60;
-  // (a timer is never set further ahead than this: setTimeout cannot hold a month, and a clock moved is caught up with)
-  var CARD_RESTORE_MOST_MS = 6 * 3600 * 1000;
-  var cardRestoreT = null;
-  // the restores being taken back now (`cardRestoreDue`), or null
-  var cardRestoring = null;
-  function cardRestoreLater() {
-    if (cardRestoreT) { clearTimeout(cardRestoreT); cardRestoreT = null; }
-    var now = Math.floor(Date.now() / 1000), soonest = 0;
-    FoxyWallet.cardRestores().forEach(function (r) {
-      var at = r.date > now ? r.date : now + CARD_RESTORE_AGAIN;
-      soonest = soonest ? Math.min(soonest, at) : at;
-    });
-    if (!soonest) return;
-    var ms = Math.min(CARD_RESTORE_MOST_MS, Math.max(1000, (soonest - now) * 1000 + 1000));
-    cardRestoreT = setTimeout(function () { cardRestoreT = null; FoxyWallet.cardRestoreDue(); }, ms);
-  }
-  // a card's row with its restore forgotten (taken back, cancelled, or nothing left to take)
-  function cardRestoreForget(cardKey) {
-    var all = cardsOnFile();
-    if (!all[cardKey] || !all[cardKey].restore) return false;
-    delete all[cardKey].restore;
-    mustSave(CARDS, all);
-    return true;
-  }
-
   /* The same for a card as `cardLook` gave it: 'usd' or 'sat' where it was set up here to hold that one and holds nothing of the
    * other; 'both' where it was set up for both, or holds the other or may (format 5: it was given some, here or on another phone);
    * '' where this phone made it no promise (not its row, a row whose key is not on the card, a card before 1.23, nothing chosen). */

@@ -137,8 +137,6 @@
         if (W.onTrustLost) W.onTrustLost((info) => this.trustLostCard(info));
         // a card's payment taken offline that will not settle now, or is near its date unsettled (11-cards.js)
         if (W.onCardKeptLost) W.onCardKeptLost((info) => this.cardKeptLostCard(info));
-        // a card's restore asked before its date, taken back on the date (26f-flashcard.js `fcRestored`)
-        if (W.onCardRestored) W.onCardRestored((info) => this.fcRestored(info));
         if (W.onTrustSettled) W.onTrustSettled((info) => this.trustSettled(info));
         // the launch screen has gone: the tap may listen now (26d-tap.js)
         if (!this._gateDownHeard) {
