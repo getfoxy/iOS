@@ -555,7 +555,11 @@
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      amountTitle: 'SET AMOUNT',
+      /* A card's set-up names its two amounts (the owner's design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
+       * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
+      amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+        : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
+        : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
         ? 'How much to send on chain?'
         : s.flow === 'transfer'
@@ -568,8 +572,8 @@
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
-        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
-        : s.flow === 'cardSuTap' ? 'What is the most this card should pay in one tap straight away?'
+        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay without asking you to enter your PIN?'
+        : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
         // a till cap, from SETTINGS (26j-till-caps.js)

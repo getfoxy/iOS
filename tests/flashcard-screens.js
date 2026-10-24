@@ -23,7 +23,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 
-const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, limits } = require('./flashcard-ui-kit');
 
 /* The app's own announcement of a payment (12-receive.js) and the queue that raises them one at a time (15-paid-wake-keyboard.js), lifted out of their
  * files and given to an app made of the card's parts, which has neither. A confirmation raised is the screen going to 'paid' with its amount. */
@@ -52,8 +52,8 @@ const withConfirmations = (app) => {
 /* A limit's three steps, as a person takes them: the warning's CONTINUE, an amount on the keypad
  * (or NO LIMIT under it, for 0), and the confirmation's CONFIRM. */
 const takeLimitSteps = (app, sats, which) => {
-  // CHANGE CARD LIMITS asks which of the card's limits first
-  if (card(app) && card(app).title === 'CHANGE CARD LIMITS') card(app).press(which || 'PER TAP LIMIT');
+  // CARD LIMITS asks which of the card's limits first
+  if (limits(app)) limits(app).press(which || 'PER TAP LIMIT');
   // the limit on one tap opens HOW TAP LIMIT WORKS, whose buttons come when it has played; the daily limit's warning has CONTINUE at once
   if (explainer(app)) { explainer(app).finish(); explainer(app).press('CONTINUE'); } else card(app).press('CONTINUE');
   if (sats > 0) keyIn(app, sats); else app.fcLimitConfirm(0);
@@ -586,9 +586,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await until('the card to be read again', () => holder.state.fc && holder.state.fc.balance === c.balance() && holder.state.fc.ownedHere === true);
   ok(holder.state.fc.ownedHere === true && vals(holder).fcLimitLine === 'NO LIMIT', 'the card is read again, and this phone is found to be its owner');
   holder.fcSetLimit();
-  ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'CLOSE'].join(' | '),
-     'LIMITS asks which limit, and offers no daily limit: PER TAP LIMIT, or CLOSE (this card has no no-PIN limit)', card(holder) && card(holder).all);
-  card(holder).press('CLOSE');
+  ok(limits(holder) && limits(holder).labels === 'PER TAP LIMIT',
+     'LIMITS asks which limit, and offers no daily limit: PER TAP LIMIT, or CLOSE (this card has no no-PIN limit)', limits(holder) && limits(holder).labels);
+  limits(holder).press('CLOSE');
   ok(!card(holder) && !pad(holder) && holder.state.screen === 'flashcard' && c.state.record.limit === 0, 'CLOSE there changes nothing');
   // a daily limit put on the card some other way: the screens say nothing about it
   c.tap();
@@ -600,8 +600,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(c.state.record.limit === 700 && v.fcLimitLine === '' && v.fcLimitShown === false && v.fcDayShown === undefined && v.fcDayLeft === undefined && v.fcDayTurns === undefined,
      'a card with a daily limit shows nothing about it: no line on its face, no day left, no day turning', JSON.stringify([v.fcLimitLine, v.fcLimitShown]));
   holder.fcSetLimit();
-  ok(card(holder) && !card(holder).has('DAILY LIMIT'), 'and LIMITS still offers none', card(holder) && card(holder).all);
-  card(holder).press('CLOSE');
+  ok(limits(holder) && limits(holder).labels === 'PER TAP LIMIT', 'and LIMITS still offers none', limits(holder) && limits(holder).labels);
+  limits(holder).press('CLOSE');
 
   /* ---- the limit on one tap ----------------------------------------------------------
    * The other choice under LIMITS, asked for by the same three steps in its own words. */
@@ -610,9 +610,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const was = holder._fcCard;
     holder._fcCard = Object.assign({}, was, { info: Object.assign({}, was.info, { format: 4, shaped: false }) });
     holder.fcSetLimit();
-    ok(card(holder) && card(holder).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'CLOSE'].join(' | '),
-       'a card of software 1.12 is asked the same question at LIMITS', card(holder) && card(holder).all);
-    card(holder).press('PER TAP LIMIT');
+    ok(limits(holder) && limits(holder).labels === 'PER TAP LIMIT',
+       'a card of software 1.12 is asked the same question at LIMITS', limits(holder) && limits(holder).labels);
+    limits(holder).press('PER TAP LIMIT');
     ok(card(holder) && !explainer(holder) && card(holder).all === ['SET PER TAP LIMIT', TAP_WARNING_OLD, 'CONTINUE', 'CANCEL'].join(' | '),
        'and is told its own rule in a warning, not the played rule of the card that makes change: change holds the card 3 seconds, and 3 seconds for every limit’s worth over it', card(holder) && card(holder).all);
     card(holder).press('CANCEL');
@@ -648,7 +648,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
   }
   holder.fcSetLimit();
-  card(holder).press('PER TAP LIMIT');
+  limits(holder).press('PER TAP LIMIT');
   {
     const x = explainer(holder);
     ok(x && !card(holder) && x.title === 'How tap limit works' && !x.done, 'PER TAP LIMIT opens HOW TAP LIMIT WORKS, a screen of its own, which plays before its buttons come', x && x.all);
@@ -662,13 +662,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(!explainer(holder) && holder.state.screen === 'flashcard' && holder._fcLimitDone === null, 'CANCEL takes it down and changes nothing');
     // played through once on this phone, it opens on the list from then on
     holder.fcSetLimit();
-    card(holder).press('PER TAP LIMIT');
+    limits(holder).press('PER TAP LIMIT');
     ok(explainer(holder) && explainer(holder).done && explainer(holder).has('CONTINUE') && H.storage.getItem('foxy.flashcard.explained') === '1',
        'opened again, it does not play: the list and its buttons are there at once');
     explainer(holder).press('CANCEL');
   }
   holder.fcSetLimit();
-  card(holder).press('PER TAP LIMIT');
+  limits(holder).press('PER TAP LIMIT');
   explainer(holder).finish();
   explainer(holder).press('CONTINUE');
   ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.fcLimitQuestion() === 'What is the most this card should pay in one tap straight away?',
@@ -747,7 +747,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   // and it is taken off again, the same way, with NO LIMIT
   holder.fcSetLimit();
-  card(holder).press('PER TAP LIMIT');
+  limits(holder).press('PER TAP LIMIT');
   explainer(holder).finish();
   explainer(holder).press('CONTINUE');
   holder.fcLimitConfirm(0);
@@ -1984,9 +1984,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'HISTORY,LIMITS,ADD PIN,RESET' && histFirst(v) && v.fcLimitLine === 'NO LIMIT | NO PIN',
        'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, with RESET last (a card of 1.17 and on), and HISTORY first in it', menuOf(v));
     owner.fcSetLimit();
-    ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'CLOSE'].join(' | '),
-       'LIMITS offers a card with no PIN its per tap limit and no NO PIN LIMIT: there is nothing to pay without', card(owner) && card(owner).all);
-    card(owner).press('CLOSE');
+    ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT',
+       'LIMITS offers a card with no PIN its per second limit and no NO PIN LIMIT: there is nothing to pay without', limits(owner) && limits(owner).labels);
+    limits(owner).press('CLOSE');
 
     /* its owner puts money on it and takes some off with no PIN asked for; a till is paid in one tap */
     owner.fcAdd();
@@ -2064,15 +2064,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.';
     await look();
     owner.fcSetLimit();
-    ok(card(owner) && card(owner).all === ['CHANGE CARD LIMITS', 'Which limit would you like to add or change?', 'PER TAP LIMIT', 'NO PIN LIMIT', 'CLOSE'].join(' | '),
-       'on a card with a PIN, LIMITS has a second button, NO PIN LIMIT, under PER TAP LIMIT', card(owner) && card(owner).all);
-    card(owner).press('NO PIN LIMIT');
+    ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT,NO PIN LIMIT',
+       'on a card with a PIN, LIMITS has a second row, NO PIN LIMIT, under PER SECOND LIMIT', limits(owner) && limits(owner).labels);
+    limits(owner).press('NO PIN LIMIT');
     ok(card(owner) && card(owner).all === ['SET NO PIN LIMIT', NOPIN_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
        'NO PIN LIMIT opens its warning: what it is, that over it the PIN is asked for the whole payment, that only payments with no PIN count', card(owner) && card(owner).all);
     card(owner).press('CANCEL');
     ok(!card(owner) && owner.state.screen === 'flashcard' && owner._fcLimitDone === null, 'CANCEL there changes nothing');
     owner.fcSetLimit();
-    card(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN LIMIT');
     card(owner).press('CONTINUE');
     ok(owner.state.screen === 'amount' && owner.state.flow === 'cardLimit' && owner.fcLimitQuestion() === 'What is the most this card should pay in a day without its PIN?',
        'CONTINUE asks the amount on the same keypad, in its own words', owner.fcLimitQuestion());
@@ -2088,7 +2088,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       ok(owner.state.screen === 'flashcard' && n.state.noPinLimit === 0 && !pad(owner), 'CANCEL there writes nothing');
     }
     owner.fcSetLimit();
-    card(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN LIMIT');
     card(owner).press('CONTINUE');
     keyIn(owner, 500);
     n.sent.length = 0;
@@ -2151,7 +2151,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
     // NO LIMIT removes it: every payment asks for the PIN again
     owner.fcSetLimit();
-    card(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN LIMIT');
     card(owner).press('CONTINUE');
     owner.fcLimitConfirm(0);
     {
@@ -2167,7 +2167,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     // in dollars where there is a price: kept at those dollars
     owner.price = 100000;
     owner.fcSetLimit();
-    card(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN LIMIT');
     card(owner).press('CONTINUE');
     ok(owner.state.unit === 'USD', 'with a price the amount is asked in dollars first');
     owner.state.amount = '0.50';
@@ -2427,7 +2427,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await look(owner, H2, n);
     ok(owner.fcWaitOver() === 10 && owner.fcWaitMore() === 4, 'the card on show says ten askings for the first limit’s worth over and four for each further one', [owner.fcWaitOver(), owner.fcWaitMore()].join());
     owner.fcSetLimit();
-    card(owner).press('PER TAP LIMIT');
+    limits(owner).press('PER SECOND LIMIT');
     {
       explainer(owner).finish();
       const y = explainer(owner);
@@ -2436,8 +2436,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
                               'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
          'HOW TAP LIMIT WORKS for a card of 1.18: ~1\u20134 within the limit, then ~9, ~11 and ~13, what the screen reaches at ten askings, fourteen and eighteen', y.all);
       y.press('CONTINUE');
+      // (no price here: the rate is typed in sats, a limit of three seconds of it)
+      ok(owner.state.screen === 'amount' && owner.state.flow === 'cardLimit' && owner.fcLimitQuestion() === 'What is the most this card should pay each second?', 'with no price, CONTINUE asks the rate on SET AMOUNT, in sats');
       keyIn(owner, 2000);
-      ok(/held about 9 seconds, and 2 seconds more for every limit\u2019s worth beyond that\./.test(owner.fcLimitSpec().warn), 'and its confirmation says about 9 seconds over the limit', owner.fcLimitSpec().warn);
+      ok(owner.state.fcLimit.sats === 6000 && /held about 9 seconds, and 2 seconds more for every ₿ 6,000 beyond that\./.test(owner.fcLimitSpec().warn) && owner.fcLimitSpec().amount === '₿2,000 / sec',
+         'and its confirmation says the rate, and about 9 seconds over the limit it makes', owner.fcLimitSpec().amount + ' | ' + owner.fcLimitSpec().warn);
       owner.fcLimitSpec().secondary.go();
     }
 
@@ -3127,6 +3130,42 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'a dollar card’s own amounts are typed in dollars; money onto any card from this phone’s bitcoin, in sats');
     app.state.fc = { unit: 'sat' };
     ok(app.fcUnit() === 'sat' && app.fcTypedUnitFor('cardAdd') === 'sat', 'and a bitcoin card’s in sats, as ever');
+  }
+  /* ---- the owner's designs: a limit said as the rate it makes and back, and the welcome of a new card (26j-card-wheel.js) ---- */
+  {
+    const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
+    a.price = 60000;
+    ok(a.FC_SPEED_SECS === 3 && a.fcSpeedLimit(5, 'usd') === 1500 && a.fcSpeedLimit(5, 'sat') === Math.round(15 / 60000 * 1e8) && a.fcSpeedLimit(50, 'usd') === 15000,
+       'a rate R a second is a limit L of 3R: $5 a second is $15.00 (1,500 cents, or its sats at the price)');
+    ok(a.fcSpeedText(1500, 'usd', 0) === '$5' && a.fcSpeedText(Math.round(15 / 60000 * 1e8), 'sat', 0) === '$5' && a.fcSpeedText(99999, 'sat', 15) === '$5'
+       && a.fcSpeedText(2000, 'usd', 0) === '$6.67' && a.fcSpeedText(15000, 'usd', 0) === '$50',
+       'and a limit L is said as L / 3 a second: the chip where it is one (by the dollars it was set at, where it was), the figure where not',
+       [a.fcSpeedText(1500, 'usd', 0), a.fcSpeedText(2000, 'usd', 0)].join());
+    ok(a.FC_SPEED_CHIPS.join() === '1,2,5,10,25,50' && a.FC_SPEED_CHIPS.every((r) => a.fcSpeedText(a.fcSpeedLimit(r, 'sat'), 'sat', 0) === '$' + r && a.fcSpeedText(a.fcSpeedLimit(r, 'usd'), 'usd', 0) === '$' + r),
+       'every chip comes back as itself, both ways, in cents and in sats');
+    a.price = 0;
+    ok(a.fcSpeedText(300, 'sat', 0) === '\u20bf100' && !a.fcSpeedChoosable('sat') && a.fcSpeedChoosable('usd'),
+       'with no price a bitcoin card’s is said in sats, and typed rather than chosen; a dollar card’s is chosen all the same');
+    // the welcome, on the card's screen: a new card, a set-up cut short, and none for a card that is not this phone's to set up
+    a.setState({ fc: { key: 'k1', setUp: false, pin: 'none', hasRecord: false } });
+    let v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
+    ok(v.isFcPanel && v.fpWelcome && !v.fpLimits && v.fpLine === '' && v.fpDesign === 'FL1', 'a new card on the card’s screen: WELCOME TO YOUR CASHU CARD over it, the card in its drawn design');
+    a.setState({ fc: { key: 'k1', setUp: false, pin: 'set', pinSet: true, hasRecord: false } });
+    v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
+    ok(v.fpWelcome && v.fpLine === 'Its set-up was cut short. Finish it to put money on it.', 'a set-up cut short is welcomed with a line saying so', v.fpLine);
+    a.setState({ fc: { key: 'k1', setUp: false, pin: 'set', pinSet: true, forHolder: true } });
+    const cut = a.renderCardScreens({ s: a.state, sc: 'flashcard' }).isFcPanel;
+    a.setState({ fc: { key: 'k1', setUp: false, pin: 'blocked' } });
+    const blockedUp = a.renderCardScreens({ s: a.state, sc: 'flashcard' }).isFcPanel;
+    a.setState({ fc: { key: 'k1', setUp: true, pin: 'set', pinSet: true, hasRecord: true } });
+    ok(!cut && !blockedUp && !a.renderCardScreens({ s: a.state, sc: 'flashcard' }).isFcPanel, 'and none over a card begun for its holder, a blocked card, or one set up');
+    a.setState({ fc: { key: 'k1', setUp: false, pin: 'none' } });
+    a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpCancel();
+    ok(a.state.screen === 'home' && !a.state.fc, 'CANCEL is HOME', a.state.screen);
+    a.setState({ screen: 'flashcard', stack: ['home'], fc: { key: 'k1', setUp: false, pin: 'none' } });
+    a.renderCardScreens({ s: a.state, sc: 'flashcard' }).fpRestore();
+    ok((a.state.screen === 'flashcard' && !a.state.fc) || (card(a) && card(a).title === 'RESTORE LOST CARD'), 'RESTORE LOST CARD is the restore it always was', a.state.screen);
+    if (card(a)) card(a).press('CLOSE');
   }
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);

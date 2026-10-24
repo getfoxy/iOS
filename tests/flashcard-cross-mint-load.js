@@ -178,10 +178,13 @@ async function world(o) {
     ok(bare(R.W.mintUrl) === MINT2 && !R.W.cardAwayNow(), 'both mints are asked with this phone still at its own');
     ok(!!x.plan && x.plan.amount === 1000 && x.plan.total === 1010 && x.plan.fee === 10 && x.cardUnit === 'sat' && x.payUnit === 'sat',
        'the figures: 1,000 to go on, at most 1,010 from this phone, a fee of up to 10', JSON.stringify(x.plan && { amount: x.plan.amount, total: x.plan.total, fee: x.plan.fee }));
-    ok(spec(a).title === 'A CARD AT ANOTHER MINT' && spec(a).amountLabel === 'YOU PAY' && spec(a).amount === 'UP TO ₿ 1,010'
+    // (the owner's design: CARD AT DIFFERENT MINT; with no price here, the sats are the main figures)
+    ok(spec(a).title === 'CARD AT DIFFERENT MINT' && spec(a).subtitle === 'This card is at another mint. Your money goes there by Lightning, and you pay the fee.'
+       && spec(a).amountLabel === 'YOU PAY' && spec(a).amount === 'UP TO ₿ 1,010'
+       && (spec(a).rows || []).map((r) => r.label).join() === 'ON THE CARD,FEE, PAID BY YOU,CARD’S MINT,YOUR MINT'
        && rowOf(a, 'ON THE CARD').value === '₿ 1,000' && rowOf(a, 'FEE, PAID BY YOU').value === 'UP TO ₿ 10'
-       && rowOf(a, 'THE CARD’S MINT').value === 'M.TEST' && rowOf(a, 'YOUR MINT').value === 'N.TEST',
-       'it says what goes on the card, what leaves this phone, the fee and the two mints', JSON.stringify((spec(a).rows || []).map((r) => r.label + '=' + r.value)));
+       && rowOf(a, 'CARD’S MINT').value === 'M.TEST' && rowOf(a, 'YOUR MINT').value === 'N.TEST' && rowOf(a, 'CARD’S MINT').basis === '50%' && rowOf(a, 'YOUR MINT').basis === '50%',
+       'it says what goes on the card, what leaves this phone, the fee and the two mints side by side', JSON.stringify((spec(a).rows || []).map((r) => r.label + '=' + r.value)));
     ok(spec(a).cta === 'PUT ₿ 1,000 ON CARD' && !spec(a).ctaBusy, 'the button says what it does, with the amount', spec(a).cta);
     spec(a).go();
     await waitFor(() => k.balance() === cardBefore + 1000, 40000);

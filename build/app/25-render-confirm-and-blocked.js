@@ -163,6 +163,12 @@
     const setUp = cardFlow && !cc;
     // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
     const receiving = !cardFlow && s.flow === 'receive';
+    /* A card's set-up, as the owner drew it: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
+     * dollars' frost and bitcoin's fur. */
+    if (both && setUp) {
+      LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',
+        blend: 'normal,' + LOOK.sat.blend, edge: 'rgba(255,255,255,.22)', badgeBg: '#FFFFFF', badgeInk: '#10161B', sym: '$\u20bf' };
+    }
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
@@ -173,8 +179,14 @@
         // (setting a card up shows no balances: they would read as what the card already holds)
         balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
         labelShown: u !== 'both' && !setUp && !receiving,
-        badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
-        balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
+        badgePx: setUp ? '60px' : three ? '52px' : '92px', badgeFont: setUp ? (u === 'both' ? '20px' : '30px') : three ? '28px' : '50px',
+        nameSize: setUp ? '28px' : three ? '26px' : '34px',
+        balSize: three ? '20px' : '24px', gap: setUp ? '8px' : three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
+        radius: setUp ? '30px' : '34px',
+        // (the big faint sign behind each card, and a balance line, are not on the set-up's tiles nor a receive's; BOTH's badge has the two signs, the ₿ in fur)
+        markShown: !setUp, balShown: !setUp && !receiving,
+        symOne: !(setUp && u === 'both'), symTwo: setUp && u === 'both',
+        nameShadow: (setUp && u === 'both') ? '0 2px 8px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.5)' : 'none',
         tag: tag, tagShown: !!tag,
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
@@ -200,10 +212,13 @@
       curTitle: pick ? 'WALLET' : 'CURRENCY',
       curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
         : cc ? String(cc.question || '')
-        : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
+        : cardFlow ? 'What will this card hold?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
-      curGap: three ? '12px' : '16px',
+      curGap: setUp ? '14px' : three ? '12px' : '16px',
+      // (the set-up's tiles stand alone, with nothing under them)
+      curFootShown: !setUp,
+      curTilesOnly: setUp,
       curFoot: pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'

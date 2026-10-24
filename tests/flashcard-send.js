@@ -186,10 +186,12 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const labels = spec.rows.map((r) => r.label);
     const from = spec.rows.find((r) => r.label === 'FROM') || {};
     ok(holder.state.screen === 'sendConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(), 'a pasted invoice reaches its confirmation, still in card mode');
-    ok(labels.indexOf('FROM') === labels.indexOf('NETWORK') + 1 && from.value === 'FLASHCARD' && from.sub === 'm.test',
-       'with FROM / FLASHCARD / the card’s mint in a row after NETWORK', labels.join() + ' | ' + from.value + ' ' + from.sub);
-    ok(spec.cta === 'NEXT' && !spec.ctaBusy && labels.indexOf('FEE') >= 0 && (spec.rows.find((r) => r.label === 'FEE') || {}).value === 'UP TO ₿ 10',
-       'and the button reads NEXT, with the fee the mint quoted', spec.cta + ' | ' + (spec.rows.find((r) => r.label === 'FEE') || {}).value);
+    // (the owner's design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
+    ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'FLASHCARD' && from.sub === '',
+       'with FROM / FLASHCARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
+    const feeRow = spec.rows.find((r) => r.label === 'FEE') || {};
+    ok(spec.cta === 'NEXT' && !spec.ctaBusy && feeRow.value === '~₿ 10' && feeRow.sub === '' && !feeRow.sub2Shown && spec.secondary.label === 'ADD A NOTE',
+       'and the buttons read ADD A NOTE and NEXT, with the fee the mint quoted as ~₿ 10 and nothing under it', spec.cta + ' | ' + feeRow.value);
     // the same invoice from home: SEND, and no FROM row
     const was = Object.assign({}, holder.state);
     holder.state.sendFrom = '';

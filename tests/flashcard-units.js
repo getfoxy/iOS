@@ -57,7 +57,7 @@ const path = require('path');
 const { funded, page, newCard, settle, why, OTHER_WORDS, MINT, MINT2 } = require('./flashcard-kit');
 const { booksWrong } = require('./harness');
 const { makeCard } = require('./flashcard-card');
-const { appOn, until, pad, card: cardUp, vals, settle: uiSettle } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card: cardUp, vals, settle: uiSettle, speed } = require('./flashcard-ui-kit');
 /* One of the app's methods, out of the text of its file, by its first line (as flashcard-ui-kit.js lifts them). */
 const liftFrom = (file, sig) => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', file), 'utf8');
@@ -504,7 +504,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     ok(fc.v123 && fc.cents && fc.bal && fc.bal.usd === 500 && fc.bal.sat === 3000 && holder.fcTwoUnits(fc), 'the card\u2019s screen knows it holds both, and each balance');
     const v = vals(holder);
     ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '5.00' && v.fcPillRows[1].big === '3,000', 'two pills: dollars, then bitcoin', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-    ok(/^PER TAP LIMIT \$10\.00/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both', v.fcLimitLine + ' / ' + limitsSub(v));
+    ok(/^PER SECOND LIMIT \$3\.33/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both: $10.00 a payment, $3.33 a second', v.fcLimitLine + ' / ' + limitsSub(v));
     ok(v.fcButtons.some((x) => x.label === 'SWAP' && (x.dim === '1') === !holder.offlineNow()), 'SWAP is in the bottom row, and not greyed for being of one currency');
     holder.fcWithdraw();
     ok(holder.state.screen === 'currency' && holder.state.currencyFlow === 'card' && holder.state.curCard && holder.state.curCard.question === 'WITHDRAW WHICH?'
@@ -953,15 +953,17 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          name + ': YES opens SET AMOUNT for the no-PIN amount, empty and in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
-      ok(a.state.screen === 'flashcard' && cardUp(a) && cardUp(a).title === 'MAX PER TAP', name + ': NEXT is the next question, over the card’s screen');
+      ok(a.state.screen === 'flashcard' && cardUp(a) && cardUp(a).title === 'SPEND PER SECOND', name + ': NEXT is the next question, over the card’s screen');
       cardUp(a).press('YES');
+      ok(speed(a) && speed(a).chosen === '$5', name + ': YES opens MAX SPEND PER SECOND, in dollars', JSON.stringify(speed(a)));
+      speed(a).other();
       a.setState({ amount: '10.00' });
-      ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 13 seconds to pay $40.00.', name + ': the limit’s SET AMOUNT, its seconds under the figure', a.fcSuAmountLine());
+      ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 13 seconds to pay $120.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
       c.tap();
       a.fcAmountNext();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
-      ok(c.state.noPinLimit === 200 && c.state.tapLimit === 1000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+      ok(c.state.noPinLimit === 200 && c.state.tapLimit === 3000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 a second ($30.00) in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
       // one currency chosen: one pill from the moment set-up ends, the ceiling said with no "both", and ADD FUNDS asks nothing
       const v1 = vals(a);
       ok(v1.fcPillRows.length === 1 && v1.fcPillRows[0].big === (i === 0 ? '0.00' : '0') && !/both currencies/.test(limitsSub(v1)),
@@ -977,14 +979,15 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const c = newCard(H, undefined, { format: 4, software: 23 });
       await toCurrency(a, c);
       const v = cur(a);
-      ok(a.state.screen === 'currency' && v.curQuestion === 'WHAT WILL THIS CARD HOLD?' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN,BOTH',
-         'a card of 1.23: WHAT WILL THIS CARD HOLD? with DOLLARS, BITCOIN and BOTH', v.curCards.map((x) => x.name).join());
+      ok(a.state.screen === 'currency' && v.curQuestion === 'What will this card hold?' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN,BOTH',
+         'a card of 1.23: "What will this card hold?" with DOLLARS, BITCOIN and BOTH', v.curCards.map((x) => x.name).join());
       const b = v.curCards[2];
       ok(b.balance === '' && b.labelShown === false && v.curCards.every((x) => x.labelShown === false && x.balance === '')
-         && v.curCards.every((x) => x.badgePx === '52px' && typeof x.tap === 'function'),
-         'BOTH is a card of the same shape; the set-up tiles show no balances, all three a size smaller', JSON.stringify([b.balance, b.labelShown]));
-      ok(v.curFoot === 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.',
-         'the words under them say what each choice does', v.curFoot);
+         && v.curCards.every((x) => x.badgePx === '60px' && x.nameSize === '28px' && x.radius === '30px' && !x.markShown && !x.balShown && typeof x.tap === 'function'),
+         'BOTH is a tile of the same shape; the set-up tiles are the owner’s: a 60px badge, the word, no balances', JSON.stringify([b.balance, b.labelShown]));
+      ok(b.symTwo && !b.symOne && /^linear-gradient\(115deg,#D6EEF7 0%,#B9DCEA 49\.8%,transparent 50\.2%\),/.test(b.bg) && /foxy-fur\.webp/.test(b.bg)
+         && v.curCards[0].symOne && !v.curCards[0].symTwo && v.curFootShown === false,
+         'BOTH split between dollars’ frost and bitcoin’s fur, its badge $ and ₿; nothing under the tiles', b.bg);
       b.tap();
       cardUp(a).press('NO');
       c.tap();
@@ -1246,9 +1249,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const c = newCard(H, undefined, { format: 4, software: 22 });
       await toCurrency(a, c);
       const v = cur(a);
-      ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '92px' && x.labelShown === false && x.balance === '')
-         && v.curFoot === 'A card holds one of them. To change it later, RESET the card and set it up again.',
-         'a card of 1.22: DOLLARS and BITCOIN, and the old words', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
+      ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '60px' && x.labelShown === false && x.balance === '')
+         && v.curFoot === 'A card holds one of them. To change it later, RESET the card and set it up again.' && v.curFootShown === false,
+         'a card of 1.22: DOLLARS and BITCOIN as the owner drew them, the old words kept and not shown', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
       v.curBack();
     }
 

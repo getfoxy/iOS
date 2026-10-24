@@ -1176,10 +1176,12 @@ The limit is the most the card will sign for in one day. A card has none until
 its owner sets one, and any amount may be set. Only the owner's phone sets,
 changes or removes it, and it asks for no PIN.
 
-**LIMITS** on the card's screen first asks which of the card's limits,
-under CHANGE CARD LIMITS: `Which limit would you like to add or change?`, with
-**PER TAP LIMIT**, **DAILY LIMIT** and, on a card that has a PIN (software 1.16
-and on), **NO PIN LIMIT**, each a button, and CANCEL (*The limit on
+**LIMITS** on the card's screen first asks which of the card's limits, on the
+CARD LIMITS screen: `Which limit do you want to change?`, the card's picture and
+a row for each with what it is now: **PER SECOND LIMIT** (the limit on one tap,
+said as the rate it makes, L/3 a second; **PER TAP LIMIT** on a card that
+refuses past it) and, on a card that has a PIN (software 1.16 and on), **NO PIN
+LIMIT**, and CLOSE (this phone sets no daily limit) (*The limit on
 one tap*, below; a card whose software has only the daily limit is not asked;
 the third is *No PIN, and the no-PIN allowance*, above).
 Each has three steps and then a tap. The daily limit's:

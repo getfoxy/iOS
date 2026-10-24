@@ -45,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const { page, funded, newCard, settle, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
 const { booksWrong } = require('./harness');
-const { appOn, until, pad, card, explainer, behind, vals } = require('./flashcard-ui-kit');
+const { appOn, until, pad, card, explainer, behind, vals, limits, speed, welcome } = require('./flashcard-ui-kit');
 
 let failed = 0, passed = 0;
 const ok = (good, name, detail) => {
@@ -232,10 +232,10 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(holder.state.screen === 'currency' && holder.state.currencyFlow === 'card' && holder.state.stack.slice(-1)[0] === 'flashcard' && H.sheet.length === sheets,
        'SET UP at a mint with two balances: the CURRENCY screen first, nothing tapped yet', holder.state.screen + ' ' + holder.state.currencyFlow);
     let cv = holder.renderCurrency({ s: holder.state, sc: 'currency' });
-    ok(cv.curTitle === 'CURRENCY' && cv.curQuestion === 'WHAT WILL THIS CARD HOLD?' && cv.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN'
-       && cv.curCards[0].balance === '' && cv.curCards[1].balance === '',
-       'it asks WHAT WILL THIS CARD HOLD?, with the two balances and no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
-    ok(/RESET the card/.test(cv.curFoot), 'and says the card holds one, changed by RESET and setting it up again', cv.curFoot);
+    ok(cv.curTitle === 'CURRENCY' && cv.curQuestion === 'What will this card hold?' && cv.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN'
+       && cv.curCards[0].balance === '' && cv.curCards[1].balance === '' && cv.curCards.every((x) => !x.balShown && !x.markShown && x.radius === '30px'),
+       'it asks "What will this card hold?", with the two balances as the owner drew them: a badge and a word, no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
+    ok(cv.curFootShown === false && cv.curTilesOnly === true, 'and nothing under the tiles', cv.curFoot);
     // back is the card's screen, with nothing tapped
     cv.curBack();
     ok(holder.state.screen === 'flashcard' && H.sheet.length === sheets && !k.state.owner, 'back from it is the card’s screen, and nothing was tapped');
@@ -299,8 +299,8 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await until('the card read again', () => !!holder.state.fc && holder.state.fc.tap && holder.state.fc.tap.limited && holder.state.fc.limit === 5000);
     const line = () => vals(holder).fcLimitLine;
     // (its daily limit is not said: the card screens have none)
-    const want = 'PER TAP LIMIT $20.00 | NO PIN';
-    ok(line() === want, 'its per tap limit in dollars: PER TAP LIMIT $20.00, and nothing of its daily limit', line());
+    const want = 'PER SECOND LIMIT $6.67 | NO PIN';
+    ok(line() === want, 'its limit as the rate it makes, in dollars: $20.00 a payment is $6.67 a second, and nothing of its daily limit', line());
     holder.price = 80000;
     const at80 = line();
     holder.price = 160000;
@@ -693,20 +693,38 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     H.W.cardSetLimit = (link, o) => { asked.push(Object.assign({}, o, { on: undefined, progress: undefined })); return real.call(H.W, link, o); };
     holder.price = 80000;
     holder.fcSetLimit();
-    // (the per tap limit: the card screens set no daily limit)
-    card(holder).press('PER TAP LIMIT');
+    // (the limit on a payment, which this card waits for: its rate; the card screens set no daily limit)
+    ok(limits(holder) && limits(holder).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $6.67 | per sec', 'CARD LIMITS: PER SECOND LIMIT first, $20.00 a payment said as $6.67 a second', limits(holder) && limits(holder).rows.join(' / '));
+    limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
-    ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.unit === 'USD' && holder.usdKeypad() === true, 'the dollar keypad');
+    ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$5', 'CONTINUE opens MAX SPEND PER SECOND, at $5 a second', JSON.stringify(speed(holder)));
+    speed(holder).other();
+    ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.unit === 'USD' && holder.usdKeypad() === true
+       && holder.fcLimitQuestion() === 'What is the most this card should pay each second?', 'its figure opens the dollar keypad, asking a figure a second', holder.fcLimitQuestion());
     holder.state.amount = '20.00';
     holder.fcAmountNext();
-    const sp = holder.fcLimitSpec();
-    ok(holder.state.fcLimit.sats === 2000 && holder.state.fcLimit.usd === 0 && sp.amount === '$ 20.00' && sp.amountSub === '' && !/kept at/.test(sp.warn),
-       'the confirmation: $ 20.00, nothing under it, and no "kept at this many dollars"', JSON.stringify([sp.amount, sp.amountSub, sp.warn]));
+    let sp = holder.fcLimitSpec();
+    ok(holder.state.fcLimit.sats === 6000 && holder.state.fcLimit.usd === 0 && sp.amount === '$20.00 / sec' && sp.amountSub === '' && !/kept at/.test(sp.warn)
+       && /^This card pays up to \$ 60\.00 straight away/.test(sp.warn),
+       'typed: $20.00 a second is a limit of $60.00, said as the rate, with no "kept at this many dollars"', JSON.stringify([sp.amount, sp.amountSub, sp.warn]));
+    sp.secondary.go();
+    ok(holder.state.screen === 'flashcard' && !holder.state.fcSpeed && !holder.state.fcLimit, 'CANCEL there is the card’s screen, past the keypad and the rate', holder.state.screen);
+    holder.fcSetLimit();
+    limits(holder).press('PER SECOND LIMIT');
+    if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
+    speed(holder).pick(10).next();
+    sp = holder.fcLimitSpec();
+    ok(holder.state.fcLimit.sats === 3000 && holder.state.fcLimit.usd === 0 && sp.amount === '$10 / sec' && sp.amountLabel === 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
+       'a chip: $10 a second is a limit of $30.00 in cents, confirmed as $10 / sec', JSON.stringify([holder.state.fcLimit, sp.amount]));
     k.tap();
     sp.go();
     await until('the limit to be set', () => asked.length === 1 && !(holder._fcTaps > 0));
     await settle();
-    ok(asked[0].sats === 2000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 2000, 'the card’s limit on one tap is set to 2,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
+    ok(asked[0].sats === 3000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 3000 && holder.toasts.indexOf('Per second limit set.') >= 0,
+       'the card’s limit on a payment is set to 3,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
+    ok(vals(holder).fcLimitLine === 'PER SECOND LIMIT $10 | NO PIN' && limits((holder.fcSetLimit(), holder)).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $10 | per sec',
+       'and read back as $10 a second, on its face and in CARD LIMITS', vals(holder).fcLimitLine);
+    limits(holder).press('CLOSE');
     H.W.cardSetLimit = real;
     k.tap();
     await H.W.cardSetLimit(k, { sats: 0, tap: true });
@@ -778,9 +796,11 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const rows = sp.rows.map((r) => r.label);
     const rate = sp.rows.filter((r) => r.label === 'RATE')[0];
     const fee = sp.rows.filter((r) => r.label === 'FEE')[0];
-    ok(!sp.wallet && sp.cta === 'NEXT' && rows.indexOf('FROM') >= 0 && !!rate && /^₿ 1 = \$ [\d,]+ · m\.test’s rate$/.test(rate.value)
-       && /^UP TO \$ \d+\.\d\d$/.test(fee.value) && /^\$ \d+\.\d\d$/.test(sp.amount) && sp.amountSub === '₿ 2,000',
-       'FROM FLASHCARD, the fee in dollars, the mint’s RATE, the dollars it costs over the sats paid, and NEXT', JSON.stringify([sp.amount, sp.amountSub, fee.value, rate && rate.value]));
+    // (the owner's design: the price under the amount, NETWORK FROM ARRIVES FEE in a grid of four, no RATE row)
+    ok(!sp.wallet && sp.cta === 'NEXT' && rows.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && !rate && sp.secondary.label === 'ADD A NOTE'
+       && /^~\$ \d+\.\d\d$/.test(fee.value) && fee.sub === '' && /^\$ \d+\.\d\d$/.test(sp.amount) && /^at \$ [\d,]+ per bitcoin$/.test(sp.amountSub)
+       && sp.amountSub === 'at $ ' + holder.group(Math.round(holder._feeQuote.rate.usdPerBtc)) + ' per bitcoin',
+       'FROM FLASHCARD: the dollars it costs, at the mint’s price under them, the fee as ~$, ADD A NOTE and NEXT', JSON.stringify([sp.amount, sp.amountSub, fee.value, rows]));
     const at = H.trace.length;
     k.tap();
     sp.go();

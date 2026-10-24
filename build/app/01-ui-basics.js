@@ -270,7 +270,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
      * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
-     * (a dollar card's has the RATE row, since it pays a bitcoin invoice in dollars). */
+     * (a dollar card's says the mint's price under its amount, since it pays a bitcoin invoice in dollars). */
     if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
         && this.twoUnitsOn && this.twoUnitsOn() && !this.cardSendNow()) return this.confirmTwoSpec();
     /* Waiting on the connection, or on what it is for.
@@ -320,19 +320,19 @@ class Component extends DCLogic {
        * on a screen shown before the payment — a quote or nothing. */
       /* Whose fee it is, in the owner's words: a payment that leaves this mint
        * pays the mint's fees, and the payer pays them (C16). */
+      /* (from a card, as the owner drew it: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
       this.cfRow('FEE', s.quotedFee != null
-        ? 'UP TO ' + cfig(s.quotedFee).main
+        ? (out ? '~' : 'UP TO ') + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
-        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
+        out ? { half: true } : { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
-    /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. A payment in the card's own
-     * unit would have none; every Lightning invoice names bitcoin, so a dollar card's always has it. */
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
+    /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
+     * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
+     * dollar card, this phone's for a bitcoin card (the owner's design, where it was a RATE row). */
     const cardRate = (cardUsd && this._feeQuote && this._feeQuote.rate) ? Math.round(Number(this._feeQuote.rate.usdPerBtc) || 0) : 0;
-    if (cardRate > 0) {
-      const who = String(this.mintName() || 'the mint');
-      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(cardRate) + ' · ' + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
-    }
+    const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
+    const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
@@ -450,6 +450,8 @@ class Component extends DCLogic {
       const inv = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(s.recipient) : 0;
       Object.assign(spec, { amount: cardHead, amountSub: inv ? '₿ ' + this.group(inv) : '' });
     }
+    // from a card: the price under the amount, where there is one
+    if (out && atLine) spec.amountSub = atLine;
     return spec;
   }
 

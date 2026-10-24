@@ -280,6 +280,27 @@ function representative(logic) {
   add('amount, the set-up\u2019s no PIN amount, nothing typed yet', at('amount', { flow: 'cardSuNoPin', amount: '', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
   add('amount, the set-up\u2019s max per tap, its seconds under the figure', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
   add('amount, the set-up\u2019s max per tap on a dollar card', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: 'usd' }; } }));
+  /* The owner's designs (26j-card-wheel.js): WELCOME TO YOUR CASHU CARD over a new card's screen and as SEND's own screen, MAX SPEND PER
+   * SECOND as the set-up and LIMITS ask it, CARD LIMITS with its rows, and a limit confirmed as the rate it makes */
+  const NEWCARD = { setUp: false, pinSet: false, hasRecord: false, pin: 'none', owner: false, ownedHere: false, balance: 0, count: 0, mint: '', check: 'none', design: '' };
+  add('flashcard, a new card: WELCOME TO YOUR CASHU CARD', at('flashcard', { fc: FC(NEWCARD) }, { wallet: CARDS() }));
+  add('flashcard, a set-up cut short: the welcome, saying so', at('flashcard', { fc: FC(Object.assign({}, NEWCARD, { pin: 'set', pinSet: true })) }, { wallet: CARDS() }));
+  add('fcWelcome, a new card met by SEND > FLASHCARD', at('fcWelcome', { fcWelcome: { sats: 1500, unit: 'sat', alt: null, info: null }, flow: 'cardSend', amount: '1500', unit: 'SATS' }, { wallet: CARDS() }));
+  add('fcSpeed, MAX SPEND PER SECOND, the set-up at $5', at('fcSpeed', { fcSpeed: { mode: 'su', unit: 'usd', r: 5 } }));
+  add('fcSpeed, MAX SPEND PER SECOND, LIMITS at $25', at('fcSpeed', { fcSpeed: { mode: 'limit', unit: 'sat', r: 25 }, fc: FC({ tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
+  const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 1500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };
+  add('fcLimits, CARD LIMITS: $5 per sec, $100 per tap', at('fcLimits', { fc: FC(PACED) }, { wallet: CARDS() }));
+  add('fcLimits, CARD LIMITS: none set, a card with no PIN', at('fcLimits', { fc: FC({ pinSet: false, tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
+  add('fcLimits, CARD LIMITS: a card that refuses past its limit', at('fcLimits', { fc: FC({ tap: { known: true, paced: false, limited: true, limit: 2000 } }) }, { wallet: CARDS() }));
+  add('fcLimitConfirm, a per second limit, to be confirmed', at('fcLimitConfirm', { fc: FC(PACED), fcLimit: { sats: 1500 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; a._fcLimitNoPin = false; } }));
+  add('fcLimitConfirm, a per second limit removed', at('fcLimitConfirm', { fc: FC(PACED), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; a._fcLimitNoPin = false; } }));
+  // paying from a card: the owner's confirmation, the price under the amount and NETWORK FROM ARRIVES FEE two by two
+  add('sendConfirm, from a card, an invoice with its fee', at('sendConfirm', { flow: 'send', amount: '', unit: 'SATS', recipient: 'lnbc2100n1stub', recipientKind: 'invoice', quotedFee: 12, quotedAmt: 2100,
+    sendFrom: 'card', fc: FC({ balance: 60000 }), stack: ['flashcard'] }, { wallet: CARDS({ amountOf: (inv) => (/^lnbc/.test(String(inv)) ? 2100 : null),
+      cardOutTotal: (amount, reserve) => amount + reserve }),
+    // (card mode needs the card's screen under the flow: no slide in or out of it, as the on-chain one from a card; the quote is this invoice's)
+    before: (a) => { a._fcCard = { key: KEY_A, info: {}, pieces: [] }; a._nav = { screen: 'sendConfirm', len: 1 }; a._quotedFor = 'lnbc2100n1stub'; },
+    after: (a) => { a._nav = { screen: 'sendConfirm', len: 0 }; } }));
   add('fcLimitConfirm, a limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   add('fcLimitConfirm, a limit for paying without the PIN, kept in dollars', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 5000, usd: 5 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   add('fcLimitConfirm, no limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
@@ -1020,15 +1041,12 @@ function cards() {
   add('card: restore lost card, a cash card', (a) => { a.state.fc = { key: '02' + 'ab'.repeat(32), recoverable: false }; a.fcRestoreThis(); },
     { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
   add('card: restore lost card, a phone that loaded none', (a) => a.fcRestoreLost(), { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
-  // LIMITS on a card of software 1.16 that has a PIN: the third limit, under the other two
-  add('card: change limit, which of the three', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true }, pinSet: true, noPinKnown: true, pin: 'set' }; a.fcSetLimit(); });
   // a card of software before 1.16 is asked for a PIN when it is set up (a card of 1.16 and on is not: it is set up with none), and the pad that adds a PIN says what a card with none is
   add('overlay: a new card\u2019s PIN, for a card of software before 1.16', (a) => { a.state.fc = { noPinKnown: false, pinSet: false, setUp: false }; a.fcSetUp(); });
   add('overlay: ADD PIN, the first pad', (a) => { a.state.fc = { owner: true, ownedHere: true, setUp: true, pinSet: false, noPinKnown: true }; a.fcPinAdd(); });
   // a till whose first tap, with no PIN, found the card wants one
   add('overlay: a card\u2019s PIN, for the second tap', (a) => a.fcPayAsk(500));
-  // LIMITS asks which of a card's two limits, and the limit on one tap has a warning and a confirmation of its own
-  add('card: change limit, which of the two', (a) => { a.state.fc = { owner: true, ownedHere: true, tap: { known: true } }; a.fcSetLimit(); });
+  // the limit on one tap has a warning and a confirmation of its own (LIMITS' rows are the fcLimits views)
   add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
   // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
   add('card: how tap limit works, played out', (a) => { a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });

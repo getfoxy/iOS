@@ -11,14 +11,18 @@
    *                      card up in dollars, the owner's dollars first, and ADD FUNDS asks which every time. The card itself is
    *                      told nothing of it: it takes either currency whatever was chosen
    *   SMALL AMOUNTS      "Do you want to pay small amounts without entering your PIN?" YES or NO; YES opens SET AMOUNT for
-   *                      how much (the no-PIN allowance), as LIMITS on the card's screen does
-   *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES opens SET AMOUNT for the limit on one payment,
-   *                      with the line "It will take N seconds to pay $X." under the amount as it is typed
+   *                      how much (the no-PIN allowance), titled NO PIN AMOUNT?
+   *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX SPEND PER SECOND
+   *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
-   * Both amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
+   * The card holds one limit on a payment, L, which it pays at once, and waits about three seconds for each further L (it has no
+   * clock: it counts the phone's askings). So a rate of R a second is L = 3 × R, and a card's limit is said as L / 3 a second
+   * wherever it is shown (`fcSpeedText`): $5 a second is a limit of $15.
+   *
+   * The amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
    * in the card's own money: a dollar card's in dollars and nothing else; a bitcoin card's in dollars first, with the screen's
-   * own swap to sats (sats alone where this phone has no price). What the card is sent is what it takes, whichever is typed:
-   * cents for a dollar card, sats for a bitcoin card.
+   * own swap to sats (sats alone where this phone has no price, which is also where the rate is typed rather than chosen). What
+   * the card is sent is what it takes, whichever is typed: cents for a dollar card, sats for a bitcoin card.
    *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
    *
    * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
@@ -104,8 +108,8 @@
     const su = this._fcSu;
     if (!su) return;
     this.blockedCard('fc-su-tap', {
-      tone: 'ask', title: 'MAX PER TAP',
-      reason: 'Do you want to set a max per tap?',
+      tone: 'ask', title: 'SPEND PER SECOND',
+      reason: 'Do you want to limit how much the card pays each second?',
       retry: 'YES', go: () => this.fcSuAmount('tap'),
       shut: { label: 'NO', pill: true, tap: () => { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } },
     });
@@ -116,12 +120,15 @@
    * set-up was asked over (the card's own, or SEND's keypad for a card set up for somebody else) is put back as it was when the
    * amount is left either way. */
   FC_SU_FLOWS = { noPin: 'cardSuNoPin', tap: 'cardSuTap' };
-  fcSuAmount(which) {
+  /* (the limit on a payment is asked as a rate on MAX SPEND PER SECOND, `fcSpeedOpen`, where the card's figures can be said in dollars; on
+   * SET AMOUNT in sats otherwise, a bitcoin card with no price, and from that screen when its figure is tapped, `other`) */
+  fcSuAmount(which, other) {
     const su = this._fcSu;
     if (!su) return;
     const s = this.state;
     if (!su.was) su.was = { screen: s.screen, stack: s.stack, flow: s.flow, amount: s.amount, unit: s.unit };
     su.ask = which;
+    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
   }
 
@@ -142,6 +149,7 @@
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
    * dollars, those dollars (as LIMITS keeps them, `fcAmountNext`); then the next step. Nothing typed is refused, as LIMITS refuses it. */
+  /* (the limit on a payment is typed as a rate, so what the card is sent is three seconds of it: FC_SPEED_SECS) */
   fcSuAmountNext() {
     const su = this._fcSu;
     const which = this.fcSuAsking();
@@ -149,13 +157,16 @@
     const amount = this.fcTyped();
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
     const usd = this.fcSuUnitNow() === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0;
-    if (which === 'tap') { su.tapLimit = amount; su.tapUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    const k = this.FC_SPEED_SECS;
+    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; } else { su.noPin = amount; su.noPinUsd = usd; }
     this.fcSuLeave();
     if (which === 'tap') this.fcSuGo(); else this.fcSuTap();
   }
 
   /* The round back button on SET AMOUNT (01-ui-basics.js, `back`): its question again. True where it was the set-up's. */
+  /* (and on MAX SPEND PER SECOND, while the set-up asks it) */
   fcSuAmountBack() {
+    if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
     if (!which) return false;
     this.fcSuLeave();
@@ -163,11 +174,11 @@
     return true;
   }
 
-  /* The line under the amount on SET AMOUNT for the max per tap: "It will take N seconds to pay $X." for what is typed, in the unit
-   * it is typed in; '' for the other, and before anything is typed. */
+  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (three seconds of
+   * what is typed), in the unit it is typed in; '' for the other, and before anything is typed. */
   fcSuAmountLine() {
     if (this.fcSuAsking() !== 'tap') return '';
-    return this.fcWaitLine(this.fcTyped(), this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
+    return this.fcWaitLine(this.fcTyped() * this.FC_SPEED_SECS, this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
   }
 
   /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
@@ -211,4 +222,246 @@
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
+  }
+
+  /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
+   *
+   * The limit on a payment, asked as how fast the card pays (the owner's design): the figure a second, big, six of them to choose
+   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
+   * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
+   * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up
+   * (`mode` 'su', `fcSuAmount`) and by CARD LIMITS (`mode` 'limit', `fcLimitAmount`) for a card that waits for its limit (`paced`);
+   * a figure that is none of the six is typed on SET AMOUNT, by tapping the figure (`fcSpeedOther`), where it is a figure a second
+   * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
+  FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
+  FC_SPEED_SECS = 3;
+  FC_SPEED_FIRST = 5;
+
+  // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price
+  fcSpeedChoosable(unit) {
+    return unit === 'usd' || ((this.px && this.px()) || 0) > 0;
+  }
+
+  // the limit a rate of `r` dollars a second makes, in `unit`: cents, or sats at this phone's price (0 with none)
+  fcSpeedLimit(r, unit) {
+    const k = this.FC_SPEED_SECS;
+    if (unit === 'usd') return Math.round(r * k * 100);
+    const px = (this.px && this.px()) || 0;
+    return px > 0 ? Math.round(r * k / px * 1e8) : 0;
+  }
+
+  /* A limit `n` in `unit` as the dollars a second it makes: exact for cents, and for the dollars a bitcoin card's limit was set at
+   * (`usd`); at this phone's price otherwise; 0 where there is none. */
+  fcSpeedDollars(n, unit, usd) {
+    const k = this.FC_SPEED_SECS;
+    if (!(n > 0)) return 0;
+    if (unit === 'usd') return n / 100 / k;
+    if (usd > 0) return usd / k;
+    const px = (this.px && this.px()) || 0;
+    return px > 0 ? (n / 1e8) * px / k : 0;
+  }
+
+  // the chip a rate is, within a hundredth of it (a bitcoin card's limit is whole sats, and follows the price), or 0
+  fcSpeedChip(r) {
+    return this.FC_SPEED_CHIPS.filter((x) => Math.abs(r - x) <= x / 100)[0] || 0;
+  }
+
+  /* A limit said as its rate: "$5" where it is a chip, "$1.67" where it is not, "₿100" for a bitcoin card with no dollars to say it in. */
+  fcSpeedText(n, unit, usd) {
+    const r = this.fcSpeedDollars(n, unit, usd);
+    if (r >= 0.005) { const c = this.fcSpeedChip(r); return '$' + (c ? String(c) : this.usd(r)); }
+    return '₿' + this.group(Math.round((Number(n) || 0) / this.FC_SPEED_SECS));
+  }
+
+  // the dollars this phone set a bitcoin card's limit on a payment at (the wallet's `cardPaceUsd`), or 0
+  fcKeptUsd(fc) {
+    const W = this.fcW ? this.fcW() : null;
+    if (!fc || !fc.key || fc.unit === 'usd' || fc.cents || !W || !W.cardPaceUsd) return 0;
+    return Number(W.cardPaceUsd(fc.key)) || 0;
+  }
+
+  // whether the card on show waits for its limit on a payment, rather than refusing past it: its limit is a rate
+  fcPacedNow() {
+    const fc = this.state.fc;
+    return !!(fc && fc.tap && fc.tap.paced);
+  }
+
+  // the unit a card's limits are kept in: cents for a dollar card and for a card of 1.23 (both its currencies), sats otherwise
+  fcLimitKeptUnit(fc) {
+    return (fc && (fc.cents || fc.unit === 'usd')) ? 'usd' : 'sat';
+  }
+
+  fcSpeedOpen(mode, unit, r) {
+    this.setState(p => ({ screen: 'fcSpeed', stack: p.screen === 'fcSpeed' ? p.stack : p.stack.concat([p.screen]),
+                          fcSpeed: { mode: mode === 'su' ? 'su' : 'limit', unit: unit === 'usd' ? 'usd' : 'sat', r: Number(r) || this.FC_SPEED_FIRST } }));
+  }
+
+  fcSpeedPick(r) {
+    this.setState(p => ({ fcSpeed: Object.assign({}, p.fcSpeed, { r }) }));
+  }
+
+  // NEXT: the limit the rate makes, to the set-up's tap or to the limit's confirmation
+  fcSpeedNext() {
+    const fs = this.state.fcSpeed;
+    if (!fs) return;
+    const limit = this.fcSpeedLimit(fs.r, fs.unit);
+    if (!(limit > 0)) { this.toast('Choose an amount first.', true); return; }
+    const usd = fs.unit === 'usd' ? 0 : fs.r * this.FC_SPEED_SECS;
+    if (fs.mode === 'su') {
+      const su = this._fcSu;
+      if (!su) return;
+      su.tapLimit = limit;
+      su.tapUsd = usd;
+      this.fcSuLeave();
+      this.fcSuGo();
+      return;
+    }
+    this.fcLimitConfirm(limit, usd);
+  }
+
+  // the figure tapped: another rate, typed on SET AMOUNT (with NO LIMIT under it on LIMITS)
+  fcSpeedOther() {
+    const fs = this.state.fcSpeed;
+    if (!fs) return;
+    if (fs.mode === 'su') { this.fcSuAmount('tap', true); return; }
+    this.fcAmount('cardLimit');
+  }
+
+  // its round back button: the set-up's question again, or the card's screen
+  fcSpeedBack() {
+    const fs = this.state.fcSpeed;
+    if (fs && fs.mode === 'su' && this._fcSu) { this.fcSuLeave(); this.fcSuTap(); return; }
+    this.fcLimitCancel();
+  }
+
+  /* CONTINUE on a limit's first step (`fcLimitAsk`): the rate, for the limit on a payment of a card that waits for it; SET AMOUNT for
+   * any other limit, and for that one where it cannot be said in dollars. */
+  fcLimitAmount() {
+    if (this._fcLimitTap && this.fcPacedNow() && this.fcSpeedChoosable(this.fcLimitUnit())) {
+      const fc = this.state.fc;
+      const now = (fc.tap && fc.tap.limited) ? this.fcSpeedChip(this.fcSpeedDollars(fc.tap.limit, this.fcLimitKeptUnit(fc), this.fcKeptUsd(fc))) : 0;
+      this.fcSpeedOpen('limit', this.fcLimitUnit(), now || this.FC_SPEED_FIRST);
+      return;
+    }
+    this.fcAmount('cardLimit');
+  }
+
+  /* ---- CARD LIMITS ------------------------------------------------------------------------------------------------------
+   *
+   * LIMITS in the card's menu (`fcSetLimit`): the card's picture and a row for each limit its owner can change, with what it is now.
+   * PER SECOND LIMIT (PER TAP LIMIT on a card that refuses past its limit rather than waiting) and, on a card with a PIN whose
+   * software has it, NO PIN LIMIT. A row opens that limit's own steps (`fcLimitAsk`) from the card's screen; CLOSE and the round
+   * back button go back to it. */
+  fcLimitsOpen() {
+    this.setState(p => ({ screen: 'fcLimits', stack: p.screen === 'fcLimits' ? p.stack : p.stack.concat([p.screen]), open0: false }));
+  }
+
+  fcLimitsLeave() {
+    if (this.state.screen !== 'fcLimits') return;
+    this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+  }
+
+  // the rows: { key, label, sub, value, unit, tap }
+  fcLimitRows() {
+    const fc = this.state.fc;
+    if (!fc) return [];
+    const LU = this.fcLimitKeptUnit(fc);
+    const whole = (t) => String(t).replace(/\.00$/, '');
+    const tap = fc.tap || {};
+    const rows = [tap.paced ? {
+      key: 'tap', label: 'PER SECOND LIMIT', sub: 'How fast the card can pay',
+      value: tap.limited ? this.fcSpeedText(tap.limit, LU, this.fcKeptUsd(fc)) : 'NO LIMIT', unit: tap.limited ? 'per sec' : '',
+    } : {
+      key: 'tap', label: 'PER TAP LIMIT', sub: 'Most it pays in one tap',
+      value: tap.limited ? whole(this.fcPrice(tap.limit, LU)) : 'NO LIMIT', unit: tap.limited ? 'per tap' : '',
+    }];
+    if (fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked') {
+      const n = (fc.noPin && fc.noPin.known && fc.noPin.set) ? Number(fc.noPin.limit) || 0 : 0;
+      // (before 1.21 the allowance is a day's; from 1.21 the PIN fills it again)
+      rows.push({ key: 'nopin', label: 'NO PIN LIMIT', sub: 'Most it pays without a PIN',
+        value: n > 0 ? whole(this.fcPrice(n, LU)) : 'NONE', unit: n > 0 ? (fc.pinFirst ? 'per tap' : 'a day') : '' });
+    }
+    return rows.map((r) => Object.assign(r, { unitShown: !!r.unit, tap: () => this.fcLimitsGo(r.key) }));
+  }
+
+  fcLimitsGo(which) {
+    this.fcLimitsLeave();
+    if (which === 'nopin') this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin');
+    else this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true);
+  }
+
+  /* ---- WELCOME TO YOUR CASHU CARD ------------------------------------------------------------------------------------------
+   *
+   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD, RESTORE LOST CARD and CANCEL. Drawn over the
+   * card's screen for a card read there that this phone can set up (`fcWelcomeCard`; a set-up this phone began for a card's holder is
+   * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FLASHCARD
+   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). RESTORE LOST CARD is the
+   * list of cards this phone can take back (`fcRestoreLost`); CANCEL is HOME from the card's screen, and SEND's keypad from SEND. */
+  fcWelcomeCard(s) {
+    const fc = s && s.fc;
+    return !!fc && !fc.setUp && fc.pin !== 'blocked' && !(fc.forHolder && fc.pinSet);
+  }
+
+  fcWelcomeSend(sats, unit, alt, info) {
+    this.setState(p => ({ screen: 'fcWelcome', stack: p.screen === 'fcWelcome' ? p.stack : p.stack.concat([p.screen]),
+                          fcWelcome: { sats, unit, alt: alt || null, info: info || null } }));
+  }
+
+  fcWelcomeSetUp() {
+    const w = this.state.screen === 'fcWelcome' ? this.state.fcWelcome : null;
+    if (w) { this.fcSendSetUp(w.sats, w.unit, w.alt, w.info); return; }
+    this.fcSetUp();
+  }
+
+  fcWelcomeCancel() {
+    if (this.state.screen === 'fcWelcome') {
+      this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1), fcWelcome: null }));
+      return;
+    }
+    this.fcGoHome();
+  }
+
+  /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title
+   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). */
+  /** @param {RenderContext} c */
+  renderCardScreens(c) {
+    const { s, sc } = c;
+    const sendWelcome = sc === 'fcWelcome';
+    const welcome = sendWelcome || (sc === 'flashcard' && this.fcWelcomeCard(s));
+    const limits = sc === 'fcLimits';
+    const fc = (!sendWelcome && s.fc) || null;
+    const w = sendWelcome ? (s.fcWelcome || {}) : null;
+    const line = w ? ((w.info && w.info.keepPin) ? 'Its set-up was cut short. The person who holds it finishes it here.'
+      : 'Set it up for the person who holds it. The money goes on in the same tap.')
+      : (fc && fc.pin === 'set' && !fc.hasRecord) ? 'Its set-up was cut short. Finish it to put money on it.' : '';
+    const fs = sc === 'fcSpeed' ? (s.fcSpeed || null) : null;
+    const r = fs ? Number(fs.r) || 0 : 0;
+    return {
+      isFcPanel: welcome || limits,
+      fpWelcome: welcome,
+      fpLimits: limits,
+      fpDesign: this.fcDesignOf(fc),
+      // (the welcome's picture with more room round it, CARD LIMITS' a little wider for its rows)
+      fpGap: welcome ? '40px' : '28px',
+      fpSide: welcome ? '16px' : '20px',
+      fpLine: line,
+      fpLineShown: !!line,
+      fpSetUp: () => this.fcWelcomeSetUp(),
+      fpRestore: () => this.fcRestoreLost(),
+      fpCancel: () => this.fcWelcomeCancel(),
+      fpRows: limits ? this.fcLimitRows() : [],
+      fpBack: () => this.fcLimitsLeave(),
+      isFcSpeed: !!fs,
+      fsFigure: String(r),
+      fsChips: !fs ? [] : this.FC_SPEED_CHIPS.map((x) => ({
+        label: '$' + x,
+        bg: x === r ? 'var(--acc)' : 'var(--surface)',
+        edge: x === r ? 'var(--acc)' : 'rgba(var(--ink-rgb),.1)',
+        ink: x === r ? '#fff' : 'var(--ink)',
+        tap: () => this.fcSpeedPick(x),
+      })),
+      fsNext: () => this.fcSpeedNext(),
+      fsOther: () => this.fcSpeedOther(),
+      fsBack: () => this.fcSpeedBack(),
+    };
   }

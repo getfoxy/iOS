@@ -285,7 +285,37 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 /* An amount typed on the SET AMOUNT screen, in sats, and NEXT pressed. */
 const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
 
+/* The card screens of the owner's designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
+ *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD, RESTORE LOST CARD and CANCEL by their labels;
+ *   limits    CARD LIMITS: its rows ("LABEL | sub | value | unit"), and a row pressed by its label, or CLOSE;
+ *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back. */
+const screens = (a) => a.renderCardScreens({ s: a.state, sc: a.state.screen });
+function welcome(a) {
+  const v = screens(a);
+  if (!v.isFcPanel || !v.fpWelcome) return null;
+  const go = { 'SET UP CARD': v.fpSetUp, 'RESTORE LOST CARD': v.fpRestore, CANCEL: v.fpCancel };
+  return { line: v.fpLine, design: v.fpDesign, buttons: Object.keys(go).join(), press(label) { go[label](); } };
+}
+function limits(a) {
+  const v = screens(a);
+  if (!v.isFcPanel || !v.fpLimits) return null;
+  return {
+    rows: v.fpRows.map((r) => [r.label, r.sub, r.value, r.unit].join(' | ')),
+    labels: v.fpRows.map((r) => r.label).join(),
+    press(label) { if (label === 'CLOSE') { v.fpBack(); return; } v.fpRows.filter((r) => r.label === label)[0].tap(); },
+  };
+}
+function speed(a) {
+  const v = screens(a);
+  if (!v.isFcSpeed) return null;
+  return {
+    figure: v.fsFigure, chips: v.fsChips.map((k) => k.label).join(), chosen: v.fsChips.filter((k) => k.bg === 'var(--acc)').map((k) => k.label).join(),
+    mode: a.state.fcSpeed && a.state.fcSpeed.mode,
+    pick(r) { v.fsChips.filter((k) => k.label === '$' + r)[0].tap(); return speed(a); },
+    next() { v.fsNext(); }, other() { v.fsOther(); }, back() { v.fsBack(); },
+  };
+}
 
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn };
+module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed };

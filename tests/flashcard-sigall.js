@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { funded, binaryLoad, why, history, settle, MINT, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
 const { makeCard } = require('./flashcard-card');
-const { appOn, until, pad, stage, card: uiCard, explainer: uiExplainer, vals } = require('./flashcard-ui-kit');
+const { appOn, until, pad, stage, card: uiCard, explainer: uiExplainer, vals, limits: uiLimits } = require('./flashcard-ui-kit');
 
 let failed = 0;
 const ok = (good, name, detail) => {
@@ -692,19 +692,20 @@ async function world(feePpk, sats, make) {
     holder.goFlashcard();
     await until('the card to be read', () => !!holder.state.fc);
     holder.fcSetLimit();
-    const which = uiCard(holder);
-    ok(which && which.title === 'CHANGE CARD LIMITS' && which.reason === 'Which limit would you like to add or change?', 'CHANGE CARD LIMITS asks which limit, in one line', which && which.reason);
-    which.press('PER TAP LIMIT');
-    ok(uiExplainer(holder) && !uiCard(holder) && uiExplainer(holder).title === 'How tap limit works', 'and PER TAP LIMIT opens HOW TAP LIMIT WORKS, the rule played out', uiExplainer(holder) && uiExplainer(holder).title);
+    const which = uiLimits(holder);
+    ok(which && holder.state.screen === 'fcLimits' && which.labels === 'PER SECOND LIMIT,NO PIN LIMIT', 'CARD LIMITS asks which limit, a row for each', which && which.labels);
+    which.press('PER SECOND LIMIT');
+    ok(uiExplainer(holder) && !uiCard(holder) && uiExplainer(holder).title === 'How tap limit works', 'and PER SECOND LIMIT opens HOW TAP LIMIT WORKS, the rule played out', uiExplainer(holder) && uiExplainer(holder).title);
     uiExplainer(holder).finish();
     uiExplainer(holder).press('CONTINUE');
-    holder.state.amount = '0.50';
-    holder.state.unit = 'USD';
-    holder.fcAmountNext();
-    ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 500 && holder.state.fcLimit.usd === 0.5 && /kept at this many dollars/.test(holder.fcLimitSpec().warn),
-       'an amount typed in dollars is confirmed as dollars that the phone will keep the card to', holder.fcLimitSpec().warn);
+    ok(holder.state.screen === 'fcSpeed' && holder.state.fcSpeed.unit === 'sat', 'then MAX SPEND PER SECOND, for a bitcoin card at a price');
+    // (a limit of $0.50 on a payment, kept in dollars, as the rate screen sends one: its sats at the price, and the dollars)
+    holder.fcLimitConfirm(500, 0.5);
+    ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 500 && holder.state.fcLimit.usd === 0.5 && /kept at this many dollars/.test(holder.fcLimitSpec().warn)
+       && holder.fcLimitSpec().amount === '$0.17 / sec',
+       'a limit in dollars is confirmed as the rate it makes, in dollars that the phone will keep the card to', holder.fcLimitSpec().warn);
     holder.fcLimitSpec().go();
-    await until('the limit to be set', () => holder.toasts.some((t) => /Per tap limit set/.test(t)));
+    await until('the limit to be set', () => holder.toasts.some((t) => /Per second limit set/.test(t)));
     ok(V.card.state.tapLimit === 500 && V.H.W.cardPaceUsd(V.card.key) === 0.5, 'the card is given the sats, and the phone keeps the dollars', V.card.state.tapLimit + ' sats, $' + V.H.W.cardPaceUsd(V.card.key));
     // the price moves, and the holder opens FLASHCARD again: the card follows, with nothing asked
     holder.price = 50000;

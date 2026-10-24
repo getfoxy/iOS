@@ -272,7 +272,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
      * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
-     * (a dollar card's has the RATE row, since it pays a bitcoin invoice in dollars). */
+     * (a dollar card's says the mint's price under its amount, since it pays a bitcoin invoice in dollars). */
     if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
         && this.twoUnitsOn && this.twoUnitsOn() && !this.cardSendNow()) return this.confirmTwoSpec();
     /* Waiting on the connection, or on what it is for.
@@ -322,19 +322,19 @@ class Component extends DCLogic {
        * on a screen shown before the payment — a quote or nothing. */
       /* Whose fee it is, in the owner's words: a payment that leaves this mint
        * pays the mint's fees, and the payer pays them (C16). */
+      /* (from a card, as the owner drew it: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
       this.cfRow('FEE', s.quotedFee != null
-        ? 'UP TO ' + cfig(s.quotedFee).main
+        ? (out ? '~' : 'UP TO ') + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
-        { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
+        out ? { half: true } : { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
-    /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. A payment in the card's own
-     * unit would have none; every Lightning invoice names bitcoin, so a dollar card's always has it. */
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
+    /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
+     * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
+     * dollar card, this phone's for a bitcoin card (the owner's design, where it was a RATE row). */
     const cardRate = (cardUsd && this._feeQuote && this._feeQuote.rate) ? Math.round(Number(this._feeQuote.rate.usdPerBtc) || 0) : 0;
-    if (cardRate > 0) {
-      const who = String(this.mintName() || 'the mint');
-      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(cardRate) + ' · ' + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
-    }
+    const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
+    const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
@@ -452,6 +452,8 @@ class Component extends DCLogic {
       const inv = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(s.recipient) : 0;
       Object.assign(spec, { amount: cardHead, amountSub: inv ? '₿ ' + this.group(inv) : '' });
     }
+    // from a card: the price under the amount, where there is one
+    if (out && atLine) spec.amountSub = atLine;
     return spec;
   }
 
@@ -14268,6 +14270,7 @@ class Component extends DCLogic {
       ...this.renderContacts(c),
       ...this.renderMints(c),
       ...this.renderFlashcard(c),
+      ...this.renderCardScreens(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),
       ...this.renderBackup(c),
@@ -15060,7 +15063,11 @@ class Component extends DCLogic {
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      amountTitle: 'SET AMOUNT',
+      /* A card's set-up names its two amounts (the owner's design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
+       * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
+      amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+        : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
+        : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
         ? 'How much to send on chain?'
         : s.flow === 'transfer'
@@ -15073,8 +15080,8 @@ class Component extends DCLogic {
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
-        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
-        : s.flow === 'cardSuTap' ? 'What is the most this card should pay in one tap straight away?'
+        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay without asking you to enter your PIN?'
+        : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
         // a till cap, from SETTINGS (26j-till-caps.js)
@@ -16414,6 +16421,12 @@ class Component extends DCLogic {
     const setUp = cardFlow && !cc;
     // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
     const receiving = !cardFlow && s.flow === 'receive';
+    /* A card's set-up, as the owner drew it: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
+     * dollars' frost and bitcoin's fur. */
+    if (both && setUp) {
+      LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',
+        blend: 'normal,' + LOOK.sat.blend, edge: 'rgba(255,255,255,.22)', badgeBg: '#FFFFFF', badgeInk: '#10161B', sym: '$\u20bf' };
+    }
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
@@ -16424,8 +16437,14 @@ class Component extends DCLogic {
         // (setting a card up shows no balances: they would read as what the card already holds)
         balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
         labelShown: u !== 'both' && !setUp && !receiving,
-        badgePx: three ? '52px' : '92px', badgeFont: three ? '28px' : '50px', nameSize: three ? '26px' : '34px',
-        balSize: three ? '20px' : '24px', gap: three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
+        badgePx: setUp ? '60px' : three ? '52px' : '92px', badgeFont: setUp ? (u === 'both' ? '20px' : '30px') : three ? '28px' : '50px',
+        nameSize: setUp ? '28px' : three ? '26px' : '34px',
+        balSize: three ? '20px' : '24px', gap: setUp ? '8px' : three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
+        radius: setUp ? '30px' : '34px',
+        // (the big faint sign behind each card, and a balance line, are not on the set-up's tiles nor a receive's; BOTH's badge has the two signs, the ₿ in fur)
+        markShown: !setUp, balShown: !setUp && !receiving,
+        symOne: !(setUp && u === 'both'), symTwo: setUp && u === 'both',
+        nameShadow: (setUp && u === 'both') ? '0 2px 8px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.5)' : 'none',
         tag: tag, tagShown: !!tag,
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
@@ -16451,10 +16470,13 @@ class Component extends DCLogic {
       curTitle: pick ? 'WALLET' : 'CURRENCY',
       curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
         : cc ? String(cc.question || '')
-        : cardFlow ? 'WHAT WILL THIS CARD HOLD?'
+        : cardFlow ? 'What will this card hold?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
-      curGap: three ? '12px' : '16px',
+      curGap: setUp ? '14px' : three ? '12px' : '16px',
+      // (the set-up's tiles stand alone, with nothing under them)
+      curFootShown: !setUp,
+      curTilesOnly: setUp,
       curFoot: pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
@@ -22707,7 +22729,11 @@ class Component extends DCLogic {
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
     /* A limit typed in dollars is kept in dollars (`fcLimitRun`): the card holds sats, and the price moves. A dollar card's
      * limit is dollars, and is never kept at anything: no dollars are sent to keep it at. */
-    else if (flow === 'cardLimit') this.fcLimitConfirm(sats, unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0);
+    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent three seconds of it, 26j-card-wheel.js)
+    else if (flow === 'cardLimit') {
+      const k = (this._fcLimitTap && this.fcPacedNow && this.fcPacedNow()) ? this.FC_SPEED_SECS : 1;
+      this.fcLimitConfirm(sats * k, (unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0) * k);
+    }
   }
 
   /* Off the keypad and back to the card's own screen, once an amount has
@@ -24755,8 +24781,8 @@ class Component extends DCLogic {
    * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
   cardFlowBusy() {
     return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard()
-      // (the set-up's SET AMOUNT, 26j-card-wheel.js)
-      || !!(this.fcSuAsking && this.fcSuAsking());
+      // (the set-up's SET AMOUNT, 26j-card-wheel.js, and its MAX SPEND PER SECOND)
+      || !!(this.fcSuAsking && this.fcSuAsking()) || !!(this._fcSu && this.state.screen === 'fcSpeed');
   }
 
   // a card's PIN pad, asked for a tap, is still up
@@ -25333,7 +25359,8 @@ class Component extends DCLogic {
    * they said is in docs/CARD.md). No limit is asked for or suggested: a new
    * card has none, and one is set later from LIMITS. A PIN is typed
    * here, once, and never again to add funds. The mint is this phone's, shown
-   * and not chosen. */
+   * and not chosen. It is reached from WELCOME TO YOUR CASHU CARD's SET UP CARD (26j-card-wheel.js, `fcWelcomeSetUp`), the screen a
+   * new card lands on. */
   fcSetUp() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -25844,7 +25871,8 @@ class Component extends DCLogic {
     this._fcLimitTap = tap === true;
     this._fcLimitNoPin = np;
     if (tap === true && this.fcShaped()) {
-      this.fcTapLimitExplainer({ over: this.fcWaitOver(), more: this.fcWaitMore(), go: () => this.fcAmount('cardLimit'), cancel: () => { this._fcLimitDone = null; } });
+      // (CONTINUE: the rate, MAX SPEND PER SECOND, for a card that waits for its limit, 26j-card-wheel.js `fcLimitAmount`)
+      this.fcTapLimitExplainer({ over: this.fcWaitOver(), more: this.fcWaitMore(), go: () => this.fcLimitAmount(), cancel: () => { this._fcLimitDone = null; } });
       return;
     }
     this.blockedCard('fc-limit-warn', np ? {
@@ -25856,7 +25884,7 @@ class Component extends DCLogic {
         : 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
           + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      retry: 'CONTINUE', go: () => this.fcLimitAmount(),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     } : {
       tone: 'warn', title: 'SET PER TAP LIMIT',
@@ -25864,7 +25892,7 @@ class Component extends DCLogic {
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      retry: 'CONTINUE', go: () => this.fcLimitAmount(),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     });
   }
@@ -25876,6 +25904,8 @@ class Component extends DCLogic {
       return (this.state.fc && this.state.fc.pinFirst) ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
         : 'What is the most this card should pay in a day without its PIN?';
     }
+    // (a card that waits for its limit: the figure typed is a rate, 26j-card-wheel.js)
+    if (this.fcPacedNow && this.fcPacedNow()) return 'What is the most this card should pay each second?';
     return 'What is the most this card should pay in one tap straight away?';
   }
 
@@ -25913,6 +25943,30 @@ class Component extends DCLogic {
         go: () => this.fcLimitConfirmed(),
       };
     }
+    /* A card that waits for its limit: the limit said as the rate it makes (26j-card-wheel.js, `fcSpeedText`), and the limit itself in the
+     * words under it. */
+    if (this.fcPacedNow && this.fcPacedNow()) {
+      const usd = ((this.state.fcLimit || {}).usd) || 0;
+      const fc = this.state.fc;
+      const L = U === 'usd' ? this.fcSats(sats, 'usd') : usd > 0 ? '$ ' + this.usd(usd) : fig(sats).main;
+      return !(sats > 0) ? {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER SECOND LIMIT.',
+        amount: 'NO LIMIT', amountSub: '', rows: [],
+        warn: 'One tap will be able to pay as much as the card holds straight away.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      } : {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
+        amount: this.fcSpeedText(sats, U, usd) + ' / sec', amountSub: '', rows: [],
+        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every ' + L + ' beyond that. '
+          + (usd > 0 ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
+          + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (fc && fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
+          + this.fcAboveKept(this._fcCard, sats, U)
+          + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      };
+    }
     return !(sats > 0) ? {
       title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
       amount: 'NO LIMIT', amountSub: '', rows: [],
@@ -25934,12 +25988,13 @@ class Component extends DCLogic {
     };
   }
 
-  /* Off the confirmation and the keypad under it, to where the flow began. */
+  /* Off the confirmation and the keypad and MAX SPEND PER SECOND under it, to where the flow began. */
   fcLimitLeave() {
     this.setState(p => {
-      const at = p.screen === 'fcLimitConfirm' ? 2 : p.screen === 'amount' ? 1 : 0;
-      const back = p.stack.length >= at ? p.stack[p.stack.length - at] : 'flashcard';
-      return at ? { screen: back, stack: p.stack.slice(0, -at), fcLimit: null, flow: 'receive', amount: '', unit: 'USD' } : { fcLimit: null };
+      const LEAVE = ['fcLimitConfirm', 'amount', 'fcSpeed'];
+      let screen = p.screen, at = 0;
+      while (LEAVE.indexOf(screen) >= 0) { at += 1; screen = p.stack.length >= at ? p.stack[p.stack.length - at] : 'flashcard'; }
+      return at ? { screen, stack: p.stack.slice(0, Math.max(0, p.stack.length - at)), fcLimit: null, fcSpeed: null, flow: 'receive', amount: '', unit: 'USD' } : { fcLimit: null };
     });
   }
 
@@ -26124,16 +26179,8 @@ class Component extends DCLogic {
     /* The limit on one payment and the no-PIN limit. This phone sets no daily limit (the card's own rule since 1.21), and says
      * nothing of one a card has. A card whose software has no limit on one tap (an older one) has none this phone sets. */
     if (!(fc.tap && fc.tap.known)) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software has no limit on one tap.' }); return; }
-    // a second for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
-    const np = !!(fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked');
-    this.blockedCard('fc-limit-which', Object.assign({
-      tone: 'ask', title: 'CHANGE CARD LIMITS',
-      reason: 'Which limit would you like to add or change?',
-      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
-    }, np ? {
-      shut: { label: 'NO PIN LIMIT', pill: true, tap: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin') },
-      also: { label: 'CLOSE' },
-    } : { shut: { label: 'CLOSE' } }));
+    // CARD LIMITS (26j-card-wheel.js): a row for each, and a second for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
+    this.fcLimitsOpen();
   }
 
   /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked, unless the card holds
@@ -26158,7 +26205,7 @@ class Component extends DCLogic {
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((np ? 'No PIN limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+        this.toast((np ? 'No PIN limit ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a)); return; }
@@ -27066,10 +27113,12 @@ class Component extends DCLogic {
         }
         // (not started in a currency, and decided by the card: what is asked again is in the one decided)
         if (e && e.card === 'pin-needed' && !pin && !made) { this.fcSendAsk(sats, unit || 'sat', alt); return; }
+        /* (WELCOME TO YOUR CASHU CARD first, the one way into any card's set-up, 26j-card-wheel.js `fcWelcomeSend`: its SET UP CARD is
+         * the set-up for the holder, with what is being sent) */
         if (e && e.card === 'needs-set-up' && !made) {
           // (a new card, not started in a currency: the one typed in, where this phone holds it)
-          if (!unit && fig) { const u = typedUsd && fig.usd > 0 && fig.usd <= this.fcHave('usd') ? 'usd' : 'sat'; this.fcSendSetUp(fig[u], u, null, e.info); return; }
-          this.fcSendSetUp(sats, unit, alt, e.info);
+          if (!unit && fig) { const u = typedUsd && fig.usd > 0 && fig.usd <= this.fcHave('usd') ? 'usd' : 'sat'; this.fcWelcomeSend(fig[u], u, null, e.info); return; }
+          this.fcWelcomeSend(sats, unit, alt, e.info);
           return;
         }
         if (made) {
@@ -27339,7 +27388,11 @@ class Component extends DCLogic {
     const x = this.state.fcXl || { amount: 0, cardUnit: 'sat', payUnit: 'sat', mint: '', home: '' };
     const cu = x.cardUnit === 'usd' ? 'usd' : 'sat';
     const pu = x.payUnit === 'usd' ? 'usd' : 'sat';
-    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
+    /* (the owner's design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
+     * sats are at the market price) */
+    const rate = (this.satUsd && this.satUsd()) || 0;
+    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: rate ? '\u20bf ' + this.group(Math.round(n / 100 / rate)) : '' } : this.money(n));
+    // (the figure YOU PAY has its sats under it in brackets, "(₿ 126)": the confirmation shell's own)
     const p = x.plan;
     const known = !!p;
     // what the card will get: the pieces as cut at its mint (`plan.land`), which can differ from the amount typed
@@ -27348,13 +27401,12 @@ class Component extends DCLogic {
       this.cfRow('ON THE CARD', on.main, { sub: on.sub }),
       this.cfRow('FEE, PAID BY YOU', x.err && !known ? 'UNKNOWN' : known ? 'UP TO ' + fig(p.fee, pu).main : 'CHECKING…',
                  { sub: known ? fig(p.fee, pu).sub : '', ink: 'var(--btc-ink)' }),
-      this.cfRow('THE CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
+      this.cfRow('CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
       this.cfRow('YOUR MINT', String(this.mintNameOf(x.home) || '').toUpperCase(), { half: true }),
     ];
-    const subtitle = 'This card’s money is at another mint. Your money goes there by Lightning, and you pay the fee.'
-      + (known ? ' What the fee does not use comes back to you.' : '');
+    const subtitle = 'This card is at another mint. Your money goes there by Lightning, and you pay the fee.';
     const cta = 'PUT ' + on.main + ' ON CARD';
-    const head = { title: 'A CARD AT ANOTHER MINT', amountLabel: 'YOU PAY', rows, subtitle };
+    const head = { title: 'CARD AT DIFFERENT MINT', amountLabel: 'YOU PAY', rows, subtitle };
     // this phone cannot cover it: said, with the button greyed; asking again cannot change it, and the way out is the round back button
     if (known && x.short) {
       return Object.assign(head, { amount: 'UP TO ' + fig(p.total, pu).main, amountSub: fig(p.total, pu).sub, amountInk: '#FF5C5C',
@@ -28299,8 +28351,10 @@ class Component extends DCLogic {
      * "NO LIMIT | NO PIN". What it pays without its PIN is not on the face: the LIMITS row of the menu says it, under it. A card whose
      * one limit is a daily one (set by an older Foxy) says nothing of limits at all: this phone sets no daily limit, and says nothing
      * about one. */
+    // (a card that waits for its limit says it as the rate it makes, 26j-card-wheel.js `fcSpeedText`)
     const limitBase = !(fc && fc.hasRecord) ? '' : (
-      tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
+      (tapped && fc.tap.paced) ? 'PER SECOND LIMIT ' + this.fcSpeedText(fc.tap.limit, LU, this.fcKeptUsd(fc))
+      : tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
       // another phone's card keeps its per tap limit to its owner: it is not said to have none
       : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? ''
       // only a no PIN limit: the face says nothing of it (the LIMITS row does)
@@ -29921,14 +29975,18 @@ class Component extends DCLogic {
    *                      card up in dollars, the owner's dollars first, and ADD FUNDS asks which every time. The card itself is
    *                      told nothing of it: it takes either currency whatever was chosen
    *   SMALL AMOUNTS      "Do you want to pay small amounts without entering your PIN?" YES or NO; YES opens SET AMOUNT for
-   *                      how much (the no-PIN allowance), as LIMITS on the card's screen does
-   *   MAX PER TAP        "Do you want to set a max per tap?" YES or NO; YES opens SET AMOUNT for the limit on one payment,
-   *                      with the line "It will take N seconds to pay $X." under the amount as it is typed
+   *                      how much (the no-PIN allowance), titled NO PIN AMOUNT?
+   *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX SPEND PER SECOND
+   *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
-   * Both amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
+   * The card holds one limit on a payment, L, which it pays at once, and waits about three seconds for each further L (it has no
+   * clock: it counts the phone's askings). So a rate of R a second is L = 3 × R, and a card's limit is said as L / 3 a second
+   * wherever it is shown (`fcSpeedText`): $5 a second is a limit of $15.
+   *
+   * The amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
    * in the card's own money: a dollar card's in dollars and nothing else; a bitcoin card's in dollars first, with the screen's
-   * own swap to sats (sats alone where this phone has no price). What the card is sent is what it takes, whichever is typed:
-   * cents for a dollar card, sats for a bitcoin card.
+   * own swap to sats (sats alone where this phone has no price, which is also where the rate is typed rather than chosen). What
+   * the card is sent is what it takes, whichever is typed: cents for a dollar card, sats for a bitcoin card.
    *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
    *
    * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
@@ -30014,8 +30072,8 @@ class Component extends DCLogic {
     const su = this._fcSu;
     if (!su) return;
     this.blockedCard('fc-su-tap', {
-      tone: 'ask', title: 'MAX PER TAP',
-      reason: 'Do you want to set a max per tap?',
+      tone: 'ask', title: 'SPEND PER SECOND',
+      reason: 'Do you want to limit how much the card pays each second?',
       retry: 'YES', go: () => this.fcSuAmount('tap'),
       shut: { label: 'NO', pill: true, tap: () => { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } },
     });
@@ -30026,12 +30084,15 @@ class Component extends DCLogic {
    * set-up was asked over (the card's own, or SEND's keypad for a card set up for somebody else) is put back as it was when the
    * amount is left either way. */
   FC_SU_FLOWS = { noPin: 'cardSuNoPin', tap: 'cardSuTap' };
-  fcSuAmount(which) {
+  /* (the limit on a payment is asked as a rate on MAX SPEND PER SECOND, `fcSpeedOpen`, where the card's figures can be said in dollars; on
+   * SET AMOUNT in sats otherwise, a bitcoin card with no price, and from that screen when its figure is tapped, `other`) */
+  fcSuAmount(which, other) {
     const su = this._fcSu;
     if (!su) return;
     const s = this.state;
     if (!su.was) su.was = { screen: s.screen, stack: s.stack, flow: s.flow, amount: s.amount, unit: s.unit };
     su.ask = which;
+    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
   }
 
@@ -30052,6 +30113,7 @@ class Component extends DCLogic {
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
    * dollars, those dollars (as LIMITS keeps them, `fcAmountNext`); then the next step. Nothing typed is refused, as LIMITS refuses it. */
+  /* (the limit on a payment is typed as a rate, so what the card is sent is three seconds of it: FC_SPEED_SECS) */
   fcSuAmountNext() {
     const su = this._fcSu;
     const which = this.fcSuAsking();
@@ -30059,13 +30121,16 @@ class Component extends DCLogic {
     const amount = this.fcTyped();
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
     const usd = this.fcSuUnitNow() === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0;
-    if (which === 'tap') { su.tapLimit = amount; su.tapUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    const k = this.FC_SPEED_SECS;
+    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; } else { su.noPin = amount; su.noPinUsd = usd; }
     this.fcSuLeave();
     if (which === 'tap') this.fcSuGo(); else this.fcSuTap();
   }
 
   /* The round back button on SET AMOUNT (01-ui-basics.js, `back`): its question again. True where it was the set-up's. */
+  /* (and on MAX SPEND PER SECOND, while the set-up asks it) */
   fcSuAmountBack() {
+    if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
     if (!which) return false;
     this.fcSuLeave();
@@ -30073,11 +30138,11 @@ class Component extends DCLogic {
     return true;
   }
 
-  /* The line under the amount on SET AMOUNT for the max per tap: "It will take N seconds to pay $X." for what is typed, in the unit
-   * it is typed in; '' for the other, and before anything is typed. */
+  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (three seconds of
+   * what is typed), in the unit it is typed in; '' for the other, and before anything is typed. */
   fcSuAmountLine() {
     if (this.fcSuAsking() !== 'tap') return '';
-    return this.fcWaitLine(this.fcTyped(), this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
+    return this.fcWaitLine(this.fcTyped() * this.FC_SPEED_SECS, this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
   }
 
   /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
@@ -30121,6 +30186,248 @@ class Component extends DCLogic {
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
       }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
+  }
+
+  /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
+   *
+   * The limit on a payment, asked as how fast the card pays (the owner's design): the figure a second, big, six of them to choose
+   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
+   * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
+   * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up
+   * (`mode` 'su', `fcSuAmount`) and by CARD LIMITS (`mode` 'limit', `fcLimitAmount`) for a card that waits for its limit (`paced`);
+   * a figure that is none of the six is typed on SET AMOUNT, by tapping the figure (`fcSpeedOther`), where it is a figure a second
+   * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
+  FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
+  FC_SPEED_SECS = 3;
+  FC_SPEED_FIRST = 5;
+
+  // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price
+  fcSpeedChoosable(unit) {
+    return unit === 'usd' || ((this.px && this.px()) || 0) > 0;
+  }
+
+  // the limit a rate of `r` dollars a second makes, in `unit`: cents, or sats at this phone's price (0 with none)
+  fcSpeedLimit(r, unit) {
+    const k = this.FC_SPEED_SECS;
+    if (unit === 'usd') return Math.round(r * k * 100);
+    const px = (this.px && this.px()) || 0;
+    return px > 0 ? Math.round(r * k / px * 1e8) : 0;
+  }
+
+  /* A limit `n` in `unit` as the dollars a second it makes: exact for cents, and for the dollars a bitcoin card's limit was set at
+   * (`usd`); at this phone's price otherwise; 0 where there is none. */
+  fcSpeedDollars(n, unit, usd) {
+    const k = this.FC_SPEED_SECS;
+    if (!(n > 0)) return 0;
+    if (unit === 'usd') return n / 100 / k;
+    if (usd > 0) return usd / k;
+    const px = (this.px && this.px()) || 0;
+    return px > 0 ? (n / 1e8) * px / k : 0;
+  }
+
+  // the chip a rate is, within a hundredth of it (a bitcoin card's limit is whole sats, and follows the price), or 0
+  fcSpeedChip(r) {
+    return this.FC_SPEED_CHIPS.filter((x) => Math.abs(r - x) <= x / 100)[0] || 0;
+  }
+
+  /* A limit said as its rate: "$5" where it is a chip, "$1.67" where it is not, "₿100" for a bitcoin card with no dollars to say it in. */
+  fcSpeedText(n, unit, usd) {
+    const r = this.fcSpeedDollars(n, unit, usd);
+    if (r >= 0.005) { const c = this.fcSpeedChip(r); return '$' + (c ? String(c) : this.usd(r)); }
+    return '₿' + this.group(Math.round((Number(n) || 0) / this.FC_SPEED_SECS));
+  }
+
+  // the dollars this phone set a bitcoin card's limit on a payment at (the wallet's `cardPaceUsd`), or 0
+  fcKeptUsd(fc) {
+    const W = this.fcW ? this.fcW() : null;
+    if (!fc || !fc.key || fc.unit === 'usd' || fc.cents || !W || !W.cardPaceUsd) return 0;
+    return Number(W.cardPaceUsd(fc.key)) || 0;
+  }
+
+  // whether the card on show waits for its limit on a payment, rather than refusing past it: its limit is a rate
+  fcPacedNow() {
+    const fc = this.state.fc;
+    return !!(fc && fc.tap && fc.tap.paced);
+  }
+
+  // the unit a card's limits are kept in: cents for a dollar card and for a card of 1.23 (both its currencies), sats otherwise
+  fcLimitKeptUnit(fc) {
+    return (fc && (fc.cents || fc.unit === 'usd')) ? 'usd' : 'sat';
+  }
+
+  fcSpeedOpen(mode, unit, r) {
+    this.setState(p => ({ screen: 'fcSpeed', stack: p.screen === 'fcSpeed' ? p.stack : p.stack.concat([p.screen]),
+                          fcSpeed: { mode: mode === 'su' ? 'su' : 'limit', unit: unit === 'usd' ? 'usd' : 'sat', r: Number(r) || this.FC_SPEED_FIRST } }));
+  }
+
+  fcSpeedPick(r) {
+    this.setState(p => ({ fcSpeed: Object.assign({}, p.fcSpeed, { r }) }));
+  }
+
+  // NEXT: the limit the rate makes, to the set-up's tap or to the limit's confirmation
+  fcSpeedNext() {
+    const fs = this.state.fcSpeed;
+    if (!fs) return;
+    const limit = this.fcSpeedLimit(fs.r, fs.unit);
+    if (!(limit > 0)) { this.toast('Choose an amount first.', true); return; }
+    const usd = fs.unit === 'usd' ? 0 : fs.r * this.FC_SPEED_SECS;
+    if (fs.mode === 'su') {
+      const su = this._fcSu;
+      if (!su) return;
+      su.tapLimit = limit;
+      su.tapUsd = usd;
+      this.fcSuLeave();
+      this.fcSuGo();
+      return;
+    }
+    this.fcLimitConfirm(limit, usd);
+  }
+
+  // the figure tapped: another rate, typed on SET AMOUNT (with NO LIMIT under it on LIMITS)
+  fcSpeedOther() {
+    const fs = this.state.fcSpeed;
+    if (!fs) return;
+    if (fs.mode === 'su') { this.fcSuAmount('tap', true); return; }
+    this.fcAmount('cardLimit');
+  }
+
+  // its round back button: the set-up's question again, or the card's screen
+  fcSpeedBack() {
+    const fs = this.state.fcSpeed;
+    if (fs && fs.mode === 'su' && this._fcSu) { this.fcSuLeave(); this.fcSuTap(); return; }
+    this.fcLimitCancel();
+  }
+
+  /* CONTINUE on a limit's first step (`fcLimitAsk`): the rate, for the limit on a payment of a card that waits for it; SET AMOUNT for
+   * any other limit, and for that one where it cannot be said in dollars. */
+  fcLimitAmount() {
+    if (this._fcLimitTap && this.fcPacedNow() && this.fcSpeedChoosable(this.fcLimitUnit())) {
+      const fc = this.state.fc;
+      const now = (fc.tap && fc.tap.limited) ? this.fcSpeedChip(this.fcSpeedDollars(fc.tap.limit, this.fcLimitKeptUnit(fc), this.fcKeptUsd(fc))) : 0;
+      this.fcSpeedOpen('limit', this.fcLimitUnit(), now || this.FC_SPEED_FIRST);
+      return;
+    }
+    this.fcAmount('cardLimit');
+  }
+
+  /* ---- CARD LIMITS ------------------------------------------------------------------------------------------------------
+   *
+   * LIMITS in the card's menu (`fcSetLimit`): the card's picture and a row for each limit its owner can change, with what it is now.
+   * PER SECOND LIMIT (PER TAP LIMIT on a card that refuses past its limit rather than waiting) and, on a card with a PIN whose
+   * software has it, NO PIN LIMIT. A row opens that limit's own steps (`fcLimitAsk`) from the card's screen; CLOSE and the round
+   * back button go back to it. */
+  fcLimitsOpen() {
+    this.setState(p => ({ screen: 'fcLimits', stack: p.screen === 'fcLimits' ? p.stack : p.stack.concat([p.screen]), open0: false }));
+  }
+
+  fcLimitsLeave() {
+    if (this.state.screen !== 'fcLimits') return;
+    this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+  }
+
+  // the rows: { key, label, sub, value, unit, tap }
+  fcLimitRows() {
+    const fc = this.state.fc;
+    if (!fc) return [];
+    const LU = this.fcLimitKeptUnit(fc);
+    const whole = (t) => String(t).replace(/\.00$/, '');
+    const tap = fc.tap || {};
+    const rows = [tap.paced ? {
+      key: 'tap', label: 'PER SECOND LIMIT', sub: 'How fast the card can pay',
+      value: tap.limited ? this.fcSpeedText(tap.limit, LU, this.fcKeptUsd(fc)) : 'NO LIMIT', unit: tap.limited ? 'per sec' : '',
+    } : {
+      key: 'tap', label: 'PER TAP LIMIT', sub: 'Most it pays in one tap',
+      value: tap.limited ? whole(this.fcPrice(tap.limit, LU)) : 'NO LIMIT', unit: tap.limited ? 'per tap' : '',
+    }];
+    if (fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked') {
+      const n = (fc.noPin && fc.noPin.known && fc.noPin.set) ? Number(fc.noPin.limit) || 0 : 0;
+      // (before 1.21 the allowance is a day's; from 1.21 the PIN fills it again)
+      rows.push({ key: 'nopin', label: 'NO PIN LIMIT', sub: 'Most it pays without a PIN',
+        value: n > 0 ? whole(this.fcPrice(n, LU)) : 'NONE', unit: n > 0 ? (fc.pinFirst ? 'per tap' : 'a day') : '' });
+    }
+    return rows.map((r) => Object.assign(r, { unitShown: !!r.unit, tap: () => this.fcLimitsGo(r.key) }));
+  }
+
+  fcLimitsGo(which) {
+    this.fcLimitsLeave();
+    if (which === 'nopin') this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin');
+    else this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true);
+  }
+
+  /* ---- WELCOME TO YOUR CASHU CARD ------------------------------------------------------------------------------------------
+   *
+   * What a new card is met with, the one way into its set-up: its picture, SET UP CARD, RESTORE LOST CARD and CANCEL. Drawn over the
+   * card's screen for a card read there that this phone can set up (`fcWelcomeCard`; a set-up this phone began for a card's holder is
+   * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FLASHCARD
+   * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). RESTORE LOST CARD is the
+   * list of cards this phone can take back (`fcRestoreLost`); CANCEL is HOME from the card's screen, and SEND's keypad from SEND. */
+  fcWelcomeCard(s) {
+    const fc = s && s.fc;
+    return !!fc && !fc.setUp && fc.pin !== 'blocked' && !(fc.forHolder && fc.pinSet);
+  }
+
+  fcWelcomeSend(sats, unit, alt, info) {
+    this.setState(p => ({ screen: 'fcWelcome', stack: p.screen === 'fcWelcome' ? p.stack : p.stack.concat([p.screen]),
+                          fcWelcome: { sats, unit, alt: alt || null, info: info || null } }));
+  }
+
+  fcWelcomeSetUp() {
+    const w = this.state.screen === 'fcWelcome' ? this.state.fcWelcome : null;
+    if (w) { this.fcSendSetUp(w.sats, w.unit, w.alt, w.info); return; }
+    this.fcSetUp();
+  }
+
+  fcWelcomeCancel() {
+    if (this.state.screen === 'fcWelcome') {
+      this.setState(p => ({ screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1), fcWelcome: null }));
+      return;
+    }
+    this.fcGoHome();
+  }
+
+  /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title
+   * and what can be done (`isFcPanel`); MAX SPEND PER SECOND is its own (`isFcSpeed`). */
+  /** @param {RenderContext} c */
+  renderCardScreens(c) {
+    const { s, sc } = c;
+    const sendWelcome = sc === 'fcWelcome';
+    const welcome = sendWelcome || (sc === 'flashcard' && this.fcWelcomeCard(s));
+    const limits = sc === 'fcLimits';
+    const fc = (!sendWelcome && s.fc) || null;
+    const w = sendWelcome ? (s.fcWelcome || {}) : null;
+    const line = w ? ((w.info && w.info.keepPin) ? 'Its set-up was cut short. The person who holds it finishes it here.'
+      : 'Set it up for the person who holds it. The money goes on in the same tap.')
+      : (fc && fc.pin === 'set' && !fc.hasRecord) ? 'Its set-up was cut short. Finish it to put money on it.' : '';
+    const fs = sc === 'fcSpeed' ? (s.fcSpeed || null) : null;
+    const r = fs ? Number(fs.r) || 0 : 0;
+    return {
+      isFcPanel: welcome || limits,
+      fpWelcome: welcome,
+      fpLimits: limits,
+      fpDesign: this.fcDesignOf(fc),
+      // (the welcome's picture with more room round it, CARD LIMITS' a little wider for its rows)
+      fpGap: welcome ? '40px' : '28px',
+      fpSide: welcome ? '16px' : '20px',
+      fpLine: line,
+      fpLineShown: !!line,
+      fpSetUp: () => this.fcWelcomeSetUp(),
+      fpRestore: () => this.fcRestoreLost(),
+      fpCancel: () => this.fcWelcomeCancel(),
+      fpRows: limits ? this.fcLimitRows() : [],
+      fpBack: () => this.fcLimitsLeave(),
+      isFcSpeed: !!fs,
+      fsFigure: String(r),
+      fsChips: !fs ? [] : this.FC_SPEED_CHIPS.map((x) => ({
+        label: '$' + x,
+        bg: x === r ? 'var(--acc)' : 'var(--surface)',
+        edge: x === r ? 'var(--acc)' : 'rgba(var(--ink-rgb),.1)',
+        ink: x === r ? '#fff' : 'var(--ink)',
+        tap: () => this.fcSpeedPick(x),
+      })),
+      fsNext: () => this.fcSpeedNext(),
+      fsOther: () => this.fcSpeedOther(),
+      fsBack: () => this.fcSpeedBack(),
+    };
   }
   /* ---- what this phone takes offline before it settles ---------------------
    *

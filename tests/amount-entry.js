@@ -389,6 +389,21 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   ok(amountVals({ val: 1, sendOver: true }).sendOverLabel === 'MORE THAN YOUR BALANCE', 'and the balance’s line is the one it always was');
 }
 
+// ---- a card's set-up asks its amounts on this pad, in the owner's words ----
+{
+  reset({ screen: 'amount', flow: 'cardSuNoPin' });
+  const v = amountVals();
+  ok(v.amountTitle === 'NO PIN AMOUNT?' && v.amountSubtitle === 'What is the most this card should pay without asking you to enter your PIN?',
+     'the set-up\u2019s no PIN amount: NO PIN AMOUNT?, and its question', v.amountTitle + ' | ' + v.amountSubtitle);
+  ok(v.nextBg === 'rgba(var(--ink-rgb),.14)' && v.nextFur === 'none,none,none' && amountVals({ val: 5 }).nextBg === 'var(--acc)',
+     'NEXT is grey until an amount is typed, and the fur button once it is', v.nextBg);
+  reset({ screen: 'amount', flow: 'cardSuTap' });
+  ok(amountVals().amountTitle === 'MAX SPEND PER SECOND' && amountVals().amountSubtitle === 'What is the most this card should pay each second?',
+     'the rate typed rather than chosen: MAX SPEND PER SECOND, a figure a second', amountVals().amountTitle + ' | ' + amountVals().amountSubtitle);
+  reset({ screen: 'amount', flow: 'receive' });
+  ok(amountVals().amountTitle === 'SET AMOUNT', 'every other amount is still SET AMOUNT', amountVals().amountTitle);
+}
+
 // ---- nothing refuses in silence ---------------------------------------
 {
   const buttons = [

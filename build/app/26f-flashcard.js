@@ -738,7 +738,11 @@
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
     /* A limit typed in dollars is kept in dollars (`fcLimitRun`): the card holds sats, and the price moves. A dollar card's
      * limit is dollars, and is never kept at anything: no dollars are sent to keep it at. */
-    else if (flow === 'cardLimit') this.fcLimitConfirm(sats, unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0);
+    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent three seconds of it, 26j-card-wheel.js)
+    else if (flow === 'cardLimit') {
+      const k = (this._fcLimitTap && this.fcPacedNow && this.fcPacedNow()) ? this.FC_SPEED_SECS : 1;
+      this.fcLimitConfirm(sats * k, (unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0) * k);
+    }
   }
 
   /* Off the keypad and back to the card's own screen, once an amount has
@@ -2786,8 +2790,8 @@
    * still to take). Nothing is kept for ever: a confirmation that has waited FC_HOLD_MS is raised whatever is on the screen. */
   cardFlowBusy() {
     return (this._fcTaps || 0) > 0 || this.stageUp('card') || this.stageUp('cardReady') || this.stageUp('cardBack') || this.fcPadUp() || this.fcAskingForCard()
-      // (the set-up's SET AMOUNT, 26j-card-wheel.js)
-      || !!(this.fcSuAsking && this.fcSuAsking());
+      // (the set-up's SET AMOUNT, 26j-card-wheel.js, and its MAX SPEND PER SECOND)
+      || !!(this.fcSuAsking && this.fcSuAsking()) || !!(this._fcSu && this.state.screen === 'fcSpeed');
   }
 
   // a card's PIN pad, asked for a tap, is still up
@@ -3364,7 +3368,8 @@
    * they said is in docs/CARD.md). No limit is asked for or suggested: a new
    * card has none, and one is set later from LIMITS. A PIN is typed
    * here, once, and never again to add funds. The mint is this phone's, shown
-   * and not chosen. */
+   * and not chosen. It is reached from WELCOME TO YOUR CASHU CARD's SET UP CARD (26j-card-wheel.js, `fcWelcomeSetUp`), the screen a
+   * new card lands on. */
   fcSetUp() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -3875,7 +3880,8 @@
     this._fcLimitTap = tap === true;
     this._fcLimitNoPin = np;
     if (tap === true && this.fcShaped()) {
-      this.fcTapLimitExplainer({ over: this.fcWaitOver(), more: this.fcWaitMore(), go: () => this.fcAmount('cardLimit'), cancel: () => { this._fcLimitDone = null; } });
+      // (CONTINUE: the rate, MAX SPEND PER SECOND, for a card that waits for its limit, 26j-card-wheel.js `fcLimitAmount`)
+      this.fcTapLimitExplainer({ over: this.fcWaitOver(), more: this.fcWaitMore(), go: () => this.fcLimitAmount(), cancel: () => { this._fcLimitDone = null; } });
       return;
     }
     this.blockedCard('fc-limit-warn', np ? {
@@ -3887,7 +3893,7 @@
         : 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
           + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n')
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      retry: 'CONTINUE', go: () => this.fcLimitAmount(),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     } : {
       tone: 'warn', title: 'SET PER TAP LIMIT',
@@ -3895,7 +3901,7 @@
         + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.\n\n'
         + 'If you lose the seed phrase for this Foxy app, the PIN and the limits on this card can never be changed.\n\n'
         + 'Do you wish to continue?',
-      retry: 'CONTINUE', go: () => this.fcAmount('cardLimit'),
+      retry: 'CONTINUE', go: () => this.fcLimitAmount(),
       shut: { label: 'CANCEL', tap: () => { this._fcLimitDone = null; } },
     });
   }
@@ -3907,6 +3913,8 @@
       return (this.state.fc && this.state.fc.pinFirst) ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
         : 'What is the most this card should pay in a day without its PIN?';
     }
+    // (a card that waits for its limit: the figure typed is a rate, 26j-card-wheel.js)
+    if (this.fcPacedNow && this.fcPacedNow()) return 'What is the most this card should pay each second?';
     return 'What is the most this card should pay in one tap straight away?';
   }
 
@@ -3944,6 +3952,30 @@
         go: () => this.fcLimitConfirmed(),
       };
     }
+    /* A card that waits for its limit: the limit said as the rate it makes (26j-card-wheel.js, `fcSpeedText`), and the limit itself in the
+     * words under it. */
+    if (this.fcPacedNow && this.fcPacedNow()) {
+      const usd = ((this.state.fcLimit || {}).usd) || 0;
+      const fc = this.state.fc;
+      const L = U === 'usd' ? this.fcSats(sats, 'usd') : usd > 0 ? '$ ' + this.usd(usd) : fig(sats).main;
+      return !(sats > 0) ? {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER SECOND LIMIT.',
+        amount: 'NO LIMIT', amountSub: '', rows: [],
+        warn: 'One tap will be able to pay as much as the card holds straight away.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      } : {
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
+        amount: this.fcSpeedText(sats, U, usd) + ' / sec', amountSub: '', rows: [],
+        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every ' + L + ' beyond that. '
+          + (usd > 0 ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
+          + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (fc && fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
+          + this.fcAboveKept(this._fcCard, sats, U)
+          + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+        secondary, cta: 'CONFIRM', ctaTone: 'go',
+        go: () => this.fcLimitConfirmed(),
+      };
+    }
     return !(sats > 0) ? {
       title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S PER TAP LIMIT.',
       amount: 'NO LIMIT', amountSub: '', rows: [],
@@ -3965,12 +3997,13 @@
     };
   }
 
-  /* Off the confirmation and the keypad under it, to where the flow began. */
+  /* Off the confirmation and the keypad and MAX SPEND PER SECOND under it, to where the flow began. */
   fcLimitLeave() {
     this.setState(p => {
-      const at = p.screen === 'fcLimitConfirm' ? 2 : p.screen === 'amount' ? 1 : 0;
-      const back = p.stack.length >= at ? p.stack[p.stack.length - at] : 'flashcard';
-      return at ? { screen: back, stack: p.stack.slice(0, -at), fcLimit: null, flow: 'receive', amount: '', unit: 'USD' } : { fcLimit: null };
+      const LEAVE = ['fcLimitConfirm', 'amount', 'fcSpeed'];
+      let screen = p.screen, at = 0;
+      while (LEAVE.indexOf(screen) >= 0) { at += 1; screen = p.stack.length >= at ? p.stack[p.stack.length - at] : 'flashcard'; }
+      return at ? { screen, stack: p.stack.slice(0, Math.max(0, p.stack.length - at)), fcLimit: null, fcSpeed: null, flow: 'receive', amount: '', unit: 'USD' } : { fcLimit: null };
     });
   }
 
@@ -4155,16 +4188,8 @@
     /* The limit on one payment and the no-PIN limit. This phone sets no daily limit (the card's own rule since 1.21), and says
      * nothing of one a card has. A card whose software has no limit on one tap (an older one) has none this phone sets. */
     if (!(fc.tap && fc.tap.known)) { this.fcFailed({ card: 'old-card', message: 'This card\u2019s software has no limit on one tap.' }); return; }
-    // a second for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
-    const np = !!(fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked');
-    this.blockedCard('fc-limit-which', Object.assign({
-      tone: 'ask', title: 'CHANGE CARD LIMITS',
-      reason: 'Which limit would you like to add or change?',
-      retry: 'PER TAP LIMIT', go: () => this.fcLimitAsk((sats, usd, pin) => this.fcLimitRun(sats, true, usd, pin), true),
-    }, np ? {
-      shut: { label: 'NO PIN LIMIT', pill: true, tap: () => this.fcLimitAsk((sats, usd) => this.fcLimitRun(sats, 'nopin', usd), 'nopin') },
-      also: { label: 'CLOSE' },
-    } : { shut: { label: 'CLOSE' } }));
+    // CARD LIMITS (26j-card-wheel.js): a row for each, and a second for a card that has a PIN and a software that has the no PIN limit (1.16 and on)
+    this.fcLimitsOpen();
   }
 
   /* One tap that sets the limit with this phone's proof that it is the owner. No PIN is asked, unless the card holds
@@ -4189,7 +4214,7 @@
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((np ? 'No PIN limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+        this.toast((np ? 'No PIN limit ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a)); return; }
@@ -5097,10 +5122,12 @@
         }
         // (not started in a currency, and decided by the card: what is asked again is in the one decided)
         if (e && e.card === 'pin-needed' && !pin && !made) { this.fcSendAsk(sats, unit || 'sat', alt); return; }
+        /* (WELCOME TO YOUR CASHU CARD first, the one way into any card's set-up, 26j-card-wheel.js `fcWelcomeSend`: its SET UP CARD is
+         * the set-up for the holder, with what is being sent) */
         if (e && e.card === 'needs-set-up' && !made) {
           // (a new card, not started in a currency: the one typed in, where this phone holds it)
-          if (!unit && fig) { const u = typedUsd && fig.usd > 0 && fig.usd <= this.fcHave('usd') ? 'usd' : 'sat'; this.fcSendSetUp(fig[u], u, null, e.info); return; }
-          this.fcSendSetUp(sats, unit, alt, e.info);
+          if (!unit && fig) { const u = typedUsd && fig.usd > 0 && fig.usd <= this.fcHave('usd') ? 'usd' : 'sat'; this.fcWelcomeSend(fig[u], u, null, e.info); return; }
+          this.fcWelcomeSend(sats, unit, alt, e.info);
           return;
         }
         if (made) {
@@ -5370,7 +5397,11 @@
     const x = this.state.fcXl || { amount: 0, cardUnit: 'sat', payUnit: 'sat', mint: '', home: '' };
     const cu = x.cardUnit === 'usd' ? 'usd' : 'sat';
     const pu = x.payUnit === 'usd' ? 'usd' : 'sat';
-    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: '' } : this.money(n));
+    /* (the owner's design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
+     * sats are at the market price) */
+    const rate = (this.satUsd && this.satUsd()) || 0;
+    const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: rate ? '\u20bf ' + this.group(Math.round(n / 100 / rate)) : '' } : this.money(n));
+    // (the figure YOU PAY has its sats under it in brackets, "(₿ 126)": the confirmation shell's own)
     const p = x.plan;
     const known = !!p;
     // what the card will get: the pieces as cut at its mint (`plan.land`), which can differ from the amount typed
@@ -5379,13 +5410,12 @@
       this.cfRow('ON THE CARD', on.main, { sub: on.sub }),
       this.cfRow('FEE, PAID BY YOU', x.err && !known ? 'UNKNOWN' : known ? 'UP TO ' + fig(p.fee, pu).main : 'CHECKING…',
                  { sub: known ? fig(p.fee, pu).sub : '', ink: 'var(--btc-ink)' }),
-      this.cfRow('THE CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
+      this.cfRow('CARD’S MINT', String(this.mintNameOf(x.mint) || '').toUpperCase(), { half: true }),
       this.cfRow('YOUR MINT', String(this.mintNameOf(x.home) || '').toUpperCase(), { half: true }),
     ];
-    const subtitle = 'This card’s money is at another mint. Your money goes there by Lightning, and you pay the fee.'
-      + (known ? ' What the fee does not use comes back to you.' : '');
+    const subtitle = 'This card is at another mint. Your money goes there by Lightning, and you pay the fee.';
     const cta = 'PUT ' + on.main + ' ON CARD';
-    const head = { title: 'A CARD AT ANOTHER MINT', amountLabel: 'YOU PAY', rows, subtitle };
+    const head = { title: 'CARD AT DIFFERENT MINT', amountLabel: 'YOU PAY', rows, subtitle };
     // this phone cannot cover it: said, with the button greyed; asking again cannot change it, and the way out is the round back button
     if (known && x.short) {
       return Object.assign(head, { amount: 'UP TO ' + fig(p.total, pu).main, amountSub: fig(p.total, pu).sub, amountInk: '#FF5C5C',
@@ -6330,8 +6360,10 @@
      * "NO LIMIT | NO PIN". What it pays without its PIN is not on the face: the LIMITS row of the menu says it, under it. A card whose
      * one limit is a daily one (set by an older Foxy) says nothing of limits at all: this phone sets no daily limit, and says nothing
      * about one. */
+    // (a card that waits for its limit says it as the rate it makes, 26j-card-wheel.js `fcSpeedText`)
     const limitBase = !(fc && fc.hasRecord) ? '' : (
-      tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
+      (tapped && fc.tap.paced) ? 'PER SECOND LIMIT ' + this.fcSpeedText(fc.tap.limit, LU, this.fcKeptUsd(fc))
+      : tapped ? 'PER TAP LIMIT ' + this.fcPrice(fc.tap.limit, LU)
       // another phone's card keeps its per tap limit to its owner: it is not said to have none
       : (fc.tap && fc.tap.paced && fc.ownedHere !== true && !fc.guestRead) ? ''
       // only a no PIN limit: the face says nothing of it (the LIMITS row does)
