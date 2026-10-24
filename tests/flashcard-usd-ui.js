@@ -709,6 +709,17 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
        'typed: $20.00 a second is a limit of $60.00, said as the rate, with no "kept at this many dollars"', JSON.stringify([sp.amount, sp.amountSub, sp.warn]));
     sp.secondary.go();
     ok(holder.state.screen === 'flashcard' && !holder.state.fcSpeed && !holder.state.fcLimit, 'CANCEL there is the card’s screen, past the keypad and the rate', holder.state.screen);
+    // NO LIMIT under NEXT on the rate: the limit removed, as NO LIMIT on the keypad removes it (`fcLimitConfirm(0)`)
+    holder.fcSetLimit();
+    limits(holder).press('PER SECOND LIMIT');
+    if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
+    ok(speed(holder) && speed(holder).alt === 'NO LIMIT', 'MAX SPEND PER SECOND on LIMITS: NO LIMIT under NEXT', JSON.stringify(speed(holder)));
+    speed(holder).skip();
+    sp = holder.fcLimitSpec();
+    ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 0 && sp.amount === 'NO LIMIT' && sp.amountLabel === 'YOU ARE REMOVING THIS CARD\u2019S PER SECOND LIMIT.',
+       'NO LIMIT: the confirmation of removing the per second limit', JSON.stringify([holder.state.screen, sp.amount, sp.amountLabel]));
+    sp.secondary.go();
+    ok(holder.state.screen === 'flashcard' && !holder.state.fcSpeed && !holder.state.fcLimit, 'and CANCEL there is the card’s screen, past the rate', holder.state.screen);
     holder.fcSetLimit();
     limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');

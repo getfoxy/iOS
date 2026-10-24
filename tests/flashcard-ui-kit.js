@@ -146,7 +146,7 @@ function appOn(ctx, start, o) {
     if (a.state.unit === 'SATS') return Math.round(val);
     return a.px() ? Math.round(val / a.px() * 1e8) : 0;
   };
-  // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes back to its question; back off the card's screen leaves the card behind
+  // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes a step back in it; back off the card's screen leaves the card behind
   a.back = () => {
     if (a.fcSuAmountBack && a.fcSuAmountBack()) return;
     const st = a.state.stack;
@@ -288,7 +288,8 @@ const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS
 /* The card screens of the owner's designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
  *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD, RESTORE LOST CARD and CANCEL by their labels;
  *   limits    CARD LIMITS: its rows ("LABEL | sub | value | unit"), and a row pressed by its label, or CLOSE;
- *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back. */
+ *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back, and the
+ *             plain button under NEXT (`alt`: SKIP in the set-up, NO LIMIT on LIMITS) pressed by `skip()`. */
 const screens = (a) => a.renderCardScreens({ s: a.state, sc: a.state.screen });
 function welcome(a) {
   const v = screens(a);
@@ -312,7 +313,8 @@ function speed(a) {
     figure: v.fsFigure, chips: v.fsChips.map((k) => k.label).join(), chosen: v.fsChips.filter((k) => k.bg === 'var(--acc)').map((k) => k.label).join(),
     mode: a.state.fcSpeed && a.state.fcSpeed.mode,
     pick(r) { v.fsChips.filter((k) => k.label === '$' + r)[0].tap(); return speed(a); },
-    next() { v.fsNext(); }, other() { v.fsOther(); }, back() { v.fsBack(); },
+    alt: v.fsAltLabel,
+    next() { v.fsNext(); }, other() { v.fsOther(); }, back() { v.fsBack(); }, skip() { v.fsAlt(); },
   };
 }
 

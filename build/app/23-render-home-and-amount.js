@@ -593,15 +593,18 @@
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
+      /* And a card's set-up's two amounts: SKIP, for none (26j-card-wheel.js, `fcSuSkip`). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap',
       // (a card of software 1.23: all of the currency chosen, `fcUnit`)
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
+        : (s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap') ? 'SKIP'
         : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
         : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
+        else if (this.state.flow === 'cardSuNoPin' || this.state.flow === 'cardSuTap') this.fcSuSkip();
         else if (this.state.flow === 'swap') this.swapNext(true);
         else if (this.state.flow === 'tillCap') this.tillCapSet(0);
       },

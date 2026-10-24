@@ -180,7 +180,7 @@ class Component extends DCLogic {
     }, extra || {}));
   }
   back() {
-    // a card's set-up asking an amount: back is its question (26j-card-wheel.js)
+    // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     /* Back off the card's own screen, the edge swipe's way home among them: the card shown there is left behind, as HOME leaves it
      * (26f-flashcard.js `fcGoHome`), so nothing later reads it as the card in hand (`fcPinInfo`). Not on a screen above it, which
@@ -15101,15 +15101,18 @@ class Component extends DCLogic {
        * not a number: everything on the card, or, for the daily limit, no
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap',
+      /* And a card's set-up's two amounts: SKIP, for none (26j-card-wheel.js, `fcSuSkip`). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap',
       // (a card of software 1.23: all of the currency chosen, `fcUnit`)
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
+        : (s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap') ? 'SKIP'
         : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
         : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
+        else if (this.state.flow === 'cardSuNoPin' || this.state.flow === 'cardSuTap') this.fcSuSkip();
         else if (this.state.flow === 'swap') this.swapNext(true);
         else if (this.state.flow === 'tillCap') this.tillCapSet(0);
       },
@@ -30057,32 +30060,22 @@ class Component extends DCLogic {
     return (su && (su.unit === 'usd' || su.unit === 'both')) ? 'usd' : 'sat';
   }
 
+  /* The two amounts are asked straight away, with no question first (the owner's rule): NO PIN AMOUNT? on SET AMOUNT, then the rate on
+   * MAX SPEND PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
   fcSuNoPin() {
-    const su = this._fcSu;
-    if (!su) return;
-    this.blockedCard('fc-su-nopin', {
-      tone: 'ask', title: 'SMALL AMOUNTS',
-      reason: 'Do you want to pay small amounts without entering your PIN?',
-      retry: 'YES', go: () => this.fcSuAmount('noPin'),
-      shut: { label: 'NO', pill: true, tap: () => { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); } },
-    });
+    if (!this._fcSu) return;
+    this.fcSuAmount('noPin');
   }
 
   fcSuTap() {
-    const su = this._fcSu;
-    if (!su) return;
-    this.blockedCard('fc-su-tap', {
-      tone: 'ask', title: 'SPEND PER SECOND',
-      reason: 'Do you want to limit how much the card pays each second?',
-      retry: 'YES', go: () => this.fcSuAmount('tap'),
-      shut: { label: 'NO', pill: true, tap: () => { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } },
-    });
+    if (!this._fcSu) return;
+    this.fcSuAmount('tap');
   }
 
   /* SET AMOUNT for one of the two (`which`: 'noPin' or 'tap'), in the card's unit, as LIMITS opens it (`fcAmount`): empty, dollars
-   * first, NEXT to go on (`fcSuAmountNext`), the round back button to the question again (`fcSuAmountBack`). Whatever screen the
-   * set-up was asked over (the card's own, or SEND's keypad for a card set up for somebody else) is put back as it was when the
-   * amount is left either way. */
+   * first, NEXT to go on (`fcSuAmountNext`), SKIP for none (`fcSuSkip`), the round back button a step back (`fcSuAmountBack`).
+   * Whatever screen the set-up was asked over (the card's own, or SEND's keypad for a card set up for somebody else) is put back as
+   * it was when the amount is left either way. */
   FC_SU_FLOWS = { noPin: 'cardSuNoPin', tap: 'cardSuTap' };
   /* (the limit on a payment is asked as a rate on MAX SPEND PER SECOND, `fcSpeedOpen`, where the card's figures can be said in dollars; on
    * SET AMOUNT in sats otherwise, a bitcoin card with no price, and from that screen when its figure is tapped, `other`) */
@@ -30092,6 +30085,8 @@ class Component extends DCLogic {
     const s = this.state;
     if (!su.was) su.was = { screen: s.screen, stack: s.stack, flow: s.flow, amount: s.amount, unit: s.unit };
     su.ask = which;
+    // (the rate typed: whether it was reached from MAX SPEND PER SECOND, which its back button returns to)
+    su.fromSpeed = which === 'tap' && !!other;
     if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
   }
@@ -30127,14 +30122,34 @@ class Component extends DCLogic {
     if (which === 'tap') this.fcSuGo(); else this.fcSuTap();
   }
 
-  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`): its question again. True where it was the set-up's. */
-  /* (and on MAX SPEND PER SECOND, while the set-up asks it) */
+  /* SKIP under NEXT: none of it. No allowance without the PIN, and on to the rate; no limit on a payment, and on to the tap. */
+  fcSuSkip(which) {
+    const su = this._fcSu;
+    const w = which || this.fcSuAsking();
+    if (!su || !w) return;
+    this.fcSuLeave();
+    if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } else { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); }
+  }
+
+  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT?, out of the set-up to the screen it
+   * was asked over, with nothing written; off the rate typed, MAX SPEND PER SECOND where it came from there, NO PIN AMOUNT? otherwise.
+   * True where it was the set-up's. */
+  /* (and on MAX SPEND PER SECOND, while the set-up asks it: NO PIN AMOUNT?, `fcSpeedBack`) */
   fcSuAmountBack() {
     if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
     if (!which) return false;
+    const su = this._fcSu;
+    if (which === 'noPin') { this.fcSuLeave(); this._fcSu = null; return true; }
+    if (su.fromSpeed && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') {
+      // (SET AMOUNT was opened over MAX SPEND PER SECOND, `fcAmount`: off it, back to that screen, at the rate it showed)
+      su.fromSpeed = false;
+      this.setState(p => ({ screen: 'fcSpeed', stack: p.stack.slice(0, -1),
+                            flow: su.was ? su.was.flow : p.flow, amount: su.was ? su.was.amount : p.amount, unit: su.was ? su.was.unit : p.unit }));
+      return true;
+    }
     this.fcSuLeave();
-    if (which === 'tap') this.fcSuTap(); else this.fcSuNoPin();
+    this.fcSuNoPin();
     return true;
   }
 
@@ -30291,11 +30306,19 @@ class Component extends DCLogic {
     this.fcAmount('cardLimit');
   }
 
-  // its round back button: the set-up's question again, or the card's screen
+  // its round back button: the set-up's NO PIN AMOUNT? again, or the card's screen
   fcSpeedBack() {
     const fs = this.state.fcSpeed;
-    if (fs && fs.mode === 'su' && this._fcSu) { this.fcSuLeave(); this.fcSuTap(); return; }
+    if (fs && fs.mode === 'su' && this._fcSu) { this.fcSuLeave(); this.fcSuNoPin(); return; }
     this.fcLimitCancel();
+  }
+
+  // the plain button under NEXT: SKIP in the set-up (no limit, on to the tap), NO LIMIT on LIMITS (the limit removed, its confirmation)
+  fcSpeedAlt() {
+    const fs = this.state.fcSpeed;
+    if (!fs) return;
+    if (fs.mode === 'su') { this.fcSuSkip('tap'); return; }
+    this.fcLimitConfirm(0);
   }
 
   /* CONTINUE on a limit's first step (`fcLimitAsk`): the rate, for the limit on a payment of a card that waits for it; SET AMOUNT for
@@ -30427,6 +30450,8 @@ class Component extends DCLogic {
       fsNext: () => this.fcSpeedNext(),
       fsOther: () => this.fcSpeedOther(),
       fsBack: () => this.fcSpeedBack(),
+      fsAltLabel: fs && fs.mode === 'su' ? 'SKIP' : 'NO LIMIT',
+      fsAlt: () => this.fcSpeedAlt(),
     };
   }
   /* ---- what this phone takes offline before it settles ---------------------

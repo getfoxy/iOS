@@ -397,9 +397,18 @@ const amountVals = (o) => app.renderAmount(Object.assign(
      'the set-up\u2019s no PIN amount: NO PIN AMOUNT?, and its question', v.amountTitle + ' | ' + v.amountSubtitle);
   ok(v.nextBg === 'rgba(var(--ink-rgb),.14)' && v.nextFur === 'none,none,none' && amountVals({ val: 5 }).nextBg === 'var(--acc)',
      'NEXT is grey until an amount is typed, and the fur button once it is', v.nextBg);
+  // SKIP under NEXT, for none: the set-up's own (26j-card-wheel.js, `fcSuSkip`)
+  const skipped = [];
+  app.fcSuSkip = () => skipped.push(app.state.flow);
+  ok(v.amtAlt === true && v.amtAltLabel === 'SKIP', 'SKIP under NEXT, a plain pill', JSON.stringify([v.amtAlt, v.amtAltLabel]));
+  v.amtAltTap();
   reset({ screen: 'amount', flow: 'cardSuTap' });
   ok(amountVals().amountTitle === 'MAX SPEND PER SECOND' && amountVals().amountSubtitle === 'What is the most this card should pay each second?',
      'the rate typed rather than chosen: MAX SPEND PER SECOND, a figure a second', amountVals().amountTitle + ' | ' + amountVals().amountSubtitle);
+  ok(amountVals().amtAlt === true && amountVals().amtAltLabel === 'SKIP', 'and SKIP under its NEXT too', amountVals().amtAltLabel);
+  amountVals().amtAltTap();
+  ok(skipped.join() === 'cardSuNoPin,cardSuTap', 'SKIP is the set-up\u2019s skip on each', skipped.join());
+  delete app.fcSuSkip;
   reset({ screen: 'amount', flow: 'receive' });
   ok(amountVals().amountTitle === 'SET AMOUNT', 'every other amount is still SET AMOUNT', amountVals().amountTitle);
 }

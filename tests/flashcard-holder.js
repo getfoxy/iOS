@@ -46,7 +46,8 @@ const keptFor = (ctx, key) => ['foxy.flashcard.receipts', 'foxy.flashcard.logsee
 
 /* SET AMOUNT, while the set-up asks one of its two amounts (26j-card-wheel.js, `fcSuAmount`): which, the unit on the screen, the unit
  * the card takes, what is typed, and the line under it; `type(figure, unit)` puts a figure on it as the keypad would ('USD' a dollar
- * string, 'SATS' whole sats; the swap is the screen's own, so the unit is said), `next()` is NEXT and `back()` the round back button. */
+ * string, 'SATS' whole sats; the swap is the screen's own, so the unit is said), `next()` is NEXT, `skip()` SKIP under it (23-render-home-and-amount.js,
+ * `amtAltTap`: `fcSuSkip`) and `back()` the round back button. */
 function amt(a) {
   const s = a.state;
   if (s.screen !== 'amount' || !/^cardSu(NoPin|Tap)$/.test(String(s.flow))) return null;
@@ -54,6 +55,7 @@ function amt(a) {
     flow: s.flow, unit: s.unit, cardUnit: a.fcTypedUnit(), amount: s.amount, line: a.fcSuAmountLine(),
     type(fig, unit) { a.setState({ amount: String(fig), unit: unit || s.unit }); return amt(a); },
     next() { a.fcAmountNext(); },
+    skip() { a.fcSuSkip(); },
     back() { a.back(); },
   };
 }
@@ -284,24 +286,27 @@ function amt(a) {
     ok(pad(holder).title === 'CREATE A PIN' && /did not match/.test(pad(holder).note), 'two that differ start it again', pad(holder).note);
     pad(holder).type('2580');
     pad(holder).type('2580');
-    ok(card(holder) && card(holder).title === 'SMALL AMOUNTS' && card(holder).reason === 'Do you want to pay small amounts without entering your PIN?' && card(holder).has('YES') && card(holder).has('NO'),
-       'at a mint with one balance, no currency is asked: next, "Do you want to pay small amounts without entering your PIN?" YES or NO', card(holder) && card(holder).all);
-    card(holder).press('YES');
     let s = amt(holder);
-    ok(s && s.flow === 'cardSuNoPin' && s.unit === 'USD' && s.amount === '' && s.cardUnit === 'sat' && holder.state.stack.slice(-1)[0] === 'flashcard' && s.line === '',
-       'YES opens SET AMOUNT for the no-PIN amount, as LIMITS does: empty, in dollars first, for a card that holds sats, and no seconds line', JSON.stringify(s));
+    ok(s && !card(holder) && s.flow === 'cardSuNoPin' && s.unit === 'USD' && s.amount === '' && s.cardUnit === 'sat' && holder.state.stack.slice(-1)[0] === 'flashcard' && s.line === '',
+       'at a mint with one balance, no currency is asked, and no question either: SET AMOUNT for the no-PIN amount straight away, as LIMITS opens it: empty, in dollars first, for a card that holds sats, and no seconds line', JSON.stringify(s));
     s.back();
-    ok(!amt(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'SMALL AMOUNTS', 'its round back button is the question again, over the card’s screen as it was');
-    card(holder).press('YES');
+    ok(!amt(holder) && !card(holder) && !holder._fcSu && holder.state.screen === 'flashcard' && welcome(holder) && c.state.pin !== hexOf('2580') && !c.state.owner,
+       'its round back button leaves the set-up, to the card’s screen and its welcome as they were, nothing written', JSON.stringify([holder.state.screen, holder.state.stack]));
+    welcome(holder).press('SET UP CARD');
+    pad(holder).type('2580');
+    pad(holder).type('2580');
     amt(holder).next();
     ok(amt(holder) && holder.toasts.slice(-1)[0] === 'Type an amount first.', 'NEXT with nothing typed is refused, as on LIMITS', holder.toasts.slice(-1)[0]);
     amt(holder).type('5.00').next();
-    ok(!amt(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'SPEND PER SECOND' && card(holder).reason === 'Do you want to limit how much the card pays each second?',
-       'NEXT carries it on: "Do you want to limit how much the card pays each second?", over the card’s screen', card(holder) && card(holder).all);
-    card(holder).press('YES');
     let sp = speed(holder);
-    ok(sp && sp.mode === 'su' && sp.figure === '5' && sp.chosen === '$5' && sp.chips === '$1,$2,$5,$10,$25,$50' && holder.state.stack.slice(-1)[0] === 'flashcard',
-       'YES opens MAX SPEND PER SECOND: $5 a second chosen, of $1 $2 $5 $10 $25 $50', JSON.stringify(sp));
+    ok(!amt(holder) && !card(holder) && sp && sp.mode === 'su' && sp.figure === '5' && sp.chosen === '$5' && sp.chips === '$1,$2,$5,$10,$25,$50' && sp.alt === 'SKIP' && holder.state.stack.slice(-1)[0] === 'flashcard',
+       'NEXT carries it on to MAX SPEND PER SECOND, no question first: $5 a second chosen, of $1 $2 $5 $10 $25 $50, SKIP under NEXT', JSON.stringify(sp));
+    sp.back();
+    s = amt(holder);
+    ok(!speed(holder) && s && s.flow === 'cardSuNoPin' && s.amount === '' && holder.state.stack.slice(-1)[0] === 'flashcard' && holder._fcSu,
+       'its round back button is NO PIN AMOUNT? again, over the card’s screen', JSON.stringify(s));
+    amt(holder).type('5.00').next();
+    sp = speed(holder);
     ok(sp.pick(25).figure === '25' && speed(holder).chosen === '$25' && sp.pick(5).chosen === '$5', 'a chip pressed is the figure, and the chip that is orange');
     speed(holder).other();
     s = amt(holder);
@@ -310,11 +315,12 @@ function amt(a) {
     ok(amt(holder).type('10.00').line === 'It will take 13 seconds to pay $120.00.', 'typed, the line under it says the seconds a payment of four limits waits, a limit being three seconds of the rate', amt(holder).line);
     ok(amt(holder).type('20.00').line === 'It will take 13 seconds to pay $240.00.', 'and follows the figure as it is typed', amt(holder).line);
     amt(holder).back();
-    ok(!amt(holder) && !speed(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'SPEND PER SECOND', 'its round back button is the question again');
-    card(holder).press('YES');
+    sp = speed(holder);
+    ok(!amt(holder) && sp && sp.mode === 'su' && sp.chosen === '$5' && holder.state.stack.slice(-1)[0] === 'flashcard' && holder.state.flow !== 'cardSuTap',
+       'its round back button is MAX SPEND PER SECOND again, where it came from, at the rate it showed', JSON.stringify([sp, holder.state.stack]));
     speed(holder).back();
-    ok(!speed(holder) && holder.state.screen === 'flashcard' && card(holder) && card(holder).title === 'SPEND PER SECOND', 'and so is MAX SPEND PER SECOND’s');
-    card(holder).press('YES');
+    ok(amt(holder) && amt(holder).flow === 'cardSuNoPin', 'and MAX SPEND PER SECOND’s is NO PIN AMOUNT? again');
+    amt(holder).type('5.00').next();
     c.tap();
     H.sheet.length = 0;
     speed(holder).next();
@@ -337,7 +343,7 @@ function amt(a) {
        'the bottom row is home’s with one pill: SCAN and PASTE, no SWAP on a card of one currency', v.fcButtons.map((k) => k.label + ' ' + k.dim).join(', '));
     ok(v.fcLinks === undefined && v.fcNoPinLine === undefined && v.fcBlockLine === undefined, 'and the old row, the no-PIN line and the block line are gone from the screen');
 
-    // NO and NO: nothing set, no limit sent
+    // SKIP and SKIP: nothing set, no limit sent
     const n = card4(H, 21);
     H.nfc = n;
     n.tap();
@@ -346,11 +352,13 @@ function amt(a) {
     holder.fcSetUp();
     pad(holder).type('1357');
     pad(holder).type('1357');
-    card(holder).press('NO');
-    card(holder).press('NO');
+    amt(holder).skip();
+    ok(!amt(holder) && speed(holder) && speed(holder).mode === 'su' && holder._fcSu && holder._fcSu.noPin === 0 && holder._fcSu.noPinUsd === 0,
+       'SKIP on NO PIN AMOUNT?: no allowance, and on to MAX SPEND PER SECOND', JSON.stringify(holder._fcSu && [holder._fcSu.noPin, holder._fcSu.noPinUsd]));
+    speed(holder).skip();
     await until('the 1.21 card to be set up', () => !!n.state.owner && holder.state.fc && holder.state.fc.key === n.key && holder.state.fc.ownedHere === true);
     ok(n.state.tapLimit === 0 && n.state.noPinLimit === 0 && ins(n).indexOf('33') < 0 && vals(holder).fcLimitLine === 'NO LIMIT',
-       'NO and NO: a card of 1.21 set up with no limits, and none sent', vals(holder).fcLimitLine);
+       'SKIP and SKIP: a card of 1.21 set up in one tap with no limits, and none sent', vals(holder).fcLimitLine);
 
     // the daily limit (C15): a card with one shows nothing of it, and LIMITS offers none
     n.tap();
@@ -392,10 +400,8 @@ function amt(a) {
     let chose = null;
     a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('YES');
     ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'sat', 'a bitcoin card’s SET AMOUNT opens in dollars, for sats', JSON.stringify(amt(a)));
     amt(a).type('2000', 'SATS').next();
-    card(a).press('YES');
     speed(a).other();
     ok(amt(a).flow === 'cardSuTap' && amt(a).type('10000', 'SATS').line === 'It will take 13 seconds to pay ₿ 120,000.', 'another rate, swapped to sats: the seconds line is in sats', amt(a).line);
     ok(amt(a).type('20000', 'SATS').line === 'It will take 13 seconds to pay ₿ 240,000.', 'and follows the figure in sats', amt(a).line);
@@ -407,9 +413,7 @@ function amt(a) {
     chose = null;
     a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('YES');
     amt(a).type('2.00').next();
-    card(a).press('YES');
     speed(a).pick(10).next();
     ok(chose && chose.noPin === Math.round(2 / 60000 * 1e8) && chose.noPinUsd === 2 && chose.tapLimit === Math.round(30 / 60000 * 1e8) && chose.tapUsd === 30 && a.state.screen === 'flashcard',
        'in dollars: their sats at the price, and the dollars kept; $10 a second is a limit of $30', JSON.stringify(chose));
@@ -417,10 +421,8 @@ function amt(a) {
     chose = null;
     a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('YES');
     ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'usd', 'a dollar card’s SET AMOUNT is in dollars, for cents', JSON.stringify(amt(a)));
     amt(a).type('2.00').next();
-    card(a).press('YES');
     ok(speed(a) && speed(a).chosen === '$5', 'its rate on MAX SPEND PER SECOND, in dollars');
     speed(a).other();
     ok(amt(a).type('10.00').line === 'It will take 13 seconds to pay $120.00.', 'another rate too, its seconds line in dollars', amt(a).line);
@@ -429,18 +431,15 @@ function amt(a) {
     chose = null;
     a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('NO');
-    card(a).press('YES');
+    amt(a).skip();
     speed(a).next();
     ok(chose && chose.noPin === 0 && chose.tapLimit === 1500 && chose.tapUsd === 0, 'NEXT on $5 a second: a limit of $15.00, in cents', JSON.stringify(chose));
     a.price = 0;
     a.fcSetUpSteps({ unit: 'usd', run: () => {} });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('YES');
     ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'usd', 'with no Bitcoin price a dollar card is still in dollars, never sats', JSON.stringify(amt(a)));
     amt(a).back();
-    card(a).press('NO');
-    card(a).press('NO');
+    ok(!amt(a) && !a._fcSu && a.state.screen === 'flashcard', 'its round back button leaves the set-up');
     // LIMITS takes its figure on the SET AMOUNT keypad: a dollar card's in dollars with no swap, a bitcoin card's in dollars with the swap to sats
     {
       const k = appOn(H, { screen: 'flashcard', fc: { unit: 'usd', key: 'x' } }, { send: true });
@@ -457,13 +456,38 @@ function amt(a) {
          JSON.stringify([usdPad, satPad, k.state.unit]));
     }
     // a bitcoin card with no price: sats alone, as dollars cannot be turned into the sats it holds
-    a.fcSetUpSteps({ unit: 'sat', run: () => {} });
+    chose = null;
+    a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
-    card(a).press('YES');
     ok(amt(a).unit === 'SATS' && amt(a).cardUnit === 'sat', 'a bitcoin card with no price: SET AMOUNT in sats', JSON.stringify(amt(a)));
+    amt(a).type('500', 'SATS').next();
+    ok(!speed(a) && amt(a) && amt(a).flow === 'cardSuTap' && amt(a).amount === '' && a.state.stack.slice(-1)[0] === 'flashcard',
+       'its rate cannot be said in dollars: typed on SET AMOUNT, over the card’s screen, with no MAX SPEND PER SECOND', JSON.stringify([a.state.screen, a.state.stack]));
     amt(a).back();
-    card(a).press('NO');
-    card(a).press('NO');
+    ok(amt(a) && amt(a).flow === 'cardSuNoPin' && amt(a).amount === '' && a.state.stack.slice(-1)[0] === 'flashcard' && a._fcSu,
+       'the rate typed with no MAX SPEND PER SECOND behind it: its round back button is NO PIN AMOUNT? again', JSON.stringify([a.state.screen, a.state.flow]));
+    amt(a).type('500', 'SATS').next();
+    amt(a).type('900', 'SATS').skip();
+    ok(chose && chose.noPin === 500 && chose.tapLimit === 0 && chose.tapUsd === 0 && !a._fcSu && a.state.screen === 'flashcard' && !amt(a),
+       'SKIP on the rate typed: no limit on a payment, the figure typed and not taken, and on to the tap; the no-PIN amount kept', JSON.stringify(chose));
+    // and SKIP on the rate typed from MAX SPEND PER SECOND, at a price
+    a.price = 60000;
+    chose = null;
+    a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
+    pad(a).type('2580'); pad(a).type('2580');
+    amt(a).type('3.00').next();
+    speed(a).other();
+    amt(a).type('7.00').skip();
+    ok(chose && chose.noPin === Math.round(3 / 60000 * 1e8) && chose.noPinUsd === 3 && chose.tapLimit === 0 && chose.tapUsd === 0 && a.state.screen === 'flashcard' && !speed(a) && !amt(a),
+       'SKIP on the rate typed from MAX SPEND PER SECOND: no limit either, and the card’s screen as it was', JSON.stringify([chose, a.state.screen]));
+    // SKIP on MAX SPEND PER SECOND itself, with an allowance typed: the allowance, and no limit
+    chose = null;
+    a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
+    pad(a).type('2580'); pad(a).type('2580');
+    amt(a).type('4.00').next();
+    speed(a).pick(25).skip();
+    ok(chose && chose.noPin === 400 && chose.tapLimit === 0 && chose.tapUsd === 0 && a.state.screen === 'flashcard' && !speed(a),
+       'SKIP on MAX SPEND PER SECOND: no limit, the chip chosen not taken, and the no-PIN amount kept', JSON.stringify(chose));
   }
 
   /* ---- B6: SEND > FLASHCARD to a new card: this phone sets it up for its holder, and does not own it -------------------- */
@@ -493,14 +517,18 @@ function amt(a) {
     pad(payer).type('8642');
     ok(pad(payer).title === 'RE-ENTER PIN' && pad(payer).sub === 'The person who holds the card types the same PIN again.', 'RE-ENTER PIN, in the same words', pad(payer).sub);
     pad(payer).type('8642');
-    ok(card(payer) && card(payer).title === 'SMALL AMOUNTS', 'then the same two questions');
-    card(payer).press('YES');
-    ok(amt(payer) && amt(payer).flow === 'cardSuNoPin' && payer.state.stack.slice(-1)[0] === 'fcWelcome', 'YES opens SET AMOUNT over the welcome', JSON.stringify(payer.state.stack));
+    ok(!card(payer) && amt(payer) && amt(payer).flow === 'cardSuNoPin' && payer.state.stack.slice(-1)[0] === 'fcWelcome', 'then the same two amounts: NO PIN AMOUNT? on SET AMOUNT, over the welcome', JSON.stringify(payer.state.stack));
+    amt(payer).back();
+    ok(!amt(payer) && !payer._fcSu && payer.state.screen === 'fcWelcome' && welcome(payer) && payer.state.flow === 'cardSend' && payer.state.amount === '1500' && payer.state.unit === 'SATS' && cash.state.pinState === 0,
+       'its round back button leaves the set-up for the welcome, SEND’s figure kept as it was, nothing written', JSON.stringify([payer.state.screen, payer.state.flow, payer.state.amount]));
+    welcome(payer).press('SET UP CARD');
+    pad(payer).type('8642'); pad(payer).type('8642');
     amt(payer).type('2.00').next();
-    ok(payer.state.screen === 'fcWelcome' && payer.state.flow === 'cardSend' && payer.state.amount === '1500' && payer.state.unit === 'SATS',
-       'NEXT puts the welcome back, SEND’s figure kept as it was, under the next question', JSON.stringify([payer.state.screen, payer.state.flow, payer.state.amount]));
-    card(payer).press('NO');
+    ok(speed(payer) && speed(payer).mode === 'su' && payer.state.stack.slice(-1)[0] === 'fcWelcome', 'NEXT is MAX SPEND PER SECOND, over the welcome', JSON.stringify(payer.state.stack));
     cash.tap();
+    speed(payer).skip();
+    ok(payer.state.flow === 'cardSend' && payer.state.amount === '1500' && payer.state.unit === 'SATS',
+       'SKIP puts SEND’s figure back as it was, and goes on to the tap', JSON.stringify([payer.state.screen, payer.state.flow, payer.state.amount]));
     await until('the money to be on the card', () => cash.balance() === 1500 && payer.state.screen === 'paid');
     ok(!cash.state.owner && cash.state.record.refund === '00'.repeat(33) && cash.state.pin === hexOf('8642') && cash.state.noPinLimit === Math.round(2 / 60000 * 1e8) && cash.state.tapLimit === 0,
        'one tap: the holder’s PIN, no owner, no refund key, a no-PIN amount of $2.00, and the 1,500 under the PIN', JSON.stringify([cash.state.noPinLimit, cash.balance()]));
@@ -785,6 +813,8 @@ function amt(a) {
     // the screens: SEND > FLASHCARD, cut before the holder's numbers, TRY AGAIN writes them and then the money
     // SET AMOUNT for the first, $2.00 without the PIN, and $10 a second on MAX SPEND PER SECOND for the second ($30.00 on one payment)
     const wheelSet = (a) => (speed(a) ? speed(a).pick(10).next() : amt(a).type('2.00', 'USD').next());
+    // SKIP on both: no allowance, no limit
+    const skipBoth = (a) => { amt(a).skip(); (speed(a) || amt(a)).skip(); };
     // every new card is met by WELCOME TO YOUR CASHU CARD, whose SET UP CARD is the set-up's first pad
     const throughWelcome = async (a, what) => {
       await until(what + ', after the welcome', () => !!welcome(a));
@@ -801,8 +831,7 @@ function amt(a) {
     keyIn(payer, 1500);
     await throughWelcome(payer, 'the set-up pad');
     pad(payer).type('8642'); pad(payer).type('8642');
-    card(payer).press('YES'); wheelSet(payer);
-    card(payer).press('YES'); wheelSet(payer);
+    wheelSet(payer); wheelSet(payer);
     u1.tap();
     u1.leaveBefore('33', 1);
     await until('the failure card', () => !!card(payer) && /AGAIN/.test(card(payer).all));
@@ -824,7 +853,7 @@ function amt(a) {
     keyIn(payer, 1500);
     await throughWelcome(payer, 'the set-up pad');
     pad(payer).type('8642'); pad(payer).type('8642');
-    card(payer).press('NO'); card(payer).press('NO');
+    skipBoth(payer);
     u2.tap();
     u2.leaveBefore('32', 1);
     await until('the failure card', () => !!card(payer) && /AGAIN/.test(card(payer).all));
@@ -849,7 +878,7 @@ function amt(a) {
     ok(pad(payer).title === 'CREATE A PIN' && R.sheet.some((x) => x === 'end: Finish setting up the card'),
        'a later send to it takes its set-up up again, from CREATE A PIN (the card has no record, so it takes the PIN typed now)', pad(payer).title);
     pad(payer).type('8642'); pad(payer).type('8642');
-    card(payer).press('NO'); card(payer).press('NO');
+    skipBoth(payer);
     u2.tap();
     await until('the money on the card', () => u2.balance() === 1500);
     await settle();
@@ -865,8 +894,7 @@ function amt(a) {
     keyIn(payer, 1500);
     await throughWelcome(payer, 'the set-up pad');
     pad(payer).type('8642'); pad(payer).type('8642');
-    card(payer).press('NO');
-    card(payer).press('YES'); wheelSet(payer);
+    amt(payer).skip(); wheelSet(payer);
     u3.tap();
     u3.leaveBefore('33', 1);
     await until('the failure card', () => !!card(payer) && /AGAIN/.test(card(payer).all));
@@ -879,8 +907,7 @@ function amt(a) {
     await throughWelcome(payer, 'the PIN pad');
     ok(pad(payer).title === 'CARD PIN' && /set-up was cut short/.test(pad(payer).sub), 'a later send to a card cut before its numbers asks the holder’s PIN once', pad(payer).title + ' / ' + pad(payer).sub);
     pad(payer).type('8642');
-    card(payer).press('NO');
-    card(payer).press('YES'); wheelSet(payer);
+    amt(payer).skip(); wheelSet(payer);
     u3.tap();
     await until('the money on the card', () => u3.balance() === 1500);
     await settle();

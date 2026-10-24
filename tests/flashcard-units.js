@@ -933,29 +933,27 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     const setUpAs = async (a, c, i) => {
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
-      cardUp(a).press('NO');
+      // SKIP on both amounts (26j-card-wheel.js, `fcSuSkip`): NO PIN AMOUNT? on SET AMOUNT, then MAX SPEND PER SECOND (or the rate typed)
+      a.fcSuSkip();
       c.tap();
-      cardUp(a).press('NO');
+      if (speed(a)) speed(a).skip(); else a.fcSuSkip();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
     };
 
-    /* YES to each question opens SET AMOUNT (26j-card-wheel.js, `fcSuAmount`), in the unit the card will hold, and NEXT carries the figure
+    /* The currency chosen opens SET AMOUNT (26j-card-wheel.js, `fcSuAmount`), in the unit the card will hold, and NEXT carries the figure
      * into the one tap: a card of 1.23 keeps both in cents, a dollar card's typed in dollars, a bitcoin card's typed in dollars too. */
     for (const [i, name] of [[0, 'DOLLARS'], [1, 'BITCOIN']]) {
       const a = screens();
       const c = newCard(H, undefined, { format: 4, software: 23 });
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
-      cardUp(a).press('YES');
       const unitNow = a.fcTypedUnit();
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '' && unitNow === (i === 0 ? 'usd' : 'sat'),
-         name + ': YES opens SET AMOUNT for the no-PIN amount, empty and in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '' && unitNow === (i === 0 ? 'usd' : 'sat'),
+         name + ': the currency opens SET AMOUNT for the no-PIN amount, no question first, empty and in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
-      ok(a.state.screen === 'flashcard' && cardUp(a) && cardUp(a).title === 'SPEND PER SECOND', name + ': NEXT is the next question, over the card’s screen');
-      cardUp(a).press('YES');
-      ok(speed(a) && speed(a).chosen === '$5', name + ': YES opens MAX SPEND PER SECOND, in dollars', JSON.stringify(speed(a)));
+      ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX SPEND PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));
       speed(a).other();
       a.setState({ amount: '10.00' });
       ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 13 seconds to pay $120.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
@@ -989,9 +987,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          && v.curCards[0].symOne && !v.curCards[0].symTwo && v.curFootShown === false,
          'BOTH split between dollars’ frost and bitcoin’s fur, its badge $ and ₿; nothing under the tiles', b.bg);
       b.tap();
-      cardUp(a).press('NO');
+      a.fcSuSkip();
       c.tap();
-      cardUp(a).press('NO');
+      speed(a).skip();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
       ok(c.state.record.unit === 1 && a.state.fc.unit === 'usd' && (H.W.cardsKnown()[c.key] || {}).hold === 'both' && a.state.fc.only === ''
@@ -1164,11 +1162,10 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const c = newCard(H, undefined, { format: 4, software: 23 });
       await toCurrency(a, c);
       cur(a).curCards[2].tap();
-      cardUp(a).press('YES');
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
       c.tap();
-      cardUp(a).press('NO');
+      speed(a).skip();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
       const v = vals(a);
@@ -1262,8 +1259,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       a.fcSendSetUp(500, 'sat', null, null);
       pad(a).type('1234');
       pad(a).type('1234');
-      ok(a.state.screen !== 'currency' && cardUp(a) && cardUp(a).title === 'SMALL AMOUNTS', 'a set-up for the card’s holder goes from the PIN to SMALL AMOUNTS, no currency asked',
-         a.state.screen + ' ' + (cardUp(a) && cardUp(a).title));
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && !cardUp(a), 'a set-up for the card’s holder goes from the PIN to NO PIN AMOUNT?, no currency asked',
+         a.state.screen + ' ' + a.state.flow);
       void c;
     }
   }
@@ -1347,14 +1344,16 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(!!pad(a) && !cardUp(a), 'started in bitcoin, a card of both: no refusal, its PIN asked', cardUp(a) && cardUp(a).reason);
       both.tap();
       pad(a).type('1234');
-      await until('the sats on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      await until('the sats on the card', () => !(a._fcTaps > 0) && (a.state.screen === 'home' || (a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD')));
+      if (a.state.screen === 'paid') { a.setState({ screen: 'home', stack: [] }); if (a.paidDismissed) a.paidDismissed(); }
       both.tap();
       let look = await H.W.cardLook(both, { mine: true, price: PRICE });
       ok(look.units.sat.balance === 500 && look.units.usd.balance === 250, 'and the sats go on beside its dollars', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
       a = await sendTo(both, 'usd', '1.00', 'USD');
       both.tap();
       pad(a).type('1234');
-      await until('the dollars on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      await until('the dollars on the card', () => !(a._fcTaps > 0) && (a.state.screen === 'home' || (a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD')));
+      if (a.state.screen === 'paid') { a.setState({ screen: 'home', stack: [] }); if (a.paidDismissed) a.paidDismissed(); }
       both.tap();
       look = await H.W.cardLook(both, { mine: true, price: PRICE });
       ok(look.units.usd.balance === 350 && look.units.sat.balance === 500, 'started in dollars, the dollars go on', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
@@ -1366,7 +1365,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(a.state.screen === 'amount' && !!pad(a) && /1,000/.test(pad(a).sub), 'bitcoin chosen: its PIN, for the sats the dollars typed come to', pad(a) && pad(a).sub);
       both.tap();
       pad(a).type('1234');
-      await until('the sats on the card', () => !(a._fcTaps > 0) && a.state.screen === 'home');
+      await until('the sats on the card', () => !(a._fcTaps > 0) && (a.state.screen === 'home' || (a.state.screen === 'paid' && a.state.paidSays === 'ON THE CARD')));
+      if (a.state.screen === 'paid') { a.setState({ screen: 'home', stack: [] }); if (a.paidDismissed) a.paidDismissed(); }
       both.tap();
       look = await H.W.cardLook(both, { mine: true, price: PRICE });
       ok(look.units.sat.balance === 1500 && look.units.usd.balance === 350, 'and they go on', JSON.stringify([look.units.sat.balance, look.units.usd.balance]));
