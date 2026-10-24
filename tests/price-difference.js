@@ -3,7 +3,7 @@
  *
  *     node tests/price-difference.js
  *
- * The owner's rules (2026-10-16):
+ * The design's rule:
  *
  *   C14. When a payment crosses units (a dollar holder paying an ask in sats,
  *        or the reverse), the big number is the unit the payer holds, and one
@@ -225,7 +225,7 @@ async function run() {
     const src = (sig) => method(sig);
     ok(src('confirmSpec() {').indexOf("this.cfRow('FEE', s.quotedFee != null") >= 0 && /sub2: 'You pay the mint\\u2019s fees'/.test(src('confirmSpec() {')),
       'a Lightning payment, and paying from a card (SEND): the FEE row says the mint’s fees');
-    // SWAP is left as the owner drew it: four blocks and nothing between (tests/swap-dollars.js), and the fee is in one of them
+    // SWAP is left as designed: four blocks and nothing between (tests/swap-dollars.js), and the fee is in one of them
     ok(/block\('FEE', fee, ''\)/.test(src('swapSpec() {')), 'a swap between dollars and bitcoin keeps its FEE block as drawn');
     ok((src('onchainSpec() {').match(/sub2: 'You pay the mint\\u2019s fees'/g) || []).length === 2, 'and paying on chain');
     ok(!/with its fee\.'|with the fee'/.test(src('confirmSpec() {') + src('requestSpec() {') + src('onchainSpec() {')),

@@ -93,7 +93,7 @@
     return (su && (su.unit === 'usd' || su.unit === 'both')) ? 'usd' : 'sat';
   }
 
-  /* The two amounts are asked straight away, with no question first (the owner's rule): NO PIN AMOUNT? on SET AMOUNT, then the rate on
+  /* The two amounts are asked straight away, with no question first (the design's rule): NO PIN AMOUNT? on SET AMOUNT, then the rate on
    * MAX SPEND PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
   fcSuNoPin() {
     if (!this._fcSu) return;
@@ -239,7 +239,7 @@
 
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
    *
-   * The limit on a payment, asked as how fast the card pays (the owner's design): the figure a second, big, six of them to choose
+   * The limit on a payment, asked as how fast the card pays (the design): the figure a second, big, six of them to choose
    * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
    * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
    * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up

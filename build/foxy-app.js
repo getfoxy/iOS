@@ -324,9 +324,9 @@ class Component extends DCLogic {
        * last payment's fee on the next payment's confirmation, three separate
        * times, each with a different patch. The value simply does not belong
        * on a screen shown before the payment — a quote or nothing. */
-      /* Whose fee it is, in the owner's words: a payment that leaves this mint
+      /* Whose fee it is, in the design's words: a payment that leaves this mint
        * pays the mint's fees, and the payer pays them (C16). */
-      /* (from a card, as the owner drew it: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
+      /* (from a card, as designed: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
       this.cfRow('FEE', s.quotedFee != null
         ? (out ? '~' : 'UP TO ') + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
@@ -335,7 +335,7 @@ class Component extends DCLogic {
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
      * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
-     * dollar card, this phone's for a bitcoin card (the owner's design, where it was a RATE row). */
+     * dollar card, this phone's for a bitcoin card (the design, where it was a RATE row). */
     const cardRate = (cardUsd && this._feeQuote && this._feeQuote.rate) ? Math.round(Number(this._feeQuote.rate.usdPerBtc) || 0) : 0;
     const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
     const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
@@ -746,7 +746,7 @@ class Component extends DCLogic {
     catch (e) { return null; }
   }
 
-  /* CONFIRM PAYMENT at a mint with two balances, as the owner drew it.
+  /* CONFIRM PAYMENT at a mint with two balances, as designed.
    *
    * TOTAL on top, the fee in it, in the balance that pays. Then plain rows: TO,
    * AMOUNT, FEE INCLUDED, NETWORK, and RATE when dollars pay a bitcoin invoice
@@ -14575,7 +14575,7 @@ class Component extends DCLogic {
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */
       /* And a stale price says its age in this same pill, in red, instead of on a line of its own under the price: the line came
-       * and went as the connection did, and everything under it moved with it (the owner's rule). Held sats first, then the age,
+       * and went as the connection did, and everything under it moved with it (the design's rule). Held sats first, then the age,
        * then the day's change. */
       deltaText: this.heldPill() || this.priceAgeWords() || (chart ? chart.t : ''),
       deltaShown: !!this.heldPill() || !!this.priceAgeWords() || !!chart, markerDisplay: chart ? 'block' : 'none',
@@ -14707,7 +14707,7 @@ class Component extends DCLogic {
       toggleCollapse: () => this.setState(p => ({ priceCollapsed: !p.priceCollapsed })),
       chevronRot: s.priceCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
       priceFlex: s.priceCollapsed ? '0 0 auto' : '1 1 0%',
-      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the owner's design)
+      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the design)
       priceTopPad: s.priceCollapsed ? 2 : (this.twoUnitsOn && this.twoUnitsOn()) ? 8 : 4,
       moneyFlex: (s.priceCollapsed || s.priceRemoved) ? '1 1 0%' : '0 0 auto',
       showPriceSection: !s.priceRemoved,
@@ -14730,7 +14730,7 @@ class Component extends DCLogic {
   /* The ! on the bitcoin pill that asks about the backup again (`bkAskAgain`), drawn where this is true. */
   BK_BADGE = false;
 
-  /* The money card's heading and pills, as the owner drew them, at every mint.
+  /* The money card's heading and pills, as designed, at every mint.
    *
    * The sheet is headed by the mint's own name and MINT under it, and the tap
    * opens SWITCH MINT. Then the pills: dollars over bitcoin, or the one the
@@ -15080,7 +15080,7 @@ class Component extends DCLogic {
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      /* A card's set-up names its two amounts (the owner's design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
+      /* A card's set-up names its two amounts (the design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
        * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
       amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
@@ -15577,7 +15577,7 @@ class Component extends DCLogic {
           }
           this.paidDismissed();
           /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
-           * home: the owner's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
+           * home: the design's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
            * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
           const fc = this.state.fc;
           const off = this._fcPaidOff;
@@ -16186,7 +16186,7 @@ class Component extends DCLogic {
     };
     /* Sats paying a request in dollars (`agreed`): the payment crosses units,
      * so the big number is the sats this phone holds and pays, at its own
-     * price, and the dollars they asked for are under it (the owner's rule,
+     * price, and the dollars they asked for are under it (the design's rule,
      * 26k-price-line.js). The asker's price is not carried by a request in
      * dollars, so there is no difference line here; their phone weighed this
      * phone's price against its own before it answered (`priceSpec`). */
@@ -16201,7 +16201,7 @@ class Component extends DCLogic {
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: feeShown }),
     ]).concat(feeShown ? [
-      /* The owner's rule for fees (C16): paid in the unit asked, at the mint it
+      /* The design's rule for fees (C16): paid in the unit asked, at the mint it
        * is asked at, Foxy charges nothing and says nothing; a fee the mint
        * itself takes for the pieces, or a payment across units, is the
        * payer's, and the row says whose. */
@@ -16439,9 +16439,9 @@ class Component extends DCLogic {
     }
     const three = units.length > 2;
     const setUp = cardFlow && !cc;
-    // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
+    // a receive's question shows no balances either (the design's rule): what is held says nothing about what to receive
     const receiving = !cardFlow && s.flow === 'receive';
-    /* A card's set-up, as the owner drew it: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
+    /* A card's set-up, as designed: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
      * dollars' frost and bitcoin's fur. */
     if (both && setUp) {
       LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',
@@ -17137,7 +17137,7 @@ class Component extends DCLogic {
     };
   }
 
-  /* One row of history at a mint with two balances, as the owner drew it:
+  /* One row of history at a mint with two balances, as designed:
    * the figure in the row's own unit (sats big on the bitcoin tab, cents on
    * the dollar tab), the running balance in that unit, and for a swap the
    * other leg's figure under it with the words that say so. */
@@ -22247,7 +22247,7 @@ class Component extends DCLogic {
   fcLimitUnit() {
     const fc = this.state.fc;
     if (!(fc && fc.v123)) return this.fcUnit();
-    /* (by what it holds, the owner's rule: bitcoin held, dollars or sats; dollars alone, dollars; nothing yet, by what it was set up to hold) */
+    /* (by what it holds, the design's rule: bitcoin held, dollars or sats; dollars alone, dollars; nothing yet, by what it was set up to hold) */
     if (this.fcHeld(fc, 'sat') > 0) return 'sat';
     if (this.fcHeld(fc, 'usd') > 0) return 'usd';
     return fc.unit === 'usd' ? 'usd' : 'sat';
@@ -22712,7 +22712,7 @@ class Component extends DCLogic {
     if (flow === 'cardSend' && this.twoUnitsOn && this.twoUnitsOn() && !(this.walletNow && this.walletNow('send'))) {
       const fig = { usd: this.centsTyped(), sat: this.wantedSats() };
       if (!(fig.usd > 0) && !(fig.sat > 0)) { this.toast('Type an amount first.', true); return; }
-      /* The owner's rule: the amount, then the currency, asked only where both of this phone's balances could pay it; where one
+      /* The design's rule: the amount, then the currency, asked only where both of this phone's balances could pay it; where one
        * can, that one, with nothing asked; where neither can, said. The card then takes it in the one it holds (`fcSendGuard`). */
       const canUsd = fig.usd > 0 && fig.usd <= this.fcHave('usd');
       const canSat = fig.sat > 0 && fig.sat <= this.fcHave('sat');
@@ -23775,7 +23775,7 @@ class Component extends DCLogic {
          * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
         // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
         const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
-        /* For every card payment of the code on screen (the owner's rule: never the code read as unpaid while the mint works): at the
+        /* For every card payment of the code on screen (the design's rule: never the code read as unpaid while the mint works): at the
          * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
          * sats, sats paying a dollar code) keeps it up until the mint answers. */
         if (!share && !owesChange && this.state.screen === 'confirm') {
@@ -25118,7 +25118,7 @@ class Component extends DCLogic {
     }
     /* Money put on a card that is not on show (FLASHCARD on the send screen, which leaves the person at Home) or renewed ends on the
      * app's own success screen, ON THE CARD, with its flash, as a payment does (24-render-receive-and-send.js, `renderPaid`): the sheet
-     * that said it was out of place among the other endings (the owner's rule). What the balance cannot say goes in a line after. */
+     * that said it was out of place among the other endings (the design's rule). What the balance cannot say goes in a line after. */
     // nothing went on (a read after a write that put nothing, a reset): nothing to celebrate
     if (!(went > 0)) return;
     /* A payment's change put back on the card (TAP TO RECEIVE, `fcChangeWaiting`; the change tap of a till): the ending is the
@@ -26393,7 +26393,7 @@ class Component extends DCLogic {
    *
    *   tap 1, the PIN    what the swap spends, its fee with it, taken off the card in that currency, as WITHDRAW takes it;
    *   no card           the swap at the mint, on this phone, at the rate shown while it holds (a new one for what came off where not);
-   *   tap 2             what arrived put on the card in the other currency, as ADD FUNDS puts it on, under the PIN and the owner's say.
+   *   tap 2             what arrived put on the card in the other currency, as ADD FUNDS puts it on, under the PIN and the design's say.
    *
    * Cut short anywhere, the money is in this phone, in whichever currency it was then, and the screen offers to put it on the card or
    * leave it. Only the card's owner's phone swaps. */
@@ -27547,7 +27547,7 @@ class Component extends DCLogic {
     const x = this.state.fcXl || { amount: 0, cardUnit: 'sat', payUnit: 'sat', mint: '', home: '' };
     const cu = x.cardUnit === 'usd' ? 'usd' : 'sat';
     const pu = x.payUnit === 'usd' ? 'usd' : 'sat';
-    /* (the owner's design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
+    /* (the design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
      * sats are at the market price) */
     const rate = (this.satUsd && this.satUsd()) || 0;
     const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: rate ? '\u20bf ' + this.group(Math.round(n / 100 / rate)) : '' } : this.money(n));
@@ -27807,10 +27807,10 @@ class Component extends DCLogic {
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
    *
-   * From home's MENU (21-render-values.js): RESTORE CARD, a screen of its own, 'fcRestore' (the owner's design; drawn by
+   * From home's MENU (21-render-values.js): RESTORE CARD, a screen of its own, 'fcRestore' (the design; drawn by
    * 26j-card-wheel.js `renderCardScreens`). Under CARDS TIED TO YOUR PHONE a row for each card this phone set up (`fcLostRows`): its
    * name, what it held when last seen, and on the right whether its money can be taken back. Only an unlocked card with money on it
-   * can be pressed (the owner's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
+   * can be pressed (the design's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
    * not come says when it unlocks and cannot be pressed; nor can one with nothing to take back. Not on a card's own screens: a card
    * being read is not lost. Opened, it asks the mint what is still there (`fcAskAtMint`). */
   fcRestoreLost() {
@@ -28539,7 +28539,7 @@ class Component extends DCLogic {
      * offered SWAP greyed, with the reason when pressed. */
     const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
     /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`): a card of one currency has
-     * SCAN and PASTE alone, the owner's rule. */
+     * SCAN and PASTE alone, the design's rule. */
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
@@ -30268,7 +30268,7 @@ class Component extends DCLogic {
     return (su && (su.unit === 'usd' || su.unit === 'both')) ? 'usd' : 'sat';
   }
 
-  /* The two amounts are asked straight away, with no question first (the owner's rule): NO PIN AMOUNT? on SET AMOUNT, then the rate on
+  /* The two amounts are asked straight away, with no question first (the design's rule): NO PIN AMOUNT? on SET AMOUNT, then the rate on
    * MAX SPEND PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
   fcSuNoPin() {
     if (!this._fcSu) return;
@@ -30414,7 +30414,7 @@ class Component extends DCLogic {
 
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
    *
-   * The limit on a payment, asked as how fast the card pays (the owner's design): the figure a second, big, six of them to choose
+   * The limit on a payment, asked as how fast the card pays (the design): the figure a second, big, six of them to choose
    * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
    * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
    * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up
@@ -30893,7 +30893,7 @@ class Component extends DCLogic {
   }
   /* ---- a payment across units: the line under the big number -------------
    *
-   * The owner's rule (2026-10-16): when a payment crosses units, a dollar
+   * The design's rule: when a payment crosses units, a dollar
    * holder paying an ask in sats or the other way round, the big number is
    * the unit the payer holds, and under it one line says how far that is from
    * what the ask would be at the asker's own bitcoin price, with how old each

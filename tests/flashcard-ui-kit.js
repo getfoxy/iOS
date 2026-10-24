@@ -286,7 +286,7 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 /* An amount typed on the SET AMOUNT screen, in sats, and NEXT pressed. */
 const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
 
-/* The card screens of the owner's designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
+/* The card screens of the designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
  *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD and CANCEL by their labels;
  *   limits    CARD LIMITS: its rows ("LABEL | sub | value | unit"), and a row pressed by its label, or CLOSE;
  *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back, and the

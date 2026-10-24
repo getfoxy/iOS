@@ -312,7 +312,7 @@
              * reserve less the change, which left out the melt inputs' own fee
              * (NUT-02) and the split's — about 2 sats low on a live mint. */
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
-            /* One line for the log: what the mint kept of its reserve, and what came back. The owner asked after a card paid
+            /* One line for the log: what the mint kept of its reserve, and what came back. Asked for after a card paid
              * his dollar code whether Forge had charged anything, and the log said only what was reserved. */
             try {
               // (the reserve may be the library's own Amount, which warns when coerced)

@@ -725,7 +725,7 @@
    * payment. A payment that names none (an older Foxy, another wallet, a token
    * scanned off a screen) is counted with every other one that names none, as
    * one payer. Known contacts raise nothing: whether a payer is known is a hint
-   * on a screen, never a larger cap (the owner's rule).
+   * on a screen, never a larger cap (the design's rule).
    *
    * A card's payment counts toward what is held in all, and not toward any one
    * payer's cap ("when card pays, it's safe": the card proves its money and

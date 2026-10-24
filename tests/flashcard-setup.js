@@ -264,7 +264,7 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
        'a tap opens the phone’s sheet, reads the card through it and closes it', P.sheet.join(' | '));
     P.sheet.length = 0;
     const refused = await W.cardSession('Hold the card', (link) => W.cardSetLimit(link, { sats: 1 })).then(() => null, (e) => e);
-    // (a refusal the app's screen explains ends the sheet with its tick and "Card read", not in red: the owner's rule, 2026-10-24)
+    // (a refusal the app's screen explains ends the sheet with its tick and "Card read", not in red)
     ok(refused && refused.card === 'no-owner' && P.sheet.join(' | ') === 'begin: Hold the card | end: Card read',
        'what the card refuses comes back as it was, and the sheet closes calmly with "Card read" for the screen to explain', P.sheet.join(' | '));
     P.sheet.length = 0;
@@ -277,6 +277,13 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
       const e2 = await W.cardSession('Hold the card', () => Promise.reject(Object.assign(new Error('The card was not held long enough.'), { card: code }))).then(() => null, (e) => e);
       ok(e2 && e2.card === code && /^begin: Hold the card \| error: /.test(P.sheet.join(' | ')) && !/Card read/.test(P.sheet.join(' | ')),
          'a card taken away too soon (' + code + ') ends the sheet in red, not with the tick of a refusal', P.sheet.join(' | '));
+    }
+    // and so is a card that is not what it claims: a fake, a bad signature or the wrong signer, pieces a copy has spent
+    for (const code of ['fake', 'bad-signature', 'wrong-signer', 'spent']) {
+      P.sheet.length = 0;
+      const e3 = await W.cardSession('Hold the card', () => Promise.reject(Object.assign(new Error('This card is not what it claims.'), { card: code }))).then(() => null, (e) => e);
+      ok(e3 && e3.card === code && /^begin: Hold the card \| error: /.test(P.sheet.join(' | ')) && !/Card read/.test(P.sheet.join(' | ')),
+         'a card that is not what it claims (' + code + ') ends the sheet in red, never with a tick', P.sheet.join(' | '));
     }
     P.nfc = null;
     ok((await why(W.cardSession('Hold the card', (link) => W.cardLook(link)))) === 'cancelled', 'a sheet dismissed with no card is a tap that was not made');

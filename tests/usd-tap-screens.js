@@ -3,7 +3,7 @@
  *
  *     node tests/usd-tap-screens.js
  *
- * The owner asked for two people at Forge with dollar balances to pay each other with no connection. Foxy's
+ * Two people at Forge are to be able with dollar balances to pay each other with no connection. Foxy's
  * rule for a tap is the sat rule: one of the two phones must be online (docs/TAP-SPEC.md §2). So this drives
  * what that means in dollars, as a person drives it, on two real pages side by side:
  *

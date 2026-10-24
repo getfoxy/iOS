@@ -236,7 +236,7 @@
   fcLimitUnit() {
     const fc = this.state.fc;
     if (!(fc && fc.v123)) return this.fcUnit();
-    /* (by what it holds, the owner's rule: bitcoin held, dollars or sats; dollars alone, dollars; nothing yet, by what it was set up to hold) */
+    /* (by what it holds, the design's rule: bitcoin held, dollars or sats; dollars alone, dollars; nothing yet, by what it was set up to hold) */
     if (this.fcHeld(fc, 'sat') > 0) return 'sat';
     if (this.fcHeld(fc, 'usd') > 0) return 'usd';
     return fc.unit === 'usd' ? 'usd' : 'sat';
@@ -701,7 +701,7 @@
     if (flow === 'cardSend' && this.twoUnitsOn && this.twoUnitsOn() && !(this.walletNow && this.walletNow('send'))) {
       const fig = { usd: this.centsTyped(), sat: this.wantedSats() };
       if (!(fig.usd > 0) && !(fig.sat > 0)) { this.toast('Type an amount first.', true); return; }
-      /* The owner's rule: the amount, then the currency, asked only where both of this phone's balances could pay it; where one
+      /* The design's rule: the amount, then the currency, asked only where both of this phone's balances could pay it; where one
        * can, that one, with nothing asked; where neither can, said. The card then takes it in the one it holds (`fcSendGuard`). */
       const canUsd = fig.usd > 0 && fig.usd <= this.fcHave('usd');
       const canSat = fig.sat > 0 && fig.sat <= this.fcHave('sat');
@@ -1764,7 +1764,7 @@
          * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
         // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
         const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
-        /* For every card payment of the code on screen (the owner's rule: never the code read as unpaid while the mint works): at the
+        /* For every card payment of the code on screen (the design's rule: never the code read as unpaid while the mint works): at the
          * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
          * sats, sats paying a dollar code) keeps it up until the mint answers. */
         if (!share && !owesChange && this.state.screen === 'confirm') {
@@ -3107,7 +3107,7 @@
     }
     /* Money put on a card that is not on show (FLASHCARD on the send screen, which leaves the person at Home) or renewed ends on the
      * app's own success screen, ON THE CARD, with its flash, as a payment does (24-render-receive-and-send.js, `renderPaid`): the sheet
-     * that said it was out of place among the other endings (the owner's rule). What the balance cannot say goes in a line after. */
+     * that said it was out of place among the other endings (the design's rule). What the balance cannot say goes in a line after. */
     // nothing went on (a read after a write that put nothing, a reset): nothing to celebrate
     if (!(went > 0)) return;
     /* A payment's change put back on the card (TAP TO RECEIVE, `fcChangeWaiting`; the change tap of a till): the ending is the
@@ -4382,7 +4382,7 @@
    *
    *   tap 1, the PIN    what the swap spends, its fee with it, taken off the card in that currency, as WITHDRAW takes it;
    *   no card           the swap at the mint, on this phone, at the rate shown while it holds (a new one for what came off where not);
-   *   tap 2             what arrived put on the card in the other currency, as ADD FUNDS puts it on, under the PIN and the owner's say.
+   *   tap 2             what arrived put on the card in the other currency, as ADD FUNDS puts it on, under the PIN and the design's say.
    *
    * Cut short anywhere, the money is in this phone, in whichever currency it was then, and the screen offers to put it on the card or
    * leave it. Only the card's owner's phone swaps. */
@@ -5536,7 +5536,7 @@
     const x = this.state.fcXl || { amount: 0, cardUnit: 'sat', payUnit: 'sat', mint: '', home: '' };
     const cu = x.cardUnit === 'usd' ? 'usd' : 'sat';
     const pu = x.payUnit === 'usd' ? 'usd' : 'sat';
-    /* (the owner's design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
+    /* (the design: dollars first and the sats under them, the sats the main figure where this phone has no price; a dollar figure's
      * sats are at the market price) */
     const rate = (this.satUsd && this.satUsd()) || 0;
     const fig = (n, unit) => (unit === 'usd' ? { main: this.fcSats(n, 'usd'), sub: rate ? '\u20bf ' + this.group(Math.round(n / 100 / rate)) : '' } : this.money(n));
@@ -5796,10 +5796,10 @@
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
    *
-   * From home's MENU (21-render-values.js): RESTORE CARD, a screen of its own, 'fcRestore' (the owner's design; drawn by
+   * From home's MENU (21-render-values.js): RESTORE CARD, a screen of its own, 'fcRestore' (the design; drawn by
    * 26j-card-wheel.js `renderCardScreens`). Under CARDS TIED TO YOUR PHONE a row for each card this phone set up (`fcLostRows`): its
    * name, what it held when last seen, and on the right whether its money can be taken back. Only an unlocked card with money on it
-   * can be pressed (the owner's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
+   * can be pressed (the design's rule): the take-back (`fcTakeBack`), which ends on the app's success screen. A card whose date has
    * not come says when it unlocks and cannot be pressed; nor can one with nothing to take back. Not on a card's own screens: a card
    * being read is not lost. Opened, it asks the mint what is still there (`fcAskAtMint`). */
   fcRestoreLost() {
@@ -6528,7 +6528,7 @@
      * offered SWAP greyed, with the reason when pressed. */
     const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
     /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`): a card of one currency has
-     * SCAN and PASTE alone, the owner's rule. */
+     * SCAN and PASTE alone, the design's rule. */
     const buttons = !usable ? [] : [
       { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
         path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },

@@ -1249,7 +1249,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const v = cur(a);
       ok(a.state.screen === 'currency' && v.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN' && v.curCards.every((x) => x.badgePx === '60px' && x.labelShown === false && x.balance === '')
          && v.curFoot === 'A card holds one of them. To change it later, RESET the card and set it up again.' && v.curFootShown === false,
-         'a card of 1.22: DOLLARS and BITCOIN as the owner drew them, the old words kept and not shown', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
+         'a card of 1.22: DOLLARS and BITCOIN as designed, the old words kept and not shown', JSON.stringify([v.curCards.map((x) => x.name), v.curFoot]));
       v.curBack();
     }
 

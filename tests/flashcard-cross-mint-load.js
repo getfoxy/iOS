@@ -178,7 +178,7 @@ async function world(o) {
     ok(bare(R.W.mintUrl) === MINT2 && !R.W.cardAwayNow(), 'both mints are asked with this phone still at its own');
     ok(!!x.plan && x.plan.amount === 1000 && x.plan.total === 1010 && x.plan.fee === 10 && x.cardUnit === 'sat' && x.payUnit === 'sat',
        'the figures: 1,000 to go on, at most 1,010 from this phone, a fee of up to 10', JSON.stringify(x.plan && { amount: x.plan.amount, total: x.plan.total, fee: x.plan.fee }));
-    // (the owner's design: CARD AT DIFFERENT MINT; with no price here, the sats are the main figures)
+    // (the design: CARD AT DIFFERENT MINT; with no price here, the sats are the main figures)
     ok(spec(a).title === 'CARD AT DIFFERENT MINT' && spec(a).subtitle === 'This card is at another mint. Your money goes there by Lightning, and you pay the fee.'
        && spec(a).amountLabel === 'YOU PAY' && spec(a).amount === 'UP TO ₿ 1,010'
        && (spec(a).rows || []).map((r) => r.label).join() === 'ON THE CARD,FEE, PAID BY YOU,CARD’S MINT,YOUR MINT'
@@ -512,7 +512,7 @@ async function world(o) {
     a.fcSendCard();
     a.state.amount = '1.00'; a.state.unit = 'USD';
     a.fcAmountNext();
-    /* The owner's rule (2026-10-23): both of this phone's balances could pay $1.00, so which pays is asked right after the amount,
+    /* The design's rule: both of this phone's balances could pay $1.00, so which pays is asked right after the amount,
      * before any card is read; then the PIN where the card is known to want it, one read, and, the card holding both, which goes on it. */
     await until('the question', () => a.state.screen === 'currency');
     ok(a.state.curCard && a.state.curCard.question === 'SEND WHICH TO THE CARD?' && /Either balance could pay/.test(a.state.curCard.foot || '') && begins(R) === 0,

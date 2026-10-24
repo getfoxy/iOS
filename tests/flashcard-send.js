@@ -186,7 +186,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const labels = spec.rows.map((r) => r.label);
     const from = spec.rows.find((r) => r.label === 'FROM') || {};
     ok(holder.state.screen === 'sendConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(), 'a pasted invoice reaches its confirmation, still in card mode');
-    // (the owner's design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
+    // (the design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
     ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'FLASHCARD' && from.sub === '',
        'with FROM / FLASHCARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
     const feeRow = spec.rows.find((r) => r.label === 'FEE') || {};

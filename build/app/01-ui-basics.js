@@ -322,9 +322,9 @@ class Component extends DCLogic {
        * last payment's fee on the next payment's confirmation, three separate
        * times, each with a different patch. The value simply does not belong
        * on a screen shown before the payment — a quote or nothing. */
-      /* Whose fee it is, in the owner's words: a payment that leaves this mint
+      /* Whose fee it is, in the design's words: a payment that leaves this mint
        * pays the mint's fees, and the payer pays them (C16). */
-      /* (from a card, as the owner drew it: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
+      /* (from a card, as designed: "~$ 0.01", with nothing under it, in a grid of four with NETWORK, FROM and ARRIVES) */
       this.cfRow('FEE', s.quotedFee != null
         ? (out ? '~' : 'UP TO ') + cfig(s.quotedFee).main
         : held ? 'CHECKING…' : 'UNKNOWN',
@@ -333,7 +333,7 @@ class Component extends DCLogic {
     if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
      * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
-     * dollar card, this phone's for a bitcoin card (the owner's design, where it was a RATE row). */
+     * dollar card, this phone's for a bitcoin card (the design, where it was a RATE row). */
     const cardRate = (cardUsd && this._feeQuote && this._feeQuote.rate) ? Math.round(Number(this._feeQuote.rate.usdPerBtc) || 0) : 0;
     const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
     const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
@@ -744,7 +744,7 @@ class Component extends DCLogic {
     catch (e) { return null; }
   }
 
-  /* CONFIRM PAYMENT at a mint with two balances, as the owner drew it.
+  /* CONFIRM PAYMENT at a mint with two balances, as designed.
    *
    * TOTAL on top, the fee in it, in the balance that pays. Then plain rows: TO,
    * AMOUNT, FEE INCLUDED, NETWORK, and RATE when dollars pay a bitcoin invoice

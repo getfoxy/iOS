@@ -161,9 +161,9 @@
     }
     const three = units.length > 2;
     const setUp = cardFlow && !cc;
-    // a receive's question shows no balances either (the owner's rule): what is held says nothing about what to receive
+    // a receive's question shows no balances either (the design's rule): what is held says nothing about what to receive
     const receiving = !cardFlow && s.flow === 'receive';
-    /* A card's set-up, as the owner drew it: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
+    /* A card's set-up, as designed: tall tiles with the badge and the word and nothing else, and BOTH split between the two,
      * dollars' frost and bitcoin's fur. */
     if (both && setUp) {
       LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',

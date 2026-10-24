@@ -311,7 +311,7 @@
           }
           this.paidDismissed();
           /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
-           * home: the owner's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
+           * home: the design's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
            * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
           const fc = this.state.fc;
           const off = this._fcPaidOff;
@@ -920,7 +920,7 @@
     };
     /* Sats paying a request in dollars (`agreed`): the payment crosses units,
      * so the big number is the sats this phone holds and pays, at its own
-     * price, and the dollars they asked for are under it (the owner's rule,
+     * price, and the dollars they asked for are under it (the design's rule,
      * 26k-price-line.js). The asker's price is not carried by a request in
      * dollars, so there is no difference line here; their phone weighed this
      * phone's price against its own before it answered (`priceSpec`). */
@@ -935,7 +935,7 @@
       this.cfRow('ARRIVES', d ? 'IN SECONDS' : 'WHEN THEY TAKE IT',
         { ink: d ? 'var(--ink)' : 'var(--btc-ink)', half: feeShown }),
     ]).concat(feeShown ? [
-      /* The owner's rule for fees (C16): paid in the unit asked, at the mint it
+      /* The design's rule for fees (C16): paid in the unit asked, at the mint it
        * is asked at, Foxy charges nothing and says nothing; a fee the mint
        * itself takes for the pieces, or a payment across units, is the
        * payer's, and the row says whose. */

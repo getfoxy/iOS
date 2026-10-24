@@ -433,7 +433,7 @@ function amt(a) {
     holder.back();
   }
 
-  /* ---- the two amounts' unit, by what the card holds (the owner's rule of 2026-10-22) --------------------------------------------
+  /* ---- the two amounts' unit, by what the card holds (the design's rule) --------------------------------------------
    * A dollar card's amounts are typed in dollars and nothing else; a bitcoin card's in dollars first or in sats by SET AMOUNT's own swap;
    * what the card is sent is what it takes (cents, or sats) either way. */
   {
@@ -584,7 +584,7 @@ function amt(a) {
        'one tap: the holder’s PIN, no owner, no refund key, a no-PIN amount of $2.00, and the 1,500 under the PIN', JSON.stringify([cash.state.noPinLimit, cash.balance()]));
     ok(!ins(cash).includes('43') && !R.W.cardsKnown()[cash.key] && payer.toasts.indexOf('The card is set up for the person who holds it.') >= 0,
        'no claim was asked for, the phone keeps no row of it, and the screen says whose card it is', payer.toasts.slice(-2).join(' / '));
-    // (the app's success screen, ON THE CARD, as every load that ends at Home: the owner's rule)
+    // (the app's success screen, ON THE CARD, as every load that ends at Home: the design's rule)
     ok(payer.state.screen === 'paid' && payer.state.paidSays === 'ON THE CARD' && payer.state.paidAmount === 1500, 'and what went on, on the success screen as any money put on a card is said', JSON.stringify([payer.state.screen, payer.state.paidSays, payer.state.paidAmount]));
     payer.setState({ screen: 'home', stack: [] }); if (payer.paidDismissed) payer.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     // read on the same phone's FLASHCARD screen: somebody else's card
@@ -682,7 +682,7 @@ function amt(a) {
     ok(!card(holderApp) && holderApp.state.screen === 'fcRestore' && !holderApp.state.fc && rs && rs.rows.length >= 2 && rs.rows.length === H.W.cardsList().length && rs.inert,
        'on the phone that loaded cards: RESTORE CARD, a row for each', rs && rs.rows.join(' / '));
 
-    /* A card loaded and locked till its date: its row says when it unlocks, in amber, and has no press (the owner's rule: only an
+    /* A card loaded and locked till its date: its row says when it unlocks, in amber, and has no press (the design's rule: only an
      * unlocked card can be pressed). Hours, then minutes, under a day; days, hours and minutes are rounded up. */
     const lc = newCard(H);
     await H.W.cardSetUp(lc, { pin: '1234', recoverable: true });

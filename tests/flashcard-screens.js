@@ -3137,7 +3137,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     app.state.fc = { unit: 'sat' };
     ok(app.fcUnit() === 'sat' && app.fcTypedUnitFor('cardAdd') === 'sat', 'and a bitcoin card’s in sats, as ever');
   }
-  /* ---- the owner's designs: a limit said as the rate it makes and back, and the welcome of a new card (26j-card-wheel.js) ---- */
+  /* ---- the designs: a limit said as the rate it makes and back, and the welcome of a new card (26j-card-wheel.js) ---- */
   {
     const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
     a.price = 60000;

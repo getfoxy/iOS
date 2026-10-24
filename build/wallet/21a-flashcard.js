@@ -1814,11 +1814,13 @@
         if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
         /* A refusal the app's own screen explains (the card holds the other currency, is at another mint, has not enough, wants
          * its PIN, is somebody else's): the sheet ends with its tick and "Card read", and the screen says the rest. Red is for the
-         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. (The owner, 2026-10-24.) Taken away
-         * too soon includes a card not held long enough (`keep-holding`, 6A98) and one taken away before it signed for all of it
-         * (`partial`). */
+         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. Taken away too soon includes a card
+         * not held long enough (`keep-holding`, 6A98) and one taken away before it signed for all of it (`partial`). Red too for a
+         * card that is not what it claims (`fraud`): a fake, a piece with a bad signature or the wrong signer, or pieces a copy of
+         * the card has already spent; a tick on such a card would be the wrong word. */
         var physical = { gone: 1, cancelled: 1, interrupted: 1, partial: 1, 'keep-holding': 1, lost: 1, timeout: 1, unknown: 1, chip: 1 };
-        if (e && e.card && !physical[String(e.card)]) return bridgeAsk('cardEnd', { text: 'Card read' }, 5000).then(function () { throw e; }, function () { throw e; });
+        var fraud = { fake: 1, 'bad-signature': 1, 'wrong-signer': 1, spent: 1 };
+        if (e && e.card && !physical[String(e.card)] && !fraud[String(e.card)]) return bridgeAsk('cardEnd', { text: 'Card read' }, 5000).then(function () { throw e; }, function () { throw e; });
         var say = (e && e.card === 'gone') ? 'Card taken away too soon.' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
       };

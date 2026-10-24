@@ -8059,7 +8059,7 @@
    * payment. A payment that names none (an older Foxy, another wallet, a token
    * scanned off a screen) is counted with every other one that names none, as
    * one payer. Known contacts raise nothing: whether a payer is known is a hint
-   * on a screen, never a larger cap (the owner's rule).
+   * on a screen, never a larger cap (the design's rule).
    *
    * A card's payment counts toward what is held in all, and not toward any one
    * payer's cap ("when card pays, it's safe": the card proves its money and
@@ -17255,7 +17255,7 @@
         throw cardError('offline-old', 'This card is too old to pay a phone that is offline. Take this payment when this phone is online.');
       }
       /* And within what this phone holds before it settles (`tillRefusal`), said before any PIN, BEGIN or signature. A
-       * card's payment counts toward what is held in all and toward no payer's own cap: the owner's rule is "when card
+       * card's payment counts toward what is held in all and toward no payer's own cap: the design's rule is "when card
        * pays, it's safe" (the card proves its money and signs it to this phone), so it is held to the total alone. */
       if (offline && want > 0) {
         var capNo = tillRefusal(want, cu, '', true);
@@ -23687,7 +23687,7 @@
              * reserve less the change, which left out the melt inputs' own fee
              * (NUT-02) and the split's — about 2 sats low on a live mint. */
             var feeSats = meltFee(sumProofs(split.send || []) + splitFee, quote.amount, change);
-            /* One line for the log: what the mint kept of its reserve, and what came back. The owner asked after a card paid
+            /* One line for the log: what the mint kept of its reserve, and what came back. Asked for after a card paid
              * his dollar code whether Forge had charged anything, and the log said only what was reserved. */
             try {
               // (the reserve may be the library's own Amount, which warns when coerced)
@@ -33379,11 +33379,13 @@
         if (e && e.sheetText) return bridgeAsk('cardEnd', { text: String(e.sheetText).slice(0, 110) }, 5000).then(function () { throw e; }, function () { throw e; });
         /* A refusal the app's own screen explains (the card holds the other currency, is at another mint, has not enough, wants
          * its PIN, is somebody else's): the sheet ends with its tick and "Card read", and the screen says the rest. Red is for the
-         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. (The owner, 2026-10-24.) Taken away
-         * too soon includes a card not held long enough (`keep-holding`, 6A98) and one taken away before it signed for all of it
-         * (`partial`). */
+         * card itself going wrong: taken away too soon, lost, the sheet cancelled, a chip error. Taken away too soon includes a card
+         * not held long enough (`keep-holding`, 6A98) and one taken away before it signed for all of it (`partial`). Red too for a
+         * card that is not what it claims (`fraud`): a fake, a piece with a bad signature or the wrong signer, or pieces a copy of
+         * the card has already spent; a tick on such a card would be the wrong word. */
         var physical = { gone: 1, cancelled: 1, interrupted: 1, partial: 1, 'keep-holding': 1, lost: 1, timeout: 1, unknown: 1, chip: 1 };
-        if (e && e.card && !physical[String(e.card)]) return bridgeAsk('cardEnd', { text: 'Card read' }, 5000).then(function () { throw e; }, function () { throw e; });
+        var fraud = { fake: 1, 'bad-signature': 1, 'wrong-signer': 1, spent: 1 };
+        if (e && e.card && !physical[String(e.card)] && !fraud[String(e.card)]) return bridgeAsk('cardEnd', { text: 'Card read' }, 5000).then(function () { throw e; }, function () { throw e; });
         var say = (e && e.card === 'gone') ? 'Card taken away too soon.' : String((e && e.message) || 'That did not work').slice(0, 90);
         return bridgeAsk('cardEnd', { error: say }, 5000).then(function () { throw e; }, function () { throw e; });
       };

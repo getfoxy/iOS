@@ -50,7 +50,7 @@
        * balance, and a balance that has simply dropped looks like money gone.
        * The pill under it says where they are until they are back. */
       /* And a stale price says its age in this same pill, in red, instead of on a line of its own under the price: the line came
-       * and went as the connection did, and everything under it moved with it (the owner's rule). Held sats first, then the age,
+       * and went as the connection did, and everything under it moved with it (the design's rule). Held sats first, then the age,
        * then the day's change. */
       deltaText: this.heldPill() || this.priceAgeWords() || (chart ? chart.t : ''),
       deltaShown: !!this.heldPill() || !!this.priceAgeWords() || !!chart, markerDisplay: chart ? 'block' : 'none',
@@ -182,7 +182,7 @@
       toggleCollapse: () => this.setState(p => ({ priceCollapsed: !p.priceCollapsed })),
       chevronRot: s.priceCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
       priceFlex: s.priceCollapsed ? '0 0 auto' : '1 1 0%',
-      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the owner's design)
+      // BITCOIN PRICE level with the round buttons, at a mint with two balances (the design)
       priceTopPad: s.priceCollapsed ? 2 : (this.twoUnitsOn && this.twoUnitsOn()) ? 8 : 4,
       moneyFlex: (s.priceCollapsed || s.priceRemoved) ? '1 1 0%' : '0 0 auto',
       showPriceSection: !s.priceRemoved,
@@ -205,7 +205,7 @@
   /* The ! on the bitcoin pill that asks about the backup again (`bkAskAgain`), drawn where this is true. */
   BK_BADGE = false;
 
-  /* The money card's heading and pills, as the owner drew them, at every mint.
+  /* The money card's heading and pills, as designed, at every mint.
    *
    * The sheet is headed by the mint's own name and MINT under it, and the tap
    * opens SWITCH MINT. Then the pills: dollars over bitcoin, or the one the
@@ -555,7 +555,7 @@
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      /* A card's set-up names its two amounts (the owner's design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
+      /* A card's set-up names its two amounts (the design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
        * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
       amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'

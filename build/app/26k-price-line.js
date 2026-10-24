@@ -1,6 +1,6 @@
   /* ---- a payment across units: the line under the big number -------------
    *
-   * The owner's rule (2026-10-16): when a payment crosses units, a dollar
+   * The design's rule: when a payment crosses units, a dollar
    * holder paying an ask in sats or the other way round, the big number is
    * the unit the payer holds, and under it one line says how far that is from
    * what the ask would be at the asker's own bitcoin price, with how old each

@@ -609,7 +609,7 @@
     };
   }
 
-  /* One row of history at a mint with two balances, as the owner drew it:
+  /* One row of history at a mint with two balances, as designed:
    * the figure in the row's own unit (sats big on the bitcoin tab, cents on
    * the dollar tab), the running balance in that unit, and for a swap the
    * other leg's figure under it with the words that say so. */

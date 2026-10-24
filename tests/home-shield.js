@@ -454,7 +454,7 @@ const STATES = [
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);
     /* RESTORE LOST CARD, after HISTORY, in the menu's own row with a drawing of its own: the money of a card this phone loaded, taken back
-     * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, RESTORE CARD (the owner's design). */
+     * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, RESTORE CARD (the design). */
     A.setState({ screen: 'home', stack: [], open0: false });
     await settle();
     const rv = V().menuItems[1];

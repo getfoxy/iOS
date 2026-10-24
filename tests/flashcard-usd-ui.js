@@ -242,7 +242,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     let cv = holder.renderCurrency({ s: holder.state, sc: 'currency' });
     ok(cv.curTitle === 'CURRENCY' && cv.curQuestion === 'What will this card hold?' && cv.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN'
        && cv.curCards[0].balance === '' && cv.curCards[1].balance === '' && cv.curCards.every((x) => !x.balShown && !x.markShown && x.radius === '30px'),
-       'it asks "What will this card hold?", with the two balances as the owner drew them: a badge and a word, no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
+       'it asks "What will this card hold?", with the two balances as designed: a badge and a word, no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
     ok(cv.curFootShown === false && cv.curTilesOnly === true, 'and nothing under the tiles', cv.curFoot);
     // back is the card's screen, with nothing tapped
     cv.curBack();
@@ -848,7 +848,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const rows = sp.rows.map((r) => r.label);
     const rate = sp.rows.filter((r) => r.label === 'RATE')[0];
     const fee = sp.rows.filter((r) => r.label === 'FEE')[0];
-    // (the owner's design: the price under the amount, NETWORK FROM ARRIVES FEE in a grid of four, no RATE row)
+    // (the design: the price under the amount, NETWORK FROM ARRIVES FEE in a grid of four, no RATE row)
     ok(!sp.wallet && sp.cta === 'NEXT' && rows.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && !rate && sp.secondary.label === 'ADD A NOTE'
        && /^~\$ \d+\.\d\d$/.test(fee.value) && fee.sub === '' && /^\$ \d+\.\d\d$/.test(sp.amount) && /^at \$ [\d,]+ per bitcoin$/.test(sp.amountSub)
        && sp.amountSub === 'at $ ' + holder.group(Math.round(holder._feeQuote.rate.usdPerBtc)) + ' per bitcoin',

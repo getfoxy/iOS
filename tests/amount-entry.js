@@ -389,7 +389,7 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   ok(amountVals({ val: 1, sendOver: true }).sendOverLabel === 'MORE THAN YOUR BALANCE', 'and the balance’s line is the one it always was');
 }
 
-// ---- a card's set-up asks its amounts on this pad, in the owner's words ----
+// ---- a card's set-up asks its amounts on this pad, in the design's words ----
 {
   reset({ screen: 'amount', flow: 'cardSuNoPin' });
   const v = amountVals();
