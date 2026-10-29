@@ -201,7 +201,8 @@
         return behind.then(function (restored) {
         // nothing left to claim, but what was rebuilt is still news for the screen
         if (!want) return restored;
-        var rec = outputsRecorder(w, [], function (list) { noteQuoteOutputs(quoteId, list, mintOf(w)); });
+        // before the claim leaves, a refusal stops it (`refuseOn`)
+        var rec = outputsRecorder(w, [], function (list, after) { refuseOn(w, noteQuoteOutputs(quoteId, list, mintOf(w), after)); });
         return rec.attempt(function () {
           return w.mintProofsOnchain(want, seen.answer || record.answer, record.privkey);
         }).then(function (fresh) {
@@ -347,6 +348,8 @@
       var pick = null;
       for (var i = 0; i < plan.options.length; i++) if (plan.options[i].index === feeIndex) pick = plan.options[i];
       if (!pick) return Promise.reject(new Error('That fee is not one this quote offers.'));
+      // room for what it writes, or nothing is sent (`roomFor`)
+      try { roomFor('melt'); } catch (eRoom) { if (opts && opts.held) eRoom.held = opts.held; return Promise.reject(eRoom); }
 
       var at = mintOf(w);
       var owed = plan.sats + pick.fee;
@@ -414,7 +417,19 @@
          * their age; the settled ones are what gets trimmed. */
         var holding = sending.filter(function (r) { return ((r && r.proofs) || []).length; });
         var settled = sending.filter(function (r) { return !((r && r.proofs) || []).length; });
-        mustSave(K.onchainOut, holding.concat(settled.slice(0, Math.max(0, 30 - holding.length))), true);
+        /* Not written, and the payment is not sent. The split was made, and its
+         * pieces are only here: they go back into the pile before its record is
+         * let go, as a Lightning payment's do (16-sending.js). A pile that will
+         * not take them either keeps the split's record for recoverSwaps. */
+        // (after the split, which cannot be undone: the store's reserve answers a refusal, `mustSave`)
+        try { mustSave(K.onchainOut, holding.concat(settled.slice(0, Math.max(0, 30 - holding.length))), true, true); }
+        catch (eOut) {
+          if (!heldId) {
+            try { addProofs(spending, at, w); splitGuard.done(); chargeUnsentFee(at, splitFee); }
+            catch (eBack) { console.error('[foxy] on chain: the split\u2019s pieces could not go back into the pile either; its record is kept for the next connect'); }
+          }
+          return Promise.reject(eOut);
+        }
         /* The card's pieces are this payment's now: out of their hold, once the record has them (never in neither). A hold that
          * cannot be let go is a payment that is not sent: the record goes, and the pieces stay where they were. */
         if (heldId) {
@@ -471,9 +486,12 @@
         var meltOutputs = [];
         var stopWatching = watchReserved(w, function (r) {
           meltOutputs.push(r);
-          noteOnchainOut(plan.id, { outputs: meltOutputs.slice() });
+          // before the melt: not written, not sent (`refuseOn`)
+          try { noteOnchainOut(plan.id, { outputs: meltOutputs.slice() }, true); } catch (eW) { refuseOn(w, eW); }
         });
         var meltCall;
+        // it leaves: from here what follows is what the store's reserve is for (`storeStep`)
+        storeStep('melt');
         try { meltCall = Promise.resolve(w.meltProofsOnchain(plan.quote, spending, feeIndex)); }
         catch (eM) { meltCall = Promise.reject(eM); }
         meltCall.then(stopWatching, stopWatching);
@@ -552,6 +570,19 @@
            * proofs stay in the record and onchainFollow decides, so nothing is
            * spent twice and nothing is silently lost. */
           console.warn('[foxy] on chain: the melt did not answer cleanly \u2014', (e && e.message) || e);
+          /* Never sent (its record could not be written, `onLabel`): nothing of it is at the mint, so
+           * the pieces go back now rather than wait for a follow to hear UNPAID. */
+          if (e && e.unsent) {
+            try {
+              if (heldId) cardOutReturn(heldId, spending, at, cardHold || {});
+              else addProofs(spending, at, w);
+              onchainForgetOut(plan.id);
+              amendTx(entry, { settled: false, state: 'failed' });
+              if (!heldId) chargeUnsentFee(at, splitFee);
+            } catch (eBack) { noteOnchainOut(plan.id, { state: 'UNKNOWN' }); }
+            if (heldId) cardOutDone(heldId);
+            throw e;
+          }
           noteOnchainOut(plan.id, { state: 'UNKNOWN' });
           if (heldId) cardOutDone(heldId);
           // the entry is already on the history screen, pending, from before the melt

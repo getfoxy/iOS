@@ -89,7 +89,10 @@
      * finally returns writes nothing: not a range, and not the record itself. */
     var watches = [];
     var quiet = false;
-    var put = function () { if (!quiet) write(list.map(copyRange)); };
+    /* `after`: written once the request has had its answer (a refusal's ranges
+     * taken off), not before it: `write(list, after)`. A record written before
+     * the request is the one whose refusal must stop it (`swapGuard`). */
+    var put = function (after) { if (!quiet) write(list.map(copyRange), !!after); };
     return {
       list: function () { return list.slice(); },
       stop: function () {
@@ -118,7 +121,7 @@
           done();
           if (mine.length && mintRefused(e)) {
             list = list.filter(function (r) { return mine.indexOf(r) < 0; });
-            put();
+            try { put(true); } catch (x) { console.warn('[foxy] a refused request\u2019s counters could not be taken off its record:', x && x.message); }
           }
           throw e;
         });
@@ -202,18 +205,28 @@
 
   /* The claim's output ranges, on the quote's own record: the invoice list,
    * the archive, or the mint-switch note that carries the quote. */
-  function noteQuoteOutputs(quoteId, list, mint) {
+  /* Answers the refusal when a write that had to land did not (null when every
+   * one did). Called before the claim leaves, from cashu-ts's
+   * `countersReserved`, which swallows throws: the caller puts it on the view
+   * the claim goes by (`refuseOn`), and the claim is not sent. They were `save`,
+   * and a refusal sent the claim with its ranges named only by the seed. */
+  function noteQuoteOutputs(quoteId, list, mint, after) {
     var ranges = (list || []).map(copyRange);
+    var refused = /** @type {any} */ (null);
+    var put = function (key, value) {
+      if (after) { save(key, value); return; }
+      try { mustSave(key, value, true); } catch (e) { if (!refused) refused = e; }
+    };
     [K.quotes, K.quotesOld].forEach(function (key) {
       var all = load(key, []);
       var hit = false;
       all.forEach(function (q) {
         if (q && q.quote === quoteId) { q.outputs = ranges; q.outputsMint = mint; hit = true; }
       });
-      if (hit) save(key, all);
+      if (hit) put(key, all);
     });
     var m = moveNote(quoteId);
-    if (m) { m.outputs = ranges; m.outputsMint = mint; putMoveNote(m); }
+    if (m) { m.outputs = ranges; m.outputsMint = mint; try { putMoveNote(m, !after); } catch (e) { if (!refused) refused = e; } }
     /* An on-chain address is a quote too, and its claim reserves counters the
      * same way. Its record lives in its own key, so none of the above found it
      * and every range was written nowhere: a claim whose answer was lost left
@@ -224,7 +237,8 @@
     chain.forEach(function (q) {
       if (q && q.quote === quoteId) { q.outputs = ranges; q.outputsMint = mint; onIt = true; }
     });
-    if (onIt) save(K.onchain, chain);
+    if (onIt) put(K.onchain, chain);
+    return refused;
   }
 
   /* The record a quote's claim wrote, wherever it is: { key, entry }. */
@@ -935,12 +949,20 @@
    * mustSave, not save, for the same reason the rows exist at all: a locked
    * send has no seed to fall back on, so a record that does not land is a
    * payment that cannot be recovered. A refusal throws before the swap leaves,
-   * which is the whole of W6. */
-  function writeSwap(rec) {
+   * which is the whole of W6.
+   *
+   * `before`: written before the request leaves (its ranges as they are
+   * reserved, its locked outputs as they are made, its inputs as it goes).
+   * Every such write is mustSave with `unsent`, ranges too: a refusal stops
+   * the request (`swapGuard`, `onLabel`), and is said as nothing sent. The
+   * ranges were written with `save`, whose refusal nothing read. After the
+   * answer, a record that names no locked output is written as it was. */
+  function writeSwap(rec, before) {
     var l = loadSwaps().filter(function (x) { return x.id !== rec.id; });
     var worth = (rec.outputs && rec.outputs.length) || (rec.locked && rec.locked.length);
     if (worth) l.push(rec);
-    if (rec.locked && rec.locked.length) mustSave(K.swaps, l.slice(-50));
+    if (before) mustSave(K.swaps, l.slice(-50), true);
+    else if (rec.locked && rec.locked.length) mustSave(K.swaps, l.slice(-50));
     else save(K.swaps, l.slice(-50));
   }
 
@@ -1030,12 +1052,18 @@
   /* Tokens kept after they were claimed, and change kept after it was handed
    * over, are for showing — and a token of a hundred pieces is ninety
    * kilobytes. The page's store is a few megabytes and everything Foxy
-   * remembers shares it, so these are capped at about a megabyte and a half:
-   * past that the oldest go first. Only ever `kept` and `changeToken`, which
+   * remembers shares it, so these are capped at half a million characters
+   * (half a megabyte, as WebKit counts: `storeBytes`): past that the oldest
+   * go first. It was a million and a half, which is more than half of what
+   * WebKit allows the whole page, and the notes were the largest thing on the
+   * phone whose store filled. Only ever `kept` and `changeToken`, which
    * are spent or safely locked to somebody else; never `token`, which may be
-   * the only copy of money nobody has taken. Changes `all` in place. */
-  function trimKeptTokens(all) {
-    var BUDGET = 1500000;
+   * the only copy of money nobody has taken. Changes `all` in place.
+   * `budget`: a smaller one, for a store short of room (`trimStore`). */
+  var KEPT_TOKENS_TIGHT = 50000;
+  function trimKeptTokens(all, budget) {
+    var BUDGET = 500000;
+    if (typeof budget === 'number' && budget >= 0 && budget < BUDGET) BUDGET = budget;
     var size = 0;
     var keys = Object.keys(all || {});
     keys.forEach(function (h) {
@@ -1336,6 +1364,8 @@
   function holdUnanswered(at) {
     var here = canonicalMint(at);
     var sats = 0;
+    // a send that finished, all but its record's drop, holds nothing back (`swapFinished`)
+    dropFinishedSwaps(at);
     loadSwaps().forEach(function (r) {
       if (canonicalMint(r.mint) !== here || liveSwap[r.id]) return;
       if (r.kind !== 'send' || !(r.locked && r.locked.length) || r.freeInputs || heldHas(r.id)) return;
@@ -1426,7 +1456,11 @@
       settleChangeMade(pay.forHash, Math.round(Number(pay.owed) || 0) || (sats + fee), { sats: sats, fee: fee });
       console.log('[foxy] change of ' + (unit === 'sat' ? sats + ' sats' : moneyWords(sats, unit)) + ' that was being made when Foxy closed is on its payment\u2019s entry, to be shown');
     } else {
-      var hash = 'token-' + String(rec.id).replace(/^send-/, '');
+      // the entry the send would have written, when its record names it (`swapFinished`)
+      var hash = (typeof rec.hash === 'string' && rec.hash) ? rec.hash : 'token-' + String(rec.id).replace(/^send-/, '');
+      // on its note first, as every token this phone makes (`keepSentToken`), then the last-token slot
+      noteLastToken();
+      FoxyWallet.tag(hash, { to: 'ecash', token: token, interrupted: true }, true);
       // in the send's own unit: a dollar payment rebuilt is a dollar entry, in cents
       mustSave(K.outtok, unit === 'sat'
         ? { token: token, sats: sats, unit: unit, mint: at, hash: hash, at: Date.now(), swapped: true }
@@ -1443,6 +1477,203 @@
     }
     dropSwap(rec.id);
     return { sats: sats, fee: fee, token: token };
+  }
+
+  /* ---- a send's token, written before its record goes ---------------------
+   *
+   * The string is the money once a send has made it, and the swap's record is
+   * what can rebuild it. The record used to be let go first and the token
+   * written after; with the store full the write was refused, and a locked
+   * card top-up existed in one local variable and then nowhere
+   * (its P2PK outputs are random, so no seed finds them). Now the token is
+   * written first (`keepSentToken`) and the record is let go after it
+   * (`sendToken`, `_sendUnitToken`).
+   *
+   * A relaunch can then find both, the record and the written token: the send
+   * finished, and only the record's drop was not reached. The record names the
+   * entry the send writes (`rec.hash`), and a record whose token is on file
+   * under it (the last token, or its history entry) is let go and nothing else
+   * is done (`swapFinished`, in `recoverSwaps` before any record is asked
+   * about). That matters most for a plain send: its outputs are derived from
+   * the seed, and a restore of the record's ranges would bring the token's own
+   * pieces back into the balance while the token is out. */
+  function swapFinished(rec) {
+    if (!rec || rec.kind !== 'send' || typeof rec.hash !== 'string' || !rec.hash) return false;
+    var last = load(K.outtok, null);
+    if (last && last.hash === rec.hash) return true;
+    return txSeen(rec.hash);
+  }
+
+  /* Every such record at a mint let go: the send's inputs out of the pile if
+   * any are still there, held ones let go as spent, and the record dropped.
+   * Asks the mint nothing, so it runs with no route (`holdUnanswered`) as
+   * well as before a sweep asks (`recoverSwaps`). Answers how many. */
+  function dropFinishedSwaps(at) {
+    var here = canonicalMint(at);
+    var n = 0;
+    loadSwaps().forEach(function (r) {
+      if (canonicalMint(r.mint) !== here || liveSwap[r.id] || !swapFinished(r)) return;
+      try {
+        dropInputsOf(r);
+        releaseHeld(r.id, false);
+        dropSwap(r.id);
+        n += 1;
+        console.log('[foxy] a send whose token was written down before Foxy closed left its swap\u2019s record behind; let go, nothing added');
+      } catch (e) { console.warn('[foxy] a finished send\u2019s record could not be let go yet:', e && e.message); }
+    });
+    return n;
+  }
+
+  /* The token written down (`out`, the last-token record), with `mustSave`'s
+   * one retry after making room. Refused even so:
+   *   a plain send (`lockTo` empty): its pieces are this phone's own and were
+   *     handed to nobody, so they go back into the pile, the record is let go
+   *     and what the swap cost is charged as a payment that did not go
+   *     (`meltBackFee`, `chargeUnsentFee` for sats). Refused as never sent, in
+   *     words that say what to do.
+   *   a locked send: its pieces are locked to the receiver and cannot be held
+   *     here, so the record stays, and it is what rebuilds the payment as a
+   *     token to hand over on the next connect with room (`finishLockedSend`).
+   * `back` is what goes back for a plain send (pieces signed on from a locked
+   * payment are not: they are still in the unclaimed store, struck off only
+   * once a token holds them). Throws in either case. */
+  /* The token in the last-token slot, on its note before anything writes over the slot: the slot holds one token, and
+   * a send whose note was refused had its only lasting copy there (a review found it: send A's note refused, send B
+   * written over the slot, A's text nowhere on the phone). A token already on its note as `token` or `kept` costs
+   * nothing; one that is not is put there with mustSave, and a refusal throws (`unsent`), so whatever was about to
+   * write over the slot does not. */
+  function noteLastToken() {
+    var last = load(K.outtok, null);
+    if (!last || typeof last.token !== 'string' || !last.token) return;
+    var hash = (typeof last.hash === 'string' && last.hash) ? last.hash : 'token-' + (Number(last.at) || 0);
+    var note = load('foxy.txmeta', {})[hash] || {};
+    if (note.token === last.token || note.kept === last.token || note.changeToken === last.token) return;
+    console.warn('[foxy] the last token made was on no note; it is put on one before the slot is written over');
+    FoxyWallet.tag(hash, note.to ? { token: last.token } : { to: 'ecash', token: last.token }, 'before');
+  }
+
+  /* `note`: what the token's note says (`tag`), written with the token before the last-token slot, and both before the
+   * swap's record is let go: the note is where the token lasts, the slot where the screen finds it. */
+  function keepSentToken(out, o) {
+    try {
+      noteLastToken();
+      if (o.note) FoxyWallet.tag(out.hash, o.note, true);
+      mustSave(K.outtok, out);
+      return;
+    }
+    catch (e) {
+      var unit = o.unit || 'sat';
+      var said = formatAmount(sumProofs(o.split.send || []), unit);
+      console.error('[foxy] STORAGE FULL: the token for ' + said + ' could not be written down after it was made'
+        + (o.lockTo ? '; its swap\u2019s record is kept, to rebuild it' : '; its pieces go back into the balance'));
+      if (o.lockTo) {
+        var kept = /** @type {any} */ (new Error('The payment of ' + said + ' was made, but Foxy\u2019s storage on this phone is full, '
+          + 'so its token could not be written down. It is kept on record and comes back as a token to hand over once there is room. '
+          + storeFullWay() + ' Then reopen Foxy.'));
+        kept.storageFull = true;
+        kept.definite = true;
+        throw kept;
+      }
+      try {
+        var pile = proofs(o.at, unit);
+        var have = {};
+        pile.forEach(function (p) { if (p && p.secret) have[p.secret] = true; });
+        var add = (o.back || []).filter(function (p) { return p && p.secret && !have[p.secret]; });
+        if (add.length) setProofs(pile.concat(add), o.at, o.w, unit);
+        /* And off its note, which was written first: a token whose pieces are back in the balance is not money out, and
+         * left there it would read as a sent token nobody has claimed (`tokensNotClaimed`), the same pieces twice. The
+         * note goes when this send made it; a note it only added the token to loses the token. A shrinking write. */
+        try {
+          var notes = load('foxy.txmeta', {});
+          var mine = notes && notes[out.hash];
+          if (mine && mine.token === out.token) {
+            var rest = Object.assign({}, mine);
+            delete rest.token;
+            var only = Object.keys(rest).every(function (k) { return o.note && Object.prototype.hasOwnProperty.call(o.note, k) && rest[k] === o.note[k]; });
+            if (only) delete notes[out.hash]; else notes[out.hash] = rest;
+            save('foxy.txmeta', notes);
+          }
+        } catch (eN) { console.warn('[foxy] a put-back token\u2019s note could not be cleared:', eN && eN.message); }
+        if (o.split.guard) o.split.guard.done();
+        if (o.fee > 0) meltBackFee(o.at, unit, o.fee);
+      } catch (e2) {
+        console.error('[foxy] STORAGE FULL: and the pieces could not go back into the pile; the swap\u2019s record is kept, and a seed restore finds them');
+        throw e;
+      }
+      /* Not `unsent`: a swap may have been made for it, and its fee charged (`neverSent` is for nothing asked of the mint).
+       * `putBack`: nothing was handed to anybody, and the pieces are in the balance again. */
+      var none = /** @type {any} */ (new Error('Foxy\u2019s storage on this phone is full, so the token could not be written down and was not made. '
+        + 'Your ecash is back in your balance' + (o.split && o.split.swapped && o.fee > 0 ? ' (less the mint\u2019s fee for the swap)' : '') + '. '
+        + storeFullWay()));
+      none.storageFull = true;
+      none.putBack = true;
+      throw none;
+    }
+  }
+
+  /* ---- sent tokens the mint says are claimed, when the store is short ------
+   *
+   * A sent token's text stays on its note (`token`) until the token screen
+   * hears it claimed (`forgetClaimedToken`), because until then it can be the
+   * only copy of money nobody has taken. A token whose screen was never
+   * opened again is never heard claimed, and on the phone whose store filled,
+   * 300 notes held 2.78 million characters in such fields. So, only when an
+   * operation has been refused for room in the last ten minutes (`roomFor`
+   * sets `roomShortAt`), plain tokens at the connected mint are asked about
+   * (NUT-07: reads and changes nothing), each on the circuit its own screen
+   * asks on (`token:<hash>`), at most TOKEN_TIDY_MOST a pass; one the mint
+   * calls spent in every piece is forgotten as claimed: its text goes to
+   * `kept`, which the trim may let go. Asking about sent tokens on every
+   * connect was taken out because it shows a mint who paid whom; this asks
+   * only then, and only about a few.
+   *
+   * Never a locked token: a mint that says SPENT wrongly would take with it
+   * the only way back to a payment locked to somebody else (its refund, or
+   * proof of who took it), so only tokens whose every piece is plain are
+   * asked about. Anything unspent, pending, unread or unasked keeps its text,
+   * and so does change owed to a payer. After a connect's and a return's
+   * sweeps, and when an operation is refused for room. Resolves how many were
+   * forgotten. */
+  var TOKEN_TIDY_MOST = 20;
+  var TOKEN_TIDY_AFTER_MS = 10 * 60 * 1000;
+  var roomShortAt = 0;
+  var tokenTidying = /** @type {?Promise<number>} */ (null);
+  /** @returns {Promise<number>} */
+  function tidySentTokens() {
+    if (tokenTidying) return /** @type {Promise<number>} */ (tokenTidying);
+    if (!wallet || !routeOpen() || !(roomShortAt > 0) || Date.now() - roomShortAt > TOKEN_TIDY_AFTER_MS) return Promise.resolve(0);
+    var here = mintOf(wallet);
+    var meta = load('foxy.txmeta', {});
+    var asks = [];
+    Object.keys(meta || {}).forEach(function (h) {
+      var m = meta[h];
+      if (asks.length >= TOKEN_TIDY_MOST || !m || typeof m.token !== 'string' || !m.token || m.owedChange || m.change) return;
+      var info = null;
+      try { info = FoxyWallet.tokenInfo(m.token); } catch (e) { info = null; }
+      if (!info || !info.proofs || !info.proofs.length || canonicalMint(info.mint || '') !== here) return;
+      // plain pieces only: a locked one's secret is a JSON array (NUT-10)
+      if (info.proofs.some(function (p) { return !p || typeof p.secret !== 'string' || p.secret.charAt(0) === '['; })) return;
+      asks.push({ hash: h, token: m.token, proofs: info.proofs });
+    });
+    if (!asks.length) return Promise.resolve(0);
+    var gone = 0;
+    tokenTidying = asks.reduce(function (chain, a) {
+      return chain.then(function () {
+        return statesOf(onCircuit(wallet, 'token:' + a.hash), a.proofs).then(function (states) {
+          if (states.length === a.proofs.length && states.every(function (st) { return st === 'SPENT'; })) {
+            if (FoxyWallet.forgetClaimedToken(a.token)) gone += 1;
+          }
+        }, function () { /* not answered: kept, and asked another time */ });
+      });
+    }, Promise.resolve()).then(function () {
+      tokenTidying = null;
+      if (gone) {
+        console.warn('[foxy] storage: ' + gone + ' sent token(s) the mint says are claimed are let go from their notes');
+        trimStore(true);
+      }
+      return gone;
+    }, function () { tokenTidying = null; return gone; });
+    return /** @type {Promise<number>} */ (tokenTidying);
   }
 
   /// A swap's inputs out of the pile on the mint's word that the swap was made.
@@ -1618,6 +1849,40 @@
       });
     };
     if (meta && Array.isArray(meta.inputs)) rec.inputs = keep(meta.inputs);
+    /* The history entry a send will write when it has its token (`sendToken`):
+     * with the token written down under it, a relaunch that finds this record
+     * as well knows the send finished (`swapFinished`), and adds nothing. */
+    if (meta && typeof meta.hash === 'string' && meta.hash) rec.hash = meta.hash;
+
+    /* ---- nothing leaves without its record ----------------------------------
+     *
+     * Every write this record needs before the request is mustSave with
+     * `unsent` (`writeSwap(rec, true)`). One that is refused is remembered here
+     * and on the view (`foxyRefuse`), because two of them happen inside
+     * cashu-ts: the ranges as it reserves counters, in a callback whose throws
+     * it swallows, and the locked outputs as it makes them, which throws
+     * through (`sawLockedOutputs`). The view's gate where the request leaves
+     * then refuses it (`onLabel`), and the request is never sent: the
+     * swap that cost a payment went with its locked outputs written nowhere,
+     * and nothing could rebuild them when its token's write was refused. */
+    var unwritten = /** @type {any} */ (null);
+    var refused = function (e) {
+      if (!unwritten) unwritten = e;
+      try { if (w && w.foxyCircuit) w.foxyRefuse = e; } catch (x) {}
+      console.error('[foxy] ' + kind + ' swap: its record could not be written before the request (' + ((e && e.message) || e) + '); it is not sent');
+    };
+    var writeBefore = function () {
+      try { writeSwap(rec, true); } catch (e) { refused(e); throw e; }
+    };
+    /* What has to be on disk as the request leaves: this record, whole, once it
+     * names anything the mint may sign (counter ranges or locked outputs). */
+    var onDisk = function () {
+      var worth = (rec.outputs && rec.outputs.length) || (rec.locked && rec.locked.length);
+      if (!worth) return true;
+      var there = loadSwaps().filter(function (x) { return x.id === rec.id; })[0];
+      return !!there && ((there.outputs || []).length === (rec.outputs || []).length)
+        && ((there.locked || []).length === (rec.locked || []).length);
+    };
     /* The swap as it goes out says which proofs it carries, to the view it goes by,
      * before the request leaves.
      *
@@ -1630,10 +1895,22 @@
      * about; for a receive it is not written down. */
     if (w && w.foxyCircuit) {
       w.foxyOnSwap = function (out) {
+        // a swap already settled while out is not this record's to answer for
+        if (phase !== 'out') return;
+        if (unwritten) throw unwritten;
         if (meta && Array.isArray(meta.inputs)) {
           rec.inputs = keep(out);
-          if (swapKept(rec.id)) writeSwap(rec);
+          if (swapKept(rec.id)) writeBefore();
         }
+        if (!onDisk()) {
+          var gone = /** @type {any} */ (new Error(storeFullUnsent()));
+          gone.storageFull = true;
+          gone.unsent = true;
+          refused(gone);
+          throw gone;
+        }
+        // it leaves: from here what follows its answer is what the store's reserve is for (`storeStep`)
+        storeStep('swap');
         swapOut(out);
       };
     }
@@ -1646,7 +1923,14 @@
      * and they are restored. */
     var fixed = (meta && Array.isArray(meta.fixed) && meta.fixed.length) ? meta.fixed.map(copyRange) : null;
     if (fixed) rec.outputs = fixed.map(copyRange);
-    var recorder = outputsRecorder(w, fixed || [], function (list) { rec.outputs = list; writeSwap(rec); });
+    /* Before the request, a refusal is remembered (`refused`) and thrown into
+     * cashu-ts, which drops it: the gate is what stops the request. After the
+     * answer it is written as before. */
+    var recorder = outputsRecorder(w, fixed || [], function (list, after) {
+      rec.outputs = list;
+      if (after) writeSwap(rec);
+      else writeBefore();
+    });
     /* A locked send's outputs carry no counter and no seed can rebuild them,
      * so they are written down as they are made rather than named by a range
      * (03-seed-counters-logs.js). Synchronously, before the request: that is
@@ -1882,9 +2166,14 @@
       record: rec,
       run: function (label, fn) {
         liveSwap[rec.id] = true;
+        // a refusal an earlier job left on this view is not this swap's (`foxyRefuse`)
+        try { if (w && w.foxyCircuit) w.foxyRefuse = false; } catch (x) {}
         var settled = function () { delete liveSwap[rec.id]; };
-        return this._run(label, fn).then(function (r) { settled(); return r; },
-                                         function (e) { settled(); throw e; });
+        var going;
+        // a record that could not be written before anything was asked (`fixed`) is a refusal, not a throw
+        try { going = this._run(label, fn); } catch (e) { settled(); return Promise.reject(e); }
+        return going.then(function (r) { settled(); return r; },
+                          function (e) { settled(); throw e; });
       },
       _run: function (label, fn) {
         asked = label;
@@ -1898,7 +2187,7 @@
          * restored against for ever. Each attempt records its own,
          * and starts by forgetting the last one's: outputs the mint refused as
          * already signed are not this wallet's to rebuild. */
-        if (fixed) writeSwap(rec);
+        if (fixed) writeBefore();
         var request = (fixed ? function (w0, l0, body) { return body(); } : onceMoreIfSigned)(w, label, function () {
           // a retry on used counters, after the swap was found at the mint while the request was out: not sent
           if (phase !== 'out') return Promise.reject(new Error('This swap was settled while its request was out; it is not sent again.'));
@@ -1908,7 +2197,8 @@
             stop = watchLockedOutputs(function (made) {
               if (phase === 'found') return;
               rec.locked = (rec.locked || []).concat(made.map(lockedRow).filter(Boolean));
-              writeSwap(rec);
+              // thrown through to cashu-ts, which is making these outputs for the request: it is not sent
+              writeBefore();
             });
           }
           var release = function () { if (stop) { stop(); stop = null; } };

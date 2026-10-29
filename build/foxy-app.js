@@ -2141,6 +2141,8 @@ class Component extends DCLogic {
          * it silently. */
         if (W.onOfflineOffer) W.onOfflineOffer((info) => this.offlineRiskCard(info));
         if (W.onChangeStuck) W.onChangeStuck((info) => this.changeStuckCard(info));
+        // a payment refused for want of room: what holds it, and the unclaimed tokens to copy first (11-cards.js)
+        if (W.onStorageFull) W.onStorageFull((r) => this.storageFullCard(r));
         if (W.onChangeMaking) W.onChangeMaking((info) => this.changeMaking(info));
         if (W.onTrustLost) W.onTrustLost((info) => this.trustLostCard(info));
         // a card's payment taken offline that will not settle now, or is near its date unsettled (11-cards.js)
@@ -7303,6 +7305,30 @@ class Component extends DCLogic {
     this.announcePayment(Object.assign({}, ev, { force: true, again: true }));
   }
 
+  /* This phone's storage too full for a payment: what holds the room, by what it is, and the words that are true of it
+   * (the wallet's `storeFullWay`: whether clearing history frees enough). Sent tokens nobody has claimed are kept by
+   * clearing history and can be the only copy of money, so they can be copied as text first, every one. */
+  storageFullCard(r) {
+    if (!r) return;
+    const mb = (n) => (Math.round((Number(n) || 0) / 104857.6) / 10).toFixed(1) + ' MB';
+    const n = Number(r.unclaimedCount) || 0;
+    const lines = ['What holds the room on this phone:',
+      'Tokens you sent, not yet claimed: ' + mb(r.unclaimed) + (n ? ' (' + n + ')' : ''),
+      'History, which clearing lets go: ' + mb(r.clearable),
+      'Your ecash and its records: ' + mb(r.money),
+      'Cards: ' + mb(r.cards) + ' · Other: ' + mb(r.other)].join('\n');
+    const tokens = Array.isArray(r.tokens) ? r.tokens.filter(Boolean) : [];
+    this.blockedCard('storageFull', Object.assign({
+      tone: 'warn',
+      title: 'PHONE STORAGE FULL',
+      reason: lines + '\n\n' + String(r.words || ''),
+      chip: 'Nothing was sent.',
+    }, tokens.length ? {
+      retry: 'COPY UNCLAIMED TOKENS',
+      go: () => { this.toast(this.copyText(tokens.join('\n\n')) ? (tokens.length === 1 ? 'Token copied' : tokens.length + ' tokens copied') : 'Could not copy'); },
+    } : {}));
+  }
+
   changeStuckCard(info) {
     // in the payment's own unit: cents for dollars (the wallet's `amount`), sats otherwise
     const unit = info && info.unit === 'usd' ? 'usd' : '';
@@ -9845,7 +9871,7 @@ class Component extends DCLogic {
           this.toast('History cleared');
         };
         /* A sent token nobody has claimed is money in a string. Clearing
-         * history forgets its text, so say so first. */
+         * history keeps its text (`clearHistory`), and says so first. */
         if (!W.tokensNotClaimed) { clear(false); return; }
         W.tokensNotClaimed().then(list => {
           if (!list.length) { clear(true); return; }
@@ -9865,9 +9891,9 @@ class Component extends DCLogic {
             title: 'UNCLAIMED ECASH',
             reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
               + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
-              + 'Clearing history forgets ' + (list.length === 1 ? 'it' : 'them') + ' on this phone.',
-            chip: 'Your twelve words can still restore unclaimed ecash.',
-            retry: 'CLEAR ANYWAY',
+              + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
+            chip: 'The rest of history is cleared.',
+            retry: 'CLEAR HISTORY',
             go: () => clear(true),
           });
         }).catch(() => clear(false));
@@ -22874,6 +22900,8 @@ class Component extends DCLogic {
       'empty': () => ({ tone: 'warn', title: 'NO MONEY ON THIS CARD',
         reason: 'It has not been set up, or nothing has been put on it.' }),
       'not-a-card': () => ({ title: 'NOT A FOXY CARD', reason: said }),
+      // this phone's store too full for what the tap writes once the card has signed: refused before the card was asked anything
+      'storage-full': () => ({ tone: 'warn', title: 'PHONE STORAGE FULL', reason: said, chip: 'Nothing was taken.' }),
       'no-route': () => Object.assign({ tone: 'warn', title: opt.taken ? 'NOT PAID' : 'NO CONNECTION',
         reason: 'The mint could not be reached.' + safe }, again),
       /* A till, and the card's day has too little left for this payment: said

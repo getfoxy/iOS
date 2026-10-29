@@ -205,8 +205,11 @@
     /* A token that was made and not yet marked as handed over. */
     lastToken: function () { return load(K.outtok, null); },
 
+    /* Its token on its note first (`noteLastToken`), so that letting the slot go never lets the only copy go; where the
+     * note cannot be written, the slot stays. */
     clearLastToken: function () {
-      try { localStorage.removeItem(K.outtok); } catch (e) {}
+      try { noteLastToken(); localStorage.removeItem(K.outtok); }
+      catch (e) { console.warn('[foxy] the last token is kept: it could not be put on its note first'); }
     },
 
     /* The launch reminder about the last token has been shown: once per token. */
@@ -878,6 +881,9 @@
          * (`opts.now`: a card's payment, whose swap is the last thing between
          * a till and "paid"). */
         var connected = (opts && opts.now) ? needNow() : need();
+        /* room for what this swap writes, or it is refused before anything is sent (`roomFor`): the token stays with whoever holds
+         * it. A receive needs little (`small`); a card's signed pieces, whose step is behind them, only room for the swap (`inner`). */
+        roomFor('small', !!(opts && opts.signed));
         intoMint = mintOf(connected);
         /* A token in another unit is swapped by a wallet of its own, on the circuit this job has, so that its swap
          * is looked into when it goes silent like any other's (`swapGuard`). */
@@ -1482,6 +1488,19 @@
         }
       }
       var made;
+      /* The entry this send writes, named now: its swap's record carries it, so
+       * a relaunch that finds the record beside the token written under it knows
+       * the send finished (`swapFinished`). Unique, not only the millisecond: a
+       * token made from pieces already held asks the mint nothing, so two can be
+       * made in the same millisecond, and a shared name lost one of them from
+       * the books (tests/interleave.js). */
+      var sendHash = 'token-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      /* A send that asks the mint nothing (pieces on hand, or locked ones signed on: every send with no route) still writes
+       * its token, its note and its entry: room for those first (`roomFor`), and the last token already on its note
+       * (`noteLastToken`), or it is refused here with nothing moved. */
+      if (withLocked || exact || cover) {
+        try { roomFor('token'); noteLastToken(); } catch (eRoom) { return Promise.reject(eRoom); }
+      }
       if (withLocked) {
         /* Signed now, and only the rows that are really going out: signing
          * writes them down as handed on (`rememberHandedOn`) and drops them from
@@ -1527,12 +1546,16 @@
          * the local view from above. The one kept ready, when there is one:
          * this is a swap somebody is standing and waiting for (`needNow`). */
         try { w = needNow(); } catch (e) { return Promise.reject(e); }
+        /* room for what this swap writes, and the last token on its note, or it is refused before anything is sent (`roomFor`,
+         * `noteLastToken`): a plain send needs little (`small`); a locked one, or one cut as the caller says (a card's top-up), the most */
+        var sendKind = (lockTo || (opts && Array.isArray(opts.denominations) && opts.denominations.length)) ? 'swap' : 'small';
+        try { roomFor(sendKind); noteLastToken(); } catch (e) { return Promise.reject(e); }
         /* The swap's output ranges are on disk until the answer is in, and
          * cleared before anything else once it is: the token's proofs must never
          * be restorable as balance after the token exists. A lost answer used to
          * leave the pile holding spent inputs and the swap's outputs nowhere. */
         // the pile it was handed, so a lost answer's restore can be checked against what the swap took
-        var guard = swapGuard(w, 'send', { inputs: have, locked: !!lockTo,
+        var guard = swapGuard(w, 'send', { inputs: have, locked: !!lockTo, hash: sendHash,
           pay: { want: want, purpose: (opts && opts.purpose) || '', forHash: (opts && opts.forHash) || '',
                  owed: (opts && opts.owed) || 0 } });
         /* One large piece in, the pool's pieces back. A locked payment is a
@@ -1635,59 +1658,26 @@
         });
       }
       return made.then(function (split) {
-        /* The rest is written, then the record cleared, then the token made.
+        /* The rest is written, then the token, and the record cleared last.
          * The record used to be cleared first, so a pile that could not be
          * written (storage full) left the swap's outputs nowhere; now the write
          * throws with the record in place, no token exists, and recoverSwaps
-         * puts everything back on the next connect (audit W6). The
-         * token is still only made once the record is gone, so its proofs are
-         * never restorable as balance. */
+         * puts everything back on the next connect (audit W6). And the token
+         * used to be written after the record went: refused there, a locked
+         * payment was in no pile, no hold and no record (a payment on a
+         * phone). Now it is written while the record still stands
+         * (`keepSentToken`), and a relaunch that finds both lets the record go
+         * and adds nothing (`swapFinished`), so the token's pieces are never
+         * restored as balance while it is out. */
         setProofs((split.keep || []).concat(stuck), at, w);
         /* Change for an over-payment was set aside from the balance when the
          * payment landed (`holdChange`). Its pieces have just left the pile,
          * so it is let go here and nowhere later: between this line and the
          * caller hearing of it the balance would be short by the change. */
         if (opts && opts.purpose === 'change' && opts.forHash) changeHoldOver(opts.forHash);
-        if (split.guard) split.guard.done();
         var token = encodeToken(at, split.send, 'sat', changeNoteKey && Number(split.over) > 0
           ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
-        /* Unique, not only the millisecond: a token made from pieces already held
-         * asks the mint nothing, so two can be made in the same millisecond, and
-         * a shared name lost one of them from the books (tests/interleave.js). */
-        var hash = 'token-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-
-        /* The string IS the money now — those proofs are out of the balance
-         * and exist nowhere else. Written down before anything else can go
-         * wrong, so losing the screen cannot lose the sats.
-         *
-         * mustSave, not save: the swap guard was released a few lines above
-         * and the recovery record is already gone, so a write that quietly
-         * failed here left the token in no pile, no hold and no record —
-         * recoverable only by a seed restore that nothing would have prompted.
-         * `save` returns false on a refusal and this ignored it, which is
-         * exactly what the comment above claimed could not happen. */
-        mustSave(K.outtok, { token: token, sats: sumProofs(split.send), unit: 'sat', mint: at,
-                             hash: hash, at: Date.now(), swapped: split.swapped });
-        /* The token exists and is written down: now the locked pieces in it
-         * are struck off, all of them, in the same breath. */
-        if (split.handedOn && split.handedOn.length) {
-          rememberHandedOn(split.handedOn);
-          takeFromUnclaimed(split.handedOn);
-          console.log('[foxy] handed on ' + sumProofs(split.handedOn) + ' sats of locked ecash, signed here');
-        }
-
-        /* Paid over by too little to come back. The receiver's phone does
-         * the same sum from the same mint's fees (`changeFor`) and makes no
-         * change, so none is waited for here: the entry is the whole of what
-         * left, the link is not held open, and nothing is flagged as change
-         * that never came. */
-        var dust = 0;
-        if (Number(split.over) > 0 && !(changeFor(w, Number(split.over)) > 0)) {
-          dust = Number(split.over);
-          split.over = 0;
-          console.log('[foxy] ' + dust + ' sat(s) over is too little to come back at this mint; it goes with the payment');
-        }
-        var isChange = !!(opts && opts.purpose === 'change');
+        var hash = sendHash;
         /* What the swap cost. The pile went in, the token and the change came
          * out, and the difference is the mint's. It was written as 0, so a
          * 945-sat token that took 956 from the pile left the audit 11 short,
@@ -1696,82 +1686,123 @@
         var tokFee = split.swapped
           ? Math.max(0, sumProofs(have) - sumProofs(split.send) - sumProofs(split.keep || []))
           : 0;
-        /* Change handed back writes no entry of its own.
-         *
-         * It is the tail of a payment that already has one, and filing it
-         * separately is what showed two transactions for one sale.
-         * The token is still recoverable — `K.outtok` above is
-         * what the token screen reads, not this — and the payment's own entry
-         * carries the figures (`changeSats`). */
-        if (isChange) {
-          console.log('[foxy] change of ' + sumProofs(split.send)
-            + ' sats made; it belongs to the payment it came from, not to a row of its own');
-        } else logTx({
-          dir: 'out',
-          /* What was paid, not the piece it was paid with. An offline payer
-           * with no exact pieces covers the amount and the receiver hands the
-           * difference back, so a 2-sat payment made with a 4-sat piece is a
-           * 2-sat payment — with `grossSats` and `changeSats` beside it so the
-           * detail screen can show all three, and so a report about it has the
-           * figures in it. `over` is 0 on every ordinary send. */
-          sats: sumProofs(split.send) - (Number(split.over) || 0),
-          grossSats: sumProofs(split.send),
-          changeSats: Number(split.over) || 0,
-          changeState: Number(split.over) > 0 ? 'owed' : '',
-          // paid over by too little to come back: said on the entry, counted in what it cost
-          dustSats: dust || undefined,
-          feeSats: tokFee,
-          // settled as far as this wallet is concerned: the proofs left the
-          // balance. Whether anyone claimed the token is the mint's business,
-          // and nothing here checks after the fact.
-          settled: true,
-          state: 'success',
-          memo: 'ecash',
-          hash: hash,
-          mint: at,
-        });
-        logAudit({
-          hash: hash,
-          sats: sumProofs(split.send),
-          feeSats: tokFee,
-          kind: 'token',
-          // what went into the token, and what stayed behind as change
-          inputs: (split.send || []).map(scrub),
-          outputs: (split.keep || []).map(scrub),
-        });
-        // the token rides along with the entry, so it can be handed over again
-        // if the first attempt never reached anyone
-        /* Change handed back is not a payment leaving. It is the tail of one
-         * that arrived, and the receiver's own screens must not announce it as
-         * money going out: a receiver was paid 3 sats with a 4-sat piece and saw
-         * a confirmation for 4, then a second one for 1 sat withdrawn, for a
-         * single 3-sat sale.
-         *
-         * The entry itself stays. `sendToken` writes one either way, and it is
-         * what puts an undelivered change token on the token screen instead of
-         * losing it. What changes is only what it is called. */
-        /* `inflight` while a payment is still on its way to somebody.
-         *
-         * `sendToken` writes a settled entry the moment the token exists, which
-         * is before it has been handed over — and the history pass announces
-         * every new settled entry as a payment that happened. On a both-offline
-         * tap the receiver is reading a card, so the payer was shown a
-         * confirmation of withdrawal thirteen seconds before they said no.
-         * Tagged as it is written, not a
-         * moment later: the pass runs on a heartbeat and would race it. */
-        FoxyWallet.tag(hash, isChange ? { to: 'change', change: true, token: token }
-                    : (opts && opts.inflight) ? { to: 'ecash', token: token, inflight: true }
-                    : { to: 'ecash', token: token });
-        return { token: token, sats: sumProofs(split.send), mint: at, hash: hash,
-                 swapped: split.swapped, lockedTo: lockTo || '',
-                 // what the swap cost; change has no row of its own, so its
-                 // caller puts this on the payment it belongs to
-                 fee: tokFee,
-                 /* What was paid over the amount asked, which the receiver owes
-                  * back as change. Zero on every ordinary send. */
-                 over: Number(split.over) || 0, asked: want, dust: dust,
-                 // whether the token names a key for its change to be locked to
-                 changeAsked: !!(changeNoteKey && Number(split.over) > 0) };
+
+        /* The string IS the money now — those proofs are out of the balance
+         * and exist nowhere else. Written down before anything else can go
+         * wrong, so losing the screen cannot lose the sats: mustSave, with a
+         * retry once room is made, and the swap's record still on disk.
+         * Refused even so, a plain send's pieces go back into the balance and a
+         * locked one's record stays to rebuild it (`keepSentToken`). */
+        var handed = {};
+        (split.handedOn || []).forEach(function (p) { if (p && p.secret) handed[p.secret] = true; });
+        keepSentToken({ token: token, sats: sumProofs(split.send), unit: 'sat', mint: at,
+                        hash: hash, at: Date.now(), swapped: split.swapped },
+                      { split: split, at: at, w: w, unit: 'sat', lockTo: lockTo, fee: tokFee,
+                        back: (split.send || []).filter(function (p) { return !(p && handed[p.secret]); }),
+                        // its note, written with it (`keepSentToken`): where the token lasts
+                        note: (opts && opts.purpose === 'change') ? { to: 'change', change: true, token: token }
+                          : (opts && opts.inflight) ? { to: 'ecash', token: token, inflight: true } : { to: 'ecash', token: token } });
+        try {
+          /* The token exists and is written down: now the locked pieces in it
+           * are struck off, all of them, in the same breath. */
+          if (split.handedOn && split.handedOn.length) {
+            rememberHandedOn(split.handedOn);
+            takeFromUnclaimed(split.handedOn);
+            console.log('[foxy] handed on ' + sumProofs(split.handedOn) + ' sats of locked ecash, signed here');
+          }
+
+          /* Paid over by too little to come back. The receiver's phone does
+           * the same sum from the same mint's fees (`changeFor`) and makes no
+           * change, so none is waited for here: the entry is the whole of what
+           * left, the link is not held open, and nothing is flagged as change
+           * that never came. */
+          var dust = 0;
+          if (Number(split.over) > 0 && !(changeFor(w, Number(split.over)) > 0)) {
+            dust = Number(split.over);
+            split.over = 0;
+            console.log('[foxy] ' + dust + ' sat(s) over is too little to come back at this mint; it goes with the payment');
+          }
+          var isChange = !!(opts && opts.purpose === 'change');
+          /* Change handed back writes no entry of its own.
+           *
+           * It is the tail of a payment that already has one, and filing it
+           * separately is what showed two transactions for one sale.
+           * The token is still recoverable — `K.outtok` above is
+           * what the token screen reads, not this — and the payment's own entry
+           * carries the figures (`changeSats`). */
+          if (isChange) {
+            console.log('[foxy] change of ' + sumProofs(split.send)
+              + ' sats made; it belongs to the payment it came from, not to a row of its own');
+          } else logTx({
+            dir: 'out',
+            /* What was paid, not the piece it was paid with. An offline payer
+             * with no exact pieces covers the amount and the receiver hands the
+             * difference back, so a 2-sat payment made with a 4-sat piece is a
+             * 2-sat payment — with `grossSats` and `changeSats` beside it so the
+             * detail screen can show all three, and so a report about it has the
+             * figures in it. `over` is 0 on every ordinary send. */
+            sats: sumProofs(split.send) - (Number(split.over) || 0),
+            grossSats: sumProofs(split.send),
+            changeSats: Number(split.over) || 0,
+            changeState: Number(split.over) > 0 ? 'owed' : '',
+            // paid over by too little to come back: said on the entry, counted in what it cost
+            dustSats: dust || undefined,
+            feeSats: tokFee,
+            // settled as far as this wallet is concerned: the proofs left the
+            // balance. Whether anyone claimed the token is the mint's business,
+            // and nothing here checks after the fact.
+            settled: true,
+            state: 'success',
+            memo: 'ecash',
+            hash: hash,
+            mint: at,
+          });
+          logAudit({
+            hash: hash,
+            sats: sumProofs(split.send),
+            feeSats: tokFee,
+            kind: 'token',
+            // what went into the token, and what stayed behind as change
+            inputs: (split.send || []).map(scrub),
+            outputs: (split.keep || []).map(scrub),
+          });
+          // the token rides along with the entry, so it can be handed over again
+          // if the first attempt never reached anyone
+          /* Change handed back is not a payment leaving. It is the tail of one
+           * that arrived, and the receiver's own screens must not announce it as
+           * money going out: a receiver was paid 3 sats with a 4-sat piece and saw
+           * a confirmation for 4, then a second one for 1 sat withdrawn, for a
+           * single 3-sat sale.
+           *
+           * The entry itself stays. `sendToken` writes one either way, and it is
+           * what puts an undelivered change token on the token screen instead of
+           * losing it. What changes is only what it is called. */
+          /* `inflight` while a payment is still on its way to somebody.
+           *
+           * `sendToken` writes a settled entry the moment the token exists, which
+           * is before it has been handed over — and the history pass announces
+           * every new settled entry as a payment that happened. On a both-offline
+           * tap the receiver is reading a card, so the payer was shown a
+           * confirmation of withdrawal thirteen seconds before they said no.
+           * Tagged as it is written, not a
+           * moment later: the pass runs on a heartbeat and would race it. */
+          FoxyWallet.tag(hash, isChange ? { to: 'change', change: true, token: token }
+                      : (opts && opts.inflight) ? { to: 'ecash', token: token, inflight: true }
+                      : { to: 'ecash', token: token });
+          return { token: token, sats: sumProofs(split.send), mint: at, hash: hash,
+                   swapped: split.swapped, lockedTo: lockTo || '',
+                   // what the swap cost; change has no row of its own, so its
+                   // caller puts this on the payment it belongs to
+                   fee: tokFee,
+                   /* What was paid over the amount asked, which the receiver owes
+                    * back as change. Zero on every ordinary send. */
+                   over: Number(split.over) || 0, asked: want, dust: dust,
+                   // whether the token names a key for its change to be locked to
+                   changeAsked: !!(changeNoteKey && Number(split.over) > 0) };
+        } finally {
+          // the token is written down: the swap's record has done its job, whatever came after it
+          if (split.guard) split.guard.done();
+        }
       });
     },
 
@@ -1856,6 +1887,8 @@
       var have = proofs(at);
       var plan = changePlan(w, have);
       if (!plan.input) return Promise.resolve({ skipped: plan.why });
+      // room, with the store's reserve whole, as every money operation begins (`roomFor`)
+      try { roomFor('swap'); } catch (eRoom) { return Promise.resolve({ skipped: 'storage full' }); }
       var guard = swapGuard(w, 'split', { inputs: [plan.input] });
       // on the record while it is out, for `topUpClosing`
       FoxyWallet._topUp = guard.record;

@@ -333,7 +333,7 @@
           this.toast('History cleared');
         };
         /* A sent token nobody has claimed is money in a string. Clearing
-         * history forgets its text, so say so first. */
+         * history keeps its text (`clearHistory`), and says so first. */
         if (!W.tokensNotClaimed) { clear(false); return; }
         W.tokensNotClaimed().then(list => {
           if (!list.length) { clear(true); return; }
@@ -353,9 +353,9 @@
             title: 'UNCLAIMED ECASH',
             reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
               + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
-              + 'Clearing history forgets ' + (list.length === 1 ? 'it' : 'them') + ' on this phone.',
-            chip: 'Your twelve words can still restore unclaimed ecash.',
-            retry: 'CLEAR ANYWAY',
+              + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
+            chip: 'The rest of history is cleared.',
+            retry: 'CLEAR HISTORY',
             go: () => clear(true),
           });
         }).catch(() => clear(false));

@@ -613,10 +613,18 @@
     return function () { lockedWatcher = null; };
   }
 
+  /* A watcher that could not write them down throws, and so does this: the
+   * outputs are made inside cashu-ts as it builds the request, so the throw
+   * stops the request before it is sent. It was caught here and logged, and
+   * the swap went to the mint with its locked outputs written nowhere: when
+   * the token's own write was then refused, a phone lost a payment. */
   function sawLockedOutputs(made) {
     if (lockedWatcher) {
       try { lockedWatcher([].concat(made)); }
-      catch (e) { console.warn('[foxy] a locked output could not be written down:', e && e.message); }
+      catch (e) {
+        console.error('[foxy] a locked output could not be written down, so the request that would carry it is not sent:', e && e.message);
+        throw e;
+      }
     }
     return made;
   }
@@ -1564,15 +1572,39 @@
     /* Told the inputs of a swap as it goes out, before the request: swapGuard
      * records exactly what a send took, not the whole pile it was handed. */
     var onSwap = null;
+    /* A write that the job on this view needed before its request, refused
+     * (`foxyRefuse`): its record is not on disk. Set by whatever could not
+     * write it, from inside cashu-ts's own callbacks too (`countersReserved`,
+     * whose throws cashu-ts swallows), and read here, the last moment before
+     * a swap or a melt leaves: such a request is never sent. */
+    var refusal = /** @type {any} */ (null);
     var mintView = new Proxy(mint, {
       get: function (t, k) {
         if (k === '_request') return request;
         var v = Reflect.get(t, k);
-        if ((k === 'swap' || k === 'melt') && typeof v === 'function') {
+        // (and a claim's mint, whose counter ranges go on its invoice's record before it leaves)
+        if ((k === 'swap' || k === 'melt' || k === 'mint' || k === 'mintBatch') && typeof v === 'function') {
           return function () {
             var payload = k === 'swap' ? arguments[0] : arguments[1];
-            sentInputs = (payload && Array.isArray(payload.inputs)) ? payload.inputs : null;
-            if (k === 'swap' && onSwap && sentInputs) onSwap(sentInputs);
+            var ins = (k !== 'mint' && k !== 'mintBatch' && payload && Array.isArray(payload.inputs)) ? payload.inputs : null;
+            /* Nothing leaves without its record. The swap's guard is told it is
+             * going (`onSwap`), and throws when what it must have on disk is not;
+             * a refusal set before or by that is the answer instead of the mint's,
+             * tagged as never sent, so every caller puts things back as they were. */
+            try {
+              if (refusal) throw refusal;
+              if (k === 'swap' && onSwap && ins) onSwap(ins);
+              if (refusal) throw refusal;
+            } catch (e) {
+              /* Said once, to the request it was for: a view kept for a quote can carry
+               * the person's next try, which finds room made by then. */
+              refusal = null;
+              var why = /** @type {any} */ (e);
+              if (why && typeof why === 'object' && !why.unsent) { try { why.unsent = true; } catch (x) {} }
+              console.error('[foxy] a ' + k + ' was not sent: ' + ((why && why.message) || why));
+              return Promise.reject(why);
+            }
+            if (k === 'swap' || k === 'melt') sentInputs = ins;
             return v.apply(this, arguments);
           };
         }
@@ -1586,11 +1618,15 @@
         if (k === 'foxyCircuit') return label;
         if (k === 'foxySentInputs') return sentInputs;
         if (k === 'foxyOnSwap') return onSwap;
+        if (k === 'foxyRefuse') return refusal;
         if (k === 'foxyBase') return t;
         return Reflect.get(t, k);
       },
       set: function (t, k, v) {
         if (k === 'foxyOnSwap') { onSwap = typeof v === 'function' ? v : null; return true; }
+        /* the first refusal stands until the request it was for is refused with it; `false` clears it, as a new job on a
+         * view that is used again begins (a refusal its last job set and never reached the gate with is not this one's) */
+        if (k === 'foxyRefuse') { if (v === false) refusal = null; else if (v && !refusal) refusal = v; return true; }
         t[k] = v;
         return true;
       },
@@ -1731,8 +1767,19 @@
    * (`ys`). A mint knows a piece by that value and by nothing else, so with
    * it anybody can ask whether the piece was spent, and nobody can spend it.
    * Every send keeps them from the start, because the pieces of a sent token
-   * are dropped from here once it is claimed and these have to outlast them. */
-  var AUDIT_FULL = 100, AUDIT_ALL = 500, AUDIT_FULL_CHARS = 1000000;
+   * are dropped from here once it is claimed and these have to outlast them.
+   *
+   * And the whole trail to a budget of its own, oldest dropped past it. The
+   * full rows were held to a million characters and the receipts to nothing,
+   * and on the phone whose store filled the trail was 1.4 million characters in
+   * 255 rows: a card top-up's receipt holds a value for each of its pieces.
+   * Nothing that counts money reads this trail (the history's books are its
+   * entries, `logTx`); the detail screen shows it, and a locked payment's
+   * receipt (`lockedReceipt`) is read from a row still in full. So full rows
+   * are held to 300,000 characters and the trail to 500,000 (half a megabyte), and
+   * tighter when the store is short of room (`trimStore`). */
+  var AUDIT_FULL = 100, AUDIT_ALL = 500, AUDIT_FULL_CHARS = 300000, AUDIT_ALL_CHARS = 500000;
+  var AUDIT_TIGHT = { full: 10, fullChars: 50000, allChars: 150000 };
 
   /* The value a mint knows a piece by (NUT-00's Y), or ''. */
   function lookupOf(p) {
@@ -1754,16 +1801,29 @@
     return out;
   }
 
-  /* Newest first: in full while there is room for it, receipts after that. */
-  function shapeAudit(list) {
-    var chars = 0, full = 0;
-    return (list || []).slice(0, AUDIT_ALL).map(function (a) {
-      if (!a || a.slim) return a;
-      var size = JSON.stringify(a).length;
-      if (full >= AUDIT_FULL || chars + size > AUDIT_FULL_CHARS) return slimAudit(a);
-      full += 1; chars += size;
-      return a;
+  /* Newest first: in full while there is room for it, receipts after that,
+   * and none past the trail's budget. The newest row is kept whatever its
+   * size. `tight`: the smaller budgets (`AUDIT_TIGHT`). */
+  function shapeAudit(list, tight) {
+    var fullMost = tight ? AUDIT_TIGHT.full : AUDIT_FULL;
+    var fullChars = tight ? AUDIT_TIGHT.fullChars : AUDIT_FULL_CHARS;
+    var allChars = tight ? AUDIT_TIGHT.allChars : AUDIT_ALL_CHARS;
+    var chars = 0, full = 0, all = 0;
+    var out = [];
+    (list || []).slice(0, AUDIT_ALL).some(function (a) {
+      var row = a;
+      if (row && !row.slim) {
+        var size = JSON.stringify(row).length;
+        if (full >= fullMost || chars + size > fullChars) row = slimAudit(row);
+        else { full += 1; chars += size; }
+      }
+      var n = row ? JSON.stringify(row).length + 1 : 5;
+      if (out.length && all + n > allChars) return true;
+      all += n;
+      out.push(row);
+      return false;
     });
+    return out;
   }
 
   function logAudit(entry) {
@@ -1823,8 +1883,8 @@
                   mint: String(mintUrl || '').replace(/\/+$/, '') };
     if (rateNow()) first.rate = rateNow();
     list.unshift(Object.assign(first, entry));
-    // five hundred, so the history screen's audit reaches the start
-    save(K.log, list.slice(0, 500));
+    // five hundred, so the history screen's audit reaches the start; a new entry is part of a money step (`saveMoney`)
+    saveMoney(K.log, list.slice(0, 500));
   }
 
   /* Whether history already holds an entry under this hash.

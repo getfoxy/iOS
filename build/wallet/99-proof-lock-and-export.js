@@ -218,5 +218,37 @@
     };
   }());
 
+  /* The store's growth trimmed as the page opens (`trimStore`): the notes'
+   * kept tokens and the audit trail to their budgets, nothing that money or a
+   * recovery reads. Here, last, so every budget it reads is set. Measured and
+   * trimmed again whenever an operation needs room (`roomFor`, `mustSave`). */
+  /* Tight when the store opens without room for a swap: the phone that lost
+   * a payment opened with 5.1 million characters, which the ordinary budgets
+   * leave above the cap when its notes' tokens are ones nothing can yet prove
+   * claimed. */
+  (function trimAtLaunch() {
+    try {
+      // the per-operation holds an earlier build of this fix wrote, if any are left
+      dropOldHolds();
+      var tight = storeBytes() - reserveBytes() + STORE_ROOM.swap > storeCap();
+      trimStore(tight);
+      // and the store's reserve, written where the store has room for it (`growReserve`)
+      if (!growReserve()) console.error('[foxy] storage: the store\u2019s reserve could not be written; payments wait until there is room');
+      if (storeBytes() - reserveBytes() + STORE_ROOM.swap > storeCap()) {
+        console.error('[foxy] storage: ' + storeBytes() + ' bytes in use after the trim; money that needs the mint waits for room (clear history, or the claimed tokens the mint is asked about)');
+      }
+    } catch (e) { console.warn('[foxy] storage: the trim at launch failed:', e && e.message); }
+  }());
+  // for the tests: the store as measured, and the trim (tests/store-full.js)
+  FoxyWallet._storeBytes = storeBytes;
+  FoxyWallet._trimStore = trimStore;
+  FoxyWallet._storeRoom = STORE_ROOM;
+  FoxyWallet._tidySentTokens = tidySentTokens;
+  FoxyWallet._roomShort = function () { roomShortAt = Date.now(); };
+  // (no per-operation holds any more: the store keeps one reserve, `growReserve`)
+  FoxyWallet._holds = function () { return []; };
+  FoxyWallet._reserve = function () { return reserveNow(); };
+  FoxyWallet._mustSave = mustSave;
+
   window.FoxyWallet = FoxyWallet;
 })();

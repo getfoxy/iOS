@@ -232,6 +232,14 @@
       return sum;
     },
     onChangeStuck: function (fn) { FoxyWallet._onChangeStuck = fn; },
+    /* A money operation refused for want of room (`roomFor`): what holds the store, by what it is, the words that are
+     * true of this store about what frees room (`storeFullWay`), and the text of every sent token nobody is known to have
+     * claimed (`tokens`), so the person can copy them before anything is cleared. Said at most every thirty seconds. */
+    onStorageFull: function (fn) { FoxyWallet._onStorageFull = fn; },
+    /** @type {?function(any): void} */
+    _onStorageFull: null,
+    // the same, asked: { total, cap, reserve, clearable, unclaimed, unclaimedCount, money, cards, other, tokens, words }
+    storageReport: function () { return Object.assign(storageReport(), { words: storeFullWay() }); },
     /** @type {?function(any): void} */
     _onChangeStuck: null,
     /* Change about to be made for a scanned payment, said before the swap so
@@ -412,6 +420,12 @@
 
     nativeRequest: function (opts) {
       var o = opts || {};
+      /* Room before money, at the one door every request to a mint goes by: a
+       * swap, a melt or a mint (a claim) is not sent while the store has no room
+       * for what it writes after (`roomFor`), whatever path it came by. The
+       * screens' own doors ask first; this is the one nothing goes round. */
+      var money = moneyRequestKind(o);
+      if (money) { try { roomFor(money, true); } catch (eRoom) { return Promise.reject(eRoom); } }
       /* What this mint says about itself, if it said it a moment ago
        * (cachedKeyBody). GETs of info, keysets and keys only — a POST is never
        * answered from here, so nothing that moves money is.

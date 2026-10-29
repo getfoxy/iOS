@@ -1265,6 +1265,24 @@
     return e;
   }
 
+  /* Room for everything a tap that can make a card sign writes, and for the
+   * swap after it, asked before the card is asked for anything: null, or the
+   * refusal (`storage-full`, `unsent`: the card was asked nothing). A card that
+   * has signed marks its pieces spent and will not sign for them again, so a
+   * refused write after its signature (foxy.flashcard.taken, which holds the
+   * signed pieces until the swap) leaves the money waiting for the refund date:
+   * seen on a phone whose store had filled, a withdrawal of 57 pieces. The
+   * room is `STORE_ROOM.card`, the tap's own writes and a swap's on top. */
+  function cardRoom() {
+    try { roomFor('card'); return null; }
+    catch (e) { return cardFull(e); }
+  }
+  function cardFull(e) {
+    return cardError('storage-full', String((e && e.message) || storeFullUnsent()).replace('your money has not moved', 'the card was asked for nothing'),
+      { unsent: true, storageFull: true });
+  }
+
+
   /* What the sheet ends saying when the card wants its PIN for a payment (`pin-needed` with no PIN given): it is not an error, and the
    * sheet is not red. The person is asked for the PIN and the card is tapped again. */
   var CARD_PIN_SHEET = 'Enter the card\u2019s PIN';
@@ -2245,6 +2263,22 @@
    * the card might hold money, which is for ever. It is not in the lock-key
    * rows, which are capped and swept (07-request-delivery.js). */
   var CARDS = 'foxy.flashcard.cards';
+
+  /* A card top-up's token whose every piece is in its card's file (`cardRemember`), by the nonce in the piece's secret under the
+   * card's key there: it has been on the card, which holds it, and the take-back reads the file, so the note's copy of the token
+   * is only for showing (`trimStore`). A piece not on file, or a token that will not read, answers false. */
+  function cardLoadOnFile(token) {
+    var info = null;
+    try { info = FoxyWallet.tokenInfo(token); } catch (e) { info = null; }
+    var list = (info && Array.isArray(info.proofs)) ? info.proofs : [];
+    if (!list.length) return false;
+    var files = cardsOnFile();
+    return list.every(function (p) {
+      var parts = cardSecretParts(p && p.secret);
+      var row = parts && parts.key ? files[parts.key] : null;
+      return !!(row && row.pieces && parts && parts.nonce && row.pieces[parts.nonce]);
+    });
+  }
 
   function cardsOnFile() {
     var all = load(CARDS, {});
@@ -5857,7 +5891,11 @@
       row.software = String(card.info.version || '');
     }
     all[card.key] = row;
-    if (!save(CARDS, all)) console.warn('[foxy] card: what is on a card could not be written down; it can be taken back only from what was known before');
+    /* A must-write, answered from the store's reserve (`mustSave`): this file is what a lost card's money is taken back
+     * from, once the load's token is let go from its note (`trimStore` lets it go only when every piece is here). Refused
+     * even so, the load's token keeps its text, and the card can still be taken back from that. */
+    try { mustSave(CARDS, all); }
+    catch (e) { console.warn('[foxy] card: what is on a card could not be written down; the loads\u2019 tokens are kept for its take-back'); }
   }
 
   function cardLeft(seen, nonces) {
@@ -5987,6 +6025,9 @@
                  // what of the token went to outputs the card made for itself: not this phone's, and no fee
                  toCard: row.all ? undefined : (row.cardChange > 0 ? row.cardChange : undefined),
                  noPrecheck: !again, now: !again,
+                 /* pieces the card has signed already: its step is behind it, so the swap is asked only for room for itself, never
+                  * for a reserve this tap's own writes may have used (`roomFor`'s `inner`) */
+                 signed: true,
                  // made on a card's visit to its mint, as part of it (`cardVisit`)
                  cardVisit: !!cardAway || undefined };
     if (u === 'sat') { told.keptSats = kept; told.changeSats = over; told.grossSats = gross; }
@@ -6825,6 +6866,11 @@
     try { w = offline ? needLocal() : need(); } catch (e3) { return Promise.reject(e3); }
     // what the payment's kept record is told (`cardKeepSigned`): the terms of the ask the card pays, where it has its own
     var keepOpts = o;
+    /* Room first, with the store's reserve whole (`roomFor`), before the card is read: what this tap writes once the card has
+     * signed has to land, and a must-write refused after the signature is answered from the reserve (`mustSave`). BEGIN and
+     * the signatures come after this. (A payment kept with no route writes its record too, so it is asked as well.) */
+    var noRoom = cardRoom();
+    if (noRoom) return Promise.reject(noRoom);
     var t = cardTalk(link);
     var card, picked, worth, fee, row, result, own, cap, tapCap = null, lift = false, released = false, signedNonces = [];
     // the card as a holder's own taking-off leaves it (`cardAfterTake`), for the result and for a mint that has not answered
@@ -7205,6 +7251,8 @@
       // a payment that ended above (a held one let go) has its answer already
       if (early !== undefined) return early;
       on('signing');
+      // from here the card's signature cannot be had again: what follows it is what the store's reserve is for (`storeStep`)
+      storeStep('card');
       if (!all4) return cardSign(t, card, picked, pin, lift, o.progress);
       /* Each signature's row is written down as it arrives, before the card is
        * asked for the next: the row, with the outputs it was signed for

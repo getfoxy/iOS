@@ -2918,16 +2918,22 @@ const eq = (got, want, what) =>
     return eq(JSON.parse(ctx.storage.getItem('foxy.cashu.log')).length, 1, 'history entries kept');
   });
 
-  await test('clearing history clears the notes too, and keeps an unclaimed last token unless told', async () => {
-    const { ctx } = await sentCtx(() => []);
+  await test('clearing history clears the notes too, but never a token nobody is known to have claimed, nor the last one unless told', async () => {
+    const { ctx, tokA, tokB, tokOther } = await sentCtx(() => []);
+    ctx.storage.setItem('foxy.txmeta', JSON.stringify({ 'token-1': { to: 'ecash', token: tokA }, 'token-2': { to: 'ecash', token: tokB, note: 'lunch', changeToken: 'cashuBx' },
+      'token-3': { to: 'ecash', token: tokOther }, 'token-4': { to: 'ecash', kept: 'cashuBclaimed', note: 'old' }, 'tx-5': { note: 'coffee' } }));
     const unclaimed = await ctx.W.tokensNotClaimed();
     if (unclaimed.length !== 3) return 'tokens not claimed: ' + unclaimed.length + ', wanted 3 (two here unspent, one elsewhere)';
     ctx.W.clearHistory();
-    if (Object.keys(JSON.parse(ctx.storage.getItem('foxy.txmeta'))).length) return 'the notes survived clearing history';
+    const left = JSON.parse(ctx.storage.getItem('foxy.txmeta'));
+    if (Object.keys(left).sort().join() !== 'token-1,token-2,token-3') return 'notes left: ' + Object.keys(left).join();
+    if (left['token-1'].token !== tokA || left['token-2'].token !== tokB || left['token-3'].token !== tokOther) return 'an unclaimed token lost its text';
+    if (left['token-2'].changeToken) return 'a shown copy stayed';
     if (JSON.parse(ctx.storage.getItem('foxy.cashu.audit')).length) return 'the audit trail survived';
     if (!ctx.storage.getItem('foxy.cashu.outtoken')) return 'an unclaimed last token was forgotten without asking';
     ctx.W.clearHistory({ forgetToken: true });
-    return ctx.storage.getItem('foxy.cashu.outtoken') ? 'forgetToken did not forget it' : null;
+    if (ctx.storage.getItem('foxy.cashu.outtoken')) return 'forgetToken did not forget it';
+    return JSON.parse(ctx.storage.getItem('foxy.txmeta'))['token-1'].token === tokA ? null : 'the last token is on no note once its slot went';
   });
 
   await test('clearing history leaves the balance carried forward as one settled row per mint', async () => {
@@ -3744,7 +3750,7 @@ const eq = (got, want, what) =>
       return (melt.ys || []).length && melt.ys.length === (melt.inputs || []).length ? null : 'a Lightning payment kept ' + JSON.stringify(melt.ys);
     });
 
-    await test('the last hundred payments are kept in full, four hundred more as receipts, and never more than a megabyte in full', async () => {
+    await test('the last hundred payments are kept in full, four hundred more as receipts, and never more than 300,000 characters in full', async () => {
       /* In full is every piece, for working out where money went; a receipt
        * is the figures and the public values, and nothing that spends. Five
        * hundred in full would be most of the page's store. */
@@ -3770,14 +3776,15 @@ const eq = (got, want, what) =>
       if (r.inputs || r.outputs) return 'a receipt still holds pieces';
       if (r.ins !== 1 || r.outs !== 2 || !(r.ys && r.ys.length === 1) || !(r.sats >= 0) || !r.hash || !r.at) return 'a receipt lost what it is for: ' + JSON.stringify(r);
       if (/"secret"/.test(JSON.stringify(list.slice(100)))) return 'a secret is left in a receipt';
-      // big records: a megabyte in full and no more, however few that is
+      /* big records: 300,000 characters in full and no more, however few that is (a megabyte
+       * and a half of them in all, so the store is not short of room and the trim is not the tight one: tests/store-full.js) */
       const big = [];
-      for (let n = 0; n < 12; n++) big.push(full(n, 'x'.repeat(200000)));
+      for (let n = 0; n < 12; n++) big.push(full(n, 'x'.repeat(120000)));
       P.storage.setItem('foxy.cashu.audit', JSON.stringify(big));
       await W.sendToken(50);
       const now = W.auditTrail();
       const chars = now.filter(a => !a.slim).reduce((t, a) => t + JSON.stringify(a).length, 0);
-      if (chars > 1000000) return chars + ' characters kept in full';
+      if (chars > 300000) return chars + ' characters kept in full';
       return now.length === 13 && now.filter(a => !a.slim).length >= 2 ? null : 'after the size cut: ' + now.length + ' records, ' + now.filter(a => !a.slim).length + ' in full';
     });
 

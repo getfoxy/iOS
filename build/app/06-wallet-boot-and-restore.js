@@ -133,6 +133,8 @@
          * it silently. */
         if (W.onOfflineOffer) W.onOfflineOffer((info) => this.offlineRiskCard(info));
         if (W.onChangeStuck) W.onChangeStuck((info) => this.changeStuckCard(info));
+        // a payment refused for want of room: what holds it, and the unclaimed tokens to copy first (11-cards.js)
+        if (W.onStorageFull) W.onStorageFull((r) => this.storageFullCard(r));
         if (W.onChangeMaking) W.onChangeMaking((info) => this.changeMaking(info));
         if (W.onTrustLost) W.onTrustLost((info) => this.trustLostCard(info));
         // a card's payment taken offline that will not settle now, or is near its date unsettled (11-cards.js)

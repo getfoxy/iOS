@@ -390,6 +390,8 @@
         FoxyWallet.sweepQuotes()
           .then(sweepPause).then(function () { return FoxyWallet.sweepMelts(); })
           .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
+          // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
+          .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
           .then(sweepPause).then(function () { return FoxyWallet.claimUnclaimed(); })
           // and a card's pieces it signed for while the mint was not answering (08a-flashcard.js)
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })

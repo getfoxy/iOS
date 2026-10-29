@@ -516,6 +516,30 @@
     this.announcePayment(Object.assign({}, ev, { force: true, again: true }));
   }
 
+  /* This phone's storage too full for a payment: what holds the room, by what it is, and the words that are true of it
+   * (the wallet's `storeFullWay`: whether clearing history frees enough). Sent tokens nobody has claimed are kept by
+   * clearing history and can be the only copy of money, so they can be copied as text first, every one. */
+  storageFullCard(r) {
+    if (!r) return;
+    const mb = (n) => (Math.round((Number(n) || 0) / 104857.6) / 10).toFixed(1) + ' MB';
+    const n = Number(r.unclaimedCount) || 0;
+    const lines = ['What holds the room on this phone:',
+      'Tokens you sent, not yet claimed: ' + mb(r.unclaimed) + (n ? ' (' + n + ')' : ''),
+      'History, which clearing lets go: ' + mb(r.clearable),
+      'Your ecash and its records: ' + mb(r.money),
+      'Cards: ' + mb(r.cards) + ' · Other: ' + mb(r.other)].join('\n');
+    const tokens = Array.isArray(r.tokens) ? r.tokens.filter(Boolean) : [];
+    this.blockedCard('storageFull', Object.assign({
+      tone: 'warn',
+      title: 'PHONE STORAGE FULL',
+      reason: lines + '\n\n' + String(r.words || ''),
+      chip: 'Nothing was sent.',
+    }, tokens.length ? {
+      retry: 'COPY UNCLAIMED TOKENS',
+      go: () => { this.toast(this.copyText(tokens.join('\n\n')) ? (tokens.length === 1 ? 'Token copied' : tokens.length + ' tokens copied') : 'Could not copy'); },
+    } : {}));
+  }
+
   changeStuckCard(info) {
     // in the payment's own unit: cents for dollars (the wallet's `amount`), sats otherwise
     const unit = info && info.unit === 'usd' ? 'usd' : '';

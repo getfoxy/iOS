@@ -93,6 +93,7 @@ check "hand-over rules" 1 node tests/handover-rules.js
 check "forward locked" 1 node tests/forward-locked.js
 check "offline ui"     1 node tests/offline-ui.js
 check "locked send lost" 1 node tests/locked-send-lost.js
+check "store full"     1 node tests/store-full.js
 check "crossings"      1 node tests/crossings.js
 check "away claim"     1 node tests/away-claim.js
 check "carry cards"    1 node tests/carry-cards.js

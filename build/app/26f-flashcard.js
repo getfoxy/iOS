@@ -863,6 +863,8 @@
       'empty': () => ({ tone: 'warn', title: 'NO MONEY ON THIS CARD',
         reason: 'It has not been set up, or nothing has been put on it.' }),
       'not-a-card': () => ({ title: 'NOT A FOXY CARD', reason: said }),
+      // this phone's store too full for what the tap writes once the card has signed: refused before the card was asked anything
+      'storage-full': () => ({ tone: 'warn', title: 'PHONE STORAGE FULL', reason: said, chip: 'Nothing was taken.' }),
       'no-route': () => Object.assign({ tone: 'warn', title: opt.taken ? 'NOT PAID' : 'NO CONNECTION',
         reason: 'The mint could not be reached.' + safe }, again),
       /* A till, and the card's day has too little left for this payment: said

@@ -30,6 +30,9 @@ function load(opts) {
   const dom = new JSDOM('<body></body>', {
     runScripts: 'dangerously',
     url: 'https://foxy.test/',
+    // jsdom's own store stops at 5,000,000 characters; WebKit's holds 5 MiB of one-byte characters, which
+    // tests/store-full.js reaches, so jsdom's is set above it and the suite's own cap is the one that refuses
+    storageQuota: 16 * 1024 * 1024,
   });
   const w = dom.window;
 
@@ -133,7 +136,7 @@ async function connected(opts) {
 function loadReal(opts) {
   const o = opts || {};
   const { JSDOM } = require('jsdom');
-  const dom = new JSDOM('<body></body>', { runScripts: 'dangerously', url: 'https://foxy.test/' });
+  const dom = new JSDOM('<body></body>', { runScripts: 'dangerously', url: 'https://foxy.test/', storageQuota: 16 * 1024 * 1024 });   // above WebKit's 5 MiB (tests/store-full.js)
   const w = dom.window;
   if (!w.crypto || !w.crypto.getRandomValues) Object.defineProperty(w, 'crypto', { value: globalThis.crypto });
   if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }

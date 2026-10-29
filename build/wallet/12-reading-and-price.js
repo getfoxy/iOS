@@ -418,8 +418,9 @@
        * claim() writes them on the invoice: a claim whose answer is lost leaves
        * the quote ISSUED, and recoverIssued restores exactly these. */
       var note = moveNote(quoteId);
-      var rec = outputsRecorder(w, note ? note.outputs : [], function (list) {
-        noteQuoteOutputs(quoteId, list, mintOf(w));
+      var rec = outputsRecorder(w, note ? note.outputs : [], function (list, after) {
+        // before the claim leaves, a refusal stops it (`refuseOn`)
+        refuseOn(w, noteQuoteOutputs(quoteId, list, mintOf(w), after));
       });
       return onceMoreIfSigned(w, 'claim', function () {
         return rec.attempt(function () { return mintQuoteProofs(w, want, quoteId, lock); });

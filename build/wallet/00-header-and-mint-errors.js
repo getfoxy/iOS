@@ -231,9 +231,17 @@
   ];
 
   /* True only when this failure is known to have asked the mint nothing. */
+  /* `unsent` is tagged where a request was refused before it left, and only
+   * there: a write its record needed was refused (`mustSave`'s third
+   * argument, `roomFor`), the phone refused its counters (`unsentFromPhone`),
+   * the last gate where a swap or a melt leaves found its record not on disk
+   * (`onLabel`), or the wallet refused a payment before asking the mint
+   * anything (a card's pieces gone or short, 16-sending.js and
+   * 16a-onchain.js). Each was read where it is thrown. */
   function neverSent(e) {
     if (!e || typeof e !== 'object') return false;
     if (e.noCounters) return true;                // tagged where it was thrown
+    if (e.unsent) return true;
     return NEVER_SENT.indexOf(String(e.message || '')) >= 0;
   }
 
@@ -426,10 +434,13 @@
   /* One on-chain payment out (K.onchainOut), changed in place or forgotten.
    * Kept here beside the other storage helpers: 16a-onchain.js is the body of
    * the wallet object and can hold no functions of its own. */
-  function noteOnchainOut(quoteId, fields) {
+  /* `must`: written before the melt leaves (its change's counters), so a
+   * refusal throws, `unsent`, and the melt is not sent (`onLabel`). */
+  function noteOnchainOut(quoteId, fields, must) {
     var list = load(K.onchainOut, []);
     list.forEach(function (r) { if (r.quote === quoteId) Object.assign(r, fields); });
-    save(K.onchainOut, list);
+    if (must) mustSave(K.onchainOut, list, true, true);
+    else save(K.onchainOut, list);
   }
 
   function onchainForgetOut(quoteId) {
@@ -880,7 +891,9 @@
           /* This failure asked the mint nothing (no route, or Tor still coming
            * up). Its reason is about the phone then, not the mint, and the
            * card leaves it out once a route is up (`showStuckInvoice`). */
-          unsent: free,
+          /* (Not a store too full for the claim's record: the money waits at the mint for room, and the card says why rather
+           * than "retrying", which is what it says of a request that never left for want of a route.) */
+          unsent: free && !(e && e.storageFull),
           badSignatures: badly,
           /* Why Foxy stopped asking on its own, or '' while it has not.
            *

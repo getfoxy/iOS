@@ -260,7 +260,8 @@
     /* A hold that could not be written throws, and the melt is not sent: a
      * payment in flight with no hold on disk is money a killed app forgets
      * (audit W6). pay gives the proofs back to the pile. */
-    mustSave(K.melting, list, true);
+    // (after the split that cut these pieces, which cannot be undone: the store's reserve answers a refusal, `mustSave`)
+    mustSave(K.melting, list, true, true);
     console.log('[foxy] holding', formatAmount(sumProofs(sent || []), held.unit), 'against melt', quote.quote);
   }
 
@@ -282,7 +283,14 @@
   }
 
   /* The change outputs a held melt reserved, written to its hold at once, so
-   * a process that dies before the melt answers still knows them. */
+   * a process that dies before the melt answers still knows them.
+   *
+   * Before the melt leaves, so a refusal is the melt's: answered with the
+   * error (`unsent`), which the caller puts on the view the melt goes by
+   * (`foxyRefuse`), and the melt is not sent. It is called from cashu-ts's
+   * `countersReserved`, which swallows a throw, so the error is handed back
+   * rather than thrown. It was `save`, and a refusal sent the melt with its
+   * change named nowhere but the seed. Null when written. */
   function noteMeltOutputs(quoteId, ranges) {
     var list = load(K.melting, []);
     var found = false;
@@ -292,7 +300,19 @@
         found = true;
       }
     });
-    if (found) save(K.melting, list);
+    if (!found) return null;
+    // (after the split, as the hold is: the reserve answers a refusal)
+    try { mustSave(K.melting, list, true, true); } catch (e) { return e; }
+    return null;
+  }
+
+  /* A write the request on `w` needed, refused: that request is not sent
+   * (03-seed-counters-logs.js, `onLabel`). A wallet not on a circuit of its
+   * own has no gate, and is told nothing. */
+  function refuseOn(w, e) {
+    if (!e) return;
+    console.error('[foxy] a write needed before a request was refused; the request is not sent:', (e && e.message) || e);
+    try { if (w && w.foxyCircuit) w.foxyRefuse = e; } catch (x) {}
   }
 
   /* Could a seed restore bring this proof back?
@@ -569,6 +589,8 @@
     // only a stand-in wallet without a swap (the tests) files them unchecked
     if (typeof w.receive !== 'function') return addNewProofs(incoming);
     assertRoute();
+    // room for what the swaps write, or nothing is sent (`roomFor`)
+    roomFor('small');
     var at = mintOf(w);
     var held = {};
     proofs(at).forEach(function (p) { if (p && p.secret) held[p.secret] = true; });
@@ -617,6 +639,14 @@
             got += sumProofs(swapped);
           }, function (e) {
             var why = FoxyWallet.reason(e);
+            /* A swap never sent (a store too full for its record, `neverSent`) is said as that, and carries its marks: nothing
+             * was asked of the mint, and it did not refuse anything. */
+            if (e && e.unsent) {
+              var none = /** @type {any} */ (new Error(got ? 'Imported ' + got + ' sats; the rest was not sent: ' + why : why));
+              if (!got) none.unsent = true;
+              if (e.storageFull) none.storageFull = true;
+              throw none;
+            }
             throw new Error(got
               ? 'Imported ' + got + ' sats; the mint would not accept the rest: ' + why
               : 'The mint would not accept that ecash, so none of it was imported: ' + why);

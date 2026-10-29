@@ -255,7 +255,10 @@
       try { return localStorage.getItem('foxy.myaddr') || ''; } catch (e) { return ''; }
     },
 
-    tag: function (hash, meta) {
+    /* `must`: the note holds a sent token's only lasting copy (`keepSentToken`): written with mustSave, and a refusal
+     * throws rather than being let pass. 'before' is a write made before anything moves (`noteLastToken`), refused as
+     * never sent; `true` one made after, which the store's reserve answers first (`mustSave`). */
+    tag: function (hash, meta, must) {
       if (!hash) return;
       var all = load('foxy.txmeta', {});
       all[hash] = Object.assign({}, all[hash] || {}, meta || {});
@@ -277,7 +280,8 @@
         }
         if (spare >= 0) delete all[keys[spare]];
       }
-      save('foxy.txmeta', all);
+      if (must) mustSave('foxy.txmeta', all, must === 'before');
+      else save('foxy.txmeta', all);
     },
 
     tagsFor: function (hash) { return load('foxy.txmeta', {})[hash] || {}; },
@@ -376,27 +380,79 @@
      * The last token made (outtoken) stays unless forgetToken is set — the app
      * asks first when a sent token is still unclaimed (tokensNotClaimed). */
     clearHistory: function (opts) {
-      /* What is left is one row per mint: the balance carried forward. The
-       * history screen audits the balance back to nothing, and a list that
-       * starts after the money arrived would say DOES NOT ADD UP for ever. Written as an ordinary settled receive with the
-       * memo `opening`, which the screen names and never announces. */
+      /* The notes go, but never one that still holds a sent token nobody is known to have claimed (`token`): that text
+       * can be the only copy of the money, and for a token locked to somebody else, change locked to a payer or a card's
+       * load, the twelve words cannot bring it back. Such a note keeps its token and what says what it is; its shown
+       * copies (`kept`, `changeToken`) go with the rest. It was every note, which made "clear your history" a way to
+       * lose money, and the store-full words point here (`STORE_FULL_WAY`). */
+      var notes = load('foxy.txmeta', {});
+      var keep = {};
+      Object.keys(notes || {}).forEach(function (h) {
+        var m = notes[h];
+        if (!m || typeof m.token !== 'string' || !m.token) return;
+        var left = Object.assign({}, m);
+        delete left.kept;
+        delete left.changeToken;
+        keep[h] = left;
+      });
+      /* And the entries of those notes, and of the last token's: the screens reach a token only through its entry (the
+       * history list, the token's own screen, RECLAIM), so a token kept with no entry was kept where nobody could act on
+       * it. Everything else in history goes. */
+      var last = load(K.outtok, null);
+      var kept = {};
+      Object.keys(keep).forEach(function (h) { kept[h] = true; });
+      if (last && last.hash) kept[last.hash] = true;
+      var rows = (load(K.log, []) || []).filter(function (e) { return e && e.hash && kept[e.hash]; });
+      /* What is left beside them is one row per mint and unit: the balance carried forward. The history screen audits
+       * the balance back to nothing (`histAudit`), and a list that starts after the money arrived would say DOES NOT ADD
+       * UP for ever. So the row is what is held there (the pile and what is held back for a swap the mint has not
+       * answered), with what the kept entries took out added back and what they brought in taken off, and the top-up
+       * fees no entry carries added back: the kept entries and the opening row then come to what is held, as before.
+       * Written as an ordinary settled receive with the memo `opening`, which the screen names and never announces. */
       var at = Math.floor(Date.now() / 1000);
+      var plain = function (m) { return String(m || '').replace(/\/+$/, ''); };
+      var sums = {};
+      var add = function (mint, unit, n) {
+        var k = plain(mint) + '|' + (unitOf(unit) || 'sat');
+        sums[k] = (sums[k] || 0) + n;
+      };
+      piles().forEach(function (p) { add(p.mint, p.unit, sumProofs(proofs(p.mint, p.unit))); });
+      var held = load(K.held, {}) || {};
+      Object.keys(held).forEach(function (id) { var h = held[id]; if (h && h.mint) add(h.mint, h.unit, sumProofs(h.proofs || [])); });
+      rows.forEach(function (e) {
+        if (e.state === 'failed' || e.failed || e.atRisk) return;
+        if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
+        var u = unitOf(e.unit) || 'sat';
+        // (`satsOf`: an amount from a row may be the library's own Amount, which Number() would coerce)
+        var amt = satsOf(u === 'sat' ? e.sats : e.amount) || 0;
+        if (e.dir === 'in') { if (!(e.state === 'pending' && !e.settled)) add(e.mint, u, -amt); return; }
+        var fee = Math.max(0, satsOf(u === 'sat' ? e.feeSats : e.feeAmount) || 0);
+        var owed = e.changeState === 'owed' ? (satsOf(u === 'sat' ? e.changeSats : e.changeAmount) || 0) : 0;
+        add(e.mint, u, amt + fee + owed);
+      });
+      var fees = load(K.topUpFees, {}) || {};
+      Object.keys(fees).forEach(function (mint) { add(mint, 'sat', Math.max(0, Math.round(Number(fees[mint]) || 0))); });
       var opening = [];
-      piles().forEach(function (p) {
-        if (p.unit !== 'sat') return;
-        var sats = sumProofs(proofs(p.mint, 'sat'));
-        if (!(sats > 0)) return;
-        var row = { at: at, mint: String(p.mint || '').replace(/\/+$/, ''), dir: 'in', sats: sats, feeSats: 0,
-                    settled: true, state: 'success', memo: 'opening', hash: 'opening-' + at + '-' + opening.length };
+      Object.keys(sums).forEach(function (k) {
+        var n = Math.round(sums[k]);
+        if (!(n > 0)) return;
+        var cut = k.lastIndexOf('|'), mint = k.slice(0, cut), u = k.slice(cut + 1);
+        var row = /** @type {any} */ (u === 'sat'
+          ? { at: at, mint: mint, dir: 'in', sats: n, feeSats: 0, settled: true, state: 'success', memo: 'opening' }
+          : { at: at, mint: mint, dir: 'in', unit: u, amount: n, feeAmount: 0, sats: 0, feeSats: 0, settled: true, state: 'success', memo: 'opening' });
+        row.hash = 'opening-' + at + '-' + opening.length;
         if (rateNow()) row.rate = rateNow();
         opening.push(row);
       });
-      save(K.log, opening);
+      save(K.log, rows.concat(opening));
       // the audit trail is the same record in more detail; it goes too
       save(K.audit, []);
-      save('foxy.txmeta', {});
+      save('foxy.txmeta', keep);
+      /* `forgetToken`: the last-token slot goes, its token on its note first (`noteLastToken`); where that note cannot be
+       * written, the slot stays. */
       if (opts && opts.forgetToken) {
-        try { localStorage.removeItem(K.outtok); } catch (e) {}
+        try { noteLastToken(); localStorage.removeItem(K.outtok); }
+        catch (e) { console.warn('[foxy] the last token is kept: it could not be put on its note first'); }
       }
       return true;
     },

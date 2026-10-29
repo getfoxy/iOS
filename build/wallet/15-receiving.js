@@ -314,6 +314,9 @@
         if (e && typeof e === 'object') e.noCounters = true;
         return Promise.reject(e);
       }
+      /* Room for what the claim files, or the money waits at the mint and the claim is not sent (`roomFor`): `unsent`,
+       * so it spends no try either. */
+      try { roomFor('mint'); } catch (eRoom) { return Promise.reject(eRoom); }
       /* The seed, before the mint is asked for the money. A claim derives its
        * secrets from it, so it is read either way; read here the Face ID goes
        * with the invoice being paid rather than landing partway through, over
@@ -379,8 +382,9 @@
        * they are reserved, before the request leaves. If the mint issues and
        * the answer is lost, the quote reads ISSUED and recoverIssued restores
        * exactly these. A range the mint refused is taken off (outputsRecorder). */
-      var rec = outputsRecorder(w, entry.outputs, function (list) {
-        noteQuoteOutputs(quoteId, list, mintOf(w));
+      var rec = outputsRecorder(w, entry.outputs, function (list, after) {
+        // before the claim leaves, a refusal stops it (`refuseOn`): the money waits at the mint
+        refuseOn(w, noteQuoteOutputs(quoteId, list, mintOf(w), after));
       });
       return onceMoreIfSigned(w, 'claim', function () {
         return rec.attempt(function () { return mintQuoteProofs(w, entry.amount, quoteId, entry); });
@@ -764,6 +768,11 @@
       var w = other ? other.w : wallet;
       if (!w || !routeOpen()) return Promise.resolve([]);
       var here = other ? canonicalMint(other.here) : mintOf(w);
+      /* A send whose token is written down under the entry its record names
+       * finished; only the record's drop was not reached. Let go before any
+       * record is asked about, so a plain send's ranges are never restored
+       * into the balance while its token is out (`swapFinished`). */
+      dropFinishedSwaps(here);
       var nowS = Math.floor(Date.now() / 1000);
       /* Not every record, every time.
        *

@@ -412,6 +412,39 @@ wrongly: an invoice amount of Infinity, addresses read differently from a URL
 parser, payment requests listing mints that were not text, and token totals
 past 2^53. All five were fixed.
 
+**`store-full.js`** is what a full store does to money. The page's
+localStorage refuses, with WebKit's error, any write past a byte cap measured
+as WebKit and the wallet count it (key and value, one byte a character for
+a string with none past U+00FF, two otherwise), and with
+the store filled to just under that cap and exactly at it, every money path
+runs against the harness's mint: a send, a locked send, a card top-up, an
+import, a receive, a Lightning payment and a claim. Each completes with the
+books adding up, or is refused as never sent with no swap, melt or mint
+request reaching the mint: once with history the wallet may trim, once with
+no room to make, and once past the wallet's own room check, so the gates
+where each request leaves are what answer. Then the incident that cost a
+phone a payment (a locked send's record refused before the swap: now no
+request), a token's write refused after the swap (written once room is made;
+a plain send's pieces back in the balance; a locked one rebuilt by a
+relaunch), a relaunch that finds a finished send's record beside its token,
+what the trim keeps, and the room check refusing before a send. Then the
+store's standing reserve, kept for what must follow a step that cannot be
+undone (a card's signature, a swap or a melt leaving): with the store shut at
+its size as the step is reached, a slow tap among them, everything after it is
+still written, from the reserve, and with the reserve not whole no money
+operation starts. A send from pieces on hand,
+plain or locked pieces signed on with no route, never writes over the last
+token before that token is on its note; clearing history keeps every token
+nobody is known to have claimed; and a locked token is never forgotten on a
+mint's word that it is spent. A card's load keeps its token unless every piece
+of it is in this phone's file of the card (115 loads shaped as on a real
+phone: none of the 84 off file is let go); a store too full for the whole
+reserve still lets a small payment, a receive, a melt and a claim go, and says
+what holds the room, with the unclaimed tokens to copy; and the reserve is cut
+by twice what a write adds, never by a cosmetic one. It prints
+what each operation adds to the store at its peak, which is what the room
+each is given is set from (`STORE_ROOM`).
+
 **`types/`** is the type check of `Web/foxy-wallet.js`:
 `node node_modules/typescript/bin/tsc -p tests/types`, with TypeScript 6.0.3
 pinned in the root `package-lock.json`. It emits nothing. `strictNullChecks` is

@@ -57,7 +57,7 @@ const deliver = read('build/wallet/07-request-delivery.js');
 const split = read('build/wallet/19-bill-split.js');
 const hist = read('build/app/26-render-history-and-contacts.js');
 const markup = read('build/markup.html');
-ok(/function trimKeptTokens\(all\) \{\s*var BUDGET = 1500000;/.test(lost), 'the budget is a megabyte and a half');
+ok(/function trimKeptTokens\(all, budget\) \{\s*var BUDGET = 500000;/.test(lost), 'the budget is half a million characters (half a megabyte, as WebKit counts)');
 ok(/changeToken/.test(deliver) && /changeToken/.test(split), 'the receiver keeps the change it made, both ways it is made');
 ok(/tx\.token \|\| \(tx\.dir === 'in' \? tx\.changeToken : tx\.kept\)/.test(hist),
    'history shows the unclaimed token, else the change or the kept one');
@@ -202,7 +202,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
   ok(/var back = changeFromPile\(wallet, owed\);\n      if \(!\(back > 0\)\) return Promise\.resolve\(null\);/.test(split)
      && /if \(hash\) settleChangeMade\(hash, owed, \{ sats: made\.sats, fee: made\.fee, back: back \}\);/.test(split),
      'and so is change for a scanned token');
-  ok(/if \(Number\(split\.over\) > 0 && !\(changeFor\(w, Number\(split\.over\)\) > 0\)\) \{\n          dust = Number\(split\.over\);\n          split\.over = 0;/.test(split),
+  ok(/if \(Number\(split\.over\) > 0 && !\(changeFor\(w, Number\(split\.over\)\) > 0\)\) \{\n\s+dust = Number\(split\.over\);\n\s+split\.over = 0;/.test(split),
      'a payer that paid over by too little to come back does not wait for change');
   ok(/var kept = Math\.max\(0, satsOf\(p\.amount\) - giveBack - \(Number\(p\.inFee\) \|\| 0\)\);/.test(read('build/wallet/20-helpers.js'))
      && /fee: tokFee,/.test(split)
@@ -229,7 +229,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
      'the sweep asks the mint about a locked send by its written-down outputs and writes the payment it rebuilds');
   ok(/return restoreLocked\(w, rec\)\.then\(function \(made\) \{\n      if \(!made\) \{/.test(lost)
      && /if \(!unspent\) \{\n\s+console\.warn\('\[foxy\] a locked payment the mint took the pieces for could not be rebuilt yet; its record is kept'\);/.test(lost)
-     && /var hash = 'token-' \+ String\(rec\.id\)\.replace\(\/\^send-\/, ''\);/.test(lost),
+     && /var hash = \(typeof rec\.hash === 'string' && rec\.hash\) \? rec\.hash : 'token-' \+ String\(rec\.id\)\.replace\(\/\^send-\/, ''\);/.test(lost),
      'it is given up only when the mint says its pieces are unspent, and its entry is named from the record so a second pass amends it');
 }
 
@@ -255,7 +255,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
 
 // Locked pieces signed into a token are struck off once that token is written
 // down, never one signature at a time before it exists.
-ok(/hash: hash, at: Date\.now\(\), swapped: split\.swapped \}\);\n[\s\S]{0,200}if \(split\.handedOn && split\.handedOn\.length\) \{\n\s+rememberHandedOn\(split\.handedOn\);\n\s+takeFromUnclaimed\(split\.handedOn\);/.test(read('build/wallet/19-bill-split.js'))
+ok(/keepSentToken\(\{ token: token, sats: sumProofs\(split\.send\), unit: 'sat', mint: at,\n\s+hash: hash, at: Date\.now\(\), swapped: split\.swapped \},\n[\s\S]{0,900}if \(split\.handedOn && split\.handedOn\.length\) \{\n\s+rememberHandedOn\(split\.handedOn\);\n\s+takeFromUnclaimed\(split\.handedOn\);/.test(read('build/wallet/19-bill-split.js'))
    && /if \(opts && opts\.defer\) \{\n\s+return \{ token: out, sats: fu === 'sat' \? sumProofs\(signed\) : 0, unit: fu, amount: sumProofs\(signed\), signed: signed \};/.test(read('build/wallet/19-bill-split.js')),
    'locked pieces paid out of are struck off after the token is saved, all together');
 

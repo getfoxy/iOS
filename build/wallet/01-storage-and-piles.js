@@ -192,10 +192,35 @@
     save(K.reserves, all);
   }
 
+  /* Never throws: a value that cannot be written (refused, or not JSON) is false. Never takes from the store's reserve:
+   * that is for writes that are part of moving money (`mustSave`, `saveMoney`), and nothing cosmetic or cached does. */
   function save(key, value) {
     if (storageNewer) return false;           // written by a newer Foxy: left as it is
     try { localStorage.setItem(key, JSON.stringify(value)); return true; }
     catch (e) { return false; }
+  }
+
+  /* What a write adds to the store, at the widest WebKit could count it (two bytes a character: how a string is stored is
+   * not known here), twice over: the reserve is asked for that, and a margin (`spendReserve`). */
+  function writeGrowth(key, text) {
+    var had = null;
+    try { had = localStorage.getItem(key); } catch (e) { had = null; }
+    var grow = 2 * (text.length - (had === null ? 0 : had.length)) + (had === null ? 2 * String(key).length : 0);
+    return 2 * Math.max(0, grow);
+  }
+  function fromReserve(key, value) {
+    var text;
+    try { text = JSON.stringify(value); } catch (e) { return false; }
+    if (typeof text !== 'string' || !spendReserve(writeGrowth(key, text))) return false;
+    try { localStorage.setItem(key, text); return true; } catch (e2) { return false; }
+  }
+
+  /* A write that is part of a money step but has never thrown (a payment's history entry: `logTx`): refused, it is
+   * answered from the store's reserve as a must-write is, and still never throws. */
+  function saveMoney(key, value) {
+    if (save(key, value)) return true;
+    if (storageNewer) return false;
+    return fromReserve(key, value);
   }
 
   /* A write that must land, or say so.
@@ -208,18 +233,355 @@
    * This throws instead, with `storageFull` set so a caller can tell it from a
    * mint's answer. `unsent` says the request never left: the counters for it
    * were not written, so nothing was asked of the mint. */
-  function mustSave(key, value, unsent) {
+  /* A refusal is answered once by making room (`trimStore`, which lets go of
+   * nothing money or a recovery needs) and writing again. Only then does it
+   * throw: a full store cost a phone a payment when the one write that held
+   * a token was refused with history taking the room. */
+  /* `afterStep`: a write made before a request leaves, and so `unsent` if refused, that follows another step of the same
+   * payment which cannot be undone (a melt's hold, written after the split that cut its pieces): the reserve answers it. */
+  function mustSave(key, value, unsent, afterStep) {
     if (storageNewer) throw new Error(STORAGE_NEWER);
     if (save(key, value)) return;
-    console.error('[foxy] storage refused a write to', key);
-    var e = /** @type {any} */ (new Error(unsent
-      ? 'Foxy could not write to this phone’s storage (it may be full), so nothing was sent to the mint. '
-        + 'Free up space, then try again.'
-      : 'Foxy could not save ecash: this phone’s storage refused the write (it may be full). '
-        + 'Nothing is lost; it is on record and comes back when Foxy reopens with room. Free up space, then reopen Foxy.'));
+    /* The store's reserve first: twice what this write adds, and a margin, is given up from it and the write tried again
+     * (`fromReserve`), which is what the reserve is kept for. Not for a write made before a request leaves (`unsent`):
+     * refusing that one costs nothing, and the reserve is for what cannot be refused. */
+    var mayReserve = !unsent || !!afterStep;
+    if (mayReserve && fromReserve(key, value)) {
+      console.warn('[foxy] storage refused a write to ' + key + '; it was written from the store\u2019s reserve');
+      return;
+    }
+    // and with all of the reserve, if what was given was not enough (a string stored wider than counted)
+    if (mayReserve && reserveNow() > 0) {
+      try { localStorage.removeItem(RESERVE_KEY); } catch (eR) {}
+      if (save(key, value)) return;
+    }
+    var freed = 0;
+    try { freed = trimStore(true); } catch (x) { freed = 0; }
+    if (freed > 0 && save(key, value)) {
+      console.warn('[foxy] storage refused a write to ' + key + '; ' + freed + ' bytes of history were let go and it was written');
+      return;
+    }
+    console.error('[foxy] storage refused a write to ' + key + ' (' + storeBytes() + ' bytes in use), and trimming did not make room');
+    var e = /** @type {any} */ (new Error(unsent ? storeFullUnsent()
+      : 'Foxy could not save ecash: this phone’s storage refused the write (it is full). '
+        + 'Nothing is lost; it is on record and comes back when Foxy reopens with room. ' + storeFullWay() + ' Then reopen Foxy.'));
     e.storageFull = true;
     if (unsent) e.unsent = true;
     throw e;
+  }
+
+  /* ---- room in the store ----------------------------------------------------
+   *
+   * WebKit gives a page's localStorage about 5 MB (5 × 2^20 bytes) for its
+   * origin and refuses any write past that. Everything Foxy keeps shares it:
+   * the ecash, the records that bring a lost answer back, and the history and
+   * its notes, which grow with every payment. On a phone that lost a payment this way
+   * the store held about 5.1 million characters: the notes' token fields
+   * 2.78 million over 300 notes and the audit trail 1.4 million, and the write
+   * that held a locked payment's token was the one refused.
+   *
+   * Measured as WebKit counts it (`webkitBytes`), and the cap is 4.5 MB of
+   * that, half a megabyte short of WebKit's own: nothing that sends to a mint
+   * starts unless the store is under it by the most that operation writes
+   * (`STORE_ROOM`). */
+  var STORE_CAP_BYTES = Math.round(4.5 * 1024 * 1024);
+  /* A tap that can make a card sign or let go of pieces (a withdrawal, a payment
+   * to a till, a take-back, a swap between its units): what the tap writes once
+   * the card has signed (the signed pieces' row in foxy.flashcard.taken, 33 KB
+   * for a withdrawal of 52 pieces, and the swap's writes after it: 45 KB at its
+   * peak; tests/store-full.js prints its own card's), given 256 KB, and on top
+   * of that the room the
+   * swap after it is asked for at the door every request goes by: that swap
+   * must never be the one refused, with the card's signature already spent. */
+  var CARD_ROOM_BYTES = 256 * 1024 + 512 * 1024;
+  /* The most one operation adds to the store at its peak, before its records
+   * go, measured on the test mint as WebKit counts (tests/store-full.js prints
+   * it): a locked send of 52 pieces, as a card's top-up is cut, 108 KB (its swap
+   * record with every locked output 41 KB, the audit row 44 KB, the token 46 KB
+   * in the last-token slot and as much again on its note, the pile reshaped); a
+   * card top-up of 32 pieces 107 KB; a plain send 9 KB; a receive 11 KB; a
+   * Lightning payment 11 KB; a claim 1.3 KB. Each kind's room is several times
+   * the largest of it measured (a melt's more, since a melt can carry a card's
+   * pieces), so a write well past any measured still fits. */
+  /* `token`: a send that asks the mint nothing (pieces on hand, or locked ones signed on), which still writes its token
+   * twice (the last-token slot and its note), its entry and its audit row: about three times the token, 140 KB for one
+   * of 52 pieces and a few KB for an ordinary one. */
+  /* `small`: a swap that needs little, a receive or import or reclaim, or a plain send of no locked pieces and no cut of
+   * the caller's: measured 9 KB to 23 KB, and a card's signed pieces swapped in (52 pieces) 45 KB. */
+  var STORE_ROOM = { swap: 512 * 1024, small: 128 * 1024, melt: 128 * 1024, mint: 64 * 1024, card: CARD_ROOM_BYTES, token: 160 * 1024 };
+  var STORE_FULL_START = 'Foxy’s storage on this phone is full, so nothing was sent and your money has not moved. ';
+
+  /* What holds the store, by what it is, in bytes as WebKit counts (`storageReport`): what clearing history would let
+   * go (the entries, the audit trail, claimed tokens' text, notes with no token in them), the text of sent tokens nobody
+   * is known to have claimed (kept by clearing history: it can be the only copy of money), the ecash and the records
+   * that bring it back, the cards' files, the reserve, and the rest. */
+  function storageReport() {
+    var out = { total: 0, cap: storeCap(), reserve: reserveBytes(), clearable: 0, unclaimed: 0, unclaimedCount: 0,
+                money: 0, cards: 0, other: 0, tokens: /** @type {Array<string>} */ ([]) };
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = String(localStorage.key(i) || '');
+        var v = localStorage.getItem(k) || '';
+        var b = webkitBytes(k) + webkitBytes(v);
+        out.total += b;
+        if (k === RESERVE_KEY) continue;
+        if (k === K.log || k === K.audit) { out.clearable += b; continue; }
+        if (k === 'foxy.txmeta') {
+          var meta = null;
+          try { meta = JSON.parse(v); } catch (e) { meta = null; }
+          var tok = 0;
+          Object.keys(meta || {}).forEach(function (h) {
+            var t = meta[h] && meta[h].token;
+            if (typeof t === 'string' && t) { tok += 2 * t.length; out.tokens.push(t); out.unclaimedCount += 1; }
+          });
+          tok = Math.min(tok, b);
+          out.unclaimed += tok;
+          out.clearable += b - tok;
+          continue;
+        }
+        if (k.indexOf(K.proofs) === 0 || k === K.swaps || k === K.held || k === K.melting || k === K.outtok || k === K.quotes
+            || k === K.quotesOld || k === K.onchainOut || k === K.move || k === K.carry) { out.money += b; continue; }
+        if (k.indexOf('foxy.flashcard.') === 0) { out.cards += b; continue; }
+        out.other += b;
+      }
+    } catch (e) {}
+    return out;
+  }
+  /* The words for a store with no room, true for this store: whether clearing history would free enough (it keeps every
+   * token nobody is known to have claimed, `clearHistory`), and when it would not, what holds the room and what to do. */
+  function storeFullWay() {
+    var r = storageReport();
+    var short = Math.max(0, r.total - r.reserve + STORE_ROOM.swap + reserveSize() - Math.round(5 * 1024 * 1024));
+    var mb = function (n) { return (Math.round(n / 104857.6) / 10).toFixed(1) + ' MB'; };
+    if (r.clearable >= short + 64 * 1024) {
+      return 'Clearing history on the History screen frees ' + mb(r.clearable) + ', which is enough, and keeps every token nobody has claimed.';
+    }
+    // what holds the most, said as it is
+    var most = /** @type {Array<[string, number]>} */ ([['unclaimed', r.unclaimed], ['money', r.money], ['cards', r.cards], ['other', r.other]])
+      .sort(function (a, b) { return b[1] - a[1]; })[0];
+    var held = /** @type {Object<string, string>} */ ({
+      unclaimed: 'tokens you sent that nobody has claimed (' + mb(r.unclaimed) + '): copy them from the storage card, then take them back or hand them over',
+      money: 'your ecash and its records (' + mb(r.money) + '): paying some of it out makes room',
+      cards: 'what this phone keeps of your cards (' + mb(r.cards) + ')',
+      other: 'other data on this phone (' + mb(r.other) + ')',
+    })[most[0]];
+    // whether what needs little can still go: room under the cap for it, and that much of the reserve (`roomFor`'s rule)
+    var small = (r.total - r.reserve + STORE_ROOM.small <= r.cap) && reserveNow() >= STORE_ROOM.small;
+    return 'Clearing history would free only ' + mb(r.clearable) + '. Most of the room is held by ' + held + '.'
+      + (small ? ' A small payment, a receive or a claim can still go.' : '');
+  }
+  function storeFullUnsent() { return STORE_FULL_START + storeFullWay() + ' Then try again.'; }
+
+  /* Bytes in use, as WebKit counts them: every key and value (`webkitBytes`). */
+  /* What WebKit counts against its quota for one string: its StorageMap adds each key's and value's size in bytes, and
+   * WebKit keeps a string whose every character is at or below U+00FF in one byte a character, any other in two. The
+   * wallet's keys and values are JSON of ASCII almost throughout, so this is their length; counting two bytes for every
+   * character made the cap twice as strict as the store's real one, and a phone near it refused every payment. */
+  var WIDE_CHAR = /[^\u0000-\u00ff]/;
+  function webkitBytes(s) { return s.length * (WIDE_CHAR.test(s) ? 2 : 1); }
+
+  function storeBytes() {
+    var n = 0;
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k === null || k === undefined) continue;
+        var v = localStorage.getItem(k);
+        n += webkitBytes(String(k)) + webkitBytes(v || '');
+      }
+    } catch (e) {}
+    return n;
+  }
+
+  function storeCap() {
+    var t = Number(FoxyWallet && FoxyWallet._storeCap);
+    return t > 0 ? t : STORE_CAP_BYTES;
+  }
+
+  /* ---- the store's reserve: room kept for what must follow a step that cannot be undone ----
+   *
+   * A card that has signed will not sign again, and a swap or a melt that has
+   * left cannot be called back. What must be written after them (the signed
+   * pieces' row, the token, the pile) rested on a predicted size and on a
+   * count of bytes, and WebKit counts a string by how it is stored, which can
+   * be wider than its characters. So the store keeps one standing reserve: a
+   * key of plain characters as large as the largest such kind's room (a
+   * card's, `STORE_ROOM.card`), written at launch and grown back whenever
+   * there is room after it was spent. Nothing is written or deleted for it on
+   * a payment, and nothing times it.
+   *
+   * A money operation starts only with the reserve whole (`roomFor`, which
+   * grows it back first or refuses as never sent). When a write money depends
+   * on is refused all the same (`mustSave`), the reserve is cut by what that
+   * write needs and a margin, or removed, and the write tried again: WebKit
+   * takes a new size as the old less what is removed plus what is added, so
+   * a shrink is never refused, and the store never holds more than it did
+   * with the whole reserve in it. Until it is whole again, new money
+   * operations are refused before they start. Its bytes are not counted as
+   * use by `roomFor`: they are room kept, not room taken. */
+  var RESERVE_KEY = 'foxy.store.reserve';
+  var RESERVE_MARGIN = 4096;
+  // the old per-operation holds (an earlier build of this fix): dropped wherever one is found
+  var HOLD_PREFIX = 'foxy.store.hold.';
+  function reserveSize() { return STORE_ROOM.card; }
+  function reserveNow() {
+    try { var v = localStorage.getItem(RESERVE_KEY); return v ? v.length : 0; } catch (e) { return 0; }
+  }
+  function reserveWhole() { return reserveNow() >= reserveSize(); }
+  /* Grown back towards its size where the store takes it: whole if it can be, or else as large as it will go, in halves
+   * down to the smallest kind's room, so a store too full for the whole reserve still keeps what it can (`roomFor`).
+   * Answers the reserve as it is now. A grow is a write like any other, so the store's own count decides. */
+  function growReserve() {
+    if (storageNewer) return reserveNow();
+    var have = reserveNow();
+    for (var size = reserveSize(); size > have && size >= STORE_ROOM.mint; size = Math.floor(size / 2)) {
+      try { localStorage.setItem(RESERVE_KEY, new Array(size + 1).join('r')); return size; } catch (e) {}
+    }
+    return have;
+  }
+  /* A must-write refused: the reserve gives up `need` bytes (twice the write's growth, `writeGrowth`) and a margin, all of
+   * it when that is most of it. A shrink, never refused. Whether there was anything to give. */
+  function spendReserve(need) {
+    var have = reserveNow();
+    if (!(have > 0)) return false;
+    var left = have - Math.max(0, Math.ceil(Number(need) || 0)) - RESERVE_MARGIN;
+    try {
+      if (left > RESERVE_MARGIN) localStorage.setItem(RESERVE_KEY, new Array(left + 1).join('r'));
+      else localStorage.removeItem(RESERVE_KEY);
+    } catch (e) {
+      try { localStorage.removeItem(RESERVE_KEY); } catch (e2) { return false; }
+    }
+    console.warn('[foxy] storage: a write money depends on took ' + (have - Math.max(0, left)) + ' bytes of the store\u2019s reserve; new payments wait until it is whole again');
+    return true;
+  }
+  function reserveBytes() { var n = reserveNow(); return n ? webkitBytes(RESERVE_KEY) + n : 0; }
+  // at launch: the per-operation holds an earlier build of this fix wrote
+  function dropOldHolds() {
+    var keys = [];
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf(HOLD_PREFIX) === 0) keys.push(k); } } catch (e) {}
+    keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+  }
+  /* The moment a step that cannot be undone is under way (a card asked to sign, a swap or a melt leaving). Nothing is
+   * written: the reserve is already whole. Said for the tests, which shut the store here (`_onArm`). */
+  function storeStep(what) {
+    try { if (typeof FoxyWallet._onArm === 'function') FoxyWallet._onArm(what); } catch (e) {}
+  }
+
+
+  /* An operation that would send to a mint, asked before it does: the store
+   * has room for the most it writes, or room is made, or it is refused before
+   * anything leaves (`unsent`, `storageFull`), with words that say what to do.
+   * `kind` is 'swap', 'melt' or 'mint'. */
+  /* The rule, in one place. An operation starts when the store, its reserve left out, has room under the cap for the most
+   * that kind writes (`STORE_ROOM`), and the reserve (grown back first where it can be: `growReserve`) is at least that
+   * same room. So with the reserve whole every kind may start; with it partial (spent, or a store too full to hold all
+   * of it) the kinds that need little still do (a claim 64 KB, a melt or a small swap 128 KB: a receive, a plain send,
+   * a card's signed pieces swapped in) while a large swap or a card's tap waits; and nothing starts that its own writes
+   * could not be answered for after its step.
+   *
+   * `inner`: the request door (`nativeRequest`) or a swap of pieces a card has already signed (`cardSwapTaken`), inside
+   * an operation that asked as it began or whose step is behind it: the reserve is not asked for (and not grown back
+   * here, which would take room what is under way may need), only room for the request. */
+  function roomFor(kind, inner) {
+    var need = STORE_ROOM[kind] || STORE_ROOM.swap;
+    var cap = storeCap();
+    var enough = function () {
+      var used = storeBytes() - reserveBytes();
+      if (used + need > cap) return false;
+      return !!inner || growReserve() >= need;
+    };
+    if (enough()) return;
+    try { trimStore(true); } catch (e) {}
+    if (enough()) return;
+    console.error('[foxy] storage: ' + (storeBytes() - reserveBytes()) + ' bytes in use of ' + cap + ', a ' + kind + ' needs room for '
+      + need + ' more, and the reserve is ' + reserveNow() + ': refused before anything was sent');
+    // and sent tokens the mint says are claimed are looked for, so that the next try may find room (`tidySentTokens`)
+    roomShortAt = Date.now();
+    try { tidySentTokens().then(null, function () {}); } catch (x) {}
+    // and the person told what holds the room, with the unclaimed tokens to copy (`onStorageFull`)
+    try {
+      var tell = FoxyWallet && FoxyWallet._onStorageFull;
+      if (typeof tell === 'function' && Date.now() - storageToldAt > 30000) {
+        storageToldAt = Date.now();
+        var report = storageReport();
+        var told = /** @type {function(any): void} */ (tell);
+        setTimeout(function () { try { told(Object.assign(report, { kind: kind, words: storeFullWay() })); } catch (x2) {} }, 0);
+      }
+    } catch (x3) {}
+    var e = /** @type {any} */ (new Error(storeFullUnsent()));
+    e.storageFull = true;
+    e.unsent = true;
+    throw e;
+  }
+  var storageToldAt = 0;
+
+  /* Which of `roomFor`'s kinds a request to a mint is, or '' for one that
+   * moves no money (a quote, a state check, a restore, the mint's keys). */
+  var MONEY_PATH = /\/v1\/(swap|melt\/(?!quote\/)[A-Za-z0-9_-]+|mint\/(?!quote\/)[A-Za-z0-9_-]+(\/batch)?)$/;
+  function moneyRequestKind(o) {
+    if (!o || String(o.method || 'GET').toUpperCase() !== 'POST') return '';
+    var path = String(o.endpoint || '').split('?')[0];
+    var m = MONEY_PATH.exec(path);
+    if (!m) return '';
+    // (a swap at the door is asked for the least a swap needs: the operation sized itself as it began, `roomFor`)
+    return m[1] === 'swap' ? 'small' : m[1].indexOf('melt/') === 0 ? 'melt' : 'mint';
+  }
+
+  /* Making room, from what only shows what happened and nothing that money
+   * or a recovery reads.
+   *
+   *   foxy.txmeta (the notes on payments): a sent token's text once it is
+   *     claimed (`kept`) and change handed to a payer (`changeToken`), oldest
+   *     first, to their budget (`trimKeptTokens`); and a card top-up's token
+   *     once every one of its pieces is in this phone's file of that card
+   *     (`cardLoadOnFile`), which is what a lost card's take-back is rebuilt
+   *     from (`cardRemember`, a must-write): its text becomes `kept`, shown as
+   *     before and let go with the rest. Being on the card (`carded`) is not
+   *     enough, and a load whose pieces are on no file keeps its text.
+   *     Any other token nobody has claimed (`token`) is never touched: it can
+   *     be the only copy of money.
+   *   foxy.cashu.audit (what each payment consumed and produced, read by the
+   *     detail screen and nothing that counts): past the newest few, rows go
+   *     slim, and past its budget the oldest go (`shapeAudit`).
+   *
+   * Never the piles, the counters, the swap and melt records, the holds, the
+   * last token, a card's owed rows or its file, or any key. Idempotent: run
+   * twice, the second frees nothing. `tight` is for a store short of room:
+   * the budgets are smaller. Answers the bytes freed. At launch, and whenever
+   * a write or an operation needs room (`mustSave`, `roomFor`). */
+  function trimStore(tight) {
+    var before = storeBytes();
+    try {
+      var raw = localStorage.getItem('foxy.txmeta');
+      var meta = raw ? JSON.parse(raw) : null;
+      if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+        Object.keys(meta).forEach(function (h) {
+          var m = meta[h];
+          if (!m || m.to !== 'card' || m.owedChange || typeof m.token !== 'string' || !m.token) return;
+          /* Only when every piece of it is in this phone's file of the card (`cardLoadOnFile`): that file is what a lost card's
+           * take-back is rebuilt from, so the token's text is then only for showing. `carded` alone says the card took it,
+           * not that this phone could take it back without the card, and a load on no file keeps its text. */
+          if (cardLoadOnFile(m.token)) {
+            m.kept = m.token;
+            delete m.token;
+          }
+        });
+        trimKeptTokens(meta, tight ? KEPT_TOKENS_TIGHT : undefined);
+        var out = JSON.stringify(meta);
+        if (out.length < String(raw).length) save('foxy.txmeta', meta);
+      }
+    } catch (e) { console.warn('[foxy] storage: the notes could not be trimmed:', e && e.message); }
+    try {
+      var rawA = localStorage.getItem(K.audit);
+      var list = rawA ? JSON.parse(rawA) : null;
+      if (Array.isArray(list) && list.length) {
+        var shaped = shapeAudit(list, tight);
+        if (JSON.stringify(shaped).length < String(rawA).length) save(K.audit, shaped);
+      }
+    } catch (e) { console.warn('[foxy] storage: the audit trail could not be trimmed:', e && e.message); }
+    var freed = Math.max(0, before - storeBytes());
+    if (freed > 0) console.warn('[foxy] storage: ' + freed + ' bytes of history let go' + (tight ? ' to make room' : '') + '; ' + storeBytes() + ' in use');
+    return freed;
   }
 
   /* Proofs are per mint, and have to be: a mint's ecash is only redeemable at

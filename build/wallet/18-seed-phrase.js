@@ -92,6 +92,7 @@
           if (k === SCHEMA_KEY) continue;        // stamped on every launch, even a fresh one
           if (k === COUNTERS_SENT_KEY) continue; // the one-time moves onto the phone
           if (k === SEED_MOVED_KEY) continue;
+          if (k === RESERVE_KEY || k.indexOf(HOLD_PREFIX) === 0) continue;   // the store's reserve, written at every launch: room, not wallet data
           var v = localStorage.getItem(k);
           if (v && v !== '[]' && v !== '{}' && v !== 'null' && v !== '""' && v !== '0') {
             return false;                        // something is here: not a reinstall
@@ -192,6 +193,8 @@
      */
     reclaimToken: function (text) {
       assertRoute();
+      // room for what the swap writes, or nothing is sent (`roomFor`)
+      try { roomFor('small'); } catch (eRoom) { return Promise.reject(eRoom); }
       var info = FoxyWallet.tokenInfo(text);
       if (!info) return Promise.reject(new Error('That is not a Cashu token.'));
       var tok = info;           // not null, in the callbacks below as well

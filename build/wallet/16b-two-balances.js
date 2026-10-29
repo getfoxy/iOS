@@ -238,6 +238,8 @@
           if (!exactGoesAsIs(w, exact)) exact = null;
         }
         var made, changeNoteKey = '';
+        // the entry this send writes, named now and carried on its swap's record (`swapFinished`, as `sendToken`)
+        var sendHash = 'token-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
         /** @type {any} */
         var withLocked = null;
         /** @type {?{ picked: any[], total: number, over: number }} */
@@ -301,6 +303,8 @@
             }
           }
         }
+        // asking the mint nothing, it writes all the same: room first, and the last token on its note (as `sendToken`)
+        if (withLocked || exact || cover) { roomFor('token'); noteLastToken(); }
         if (withLocked) {
           /* Signed now, and only the rows that are really going out; struck
            * off once the token is written down (below), as `sendToken` does. */
@@ -336,7 +340,11 @@
            * leaves, with the locked outputs written down as they are made, so
            * a lost answer is rebuilt and a payment killed half way is not
            * lost (`recoverSwaps`, `finishLockedSend`). */
-          var guard = swapGuard(w, 'send', { inputs: have, unit: u, locked: !!lockTo,
+          // room for what this swap writes, or it is refused before anything is sent (`roomFor`)
+          // a plain send needs little (`small`); a locked one or one cut for a card, the most (`roomFor`)
+          roomFor((lockTo || (Array.isArray(o.denominations) && o.denominations.length)) ? 'swap' : 'small');
+          noteLastToken();
+          var guard = swapGuard(w, 'send', { inputs: have, unit: u, locked: !!lockTo, hash: sendHash,
             pay: { want: want, purpose: o.purpose || '', forHash: o.forHash || '', owed: o.owed || 0 } });
           made = guard.run('token', function () {
             /* Locked as the sat send locks (19-bill-split.js): a refund to the
@@ -370,51 +378,61 @@
           });
         }
         return made.then(function (split) {
-          // the rest of the pile first, then the record cleared, then the token (as `sendToken`)
+          // the rest of the pile first, then the token, then the record cleared (as `sendToken`)
           setProofs((split.keep || []).concat(stuck), at, w, u);
           // change set aside for an over-payment leaves with its pieces (`holdChange`)
           if (isChange && o.forHash) changeHoldOver(o.forHash);
-          if (split.guard) split.guard.done();
           var over = Number(split.over) || 0;
           var token = encodeToken(at, split.send, u, changeNoteKey && over > 0
             ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
-          var hash = 'token-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          var hash = sendHash;
           var sent = sumProofs(split.send);
           var tokFee = split.swapped
             ? Math.max(0, sumProofs(have) - sent - sumProofs(split.keep || []))
             : 0;
-          // the string is the money now: written down before anything else
-          mustSave(K.outtok, { token: token, sats: 0, unit: u, amount: sent, mint: at,
-                               hash: hash, at: Date.now(), swapped: split.swapped });
-          // the locked pieces in it struck off, all of them, now that the token is written down
-          if (split.handedOn && split.handedOn.length) {
-            rememberHandedOn(split.handedOn);
-            takeFromUnclaimed(split.handedOn);
-            console.log('[foxy] handed on ' + said(sumProofs(split.handedOn)) + ' of locked ecash, signed here');
+          // the string is the money now: written down before anything else, with the swap's record still standing (`keepSentToken`)
+          var handed = {};
+          (split.handedOn || []).forEach(function (p) { if (p && p.secret) handed[p.secret] = true; });
+          keepSentToken({ token: token, sats: 0, unit: u, amount: sent, mint: at,
+                          hash: hash, at: Date.now(), swapped: split.swapped },
+                        { split: split, at: at, w: w, unit: u, lockTo: lockTo, fee: tokFee,
+                          back: (split.send || []).filter(function (p) { return !(p && handed[p.secret]); }),
+                          note: isChange ? { to: 'change', change: true, token: token, unit: u }
+                            : o.inflight ? { to: 'ecash', token: token, unit: u, inflight: true } : { to: 'ecash', token: token, unit: u } });
+          try {
+            // the locked pieces in it struck off, all of them, now that the token is written down
+            if (split.handedOn && split.handedOn.length) {
+              rememberHandedOn(split.handedOn);
+              takeFromUnclaimed(split.handedOn);
+              console.log('[foxy] handed on ' + said(sumProofs(split.handedOn)) + ' of locked ecash, signed here');
+            }
+            // paid over by too little to come back: it goes with the payment (`changeFor`, the receiver's sum)
+            var dust = 0;
+            if (over > 0 && !(changeFor(w, over) > 0)) {
+              dust = over;
+              over = 0;
+              console.log('[foxy] ' + said(dust) + ' over is too little to come back at this mint; it goes with the payment');
+            }
+            if (isChange) {
+              console.log('[foxy] change of ' + said(sent) + ' made; it belongs to the payment it came from, not to a row of its own');
+            } else {
+              logTx(unitRow(u, { dir: 'out', sats: sent - over, grossSats: over > 0 ? sent : undefined,
+                                 changeSats: over > 0 ? over : undefined, changeState: over > 0 ? 'owed' : '',
+                                 dustSats: dust || undefined, feeSats: tokFee, settled: true, state: 'success',
+                                 memo: 'ecash', hash: hash, mint: at }));
+            }
+            logAudit({ hash: hash, sats: 0, feeSats: 0, unit: u, amount: sent, kind: 'token',
+                       inputs: (split.send || []).map(scrub), outputs: (split.keep || []).map(scrub) });
+            FoxyWallet.tag(hash, isChange ? { to: 'change', change: true, token: token, unit: u }
+              : o.inflight ? { to: 'ecash', token: token, unit: u, inflight: true }
+              : { to: 'ecash', token: token, unit: u });
+            return { token: token, unit: u, amount: sent, sats: 0, mint: at, hash: hash,
+                     swapped: split.swapped, lockedTo: lockTo || '', fee: tokFee, over: over, asked: want, dust: dust,
+                     changeAsked: !!(changeNoteKey && over > 0) };
+          } finally {
+            // the token is written down: the swap's record has done its job
+            if (split.guard) split.guard.done();
           }
-          // paid over by too little to come back: it goes with the payment (`changeFor`, the receiver's sum)
-          var dust = 0;
-          if (over > 0 && !(changeFor(w, over) > 0)) {
-            dust = over;
-            over = 0;
-            console.log('[foxy] ' + said(dust) + ' over is too little to come back at this mint; it goes with the payment');
-          }
-          if (isChange) {
-            console.log('[foxy] change of ' + said(sent) + ' made; it belongs to the payment it came from, not to a row of its own');
-          } else {
-            logTx(unitRow(u, { dir: 'out', sats: sent - over, grossSats: over > 0 ? sent : undefined,
-                               changeSats: over > 0 ? over : undefined, changeState: over > 0 ? 'owed' : '',
-                               dustSats: dust || undefined, feeSats: tokFee, settled: true, state: 'success',
-                               memo: 'ecash', hash: hash, mint: at }));
-          }
-          logAudit({ hash: hash, sats: 0, feeSats: 0, unit: u, amount: sent, kind: 'token',
-                     inputs: (split.send || []).map(scrub), outputs: (split.keep || []).map(scrub) });
-          FoxyWallet.tag(hash, isChange ? { to: 'change', change: true, token: token, unit: u }
-            : o.inflight ? { to: 'ecash', token: token, unit: u, inflight: true }
-            : { to: 'ecash', token: token, unit: u });
-          return { token: token, unit: u, amount: sent, sats: 0, mint: at, hash: hash,
-                   swapped: split.swapped, lockedTo: lockTo || '', fee: tokFee, over: over, asked: want, dust: dust,
-                   changeAsked: !!(changeNoteKey && over > 0) };
         });
       });
     },
@@ -639,7 +657,8 @@
       };
       var refuseLow = function () { return new Error('That is too little to swap after the mint’s fee.'); };
       var mintRefusal = function (e) {
-        if (e && (e.offline || neverSent(e))) throw offline();
+        // (a store too full to write a swap's record is not a phone offline: said in its own words)
+        if (e && (e.offline || (neverSent(e) && !e.storageFull))) throw offline();
         throw e;
       };
       return Promise.all([unitWalletOn(view, t), unitWalletOn(view, f)]).then(function (ws) {

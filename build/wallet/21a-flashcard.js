@@ -381,6 +381,9 @@
       var o = opts || {};
       var pin;
       try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
+      // room for what the mending writes once the card has acted, or the card is asked nothing (`cardRoom`)
+      var noRoom = cardRoom();
+      if (noRoom) return Promise.reject(noRoom);
       var t = cardTalk(link);
       var card;
       return cardLook(link, { short: true }).then(function (c) {
@@ -441,6 +444,9 @@
       var n = Number(o.number);
       var named = String(o.B_ || '').toLowerCase();
       if (!(n >= 0 && n <= 7 && Math.floor(n) === n) || !/^0[23][0-9a-f]{64}$/.test(named)) return Promise.reject(cardError('refused', 'That is not change owed to the card.'));
+      // room for what is written once the card has let go, or the card is asked nothing (`cardRoom`)
+      var noRoom = cardRoom();
+      if (noRoom) return Promise.reject(noRoom);
       var pin = '';
       if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var t = cardTalk(link);
@@ -655,6 +661,9 @@
      * empty and the next tap resets it (`cardReset`). `opts.on` and `opts.progress` are `cardWithdraw`'s. */
     cardEmptyAndReset: function (link, opts) {
       var o = opts || {};
+      // the money comes off first (`cardWithdraw`), and that is a signature: room for it, before the card is read (`cardRoom`)
+      var noRoom = cardRoom();
+      if (noRoom) return Promise.reject(noRoom);
       var pin = '';
       if (!(o.pin === undefined || o.pin === null || o.pin === '')) { try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); } }
       var t = cardTalk(link);
@@ -913,6 +922,9 @@
         return Promise.reject(cardError('other-mint', 'That card\u2019s money is at ' + hostOf(row.mint) + '. Switch to it first.', { mint: canonicalMint(row.mint) }));
       }
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
+      // room for the signed pieces' row and the swap after it, before this phone's key signs anything (`cardRoom`)
+      var noRoom = cardRoom();
+      if (noRoom) return Promise.reject(noRoom);
       var now = Math.floor(Date.now() / 1000);
       var pieces = row.pieces && typeof row.pieces === 'object' ? row.pieces : {};
       var due = [], dueNonces = [], later = 0, soonest = 0;

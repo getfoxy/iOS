@@ -24,6 +24,9 @@
       var w;
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
+      /* Room for what the payment writes (its split's record, the hold, the history), or it is refused before anything is
+       * sent (`roomFor`); a card's pieces stay in their hold, for the card (`held`). */
+      try { roomFor('melt'); } catch (eRoom) { if (opts && typeof opts.held === 'string') eRoom.held = opts.held; return Promise.reject(eRoom); }
 
       /* An invoice with no amount on it, and the amount the person typed.
        *
@@ -379,12 +382,17 @@
             return e;
           }
 
+          // a refusal an earlier job left on this view is not this melt's (`foxyRefuse`)
+          try { if (w && w.foxyCircuit) w.foxyRefuse = false; } catch (x) {}
           // written to the hold as they are reserved, so a later settle restores exactly these
           var stopWatching = watchReserved(w, function (r) {
             meltOutputs.push(r);
-            noteMeltOutputs(quote.quote, meltOutputs);
+            // not on the hold, and the melt is not sent (`refuseOn`): its change would be named by nothing but the seed
+            refuseOn(w, noteMeltOutputs(quote.quote, meltOutputs));
           });
           var meltCall;
+          // it leaves: from here what follows is what the store's reserve is for (`storeStep`)
+          storeStep('melt');
           try { meltCall = Promise.resolve(w.meltProofsBolt11(quote, split.send)); }
           catch (e) { stopWatching(); throw e; }
           meltCall.then(stopWatching, stopWatching);
@@ -443,7 +451,12 @@
              * not stored, so cashu-ts never sent it, and the proofs go back.
              * Otherwise the mint answered and the pile could not take what came
              * of it; the hold stays for sweepMelts (W6). */
-            if (e && e.unsent) throw notSent(e.message);
+            if (e && e.unsent) {
+              var back = /** @type {any} */ (notSent(e.message));
+              back.unsent = true;
+              if (e.storageFull) back.storageFull = true;
+              throw back;
+            }
             if (e && (e.definite || e.storageFull)) throw e;
             /* The mint is asked what happened, not read from its wording.
              *
