@@ -238,8 +238,33 @@
     onStorageFull: function (fn) { FoxyWallet._onStorageFull = fn; },
     /** @type {?function(any): void} */
     _onStorageFull: null,
-    // the same, asked: { total, cap, reserve, clearable, unclaimed, unclaimedCount, money, cards, other, tokens, words }
+    // the same, asked: { total, cap, reserve, clearable, trimmable, sent, sentCount, cardLoads, cardLoadCount, money, cards,
+    // other, history, sentTokens, cardTokens, words }
     storageReport: function () { return Object.assign(storageReport(), { words: storeFullWay() }); },
+    /* A text kept outside Foxy as a file the person puts where they choose (the share sheet, with Copy left out:
+     * Foxy/Bridge/TextExport.swift), never the pasteboard, which reaches the person's other devices and never expires.
+     * The unclaimed tokens a full store lists, before anything is cleared. Resolves 'saved' or 'cancelled'; nothing of
+     * the text is logged. Ten minutes for the person to choose. */
+    exportText: function (text, label) {
+      return bridgeAsk('exportText', { text: String(text || ''), label: String(label || '') }, 600000);
+    },
+    /* The unclaimed tokens as one text to export, in two parts said apart, with what each is. */
+    unclaimedTokensText: function () {
+      var r = storageReport();
+      var parts = [];
+      if (r.sentTokens.length) {
+        parts.push('TOKENS YOU SENT THAT NOBODY IS KNOWN TO HAVE CLAIMED (' + r.sentTokens.length + ')\n'
+          + 'Each is money until somebody claims it. Whoever holds the text can claim it, so keep this file to yourself. '
+          + 'One that never reached its receiver can be taken back by receiving it in Foxy.\n\n' + r.sentTokens.join('\n\n'));
+      }
+      if (r.cardTokens.length) {
+        parts.push('LOADS PUT ON YOUR CARDS (' + r.cardTokens.length + ')\n'
+          + 'Their money is on the card, not in these texts. They are kept so that this phone can take a lost or broken '
+          + 'card\u2019s money back after its date; a load whose pieces a card has since paid out reads as spent.\n\n'
+          + r.cardTokens.join('\n\n'));
+      }
+      return parts.join('\n\n\n');
+    },
     /** @type {?function(any): void} */
     _onChangeStuck: null,
     /* Change about to be made for a scanned payment, said before the swap so

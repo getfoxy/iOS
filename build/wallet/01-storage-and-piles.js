@@ -311,13 +311,21 @@
   var STORE_ROOM = { swap: 512 * 1024, small: 128 * 1024, melt: 128 * 1024, mint: 64 * 1024, card: CARD_ROOM_BYTES, token: 160 * 1024 };
   var STORE_FULL_START = 'Foxy’s storage on this phone is full, so nothing was sent and your money has not moved. ';
 
-  /* What holds the store, by what it is, in bytes as WebKit counts (`storageReport`): what clearing history would let
-   * go (the entries, the audit trail, claimed tokens' text, notes with no token in them), the text of sent tokens nobody
-   * is known to have claimed (kept by clearing history: it can be the only copy of money), the ecash and the records
-   * that bring it back, the cards' files, the reserve, and the rest. */
+  /* What holds the store, by what it is, in bytes as WebKit counts (`webkitBytes`), and what would really free room,
+   * worked out the way it would be freed (`storageReport`):
+   *   clearable  what clearing history frees: the store now, less what `clearHistory` would leave of the log, the audit
+   *              trail and the notes (`_historyAfterClear`, the very sum it writes);
+   *   trimmable  what the trim at its tightest frees (`trimPlan`, what `trimStore` writes);
+   *   sent       the text of tokens this phone sent that nobody is known to have claimed (kept by clearing history: it
+   *              can be the only copy of money), and `sentTokens` the texts;
+   *   cardLoads  the text of loads put onto cards, kept until every piece is in the card's file (`cardLoadOnFile`): how a
+   *              lost card's money is taken back after its date; `cardTokens` the texts;
+   *   money      the ecash and the records that bring it back; cards the cards' files; reserve; other the rest. */
   function storageReport() {
-    var out = { total: 0, cap: storeCap(), reserve: reserveBytes(), clearable: 0, unclaimed: 0, unclaimedCount: 0,
-                money: 0, cards: 0, other: 0, tokens: /** @type {Array<string>} */ ([]) };
+    var out = { total: 0, cap: storeCap(), reserve: reserveBytes(), clearable: 0, trimmable: 0, sent: 0, sentCount: 0,
+                cardLoads: 0, cardLoadCount: 0, money: 0, cards: 0, other: 0, history: 0,
+                sentTokens: /** @type {Array<string>} */ ([]), cardTokens: /** @type {Array<string>} */ ([]) };
+    var now = /** @type {Object<string, string>} */ ({});
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var k = String(localStorage.key(i) || '');
@@ -325,42 +333,50 @@
         var b = webkitBytes(k) + webkitBytes(v);
         out.total += b;
         if (k === RESERVE_KEY) continue;
-        if (k === K.log || k === K.audit) { out.clearable += b; continue; }
-        if (k === 'foxy.txmeta') {
-          var meta = null;
-          try { meta = JSON.parse(v); } catch (e) { meta = null; }
-          var tok = 0;
-          Object.keys(meta || {}).forEach(function (h) {
-            var t = meta[h] && meta[h].token;
-            if (typeof t === 'string' && t) { tok += 2 * t.length; out.tokens.push(t); out.unclaimedCount += 1; }
-          });
-          tok = Math.min(tok, b);
-          out.unclaimed += tok;
-          out.clearable += b - tok;
-          continue;
-        }
+        if (k === K.log || k === K.audit || k === 'foxy.txmeta') { now[k] = v; out.history += b; continue; }
         if (k.indexOf(K.proofs) === 0 || k === K.swaps || k === K.held || k === K.melting || k === K.outtok || k === K.quotes
             || k === K.quotesOld || k === K.onchainOut || k === K.move || k === K.carry) { out.money += b; continue; }
         if (k.indexOf('foxy.flashcard.') === 0) { out.cards += b; continue; }
         out.other += b;
       }
+      var meta = null;
+      try { meta = JSON.parse(now['foxy.txmeta'] || 'null'); } catch (e) { meta = null; }
+      Object.keys(meta || {}).forEach(function (h) {
+        var t = meta[h] && meta[h].token;
+        if (typeof t !== 'string' || !t) return;
+        if (meta[h].to === 'card') { out.cardLoads += webkitBytes(t); out.cardLoadCount += 1; out.cardTokens.push(t); }
+        else { out.sent += webkitBytes(t); out.sentCount += 1; out.sentTokens.push(t); }
+      });
+      var size = function (key, value) { return value ? webkitBytes(key) + webkitBytes(value) : 0; };
+      var before = size(K.log, now[K.log]) + size(K.audit, now[K.audit]) + size('foxy.txmeta', now['foxy.txmeta']);
+      var after = FoxyWallet._historyAfterClear ? FoxyWallet._historyAfterClear() : null;
+      if (after) {
+        out.clearable = Math.max(0, before - (size(K.log, JSON.stringify(after.log)) + size(K.audit, '[]')
+          + size('foxy.txmeta', JSON.stringify(after.notes))));
+      }
+      var plan = trimPlan(true);
+      var left = (plan.meta ? size('foxy.txmeta', JSON.stringify(plan.meta)) : size('foxy.txmeta', now['foxy.txmeta']))
+        + (plan.audit ? size(K.audit, JSON.stringify(plan.audit)) : size(K.audit, now[K.audit]));
+      out.trimmable = Math.max(0, size('foxy.txmeta', now['foxy.txmeta']) + size(K.audit, now[K.audit]) - left);
     } catch (e) {}
     return out;
   }
-  /* The words for a store with no room, true for this store: whether clearing history would free enough (it keeps every
-   * token nobody is known to have claimed, `clearHistory`), and when it would not, what holds the room and what to do. */
+  /* The words for a store with no room, true for this store: whether clearing history frees enough (it keeps every token
+   * nobody is known to have claimed and every card load still needed, `clearHistory`), and when it does not, what holds
+   * the room, the tokens sent and the card loads said apart, and what can still go. */
   function storeFullWay() {
     var r = storageReport();
+    // what a swap needs and the reserve whole, under WebKit's 5 MiB
     var short = Math.max(0, r.total - r.reserve + STORE_ROOM.swap + reserveSize() - Math.round(5 * 1024 * 1024));
     var mb = function (n) { return (Math.round(n / 104857.6) / 10).toFixed(1) + ' MB'; };
     if (r.clearable >= short + 64 * 1024) {
       return 'Clearing history on the History screen frees ' + mb(r.clearable) + ', which is enough, and keeps every token nobody has claimed.';
     }
-    // what holds the most, said as it is
-    var most = /** @type {Array<[string, number]>} */ ([['unclaimed', r.unclaimed], ['money', r.money], ['cards', r.cards], ['other', r.other]])
+    var most = /** @type {Array<[string, number]>} */ ([['sent', r.sent], ['cardLoads', r.cardLoads], ['money', r.money], ['cards', r.cards], ['other', r.other]])
       .sort(function (a, b) { return b[1] - a[1]; })[0];
     var held = /** @type {Object<string, string>} */ ({
-      unclaimed: 'tokens you sent that nobody has claimed (' + mb(r.unclaimed) + '): copy them from the storage card, then take them back or hand them over',
+      sent: 'tokens you sent that nobody has claimed (' + mb(r.sent) + '): save them from the storage card, then take back the ones that never arrived',
+      cardLoads: 'the loads you put on your cards (' + mb(r.cardLoads) + '), which this phone keeps to take a lost card\u2019s money back',
       money: 'your ecash and its records (' + mb(r.money) + '): paying some of it out makes room',
       cards: 'what this phone keeps of your cards (' + mb(r.cards) + ')',
       other: 'other data on this phone (' + mb(r.other) + ')',
@@ -549,11 +565,13 @@
    * twice, the second frees nothing. `tight` is for a store short of room:
    * the budgets are smaller. Answers the bytes freed. At launch, and whenever
    * a write or an operation needs room (`mustSave`, `roomFor`). */
-  function trimStore(tight) {
-    var before = storeBytes();
+  /* What the trim would leave (`trimStore` writes it; `storageReport` measures it): the notes and the audit trail as they
+   * would be, beside what they are. Writes nothing. */
+  function trimPlan(tight) {
+    var plan = { metaRaw: '', meta: /** @type {any} */ (null), auditRaw: '', audit: /** @type {any} */ (null) };
     try {
-      var raw = localStorage.getItem('foxy.txmeta');
-      var meta = raw ? JSON.parse(raw) : null;
+      plan.metaRaw = localStorage.getItem('foxy.txmeta') || '';
+      var meta = plan.metaRaw ? JSON.parse(plan.metaRaw) : null;
       if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
         Object.keys(meta).forEach(function (h) {
           var m = meta[h];
@@ -567,22 +585,29 @@
           }
         });
         trimKeptTokens(meta, tight ? KEPT_TOKENS_TIGHT : undefined);
-        var out = JSON.stringify(meta);
-        if (out.length < String(raw).length) save('foxy.txmeta', meta);
+        plan.meta = meta;
       }
-    } catch (e) { console.warn('[foxy] storage: the notes could not be trimmed:', e && e.message); }
+    } catch (e) { console.warn('[foxy] storage: the notes could not be read to trim:', e && e.message); }
     try {
-      var rawA = localStorage.getItem(K.audit);
-      var list = rawA ? JSON.parse(rawA) : null;
-      if (Array.isArray(list) && list.length) {
-        var shaped = shapeAudit(list, tight);
-        if (JSON.stringify(shaped).length < String(rawA).length) save(K.audit, shaped);
-      }
-    } catch (e) { console.warn('[foxy] storage: the audit trail could not be trimmed:', e && e.message); }
+      plan.auditRaw = localStorage.getItem(K.audit) || '';
+      var list = plan.auditRaw ? JSON.parse(plan.auditRaw) : null;
+      if (Array.isArray(list) && list.length) plan.audit = shapeAudit(list, tight);
+    } catch (e) { console.warn('[foxy] storage: the audit trail could not be read to trim:', e && e.message); }
+    return plan;
+  }
+
+  function trimStore(tight) {
+    var before = storeBytes();
+    var plan = trimPlan(tight);
+    try { if (plan.meta && JSON.stringify(plan.meta).length < plan.metaRaw.length) save('foxy.txmeta', plan.meta); }
+    catch (e) { console.warn('[foxy] storage: the notes could not be trimmed:', e && e.message); }
+    try { if (plan.audit && JSON.stringify(plan.audit).length < plan.auditRaw.length) save(K.audit, plan.audit); }
+    catch (e) { console.warn('[foxy] storage: the audit trail could not be trimmed:', e && e.message); }
     var freed = Math.max(0, before - storeBytes());
     if (freed > 0) console.warn('[foxy] storage: ' + freed + ' bytes of history let go' + (tight ? ' to make room' : '') + '; ' + storeBytes() + ' in use');
     return freed;
   }
+
 
   /* Proofs are per mint, and have to be: a mint's ecash is only redeemable at
    * that mint. Kept in one pile, switching mints would show a balance the new

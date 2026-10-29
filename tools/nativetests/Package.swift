@@ -30,6 +30,11 @@
 // background, is a module too, FoxyTorReturn: it needs no Tor. TorReturnTests imports it
 // as FoxyTorReturn here and as Foxy in the app.
 //
+// Foxy/Bridge/TextExport.swift, the file a text the page hands over is kept in outside Foxy
+// (the unclaimed tokens a full store lists, never the pasteboard), is a module too,
+// FoxyTextExport: it needs only Foundation. TextExportTests imports it as FoxyTextExport
+// here and as Foxy in the app.
+//
 // Foxy/WebStore/WebStore.swift and WebSchemeHandler.swift, the page's fixed address, the
 // handler that serves the staged page there and the check that carries a stored wallet
 // to it, are a module too, FoxyWebStore: they need WebKit and SQLite, which the Mac
@@ -85,9 +90,13 @@ let package = Package(
             name: "FoxyWebStore",
             path: "Sources/FoxyWebStore"
         ),
+        .target(
+            name: "FoxyTextExport",
+            path: "Sources/FoxyTextExport"
+        ),
         .testTarget(
             name: "FoxyTests",
-            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary", "FoxyTorReturn", "FoxyWebStore"],
+            dependencies: ["Foxy", "FoxyCardTap", "FoxyNetDiary", "FoxyTorReturn", "FoxyWebStore", "FoxyTextExport"],
             path: "Tests/FoxyTests",
             // the app's own tests, which need Foxy.app (sh tools/unit-tests.sh)
             exclude: [
@@ -111,6 +120,7 @@ let package = Package(
                 "NetDiaryTests.swift",
                 "TorReturnTests.swift",
                 "WebStoreTests.swift",
+                "TextExportTests.swift",
             ]
         ),
     ]

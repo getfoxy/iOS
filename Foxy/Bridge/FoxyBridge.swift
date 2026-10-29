@@ -406,6 +406,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "pasteStop": FoxyBridge.handlePasteStop,
         "notify": FoxyBridge.notify,
         "share": FoxyBridge.handleShare,
+        // a text kept outside Foxy as a file the person puts where they choose, never the pasteboard (TextExport.swift)
+        "exportText": FoxyBridge.handleExportText,
         "openSettings": FoxyBridge.handleOpenSettings,
         "openCompany": FoxyBridge.handleOpenCompany,
         // Payment requests paid straight to the requester (FoxyBridge+Delivery.swift)
@@ -1023,6 +1025,10 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         presentShare(id: id, text: body["text"] as? String ?? "")
     }
 
+    private func handleExportText(id: String, body: [String: Any]) {
+        presentTextExport(id: id, text: body["text"] as? String ?? "", label: body["label"] as? String ?? "")
+    }
+
     /// Foxy's own page in Settings, and nothing else: the one URL iOS gives an
     /// app for this. For a permission refused once — Bluetooth, the camera —
     /// which iOS never asks about again, so the button on the page is the only
@@ -1340,6 +1346,48 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             presenter.present(sheet, animated: true)
         }
         resolve(id: id, text: "ok", error: nil)
+    }
+
+    /// A text the page hands over, as a file in the share sheet (TextExport.swift): the
+    /// unclaimed tokens a full store lists, which can be the only copy of money. Never the
+    /// pasteboard, whose contents reach the person's other devices and never expire, so
+    /// Copy is left out of the sheet; the file is deleted when the sheet closes. Logged by
+    /// its length alone.
+    private func presentTextExport(id: String, text: String, label: String) {
+        guard let presenter else {
+            resolve(id: id, text: "", error: "Nothing to show the sheet on.")
+            return
+        }
+        if TextExport.check(text) != nil {
+            resolve(id: id, text: "", error: "Nothing to save.")
+            return
+        }
+        if presenter.presentedViewController != nil {
+            resolve(id: id, text: "", error: "Something else is already open.")
+            return
+        }
+        DispatchQueue.main.async {
+            let folder = FileManager.default.temporaryDirectory
+            TextExport.removeLeftovers(in: folder)
+            let file: URL
+            do { file = try TextExport.write(text, label: label, in: folder, at: Date()) } catch {
+                self.resolve(id: id, text: "", error: "The file could not be written.")
+                return
+            }
+            // the file through an item of Foxy's own, as text is (ShareFile): a header with a title and no URL, nothing to fetch
+            let sheet = UIActivityViewController(activityItems: [ShareFile(file)], applicationActivities: nil)
+            sheet.excludedActivityTypes = TextExport.excludedActivities.map { UIActivity.ActivityType(rawValue: $0) }
+            sheet.popoverPresentationController?.sourceView = presenter.view
+            sheet.popoverPresentationController?.sourceRect = CGRect(
+                x: presenter.view.bounds.midX, y: presenter.view.bounds.maxY - 80, width: 1, height: 1)
+            sheet.completionWithItemsHandler = { _, completed, _, error in
+                if let error { print("[foxy] export sheet:", error) }
+                TextExport.remove(file)
+                self.resolve(id: id, text: completed ? "saved" : "cancelled", error: nil)
+            }
+            print("[foxy] offering a text file to save,", text.count, "characters")
+            presenter.present(sheet, animated: true)
+        }
     }
 
     /// Read the pasteboard, but only when there is text to read.
@@ -1725,6 +1773,38 @@ private final class PriceWalk {
         running = [:]
         others.forEach { $0() }
         finish(price, error)
+    }
+}
+
+/// A file for the share sheet, as `ShareText` is text: the file's URL for every activity (a
+/// file on this phone, which an activity copies or sends as the person chooses), offered as
+/// plain text, and the header's metadata supplied here with a title and no URL, so the
+/// sheet has nothing to fetch a preview from (`presentTextExport`).
+private final class ShareFile: NSObject, UIActivityItemSource {
+    private let file: URL
+
+    init(_ file: URL) {
+        self.file = file
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        file
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        file
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                dataTypeIdentifierForActivityType activityType: UIActivity.ActivityType?) -> String {
+        UTType.plainText.identifier
+    }
+
+    func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        let metadata = LPLinkMetadata()
+        metadata.title = "Foxy"
+        return metadata
     }
 }
 

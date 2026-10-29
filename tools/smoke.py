@@ -631,8 +631,15 @@ needs = [
     (share_cls and 'itemForActivityType' in share_cls.group(1) and 'URL(' not in share_cls.group(1),
      'ShareText hands an activity something other than plain text'),
     ('LPMetadataProvider' not in code_all, 'LPMetadataProvider is used: it fetches pages outside Tor'),
-    (len(re.findall(r'UIActivityViewController\(activityItems:', code_all)) == 1,
-     'a share sheet is presented somewhere other than presentShare'),
+    # two sheets: text (presentShare, ShareText) and a file of unclaimed tokens kept outside Foxy (presentTextExport,
+    # ShareFile, which gives its own header the same way: a title and no URL); none anywhere else
+    (len(re.findall(r'UIActivityViewController\(activityItems:', code_all)) == 2
+     and (lambda f: bool(f) and 'UIActivityViewController(activityItems: [ShareFile(' in f.group(0))(
+         re.search(r'private func presentTextExport\(.*?\n    \}', bridge_src, re.S))
+     and (lambda c: bool(c) and 'LPLinkMetadata()' in c.group(1)
+          and not re.search(r'\.(url|originalURL|iconProvider|imageProvider|videoProvider|remoteVideoURL)\s*=', c.group(1)))(
+         re.search(r'class ShareFile\b[^{]*UIActivityItemSource[^{]*\{(.*?)\n\}', bridge_src, re.S)),
+     'a share sheet is presented somewhere other than presentShare and presentTextExport, or ShareFile gives a URL to fetch'),
 ]
 broken = [msg for good, msg in needs if not good]
 if broken:

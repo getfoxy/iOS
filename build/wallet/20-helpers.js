@@ -379,7 +379,9 @@
      * the phone with nothing showing they were there. The notes go too now.
      * The last token made (outtoken) stays unless forgetToken is set — the app
      * asks first when a sent token is still unclaimed (tokensNotClaimed). */
-    clearHistory: function (opts) {
+    /* What clearing history would leave, worked out and not written (`clearHistory` writes it; `storageReport` measures
+     * it, so the storage card's figure for what clearing frees is what clearing frees): { log, notes }. */
+    _historyAfterClear: function () {
       /* The notes go, but never one that still holds a sent token nobody is known to have claimed (`token`): that text
        * can be the only copy of the money, and for a token locked to somebody else, change locked to a payer or a card's
        * load, the twelve words cannot bring it back. Such a note keeps its token and what says what it is; its shown
@@ -444,10 +446,15 @@
         if (rateNow()) row.rate = rateNow();
         opening.push(row);
       });
-      save(K.log, rows.concat(opening));
+      return { log: rows.concat(opening), notes: keep };
+    },
+
+    clearHistory: function (opts) {
+      var after = FoxyWallet._historyAfterClear();
+      save(K.log, after.log);
       // the audit trail is the same record in more detail; it goes too
       save(K.audit, []);
-      save('foxy.txmeta', keep);
+      save('foxy.txmeta', after.notes);
       /* `forgetToken`: the last-token slot goes, its token on its note first (`noteLastToken`); where that note cannot be
        * written, the slot stays. */
       if (opts && opts.forgetToken) {
@@ -2582,6 +2589,8 @@
              * and no entry is written for money that never left. */
             var token = encodeToken(here, live, gu);
             return unitWalletOn(cw, gu).then(function (uw) {
+            // room for what the swap writes, as every money operation begins (`roomFor`); refused, the pieces stay at risk and are asked about again
+            roomFor('small');
             var guard = swapGuard(uw, 'split', { inputs: live, unit: gu });
             return guard.run('receive', function () { return uw.receive(token); }).then(function (fresh) {
               var old = {};

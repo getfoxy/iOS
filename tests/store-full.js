@@ -825,12 +825,12 @@ async function judge(c, name, how) {
     c.full.tap();
     const tap = await c.W.cardWithdraw(c.full, { pin: '1234' }).then(() => null, (e) => e);
     await quiet();
-    ok(!!tap && tap.card === 'storage-full' && !!told && told.unclaimedCount >= 1 && told.tokens.indexOf(sentOut.token) >= 0
+    ok(!!tap && tap.card === 'storage-full' && !!told && told.sentCount >= 1 && told.sentTokens.indexOf(sentOut.token) >= 0
        && /Clearing history (on the History screen frees|would free only)/.test(told.words) && told.total > 0,
        'a card\u2019s tap is refused, and the person is told what holds the room, with every unclaimed token to copy',
        (tap ? tap.card : 'went') + '; ' + (told ? told.words : 'not told'));
     const r = c.W.storageReport();
-    ok(Math.abs(r.total - bytesOf(c.storage)) < 64 && r.unclaimed > 0 && r.money > 0, 'the report adds up to the store as WebKit counts it', r.total + ' / ' + bytesOf(c.storage));
+    ok(Math.abs(r.total - bytesOf(c.storage)) < 64 && r.sent > 0 && r.money > 0, 'the report adds up to the store as WebKit counts it', r.total + ' / ' + bytesOf(c.storage));
   }
   // the words are true: clearing history is said to be enough only when it is
   {
@@ -845,6 +845,82 @@ async function judge(c, name, how) {
     fillDead(c, CAP - 1000);
     const w2 = c.W.storageReport().words;
     ok(/frees [0-9.]+ MB, which is enough/.test(w1) && /would free only/.test(w2), 'the words say clearing history is enough when it is, and say what holds the room when it is not', w1 + ' | ' + w2);
+  }
+
+  /* ---- the storage card's figures are what clearing and the trim really free ---------------------------------- */
+  {
+    const c = await world();
+    await c.W.sendToken(300);
+    c.card.tap();
+    await c.W.cardPrepare(await c.W.cardLook(c.card), 1000);
+    fillHistory(c, Math.round(3 * 1024 * 1024));
+    const r = c.W.storageReport();
+    // the trim, on a copy of this store (a page launched over it trims as it opens: measured before that, on this page)
+    const before = bytesOf(c.storage, true);
+    c.W._trimStore(true);
+    const trimmed = before - bytesOf(c.storage, true);
+    const r2 = c.W.storageReport();
+    const mid = bytesOf(c.storage, true);
+    c.W.clearHistory();
+    const cleared = mid - bytesOf(c.storage, true);
+    noBooks(c, 'history filled behind the wallet\u2019s back');
+    ok(Math.abs(r.trimmable - trimmed) <= 64, 'the card\u2019s figure for what the trim frees is what it frees', r.trimmable + ' said, ' + trimmed + ' freed');
+    ok(Math.abs(r2.clearable - cleared) <= 256, 'and its figure for what clearing history frees is what clearing frees', r2.clearable + ' said, ' + cleared + ' freed');
+    ok(r.sentCount >= 1 && r.cardLoadCount === 1 && r.sent > 0 && r.cardLoads > 0, 'sent tokens and card loads are counted apart', r.sentCount + ' sent, ' + r.cardLoadCount + ' card loads');
+  }
+  // card loads kept for a lost card's take-back are listed apart from tokens sent
+  {
+    const c = await world();
+    const sent = await c.W.sendToken(300);
+    c.card.tap();
+    c.refuse = (k) => k === 'foxy.flashcard.cards';
+    await c.W.cardPrepare(await c.W.cardLook(c.card), 1000);
+    c.refuse = null;
+    const r = c.W.storageReport();
+    const text = c.W.unclaimedTokensText();
+    ok(r.sentTokens.indexOf(sent.token) >= 0 && r.cardLoadCount === 1 && r.cardTokens.length === 1 && r.sentTokens.indexOf(r.cardTokens[0]) < 0
+       && /TOKENS YOU SENT THAT NOBODY IS KNOWN TO HAVE CLAIMED \(1\)/.test(text) && /LOADS PUT ON YOUR CARDS \(1\)/.test(text)
+       && text.indexOf(sent.token) >= 0 && text.indexOf(r.cardTokens[0]) > text.indexOf('LOADS PUT ON YOUR CARDS'),
+       'the text to save lists tokens sent and card loads apart, each with what it is', r.sentCount + ' sent, ' + r.cardLoadCount + ' loads');
+  }
+
+  /* ---- saving the unclaimed tokens: a file through native, never the clipboard, nothing in the log ------------- */
+  {
+    const c = await world();
+    const sent = await c.W.sendToken(300);
+    const asked = [];
+    const mh = c.window.webkit.messageHandlers.foxy;
+    const post = mh.postMessage.bind(mh);
+    mh.postMessage = (m) => {
+      if (m && m.action === 'exportText') { asked.push(m); setTimeout(() => c.W._scanResult(m.id, 'saved'), 0); return; }
+      return post(m);
+    };
+    const said = [];
+    const con = c.window.console;
+    const keep = { log: con.log, warn: con.warn, error: con.error, info: con.info };
+    ['log', 'warn', 'error', 'info'].forEach((k) => { con[k] = (...a) => { said.push(a.map(String).join(' ')); }; });
+    const got = await c.W.exportText(c.W.unclaimedTokensText(), 'unclaimed tokens').then((x) => x, (e) => e);
+    Object.assign(con, keep);
+    ok(got === 'saved' && asked.length === 1 && asked[0].text.indexOf(sent.token) >= 0 && asked[0].label === 'unclaimed tokens',
+       'the tokens go to native as one text to keep as a file (`exportText`)', String(got));
+    ok(!said.some((l) => l.indexOf(sent.token) >= 0 || l.indexOf('cashuB') >= 0), 'and nothing of them is written to the log');
+    const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'app', '11-cards.js'), 'utf8');
+    const card = app.slice(app.indexOf('  storageFullCard(r) {'), app.indexOf('  changeStuckCard(info) {'));
+    ok(card.length > 100 && /W\.exportText\(W\.unclaimedTokensText\(\), 'unclaimed tokens'\)/.test(card) && !/copyText|clipboard/.test(card),
+       'the storage card saves them through native, and never puts them on the clipboard');
+    const swift = require('fs').readFileSync(require('path').join(__dirname, '..', 'Foxy', 'Bridge', 'FoxyBridge.swift'), 'utf8');
+    const native = swift.slice(swift.indexOf('    private func presentTextExport('), swift.indexOf('    /// Read the pasteboard, but only when there is text to read.'));
+    ok(native.length > 100 && /UIActivityViewController\(activityItems: \[ShareFile\(file\)\]/.test(native) && /excludedActivityTypes = TextExport\.excludedActivities/.test(native)
+       && /TextExport\.remove\(file\)/.test(native) && !/UIPasteboard/.test(native) && !/print\([^)]*text\)/.test(native.replace('text.count', '')),
+       'and native offers a file in the share sheet with Copy left out, deletes it when the sheet closes, and logs only its length');
+  }
+  // the other two doors a payment starts by: an on-chain claim and a swap of ecash taken back after a refusal ask for room first
+  {
+    const chain = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'wallet', '16a-onchain.js'), 'utf8');
+    const help = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'wallet', '20-helpers.js'), 'utf8');
+    ok(/roomFor\('mint'\);\n\s+\/\/ before the claim leaves, a refusal stops it \(`refuseOn`\)\n\s+var rec = outputsRecorder\(w, \[\]/.test(chain)
+       && /roomFor\('small'\);\n\s+var guard = swapGuard\(uw, 'split', \{ inputs: live, unit: gu \}\);/.test(help),
+       'an on-chain claim and the swap of ecash at risk each ask for room before anything is sent');
   }
 
   /* ---- the reserve: cut by twice what a write adds, never by a cosmetic write ---------------------------------- */

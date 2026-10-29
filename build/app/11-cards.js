@@ -516,27 +516,35 @@
     this.announcePayment(Object.assign({}, ev, { force: true, again: true }));
   }
 
-  /* This phone's storage too full for a payment: what holds the room, by what it is, and the words that are true of it
-   * (the wallet's `storeFullWay`: whether clearing history frees enough). Sent tokens nobody has claimed are kept by
-   * clearing history and can be the only copy of money, so they can be copied as text first, every one. */
+  /* This phone's storage too full for a payment: what holds the room, by what it is, measured as clearing history and
+   * the trim would really free it (the wallet's `storageReport`), and the words that are true of it (`storeFullWay`).
+   * Sent tokens nobody has claimed, and card loads kept for taking a lost card back, are kept by clearing history and
+   * can be the only copy of money: they can be saved first, as a file the person puts where they choose (the share
+   * sheet: `exportText`), never on the clipboard, which reaches other devices and never expires. */
   storageFullCard(r) {
     if (!r) return;
+    const W = window.FoxyWallet;
     const mb = (n) => (Math.round((Number(n) || 0) / 104857.6) / 10).toFixed(1) + ' MB';
-    const n = Number(r.unclaimedCount) || 0;
+    const sent = Number(r.sentCount) || 0, loads = Number(r.cardLoadCount) || 0;
     const lines = ['What holds the room on this phone:',
-      'Tokens you sent, not yet claimed: ' + mb(r.unclaimed) + (n ? ' (' + n + ')' : ''),
-      'History, which clearing lets go: ' + mb(r.clearable),
+      'Tokens you sent, not yet claimed: ' + mb(r.sent) + (sent ? ' (' + sent + ')' : ''),
+      'Loads on your cards, kept to take a lost card back: ' + mb(r.cardLoads) + (loads ? ' (' + loads + ')' : ''),
+      'History, which clearing frees: ' + mb(r.clearable),
       'Your ecash and its records: ' + mb(r.money),
       'Cards: ' + mb(r.cards) + ' · Other: ' + mb(r.other)].join('\n');
-    const tokens = Array.isArray(r.tokens) ? r.tokens.filter(Boolean) : [];
+    const save = (sent || loads) && W && W.exportText && W.unclaimedTokensText;
     this.blockedCard('storageFull', Object.assign({
       tone: 'warn',
       title: 'PHONE STORAGE FULL',
       reason: lines + '\n\n' + String(r.words || ''),
       chip: 'Nothing was sent.',
-    }, tokens.length ? {
-      retry: 'COPY UNCLAIMED TOKENS',
-      go: () => { this.toast(this.copyText(tokens.join('\n\n')) ? (tokens.length === 1 ? 'Token copied' : tokens.length + ' tokens copied') : 'Could not copy'); },
+    }, save ? {
+      retry: 'SAVE UNCLAIMED TOKENS',
+      go: () => {
+        W.exportText(W.unclaimedTokensText(), 'unclaimed tokens').then(
+          (how) => this.toast(how === 'saved' ? 'Tokens saved' : 'Not saved'),
+          () => this.toast('Could not save'));
+      },
     } : {}));
   }
 

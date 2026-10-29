@@ -58,7 +58,7 @@ The bridge exposes exactly these actions:
 - the keys a payment request locks ecash to, derived from the seed at NUT-13's P2PK path: `p2pkReserve`, `p2pkPubkeys`, `p2pkKey`
 - `orbotAccess`, `orbotRefresh`, `privacy`, `captured`, `torRetry`, `unprotected`, `isDebug`
 - `hostsKnown` (once, the first time a version with host approvals runs)
-- `previewStart`, `previewStop`, `pasteStart`, `pasteStop`, `notify`, `share`, `openSettings`, `openCompany`
+- `previewStart`, `previewStop`, `pasteStart`, `pasteStop`, `notify`, `share`, `exportText`, `openSettings`, `openCompany`
 - payment requests paid straight to whoever asked: `inboxOpen`, `inboxClose`, `inboxAnswer`, `onionPost`, `nostrSend`
 - tap to pay, an invoice or a payment request handed over Bluetooth: `tapReceiveStart`, `tapReceiveStop`, `tapPayStart`, `tapPayStop`, `tapSend`, `tapChange`, and `bluetoothAsk`, the first install's Bluetooth question, `tapChangeKept`, `tapAsking`, `tapChangeDue`, `tapQuote`, `tapTerms`
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
@@ -130,6 +130,7 @@ answer for a third of them.
 | `pasteStop` | — | removes the control |
 | `notify` | kinds + throttle | two texts only, "Payment sent" and "Payment received", no amounts, one every 3 s at most |
 | `share` | — | the iOS share sheet from the presenter, refused when something else is already up or the text is empty |
+| `exportText` | — | the text written to a file of its own in the app's temporary folder (complete file protection) and offered in the share sheet with Copy, Print, contacts, reading list and photos left out; the file deleted when the sheet closes; refused when the text is empty or over 16 M characters, or something else is up. Never the pasteboard |
 | `openSettings` | settings url | opens Foxy's own page in the Settings app (`UIApplication.openSettingsURLString`) and no other URL, for a Bluetooth or camera permission refused once, which iOS never asks about again |
 | `openCompany` | company sites | opens one of four fixed web addresses in the phone's browser, picked by name (`cashapp`, `strike`, `river`, `flash`); the page never supplies a URL. The browser is outside Foxy and outside Tor, so that company sees the phone's own address |
 | `inboxOpen` | onion inbox | an onion address with a key Tor makes and discards (`NEW:ED25519-V3`, `DiscardPK`), forwarding to a listener on 127.0.0.1 only; refused unless Tor is up. It accepts one thing: a POST to a path of 128 random bits, with a Content-Length of at most 256 kB, no chunked body, four connections at a time and 30 s to send |

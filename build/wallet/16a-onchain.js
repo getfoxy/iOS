@@ -201,6 +201,8 @@
         return behind.then(function (restored) {
         // nothing left to claim, but what was rebuilt is still news for the screen
         if (!want) return restored;
+        // room for what the claim files, with the reserve at least a claim's room, or the money waits at the mint (`roomFor`)
+        roomFor('mint');
         // before the claim leaves, a refusal stops it (`refuseOn`)
         var rec = outputsRecorder(w, [], function (list, after) { refuseOn(w, noteQuoteOutputs(quoteId, list, mintOf(w), after)); });
         return rec.attempt(function () {
