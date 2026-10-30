@@ -55,15 +55,21 @@ nothing from this: the receiver always asks the mint first.
 - **One mint per card.** The mint is written on the card at set-up. A payment
   to a phone that is at another mint stops at A DIFFERENT MINT, with nothing
   taken. A mint whose address is longer than 80 characters cannot be used. To
-  use a card at another mint, take everything off it first. A card that holds
-  money cannot be switched: ADD FUNDS says to withdraw all of it. On an empty
+  use a card at another mint, TRANSFER it (below). A top-up never moves a card that holds
+  money: ADD FUNDS at another mint says to withdraw all of it. On an empty
   card, the owner's phone is offered SWITCH TO <its mint> there, and the card's
   record is rewritten in the tap that writes the funds; the PIN, owner, limit
-  and clock stay as they were. Moving the money across by Lightning, with a
-  card that still holds it, is built and tested at two local mints, but the app
-  has no button for it.
+  and clock stay as they were. A card that holds money is moved, money and all,
+  by TRANSFER in the card's MENU, on the phone that owns it: the mint list, a
+  confirmation with the card's mint's fee, the Lightning fee and the new mint's
+  fee, and one tap that takes the money off, crosses by Lightning, tells the
+  card its new mint and puts the new pieces on (`cardTransfer`). A dollar card
+  going to a mint with no dollars becomes a bitcoin card there, which the
+  confirmation says first. A tap cut short leaves the money owed to the card or
+  noted in this phone, and the card's screen finishes it
+  (`tests/flashcard-transfer.js`, `tests/flashcard-switch.js`).
 - **Every card can be taken back.** A card is set up so that the phone that
-  loaded it can take its money back after its date (thirty days from when it
+  loaded it can take its money back after its date (fourteen days from when it
   was put on) if the card is lost. Set-up asks nothing about it, and FLASHCARD
   lists the cards this phone loaded, with TAKE BACK for any past its date
   (`FC_RECOVERABLE` in `build/app/26f-flashcard.js`). A cash card set up before
@@ -860,10 +866,10 @@ What that changes:
   the same flag, and is money it signs for again.
 - **One date.** A mint takes one signature only for pieces whose secrets agree
   in everything but the nonce, and a recoverable card's pieces carry a date.
-  So a payment is of one date's pieces. A card's money is good for thirty days.
-  A top-up takes the date the card already has while that is twenty days off or
-  more, and a new thirty days after that, so a card is mostly of one date; its
-  owner's phone renews the whole card, to one date, once it has less than twenty
+  So a payment is of one date's pieces. A card's money is good for fourteen days.
+  A top-up takes the date the card already has while that is ten days off or
+  more, and a new fourteen days after that, so a card is mostly of one date; its
+  owner's phone renews the whole card, to one date, once it has less than ten
   days left: its owner's read, online, offers it (RENEW THIS CARD, with RENEW and
   LATER, once a session), and the card's screen keeps a line for it. A card topped up after that holds two; a price that neither covers alone is refused before the PIN
   with `TAKE IT IN TWO PARTS` and the most it can pay at once. The holder's own

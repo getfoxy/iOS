@@ -11230,6 +11230,8 @@
      * and with P1 = 3 it says its book (`book`) and, to its holder, the rate it weighs a payment in sats at (`rate`, sats per dollar,
      * 0 for none or not said). `twoUnits`: format 5, a keyset of the other unit in its table. */
     var units = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 23));
+    // 1.24: a card with no owner is tied to a phone while it holds money as well as empty (`claimFull`, `cardClaim`)
+    var claimFull = guests && (b(0) > 1 || (b(0) === 1 && b(1) >= 24));
     var bookSaid = units && h.length === 102;
     var unitSaid = function (v) { return v === 0x80 ? 'record' : v === 0xa0 ? 'other' : ''; };
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
@@ -11273,7 +11275,7 @@
              /* (1.22: a record and an owner, or a record and a PIN: a card with no owner is a holder's with no phone, set up by the
               * first phone that sent it money, and used as any card is) */
              setUp: b(11) === 1 && (guests ? (b(16) === 1 || b(7) !== 0) : noPinKnown ? b(16) === 1 : b(7) !== 0),
-             pinFirst: pinFirst, guests: guests,
+             pinFirst: pinFirst, guests: guests, claimFull: claimFull,
              /* `resetKnown`: the card's software is 1.17 or later, whose owner can reset it (the version says so, as for `costed`):
               * no PIN, no owner, no record, no limits, no log and a new key, with its clock and its software kept. */
              resetKnown: resetKnown,
@@ -13533,36 +13535,41 @@
    * after CARD_DUE_DAYS, when the receiver keeps it as before. */
   var CARD_DUE = 'foxy.flashcard.due';
   var CARD_DUE_DAYS = 30;
-  /* Thirty days, for a piece on a recoverable card: after it, the key that
+  /* Fourteen days, for a piece on a recoverable card: after it, the key that
    * loaded the card may take the piece back. A piece this close to its date is
    * not taken in payment (some mints stop honouring the card's own key then). */
-  /* The hold: how far ahead a piece's date is set, thirty days. A test build may shorten it (the native side sets
-   * `window.__foxyCardHoldSecs`, a Debug-only key of a local build; never in the app as shipped): every margin below
-   * scales with it, so a ten-minute hold behaves as the thirty-day one does, only faster. Read at use, never kept. */
-  var CARD_HOLD_DEFAULT = 30 * 24 * 3600;
+  /* The hold: how far ahead a piece's date is set, fourteen days (it was thirty; a piece keeps the date it was made with, so a
+   * card loaded before still holds pieces dated thirty days from their load until they are renewed or spent). A test build may
+   * shorten it (the native side sets `window.__foxyCardHoldSecs`, a Debug-only key of a local build; never in the app as
+   * shipped): every margin below scales with it, so a ten-minute hold behaves as the fourteen-day one does, only faster. Read at
+   * use, never kept. */
+  var CARD_HOLD_DEFAULT = 14 * 24 * 3600;
   function cardHoldSecs() {
     var h = 0;
     try { h = Math.round(Number(typeof window !== 'undefined' && window.__foxyCardHoldSecs) || 0); } catch (e) { h = 0; }
     return h > 0 ? h : CARD_HOLD_DEFAULT;
   }
   function cardDateAhead() { return cardHoldSecs(); }
-  // the receiver's margin offline: a week of the thirty days, scaled
-  function cardDateMargin() { return Math.round(cardHoldSecs() * 7 / 30); }
-  // the owner's own margin: ten minutes of the thirty days; of a shorter hold, a twentieth, ten seconds at least
+  /* The receiver's margin offline: a week. It stayed a week when the hold went from thirty days to fourteen, so it is half the
+   * hold now, and of a shortened hold half of that, the same seven of the fourteen days. */
+  var CARD_OFFLINE_MARGIN = 7 * 24 * 3600;
+  function cardDateMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? CARD_OFFLINE_MARGIN : Math.round(h * 7 / 14); }
+  // the owner's own margin: ten minutes of the fourteen days; of a shorter hold, a twentieth, ten seconds at least
   function cardOwnMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? 10 * 60 : Math.max(10, Math.round(h / 20)); }
-  // a one-signature card keeps a date that is still twenty of the thirty days off, scaled
-  function cardDateReuse() { return Math.round(cardHoldSecs() * 20 / 30); }
+  /* A one-signature card keeps a date that is still ten of the fourteen days off, scaled: the renewal's own threshold
+   * (CARD_REFRESH_LEFT), so a top-up never joins money that is about to be renewed. */
+  function cardDateReuse() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? CARD_REFRESH_LEFT : Math.round(h * 10 / 14); }
   /* A week: what a phone with no route needs left on a piece. It keeps what the
    * card signed until it is online again, and has to reach the mint before the
    * piece's date, when its loader may take it back. */
-  // (CARD_DATE_MARGIN became cardDateMargin(), which scales with the hold)
+  // (CARD_DATE_MARGIN became cardDateMargin(), which scales with a shortened hold)
   /* A day: what a phone with a route needs. It swaps the pieces in at once, so
    * the date only has to be far enough off that the swap is not answered after
    * it. A week here would stop a card that only meets strangers from paying
-   * three weeks after its money went on, a week before its date. */
+   * a week after its money went on, a week before its date. */
   var CARD_ONLINE_MARGIN = 24 * 3600;
-  // a day of the thirty days when the receiver is online; of a shortened hold, a thirtieth, ten seconds at least
-  function cardOnlineMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? CARD_ONLINE_MARGIN : Math.max(10, Math.round(h / 30)); }
+  // a day of the fourteen days when the receiver is online; of a shortened hold, a fourteenth, ten seconds at least
+  function cardOnlineMargin() { var h = cardHoldSecs(); return h === CARD_HOLD_DEFAULT ? CARD_ONLINE_MARGIN : Math.max(10, Math.round(h / 14)); }
   /* Those margins are a stranger's: they keep a receiver from taking a piece
    * its loader could take back before the receiver's swap is made. The phone
    * that holds the card's refund key is that loader, and has nobody to guard
@@ -13570,11 +13577,13 @@
    * answered after it. Without this a holder could not empty or renew their
    * own card in its last days. */
   // (CARD_OWN_MARGIN became cardOwnMargin())
-  /* Twenty days: a card its owner reads online with less than this left on its
-   * money is renewed for thirty days more (the owner's refresh, on the card's
-   * screen). A top-up keeps a date only while it has this much left too
-   * (CARD_DATE_REUSE), so it never joins money that is about to be renewed. */
-  var CARD_REFRESH_LEFT = 20 * 24 * 3600;
+  /* Ten days: a card its owner reads online with less than this left on its
+   * money is renewed for fourteen days more (the owner's refresh, on the card's
+   * screen). Above the week an offline receiver needs left (CARD_OFFLINE_MARGIN),
+   * so a card is renewed before a phone with no route starts refusing it. A
+   * top-up keeps a date only while it has this much left too (`cardDateReuse`),
+   * so it never joins money that is about to be renewed. */
+  var CARD_REFRESH_LEFT = 10 * 24 * 3600;
 
   /* KEPT: a card's payment to this phone while it had no route, signed over to
    * this phone and proved by the mint's own proofs, between the tap and the
@@ -15313,33 +15322,107 @@
    * refuses to change mints under unspent pieces, and it is not asked to. So
    * a card never holds ecash of a mint it does not name, and a move cut short
    * before its second tap is finished by any later one. The record is the
-   * owner's to change, with the owner's proof and no PIN, and  Answers whether it changed. */
+   * owner's to change, with the owner's proof and no PIN, and  Answers whether it changed.
+   *
+   * Two more things a row owed to the card can ask of its record, written in the same SET_CARD:
+   *   `toUnit`  a TRANSFER to a mint that issues no dollars, of a dollar card (`cardTransfer`): the money became bitcoin on its
+   *             way, and the card holds bitcoin at its new mint. A row with none keeps the unit the card has, and a dollar card
+   *             is moved only to a mint that issues dollars, as before.
+   *   `rekey`   the refund key the pieces were made with, where it is not the card's (`cardRekeyRun`): a card claimed while it
+   *             held money (software 1.24) keeps the record of the phone that loaded it, and its pieces were remade here with
+   *             this phone's key, so that its money can be taken back by this phone if it is lost. A piece's secret is built
+   *             from the record's refund key (`cardSecret`), so the record names the key every piece on the card was made
+   *             with, and it changes only while the card is empty. */
   function cardRepointFor(t, card) {
     var w = wallet;
     if (!w || !card || !card.record) return Promise.resolve(false);
     var here = mintOf(w);
-    if (canonicalMint(card.record.mint) === here) return Promise.resolve(false);
     var mine = cardStore(CARD_OWED).filter(function (r) {
-      return r && r.card === card.key && r.repoint && r.mint && canonicalMint(r.mint) === here;
+      if (!r || r.card !== card.key || r.stuck) return false;
+      if (r.repoint && r.mint && canonicalMint(r.mint) === here) return true;
+      return !!r.rekey && (!r.mint || canonicalMint(r.mint) === here);
     });
     if (!mine.length) return Promise.resolve(false);
+    var moving = canonicalMint(card.record.mint) !== here;
+    var unit = (card.record.unit === 'usd') ? 'usd' : 'sat';
+    var toUnit = unit;
+    mine.forEach(function (r) { if (r.repoint && (r.toUnit === 'sat' || r.toUnit === 'usd')) toUnit = r.toUnit; });
+    var refund = card.record.refundKey || '';
+    mine.forEach(function (r) { if (r.rekey && /^0[23][0-9a-f]{64}$/.test(String(r.rekey))) refund = String(r.rekey); });
+    // (a row that moves nothing and names the key the card has already: nothing to change)
+    if (!moving && toUnit === unit && refund === (card.record.refundKey || '')) return Promise.resolve(false);
+    // a row that would change the key at another mint than the card's waits for the card's own mint
+    if (moving && !mine.some(function (r) { return r.repoint; })) return Promise.resolve(false);
     if (card.pieces.length) {
       return Promise.reject(cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.'));
     }
-    // a dollar card goes only to a mint that issues dollars, and keeps its unit
-    if (card.record.unit === 'usd' && unitsOf(here, w).indexOf('usd') < 0) {
+    // a dollar card goes only to a mint that issues dollars, and keeps its unit, unless its money became bitcoin on the way
+    if (toUnit === 'usd' && unitsOf(here, w).indexOf('usd') < 0) {
       return Promise.reject(cardError('no-dollars-here', hostOf(here) + ' does not issue dollars. RESET this card and set it up again to hold bitcoin there.'));
     }
     var record;
-    try { record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', card.record.unit); } catch (e) { return Promise.reject(e); }
+    try { record = cardRecordHex(refund, here, cardCanDesign(card) ? card.record.design : '', toUnit); } catch (e) { return Promise.reject(e); }
     return cardOwned(t, card.key, 'set-card', record).then(function (data) {
-      return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
+      return t.want(cardCommand(CARD_INS.setCard, 0, data), moving ? 'its new mint' : 'this phone\u2019s key');
     }).then(function () {
-      console.log('[foxy] card: moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here));
+      if (moving) console.log('[foxy] card: moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here) + (toUnit !== unit ? ', now in ' + balanceWord(toUnit) : ''));
+      if (refund !== (card.record.refundKey || '')) console.log('[foxy] card: its record names this phone\u2019s refund key now, which every piece on it is made with');
       // as the card now has it: what is written next is checked against this
       card.record.mint = here;
+      card.record.unit = toUnit;
+      card.record.refundKey = refund;
+      var files = cardsOnFile();
+      if (files[card.key] && (files[card.key].rekey || files[card.key].unit !== toUnit || files[card.key].mint !== here)) {
+        var row = Object.assign({}, files[card.key], { mint: here, unit: toUnit });
+        if (row.refundKey === refund) delete row.rekey;
+        files[card.key] = row;
+        try { mustSave(CARDS, files); } catch (e2) { console.warn('[foxy] card: its row here could not be brought up to date with its record'); }
+      }
       return true;
     });
+  }
+
+  /* ---- a card claimed with money on it (software 1.24) ------------------------------------------------------------------
+   *
+   * A card of 1.24 with no owner is tied to a phone while it holds money (`cardClaim`). Its pieces were made by whoever loaded
+   * it, with that phone's refund key or with none, and the key in its record is that one: if the card is lost, the money comes
+   * back to that phone after the pieces' date, or to nobody. The claim writes this phone's refund key on file for the card
+   * (`CARDS`, with `rekey`), and the card's backup is said to move here when every piece has been remade with it: all of them
+   * off the card, swapped at its mint for pieces locked to the card with this phone's refund key and a fresh date, the card's
+   * record given that key while it is empty, and the new pieces written (`cardRekeyRun`). In the claim's own tap where this
+   * phone has a route to the card's mint, and otherwise the next time this phone has the card and a route (the card's screen
+   * says so meanwhile, 26f-flashcard.js `fcRekeyMaybe`). Nothing is ever left only in this phone: a tap cut short between the
+   * two leaves the new pieces owed to the card, as any top-up's are, and the card's next tap writes them. */
+  function cardRekeyDue(card) {
+    if (!card || !card.key || !card.record || !card.info || !card.info.owner) return false;
+    var row = cardsOnFile()[card.key];
+    if (!row || !row.rekey || !/^0[23][0-9a-f]{64}$/.test(String(row.refundKey || ''))) return false;
+    return String(card.record.refundKey || '') !== String(row.refundKey);
+  }
+
+  /* The card as its pieces are made for it when they are made with this phone's refund key (`cardRekeyDue`): the same card, with
+   * no pieces (it is emptied first) and the key on file in its record. In memory only; the card's own record is given the key at
+   * the write. */
+  function cardRekeyCopy(card) {
+    var row = cardsOnFile()[card.key] || {};
+    return cardEmptyCopy(card, { refundKey: String(row.refundKey || '') });
+  }
+
+  /* A card as it will be once it is empty, with `record` laid over its record: for the pieces made for it before the write that
+   * puts them on (a TRANSFER's at its new mint, a backup moved here). Nothing of what it holds is kept: the cut and the date are a
+   * fresh card's. */
+  function cardEmptyCopy(card, record) {
+    var whole = card.whole || card;
+    var copy = Object.assign({}, whole, {
+      record: Object.assign({}, whole.record, record || {}),
+      pieces: [], slots: (whole.slots || []).map(function (x) { return Object.assign({}, x, { state: x.state === 'unspent' ? 'empty' : x.state }); }),
+      balance: 0, above: 0,
+    });
+    delete copy.units;
+    delete copy.whole;
+    delete copy.viewUnit;
+    if (copy.info) copy.info = Object.assign({}, copy.info, { unspent: 0 });
+    return copy;
   }
 
   /* Whether this mint's ecash can go on a card at all, asked before any is
@@ -16551,7 +16634,7 @@
   }
 
   /* The date a top-up's pieces take. A card that signs for each piece is given
-   * thirty days from now, every time. A one-signature card keeps the date it
+   * the hold from now (fourteen days), every time. A one-signature card keeps the date it
    * already has (on it, or owed to it) while that is CARD_DATE_REUSE off or
    * more, so that what is put on it today can be spent in one signature with
    * what was put on it last week. */
@@ -18247,7 +18330,7 @@
           + cardSaid(want, cu) + '. Pay an amount it can make, or pay when this phone is online.', { balance: card.balance, cardUnit: cu });
       }
       /* A one-signature card that holds enough, in pieces of more than one
-       * date (it was topped up near the end of its thirty days): one payment is of one
+       * date (it was topped up near the end of its hold): one payment is of one
        * date's pieces, and no date's alone will do. Said as what it can pay. */
       if (all4 && (!picked || !picked.length) && !offline && sumProofs(have) >= rest) {
         var most = cardDateGroups(have).reduce(function (n, g) { return Math.max(n, sumProofs(g)); }, 0);
@@ -19133,8 +19216,11 @@
    * and the sweeps settle it: paid, what it pays is this phone's at the card's mint; not, it is back here); `movePaid`, paid and not
    * yet made into pieces for the card (the money is this phone's at the card's mint, claimed by `finishMove` where it was not); or
    * neither, and nothing left this phone. */
-  function cardLoadAcross(plan, card, onStage) {
+  /* `opts` (a TRANSFER's, `cardTransfer`): `moving` and `toUnit` for the pieces made at the far mint (`cardPrepare`), the card being
+   * on its way there. */
+  function cardLoadAcross(plan, card, onStage, opts) {
     var stage = typeof onStage === 'function' ? onStage : function () {};
+    var also = opts || {};
     if (!plan || !plan.mintQuote || !plan.invoice || !card) return Promise.reject(new Error('No load to make.'));
     try { assertRoute(); } catch (e) { return Promise.reject(e); }
     if (canonicalMint(mintUrl || '') !== plan.home) return Promise.reject(new Error('This phone is not at ' + hostOf(plan.home) + ' now. Nothing was taken.'));
@@ -19173,7 +19259,7 @@
         stage('claiming');
         return claimPatiently(8).then(function () {
           dropMoveNote(quoteId);
-          return FoxyWallet.cardPrepare(card, plan.amount, { unit: cu, visit: true });
+          return FoxyWallet.cardPrepare(card, plan.amount, { unit: cu, visit: true, moving: !!also.moving, toUnit: also.toUnit });
         }).then(function (made) { return { made: made, visit: v, paid: paid }; }, function (e) {
           v.end();
           throw e;
@@ -19185,6 +19271,116 @@
     });
     run.then(notLive, notLive);
     return run;
+  }
+
+  /* ---- TRANSFER: a whole card moved to another mint, in one tap ---------------------------------------------------------
+   *
+   * The card's MENU's TRANSFER (26f-flashcard.js, `fcSwitchMint`). The money comes off the card into this phone at the card's mint,
+   * as a holder's withdrawal does (`cardWithdraw`, the card held); crosses by Lightning to the new mint as a card loaded from another
+   * mint is (`cardLoadAcross`: the new mint's invoice, paid from what came off, claimed there on a visit and made into pieces for the
+   * card, owed to it, with `repoint`); and in the same tap the card, empty now, is told its new mint with the owner's proof (SET_CARD,
+   * `cardRepointFor`) and the pieces are written (`cardWrite`). The money pays its own way: what leaves this phone is no more than
+   * what came off the card, and what lands is that less three fees, the card's mint's (its fee on the pieces swapped off the card and
+   * on those melted), the Lightning route's (a reserve, whatever it does not use coming back at the card's old mint) and the new mint's
+   * (its fee on the pieces made there). A dollar card goes to a mint that issues dollars as dollars, and to one that issues none as
+   * bitcoin: the new mint's invoice is in sats, paid from the dollars, and the card's record is given its new unit at the write.
+   *
+   * Nothing is only in memory at any point. Until the crossing is paid the money is this phone's at the card's old mint; once it is,
+   * the crossing's note claims it from wherever this phone is (`finishMove`); once it is made into pieces for the card they are
+   * owed to it, and any later tap at its new mint writes them, the record first. Between the first and the last, this TRANSFER's
+   * own note says what is left to do (TRANSFER, below), for the card's screen to finish it: `stage` 'off' (the money is this
+   * phone's at `from`, `amount` of it in `unit`) or 'paid' (it is at `to`, `land` of it in `toUnit`). */
+  var CARD_TRANSFER = 'foxy.flashcard.transfer';
+  function cardTransfers() {
+    var all = load(CARD_TRANSFER, {});
+    return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
+  }
+  function cardTransferPut(key, note) {
+    var all = cardTransfers();
+    if (note) all[key] = note; else delete all[key];
+    // after a step that cannot be undone (the money came off the card): from the store's reserve if need be
+    try { mustSave(CARD_TRANSFER, all, false, true); }
+    catch (e) { console.warn('[foxy] card: what is left of a TRANSFER could not be written down; the money is in this phone and the card’s screen cannot say so'); }
+  }
+
+  /* The plan for a TRANSFER of `have` (in `pu`, the card's unit, at the mint this phone is at) to `to`, for the card in `cu` there:
+   * `cardLoadCrossQuote`'s, its amount stepped down until what leaves this phone is no more than `have`. `ahead`: asked before the
+   * card is touched, when the money is not in this phone yet, so the card's mint's fees are worked out as they will be: its fee on
+   * the card's `pieces` swapped off, and on the pieces the melt will spend. In hand, they are the very sum the payment refuses on
+   * (`payNeed`). Resolves the plan with `cost` (what leaves, in `pu`), `fees` { from, lightning, to } and `lands` (in `cu`). */
+  function cardTransferPlan(to, have, cu, pu, card, ahead, pieces) {
+    var w;
+    try { w = need(); } catch (e) { return Promise.reject(e); }
+    var tries = 0;
+    var feesAt = function (uw, p) {
+      var owed = p.melt.amount + p.melt.feeReserve;
+      if (!ahead) return { cost: p.total, from: Math.max(0, p.total - owed) };
+      var off = feeForInputs(uw, Math.max(1, Math.round(Number(pieces) || 1)));
+      var bits = function (v) { return String(Math.max(0, v).toString(2)).split('1').length - 1; };
+      var melt = feeForInputs(uw, bits(owed) + 4) + feeForInputs(uw, bits(have) + 4);
+      return { cost: owed + off + melt, from: off + melt };
+    };
+    var copy = cardEmptyCopy(card, { unit: cu });
+    return cardWalletFor(pu, w, false).then(function (uw) {
+      var ask = function (n) {
+        if (!(n > 0)) return Promise.reject(cardError('too-little', 'That is too little to move by Lightning: the fees would take it all.'));
+        return cardLoadCrossQuote(to, n, { cardUnit: cu, payUnit: pu, card: copy }).then(function (p) {
+          var f = feesAt(uw, p);
+          if (f.cost <= have) {
+            p.cost = f.cost;
+            p.fees = { from: f.from, lightning: p.melt.feeReserve, to: Math.max(0, p.issue - p.land) };
+            p.lands = p.land;
+            return p;
+          }
+          if (tries >= 8) throw cardError('too-little', 'That is too little to move by Lightning: the fees would take it all.');
+          tries += 1;
+          // the same unit, less what it is over by; another, scaled by what each unit is worth in the other, and a little under
+          var next = cu === pu ? n - (f.cost - have) : Math.floor(n * have / f.cost) - 1;
+          return ask(Math.min(n - 1, next));
+        });
+      };
+      // a first figure in the card's new unit: the same, or what `have` is worth there at the new mint's own quote for it
+      if (cu === pu) return ask(have);
+      return cardLoadCrossQuote(to, Math.max(1, have), { cardUnit: cu, payUnit: pu, card: copy }).then(function (p) {
+        var each = p.melt.amount / Math.max(1, have);
+        return ask(Math.max(1, Math.floor(have / Math.max(each, 1e-9) * 0.97)));
+      });
+    });
+  }
+
+  /* What a card's TRANSFER to `to` would be, asked before the card is touched (this phone at the card's mint): the unit it lands in
+   * (`toUnit`: the card's, or 'sat' for a dollar card going to a mint that issues none, `converts`), what lands and the three fees.
+   * Resolves { from, to, unit, toUnit, converts, have, lands, cost, fees: { from, lightning, to }, worth }. Rejects `too-little`, and
+   * what the new mint's quote rejects with. */
+  function cardTransferQuote(card, toUrl) {
+    var w;
+    try { w = need(); assertRoute(); } catch (e) { return Promise.reject(e); }
+    var to = canonicalMint(toUrl), from = mintOf(w);
+    if (!card || !card.record) return Promise.reject(cardError('no-record', 'Set this card up first.'));
+    if (!to || to === from) return Promise.reject(new Error('That is the mint the card is at already.'));
+    var whole = card.whole || card;
+    var unit = (whole.record.unit === 'usd') ? 'usd' : 'sat';
+    if (whole.units) {
+      var other = unit === 'usd' ? 'sat' : 'usd';
+      if (whole.units[other] && whole.units[other].balance > 0) {
+        // a card of 1.23 holding both currencies: one at a time, which is the card's own swap's to make first
+        if (!(whole.units[unit] && whole.units[unit].balance > 0)) unit = other;
+        else return Promise.reject(cardError('both-units', 'This card holds dollars and bitcoin. Swap it to one of them first, then transfer it.'));
+      }
+    }
+    var have = whole.units ? whole.units[unit].balance : whole.balance;
+    var pieces = whole.units ? whole.units[unit].pieces.length : (whole.pieces || []).length;
+    if (!(have > 0)) return Promise.reject(cardError('empty', 'There is no money on this card.'));
+    var go = function (cu) {
+      return cardTransferPlan(to, have, cu, unit, whole, true, pieces).then(function (p) {
+        return { from: from, to: to, unit: unit, toUnit: cu, converts: cu !== unit, have: have, lands: p.lands, cost: p.cost, fees: p.fees,
+                 worth: p.worth, fee: Math.max(0, have - (cu === unit ? p.lands : p.worth)) };
+      });
+    };
+    return go(unit).then(null, function (e) {
+      if (unit === 'usd' && e && e.card === 'no-dollars-here') return go('sat');
+      throw e;
+    });
   }
 
   /* ---- a visit to a card's mint ---------------------------------------------------------------------------------------
@@ -33075,29 +33271,45 @@
       });
     },
 
-    /* TIE OWNERSHIP TO THIS PHONE: the claim of set-up (software 1.21 and on), on a card that has a PIN and no owner: the PIN
-     * (`opts.pin`) shown, and this phone's owner key asked for six times in a row, the card answering keep holding to the first five
-     * (`opts.onHold(n)`). Only of an EMPTY card: one with money on it, or change owed to it, is refused before anything is sent
-     * (`has-money`), and so is the card's own 6A8D. Once it is this phone's, the card is given this phone's refund key in its record,
-     * with the owner's proof, so that its money can be taken back if it is lost, as every card this phone sets up can; a card that
-     * will not take it stays as it was, cash, and that is a line in the log. Resolves the card as its owner reads it. Rejects, with
-     * `card`: `bad-pin`, `wrong-pin`, `blocked`, `no-pin`, `set-up` (it has an owner), `old-card` (before 1.21), `has-money`,
-     * `no-owner-key`, `gone`, and `refused` with `sw` 6985 for a tap that paid. */
+    /* CONNECT TO PHONE: the claim of set-up (software 1.21 and on), on a card that has a PIN and no owner: the PIN (`opts.pin`)
+     * shown, and this phone's owner key asked for six times in a row, the card answering keep holding to the first five
+     * (`opts.onHold(n)`). Before software 1.24 only of an EMPTY card: one with money on it, or change owed to it, is refused before
+     * anything is sent (`has-money`), and so is the card's own 6A8D. Once it is this phone's, the card is given this phone's refund
+     * key in its record, with the owner's proof, so that its money can be taken back if it is lost, as every card this phone sets up
+     * can; a card that will not take it stays as it was, cash, and that is a line in the log.
+     *
+     * A card of 1.24 is claimed with money on it too (`info.claimFull`), and refused only while change is owed to it (VIEW AS GUEST
+     * puts that on). Its record takes no new key while it holds pieces, so the claim files this phone's refund key for it as due
+     * (`cardRekeyDue`) and the pieces are remade with it (`cardRekeyRun`): with `opts.refresh` (the screen's word that this phone has
+     * a route to the card's mint and is at it), in the same sheet, the card asked for once more because it signs nothing in the tap
+     * that claimed it (6985); without, or where that is cut short, the next time this phone has the card and a route. The result
+     * says which: `rekeyed` true where every piece on it is this phone's backup now, `rekeyDue` where that is still to come (and
+     * `rekeyError`, what cut it short).
+     *
+     * Resolves the card as its owner reads it. Rejects, with `card`: `bad-pin`, `wrong-pin`, `blocked`, `no-pin`, `set-up` (it has an
+     * owner), `old-card` (before 1.21), `has-money`, `no-owner-key`, `gone`, and `refused` with `sw` 6985 for a tap that paid. */
     cardClaim: function (link, opts) {
       var o = opts || {};
       var pin;
       try { pin = cardPinHex(o.pin); } catch (e) { return Promise.reject(e); }
       var t = cardTalk(link);
-      var card, ownerPub;
-      var money = function () { return cardError('has-money', 'Spend or move the money on this card first. Only an empty card can be tied to a phone.'); };
+      var card, ownerPub, full = false;
+      var money = function () {
+        if (card && card.info && card.info.claimFull) {
+          return cardError('has-money', 'Change is owed to this card. VIEW AS GUEST puts it on the card; then connect it to this phone.');
+        }
+        return cardError('has-money', 'Spend or move the money on this card first. Only an empty card can be tied to a phone.');
+      };
       return cardLook(link, { short: true }).then(function (c) {
         card = c;
         if (card.info.locked) throw cardRefused('6986');
         if (card.info.owner) throw cardError('set-up', 'This card already belongs to a Foxy. Only that Foxy, or one restored from its seed phrase, can change that.');
-        if (!cardIs121(card)) throw cardError('old-card', 'This card\u2019s software cannot be tied to a phone this way.');
+        if (!cardIs121(card)) throw cardError('old-card', 'This card’s software cannot be tied to a phone this way.');
         if (!card.info.pinSet) throw cardRefused('6984');
         if (card.info.pin === 'blocked') throw cardRefused('6983');
-        if (card.info.unspent > 0 || card.info.changeDue) throw money();
+        if (card.info.changeDue) throw money();
+        if (card.info.unspent > 0 && !card.info.claimFull) throw money();
+        full = card.info.unspent > 0;
         return cardOwnerPub(card.key);
       }).then(function (pub) {
         ownerPub = pub;
@@ -33108,22 +33320,66 @@
           throw e;
         });
       }).then(function () {
-        console.log('[foxy] card: this phone has claimed a card that had no owner');
+        console.log('[foxy] card: this phone has claimed a card that had no owner' + (full ? ', with money on it' : ''));
         var unit = (card.record && card.record.unit) || 'sat';
         return cardRefundKey(card.key, unit).then(function (refund) {
           if (!refund || !card.record || !card.record.mint) return null;
+          /* With money on it: the key is filed as due, and the record takes it once the pieces are off (`cardRekeyRun`). The card
+           * would refuse it now (6A8D), and with the record naming a key no piece was made with, nothing on it could be spent. */
+          if (full) {
+            var files = cardsOnFile();
+            if (files[card.key]) {
+              files[card.key] = Object.assign({}, files[card.key], { rekey: true, claimed: Date.now() });
+              mustSave(CARDS, files);
+            }
+            return null;
+          }
           var record = cardRecordHex(refund, card.record.mint, cardCanDesign(card) ? card.record.design : '', unit);
           return cardOwned(t, card.key, 'set-card', record).then(function (data) {
-            return t.want(cardCommand(CARD_INS.setCard, 0, data), 'this phone\u2019s key');
+            return t.want(cardCommand(CARD_INS.setCard, 0, data), 'this phone’s key');
           });
         }).then(null, function (e) {
           if (e && e.card === 'gone') throw e;
           console.warn('[foxy] card: the claimed card kept its record, with no key to take it back:', (e && e.message) || e);
         });
       }).then(function () {
-        return FoxyWallet.cardLook(link, { mine: true });
+        if (!full || !o.refresh) return FoxyWallet.cardLook(link, { mine: true });
+        // the card signs nothing in the tap that claimed it: asked for again in the same sheet, then its pieces are remade here
+        var again = (typeof link.again === 'function') ? link.again(o.againLine || 'Keep holding. Lift the card and tap it again.') : Promise.reject(cardError('cancelled', 'The card was not tapped.'));
+        return again.then(function () {
+          return FoxyWallet.cardRekeyRun(link, { pin: o.pin, on: o.on, progress: o.progress });
+        }).then(function (r) {
+          var c = r.card;
+          c.rekeyed = !cardRekeyDue(c);
+          if (!c.rekeyed) c.rekeyDue = true;
+          return c;
+        }, function (e) {
+          // the claim stands, whatever cut the backup's move short: the card is this phone's, and what was taken off it is owed back to it
+          console.warn('[foxy] card: claimed; its backup moves to this phone later:', (e && e.message) || e);
+          if (e && (e.card === 'cancelled' || e.card === 'gone')) {
+            return { key: card.key, info: Object.assign({}, card.info, { owner: true }), record: card.record, balance: card.balance, pieces: card.pieces,
+                     mine: true, rekeyDue: true, rekeyError: e, bare: true };
+          }
+          return FoxyWallet.cardLook(link, { mine: true }).then(function (c) { c.rekeyDue = cardRekeyDue(c); c.rekeyError = e; return c; },
+            function () { return { key: card.key, info: Object.assign({}, card.info, { owner: true }), record: card.record, balance: card.balance, pieces: card.pieces, mine: true, rekeyDue: true, rekeyError: e, bare: true }; });
+        });
+      }).then(function (c) {
+        if (c && full && c.rekeyed === undefined && c.rekeyDue === undefined) c.rekeyDue = cardRekeyDue(c);
+        return c;
       });
     },
+
+    /* A card's backup moved to this phone (software 1.24, a card claimed with money on it: `cardRekeyDue`), in one tap: everything
+     * off the card (`cardWithdraw`, held), the same money made into pieces locked to the card with this phone's refund key and a
+     * fresh date (`cardPrepare` makes them so for a card whose key is due and that is empty), the card's record given that key
+     * while it is empty, and the pieces written (`cardWrite`, `cardRepointFor`). The whole-drawer refresh a renewal is
+     * (`cardRenew`), with the key changed in it. A tap cut short between the two leaves the money in this phone and the pieces
+     * owed to the card, and its next tap writes them, the record first. Resolves as `cardRenew`. */
+    cardRekeyRun: function (link, opts) {
+      return FoxyWallet.cardRenew(link, opts);
+    },
+    // whether a card as read is one whose backup is still to move to this phone (`cardRekeyDue`)
+    cardRekeyDue: function (card) { return cardRekeyDue(card); },
 
     /* The PIN changed by the card's owner: this phone's proof over the new PIN,
      * and nothing else. The old PIN is not asked for, because this phone does
@@ -33375,11 +33631,11 @@
     /* The cards on file here: those this phone set up with a key to take their money back, and those it claimed (TIE OWNERSHIP),
      * { key: { mint, refundKey, at, ... } }. Not a card it only loaded, nor one it set up as cash for somebody else. */
     cardsKnown: function () { return cardsOnFile(); },
-    // the hold a card's pieces are dated ahead by, in seconds (thirty days; a local test build may shorten it)
+    // the hold a card's pieces are dated ahead by, in seconds (fourteen days; a local test build may shorten it)
     cardHoldSecs: function () { return cardHoldSecs(); },
     /* And the margins that scale with it, in seconds: `ahead` (a piece's date from now), `offline` (what a receiver with no route
      * needs left), `online` (one with a route), `own` (the card's own phone), `reuse` (a top-up keeps a date this far off). At the
-     * thirty days: 30 d, 7 d, 24 h, 10 min, 20 d. */
+     * fourteen days: 14 d, 7 d, 24 h, 10 min, 10 d. */
     cardMargins: function () {
       return { hold: cardHoldSecs(), ahead: cardDateAhead(), offline: cardDateMargin(), online: cardOnlineMargin(), own: cardOwnMargin(), reuse: cardDateReuse() };
     },
@@ -33648,6 +33904,20 @@
       /* `opts.visit`: made on a card's visit to its own mint, as part of it (`cardLoadAcross`): not held for this phone to be home,
        * which is what everything else started during a visit waits for (99-proof-lock-and-export.js). */
       var onVisit = !!(opts && opts.visit && cardAway);
+      /* `opts.toUnit`: a TRANSFER's pieces at a mint that issues no dollars, of a dollar card (`cardTransfer`): `card` is the card as
+       * it will be there, in bitcoin, and the row says so, for the record its write gives the card first (`cardRepointFor`).
+       * `opts.rekey`: pieces made with the refund key `card`'s record names here and not on the card (`cardRekeyRun`): the row
+       * says that key, which the card's record is given, while it is empty, before they are written. */
+      var toUnit = (opts && (opts.toUnit === 'sat' || opts.toUnit === 'usd')) ? opts.toUnit : '';
+      var rekey = !!(opts && opts.rekey);
+      /* A card claimed with money on it (software 1.24) whose backup has not moved here yet, empty now and with nothing owed to it:
+       * what is put on it is made with this phone's key, and the record takes it first (`cardRekeyDue`), so that a top-up never locks
+       * new money to the key of the phone that loaded the card before it was claimed. */
+      if (!rekey && !moving && card && cardRekeyDue(card) && !((card.whole || card).pieces || []).length
+          && !cardStore(CARD_OWED).some(function (r) { return r && r.card === card.key && r.rekey !== (cardsOnFile()[card.key] || {}).refundKey; })) {
+        card = cardRekeyCopy(card);
+        rekey = true;
+      }
       /* `opts.only`: the key of the card these pieces are for (a card's swap, whose second tap is held to the card on the screen,
        * 26f-flashcard.js `fcSwapOn`). Any other card read at the tap is refused (`wrong-card`) before anything is made for it, so
        * nothing is owed to it and nothing is written on it. */
@@ -33726,7 +33996,8 @@
            * pieces exist, only this card can spend them, and this row is how
            * they reach it: nothing that can throw comes before it. */
           var row = /** @type {any} */ (Object.assign({ id: made.hash, card: card.key, token: made.token, kind: 'load', forHash: made.hash, at: Date.now() }, cardFig(unit, n)));
-          if (moving) { row.mint = mintOf(w); row.repoint = true; }
+          if (moving) { row.mint = mintOf(w); row.repoint = true; if (toUnit) row.toUnit = toUnit; }
+          if (rekey) { row.mint = mintOf(w); row.rekey = card.record.refundKey; }
           mustSave(CARD_OWED, cardStore(CARD_OWED).concat([row]));
           try { amendTx(made.hash, { memo: 'to card', card: card.key }); } catch (x) {}
           try { FoxyWallet.tag(made.hash, { to: 'card' }); } catch (x2) {}
@@ -33923,18 +34194,119 @@
         if (!card.info.setUp) throw cardError('no-record', 'Set this card up first.');
         if (canonicalMint(card.record.mint) === here) return null;
         if (card.pieces.length) throw cardError('in-use', 'This card still holds money at ' + hostOf(card.record.mint) + '. Take that off it first.');
-        // a dollar card goes only to a mint that issues dollars, and keeps its unit there
-        if (card.record.unit === 'usd' && unitsOf(here, w).indexOf('usd') < 0) {
-          throw cardError('no-dollars-here', hostOf(here) + ' does not issue dollars. RESET this card and set it up again to hold bitcoin there.');
-        }
+        /* A dollar card keeps its unit at a mint that issues dollars; at one that issues none it holds bitcoin there (TRANSFER, the
+         * card's MENU: empty, it has nothing to change but its record), and the row this phone keeps for it says so. */
+        var unit = (card.record.unit === 'usd' && unitsOf(here, w).indexOf('usd') < 0) ? 'sat' : card.record.unit;
         if (!card.info.owner) throw cardRefused('6a90');
-        var record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', card.record.unit);
+        var record = cardRecordHex(card.record.refundKey, here, cardCanDesign(card) ? card.record.design : '', unit);
         return cardOwned(t, card.key, 'set-card', record).then(function (data) {
           return t.want(cardCommand(CARD_INS.setCard, 0, data), 'its new mint');
         }).then(function () {
-          console.log('[foxy] card: an empty card moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here));
+          console.log('[foxy] card: an empty card moved from ' + hostOf(card.record.mint) + ' to ' + hostOf(here) + (unit !== card.record.unit ? ', now in ' + balanceWord(unit) : ''));
+          var files = cardsOnFile();
+          if (files[card.key]) {
+            files[card.key] = Object.assign({}, files[card.key], { mint: here, unit: unit });
+            try { mustSave(CARDS, files); } catch (e3) { console.warn('[foxy] card: its row here could not be brought up to date with its record'); }
+          }
         });
       }).then(function () { return FoxyWallet.cardLook(link); });
+    },
+
+    /* TRANSFER (08a-flashcard.js, `cardTransferPlan`): what it would be, asked of both mints before the card is touched, with this
+     * phone at the card's mint (`cardTransferQuote`); and the move itself, in one tap. */
+    cardTransferQuote: function (card, to) { return cardTransferQuote(card, to); },
+    // what is left of a TRANSFER cut short, by card: { <key>: { from, to, unit, toUnit, amount, land, stage, at } }
+    cardTransfers: function () { return cardTransfers(); },
+
+    /* The tap: `opts.to` the new mint, `opts.pin` the card's PIN (none for a card that has none), `opts.most` the most the fees may
+     * come to, as agreed on the confirmation (in the card's unit; a sat or two of rounding over it is let through, and more stops the
+     * move with the money in this phone, the note kept: `fee-up`, with `fee`), `opts.only` the card on the screen. This phone is at
+     * the card's mint, and is at the new one when this resolves, on a visit that the caller ends (`visit.end()`) once nothing more
+     * is wanted there. `opts.resume`: a TRANSFER cut short (its note), finished: nothing is taken off the card, which is empty, and
+     * the money is what the note says is in this phone, at the old mint or the new. Resolves { card, unit, toUnit, amount (what came
+     * off), lands (what went on, in `toUnit`), left (pieces still owed), visit }. Rejects with what cut it short, `stage` on the
+     * error saying where the money is ('card': nothing moved; 'off': in this phone at the old mint; 'paid': at the new; 'owed':
+     * made for the card and owed to it) and `visit` where one is open. */
+    cardTransfer: function (link, opts) {
+      var o = opts || {};
+      var w;
+      try { w = need(); assertRoute(); } catch (e) { return Promise.reject(e); }
+      var to = canonicalMint(o.to), from = mintOf(w);
+      var key = '', unit = 'sat', toUnit = 'sat', amount = 0, card = null, visit = null, stage = 'card', land = 0;
+      var fail = function (e) {
+        var x = (e && typeof e === 'object') ? e : new Error(String(e));
+        try { x.stage = stage; if (visit) x.visit = visit; } catch (y) {}
+        throw x;
+      };
+      var noted = function (more) {
+        var was = cardTransfers()[key] || {};
+        cardTransferPut(key, Object.assign({}, was, { from: from, to: to, unit: unit, toUnit: toUnit, amount: amount, at: was.at || Date.now() }, more));
+      };
+      var begin = o.resume ? cardLook(link, { short: true, mine: true }).then(function (c) {
+        card = c; key = c.key;
+        if (o.only && key !== o.only) throw cardError('wrong-card', 'That is not the card on the screen. Nothing was done to it.');
+        var note = cardTransfers()[key];
+        if (!note) throw cardError('nothing-owed', 'This card has no transfer left to finish.');
+        unit = note.unit === 'usd' ? 'usd' : 'sat';
+        toUnit = note.toUnit === 'usd' ? 'usd' : 'sat';
+        to = canonicalMint(note.to);
+        if (note.stage === 'paid') { stage = 'paid'; land = Math.round(Number(note.land) || 0); amount = Math.round(satsOf(note.amount)); return null; }
+        stage = 'off';
+        if (canonicalMint(note.from) !== from) throw cardError('other-mint', 'This phone is not at ' + hostOf(note.from) + ', where the money is.', { mint: canonicalMint(note.from) });
+        // what is still in this phone of it: the note's figure, or less where this phone has spent some since
+        amount = Math.min(Math.round(satsOf(note.amount)), FoxyWallet.balanceOf(unit, from));
+        return null;
+      }) : FoxyWallet.cardWithdraw(link, { pin: o.pin, on: o.on, progress: o.progress, hold: true, only: o.only, unit: o.unit || undefined }).then(function (got) {
+        card = got.card || null;
+        key = (card && card.key) || (lastCardRead && lastCardRead.key) || '';
+        unit = (got.unit === 'usd') ? 'usd' : 'sat';
+        toUnit = (o.toUnit === 'usd' || o.toUnit === 'sat') ? o.toUnit : unit;
+        amount = Math.round(satsOf(got.amount));
+        stage = 'off';
+        if (key) noted({ stage: 'off' });
+        console.log('[foxy] card: TRANSFER: ' + cardSaid(amount, unit) + ' off the card at ' + hostOf(from) + ', on its way to ' + hostOf(to));
+        return null;
+      });
+      return begin.then(function () {
+        if (!card) throw cardError('gone', 'The card was taken away.');
+        if (stage === 'paid') {
+          // at the new mint already: claimed there (`finishMove`) and made into pieces for the card from what landed
+          return cardVisit(to).then(function (v) {
+            visit = v;
+            return Promise.resolve(FoxyWallet.finishMove()).then(null, function () { return null; }).then(function () {
+              var there = Math.min(land, FoxyWallet.balanceOf(toUnit, to));
+              if (!(there > 0)) throw cardError('too-little', 'The money for this card has not arrived at ' + hostOf(to) + ' yet.');
+              return FoxyWallet.cardPrepare(cardEmptyCopy(card, { unit: toUnit }), there, { unit: toUnit, moving: true, toUnit: toUnit, visit: true });
+            });
+          }).then(function (made) { stage = 'owed'; cardTransferPut(key, null); return made; });
+        }
+        if (typeof o.on === 'function') { try { o.on('mint'); } catch (e) {} }
+        try { link.say && link.say('Moving to ' + hostOf(to) + '. Keep holding.'); } catch (e2) {}
+        return cardTransferPlan(to, amount, toUnit, unit, card, false).then(function (plan) {
+          var fee = Math.max(0, amount - (toUnit === unit ? plan.lands : plan.worth));
+          if (o.most !== undefined && o.most !== null && fee > Math.round(Number(o.most) || 0) + 2) {
+            throw cardError('fee-up', 'The fees are now ' + cardSaid(fee, unit) + ', more than was shown.', { fee: fee });
+          }
+          land = plan.lands;
+          return cardLoadAcross(plan, cardEmptyCopy(card, { unit: toUnit }), function () {}, { moving: true, toUnit: toUnit }).then(function (r) {
+            visit = r.visit;
+            stage = 'owed';
+            cardTransferPut(key, null);
+            return r.made;
+          }, function (e) {
+            // paid and not made into pieces for the card yet: the money is at the new mint, and the note says how much
+            if (e && e.movePaid) { stage = 'paid'; noted({ stage: 'paid', land: land }); }
+            throw e;
+          });
+        });
+      }).then(function () {
+        if (typeof o.on === 'function') { try { o.on('writing'); } catch (e) {} }
+        // the card is empty: told its new mint with the owner's proof, then written, under its PIN where it has one
+        return FoxyWallet.cardWrite(link, (o.pin === undefined || o.pin === null || o.pin === '') ? { owner: true, progress: o.progress } : { pin: o.pin, progress: o.progress });
+      }).then(function (r) {
+        console.log('[foxy] card: TRANSFER: the card is at ' + hostOf(to) + ' now and holds ' + cardSaid(r.amount, r.unit));
+        return { card: r.card, unit: unit, toUnit: toUnit, amount: amount, lands: r.amount, left: r.left, visit: visit };
+      }).then(null, fail);
     },
 
     // how long an owner's tap waits for the mint's word on the change a card is owed, in milliseconds; the suites set it short
@@ -34079,7 +34451,7 @@
     },
 
     /* A card's money given a new date, in one tap: all of it off the card and
-     * on again. The pieces that come back carry a date thirty days from now, which
+     * on again. The pieces that come back carry a date fourteen days from now, which
      * is the only way a piece's date changes: it is part of the piece. At a
      * mint that charges for inputs this costs what a withdrawal and a top-up
      * cost. A tap cut short between the two leaves the money in this phone

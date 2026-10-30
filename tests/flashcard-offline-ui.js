@@ -391,26 +391,26 @@ async function keptPay(R, k, sats) {
       await until('the card to be read', () => !!owner.state.fc && owner.state.fc.key === k.key);
       await settle();
     };
-    // twenty-one days left: nothing asked
-    let undo = later([H], date * 1000 - 21 * DAY - Date.now());
+    // eleven days left: nothing asked
+    let undo = later([H], date * 1000 - 11 * DAY - Date.now());
     await readCard();
-    ok(!card(owner) && !pad(owner), 'with twenty-one days left, its owner’s read asks nothing', card(owner) && card(owner).title);
+    ok(!card(owner) && !pad(owner), 'with eleven days left, its owner’s read asks nothing', card(owner) && card(owner).title);
     undo();
-    // nineteen days left, and offline: nothing asked
-    undo = later([H], date * 1000 - 19 * DAY - Date.now());
+    // nine days left, and offline: nothing asked
+    undo = later([H], date * 1000 - 9 * DAY - Date.now());
     owner.offline = true;
     await readCard();
-    ok(!card(owner) && !pad(owner), 'with nineteen days left and no connection, nothing is asked');
+    ok(!card(owner) && !pad(owner), 'with nine days left and no connection, nothing is asked');
     owner.offline = false;
     owner._fcRefreshAsked = {};
-    // nineteen days left, online: RENEW THIS CARD, then its PIN pad
+    // nine days left, online: RENEW THIS CARD, then its PIN pad
     await readCard();
     const day = owner.fcDay(date);
-    ok(card(owner) && card(owner).title === 'RENEW THIS CARD' && card(owner).reason === 'Its money is good until ' + day + '. Renew it for 30 days.'
+    ok(card(owner) && card(owner).title === 'RENEW THIS CARD' && card(owner).reason === 'Its money is good until ' + day + '. Renew it for 14 days.'
        && card(owner).has('RENEW') && card(owner).has('LATER') && !pad(owner),
-       'with nineteen days left, online, its owner is offered the renewal: RENEW or LATER, and no pad until asked', card(owner) && card(owner).all);
+       'with nine days left, online, its owner is offered the renewal: RENEW or LATER, and no pad until asked', card(owner) && card(owner).all);
     card(owner).press('LATER');
-    ok(!card(owner) && !pad(owner) && owner.state.screen === 'flashcard' && owner.FC_RENEW_DAYS === 20
+    ok(!card(owner) && !pad(owner) && owner.state.screen === 'flashcard' && owner.FC_RENEW_DAYS === 10
        && owner.renderFlashcard({ s: owner.state, sc: owner.state.screen }).fcNotes.some((n) => /must be renewed by/.test(n.text)),
        'LATER: nothing is done, and the line on the card’s screen still offers it');
     await readCard();
@@ -436,15 +436,15 @@ async function keptPay(R, k, sats) {
     await readCard();
     card(owner).press('RENEW');
     await until('the renewal’s PIN pad', () => !!pad(owner));
-    ok(pad(owner).title === 'CARD PIN' && pad(owner).sub === 'Its money is good until ' + day + '. Renew it for 30 days: ₿2,000.' && pad(owner).cta === 'RENEW',
+    ok(pad(owner).title === 'CARD PIN' && pad(owner).sub === 'Its money is good until ' + day + '. Renew it for 14 days: ₿2,000.' && pad(owner).cta === 'RENEW',
        'RENEW asks for the card’s PIN, and says what it is good until and what is renewed', pad(owner).sub);
     const hb = await H.W.balanceSats();
     k.tap();
     pad(owner).type('1234');
     await until('the card to be renewed', () => owner.state.screen === 'paid' && owner.state.paidSays === 'ON THE CARD');
     const nowS = Math.floor(H.window.Date.now() / 1000);
-    ok(k.balance() === 2000 && slotDates(k).length === 1 && Math.abs(slotDates(k)[0] - (nowS + 30 * 86400)) < 600 && (await H.W.balanceSats()) === hb,
-       'renewed: the same 2,000, every piece of one date thirty days on', JSON.stringify({ days: ((slotDates(k)[0] - nowS) / 86400).toFixed(2) }));
+    ok(k.balance() === 2000 && slotDates(k).length === 1 && Math.abs(slotDates(k)[0] - (nowS + 14 * 86400)) < 600 && (await H.W.balanceSats()) === hb,
+       'renewed: the same 2,000, every piece of one date fourteen days on', JSON.stringify({ days: ((slotDates(k)[0] - nowS) / 86400).toFixed(2) }));
     owner.setState({ screen: 'home', stack: [] }); if (owner.paidDismissed) owner.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
     undo();
     booksGood('the books add up', H);
@@ -466,8 +466,8 @@ async function keptPay(R, k, sats) {
     k.tap();
     await H.W.cardAdd(k, { sats: 500, pin: '1234' });
     ok(/^0[23]/.test(k.state.record.refund) && owner.state.fc.recoverable && H.W.cardsList().some((r) => r.key === k.key)
-       && Math.abs(slotDates(k)[0] - (Date.now() / 1000 + 30 * 86400)) < 600,
-       'the card names this phone’s key, is on the list of cards this phone loaded, and what goes on it is good for thirty days', k.state.record.refund.slice(0, 6));
+       && Math.abs(slotDates(k)[0] - (Date.now() / 1000 + 14 * 86400)) < 600,
+       'the card names this phone’s key, is on the list of cards this phone loaded, and what goes on it is good for fourteen days', k.state.record.refund.slice(0, 6));
     booksGood('the books add up', H);
   }
 

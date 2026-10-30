@@ -4,9 +4,11 @@
  *     node tests/flashcard-switch.js
  *
  * A card's money is at the one mint its record names. Moving the card is
- * moving the money: off the card into the phone (a tap), across by Lightning
- * as any move between the phone's own mints goes, and back onto the card at
- * the far mint, where the card is first told its new mint (a second tap).
+ * moving the money: off the card into the phone, across by Lightning as any
+ * move between the phone's own mints goes, and back onto the card at the far
+ * mint, where the card is first told its new mint. The wallet's parts of that
+ * are held to first, one at a time; then the screens, where TRANSFER does all of
+ * it in one tap (the wallet's `cardTransfer`, and tests/flashcard-transfer.js).
  *
  * What is held to here: the money that crosses pays for its own crossing and
  * the phone's own balance is not dipped into; what is left behind is the
@@ -203,7 +205,7 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
        told.no ? String(told.no.message) : told.record.mint + ' ' + told.record.design);
   }
 
-  /* ---- the screens: SWITCH MINT, as a person meets it -------------------------- */
+  /* ---- the screens: TRANSFER, as a person meets it -------------------------- */
   {
     const U = await funded({ second: true }, 6000);
     const app = appOn(U);
@@ -215,41 +217,50 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     U.nfc = c;
     app.goFlashcard();
     await until('the card to be read', () => !!app.state.fc && app.state.fc.check !== 'asking');
-    // the card's screen carries no SWITCH MINT button for now; the move is kept, and driven here by its own entry (fcSwitchMint)
-    ok(vals(app).fcMenuItems.map((k) => k.label).join() === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN' && typeof vals(app).fcHome === 'function', 'the card’s screen has HISTORY, RENAME CARD, LIMITS and CHANGE PIN in its menu, HOME at the top left, and no SWITCH MINT button');
-
-    app.fcSwitchMint();
-    ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard', 'it opens the list of mints, asking which');
+    const menu = () => vals(app).fcMenuItems.map((k) => k.label).join();
+    /* DONE on the success screen: the app's `dismissPaid` (24-render-receive-and-send.js), which is not among this kit's parts, ends on the
+     * card's screen where the screen was raised over it, as the stack says it was. */
+    const done = () => { if (app.state.stack.indexOf('flashcard') >= 0) app.setState({ screen: 'flashcard', stack: [], paidPlace: null, paidSays: '' }); };
+    ok(menu() === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER' && typeof vals(app).fcHome === 'function',
+       'the card’s screen has HISTORY, RENAME CARD, LIMITS, CHANGE PIN and TRANSFER in its menu, and HOME at the top left', menu());
+    app.setState({ open0: true });
+    vals(app).fcMenuItems.filter((k) => k.label === 'TRANSFER')[0].tap();
+    ok(app.state.screen === 'switchMint' && app.state.fcPick === true && app.state.stack.slice(-1)[0] === 'flashcard' && !app.state.open0,
+       'TRANSFER closes the menu and opens the list of mints, asking which');
     app.fcSwitchPick(MINT2);
     ok(app.state.screen === 'fcMoveConfirm' && app.state.fcPick === false && app.state.fcMove.to === MINT2 && /CHECKING/.test(app.fcMoveSpec().cta),
        'a mint chosen, the confirmation is up and asking both mints what it will cost', app.fcMoveSpec().cta);
-    await until('the cost to be known', () => app.state.fcMove && app.state.fcMove.fee != null);
+    await until('the cost to be known', () => app.state.fcMove && app.state.fcMove.quote);
     let spec = app.fcMoveSpec();
     const row = (label) => (spec.rows.filter((r) => r.label === label)[0] || {}).value;
-    ok(row('MOVING TO') === 'N.TEST' && row('FROM') === 'M.TEST' && row('ARRIVES ON THE CARD') === 'ABOUT ₿ 1,990' && row('FEE') === 'UP TO ₿ 10' && spec.cta === 'MOVE ₿ 2,000',
-       'it says where to, about what arrives, and the most the fee can be', row('ARRIVES ON THE CARD') + ' / ' + row('FEE'));
+    ok(row('FROM') === 'M.TEST' && row('TO') === 'N.TEST' && row('M.TEST FEE') === '₿ 0' && row('LIGHTNING FEE') === 'UP TO ₿ 10' && row('N.TEST FEE') === '₿ 0'
+       && row('ARRIVES ON THE CARD') === 'ABOUT ₿ 1,990' && spec.cta === 'TRANSFER ₿ 2,000' && spec.subtitle === 'Tap your card once. Its money moves to n.test.',
+       'it says where from and to, the card’s mint’s fee, the Lightning fee and the new mint’s, and about what arrives', spec.rows.map((r) => r.label + ' ' + r.value).join(' / '));
     ok(c.balance() === 2000 && at(U, MINT) === 4000, 'and nothing has moved for the asking');
 
     const sheets = U.sheet.filter((l) => /^begin/.test(l)).length;
     const before = history(U).map((e) => e.hash);
     spec.go();
-    ok(pad(app).title === 'CARD PIN' && pad(app).cta === 'MOVE ₿2,000' && /to n\.test/.test(pad(app).sub), 'MOVE asks the card’s PIN once', pad(app).cta);
+    ok(pad(app).title === 'CARD PIN' && pad(app).cta === 'TRANSFER ₿ 2,000' && /to n\.test/.test(pad(app).sub), 'TRANSFER asks the card’s PIN once', pad(app).cta);
     pad(app).type('1234');
-    await until('the card to be moved', () => face(app) && face(app).title === 'MOVED');
+    await until('the card to be moved', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
     await settle();
-    ok(c.balance() === 1990 && app.state.screen === 'flashcard' && app.state.fc.mint === MINT2 && app.state.fc.balance === 1990 && !app.state.fcMove,
-       'two taps later the card is at the other mint with 1,990 on it, and the screen is the card', face(app).reason);
-    ok(U.sheet.filter((l) => /^begin/.test(l)).length === sheets + 2 && /Moving your sats to n\.test/.test(app.melts.join()) && !app.melting && !stage(U),
-       'the card was asked for twice, with the crossing between, and nothing is left over the screen');
+    const st = app.state;
+    ok(c.balance() === 1990 && c.state.record.mint === MINT2 && st.paidSays === 'CARD MOVED' && st.paidPlace && st.paidPlace.label === 'NOW AT' && st.paidPlace.to === 'n.test'
+       && st.paidPlace.dismiss === 'DONE' && st.recvResolved === true && st.paidAmount === 1990 && st.paidUnit === 'sat' && st.stack.indexOf('flashcard') >= 0,
+       'one tap: the card is at the other mint with 1,990 on it, and the orange success screen says CARD MOVED, NOW AT n.test, DONE (render-snapshots draws it)', JSON.stringify([st.paidSays, st.paidPlace, st.paidAmount]));
+    ok(U.sheet.filter((l) => /^begin/.test(l)).length === sheets + 1 && !app.melting && !stage(U), 'the card was asked for once, and nothing is left over the screen');
     ok(at(U, MINT) === 4008 && at(U, MINT2) === 0 && U.W.cardOwed().length === 0, 'the phone’s own 4,000 is untouched; 8 of the fee’s reserve came back to it; nothing is owed', at(U, MINT) + ' / ' + at(U, MINT2));
-    ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT, 'and the phone is back at the mint it was at');
+    await until('the phone to be back at its own mint', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT);
     const fresh = history(U).filter((e) => before.indexOf(e.hash) < 0);
     ok(fresh.length >= 3 && fresh.every((e) => app.seen[e.hash] || U.W.tagsFor(e.hash).to === 'card'),
        'none of its entries is announced as a payment', fresh.filter((e) => !app.seen[e.hash]).map((e) => (e.memo || e.dir) + ':' + e.sats).join(' '));
     ok(app._quiet === false, 'and the quiet it kept while it ran is over');
-    face(app).press('DONE');
+    done();
+    await until('DONE to be the card’s screen', () => app.state.screen === 'flashcard');
+    ok(app.state.fc.mint === MINT2 && app.state.fc.balance === 1990, 'DONE is the card’s screen, the card at its new mint', app.state.fc.mint);
 
-    /* ---- the second tap missed --------------------------------------------- */
+    /* ---- the tap dropped after the money crossed: TAP CARD finishes it ---------- */
     await U.W.connect(MINT2, null, null, { remember: true });      // this phone now uses the card's mint
     await app.refreshBalance();
     c.tap();
@@ -258,71 +269,77 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     await until('the card to be read at its new mint', () => app.state.fc && app.state.fc.check === 'ok');
     app.fcSwitchMint();
     app.fcSwitchPick(MINT);
-    await until('the cost back to be known', () => app.state.fcMove && app.state.fcMove.fee != null);
-    const melt0 = app.showMelt;
-    app.showMelt = (label) => { melt0(label); U.nfc = null; };      // the card is put away during the crossing
+    await until('the cost back to be known', () => app.state.fcMove && app.state.fcMove.quote);
+    // the card leaves just before it would be told its new mint: armed by the tap the sheet begins with, which clears what was armed before
+    const tap0 = c.tap.bind(c);
+    c.tap = () => { tap0(); c.leaveBefore('32', 1); c.tap = tap0; };
     app.fcMoveSpec().go();
     pad(app).type('1234');
-    await until('the second tap to be asked for again', () => face(app) && face(app).title === 'TAP THE CARD AGAIN');
-    ok(c.balance() === 0 && U.W.cardOwed().length === 1 && U.W.cardOwed()[0].mint === MINT && /waiting to go onto this card/.test(face(app).reason),
-       'the card put away before its second tap: the money has crossed and waits for it', face(app).reason);
+    await until('the card to be asked for again', () => face(app) && face(app).title === 'TAP THE CARD AGAIN');
+    ok(c.balance() === 0 && c.state.record.mint === MINT2 && U.W.cardOwed().length === 1 && U.W.cardOwed()[0].mint === MINT && /waiting to go onto this card/.test(face(app).reason),
+       'the card put away before it was told its new mint: the money has crossed and is owed to it there', face(app).reason);
     face(app).press('LATER');
     await settle();
-    ok(app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT2 && !app.state.fcMove, 'LATER leaves the card’s screen, and the phone where it was');
-    // (the card's last tap, from its own log, has a line too by now: the money waiting is said first, and once)
+    await until('the phone to be back where it was', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
+    ok(app.state.screen === 'flashcard' && !app.state.fcMove, 'LATER leaves the card’s screen, and the phone where it was');
     ok(vals(app).fcNotes.filter((n) => /waiting to go onto this card/.test(n.text)).length === 1 && /waiting to go onto this card/.test(vals(app).fcNotes[0].text),
        'with the line that says so, first of the card’s lines');
     app.fcSwitchMint();
     ok(face(app) && face(app).title === 'PUT IT ON FIRST', 'and it is not moved again while that money waits');
     face(app).press('CANCEL');
+    c.tap();
     vals(app).fcNotes[0].tap();
-    ok(face(app) && face(app).title === 'A DIFFERENT MINT' && face(app).has('SWITCH MINT') && !pad(app), 'pressed from the wrong mint, the line says which mint the money is at', face(app).reason);
-    face(app).press('CANCEL');
-    await U.W.connect(MINT, null, null, { remember: true });
-    U.nfc = c;
-    vals(app).fcNotes[0].tap();
-    ok(!pad(app), 'and the owner’s phone is asked for no PIN: its proof moves the card and writes the money');
-    // the card's own screen says it: the balance counts up to what the card holds, and no card is raised over it
-    await until('the money to be on the card', () => c.balance() === 1980 && !!app.state.fc && app.state.fc.balance === 1980 && !app.state.fcRoll);
-    ok(c.balance() === 1980 && app.state.fc.mint === MINT && U.W.cardOwed().length === 0 && !face(app), 'from the right one, a tap finishes the move: the card is at that mint with its money', String(c.balance()));
-    app.showMelt = melt0;
+    ok(!pad(app) && !(face(app) && face(app).title === 'A DIFFERENT MINT'), 'pressed from another mint than the money’s, the line visits that mint for the tap: no switch, and no PIN from the phone that owns the card');
+    await until('the money to be on the card', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
+    ok(c.balance() === 1980 && c.state.record.mint === MINT && U.W.cardOwed().length === 0, 'a tap finishes the move: the card is at that mint with its money', String(c.balance()));
+    done();
+    await until('the card’s screen again', () => app.state.screen === 'flashcard');
+    await until('the phone back on its own mint', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
 
-    /* ---- pressed with this phone at the mint the card is going to ------------- */
-    await U.W.connect(MINT2, null, null, { remember: true });
-    await app.refreshBalance();
-    const mine = { at1: at(U, MINT), at2: at(U, MINT2) };
+    /* ---- the crossing does not go: the money waits in this phone, and FINISH moves it ---------- */
     const heldThere = c.balance();
+    const mine = at(U, MINT);
+    c.tap();
     app.fcSwitchMint();
-    ok(!face(app) && app.state.screen === 'switchMint' && app.state.fcPick === true,
-       'pressed with this phone at another mint, it asks which mint all the same: nobody is sent to switch first', (face(app) && face(app).title) || app.state.screen);
     app.fcSwitchPick(MINT2);
-    await until('the cost to be known from there', () => app.state.fcMove && app.state.fcMove.fee != null);
+    await until('the cost to be known from there', () => app.state.fcMove && app.state.fcMove.quote);
     ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT && own(U) === MINT2,
        'the phone is taken to the card’s mint for the asking, as a visit: its own mint is still the one it chose', U.W.mintUrl + ' / ' + own(U));
-    app.fcMoveSpec().secondary.go();
-    await until('CANCEL to put the phone back', () => app.state.screen === 'flashcard' && !app.state.fcMove && String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
-    ok(c.balance() === heldThere && at(U, MINT) === mine.at1 && at(U, MINT2) === mine.at2, 'CANCEL puts it back where it was, and nothing has moved');
-    app.fcSwitchMint();
-    app.fcSwitchPick(MINT2);
-    await until('the cost to be known again', () => app.state.fcMove && app.state.fcMove.fee != null);
+    // the fee has risen past what was agreed between the asking and the tap
+    app.setState({ fcMove: Object.assign({}, app.state.fcMove, { quote: Object.assign({}, app.state.fcMove.quote, { fee: -50 }) }) });
     app.fcMoveSpec().go();
     pad(app).type('1234');
-    await until('the card to be moved from there', () => face(app) && face(app).title === 'MOVED');
+    await until('the move to stop', () => face(app) && face(app).title === 'NOT MOVED YET');
+    ok(c.balance() === 0 && at(U, MINT) === mine + heldThere && U.W.cardTransfers()[c.key] && U.W.cardTransfers()[c.key].stage === 'off' && face(app).has('FINISH'),
+       'a fee over what was agreed: the money is in this phone at the old mint, the transfer noted, and FINISH offered', face(app).all);
+    face(app).press('LATER');
     await settle();
-    ok(app.state.fc.mint === MINT2 && c.balance() === app.state.fc.balance && c.balance() > 0 && c.balance() < heldThere && U.W.cardOwed().length === 0,
-       'and MOVE moves it: the card is at this phone’s mint with its money', heldThere + ' became ' + c.balance());
-    ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT2 && own(U) === MINT2 && at(U, MINT2) === mine.at2 && at(U, MINT) >= mine.at1,
-       'the phone ends at the mint it was at, with its own money there untouched', at(U, MINT) + ' / ' + at(U, MINT2));
-    face(app).press('DONE');
+    await until('the card’s screen', () => app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
+    const note = vals(app).fcNotes.filter((n) => /Moving this card to n\.test is not finished/.test(n.text))[0];
+    ok(!!note, 'the card’s screen says the move is not finished', vals(app).fcNotes.map((n) => n.text).join(' | '));
+    note.tap();
+    await until('the confirmation for what is left', () => app.state.screen === 'fcMoveConfirm' && app.state.fcMove && app.state.fcMove.resume && app.state.fcMove.quote);
+    ok(app.fcMoveSpec().cta === 'TRANSFER ' + app.fcMoveFig(heldThere, 'sat').main, 'it shows the fees again, for the money in this phone', app.fcMoveSpec().cta);
+    app.fcMoveSpec().go();
+    pad(app).type('1234');
+    await until('the card to be moved from the note', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
+    await settle();
+    ok(c.state.record.mint === MINT2 && c.balance() > 0 && c.balance() < heldThere && !U.W.cardTransfers()[c.key] && U.W.cardOwed().length === 0,
+       'one tap finishes it: nothing taken off the card, the money across and on it', heldThere + ' became ' + c.balance());
+    done();
+    await until('the card’s screen once more', () => app.state.screen === 'flashcard');
+    await until('the phone home', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
     // back, for what follows: the card and the phone at the first mint
+    c.tap();
     app.fcSwitchMint();
     app.fcSwitchPick(MINT);
-    await until('the cost back to be known', () => app.state.fcMove && app.state.fcMove.fee != null);
+    await until('the cost back to be known', () => app.state.fcMove && app.state.fcMove.quote);
     app.fcMoveSpec().go();
     pad(app).type('1234');
-    await until('the card to be moved back', () => face(app) && face(app).title === 'MOVED');
+    await until('the card to be moved back', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
     await settle();
-    face(app).press('DONE');
+    done();
+    await until('the card’s screen after it', () => app.state.screen === 'flashcard');
     await U.W.connect(MINT, null, null, { remember: true });
     await app.refreshBalance();
 
@@ -336,16 +353,23 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     app.fcSwitchMint();
     app.fcSwitchPick(MINT2);
     ok(app.state.screen === 'flashcard' && !pad(app) && !app.state.fcMove, 'an empty card has no confirmation and no Lightning, and asks for no PIN: this phone’s proof, and one tap');
-    await until('the empty card to be moved', () => face(app) && face(app).title === 'MOVED');
+    await until('the empty card to be moved', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
     await settle();
-    ok(app.state.fc.mint === MINT2 && String(U.W.mintUrl).replace(/\/+$/, '') === MINT, 'and it is at the other mint, with the phone back where it was');
-    face(app).press('DONE');
+    ok(app.state.fc.mint === MINT2 && blank.state.record.mint === MINT2, 'and it is at the other mint: CARD MOVED');
+    done();
+    await until('the card’s screen, the empty card', () => app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT);
 
     /* ---- what stops it before it starts ------------------------------------- */
     app.offline = true;
     app.fcSwitchMint();
     ok(app.state.screen === 'flashcard' && /needs a connection/.test(app.toasts.join('|')), 'with no connection it says so and opens nothing');
     app.offline = false;
+    // a card that is not this phone's is not moved by it
+    app.setState({ fc: Object.assign({}, app.state.fc, { ownedHere: false }) });
+    ok(!vals(app).fcMenuItems.some((k) => k.label === 'TRANSFER'), 'a card that is not this phone’s has no TRANSFER in its menu');
+    app.fcSwitchMint();
+    ok(face(app) && face(app).title === 'NOT THIS PHONE’S CARD' && app.state.screen === 'flashcard', 'and is refused if it is asked for all the same', face(app) && face(app).title);
+    face(app).press('CLOSE');
   }
 
   failed += until.failed;

@@ -1005,7 +1005,7 @@
     if (cardOut && kind === 'request') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        reason: 'This is a Cashu payment request. An EcashCard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -1065,7 +1065,7 @@
     if (!sats && cardOut) {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This invoice names no amount. A Flashcard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
+        reason: 'This invoice names no amount. An EcashCard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -1295,6 +1295,8 @@
       recvResolved: true,
       // its own heading, where the ordinary one would say the wrong thing
       paidSays: ev.says || '',
+      // (the place line and the button are the ordinary ones: a card's TRANSFER names its own, 26f-flashcard.js `fcMovedScreen`)
+      paidPlace: null,
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,

@@ -127,6 +127,8 @@ check "flashcard on chain" 1 node tests/flashcard-onchain.js
 check "flashcard dollar receive" 1 node tests/flashcard-usd-receive.js
 check "flashcard long ids" 1 node tests/flashcard-long-ids.js
 check "flashcard switch" 1 node tests/flashcard-switch.js
+check "flashcard transfer" 1 node tests/flashcard-transfer.js
+check "flashcard claimed with money" 1 node tests/flashcard-claim-money.js
 check "flashcard from another mint" 1 node tests/flashcard-cross-mint-pay.js
 check "flashcard fewer" 1 node tests/flashcard-fewer.js
 check "flashcard release" 1 node tests/flashcard-release.js

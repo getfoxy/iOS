@@ -52,6 +52,8 @@ is fine for the simulator and the tests, which sign nothing. To install under
 your own account, change the bundle identifier `io.getfoxi.foxy` in
 `project.yml` to one of yours.
 
+A local Debug build can show a card picture of its own: put an upright JPEG (54 by 85.6) at `Local/card-picture.jpg` (not tracked), set `LOCAL_PROJECT_SED` in `local.env` and run `sh local-project.sh`; it replaces `Web/img/card-fx1-portrait.jpg` in that build only (`FoxyWebView.stageLocalCardPicture`), and a Release build never has it.
+
 Run on a real phone with iOS 17 or later — the first iOS where a request that
 cannot reach Tor is guaranteed to fail rather than go around it. The scanner
 needs a camera, and Tor starts slowly in the simulator: about 14 seconds there,

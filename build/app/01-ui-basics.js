@@ -330,7 +330,7 @@ class Component extends DCLogic {
         : held ? 'CHECKING…' : 'UNKNOWN',
         out ? { half: true } : { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
      * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
      * dollar card, this phone's for a bitcoin card (the design, where it was a RATE row). */

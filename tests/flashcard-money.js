@@ -45,9 +45,9 @@ let L0 = null;
   ok(loadRow.sats === 2000 && loadRow.memo === 'to card' && loadRow.card === card.key, 'with one entry, to the card', JSON.stringify({ sats: loadRow.sats, memo: loadRow.memo }));
   ok(H.W.cardOwed().length === 0, 'and nothing left owed to it');
   {
-    const month = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+    const month = Math.floor(Date.now() / 1000) + 14 * 24 * 3600;
     const dates = added.card.pieces.map((x) => x.date);
-    ok(dates.every((d) => Math.abs(d - month) < 600), 'each piece can be taken back by this phone thirty days from now', String(dates[0]));
+    ok(dates.every((d) => Math.abs(d - month) < 600), 'each piece can be taken back by this phone fourteen days from now', String(dates[0]));
     const known = (H.W.cardsKnown()[card.key] || {}).pieces || {};
     ok(Object.keys(known).length === 32 && added.card.pieces.every((x) => known[x.nonce] && known[x.nonce].amount === x.amount),
        'and the phone has written down what it put there', String(Object.keys(known).length));

@@ -332,7 +332,7 @@ class Component extends DCLogic {
         : held ? 'CHECKING…' : 'UNKNOWN',
         out ? { half: true } : { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
      * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
      * dollar card, this phone's for a bitcoin card (the design, where it was a RATE row). */
@@ -9105,7 +9105,7 @@ class Component extends DCLogic {
     if (cardOut && kind === 'request') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This is a Cashu payment request. A Flashcard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        reason: 'This is a Cashu payment request. An EcashCard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -9165,7 +9165,7 @@ class Component extends DCLogic {
     if (!sats && cardOut) {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This invoice names no amount. A Flashcard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
+        reason: 'This invoice names no amount. An EcashCard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -9395,6 +9395,8 @@ class Component extends DCLogic {
       recvResolved: true,
       // its own heading, where the ordinary one would say the wrong thing
       paidSays: ev.says || '',
+      // (the place line and the button are the ordinary ones: a card's TRANSFER names its own, 26f-flashcard.js `fcMovedScreen`)
+      paidPlace: null,
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,
@@ -15126,7 +15128,7 @@ class Component extends DCLogic {
         ? 'From ' + (this.mintNameOf(s.trFrom) || 'that mint') + ' \u00b7 \u20bf '
           + this.group(this.trFromSats()) + ' there'
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
-        : s.flow === 'cardAdd' ? 'How much to add to your card?'
+        : s.flow === 'cardAdd' ? 'How much to deposit?'
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
@@ -15524,7 +15526,8 @@ class Component extends DCLogic {
         paidBreakdown: !!s.payOut && fee > 0,
         paidSentAmt: this.unitFigure(cents, 'usd'),
         paidFeeAmt: this.unitFigure(fee, 'usd'),
-        paidAddedTo: s.payOut ? this.paidTargetLabel() : 'DOLLARS',
+        // (a screen that names its own place, `paidPlace`: a card's TRANSFER, NOW AT the new mint)
+        paidAddedTo: s.paidPlace ? s.paidPlace.to : s.payOut ? this.paidTargetLabel() : 'DOLLARS',
         paidStack: '',
       });
       /* Dollars a dollar card paid for sats this phone asked (26f-flashcard.js, `fcOtherUnit`). To be swapped into bitcoin
@@ -15547,7 +15550,7 @@ class Component extends DCLogic {
     }
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
-    if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    if (two && !s.payOut && !s.paidPlace) base.paidAddedTo = 'BITCOIN';
     /* Sats paid for dollars this phone asked for, to be swapped into
      * dollars (`paidConvert`): the dollars asked are the headline, the sats
      * that came under them, with how old the payer's price was, and where
@@ -15580,7 +15583,9 @@ class Component extends DCLogic {
       paidBreakdown: !!s.payOut && (this._lastFee || 0) > 0,
       paidSentAmt: this.money(sats).main,
       paidFeeAmt: this.money(this._lastFee || 0).main,
-      paidAddedTo: s.payOut ? this.paidTargetLabel()
+      /* A screen that names its own place line and button (`paidPlace`: a card's TRANSFER, NOW AT the new mint and DONE,
+       * 26f-flashcard.js `fcMovedScreen`) has them in place of what the money's own unit would have said. */
+      paidAddedTo: s.paidPlace ? s.paidPlace.to : s.payOut ? this.paidTargetLabel()
         : (s.asset === 'BITCOIN' ? 'Bitcoin Balance' : 'Cash Balance'),
       paidStack: this.fitStack(H => this.satsStack(sats, s.recv && s.recv.live, H)),
       paidBolts: this.boltField((s.recv && s.recv.live) === 'in'),
@@ -15593,7 +15598,9 @@ class Component extends DCLogic {
       paidInkDim: s.recvResolved ? 'rgba(5,5,5,.5)' : 'rgba(var(--ink-rgb),.5)',
       paidBadgeBg: s.recvResolved ? '#050505' : 'var(--acc)',
       paidTitle: s.paidSays || (s.payOut ? 'WITHDRAWAL SENT' : 'PAYMENT RECEIVED'),
-      paidAddedLabel: s.payOut ? 'SENT TO' : 'ADDED TO',
+      paidAddedLabel: s.paidPlace ? s.paidPlace.label : s.payOut ? 'SENT TO' : 'ADDED TO',
+      // the button under it
+      paidDismissLabel: (s.paidPlace && s.paidPlace.dismiss) || 'DISMISS',
       paidBadgeTick: s.recvResolved ? 'var(--acc)' : CTA_INK(s),
       paidLive: (s.recv && s.recv.live) !== 'gone',
       dismissPaid: () => {
@@ -15621,7 +15628,7 @@ class Component extends DCLogic {
             balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
             bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
           }) : fc;
-          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };
@@ -16737,7 +16744,7 @@ class Component extends DCLogic {
           // paid by a card while this phone was offline: received, and settled with the mint the next time it is online
           : t.cardWaits ? 'Paid by card \u00b7 settles online'
           // paid from a card (SEND on the card's screen), not from this phone's balance
-          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Flashcard'
+          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the EcashCard'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */
@@ -17034,7 +17041,7 @@ class Component extends DCLogic {
         : (tx.changeState === 'given back' && tx.fromCard) ? 'The fee the payment did not use is back on the card.'
         : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))
           ? 'Their change was made and is waiting for their card. It is locked to that card: '
-            + 'MENU \u203a FLASHCARD, and tap the card, to put it back.'
+            + 'open CARD at the top left of home, and tap the card, to put it back.'
         : tx.changeState === 'not handed' ? 'Their change was made and could not be handed over. '
           + 'Show them the token below: it is locked to their phone, so only they can take it.'
         : tx.changeState === 'owed' ? 'Waiting for the change.'
@@ -17774,7 +17781,7 @@ class Component extends DCLogic {
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
         out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub, sub2: 'You pay the mint\u2019s fees' } : { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
     /* Once the quote is in: can the balance cover the payout and its fees?
      *
@@ -22126,15 +22133,25 @@ class Component extends DCLogic {
     done: 'Done.',
   };
   FC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  // how near its date a card's own phone starts saying RENEW: a card's money is good for thirty days, and is renewed with twenty left
-  FC_RENEW_DAYS = 20;
-  // the renewal threshold in seconds: twenty of the hold's thirty days, scaled with a shortened hold (the wallet's `cardHoldSecs`)
+  /* How near its date a card's own phone starts saying RENEW: a card's money is good for fourteen days, and is renewed with ten
+   * left, which is above the week a phone with no route needs left on a piece (the wallet's `cardMargins().offline`), so a card is
+   * renewed before such a phone starts refusing it. */
+  FC_RENEW_DAYS = 10;
+  // the hold the renewal threshold is ten days of (the wallet's CARD_HOLD_DEFAULT)
+  FC_HOLD_DAYS = 14;
+  // the renewal threshold in seconds: ten of the hold's fourteen days, scaled with a shortened hold (the wallet's `cardHoldSecs`)
   fcRenewSecs() {
     const W = this.fcW ? this.fcW() : null;
     const hold = (W && W.cardHoldSecs) ? Number(W.cardHoldSecs()) || 0 : 0;
-    return hold > 0 ? Math.round(hold * 20 / 30) : this.FC_RENEW_DAYS * 86400;
+    return hold > 0 ? Math.round(hold * this.FC_RENEW_DAYS / this.FC_HOLD_DAYS) : this.FC_RENEW_DAYS * 86400;
   }
-  /* The owner's own margin before a date, the wallet's (`cardMargins`: ten minutes of the thirty days, scaled with a test build's
+  // the hold as a person reads it, in whole days ("Renew it for 14 days"): the wallet's, a day at least for a test build's shorter one
+  fcHoldDays() {
+    const W = this.fcW ? this.fcW() : null;
+    const hold = (W && W.cardHoldSecs) ? Number(W.cardHoldSecs()) || 0 : 0;
+    return hold > 0 ? Math.max(1, Math.round(hold / 86400)) : this.FC_HOLD_DAYS;
+  }
+  /* The owner's own margin before a date, the wallet's (`cardMargins`: ten minutes of the fourteen days, scaled with a test build's
    * shorter hold): a renewal is not offered closer to the date than that. */
   fcOwnSecs() {
     const W = this.fcW ? this.fcW() : null;
@@ -22160,7 +22177,7 @@ class Component extends DCLogic {
   /* Every new card can be taken back.
    *
    * A card set up here names a key of the phone that loaded it, and that phone
-   * can take its money back after the pieces' date (thirty days from when it
+   * can take its money back after the pieces' date (fourteen days from when it
    * was put on) if the card is lost or blocked. Set-up asks nothing about it:
    * there is no "like cash" card to choose. This switch is the list that makes
    * that true for a person: the cards this phone loaded are shown on the
@@ -22921,7 +22938,7 @@ class Component extends DCLogic {
        * what to do about it, which is to charge it in parts. */
       'tap-limit': () => ({ tone: 'warn', title: 'OVER THE CARD’S PER TAP LIMIT',
         reason: (e.left !== undefined ? this.fcTapRefusal(e) : said) + safe }),
-      /* A card topped up with under twenty days left on its money holds money of two dates,
+      /* A card topped up with under ten days left on its money holds money of two dates,
        * and one signature is for one of them: said before the PIN was sent,
        * with the most it can pay at once. */
       'two-dates': () => ({ tone: 'warn', title: 'TAKE IT IN TWO PARTS',
@@ -24766,6 +24783,10 @@ class Component extends DCLogic {
      * phone, whatever mint the phone is at.) */
     const xmAt = this._fcXmAt || {};
     const away = ((W && W.cardOwed()) || []).filter(r => r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)])[0];
+    /* Money for the card on its own screen, at another mint (a TRANSFER's new pieces, cut off before they went on): this phone visits
+     * that mint for the tap and comes back (`fcMoveWrite`), and is not sent to switch. */
+    const fc0 = this.state.fc;
+    if (away && !opt.here && fc0 && away.card === fc0.key && this.state.screen === 'flashcard') { this.fcMoveWrite(away.mint); return; }
     if (away && !opt.here) {
       this.blockedCard('fc-other-mint', {
         tone: 'warn', title: 'A DIFFERENT MINT',
@@ -25169,7 +25190,7 @@ class Component extends DCLogic {
     this._lastPay = null;
     this.setState(p => ({
       screen: 'paid', stack: p.stack.concat([p.screen]),
-      payOut: true, paidSays: 'ON THE CARD', paidTo: 'FLASHCARD', paidUnit: u, paidAmount: went,
+      payOut: true, paidSays: 'ON THE CARD', paidTo: 'ECASHCARD', paidPlace: null, paidUnit: u, paidAmount: went,
       paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
       recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
     }));
@@ -25254,6 +25275,7 @@ class Component extends DCLogic {
         if (card && card.owes && card.owes.wrote > 0) { this.haptic && this.haptic('success'); this.refreshBalance(); this.loadHistory(); }
         // its owner, online, and its money near its date: the renewal is offered now
         this.fcRefreshMaybe(card);
+        this.fcRekeyMaybe(card);
       }, (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
   }
 
@@ -25286,6 +25308,10 @@ class Component extends DCLogic {
       /* software 1.22 and on: a card with a PIN and no owner is a holder's with no phone, shown with VIEW AS GUEST and TIE OWNERSHIP
        * TO THIS PHONE; `guestRead`, the history it showed as a guest in this tap (`fcGuestRun`), which this phone keeps nowhere */
       guests: !!card.info.guests, guestRead: !!card.guest,
+      /* software 1.24 and on: a card with no owner is connected to a phone with money on it as well as empty (`claimFull`); and a card
+       * so connected whose backup is still to move here (the wallet's `cardRekeyDue`, `rekeyDue` on a read that could not ask) */
+      claimFull: !!card.info.claimFull,
+      rekeyDue: !!card.rekeyDue || !!(W && W.cardRekeyDue && W.cardRekeyDue(card)),
       // a set-up this phone began for the card's holder and did not finish (`cardSetUpFor`): not this phone's to set up as its own
       forHolder: !!card.forHolder,
       limit: (card.record && card.record.limit) || 0,
@@ -26650,45 +26676,43 @@ class Component extends DCLogic {
     });
   }
 
-  /* ---- its mint -------------------------------------------------------------
+  /* ---- its mint: TRANSFER ---------------------------------------------------
    *
-   * SWITCH MINT moves the card, and its money with it, to another mint:
+   * TRANSFER, in the card's MENU above RESET, moves the card, and its money with it, to another mint, in one tap. It is built of
+   * screens the app already has:
    *
    *   which mint            the app's own list of mints, asked "TO WHICH MINT?"
-   *   what it costs         the confirmation screen every move has: what
-   *                         moves, about what arrives, the most the fee can be
-   *   the PIN, and a tap    everything comes off the card into this phone
-   *   the crossing          by Lightning, with no card: it takes longer than
-   *                         a card can be held, and the phone's own card sheet
-   *                         gives up after a minute
-   *   a second tap          the card is told its new mint, and the money is
-   *                         written onto it
+   *   what it costs         the confirmation every move has: what moves, the card's mint's fee, the Lightning fee, the new mint's
+   *                         fee, and about what arrives on the card, asked of both mints before the card is touched
+   *                         (the wallet's `cardTransferQuote`). Nothing moves until it is agreed to
+   *   the PIN, and one tap  the card's sheet, the card drawn upright: the money comes off the card, crosses by Lightning, the
+   *                         empty card is told its new mint with this phone's proof that it owns it, and the new pieces go on,
+   *                         all in the one tap (`cardTransfer`)
+   *   the end               the orange success screen: CARD MOVED, what is on the card now, NOW AT the new mint, DONE
    *
-   * The money pays for its own crossing (`cardMoveQuote`): this phone's own
-   * balance is not dipped into, and what stays behind is the part of the
-   * Lightning fee's reserve that was not used, in this phone at the old mint.
-   * Cut short anywhere, the money is in this phone and the card is empty and
-   * still good. A card with nothing on it needs none of this: one tap.
+   * The money pays for its own crossing: this phone's own balance is not dipped into. A dollar card goes to a mint that issues
+   * dollars as dollars, and to one that issues none as bitcoin, which the confirmation says before anything moves ("macadamia
+   * has no dollars, so the money becomes bitcoin.") and the card's record is changed to at the write.
    *
-   * The phone is taken to the other mint for as long as this lasts and put
-   * back when it ends, however it ends (`fcMoveEnd`). */
+   * Cut short anywhere, nothing is only in memory: a tap that drops once the new pieces are made leaves them owed to the card at
+   * its new mint, and TAP CARD (now, or the line on the card's screen later) writes them, the record first; a crossing that did
+   * not go leaves the money in this phone at the old mint with the TRANSFER noted, and the card's screen offers to finish it
+   * (`fcMoveResume`), which is the confirmation again and one tap. Only the phone that owns the card is offered TRANSFER: the new
+   * mint is written into the card with the owner's proof.
+   *
+   * The phone is taken to the card's mint for as long as this lasts, and to the new one for the tap's end, and put back when it
+   * ends, however it ends (`fcMoveEnd`). */
   fcSwitchMint() {
     const fc = this.state.fc;
     const W = this.fcW();
     if (!fc || !this._fcCard || !W) return;
     if (this.offlineNow()) { this.offlineNo('Moving a card to another mint'); return; }
-    // a move connects to another mint, and waits like every switch for money that is already moving
-    if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
-    /* A dollar card's dollars do not move between mints by Lightning (`cardMoveQuote` refuses one): they come off to this
-     * phone's own dollars, and go on again at the new mint. An empty one is told its new mint, as any is. */
-    // (a card of software 1.23 holding dollars beside its bitcoin is the same: its dollars come off and go on again)
-    if ((fc.unit === 'usd' && fc.balance > 0) || (fc.v123 && this.fcHeld(fc, 'usd') > 0)) {
-      this.blockedCard('fc-usd-move', {
-        tone: 'warn', title: 'A DOLLAR CARD',
-        reason: 'This card holds dollars at ' + this.mintNameOf(fc.mint) + '. Take them off with WITHDRAW, switch, and load it again at the new mint.',
-      });
+    if (fc.ownedHere !== true) {
+      this.blockedCard('fc-move-owner', { tone: 'warn', title: 'NOT THIS PHONE’S CARD', reason: 'Only the phone that owns this card can move it to another mint.' });
       return;
     }
+    // a move connects to another mint, and waits like every switch for money that is already moving
+    if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
     if (this.fcOwed().some(r => r.key === fc.key)) {
       this.blockedCard('fc-owed-first', {
         tone: 'warn', title: 'PUT IT ON FIRST',
@@ -26697,12 +26721,14 @@ class Component extends DCLogic {
       });
       return;
     }
+    // (a card of software 1.23 holding both currencies moves one currency at a time: its SWAP makes it one first)
+    if (fc.bal && fc.bal.usd > 0 && fc.bal.sat > 0) {
+      this.blockedCard('fc-move-both', { tone: 'warn', title: 'TWO CURRENCIES', reason: 'This card holds dollars and bitcoin. SWAP it to one of them first, then transfer it.' });
+      return;
+    }
     /* Whichever mint this phone is at. The money comes off the card at the
      * card's own mint, and this phone is taken there for as long as the move
-     * lasts (`fcMoveQuote`) and put back after (`fcMoveEnd`). It was refused
-     * from any other mint with a card whose button opened this phone's own
-     * list of mints: a person at the mint they wanted the card moved to was
-     * sent to switch away from it, and round again. */
+     * lasts (`fcMoveQuote`) and put back after (`fcMoveEnd`). */
     // through the one way into that list, which clears every other question it can be asking
     this.goSwitchMint({ fcPick: true });
   }
@@ -26715,16 +26741,18 @@ class Component extends DCLogic {
     if (!this.state.fcPick) return;
     if (!fc || !W || !to) { this.setState({ fcPick: false }); this.back(); return; }
     this._fcMoveWas = String(W.mintUrl || '').replace(/\/+$/, '');
-    if (!(fc.balance > 0)) {
+    if (!this.fcAnyMoney(fc)) {
       // nothing to move: off the list, and the card is told its new mint in one tap, with this phone's proof that it owns it
       this.setState(p => ({ fcPick: false, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
       this.fcRepointRun(to);
       return;
     }
+    const unit = (fc.bal && !(fc.bal[fc.unit] > 0) && fc.bal[fc.unit === 'usd' ? 'sat' : 'usd'] > 0) ? (fc.unit === 'usd' ? 'sat' : 'usd') : fc.unit;
+    const have = fc.bal ? fc.bal[unit] : fc.balance;
     // the confirmation takes the list's place: back from it is the card's own screen
     this.setState({
       fcPick: false, screen: 'fcMoveConfirm',
-      fcMove: { from: String(fc.mint || '').replace(/\/+$/, ''), to, sats: fc.balance, plan: null, fee: null, lands: 0, err: '', busy: false },
+      fcMove: { from: String(fc.mint || '').replace(/\/+$/, ''), to, unit, have, sats: have, quote: null, fee: null, lands: 0, err: '', busy: false },
     });
     this.fcMoveQuote();
   }
@@ -26739,12 +26767,13 @@ class Component extends DCLogic {
         this.fcShow(card);
         end();
         this.haptic && this.haptic('success');
-        this.blockedCard('fc-moved', { tone: 'ask', title: 'MOVED', reason: 'This card is now at ' + this.mintNameOf(to) + '.', shut: { label: 'DONE' } });
+        this.fcMovedScreen(to, card && card.balance, (card && card.record && card.record.unit) === 'usd' ? 'usd' : 'sat');
       }, (e) => { end(); this.fcFailed(e, { again: () => this.fcSwitchMint() }); });
   }
 
-  /* About what it will cost, asked of both mints before the card is touched.
-   * Nothing is spent by asking. */
+  /* What it will cost, asked of both mints before the card is touched (the wallet's `cardTransferQuote`, with this phone at the
+   * card's mint). Nothing is spent by asking. A TRANSFER being finished from its note (`fcMove.resume`) is asked the same, of the
+   * money in this phone. */
   fcMoveQuote() {
     const W = this.fcW();
     const m = this.state.fcMove;
@@ -26755,40 +26784,65 @@ class Component extends DCLogic {
     const bare = (u) => String(u || '').replace(/\/+$/, '');
     this._fcVisit = Promise.resolve()
       .then(() => (bare(W.mintUrl) === bare(m.from) ? null : W.connect(m.from, null, null, { remember: false })));
-    this._fcVisit.then(() => W.cardMoveQuote(m.from, m.to, m.sats, { quoteOnly: true, pieces: (this.state.fc || {}).count })).then((plan) => {
-      // what leaves the card, less what lands, is the most the crossing can cost
-      put({ quoting: false, plan, lands: plan.net, fee: Math.max(0, m.sats - plan.net) });
+    /* (a TRANSFER being finished: the card on show, empty, as if it held what is in this phone for it, so that the new mint's pieces
+     * are cut for it as they will be; with none on show, the figure alone) */
+    const shown = this._fcCard;
+    const card = !m.resume ? shown
+      : shown ? Object.assign({}, shown, { balance: m.have, pieces: [], units: undefined, whole: undefined, record: Object.assign({}, shown.record, { unit: m.unit }) })
+      : { record: { unit: m.unit, mint: m.from }, balance: m.have, pieces: [], info: null };
+    this._fcVisit.then(() => W.cardTransferQuote(card, m.to)).then((q) => {
+      put({ quoting: false, quote: q, lands: q.lands, fee: q.fee, toUnit: q.toUnit });
     }, (e) => {
-      put({ quoting: false, plan: null, fee: null, err: (e && e.card === 'too-little') ? String(e.message) : W.reason(e) });
+      put({ quoting: false, quote: null, fee: null, err: (e && (e.card === 'too-little' || e.card === 'both-units')) ? String(e.message) : W.reason(e) });
     });
   }
 
-  /* The confirmation screen's contents (confirmSpec), in the transfer's own shape. */
+  // a figure of a TRANSFER in its own unit, as the confirmation says it: dollars with the sats under them, or the money line for sats
+  fcMoveFig(n, unit) {
+    if (unit !== 'usd') return this.money(n);
+    const sat1 = (this.satUsd && this.satUsd()) || 0;
+    return { main: this.unitFigure(n, 'usd'), sub: sat1 ? '₿ ' + this.group(Math.round(n / 100 / sat1)) : '' };
+  }
+
+  /* The confirmation screen's contents (confirmSpec), in the transfer's own shape: what goes, the three fees, what lands. */
   fcMoveSpec() {
-    const m = this.state.fcMove || { sats: 0 };
+    const m = this.state.fcMove || { sats: 0, unit: 'sat' };
+    const u = m.unit === 'usd' ? 'usd' : 'sat';
+    const q = m.quote;
+    const from = (this.mintNameOf(m.from) || '').toUpperCase();
+    const to = (this.mintNameOf(m.to) || '').toUpperCase();
+    const asking = m.err ? 'UNKNOWN' : !q ? 'CHECKING…' : '';
+    const fee = (n, prefix) => asking || ((prefix || '') + this.fcMoveFig(n, u).main);
+    // what lands, in the unit it lands in: sats where the money becomes bitcoin, with what that is worth in the card's dollars under it
+    const lands = !q ? null : q.converts ? { main: '₿ ' + this.group(q.lands), sub: '' } : this.fcMoveFig(q.lands, q.toUnit);
     const rows = [
-      this.cfRow('MOVING TO', (this.mintNameOf(m.to) || '').toUpperCase()),
-      this.cfRow('FROM', (this.mintNameOf(m.from) || '').toUpperCase(), { half: true }),
-      this.cfRow('NETWORK', 'LIGHTNING', { half: true }),
-      this.cfRow('ARRIVES ON THE CARD', m.err ? 'UNKNOWN' : m.fee == null ? 'CHECKING\u2026' : 'ABOUT ' + this.money(m.lands).main, { ink: 'var(--acc)', half: true }),
-      this.cfRow('FEE', m.err ? 'UNKNOWN' : m.fee == null ? 'CHECKING\u2026' : 'UP TO ' + this.money(m.fee).main, { half: true }),
+      this.cfRow('FROM', from, { half: true }),
+      this.cfRow('TO', to, { half: true }),
+      this.cfRow(from + ' FEE', fee(q ? q.fees.from : 0), { half: true }),
+      this.cfRow('LIGHTNING FEE', fee(q ? q.fees.lightning : 0, 'UP TO '), { half: true }),
+      // the new mint's fee is in what lands there: in sats where the money becomes bitcoin
+      this.cfRow(to + ' FEE', asking || this.fcMoveFig(q.fees.to, q.toUnit).main),
+      this.cfRow('ARRIVES ON THE CARD', asking || 'ABOUT ' + lands.main,
+                 { ink: 'var(--acc)', sub: (q && q.converts) ? this.unitFigure(q.worth, u) : '' }),
     ];
     const cancel = { label: 'CANCEL', go: () => this.fcMoveCancel() };
+    const what = this.fcMoveFig(m.have, u);
     if (m.err) {
       return {
         title: 'CONFIRMATION', amountLabel: 'MOVING THIS CARD',
-        amount: this.money(m.sats).main, amountSub: this.money(m.sats).sub, amountInk: '#FF5C5C', rows,
+        amount: what.main, amountSub: what.sub, amountInk: '#FF5C5C', rows,
         warn: m.err, cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.fcMoveQuote(), secondary: cancel,
       };
     }
     return {
       title: 'CONFIRMATION', amountLabel: 'MOVING THIS CARD',
-      amount: this.money(m.sats).main, amountSub: this.money(m.sats).sub, rows,
-      subtitle: m.fee == null ? '' : 'The card is tapped twice: once to take the money off, once to put it back.',
+      amount: what.main, amountSub: what.sub, rows,
+      subtitle: !q ? '' : q.converts ? this.mintNameOf(m.to) + ' has no dollars, so the money becomes bitcoin.'
+        : 'Tap your card once. Its money moves to ' + this.mintNameOf(m.to) + '.',
       secondary: cancel,
-      cta: m.busy ? 'MOVING\u2026' : m.fee == null ? 'CHECKING THE FEE\u2026' : 'MOVE ' + this.money(m.sats).main,
-      ctaTone: 'go', ctaBusy: !!m.busy || m.fee == null,
-      go: () => { if (m.fee != null && !m.busy) this.fcMoveGo(); },
+      cta: m.busy ? 'MOVING…' : !q ? 'CHECKING THE FEE…' : 'TRANSFER ' + what.main,
+      ctaTone: 'go', ctaBusy: !!m.busy || !q,
+      go: () => { if (q && !m.busy) this.fcMoveGo(); },
     };
   }
 
@@ -26799,38 +26853,138 @@ class Component extends DCLogic {
 
   fcMoveGo() {
     const m = this.state.fcMove;
-    if (!m || m.fee == null || m.busy) return;
+    if (!m || !m.quote || m.busy) return;
     if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
+    const what = this.fcMoveFig(m.have, m.unit).main;
     this.fcPinOr({
       title: 'CARD PIN',
-      subtitle: 'To move ' + this.fcBoth(m.sats) + ' to ' + this.mintNameOf(m.to) + '.',
-      cta: 'MOVE ' + this.fcPrice(m.sats),
-    }, (pin) => this.fcMoveOff(pin));
+      subtitle: 'To transfer this card to ' + this.mintNameOf(m.to) + '.',
+      cta: 'TRANSFER ' + what,
+    }, (pin) => this.fcMoveRun(pin));
   }
 
-  /* The first tap: everything off the card, into this phone. */
-  fcMoveOff(pin) {
+  /* The one tap: off the card, across, the card told its new mint, and on again (the wallet's `cardTransfer`). */
+  fcMoveRun(pin) {
     const W = this.fcW();
     const m = this.state.fcMove;
-    if (!m) return;
+    const fc = this.state.fc;
+    if (!m || !W) return;
     const busy = (on) => { if (this.state.fcMove) this.setState({ fcMove: Object.assign({}, this.state.fcMove, { busy: on }) }); };
     busy(true);
-    /* One thing was asked for, and it writes four entries: off the card, out
-     * of one mint, into the other, onto the card. None is a payment to
-     * announce. Quiet from here, as a crossing made for a tap is
-     * (26d-tap.js), and every entry it wrote is marked seen when it ends
-     * (`fcMoveEnd`): the crossing asks for its quote again when it pays, so
-     * the entries cannot be named in advance. */
+    /* One thing was asked for, and it writes entries: off the card, out of one mint, into the other, onto the card. None is a
+     * payment to announce. Quiet from here, as a crossing made for a tap is (26d-tap.js), and every entry it wrote is marked seen
+     * when it ends (`fcMoveEnd`). */
     this._quiet = true;
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    this.fcTap({ amount: this.stageMoney(m.sats), warm: true },
-      (link, on) => W.cardWithdraw(link, { pin, on, hold: true }))
+    this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
+      (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
+                                                     only: fc && fc.key, resume: !!m.resume }))
       .then((r) => {
-        if (r && r.hash) this.txIsNew(r.hash);
-        this.fcMoveAcross(r);
-      }, (e) => { busy(false); this.fcLoud(); this.fcFailed(e, { taken: true, again: () => this.fcMoveGo() }); });
+        const end = r.visit ? r.visit.end() : Promise.resolve();
+        this.fcMoveEnd(r.card, end);
+        this.haptic && this.haptic('success');
+        this.fcMovedScreen(m.to, r.lands, r.toUnit);
+      }, (e) => {
+        busy(false);
+        this.fcMoveCut(m, e, pin);
+      });
+  }
+
+  /* A TRANSFER cut short: said with where the money is (the wallet's `stage` on the error). */
+  fcMoveCut(m, e, pin) {
+    const W = this.fcW();
+    const to = this.mintNameOf(m.to);
+    const end = (e && e.visit) ? () => e.visit.end() : () => Promise.resolve();
+    // nothing moved: the card was not read, or refused before anything came off it
+    if (!e || !e.stage || e.stage === 'card') {
+      end();
+      this.fcMoveEnd(null);
+      this.fcFailed(e, { again: () => this.fcMoveGo() });
+      return;
+    }
+    // made for the card and owed to it at the new mint: the next tap writes it, with the phone still there
+    if (e.stage === 'owed') {
+      this.fcMoveEnd(null, end());
+      this.blockedCard('fc-move-tap', {
+        tone: 'warn', title: 'TAP THE CARD AGAIN',
+        reason: 'Its money is at ' + to + ', waiting to go onto this card.',
+        retry: 'TAP CARD', go: () => this.fcMoveWrite(m.to, pin),
+        shut: { label: 'LATER' },
+      });
+      return;
+    }
+    // in this phone, at the old mint or the new: noted, and finished from the card's screen
+    this.fcMoveEnd(null, end());
+    const where = this.mintNameOf(e.stage === 'paid' ? m.to : m.from);
+    this.blockedCard('fc-move-failed', {
+      tone: 'warn', title: 'NOT MOVED YET',
+      reason: (e.card === 'fee-up' ? String(e.message) : (e.card ? String(e.message) : W.reason(e))),
+      chip: 'The money is in this phone, at ' + where + '. The card is empty. Finish the transfer from the card’s screen.',
+      retry: 'FINISH', go: () => this.fcMoveResume(), shut: { label: 'LATER' },
+    });
+  }
+
+  /* What a TRANSFER left owed to the card at its new mint, written: the phone visits that mint for the tap (the wallet's `cardVisit`),
+   * the card is told its new mint and the pieces go on, under its PIN where it wants one for every load (software 1.21). */
+  fcMoveWrite(to, pin0) {
+    const W = this.fcW();
+    if (!W) return;
+    const go = (pin) => W.cardVisit(to).then((v) => this.fcTap({},
+      (link, on, progress) => { on('writing'); return W.cardWrite(link, pin ? { pin, progress } : { owner: true, progress }); })
+      .then((r) => {
+        v.end();
+        this.fcShow(r.card);
+        this.refreshBalance();
+        this.loadHistory();
+        this.haptic && this.haptic('success');
+        this.fcMovedScreen(to, r.amount, r.unit);
+      }, (e) => { v.end(); this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }); }),
+    (e) => this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }));
+    if (pin0 || !this.fcKnownPinFirst()) { go(pin0 || ''); return; }
+    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put its money on the card at ' + this.mintNameOf(to) + '.', cta: 'TAP CARD' }, go);
+  }
+
+  /* A TRANSFER the card's screen says is not finished (the wallet's `cardTransfers`): its money is in this phone. Where it is at the
+   * old mint, the confirmation again, for what it holds of it, and one tap; where it has crossed already, one tap. */
+  fcMoveResume() {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    const note = (W && W.cardTransfers && fc) ? W.cardTransfers()[fc.key] : null;
+    if (!note) return;
+    if (this.offlineNow()) { this.offlineNo('Finishing a card’s transfer'); return; }
+    this._fcMoveWas = String(W.mintUrl || '').replace(/\/+$/, '');
+    const unit = note.unit === 'usd' ? 'usd' : 'sat';
+    const base = { from: String(note.from || '').replace(/\/+$/, ''), to: String(note.to || '').replace(/\/+$/, ''), unit, resume: true,
+                   have: Math.round(Number(note.amount) || 0), sats: Math.round(Number(note.amount) || 0), err: '', busy: false };
+    if (note.stage === 'paid') {
+      // across already: nothing more to agree to, the new mint's own fee aside, and the tap is the write
+      const q = { fee: Number.MAX_SAFE_INTEGER, toUnit: note.toUnit === 'usd' ? 'usd' : 'sat', lands: Math.round(Number(note.land) || 0) };
+      this.setState({ fcMove: Object.assign(base, { quote: q, lands: q.lands }) });
+      this.fcPinOr({ title: 'CARD PIN', subtitle: 'To finish moving this card to ' + this.mintNameOf(base.to) + '.', cta: 'FINISH' }, (pin) => this.fcMoveRun(pin));
+      return;
+    }
+    this.setState(p => ({ screen: 'fcMoveConfirm', stack: p.stack.concat([p.screen]),
+                          fcMove: Object.assign(base, { quote: null, fee: null, lands: 0 }) }));
+    this.fcMoveQuote();
+  }
+
+  /* The end of a TRANSFER that went: the app's own success screen, orange, as money that arrives ends (12-receive.js; the design's
+   * rule): CARD MOVED, what is on the card now in the unit it holds, NOW AT the new mint, DONE (back to the card's screen). */
+  fcMovedScreen(to, amount, unit) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const got = Math.round(Number(amount) || 0);
+    this._lastFee = 0;
+    this._lastPay = null;
+    this.setState(p => ({
+      screen: 'paid', stack: (p.screen === 'paid' ? p.stack : p.stack.concat([p.screen])).filter((x) => x !== 'fcMoveConfirm'),
+      payOut: false, paidSays: 'CARD MOVED', paidTo: '', paidUnit: u, paidAmount: got,
+      paidPlace: { label: 'NOW AT', to: this.mintNameOf(to), dismiss: 'DONE' },
+      paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
+      asset: 'BITCOIN', unit: 'SATS', amount: String(u === 'usd' ? 0 : got),
+      recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+    }));
   }
 
   /* The quiet a move began is ended, with what it wrote marked as seen. */
@@ -26841,83 +26995,11 @@ class Component extends DCLogic {
     (this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve()).then(loud, loud);
   }
 
-  /* The crossing, with no card: a plan the money itself pays for, the move,
-   * and what landed made into pieces for the card at the far mint. */
-  fcMoveAcross(off) {
-    const W = this.fcW();
-    const m = this.state.fcMove;
-    const to = this.mintNameOf(m.to);
-    const card = off.card || this._fcCard;
-    let crossed = false;
-    this.showMelt('Moving your sats to ' + to + '\u2026', 0, { sats: off.sats, mint: to });
-    W.cardMoveQuote(m.from, m.to, off.sats).then((plan) => {
-      /* More than was agreed to, by more than a sat or two of rounding: asked
-       * again, with the money safe in this phone meanwhile. */
-      const fee = Math.max(0, off.sats - plan.net);
-      if (fee > m.fee + 2) { const e = /** @type {any} */ (new Error('fee')); e.fcFee = fee; throw e; }
-      if (this.hushMove) this.hushMove(plan);
-      return W.moveRun(plan, () => {}, { visit: true });
-    }).then((done) => {
-      crossed = true;
-      return W.cardMoveLoad(card, done.sats);
-    }).then((made) => {
-      if (made && made.hash) this.txIsNew(made.hash);
-      this.hideMelt();
-      this.fcMoveOn(made);
-    }, (e) => {
-      this.hideMelt();
-      /* Not moved, or moved and too little to put on a card. Either way the
-       * money is this phone's, at a mint it can be seen at, and the card is
-       * empty. Said with where it is. */
-      const where = this.mintNameOf(crossed ? m.to : m.from);
-      this.fcMoveEnd(off.card);
-      this.blockedCard('fc-move-failed', {
-        tone: 'warn', title: crossed ? 'NOT PUT ON THE CARD' : 'NOT MOVED',
-        reason: (e && e.fcFee) ? 'The fee is now up to ' + this.fcSats(e.fcFee) + ', more than was shown.'
-          : (e && e.card) ? String(e.message) : W.reason(e),
-        chip: 'The money is in this phone, at ' + where + '. The card is empty.',
-      });
-    });
-  }
-
-  /* The second tap: the card is told its new mint, and the money goes on, both
-   * with this phone's proof that it owns the card: no PIN is asked again. */
-  fcMoveOn(made) {
-    const W = this.fcW();
-    const m = this.state.fcMove;
-    const to = this.mintNameOf(m.to);
-    this.fcTap({ amount: this.stageMoney(made.sats) },
-      (link, on) => { on('writing'); return W.cardWrite(link, { owner: true }); })
-      .then((r) => {
-        this.fcMoveEnd(r.card);
-        if (r.left > 0 || !(r.sats > 0)) { this.fcWrote(r, {}); return; }
-        this.haptic && this.haptic('success');
-        this.blockedCard('fc-moved', {
-          tone: 'ask', title: 'MOVED',
-          reason: 'This card is now at ' + to + ' and holds ' + this.fcBoth(r.card.balance) + '.',
-          shut: { label: 'DONE' },
-        });
-      }, (e) => {
-        /* The money is at the new mint, made for this card and waiting for
-         * it. Tapped again now, or later from the line on the card's screen. */
-        if (e && (e.card === 'cancelled' || e.card === 'gone')) {
-          this.blockedCard('fc-move-tap', {
-            tone: 'warn', title: 'TAP THE CARD AGAIN',
-            reason: this.fcBoth(made.sats) + ' is at ' + to + ', waiting to go onto this card.',
-            retry: 'TAP CARD', go: () => this.fcMoveOn(made),
-            shut: { label: 'LATER', tap: () => this.fcMoveEnd(null) },
-          });
-          return;
-        }
-        this.fcMoveEnd(null);
-        this.fcFailed(e, {});
-      });
-  }
-
   /* The end of a move, however it went: the confirmation gives way to the
    * card's screen (showing `card` where there is one to show), and the phone
-   * goes back to the mint it was at. */
-  fcMoveEnd(card) {
+   * goes back to the mint it was at, once a visit the tap left open
+   * (`after`, the wallet's `visit.end()`) has brought it back from the new one. */
+  fcMoveEnd(card, after) {
     const W = this.fcW();
     const was = this._fcMoveWas;
     this._fcMoveWas = '';
@@ -26930,7 +27012,7 @@ class Component extends DCLogic {
     this.fcLoud();
     const home = () => { this.refreshBalance(); this.loadHistory(); };
     // after a visit that is still being made (CANCEL pressed while it was): put back from where that leaves it
-    const visit = this._fcVisit || Promise.resolve();
+    const visit = Promise.all([this._fcVisit || Promise.resolve(), after || Promise.resolve()]);
     this._fcVisit = null;
     const put = () => {
       if (W && was && String(W.mintUrl || '').replace(/\/+$/, '') !== was) W.connect(was).then(home, home);
@@ -26947,7 +27029,7 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     this.fcPinOr({
       title: 'CARD PIN',
-      subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days: ' + this.fcWholeWords(fc) + '.',
+      subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for ' + this.fcHoldDays() + ' days: ' + this.fcWholeWords(fc) + '.',
       cta: 'RENEW',
     }, (pin) => this.fcTap({ amount: this.fcWholeStage(fc), warm: true },
       (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
@@ -26990,7 +27072,7 @@ class Component extends DCLogic {
     console.log('[foxy] card: its money has ' + Math.floor((fc.first - now) / 86400) + ' days left; its owner is offered the renewal');
     this.blockedCard('fc-renew-ask', {
       tone: 'ask', title: 'RENEW THIS CARD',
-      reason: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for 30 days.',
+      reason: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for ' + this.fcHoldDays() + ' days.',
       retry: 'RENEW', go: () => this.fcRenew(),
       shut: { label: 'LATER' },
     });
@@ -27023,7 +27105,7 @@ class Component extends DCLogic {
       this._lastPay = null;
       this.setState(p => ({
         screen: 'paid', stack: p.screen === 'paid' ? p.stack : p.stack.concat([p.screen]),
-        payOut: false, paidSays: 'RESTORED', paidTo: '', paidUnit: u, paidAmount: got,
+        payOut: false, paidSays: 'RESTORED', paidTo: '', paidPlace: null, paidUnit: u, paidAmount: got,
         paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
         asset: 'BITCOIN', unit: 'SATS', amount: String(u === 'usd' ? 0 : got),
         recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
@@ -27787,9 +27869,9 @@ class Component extends DCLogic {
    *                                  history, which the screen shows with what it holds (the card's own log). A till that was
    *                                  handed the PIN for a payment does not hold a card that long, and the card shows nothing in a
    *                                  tap that paid. Nothing is paid in this tap, and nothing of the history is kept here.
-   *   TIE OWNERSHIP TO THIS PHONE    a plain warning first, then its PIN and the claim set-up makes (about four seconds of Keep
-   *                                  holding): this phone is then its owner. Only an empty card: one with money on it is told
-   *                                  to spend or move it first. */
+   *   CONNECT TO PHONE               its PIN, then the claim set-up makes (about four seconds of Keep holding): this phone is
+   *                                  then its owner. Before software 1.24 only an empty card: one with money on it is told to
+   *                                  spend or move it first. A card of 1.24 is connected with its money on it (`fcGuestTie`). */
   fcGuestView() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -27812,33 +27894,90 @@ class Component extends DCLogic {
       }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin) }));
   }
 
+  /* CONNECT TO PHONE: straight to the card's PIN ("To connect the card to this phone…", CONNECT), then the claim's held tap (about
+   * four seconds of Keep holding). Before software 1.24 only an empty card: one with money on it is told to spend or move it first,
+   * as its software would refuse it. A card of 1.24 is connected with its money on it, and its backup moves to this phone: in the same
+   * sheet where this phone has a route to the card's mint and is at it (the card is asked for once more: it signs nothing in the tap
+   * that claimed it), and otherwise the next time it has the card and a route (`fcRekeyMaybe`), the card's screen saying so meanwhile
+   * ("Backup moves to this phone next time you’re online."). */
   fcGuestTie() {
     const fc = this.state.fc;
     if (!fc) return;
-    if (fc.balance > 0 || fc.count > 0) {
+    if ((fc.balance > 0 || fc.count > 0) && !fc.claimFull) {
       this.fcFailed({ card: 'has-money', message: 'Spend or move the money on this card first. Only an empty card can be tied to a phone.' });
       return;
     }
-    this.blockedCard('fc-tie', {
-      tone: 'warn', title: 'TIE OWNERSHIP TO THIS PHONE?',
-      reason: 'This makes this phone the card\u2019s owner. From then on only this phone, or one restored from its seed phrase, can change the card\u2019s PIN and limits.',
-      retry: 'TIE OWNERSHIP', go: () => this.fcAskPin({
-        title: 'CARD PIN',
-        subtitle: 'To tie the card to this phone. Hold it still for about four seconds when you tap it.',
-        cta: 'TIE OWNERSHIP',
-      }, (pin) => this.fcTieRun(pin)),
-    });
+    this.fcAskPin({
+      title: 'CARD PIN',
+      subtitle: 'To connect the card to this phone. Hold it still for about four seconds when you tap it.',
+      cta: 'CONNECT',
+    }, (pin) => this.fcTieRun(pin));
   }
 
   fcTieRun(pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardClaim(link, { pin, onHold: () => on('writing') }); })
-      .then((card) => {
-        this.fcShow(card);
-        this.haptic && this.haptic('success');
-        this.toast('This phone is the card\u2019s owner now.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin) }));
+    const fc = this.state.fc;
+    const full = !!fc && (fc.balance > 0 || fc.count > 0);
+    // its money's backup moved in the same sheet only where that can be done now: a route, and this phone at the card's mint
+    const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const there = String((fc && fc.mint) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const refresh = full && !this.offlineNow() && !!(W.cardOnline && W.cardOnline()) && !!here && (!there || there === here);
+    this.fcTap({ warm: refresh }, (link, on, progress) => {
+      on('writing');
+      return W.cardClaim(link, { pin, onHold: () => on('writing'), refresh, on, progress });
+    }).then((card) => {
+      (card && card.hashes || []).forEach((h) => this.txIsNew(h));
+      this.fcShow(card);
+      if (full) { this.refreshBalance(); this.loadHistory(); }
+      this.haptic && this.haptic('success');
+      this.toast(card && card.rekeyed ? 'Connected. Backup on this phone.' : 'Connected to this phone.');
+    }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin) }));
+  }
+
+  /* A card connected with money on it whose backup is still to move here (software 1.24, `rekeyDue`): read by this phone with a route
+   * and at the card's mint, the move is begun at once, as a renewal is offered (`fcRefreshMaybe`): its PIN where it has one, and one
+   * tap. Begun once for a card in a session; the line on the card's screen begins it again (`fcRekey`). */
+  fcRekeyMaybe(card) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    if (!W || !card || !fc || fc.key !== card.key || this.state.screen !== 'flashcard' || !fc.rekeyDue || fc.ownedHere !== true) return;
+    this._fcRekeyAsked = this._fcRekeyAsked || {};
+    if (this._fcRekeyAsked[fc.key]) return;
+    if (!(W.cardOnline && W.cardOnline()) || this.offlineNow() || fc.locked) return;
+    const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const there = String(fc.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!here || (there && there !== here)) return;
+    if (((W.cardOwed && W.cardOwed()) || []).some((r) => r && r.card === fc.key)) return;
+    this._fcRekeyAsked[fc.key] = true;
+    this.fcRekey();
+  }
+
+  /* Its backup moved: everything off the card and on again, made with this phone's refund key, the card's record given that key while
+   * it is empty (the wallet's `cardRekeyRun`). The card's mint is visited for it where this phone is at another. */
+  fcRekey() {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    if (!W || !fc) return;
+    if (this.offlineNow() || !(W.cardOnline && W.cardOnline())) { this.toast('Backup moves to this phone next time you’re online.'); return; }
+    this.fcPinOr({
+      title: 'CARD PIN',
+      subtitle: 'To move this card’s backup to this phone: ' + this.fcWholeWords(fc) + '.',
+      cta: 'MOVE BACKUP',
+    }, (pin) => W.cardVisit(fc.mint || W.mintUrl).then((v) => this.fcTap({ amount: this.fcWholeStage(fc), warm: true },
+      (link, on, progress) => W.cardRekeyRun(link, { pin, on, progress }))
+      .then((r) => {
+        v.end();
+        (r.hashes || []).forEach((h) => this.txIsNew(h));
+        this.fcWrote(r, { renewed: true });
+        this.toast('Backup on this phone.');
+      }, (e) => {
+        v.end();
+        ((e && e.hashes) || []).forEach((h) => this.txIsNew(h));
+        this.refreshBalance();
+        this.loadHistory();
+        this.fcFailed(e, { again: () => this.fcRekey() });
+      }), (e) => this.fcFailed(e, { again: () => this.fcRekey() })));
   }
 
   /* ---- RESTORE LOST CARD ------------------------------------------------------------------------------------------------
@@ -28294,7 +28433,7 @@ class Component extends DCLogic {
       if (known && !(limits && limits.send)) {
         this.blockedCard('fcOutNot', {
           tone: 'warn', title: 'THAT WON\u2019T WORK',
-          reason: this.mintName() + ' does not pay bitcoin addresses, so a Flashcard cannot pay one from here. '
+          reason: this.mintName() + ' does not pay bitcoin addresses, so an EcashCard cannot pay one from here. '
             + 'Ask them for a Lightning invoice, or WITHDRAW to this phone and pay from a mint that does.',
           chip: 'Nothing was taken from the card.',
         });
@@ -28492,13 +28631,26 @@ class Component extends DCLogic {
      * under what it holds how much of its limit is left. LIMITS is where
      * it is changed. */
     // a card with under FC_RENEW_DAYS left before its date: said where the money waiting for a card is said, and renewed from there
-    if (on && fc && near && !past && this.fcAnyMoney(fc)) {
+    if (on && fc && near && !past && this.fcAnyMoney(fc) && !fc.rekeyDue) {
       notes.push({ text: 'This card must be renewed by ' + this.fcDay(fc.first) + '. Press here, then tap it.', tap: () => this.fcRenew() });
+    }
+    /* A card connected to this phone with money on it (software 1.24) whose backup has not moved here yet (the wallet's
+     * `cardRekeyDue`): said in the same box, and moved the next time this phone has the card and a route (`fcRekeyMaybe`), or now
+     * from here. */
+    if (on && fc && fc.rekeyDue && fc.ownedHere === true) {
+      notes.push({ text: 'Backup moves to this phone next time you\u2019re online.', tap: () => this.fcRekey() });
+    }
+    // a TRANSFER cut short with the money in this phone (the wallet's `cardTransfers`): finished from here (`fcMoveResume`)
+    const moving = (on && fc && fc.key && W && W.cardTransfers) ? W.cardTransfers()[fc.key] : null;
+    if (moving) {
+      notes.push({ text: 'Moving this card to ' + this.mintNameOf(moving.to) + ' is not finished. Press here, then tap it.', tap: () => this.fcMoveResume() });
     }
 
     /* RESET, for the card's owner (software 1.17 and on): a locked card is not asked whether this phone owns it, so it is offered to
      * any phone that holds the card and the card's own word at the tap decides. */
     const resettable = !!fc && fc.owner && fc.resetKnown && (fc.ownedHere === true || fc.locked);
+    // TRANSFER, for the phone that owns the card: the new mint is written into the card with this phone's proof that it owns it
+    const transferable = usable && fc.ownedHere === true && !fc.locked;
 
 
     /* Under the title: how fresh the mint's word on this card is. Just now,
@@ -28539,7 +28691,8 @@ class Component extends DCLogic {
     /* The card's MENU, at the top right, home's own menu button and drawer (build/markup.html, `open0`): the card's settings, in this
      * order. HISTORY, what has been done with this card on this phone (`fcHistory`: its own log and the tampers it marked, for its
      * owner), the clock as home's HISTORY row has it; RENAME CARD; LIMITS, with what the card pays without its PIN under it; CHANGE PIN
-     * (ADD PIN on a card that has none); RESET, for its owner (software 1.17 and on). Restoring a lost card is home's MENU's: a card
+     * (ADD PIN on a card that has none); TRANSFER, for the phone that owns it (`fcSwitchMint`); RESET, for its owner (software 1.17 and on).
+     * Restoring a lost card is home's MENU's: a card
      * being read is not lost. LIMITS and the PIN are the owner's: only the phone that holds the words the card was set up with can
      * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
@@ -28561,27 +28714,26 @@ class Component extends DCLogic {
         path: 'M4.6 16.8a8.2 8.2 0 1 1 14.8 0M12 13.6l3.7-4.4M12 14.6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z' },
       { label: addable ? 'ADD PIN' : 'CHANGE PIN', sub: '', tap: shut(() => (addable ? this.fcPinAdd() : this.fcChangePin())),
         path: 'M6.4 10.4V7.6a5.6 5.6 0 0 1 11.2 0v2.8M5.2 10.4h13.6a1.4 1.4 0 0 1 1.4 1.4v7.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4v-7.4a1.4 1.4 0 0 1 1.4-1.4Z' },
+    ]).concat(!transferable ? [] : [
+      // TRANSFER: the whole card to another mint, in one tap (`fcSwitchMint`), with the swap arrows SWAP has
+      { label: 'TRANSFER', sub: '', tap: shut(() => this.fcSwitchMint()),
+        path: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5' },
     ]).concat(!resettable ? [] : [
       { label: 'RESET', sub: '', tap: shut(() => this.fcReset()),
         path: 'M3.8 12a8.2 8.2 0 1 0 2.5-5.9M3.8 4.2v4.4h4.4' },
     ]).map((m) => Object.assign({ indent: '0', glow: 'none', ringInk: 'transparent', ringInk2: 'transparent', ring: 'none' }, m));
-    /* The row at the bottom, home's own row of three (21-render-values.js, `homeButtonsTwo`): SCAN and PASTE pay from the card,
-     * as SEND does with its camera (`fcOutOpen`, `fcOutPaste`), and SWAP moves money between its two balances (software 1.23,
-     * `fcSwap`). On a card of one currency SWAP is greyed and says why when pressed; offline it is greyed as home's is, and the
-     * swap says why itself. */
+    /* The row under DEPOSIT and WITHDRAW, home's own row of round-cornered buttons (21-render-values.js, `homeButtonsTwo`): SWAP,
+     * which moves money between a card's two balances (software 1.23, `fcSwap`), on a card of two currencies only. Offline it is
+     * greyed as home's is, and the swap says why itself. A card of one currency has no row: the room it took is the card's picture's.
+     * (SCAN and PASTE, which paid from the card as SEND does with its camera, `fcOutOpen` and `fcOutPaste`, were in this row and are
+     * not on this screen any more; the send screen's own card flows still reach them.) */
     const swappable = !!(fc && this.fcTwoUnits(fc));
     /* A card of two currencies swaps whenever either holds something: from the side with money into the other, which may be empty
      * (the card then holds both); where both hold, the swap screen's own from and to choose. Only a card that holds nothing at all is
      * offered SWAP greyed, with the reason when pressed. */
     const swapEarly = swappable && !!fc.bal && !(fc.bal.usd > 0) && !(fc.bal.sat > 0);
-    /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`): a card of one currency has
-     * SCAN and PASTE alone, the design's rule. */
-    const buttons = !usable ? [] : [
-      { label: 'SCAN', tap: () => this.fcOutOpen(), spin: 'rotate(180deg)', dim: '1', pasteHere: '',
-        path: 'M3.5 8.5v-3a2 2 0 0 1 2-2h3M15.5 3.5h3a2 2 0 0 1 2 2v3M20.5 15.5v3a2 2 0 0 1-2 2h-3M8.5 20.5h-3a2 2 0 0 1-2-2v-3M3.5 12h17' },
-      { label: 'PASTE', tap: () => this.fcOutPaste(), spin: 'none', dim: '1', pasteHere: '',
-        path: 'M9 4.5h6M8.2 6.5H6.4A1.9 1.9 0 0 0 4.5 8.4v10.2a1.9 1.9 0 0 0 1.9 1.9h11.2a1.9 1.9 0 0 0 1.9-1.9V8.4a1.9 1.9 0 0 0-1.9-1.9h-1.8M8.6 3.5h6.8v3H8.6z' },
-    ].concat(swappable ? [
+    /* SWAP is in the row for a card of two currencies only, as home's is for two pills (`homeButtonsTwo`). */
+    const buttons = !usable ? [] : [].concat(swappable ? [
       { label: 'SWAP', spin: 'none', pasteHere: '',
         dim: (swapEarly || this.offlineNow()) ? '0.38' : '1',
         tap: swapEarly ? () => this.toast('Put money on the card to swap.', true) : () => this.fcSwap(),
@@ -28608,8 +28760,12 @@ class Component extends DCLogic {
     return {
       isFlashcard: on,
       fcVerified: verified[0], fcVerifiedInk: verified[1], fcVerifiedShown: !!verified[0],
-      // the screen's title: the card's name on this phone (NAME CARD), FLASHCARD for a card with none, and with no card
-      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'FLASHCARD',
+      // the screen's title: the card's name on this phone (NAME CARD), ECASHCARD for a card with none, and with no card
+      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'ECASHCARD',
+      /* The room the card's picture leaves under itself for the lines that are under it (build/markup.html, `data-card-room`): the
+       * card stands upright and is as tall as the screen leaves room for, 160px at the least, and 26px less for each line under it
+       * (its 14px, and the 12px between). */
+      fcCardCap: (((limitShown && !!limitLine) ? 1 : 0) + (check[0] ? 1 : 0)) === 2 ? '44px' : ((limitShown && !!limitLine) || !!check[0]) ? '26px' : '0px',
       // which design the card on screen is drawn in (FC_DESIGNS)
       fcDesign: this.fcDesignOf(fc),
       // a card that has been read says what it is on its own face
@@ -28666,8 +28822,8 @@ class Component extends DCLogic {
       // what the card holds, in words: the pill's figure with its sign
       fcBalance: !fc ? '' : two ? '$ ' + this.usd(fc.bal.usd / 100) + ' \u00b7 \u20bf ' + this.group(fc.bal.sat)
         : usdCard ? '$ ' + this.usd(shown / 100) : '\u20bf ' + this.group(shown),
-      /* The limit line is on the card's own face, at its bottom left, where its design has BEARER at the bottom right (build/markup.html;
-       * with the card's badge above it where it has one), in dollars first as the balance is. */
+      /* The limit line is under the card, in the spaced capitals the card's face had it in (build/markup.html, `data-card-lines`; with
+       * the card's badge above it where it has one: Blocked, Locked), in dollars first as the balance is. */
       fcLimitShown: limitShown && !!limitLine,
       fcFaceLines: (limitShown && !!limitLine) || !!check[0],
       fcLimitLine: limitLine,
@@ -28686,7 +28842,7 @@ class Component extends DCLogic {
       fcCheck: check[0], fcCheckInk: check[1],
       fcHasCheck: !!check[0],
       // (what has been done with this card, on this phone, is HISTORY at the top of its menu, and its pill)
-      // the bottom row, SCAN / PASTE / SWAP, and the MENU at the top right, which is the close button where it has no rows
+      // the row under DEPOSIT and WITHDRAW, SWAP alone, and the MENU at the top right, which is the close button where it has no rows
       fcRowShown: buttons.length > 0,
       fcButtons: buttons,
       fcMenuShown: menu.length > 0,
@@ -28723,9 +28879,10 @@ class Component extends DCLogic {
         : 'Too many wrong PINs. Only the phone that loaded it can take its money back, after its date.',
       fcUsable: usable,
       fcTap: () => this.fcRead(),
+      // DEPOSIT: money onto the card, on SET AMOUNT ("How much to deposit?")
       fcAdd: () => this.fcAdd(),
-      // SEND: a payment from the card, on the send screen (`fcOutOpen`); the card's WITHDRAW is a row there
-      fcSend: () => this.fcOutOpen(),
+      // WITHDRAW: money off the card into this phone, straight to SET AMOUNT ("How much to withdraw?", with ALL OF IT under NEXT)
+      fcSend: () => this.fcWithdraw(),
       fcWithdraw: () => this.fcWithdraw(),
       fcSetUp: () => this.fcSetUp(),
       // HOME, the round button at the top left
@@ -28970,9 +29127,10 @@ class Component extends DCLogic {
    * nothing of it is repeated here, and no estimate of how long a tap will take:
    * the till cannot know the count, and the card does not say it.
    *
-   * The card in the animation is the card screen's own face (build/markup.html,
-   * `[data-card-face]`) at 250px: its design is the card's (FX1 is the picture,
-   * FL1 the drawn face, EL1 the animated beaker), FX1 until a card has been read at a till.
+   * The card in the animation is the card screen's own card (build/markup.html,
+   * `[data-card-portrait]`), standing up, 150px wide: its design is the card's (FX1 is
+   * the upright picture, img/card-fx1-portrait.jpg; FL1 the drawn face and EL1 the
+   * animated beaker, each turned a quarter to stand), FX1 until a card has been read at a till.
    */
   FC_TAP_FACE = '<div data-card-face style="width:100cqw;height:63.02cqw;border-radius:4.17cqw;box-sizing:border-box;position:relative;overflow:hidden;background:repeating-linear-gradient(92deg,rgba(255,255,255,.05) 0 1px,rgba(255,255,255,0) 1px 3px),repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,rgba(0,0,0,0) 1px 4px),radial-gradient(circle at 22% 8%,rgba(255,255,255,.14),rgba(255,255,255,0) 46%),linear-gradient(146deg,#3A3B3D 0%,#1B1C1E 38%,#101113 72%,#26272A 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6)"><div style="position:absolute;inset:3.52cqw;border-radius:2.34cqw;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5);pointer-events:none"></div><div style="position:absolute;inset:4.56cqw;border-radius:1.82cqw;background:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px);pointer-events:none"></div><div style="position:absolute;inset:6.25cqw;border-radius:1.04cqw;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,.5),rgba(0,0,0,0) 72%);pointer-events:none"></div><div style="position:absolute;left:50%;top:50%;width:31.25cqw;height:31.25cqw;transform:translate(-50%,-50%);border-radius:50%;background:linear-gradient(150deg,#2E2F32,#121315);box-shadow:inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;pointer-events:none"><svg viewBox="0 0 236.5 366" style="height:16.15cqw;width:10.43cqw;display:block;opacity:.5"><path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg></div><div style="position:absolute;left:9.92cqw;top:8.75cqw;width:15.18cqw;height:13.78cqw;border-radius:1.56cqw;background:linear-gradient(150deg,#E8E4D8,#A9A392);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;right:0;top:33%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;left:0;right:0;top:66%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:33%;width:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:66%;width:1px;background:rgba(70,68,60,.4)"></div></div><div style="position:absolute;right:7.81cqw;bottom:6.25cqw;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="font-size:5.99cqw;font-weight:800;line-height:1;color:rgba(255,255,255,.5)">₿</div><div style="font-family:Sora,sans-serif;font-size:2.86cqw;font-weight:600;letter-spacing:0.24em;color:rgba(255,255,255,.42)">BEARER</div></div>' + this.FC_EL1_FACE + '</div>';
   FC_TAP_GROUNDS = {
@@ -29152,9 +29310,13 @@ class Component extends DCLogic {
       + 'mix-blend-mode:soft-light;opacity:0;pointer-events:none;transition:opacity .35s ease"></div>'
       + '<div style="position:relative;width:100%;max-width:430px;margin:0 auto;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">'
       + '<div style="position:relative;flex:0 0 auto;height:269px;overflow:hidden">'
-      + '<div data-tap-card style="position:absolute;left:50%;top:40px;width:250px;margin-left:-125px;aspect-ratio:1.585;'
-      + 'border-radius:15px;overflow:hidden;animation:cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite">'
-      + '<div data-card-design="FX1" style="container-type:inline-size;width:100%">' + this.FC_TAP_FACE + '</div></div>'
+      // 150px wide and 54 by 85.6 (237.8px tall), the corners its 3.18mm to scale
+      + '<div data-tap-card style="position:absolute;left:50%;top:30px;width:150px;margin-left:-75px;aspect-ratio:54 / 85.6;'
+      + 'border-radius:8.83px;overflow:hidden;animation:cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite">'
+      + '<div data-card-portrait data-card-design="FX1" style="position:relative;width:100%;height:100%">'
+      + '<div data-card-picture style="position:absolute;inset:0;background:url(img/card-fx1-portrait.jpg) center/cover no-repeat"></div>'
+      + '<div data-card-turn style="position:absolute;left:50%;top:50%;width:237.8px;transform:translate(-50%,-50%) rotate(90deg);container-type:inline-size">'
+      + this.FC_TAP_FACE + '</div></div></div>'
       + '<svg viewBox="0 0 220 60" width="220" height="60" fill="none" style="position:absolute;left:50%;top:83px;margin-left:-110px;z-index:2;overflow:visible">'
       + '<g stroke="' + BLUE + '" stroke-width="4" stroke-linecap="round">'
       + wave('M70 40 Q110 14 150 40', 0) + wave('M52 34 Q110 -4 168 34', .25) + wave('M34 28 Q110 -22 186 28', .5)

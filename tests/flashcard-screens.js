@@ -164,12 +164,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcPill === true && v.fcPillMint === 'm.test' && v.fcMintName === 'M.TEST' && v.fcPillRows[0].big === '0' && v.fcBalance === '₿ 0' && v.fcFields === undefined,
      'and the screen says its mint and what it holds in home’s own pill', v.fcPillMint + ' | ' + v.fcBalance);
   ok(v.fcLimitShown === true && v.fcLimitLine === 'NO LIMIT' && v.fcDayShown === undefined && v.fcDayLeft === undefined, 'and under it, that it has no limit, with nothing to say of a day: the card screens have no daily limit', v.fcLimitLine);
-  ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE'
+  ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER' && v.fcMenuShown === true && v.fcCloseShown === false && v.fcRowShown === false && v.fcButtons.length === 0
      && histFirst(v) && v.fcResetVis === undefined && v.fcReset === undefined
      && typeof v.fcAdd === 'function' && typeof v.fcWithdraw === 'function' && typeof v.fcMenuItems[0].tap === 'function' && !hasReset(holder),
-     'with RECEIVE (ADD FUNDS, `fcAdd`) and SEND (its WITHDRAW is a row on the send screen), HISTORY first in its MENU and HOME at the top left, SCAN, PASTE and SWAP under them, and a MENU of HISTORY, LIMITS and CHANGE PIN: RESET is in the menu for a card of 1.17 and not for this older one');
-  ok(v.fcButtons.length === 2 && !v.fcButtons.some((k) => k.label === 'SWAP'),
-     'no SWAP on a card of one currency: SCAN and PASTE alone, as home with one pill', v.fcButtons.map((k) => k.label).join());
+     'with DEPOSIT (`fcAdd`) and WITHDRAW, HISTORY first in its MENU and HOME at the top left, no SCAN or PASTE, and a MENU of HISTORY, LIMITS, CHANGE PIN and TRANSFER: RESET is in the menu for a card of 1.17 and not for this older one', menuOf(v));
+  ok(v.fcButtons.length === 0 && !v.fcButtons.some((k) => k.label === 'SWAP'),
+     'no SWAP on a card of one currency, and no row at all: the room is the card’s picture’s', v.fcButtons.map((k) => k.label).join());
   ok(v.fcFaceLines === true && v.fcLimitShown === true, 'and the limit line is drawn on the card’s own face (it has the card’s badge above it only where there is one)');
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
@@ -959,7 +959,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const sizes = (k) => k.pieces.map((x) => x.amount).sort((a, b) => a - b).join();
     ok(shown.balance === real.balance && sizes(shown) === sizes(real) && shown.info.unspent === real.info.unspent && holder.state.fc.count === real.pieces.length,
        'the screen says what the card says when it is read: the card as the sheet read it after its change went on, whole pieces and all', shown.balance + ' / ' + real.balance);
-    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcMenuItems.length === 4 && !hasReset(holder),
+    ok(holder.state.fc.ownedHere === true && holder.state.fc.owner === true && vals(holder).fcMenuItems.length === 5 && !hasReset(holder),
        'and it is still this phone’s card: the owner’s buttons are there (the read after the change is not the owner’s read, and what only that says is kept)');
     // what is left comes off again, so that what follows has the card as it was
     c.tap();
@@ -1158,14 +1158,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await counted(holder, 1024, '1,024 to be on the card');
   ok(rc.state.record.limit === 0 && rc.balance() === 1024 && !card(holder), 'and the card has it, and no limit', String(rc.state.record.limit));
   const renewLine = (vv) => vv.fcNotes.filter((n) => /must be renewed by/.test(n.text))[0];
-  ok(!renewLine(vals(holder)), 'with thirty days to run there is nothing to renew');
+  ok(!renewLine(vals(holder)), 'with fourteen days to run there is nothing to renew');
   const real = H.window.Date.now.bind(H.window.Date);
   const realHere = Date.now;
   const move = (ms) => { H.window.Date.now = () => real() + ms; Date.now = () => realHere() + ms; };
   move(11 * 86400000);
   v = vals(holder);
-  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcMenuItems.length === 4,
-     'with under twenty days to run the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
+  ok(!!renewLine(v) && typeof renewLine(v).tap === 'function' && v.fcMenuItems.length === 5,
+     'with under ten days to run the screen carries a line to renew it, and by when', renewLine(v) && renewLine(v).text);
   rc.tap();
   const entriesBefore = history(H).map((e) => e.hash);
   holder.fcRenew();
@@ -1353,8 +1353,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       const up = R.window.document.getElementById('foxy-stage');
       ok(/white-space:\s*nowrap/.test(up.querySelector('h1').getAttribute('style')) && /font-size:\s*31px/.test(up.querySelector('h1').getAttribute('style'))
          && /font-size:\s*42px/.test(up.querySelector('[data-tap-amount]').getAttribute('style')) && up.querySelectorAll('[data-tap-wave]').length === 3
-         && /width:\s*250px/.test(up.querySelector('[data-tap-card]').getAttribute('style')) && up.querySelector('[data-tap-card] [data-card-face]'),
-         'the title is 31px on one line, the amount 42px, there are three waves, and the card is 250px wide and the card screen’s own face');
+         && /width:\s*150px/.test(up.querySelector('[data-tap-card]').getAttribute('style')) && /aspect-ratio:\s*54 \/ 85\.6/.test(up.querySelector('[data-tap-card]').getAttribute('style'))
+         && up.querySelector('[data-tap-card] [data-card-portrait] [data-card-picture]') && up.querySelector('[data-tap-card] [data-card-turn] [data-card-face]'),
+         'the title is 31px on one line, the amount 42px, there are three waves, and the card stands upright, 150px wide, the card screen’s own card');
       ok(/background-color: rgb\(191, 227, 236\)/.test(up.getAttribute('style')) && /color: rgb\(15, 42, 51\)/.test(up.getAttribute('style')),
          'the light ground is #BFE3EC with #0F2A33 ink');
 
@@ -1987,8 +1988,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'one tap gave the card its record and its owner and no PIN, and the person is on the card’s screen, told so in a line', owner.state.screen);
     await look();
     v = vals(owner);
-    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,ADD PIN,RESET' && histFirst(v) && v.fcLimitLine === 'NO LIMIT | NO PIN',
-       'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, with RESET last (a card of 1.17 and on), and HISTORY first in it', menuOf(v));
+    ok(v.fcUsable && !v.fcNew && v.fcCheck === '' && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,ADD PIN,TRANSFER,RESET' && histFirst(v) && v.fcLimitLine === 'NO LIMIT | NO PIN',
+       'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, then TRANSFER, with RESET last (a card of 1.17 and on), and HISTORY first in it', menuOf(v));
     owner.fcSetLimit();
     ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT',
        'LIMITS offers a card with no PIN its per second limit and no NO PIN LIMIT: there is nothing to pay without', limits(owner) && limits(owner).labels);
@@ -2052,7 +2053,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(n.state.pinState === 1 && n.state.pin === Buffer.from('4321').toString('hex') && n.state.noPinLimit === 0 && owner.state.fc.pinSet === true && owner.state.screen === 'flashcard',
        'one tap gave the card the PIN, with no allowance, and said so in a line', owner.toasts.slice(-1)[0]);
     v = vals(owner);
-    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
+    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
 
     /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
@@ -2305,9 +2306,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await setUpWith(owner, H2, n, '1234');
     await look(owner, H2, n);
     v = vals(owner);
-    ok(owner.state.fc.resetKnown === true && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && histFirst(v),
-       'a card of 1.17 read by its owner: HOME at the top left, and a MENU of HISTORY, LIMITS, CHANGE PIN and RESET', menuOf(v));
-    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcMenuItems.map((k) => k.path)).size === 5, 'each a row with its own drawing');
+    ok(owner.state.fc.resetKnown === true && menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER,RESET' && histFirst(v),
+       'a card of 1.17 read by its owner: HOME at the top left, and a MENU of HISTORY, LIMITS, CHANGE PIN, TRANSFER and RESET', menuOf(v));
+    ok(v.fcMenuItems.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)) && new Set(v.fcMenuItems.map((k) => k.path)).size === 6, 'each a row with its own drawing');
+    ok(v.fcMenuItems.find((k) => k.label === 'TRANSFER').path === 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
+       'TRANSFER has the swap arrows the app already draws for SWAP');
     ok(owner.state.fc.headers === true && v.fcBlockShown === undefined && v.fcBlockLine === undefined && VERIFIED_AT.test(v.fcVerified),
        'a card whose clock is block headers says no block under the time it was verified: the screen has no block line', v.fcVerified);
     const HASH = '00000000000000000001fa7ca83e1eb90d5a1865d8db9684f3f03ca64ccaec8a';
@@ -2360,7 +2363,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const old16 = newCard(H2, undefined, { format: 4, software: 16 });
     await setUpWith(owner, H2, old16, '1234');
     await look(owner, H2, old16);
-    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && menuOf(vals(owner)) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN', 'a card of software 1.16 has no RESET: its menu has HISTORY and the two it can offer');
+    ok(owner.state.fc.resetKnown === false && !hasReset(owner) && menuOf(vals(owner)) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER', 'a card of software 1.16 has no RESET: its menu has HISTORY, the two it can offer, and TRANSFER');
     owner.fcReset();
     ok(card(owner) && card(owner).title === 'NOT ON THIS CARD', 'and pressed anyway it says it cannot', card(owner) && card(owner).all);
     card(owner).press('CLOSE');
@@ -2622,72 +2625,55 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     }
   }
 
-  /* ---- the card's face: the limit line sits where BEARER does, mirrored ------------------------------------------------------
-   * At the bottom left of the card, with the margins BEARER has at the bottom right, in each design: FL1 is drawn in markup (BEARER's
-   * type and place are in it); FX1 is a picture (img/card-fx1.png), whose BEARER is measured here, from its pixels, and the line is set by
-   * what was measured (the markup's FX1 rules). Sizes are percentages of the card's width (`cqw`), so they hold at any width. A line's last
-   * baseline is above its box's bottom by (line-height / 2 - 0.34) em in Sora, whose line box is 0.97 em above its baseline and 0.29 below. */
+  /* ---- the card standing up, and the lines under it --------------------------------------------------------------------------
+   * The card on its screen stands upright, 54 by 85.6 with its 3.18mm corners to scale, as tall as the room the screen leaves it (160px
+   * at the least, 440px at the most, and 26px less for each line under it), and the lines that were on its face (its limit, and its badge:
+   * Blocked, Locked) are under it, in the spaced capitals the face had them in. FX1 is a picture drawn standing up
+   * (img/card-fx1-portrait.jpg, made by tools/make-card-portrait.py from img/card-fx1.png); every other design is its face turned a quarter. */
   {
-    const fs = require('fs'), path = require('path'), zlib = require('zlib');
+    const fs = require('fs'), path = require('path');
     const root = path.join(__dirname, '..');
     const markup = fs.readFileSync(path.join(root, 'build', 'markup.html'), 'utf8');
-    // the picture, decoded: an 8-bit palette PNG
-    const png = fs.readFileSync(path.join(root, 'Web', 'img', 'card-fx1.png'));
-    let at = 8, W = 0, H0 = 0, plte = null, trns = null; const idat = [];
-    while (at < png.length) {
-      const n = png.readUInt32BE(at), kind = png.toString('latin1', at + 4, at + 8), body = png.subarray(at + 8, at + 8 + n);
-      if (kind === 'IHDR') { W = body.readUInt32BE(0); H0 = body.readUInt32BE(4); if (body[8] !== 8 || body[9] !== 3 || body[12] !== 0) throw new Error('card-fx1.png is not an 8-bit palette picture'); }
-      if (kind === 'PLTE') plte = body; if (kind === 'tRNS') trns = body; if (kind === 'IDAT') idat.push(body);
-      at += 12 + n;
+    const room = /<div data-card-room style="([^"]*)">/.exec(markup);
+    const card = /<div data-card-portrait data-card-design="\{\{ fcDesign \}\}" style="([^"]*)">/.exec(markup);
+    ok(!!room && /container-type:size/.test(room[1]) && /flex:1 1 0%/.test(room[1]) && !!card
+       && card[1].indexOf('--ch:max(160px,min(calc(100cqh - {{ fcCardCap }}),440px,calc(100cqw * 85.6 / 54)))') >= 0
+       && /width:calc\(var\(--ch\) \* 54 \/ 85\.6\)/.test(card[1]) && /border-radius:calc\(var\(--ch\) \* 3\.18 \/ 85\.6\)/.test(card[1]),
+       'the card stands upright, 54 by 85.6 with its corners to scale, as tall as its room leaves it: 160px at least, 440px at most', card && card[1].slice(0, 120));
+    // the lines: after the card, not on its face, once each
+    const at = markup.indexOf('<div data-card-portrait data-card-design="{{ fcDesign }}"');
+    const lines = markup.indexOf('<div data-card-lines', at);
+    const face = markup.indexOf('<div data-card-face', at);
+    const limit = /<div data-card-limit style="([^"]*)">\{\{ fcLimitLine \}\}/.exec(markup);
+    ok(face > at && lines > face && markup.indexOf('</div></div></div><sc-if value="{{ fcFaceLines }}"><div data-card-lines', at) > 0
+       && markup.split('{{ fcLimitLine }}').length === 2 && !!limit
+       && /font-size:11\.5px/.test(limit[1]) && /font-weight:700/.test(limit[1]) && /letter-spacing:\.3em/.test(limit[1]) && /white-space:nowrap/.test(limit[1]),
+       'the limit line is under the card, once, in its spaced capitals, and not on its face any more', limit && limit[1]);
+    const badge = /<div data-card-badge style="([^"]*)">\{\{ fcCheck \}\}/.exec(markup);
+    ok(!!badge && /text-transform:uppercase/.test(badge[1]) && /letter-spacing:\.3em/.test(badge[1]) && /color:\{\{ fcCheckInk \}\}/.test(badge[1]),
+       'and its badge (Blocked, Locked) above it, under the card, the same capitals in its own ink');
+    // the designs: FX1's own upright picture; any other its face turned a quarter
+    ok(/\[data-card-portrait\]:not\(\[data-card-design="FX1"\]\) \[data-card-picture\]\{display:none\}/.test(markup)
+       && /\[data-card-portrait\]\[data-card-design="FX1"\] \[data-card-turn\]\{display:none\}/.test(markup)
+       && /<div data-card-picture style="[^"]*background:url\(img\/card-fx1-portrait\.jpg\) center\/cover no-repeat"><\/div>/.test(markup)
+       && /<div data-card-turn style="[^"]*width:var\(--ch\);transform:translate\(-50%,-50%\) rotate\(90deg\);container-type:inline-size">/.test(markup),
+       'FX1 is its own upright picture, and every other design is its face turned a quarter');
+    // the picture: a JPEG of 1080 by 1712 (54:85.6), from its frame header
+    const jpg = fs.readFileSync(path.join(root, 'Web', 'img', 'card-fx1-portrait.jpg'));
+    let i = 2, size = null;
+    while (i < jpg.length) {
+      const mark = jpg[i + 1], len = jpg.readUInt16BE(i + 2);
+      if (mark >= 0xc0 && mark <= 0xc2) { size = [jpg.readUInt16BE(i + 7), jpg.readUInt16BE(i + 5)]; break; }
+      i += 2 + len;
     }
-    const raw = zlib.inflateSync(Buffer.concat(idat)), stride = W + 1, rows = [];
-    for (let y = 0; y < H0; y++) {
-      const f = raw[y * stride], line = Buffer.from(raw.subarray(y * stride + 1, (y + 1) * stride)), up = y ? rows[y - 1] : Buffer.alloc(W);
-      for (let x = 0; x < W; x++) {
-        const a = x ? line[x - 1] : 0, b = up[x], c2 = x ? up[x - 1] : 0;
-        const p = a + b - c2, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c2);
-        line[x] = (line[x] + (f === 1 ? a : f === 2 ? b : f === 3 ? ((a + b) >> 1) : f === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c2) : 0)) & 255;
-      }
-      rows.push(line);
-    }
-    const dark = (x, y) => { const i = rows[y][x], r = plte[i * 3], g = plte[i * 3 + 1], b = plte[i * 3 + 2];
-      return (!trns || (trns[i] === undefined ? 255 : trns[i]) > 200) && 0.2126 * r + 0.7152 * g + 0.0722 * b < 60; };
-    // BEARER: the dark lettering below the bitcoin sign, in the lower right, inside the thin frame that runs round the picture's edge
-    let x0 = W, x1 = 0, y0 = H0, y1 = 0;
-    for (let y = Math.floor(H0 * 0.85); y < Math.floor(H0 * 0.95); y++) for (let x = Math.floor(W * 0.7); x < Math.floor(W * 0.95); x++) if (dark(x, y)) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-    const rightMargin = (W - 1 - x1) / W * 100, baseline = (H0 - 1 - y1) / W * 100, cap = (y1 - y0 + 1) / W * 100;     // % of the width, as cqw is
-    ok(x1 > x0 && Math.abs(rightMargin - 8.4) < 0.15 && Math.abs(baseline - 6.4) < 0.15 && Math.abs(cap - 1.83) < 0.1,
-       'BEARER, measured in img/card-fx1.png, ends 8.4% of the width from the right and has its baseline 6.4% up, 1.83% tall', [rightMargin, baseline, cap].map((n) => n.toFixed(2)).join(' / '));
-    // the markup's own: the wrapper's place, the line's type, and the FX1 rules
-    const num = (text, prop) => { const m = new RegExp('(?:^|[;"{ ])' + prop + ':\\s*(-?[0-9.]+)(?:cqw|em)?').exec(text); return m ? Number(m[1]) : NaN; };
-    const lines = /data-card-lines style="([^"]*)"/.exec(markup)[1];
-    const fl1 = /data-card-limit style="([^"]*)"/.exec(markup)[1];
-    const fx1Lines = /\[data-card-design="FX1"\] \[data-card-lines\]\{([^}]*)\}/.exec(markup)[1];
-    const fx1Limit = /\[data-card-design="FX1"\] \[data-card-limit\]\{([^}]*)\}/.exec(markup)[1];
-    const bearer = /font-family:Sora,sans-serif;font-size:([0-9.]+)cqw;font-weight:(\d+);letter-spacing:([0-9.]+)em;color:(rgba\(255,255,255,\.42\))">BEARER/.exec(markup);
-    const bearerRight = /position:absolute;right:([0-9.]+)cqw;bottom:([0-9.]+)cqw;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="font-size:5\.99cqw/.exec(markup);
-    const LH = num(fl1, 'line-height'), SIDE = 0.075;               // the line's height in em, and a capital's side bearing in Sora (em)
-    // FL1: BEARER is the line's own type; its ink ends 0.24 em past its box (tracking is added after the last letter)
-    const bFs = Number(bearer[1]), bRight = Number(bearerRight[1]) + 0.24 * bFs, bBase = Number(bearerRight[2]) + 0.29 * bFs;
-    const lFs = num(fl1, 'font-size'), lLeft = num(lines, 'left') + SIDE * lFs, lBase = num(lines, 'bottom') + (LH / 2 - 0.34) * lFs;
-    ok(lFs === bFs && /font-weight:600/.test(fl1) && num(fl1, 'letter-spacing') === Number(bearer[3]) && /color:rgba\(255,255,255,\.42\)/.test(fl1) && Number(bearer[2]) === 600,
-       'FL1: the line is in BEARER’s own type: its size, weight, tracking and colour', JSON.stringify([lFs, bFs]));
-    ok(Math.abs(lLeft - bRight) < 0.2 && Math.abs(lBase - bBase) < 0.15,
-       'FL1: its first letter is as far in from the left as BEARER’s last is from the right, and its baseline is level with BEARER’s', [lLeft, bRight, lBase, bBase].map((n) => n.toFixed(2)).join(' / '));
-    // FX1: the picture's measured margins, and its ink and lettering
-    const xFs = num(fx1Limit, 'font-size'), xLeft = num(fx1Lines, 'left') + SIDE * xFs, xBase = num(fx1Lines, 'bottom') + (LH / 2 - 0.34) * xFs;
-    ok(Math.abs(xLeft - rightMargin) < 0.2 && Math.abs(xBase - baseline) < 0.1,
-       'FX1: the line is as far in from the left as the picture’s BEARER is from the right, and level with it', [xLeft, rightMargin, xBase, baseline].map((n) => n.toFixed(2)).join(' / '));
-    ok(Math.abs(xFs * 0.733 - cap) < 0.12 && /font-weight:700/.test(fx1Limit) && num(fx1Limit, 'letter-spacing') === 0.3 && /color:#1A0A04/i.test(fx1Limit),
-       'FX1: in the picture’s ink (dark brown), at the size that gives BEARER’s height (Sora’s capitals are 0.733 em), bold, and tracked as BEARER is', xFs + ' -> ' + (xFs * 0.733).toFixed(2) + ' vs ' + cap.toFixed(2));
-    // and it cannot reach BEARER: its box ends well left of where BEARER begins in either design
-    const room = num(lines, 'max-width');
-    ok(num(lines, 'left') + room < 100 - 8.4 - 15.8 && num(lines, 'left') + room < 100 - Number(bearerRight[1]) - 5.533 * bFs,
-       'a long line wraps within ' + room + '% of the width, and is stopped well before BEARER in both designs', String(num(lines, 'left') + room));
-    // the pill under the card has no limit line any more, and the card’s face has it
+    ok(jpg[0] === 0xff && jpg[1] === 0xd8 && size && size[0] === 1080 && size[1] === 1712, 'img/card-fx1-portrait.jpg is 1080 by 1712, the card’s own proportions', JSON.stringify(size));
+    // the pill under the card has no limit line
     const pill = markup.slice(markup.indexOf('{{ fcPillRows }}'), markup.indexOf('</sc-for>', markup.indexOf('{{ fcPillRows }}')));
-    ok(pill.indexOf('fcLimitLine') < 0 && markup.indexOf('{{ fcLimitLine }}') > markup.indexOf('data-card-face') && markup.split('{{ fcLimitLine }}').length === 2,
-       'the limit line is drawn once, on the card’s face, and no longer in the pill under it');
+    ok(pill.indexOf('fcLimitLine') < 0, 'the pill under the card has no limit line');
+    // DEPOSIT and WITHDRAW, and no SCAN or PASTE on the card's screen
+    const screen = markup.slice(markup.indexOf('<sc-if value="{{ isFlashcard }}">\n<div data-template="list"'), markup.indexOf('<sc-if value="{{ isFieldLog }}">'));
+    ok(/>DEPOSIT<\/div>/.test(screen) && />WITHDRAW<\/div>/.test(screen) && !/>RECEIVE<\/div>/.test(screen) && !/>SEND<\/div>/.test(screen) && />CONNECT TO PHONE<\/div>/.test(screen),
+       'the card’s two buttons read DEPOSIT and WITHDRAW, and its guest button CONNECT TO PHONE');
     // HOME is the round button at the top left, HISTORY in the card's menu, and RESET is no longer there
     ok(/sc-camel-on-click="\{\{ fcHome \}\}" role="button" aria-label="Home" data-home-button="1" style="position:absolute;left:22px;top:56px/.test(markup) && markup.indexOf('{{ fcHistory }}') < 0
        && markup.indexOf('fcResetVis') < 0 && markup.indexOf('{{ fcReset }}') < 0,
@@ -3221,7 +3207,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     v = vals(a);
     ok(v.fcTitle === 'LUNCH' && v.fcVerifiedShown, 'the card screen’s title is its name, the Verified line under it', v.fcTitle + ' / ' + v.fcVerified);
     a.setState({ fc: { key: stranger, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0 } });
-    ok(vals(a).fcTitle === 'FLASHCARD', 'a card with no name keeps FLASHCARD');
+    ok(vals(a).fcTitle === 'ECASHCARD', 'a card with no name keeps ECASHCARD');
     // home's history rows, where a card is named (16-history-lists.js `txWho`)
     const hist = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '16-history-lists.js'), 'utf8');
     const lift = (sig) => { const from = hist.indexOf('\n  ' + sig) + 1; return hist.slice(from, hist.indexOf('\n  }\n', from) + 4); };

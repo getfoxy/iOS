@@ -264,7 +264,7 @@
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
         out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub, sub2: 'You pay the mint\u2019s fees' } : { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FLASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
     /* Once the quote is in: can the balance cover the payout and its fees?
      *

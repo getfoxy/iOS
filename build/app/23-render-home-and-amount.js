@@ -567,7 +567,7 @@
         ? 'From ' + (this.mintNameOf(s.trFrom) || 'that mint') + ' \u00b7 \u20bf '
           + this.group(this.trFromSats()) + ' there'
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
-        : s.flow === 'cardAdd' ? 'How much to add to your card?'
+        : s.flow === 'cardAdd' ? 'How much to deposit?'
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')

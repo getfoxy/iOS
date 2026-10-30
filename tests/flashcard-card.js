@@ -139,8 +139,8 @@ function makeCard(opts) {
    *        (6985), with the holder's say (the owner's grant, or with no owner the history held for: 6982), and refuses it with no PIN (6A80);
    *        RESET_CARD with P1 = 1 and P2 = an opening's number gives that opening up (the owner's proof over "FoxyCard/reset", the nonce and
    *        the number; with no owner the number alone under the PIN and the hold), writing bit 4 (0x10) of the tap's log flags. */
-  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22 || o.software === 23);
-  const GUESTS = PIN_FIRST && (o.software === 22 || o.software === 23);
+  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22 || o.software === 23 || o.software === 24);
+  const GUESTS = PIN_FIRST && (o.software === 22 || o.software === 23 || o.software === 24);
   /* 1.23 (`UNITS`, asked for by name: `software: 23`), dollars and sats on one card at its one mint (the card repository's
    * docs/FOXY-CARD-KEYSETS.md, held to applet/src/main/java/me/flashapp/cashu/CashuApplet.java and UnitsTest.java):
    *   - the book: a table of six entries (a keyset's eight bytes and a state byte: 40 in use, 80 the mark, bit 0 the unit code), the
@@ -161,10 +161,14 @@ function makeCard(opts) {
    *     the head) and P1 = 3 (each receipt and its unit); a log entry's bit 5 (20) the other unit, a tap of both units two entries;
    *   - the reclaim (entries nothing on the card names, let go) at CLEAR_SPENT, at a load that finds the table full, and at SET_CARD,
    *     which takes a unit of 00 or 01 only (6A80) and lets drafted openings go first. */
-  const UNITS = PIN_FIRST && o.software === 23;
+  const UNITS = PIN_FIRST && (o.software === 23 || o.software === 24);
+  /* 1.24 (`CLAIM_FULL`, asked for by name: `software: 24`): 1.23, and a card with no owner is claimed (SET_OWNER under the PIN, the
+   * same six askings) with pieces on it as well as empty; only change owed to it refuses the claim (6A8D at every asking, nothing
+   * counted). SET_CARD still wants nothing unspent and nothing owed, and no payment follows a claim in its tap (6985), as in 1.21. */
+  const CLAIM_FULL = UNITS && o.software === 24;
   // the askings a claim and a history are held for (the applet's CLAIM_ASKINGS and HISTORY_ASKINGS)
   const CLAIM_ASKINGS = 6, HISTORY_ASKINGS = 10;
-  const VERSION = UNITS ? 23 : GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const VERSION = CLAIM_FULL ? 24 : UNITS ? 23 : GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -1293,7 +1297,8 @@ function makeCard(opts) {
           if (!pinGiven()) return '6982';
           if (s.tapPaid) return '6985';
         }
-        if (unspent()) return '6a8d';
+        // (1.24: a claim, with no owner yet, over pieces on the card; change owed to it still refuses it, and nothing is counted)
+        if (CLAIM_FULL && !s.owner ? s.openings.some((x) => x.state === 'pending') : unspent()) return '6a8d';
         if (key.length !== 65) return '6700';
         if (key[0] !== 4) return '6a80';
         if (PIN_FIRST && !s.owner) {

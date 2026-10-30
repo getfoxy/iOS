@@ -3,8 +3,9 @@
  *
  *     node tests/flashcard-send.js
  *
- * The card's screen has RECEIVE (what ADD FUNDS was) and SEND (where WITHDRAW was). SEND opens the app's own SEND
- * MONEY screen in card mode: the camera as ever, the card's WITHDRAW at the top of the rows, PASTE, CONTACTS and TYPE,
+ * The card's screen has DEPOSIT and WITHDRAW, and WITHDRAW goes straight to SET AMOUNT ("How much to withdraw?"). The card
+ * mode of the app's own SEND MONEY screen is no longer on the card's screen (it was SEND's, and SCAN's and PASTE's, until
+ * 2026-10-30); it is kept, and opened here by its own entry (`fcOutOpen`), as the other screens of the app may yet open it: the camera as ever, the card's WITHDRAW at the top of the rows, PASTE, CONTACTS and TYPE,
  * and no SEND ECASH or FLASHCARD. What is read goes to the app's own confirmation, with a FROM / FLASHCARD row and NEXT
  * for PAY; NEXT reads the payment's total (its amount and the fee the confirmation showed) off the card exactly as a
  * till reads a card that pays it, and the pieces the card pays are held for that payment and melted, those and no others.
@@ -129,21 +130,26 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
       const i = CARD_SCREEN.indexOf('sc-camel-on-click="{{ ' + handler + ' }}"');
       return i < 0 ? '' : (/white-space:nowrap">([A-Z ]+)<\/div><\/div>/.exec(CARD_SCREEN.slice(i, i + 3000)) || [])[1];
     };
-    ok(tile('fcAdd') === 'RECEIVE' && tile('fcSend') === 'SEND' && !tile('fcWithdraw'),
-       'the card’s two tiles read RECEIVE (what ADD FUNDS did) and SEND, which takes WITHDRAW’s place', tile('fcAdd') + ' | ' + tile('fcSend'));
-    ok(!/>ADD FUNDS</.test(CARD_SCREEN) && !/nowrap">WITHDRAW</.test(CARD_SCREEN), 'and nothing on the card’s screen says ADD FUNDS or WITHDRAW any more');
+    ok(tile('fcAdd') === 'DEPOSIT' && tile('fcSend') === 'WITHDRAW' && !tile('fcWithdraw'),
+       'the card’s two tiles read DEPOSIT and WITHDRAW', tile('fcAdd') + ' | ' + tile('fcSend'));
+    ok(!/>ADD FUNDS</.test(CARD_SCREEN) && !/>RECEIVE</.test(CARD_SCREEN) && !/nowrap">SEND</.test(CARD_SCREEN), 'and nothing on the card’s screen says ADD FUNDS, RECEIVE or SEND any more');
     const v = vals(holder);
-    ok(typeof v.fcSend === 'function' && typeof v.fcAdd === 'function', 'SEND has its handler, and RECEIVE keeps ADD FUNDS’s');
+    ok(typeof v.fcSend === 'function' && typeof v.fcAdd === 'function', 'WITHDRAW has its handler, and DEPOSIT keeps ADD FUNDS’s');
+    v.fcSend();
+    ok(holder.state.screen === 'amount' && holder.state.flow === 'cardWd' && holder.state.stack[holder.state.stack.length - 1] === 'flashcard',
+       'WITHDRAW goes straight to SET AMOUNT, over the card’s screen', JSON.stringify({ screen: holder.state.screen, flow: holder.state.flow }));
+    holder.back();
+    update();
   }
 
-  /* ---- 2: SEND opens SEND MONEY in card mode --------------------------------------------------------------------- */
+  /* ---- 2: the card's SEND MONEY, in card mode (`fcOutOpen`) --------------------------------------------------------------------- */
   {
     camera.length = 0;
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     const s = holder.state;
     ok(s.screen === 'sendHow' && s.sendFrom === 'card' && s.flow === 'send' && s.stack[s.stack.length - 1] === 'flashcard' && holder.fcOutMode(),
-       'SEND opens the send screen, in card mode, over the card’s screen', JSON.stringify({ screen: s.screen, from: s.sendFrom, stack: s.stack }));
+       'it opens the send screen, in card mode, over the card’s screen', JSON.stringify({ screen: s.screen, from: s.sendFrom, stack: s.stack }));
     const v = sendVals();
     ok(v.clWdOn === true && v.clEcashOn === false && v.clCardOn === false && v.clPasteOn && v.clContactsOn && v.clTypeOn && typeof v.goWithdraw === 'function',
        'its values: WITHDRAW on, SEND ECASH and FLASHCARD off, PASTE, CONTACTS and TYPE as ever');
@@ -163,8 +169,8 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const real = holder.state.fc;
     holder.state.fc = Object.assign({}, real, { balance: 0 });
     holder.toasts.length = 0;
-    vals(holder).fcSend();
-    ok(holder.state.screen === 'flashcard' && holder.toasts.indexOf('There is nothing on this card.') >= 0, 'SEND on a card with nothing on it says so, and goes nowhere');
+    holder.fcOutOpen();
+    ok(holder.state.screen === 'flashcard' && holder.toasts.indexOf('There is nothing on this card.') >= 0, 'on a card with nothing on it it says so, and goes nowhere');
     holder.state.fc = real;
     // home's own SEND is this phone's, with SEND ECASH and FLASHCARD and no WITHDRAW
     holder.setState({ screen: 'home', stack: [] });
@@ -172,14 +178,14 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
     const v = sendVals();
-    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FLASHCARD', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE and FLASHCARD', rowsShown(v).join());
+    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE and FLASHCARD', rowsShown(v).join());
   }
 
   /* ---- 4: an invoice pasted in card mode, to the confirmation ------------------------------------------------- */
   let spec;
   {
     await toCard();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(500));
     spec = holder.confirmSpec();
@@ -187,7 +193,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const from = spec.rows.find((r) => r.label === 'FROM') || {};
     ok(holder.state.screen === 'sendConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(), 'a pasted invoice reaches its confirmation, still in card mode');
     // (the design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
-    ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'FLASHCARD' && from.sub === '',
+    ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'ECASHCARD' && from.sub === '',
        'with FROM / FLASHCARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
     const feeRow = spec.rows.find((r) => r.label === 'FEE') || {};
     ok(spec.cta === 'NEXT' && !spec.ctaBusy && feeRow.value === '~₿ 10' && feeRow.sub === '' && !feeRow.sub2Shown && spec.secondary.label === 'ADD A NOTE',
@@ -234,7 +240,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(holder.state.sendPhase === 'settled' && !card(holder), 'the person sees PAYMENT SENT, with nothing over it');
     // what HISTORY says of it: the app's own words for the entry (16-history-lists.js, 26-render-history-and-contacts.js)
     const appText = ['16-history-lists.js', '26-render-history-and-contacts.js'].map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
-    ok(/'paid from card': 'Paid from card'/.test(appText) && /fromCard: t\.fromCard \|\| ''/.test(appText) && /t\.fromCard && t\.dir === 'out'[^\n]*'Paid from the Flashcard'/.test(appText),
+    ok(/'paid from card': 'Paid from card'/.test(appText) && /fromCard: t\.fromCard \|\| ''/.test(appText) && /t\.fromCard && t\.dir === 'out'[^\n]*'Paid from the EcashCard'/.test(appText),
        'and HISTORY says it was paid from the Flashcard, under the payee’s name as every payment has');
   }
 
@@ -242,7 +248,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   {
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(300));
     H.fate = (m) => (/\/v1\/melt\/bolt11$/.test(String(m.url)) ? '400\n' + JSON.stringify({ code: 20000, detail: 'no route to that node' }) : addressServer(m));
@@ -271,7 +277,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   {
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(250));
     // the confirmation's quote is a few seconds from its end, and the mint now refuses the invoice
@@ -294,7 +300,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await H.W.cardSetLimit(c, { sats: 200, tap: true });
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(400));
     H.sheet.length = 0;
@@ -308,7 +314,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await H.W.cardSetLimit(c, { sats: 10, tap: true });
     await toCard();
     const now = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(600));
     holder.confirmSpec().go();
@@ -327,7 +333,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     cp.tap();
     await H.W.cardAdd(cp, { sats: 1000, owner: true });
     await toCard(cp);
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(200));
     holder.confirmSpec().go();
@@ -354,7 +360,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     other.tap();
     await H.W.cardAdd(other, { sats: 600, owner: true });
     await toCard();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(100));
     H.nfc = other;
@@ -372,7 +378,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await toCard();
     const before = c.balance();
     holder.price = 100000;
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     sendVals().pickType();
     update();
@@ -390,7 +396,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await until('the address to be looked up and its fee quoted', () => holder.state.quotedFee != null);
     update();
     const s2 = holder.confirmSpec();
-    ok(s2.cta === 'NEXT' && s2.rows.some((r) => r.label === 'FROM' && r.value === 'FLASHCARD'), 'its confirmation has the FROM row and NEXT', s2.cta);
+    ok(s2.cta === 'NEXT' && s2.rows.some((r) => r.label === 'FROM' && r.value === 'ECASHCARD'), 'its confirmation has the FROM row and NEXT', s2.cta);
     s2.go();
     await sentDone();
     await tapsDone();
@@ -404,7 +410,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
    * (A mint that pays on chain is paid from the card there: tests/flashcard-onchain.js.) */
   {
     await toCard();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     holder.acceptTarget('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq');
     await until('the mint to be asked whether it pays on chain', () => !!card(holder));
@@ -425,7 +431,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   {
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(150));
     holder.back();
@@ -433,14 +439,14 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.back();
     update();
     ok(holder.state.screen === 'flashcard' && holder.state.sendFrom === '', 'back twice from the confirmation is the card’s screen, out of card mode');
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     holder.setState({ screen: 'home', stack: [] });
     update();
     ok(holder.state.sendFrom === '' && !holder.fcOutMode(), 'home from SEND MONEY ends card mode');
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
-    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FLASHCARD', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
+    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
     ok(c.balance() === before && H.W.cardOwed().length === 0 && H.W.cardTaken().length === 0 && outsHeld().length === 0, 'nothing came off the card');
   }
 
@@ -521,7 +527,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   {
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(220));
     H.sheet.length = 0;
@@ -545,7 +551,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   {
     await toCard();
     const before = c.balance();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(240));
     // the confirmation's quote is about to end, and the mint's new one wants more fee than the card was charged for
@@ -679,7 +685,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
    *           never a payment from this phone's balance under a confirmation that says FROM FLASHCARD --------------------- */
   {
     await toCard();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     await pasted(invoice(90));
     const pile = await H.W.balanceSats();
@@ -740,7 +746,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const onCard = c.balance();
     await holder.refreshBalance();
     const had = await H.W.balanceSats();
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     update();
     sendVals().goWithdraw();
     update();
@@ -782,7 +788,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await until('the card to be read', () => !!two.state.fc && two.state.fc.key === k.key && two.state.fc.check !== 'asking');
     await settle();
     const before = k.balance();
-    vals(two).fcSend();
+    two.fcOutOpen();
     upd();
     two._quotedFor = null;
     two.acceptTarget(invoice(400));
@@ -794,7 +800,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const sp = two.confirmSpec();
     const labels = sp.rows.map((r) => r.label);
     ok(!sp.wallet && labels.indexOf('RATE') < 0 && labels.indexOf('PAYING FROM') < 0 && sp.cta === 'NEXT'
-       && sp.rows.some((r) => r.label === 'FROM' && r.value === 'FLASHCARD'),
+       && sp.rows.some((r) => r.label === 'FROM' && r.value === 'ECASHCARD'),
        'SEND from the card at a two-unit mint: FROM FLASHCARD and NEXT, with no WALLET button and no RATE row', labels.join() + ' | ' + sp.cta);
     ok(!two.state.feeQ && !!two._feeQuote && (two._feeQuote.unit === undefined || two._feeQuote.unit === 'sat'),
        'and its fee was asked once, in sats: no quote of both balances', JSON.stringify(two._feeQuote && { unit: two._feeQuote.unit, fee: two._feeQuote.feeReserve }));

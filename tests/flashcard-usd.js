@@ -192,15 +192,16 @@ async function pay(R, card, asks, o) {
        '2: a load made at the far mint repoints the card first, and its unit stays dollars', JSON.stringify({ mint: card.state.record.mint, unit: card.state.record.unit, amount: wrote.amount, sats: wrote.sats }));
     await two.W.connect(MINT, null, null, { remember: true });
     booksGood('2', two);
-    // and to a mint with no dollars: refused, nothing written
+    // and to a mint with no dollars (TRANSFER of an empty card): it holds bitcoin there, which its record and this phone's row say
     const one2 = await funded({ units: ['sat', 'usd'], second: true }, 1000);
     const c2 = newCard(one2, undefined, { format: 4 });
     await one2.W.cardSetUp(c2, { pin: '1234', unit: 'usd' });
     await one2.W.connect(MINT2, null, null, { remember: false });
     c2.tap();
     c2.sent.length = 0;
-    const r = await why(one2.W.cardRepoint(c2));
-    ok(r === 'no-dollars-here' && c2.state.record.mint === MINT && count(c2, '32') === 0, '2: an empty dollar card is not moved to a mint with no dollars', r);
+    const moved2 = await one2.W.cardRepoint(c2);
+    ok(c2.state.record.mint === MINT2 && c2.state.record.unit === 0 && moved2.record.unit === 'sat' && count(c2, '32') === 1 && one2.W.cardsKnown()[c2.key].unit === 'sat',
+       '2: an empty dollar card moved to a mint with no dollars holds bitcoin there', JSON.stringify({ mint: c2.state.record.mint, unit: c2.state.record.unit }));
     await one2.W.connect(MINT, null, null, { remember: true });
     booksGood('2b', one2);
   }
@@ -432,8 +433,8 @@ async function pay(R, card, asks, o) {
     card.tap();
     const renewed = await H.W.cardRenew(card, { pin: '1234' });
     const dates = Array.from(new Set(card.state.slots.filter((x) => x.status === 1).map((x) => parseInt(x.data.substr(154, 8), 16))));
-    ok(renewed.unit === 'usd' && card.balance() > 0 && card.balance() <= onCard - 500 && dates.length === 1 && Math.abs(dates[0] - (Date.now() / 1000 + 30 * 86400)) < 600,
-       '10: renewed in one tap: its dollars back on with a date thirty days off', JSON.stringify({ balance: card.balance(), dates }));
+    ok(renewed.unit === 'usd' && card.balance() > 0 && card.balance() <= onCard - 500 && dates.length === 1 && Math.abs(dates[0] - (Date.now() / 1000 + 14 * 86400)) < 600,
+       '10: renewed in one tap: its dollars back on with a date fourteen days off', JSON.stringify({ balance: card.balance(), dates }));
     card.tap();
     const all = await H.W.cardWithdraw(card, { pin: '1234' });
     ok(all.unit === 'usd' && all.amount > 0 && all.sats === 0 && card.balance() === 0, '10: all of it off', JSON.stringify({ amount: all.amount }));

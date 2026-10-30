@@ -18,7 +18,7 @@ const ok = (good, name, detail) => {
   if (!good) failed += 1;
 };
 const bal = (c) => c.W.balanceSats();
-// past a piece's date: a card's money is put on for thirty days
+// past a piece's date: a card's money is put on for fourteen days (thirty, before), so a month is past any piece's
 const MONTH = 31 * 24 * 3600 * 1000;
 function later(c, ms) {
   const real = c.window.Date.now.bind(c.window.Date);
@@ -107,7 +107,7 @@ function later(c, ms) {
     c3.tap();
     await H.W.cardAdd(c3, { sats: 1024, pin: '1234' });
     const date0 = H.W.cardsList().filter((c) => c.key === c3.key)[0].date;
-    const undoH = later(H, 29.5 * DAY), undoR = later(R, 29.5 * DAY);
+    const undoH = later(H, 13.5 * DAY), undoR = later(R, 13.5 * DAY);
     c3.tap();
     const looked = await H.W.cardLook(c3);
     ok(H.W.cardIsMine(looked) === true && R.W.cardIsMine(looked) === false, 'a card knows no owner, and each phone knows whether it is its own');
@@ -117,8 +117,8 @@ function later(c, ms) {
     c3.tap();
     const renewed = await H.W.cardRenew(c3, { pin: '1234' });
     const date1 = H.W.cardsList().filter((c) => c.key === c3.key)[0].date;
-    ok(renewed.sats === 1024 && renewed.left === 0 && c3.balance() === 1024 && date1 > date0 + 25 * 24 * 3600,
-       'its own phone renews it in one tap: the same 1,024 on the card, dated thirty days on', renewed.sats + ' ' + (date1 - date0));
+    ok(renewed.sats === 1024 && renewed.left === 0 && c3.balance() === 1024 && date1 > date0 + 13 * 24 * 3600 && date1 < date0 + 14 * 24 * 3600,
+       'its own phone renews it in one tap: the same 1,024 on the card, dated fourteen days on from the renewal', renewed.sats + ' ' + (date1 - date0));
     c3.tap();
     const p3 = await R.W.cardPay(c3, { sats: 100, pin: '1234' });
     ok(p3.sats === 100, 'and renewed, it pays');
@@ -277,7 +277,7 @@ function later(c, ms) {
   }
 
   /* ---- a card loaded on two dates -----------------------------------------
-   * A top-up eleven days on is dated thirty days from then: on the first date only the first load can be taken back. That part is
+   * A top-up five days on is dated fourteen days from then: on the first date only the first load can be taken back. That part is
    * taken back, and the rest stays the card's, offered again on its own date: the row is not marked taken back while something
    * is left for later (it once was, and RESTORE CARD then said "Restored to this phone" and never offered the rest). */
   {
@@ -286,15 +286,15 @@ function later(c, ms) {
     await H.W.cardSetUp(c7, { pin: '1234', recoverable: true });
     c7.tap();
     await H.W.cardAdd(c7, { sats: 256, pin: '1234' });
-    const undo7a = later(H, 11 * DAY);
+    const undo7a = later(H, 5 * DAY);
     c7.tap();
     await H.W.cardAdd(c7, { sats: 128, pin: '1234' });
     undo7a();
     const row0 = H.W.cardsList().filter((c) => c.key === c7.key)[0];
-    ok(row0 && row0.amount === 384 && row0.first < row0.date - 10 * 24 * 3600, 'loaded on two dates eleven days apart, the card’s row has both',
+    ok(row0 && row0.amount === 384 && row0.first < row0.date - 4 * 24 * 3600, 'loaded on two dates five days apart, the card’s row has both',
        JSON.stringify(row0 && [row0.amount, row0.first, row0.date]));
     const b7 = await bal(H);
-    const undo7b = later(H, MONTH);
+    const undo7b = later(H, 15 * DAY);
     const first = await H.W.cardTakeBack(c7.key);
     const row1 = H.W.cardsList().filter((c) => c.key === c7.key)[0];
     ok(first.amount === 256 && first.later === 128 && (await bal(H)) === b7 + 256, 'on the first date, the first load comes back and the rest is said to be for later',
@@ -310,7 +310,7 @@ function later(c, ms) {
     ok(!!r7 && !r7.ready && r7.top === 'Unlocks in' && r7.sub !== 'Restored to this phone', 'RESTORE CARD shows it locked until the rest’s date',
        r7 && [r7.sub, r7.top, r7.bottom].join(' | '));
     undo7b();
-    const undo7c = later(H, MONTH + 11 * DAY);
+    const undo7c = later(H, 20 * DAY);
     const rest = await H.W.cardTakeBack(c7.key);
     undo7c();
     ok(rest.amount === 128 && !(rest.later > 0) && (await bal(H)) === b7 + 384, 'on its own date the rest comes back too', JSON.stringify(rest));
@@ -319,26 +319,30 @@ function later(c, ms) {
   }
 
   /* ---- the hold and its margins ------------------------------------------
-   * One figure, the hold, that a local test build may shorten (`window.__foxyCardHoldSecs`); at the thirty days every margin is
-   * what it was before it scaled: ahead 30 d, a receiver offline 7 d, online 24 h, the card's own phone 10 min, a top-up's date
-   * kept while 20 d off, renewal offered with 20 d left. */
+   * One figure, the hold, that a local test build may shorten (`window.__foxyCardHoldSecs`). At the fourteen days: ahead 14 d, a
+   * receiver offline 7 d (a week, as it was at thirty), online 24 h, the card's own phone 10 min, a top-up's date kept while 10 d off,
+   * and renewal offered with 10 d left: above the week an offline receiver needs, so a card is renewed before such a phone refuses
+   * it. A shortened hold scales every margin, the offline one included (seven of the fourteen days), so the test build behaves as
+   * the fourteen days do. */
   {
     const D = 24 * 3600;
     const m = H.W.cardMargins();
-    ok(m.hold === 30 * D && m.ahead === 30 * D && m.offline === 7 * D && m.online === D && m.own === 600 && m.reuse === 20 * D,
-       'at the thirty days the margins are as they were', JSON.stringify(m));
+    ok(m.hold === 14 * D && m.ahead === 14 * D && m.offline === 7 * D && m.online === D && m.own === 600 && m.reuse === 10 * D,
+       'at the fourteen days: ahead 14 d, offline 7 d, online a day, the owner ten minutes, a date kept while 10 d off', JSON.stringify(m));
+    ok(H.W.cardRefreshLeft() === 10 * D, 'the owner renews with ten days left', String(H.W.cardRefreshLeft()));
     const a = appOn(H, { screen: 'home', stack: [] });
-    ok(a.fcRenewSecs() === 20 * D && a.fcOwnSecs() === 600, 'and the app offers renewal with twenty days left, ten minutes before the date at the latest',
-       a.fcRenewSecs() + ' / ' + a.fcOwnSecs());
+    ok(a.fcRenewSecs() === 10 * D && a.fcOwnSecs() === 600 && a.fcHoldDays() === 14, 'and the app offers renewal with ten days left, ten minutes before the date at the latest, for 14 days',
+       a.fcRenewSecs() + ' / ' + a.fcOwnSecs() + ' / ' + a.fcHoldDays());
+    ok(a.fcRenewSecs() > m.offline, 'renewal comes before a phone with no route would refuse the card: ten days left is above the week it needs');
     H.window.__foxyCardHoldSecs = 600;
     const s = H.W.cardMargins();
-    ok(s.hold === 600 && s.ahead === 600 && s.offline === 140 && s.online === 20 && s.own === 30 && s.reuse === 400,
-       'a ten-minute hold scales them all', JSON.stringify(s));
-    ok(a.fcRenewSecs() === 400 && a.fcOwnSecs() === 30 && a.fcRenewSecs() > a.fcOwnSecs(),
-       'and the app’s renewal with it, so a short hold is offered its renewal too (it once kept ten minutes, longer than such a hold’s renewal window)',
+    ok(s.hold === 600 && s.ahead === 600 && s.offline === 300 && s.online === 43 && s.own === 30 && s.reuse === 429,
+       'a ten-minute hold scales them all, the offline margin to half of it as the week is half of fourteen days', JSON.stringify(s));
+    ok(a.fcRenewSecs() === 429 && a.fcOwnSecs() === 30 && a.fcRenewSecs() > a.fcOwnSecs() && a.fcRenewSecs() > s.offline,
+       'and the app’s renewal with it, above the offline margin there too (it once kept ten minutes, longer than such a hold’s renewal window)',
        a.fcRenewSecs() + ' / ' + a.fcOwnSecs());
     delete H.window.__foxyCardHoldSecs;
-    ok(H.W.cardMargins().hold === 30 * D, 'and with none set, thirty days again');
+    ok(H.W.cardMargins().hold === 14 * D, 'and with none set, fourteen days again');
   }
 
   // (a wait that ran out is a failure too: `until` says so)

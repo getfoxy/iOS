@@ -224,7 +224,8 @@
         paidBreakdown: !!s.payOut && fee > 0,
         paidSentAmt: this.unitFigure(cents, 'usd'),
         paidFeeAmt: this.unitFigure(fee, 'usd'),
-        paidAddedTo: s.payOut ? this.paidTargetLabel() : 'DOLLARS',
+        // (a screen that names its own place, `paidPlace`: a card's TRANSFER, NOW AT the new mint)
+        paidAddedTo: s.paidPlace ? s.paidPlace.to : s.payOut ? this.paidTargetLabel() : 'DOLLARS',
         paidStack: '',
       });
       /* Dollars a dollar card paid for sats this phone asked (26f-flashcard.js, `fcOtherUnit`). To be swapped into bitcoin
@@ -247,7 +248,7 @@
     }
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
-    if (two && !s.payOut) base.paidAddedTo = 'BITCOIN';
+    if (two && !s.payOut && !s.paidPlace) base.paidAddedTo = 'BITCOIN';
     /* Sats paid for dollars this phone asked for, to be swapped into
      * dollars (`paidConvert`): the dollars asked are the headline, the sats
      * that came under them, with how old the payer's price was, and where
@@ -280,7 +281,9 @@
       paidBreakdown: !!s.payOut && (this._lastFee || 0) > 0,
       paidSentAmt: this.money(sats).main,
       paidFeeAmt: this.money(this._lastFee || 0).main,
-      paidAddedTo: s.payOut ? this.paidTargetLabel()
+      /* A screen that names its own place line and button (`paidPlace`: a card's TRANSFER, NOW AT the new mint and DONE,
+       * 26f-flashcard.js `fcMovedScreen`) has them in place of what the money's own unit would have said. */
+      paidAddedTo: s.paidPlace ? s.paidPlace.to : s.payOut ? this.paidTargetLabel()
         : (s.asset === 'BITCOIN' ? 'Bitcoin Balance' : 'Cash Balance'),
       paidStack: this.fitStack(H => this.satsStack(sats, s.recv && s.recv.live, H)),
       paidBolts: this.boltField((s.recv && s.recv.live) === 'in'),
@@ -293,7 +296,9 @@
       paidInkDim: s.recvResolved ? 'rgba(5,5,5,.5)' : 'rgba(var(--ink-rgb),.5)',
       paidBadgeBg: s.recvResolved ? '#050505' : 'var(--acc)',
       paidTitle: s.paidSays || (s.payOut ? 'WITHDRAWAL SENT' : 'PAYMENT RECEIVED'),
-      paidAddedLabel: s.payOut ? 'SENT TO' : 'ADDED TO',
+      paidAddedLabel: s.paidPlace ? s.paidPlace.label : s.payOut ? 'SENT TO' : 'ADDED TO',
+      // the button under it
+      paidDismissLabel: (s.paidPlace && s.paidPlace.dismiss) || 'DISMISS',
       paidBadgeTick: s.recvResolved ? 'var(--acc)' : CTA_INK(s),
       paidLive: (s.recv && s.recv.live) !== 'gone',
       dismissPaid: () => {
@@ -321,7 +326,7 @@
             balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
             bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
           }) : fc;
-          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
         }, 450);
       },
     };

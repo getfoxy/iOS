@@ -946,6 +946,10 @@ final class WebHostController: UIViewController {
             }
         }
 
+        #if DEBUG
+        Self.stageLocalCardPicture(into: dir)
+        #endif
+
         let index = dir.appendingPathComponent("index.html")
         guard fm.fileExists(atPath: index.path) else { return nil }
         // report bytes too, so a stale file is obvious at a glance
@@ -965,6 +969,37 @@ final class WebHostController: UIViewController {
         print("[foxy] page hash", Self.grouped(Self.pageHash))
         return index
     }
+
+    #if DEBUG
+    /// A local build's own card picture, in place of Foxy's.
+    ///
+    /// The card screen and the tap sheets draw a card of Foxy's design from
+    /// `img/card-fx1-portrait.jpg`, which is in the repository. A picture that
+    /// is not the project's to publish can be tried on a phone without it ever
+    /// being tracked: `Local/card-picture.jpg` (54 by 85.6, upright), in a
+    /// project made with `Local/` among its sources (local-project.sh with
+    /// LOCAL_PROJECT_SED set in local.env, the same switch as the rest of
+    /// `Local/`), is copied into the app as `card-picture.jpg`, and this puts
+    /// it over Foxy's in the staged page before its hash is taken. Debug only:
+    /// a Release build has none of this code, and a Release build of a project
+    /// with `Local/` in it is refused by that project's own build step. The
+    /// page hash then covers the picture shown, so it differs from the
+    /// tree's, as it should for a page that is not the reviewed one.
+    private static func stageLocalCardPicture(into dir: URL) {
+        guard let root = Bundle.main.resourceURL else { return }
+        let picture = root.appendingPathComponent("card-picture.jpg")
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: picture.path) else { return }
+        let target = dir.appendingPathComponent("img").appendingPathComponent("card-fx1-portrait.jpg")
+        do {
+            if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+            try fm.copyItem(at: picture, to: target)
+            print("[foxy] LOCAL BUILD: the card picture is Local/card-picture.jpg")
+        } catch {
+            print("[foxy] the local card picture could not be staged:", error)
+        }
+    }
+    #endif
 
     /// The one number that ties this phone to the reviewed sources.
     ///

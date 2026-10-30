@@ -103,8 +103,8 @@ const booksGood = (name, ...pages) => {
   {
     const { H, R, card } = A;
     const loadDate = slotDates(card)[0];
-    ok(slotDates(card).length === 1 && Math.abs(loadDate - (Date.now() / 1000 + 30 * 86400)) < 600 && /^0[23]/.test(card.state.record.refund),
-       'the owner’s card is recoverable and its money is good for thirty days', JSON.stringify({ days: ((loadDate - Date.now() / 1000) / 86400).toFixed(2) }));
+    ok(slotDates(card).length === 1 && Math.abs(loadDate - (Date.now() / 1000 + 14 * 86400)) < 600 && /^0[23]/.test(card.state.record.refund),
+       'the owner’s card is recoverable and its money is good for fourteen days', JSON.stringify({ days: ((loadDate - Date.now() / 1000) / 86400).toFixed(2) }));
     const before = await bal(R);
     const onCard = card.balance();
     const trace0 = R.trace.length, circuits0 = R.circuits.length;
@@ -514,18 +514,18 @@ const booksGood = (name, ...pages) => {
     // a card that signs for eight pieces at a time (no `many`), with more than sixteen pieces on it
     const W13 = await world({ card: { software: 7 }, fund: 12000, sats: 3000 });
     const { H, card } = W13;
-    ok(H.W.cardRefreshLeft() === 20 * 86400, 'the owner renews a card with twenty days left', String(H.W.cardRefreshLeft()));
+    ok(H.W.cardRefreshLeft() === 10 * 86400, 'the owner renews a card with ten days left', String(H.W.cardRefreshLeft()));
     const n = card.state.slots.filter((x) => x.status === 1).length;
     const date0 = slotDates(card)[0];
-    const undo = later(H, date0 * 1000 - 19 * DAY - Date.now());
+    const undo = later(H, date0 * 1000 - 9 * DAY - Date.now());
     const hb = await bal(H);
     card.tap();
     card.sent.length = 0;
     const renewed = await H.W.cardRenew(card, { pin: '1234' });
     const nowS = Math.floor(H.window.Date.now() / 1000);
     ok(n > 16 && count(card, '24') === Math.ceil(n / 8) && renewed.sats === 3000 && card.balance() === 3000 && slotDates(card).length === 1
-       && Math.abs(slotDates(card)[0] - (nowS + 30 * 86400)) < 600 && (await bal(H)) === hb,
-       'with nineteen days left, renewed in one tap: every piece off in a signature for each eight, and on again with one date thirty days on',
+       && Math.abs(slotDates(card)[0] - (nowS + 14 * 86400)) < 600 && (await bal(H)) === hb,
+       'with nine days left, renewed in one tap: every piece off in a signature for each eight, and on again with one date fourteen days on',
        JSON.stringify({ pieces: n, signatures: count(card, '24'), days: ((slotDates(card)[0] - nowS) / 86400).toFixed(2) }));
     undo();
 
@@ -533,7 +533,7 @@ const booksGood = (name, ...pages) => {
     const W13b = await world({ sats: 1000 });
     const Hb = W13b.H, cb = W13b.card;
     const d0 = slotDates(cb)[0];
-    const u2 = later(Hb, d0 * 1000 - 19 * DAY - Date.now());
+    const u2 = later(Hb, d0 * 1000 - 9 * DAY - Date.now());
     const h0 = await bal(Hb);
     cb.tap();
     cb.leaveBefore('30', 1);
@@ -544,8 +544,8 @@ const booksGood = (name, ...pages) => {
     cb.tap();
     await Hb.W.cardWrite(cb, { pin: '1234' });
     const nowB = Math.floor(Hb.window.Date.now() / 1000);
-    ok(cb.balance() === 1000 && Hb.W.cardOwed().length === 0 && slotDates(cb).length === 1 && Math.abs(slotDates(cb)[0] - (nowB + 30 * 86400)) < 600 && (await bal(Hb)) === h0,
-       'the next tap writes it, with a fresh date thirty days on', JSON.stringify({ card: cb.balance(), days: ((slotDates(cb)[0] - nowB) / 86400).toFixed(2) }));
+    ok(cb.balance() === 1000 && Hb.W.cardOwed().length === 0 && slotDates(cb).length === 1 && Math.abs(slotDates(cb)[0] - (nowB + 14 * 86400)) < 600 && (await bal(Hb)) === h0,
+       'the next tap writes it, with a fresh date fourteen days on', JSON.stringify({ card: cb.balance(), days: ((slotDates(cb)[0] - nowB) / 86400).toFixed(2) }));
     u2();
     booksGood('the books add up', H, Hb);
   }
@@ -558,8 +558,8 @@ const booksGood = (name, ...pages) => {
     c.tap();
     await H.W.cardAdd(c, { sats: 500, pin: '1234' });
     ok(/^0[23][0-9a-f]{64}$/.test(set.record.refundKey) && c.state.record.refund === set.record.refundKey && !!H.W.cardsKnown()[c.key]
-       && slotDates(c).length === 1 && Math.abs(slotDates(c)[0] - (Date.now() / 1000 + 30 * 86400)) < 600,
-       'a card set up with nothing said is recoverable, and what is put on it is good for thirty days', JSON.stringify({ refund: set.record.refundKey.slice(0, 6) }));
+       && slotDates(c).length === 1 && Math.abs(slotDates(c)[0] - (Date.now() / 1000 + 14 * 86400)) < 600,
+       'a card set up with nothing said is recoverable, and what is put on it is good for fourteen days', JSON.stringify({ refund: set.record.refundKey.slice(0, 6) }));
     booksGood('the books add up', H);
   }
 

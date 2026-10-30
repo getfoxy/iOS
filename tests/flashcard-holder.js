@@ -247,7 +247,7 @@ function amt(a) {
     c.tap();
     ok((await why(G.W.cardGuestLook(c, { pin: '0000' }))) === 'wrong-pin', 'a wrong PIN is the card’s own refusal, with its tries');
     c.tap();
-    ok((await why(G.W.cardClaim(c, { pin: '5555' }))) === 'has-money' && !c.state.owner, 'TIE OWNERSHIP of a card with money on it is refused before anything is asked: spend or move it first');
+    ok((await why(G.W.cardClaim(c, { pin: '5555' }))) === 'has-money' && !c.state.owner, 'CONNECT TO PHONE of a card of 1.22 with money on it is refused (1.24 takes it: tests/flashcard-claim-money.js) before anything is asked: spend or move it first');
     // the card emptied at a till, exactly; then claimed
     c.tap();
     await H.W.cardPay(c, { sats: 1200, pin: '5555' });
@@ -355,8 +355,8 @@ function amt(a) {
     v = vals(holder);
     ok(v.fcUsable && !v.fcGuest && v.fcLimitLine === 'PER SECOND LIMIT $5' && !welcome(holder) && v.fcNoPinShown === undefined && /^No PIN up to \$5\.00 · \$[\d,.]+ left$/.test(limitsSub(v)) && v.fcDayShown === undefined,
        'its screen: the limit as a rate on its face, the no PIN limit and what is left of it under LIMITS in its menu, nothing of a day, and no welcome', [v.fcLimitLine, limitsSub(v)].join(' | '));
-    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
-       'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN and RESET, in that order: no RESTORE, a card being read is not lost', menuOf(v));
+    ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER,RESET' && v.fcMenuShown === true && v.fcCloseShown === false,
+       'the MENU at the top right, in place of the close button, holds HISTORY, RENAME CARD, LIMITS, CHANGE PIN, TRANSFER and RESET, in that order: no RESTORE, a card being read is not lost', menuOf(v));
     ok(H.W.cardName(c.key) === 'LUNCH CARD' && H.W.cardsKnown()[c.key].name === 'LUNCH CARD' && v.fcTitle === 'LUNCH CARD' && v.fcVerifiedShown === true,
        'the name typed on NAME CARD is kept on the card’s row on this phone, trimmed, once the card is set up, and is the card screen’s title, with the Verified line under it', JSON.stringify([H.W.cardName(c.key), v.fcTitle, v.fcVerified]));
     ok(c.state.record && !JSON.stringify(c.state).includes('Lunch'), 'the card itself is told nothing of it');
@@ -378,8 +378,8 @@ function amt(a) {
     // (MENU is home's own button, `toggleMenu`, which turns `open0`)
     ok(v.fcMenuOpen === false && (holder.setState({ open0: true }), vals(holder).fcMenuOpen === true) && (holder.setState({ open0: false }), vals(holder).fcMenuOpen === false),
        'MENU opens the drawer, as home’s does, and closes it');
-    ok(v.fcRowShown === true && v.fcButtons.map((k) => k.label).join() === 'SCAN,PASTE' && v.fcButtons.every((k) => typeof k.tap === 'function' && /^M/.test(k.path)),
-       'the bottom row is home’s with one pill: SCAN and PASTE, no SWAP on a card of one currency', v.fcButtons.map((k) => k.label + ' ' + k.dim).join(', '));
+    ok(v.fcRowShown === false && v.fcButtons.length === 0 && typeof v.fcAdd === 'function' && typeof v.fcSend === 'function',
+       'no row under DEPOSIT and WITHDRAW on a card of one currency: no SCAN, no PASTE, no SWAP', v.fcButtons.map((k) => k.label + ' ' + k.dim).join(', '));
     ok(v.fcLinks === undefined && v.fcNoPinLine === undefined && v.fcBlockLine === undefined, 'and the old row, the no-PIN line and the block line are gone from the screen');
 
     // SKIP and SKIP: nothing set, no limit sent
@@ -646,7 +646,7 @@ function amt(a) {
     // TIE OWNERSHIP with money on the card
     vals(friend).fcGuestTie();
     ok(card(friend) && card(friend).title === 'MONEY ON THE CARD' && card(friend).reason === 'Spend or move the money on this card first. Only an empty card can be tied to a phone.' && !pad(friend),
-       'TIE OWNERSHIP of a card with money on it: spend or move the money first, before any PIN', card(friend) && card(friend).all);
+       'CONNECT TO PHONE of a card of 1.22 with money on it: spend or move the money first, before any PIN', card(friend) && card(friend).all);
     card(friend).press('CLOSE');
     // emptied at a till, and read again: TIE OWNERSHIP
     cash.tap();
@@ -655,16 +655,15 @@ function amt(a) {
     friend.fcRead();
     await until('the empty card', () => friend.state.fc && friend.state.fc.key === cash.key && friend.state.fc.balance === 0);
     vals(friend).fcGuestTie();
-    ok(card(friend) && card(friend).title === 'TIE OWNERSHIP TO THIS PHONE?' && /This makes this phone the card’s owner/.test(card(friend).reason) && card(friend).has('TIE OWNERSHIP'),
-       'an empty card: a plain warning first, that this makes this phone its owner', card(friend) && card(friend).all);
-    card(friend).press('TIE OWNERSHIP');
-    ok(pad(friend) && pad(friend).cta === 'TIE OWNERSHIP' && /about four seconds/.test(pad(friend).sub), 'then its PIN', pad(friend) && pad(friend).sub);
+    ok(!card(friend) && pad(friend) && pad(friend).title === 'CARD PIN' && pad(friend).cta === 'CONNECT'
+       && pad(friend).sub === 'To connect the card to this phone. Hold it still for about four seconds when you tap it.',
+       'CONNECT TO PHONE goes straight to the card’s PIN, with no warning first', pad(friend) && pad(friend).sub);
     G.sheet.length = 0;
     cash.tap();
     pad(friend).type('8642');
     await until('the claim', () => friend.state.fc && friend.state.fc.ownedHere === true);
     v = vals(friend);
-    ok(!!cash.state.owner && G.sheet.filter((x) => x === 'say: Keep holding.').length >= 6 && friend.toasts.indexOf('This phone is the card’s owner now.') >= 0
+    ok(!!cash.state.owner && G.sheet.filter((x) => x === 'say: Keep holding.').length >= 6 && friend.toasts.indexOf('Connected to this phone.') >= 0
        && v.fcUsable && !v.fcGuest && friend.state.fc.recoverable,
        'the claim, Keep holding at every asking: this phone owns the card now, with its own key in it, and its screen is an owner’s', friend.toasts.slice(-1)[0]);
   }

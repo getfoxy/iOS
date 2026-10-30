@@ -1400,7 +1400,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const a = phone({ send: true });
       await readOn(a, both);
       ok(a.state.fc.bal.usd > 0 && a.state.fc.bal.sat > 0, 'a card that holds both');
-      vals(a).fcSend();
+      a.fcOutOpen();
       ok(a.state.screen === 'sendHow' && a.state.sendFrom === 'card' && !a.state.curCard && !a._fcFlowUnit, 'SEND opens the ways to pay, no currency asked first', a.state.screen);
       // a bill pasted on SEND MONEY in card mode, as tests/flashcard-send.js pastes one
       const bill = async (sats) => {

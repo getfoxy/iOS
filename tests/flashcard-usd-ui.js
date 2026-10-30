@@ -294,7 +294,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(v.fcPillRows.length === 1 && v.fcPillRows[0].sym === '$' && v.fcPillRows[0].big === '20.00' && v.fcPillRows[0].ink === '#10161B'
        && v.fcPillRows[0].small === '₿ 25,000' && v.fcBalance === '$ 20.00',
        'one dollar pill, frost and dark ink: its cents big, their worth in sats under them at the price', JSON.stringify(v.fcPillRows[0] && { big: v.fcPillRows[0].big, small: v.fcPillRows[0].small }));
-    ok(!v.fcButtons.some((x) => x.label === 'SWAP') && v.fcButtons.map((x) => x.label).join() === 'SCAN,PASTE', 'no SWAP in the row: the card holds one currency', v.fcButtons.map((x) => x.label).join());
+    ok(!v.fcButtons.some((x) => x.label === 'SWAP') && v.fcButtons.length === 0, 'no SWAP, and no row at all: the card holds one currency', v.fcButtons.map((x) => x.label).join());
     holder.price = 0;
     v = vals(holder);
     ok(v.fcPillRows[0].small === '' && v.fcPillRows[0].big === '20.00', 'with no price, nothing under the dollars');
@@ -811,16 +811,16 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     booksGood('WITHDRAW', H);
   }
 
-  /* ---- 11: SWITCH MINT with money on a dollar card ------------------------------------------------------------------ */
+  /* ---- 11: TRANSFER with money on a dollar card -------------------------------------------------------------------- */
+  // (it was refused, A DOLLAR CARD; it moves now, as dollars or as bitcoin: tests/flashcard-transfer.js and tests/flashcard-switch.js)
   {
     const { H, holder } = W2;
     const at = H.trace.length;
     holder.fcSwitchMint();
-    ok(card(holder) && card(holder).title === 'A DOLLAR CARD'
-       && card(holder).reason === 'This card holds dollars at m.test. Take them off with WITHDRAW, switch, and load it again at the new mint.'
-       && H.trace.length === at && holder.state.screen === 'flashcard',
-       'SWITCH MINT: A DOLLAR CARD, and nothing asked of any mint', card(holder) && card(holder).all);
-    shut(holder);
+    ok(!card(holder) && holder.state.screen === 'switchMint' && holder.state.fcPick === true && H.trace.length === at,
+       'TRANSFER of a dollar card is not refused: the list of mints, asking which, and nothing asked of any mint yet', card(holder) ? card(holder).all : holder.state.screen);
+    holder.back();
+    holder.setState({ fcPick: false });
   }
 
   /* ---- 12: SEND from a dollar card ---------------------------------------------------------------------------------- */
@@ -833,7 +833,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await until('the card read', () => !!holder.state.fc && holder.state.fc.check !== 'asking' && !(holder._fcTaps > 0));
     await settle();
     const before = k.balance(), satBefore = sats(H);
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     upd();
     ok(holder.cardSendNow() && holder.walletNow('send') === 'usd', 'in card mode a dollar card pays in dollars');
     const q = await H.mint.handle({ url: MINT + '/v1/mint/quote/bolt11', method: 'POST', body: JSON.stringify({ amount: 2000, unit: 'sat' }) });
@@ -874,7 +874,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.setState({ screen: 'flashcard', stack: ['home'], sendFrom: '' });
     holder.fcRead();
     await until('the card read', () => !!holder.state.fc && !(holder._fcTaps > 0));
-    vals(holder).fcSend();
+    holder.fcOutOpen();
     upd();
     const at2 = H.trace.length;
     holder.fcOutAddress('bc1qexampleaddress');

@@ -175,7 +175,7 @@
           // paid by a card while this phone was offline: received, and settled with the mint the next time it is online
           : t.cardWaits ? 'Paid by card \u00b7 settles online'
           // paid from a card (SEND on the card's screen), not from this phone's balance
-          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Flashcard'
+          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the EcashCard'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */
@@ -472,7 +472,7 @@
         : (tx.changeState === 'given back' && tx.fromCard) ? 'The fee the payment did not use is back on the card.'
         : (tx.changeState === 'not handed' && /^card/.test(String(tx.memo || '')))
           ? 'Their change was made and is waiting for their card. It is locked to that card: '
-            + 'MENU \u203a FLASHCARD, and tap the card, to put it back.'
+            + 'open CARD at the top left of home, and tap the card, to put it back.'
         : tx.changeState === 'not handed' ? 'Their change was made and could not be handed over. '
           + 'Show them the token below: it is locked to their phone, so only they can take it.'
         : tx.changeState === 'owed' ? 'Waiting for the change.'

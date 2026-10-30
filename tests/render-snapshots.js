@@ -319,10 +319,13 @@ function representative(logic) {
   add('fcLimitConfirm, no limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
   add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
-  const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, sats: 2048, plan: null, fee: null, lands: 0, err: '', busy: false }, over || {});
+  // (TRANSFER: the quote is the wallet's `cardTransferQuote`, its three fees and what lands)
+  const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', have: 2048, sats: 2048, quote: null, fee: null, lands: 0, err: '', busy: false }, over || {});
+  const QUOTE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', toUnit: 'sat', converts: false, have: 2048, lands: 2026, cost: 2048,
+    fees: { from: 4, lightning: 16, to: 2 }, worth: 2026, fee: 22 }, over || {});
   add('fcMoveConfirm, asking what it costs', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE() }, { wallet: CARDS() }));
-  add('fcMoveConfirm, with its cost', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE({ fee: 22, lands: 2026 }) }, { wallet: CARDS() }));
-  add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
+  add('fcMoveConfirm, with its cost', at('fcMoveConfirm', { fc: FC(), fcMove: MOVE({ quote: QUOTE(), fee: 22, lands: 2026 }) }, { wallet: CARDS() }));
+  add('fcMoveConfirm, too little to move', at('fcMoveConfirm', { fc: FC({ balance: 9 }), fcMove: MOVE({ sats: 9, have: 9, err: 'That is too little to move by Lightning: the fee would take it all.' }) }, { wallet: CARDS() }));
   // a card at another mint paying this phone's invoice from there: the confirmation as its fee is asked, answered, and refused
   const XM = (over) => Object.assign({ xm: true, mint: OTHER, home: MINT, payUnit: 'sat', key: KEY_A, pinSet: false, noPinLeft: 0, balance: 2048,
                                         usdAsk: false, ask: { unit: 'sat', amount: 700 }, bolt11: 'lnbc7u1x', hash: 'h', ends: 0,
@@ -1064,7 +1067,7 @@ function cards() {
   /* A card's set-up from software 1.21 (26j-card-wheel.js): the PIN pad for a card set up for somebody else (its two amounts are SET AMOUNT
    * and MAX SPEND PER SECOND, above, with no question first); then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning. */
   add('overlay: CREATE A PIN, for a card set up for its holder', (a) => a.fcSetUpSteps({ other: true, unit: 'sat', run() {} }));
-  add('card: tie ownership to this phone, the warning', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
+  add('card: connect to phone, straight to the card PIN', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
   add('card: restore lost card, a phone that loaded none', (a) => a.fcRestoreLost(), { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });
   // a card of software before 1.16 is asked for a PIN when it is set up (a card of 1.16 and on is not: it is set up with none), and the pad that adds a PIN says what a card with none is
   add('overlay: a new card\u2019s PIN, for a card of software before 1.16', (a) => { a.state.fc = { noPinKnown: false, pinSet: false, setUp: false }; a.fcSetUp(); });
@@ -1151,12 +1154,12 @@ function cards() {
   const RENEW_AT = { wallet: RENEW_W, state: Object.assign({ screen: 'flashcard', stack: [], fc: RENEW_FC }, LIVE) };
   add('card: renew this card, offered at its owner\u2019s read', (a, w) => {
     a._fcRefreshAsked = {};
-    // nineteen days before its date, by the page's clock and the app's
+    // nine days before its date, by the page's clock and the app's
     const now = w.Date.now;
-    w.Date.now = () => (4102444800 - 19 * 86400) * 1000;
+    w.Date.now = () => (4102444800 - 9 * 86400) * 1000;
     try { a.fcRefreshMaybe({ key: RENEW_FC.key }); } finally { w.Date.now = now; }
   }, RENEW_AT);
-  add('overlay: the renewal\u2019s PIN pad, thirty days', (a) => { a._fcCard = { key: RENEW_FC.key, info: {}, pieces: [] }; a.fcRenew(); }, RENEW_AT);
+  add('overlay: the renewal\u2019s PIN pad, fourteen days', (a) => { a._fcCard = { key: RENEW_FC.key, info: {}, pieces: [] }; a.fcRenew(); }, RENEW_AT);
   add('card: no change while offline', (a) => a.fcFailed({ card: 'inexact', message: 'This phone is offline, so it cannot give change, and this card does not hold pieces that make exactly 1000 sats. Pay an amount it can make, or pay when this phone is online.' }, { taken: true }));
   add('card: change waiting for a card', (a) => a.fcChangeWaiting(212));
   // a card payment is two taps: SEND, then RECEIVE its change, then COMPLETE
@@ -1202,7 +1205,7 @@ function cards() {
   add('stage: a dollar card asked for sats, the second tap', behind({ amount: '$ 5.92', amountSub: '\u20bf 7,000 at this phone\u2019s price, seen 2 hours ago' }));
   add('card: paid in dollars, the invoice not paid', (a) => a.fcBtcKept({ pay: 593, bolt11: 'lnbc1' }, null, 'The mint could not find a route.'));
   add('card: a dollar card\u2019s payment not settled', (a) => a.cardKeptLostCard({ id: 'card-2', unit: 'usd', amount: 592, sats: 0, cause: 'spent', date: 4102444800 }));
-  add('card: a dollar card cannot switch mints with money on it', (a) => { a._fcCard = {}; a.state.fc = { unit: 'usd', balance: 2000, mint: MINT, key: '02' + 'a1'.repeat(30) + 'c3d4' }; a.fcSwitchMint(); },
+  add('card: TRANSFER of a card that is not this phone\u2019s', (a) => { a._fcCard = {}; a.state.fc = { unit: 'usd', balance: 2000, mint: MINT, key: '02' + 'a1'.repeat(30) + 'c3d4' }; a.fcSwitchMint(); },
     { wallet: { cardSession: () => Promise.resolve(), cardOwed: () => [] } });
   add('card: a dollar card cannot pay a bitcoin address', (a) => { a.state.fc = { unit: 'usd', balance: 2000, mint: MINT }; a.fcOutAddress('bc1qexample'); },
     { wallet: { cardSession: () => Promise.resolve(), connected: true } });
@@ -1218,6 +1221,35 @@ function cards() {
   // money a card is owed from a payment it made from this phone, said at launch until a tap puts it on (26f-flashcard.js)
   add('card: your card has money waiting', (a) => a.fcMoneyWaiting(),
     { wallet: { cardSession: () => Promise.resolve(), cardOwed: () => [{ id: 'o1', card: '02' + 'a1'.repeat(31), sats: 32, kind: 'change', out: true, payment: 'onchain-q1' }] } });
+  /* The EcashCard screen of 2026-10-30: the card standing up, DEPOSIT and WITHDRAW, TRANSFER in its MENU above RESET and its flow
+   * (the confirmation where the money becomes bitcoin, CARD MOVED), a dollar card, and the two lines a card connected with money on
+   * it (software 1.24) and a TRANSFER cut short leave on the card's screen. */
+  {
+    // (a view here is a screen as `representative` has it: `put` takes its spec, and the card's fixtures are its own)
+    const put = (label, spec) => v.push([label, spec]);
+    const CARDS = (over) => Object.assign({ cardSession: () => Promise.resolve(), cardOwed: () => [], cardsList: () => [] }, over || {});
+    const KEY_A = '02' + 'a1'.repeat(30) + 'c3d4';
+    const FC = (over) => Object.assign({ key: KEY_A, balance: 2048, count: 12, room: 52, pin: 'set', locked: false,
+      hasRecord: true, setUp: true, pinSet: true, limit: 0, day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true,
+      first: 4102444800, last: 4102444800, check: 'ok', checkedAt: 4102358400000 }, over || {});
+    const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', have: 2048, sats: 2048, quote: null, fee: null, lands: 0, err: '', busy: false }, over || {});
+    const QUOTE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', toUnit: 'sat', converts: false, have: 2048, lands: 2026, cost: 2048,
+      fees: { from: 4, lightning: 16, to: 2 }, worth: 2026, fee: 22 }, over || {});
+    const UFC = (over) => FC(Object.assign({ unit: 'usd', balance: 2000, design: 'FX1', resetKnown: true, tap: { known: true, limited: true, limit: 2000, left: 2000, turns: 0 } }, over || {}));
+    put('flashcard, a dollar card of the Foxy design, standing up, its limit under it', at('flashcard', { fc: UFC() }, { wallet: CARDS({ cardKnownHere: () => true }) }));
+    put('flashcard, its MENU with TRANSFER above RESET', at('flashcard', { fc: UFC(), open0: true }, { wallet: CARDS({ cardKnownHere: () => true }) }));
+    put('flashcard, a locked card, Locked under it', at('flashcard', { fc: UFC({ locked: true }) }, { wallet: CARDS() }));
+    put('fcMoveConfirm, a dollar card to a mint with no dollars: the money becomes bitcoin', at('fcMoveConfirm', { fc: UFC(), fcMove: MOVE({ unit: 'usd', have: 2000, sats: 2000,
+      quote: QUOTE({ unit: 'usd', toUnit: 'sat', converts: true, have: 2000, lands: 31156, cost: 1999, worth: 1994, fees: { from: 2, lightning: 3, to: 16 }, fee: 6 }) }) }, { wallet: CARDS() }));
+    put('fcMoveConfirm, a dollar card to a mint with dollars', at('fcMoveConfirm', { fc: UFC(), fcMove: MOVE({ unit: 'usd', have: 2000, sats: 2000,
+      quote: QUOTE({ unit: 'usd', toUnit: 'usd', have: 2000, lands: 1994, cost: 2000, worth: 1994, fees: { from: 2, lightning: 3, to: 1 }, fee: 6 }) }) }, { wallet: CARDS() }));
+    put('paid, CARD MOVED, NOW AT the new mint', at('paid', { paidSays: 'CARD MOVED', paidUnit: 'usd', paidAmount: 1994, payOut: false, amount: '0', unit: 'SATS', asset: 'BITCOIN',
+      paidPlace: { label: 'NOW AT', to: 'Flash Forge', dismiss: 'DONE' }, recv: { live: 'in' }, recvResolved: true }));
+    put('flashcard, connected with money on it, its backup still to move', at('flashcard', { fc: UFC({ rekeyDue: true }) }, { wallet: CARDS() }));
+    put('flashcard, a TRANSFER not finished', at('flashcard', { fc: UFC({ balance: 0, count: 0 }) }, { wallet: CARDS({
+      cardTransfers: () => ({ [KEY_A]: { from: MINT, to: OTHER, unit: 'usd', toUnit: 'usd', amount: 2000, stage: 'off', at: 0 } }) }) }));
+    put('flashcard, a card of the beaker design, standing up', at('flashcard', { fc: UFC({ design: 'EL1' }) }, { wallet: CARDS() }));
+  }
   return v;
 }
 

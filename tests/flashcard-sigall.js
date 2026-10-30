@@ -161,12 +161,12 @@ async function world(feePpk, sats, make) {
 
   /* ---- 5: a top-up keeps the card's date ---------------------------------- */
   {
-    // nine days on, its date has twenty-one days left: more than the twenty a top-up keeps a date for
-    const undo = later(H, 9 * DAY);
+    // three days on, its date has eleven days left: more than the ten a top-up keeps a date for
+    const undo = later(H, 3 * DAY);
     card.tap();
     await H.W.cardAdd(card, { sats: 1500, pin: '1234' });
     undo();
-    ok(card.balance() === 2500 && dates(card).length === 1, 'money put on nine days later takes the date the card already has', JSON.stringify(dates(card)));
+    ok(card.balance() === 2500 && dates(card).length === 1, 'money put on three days later takes the date the card already has', JSON.stringify(dates(card)));
     card.tap();
     card.sent.length = 0;
     const before = await bal(R);
@@ -182,12 +182,12 @@ async function world(feePpk, sats, make) {
     const T = await world(0, 9000);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 600, pin: '1234' });
-    // twelve days on, its date has eighteen left: under twenty, so the top-up takes a date of its own
-    const undo = later(T.H, 12 * DAY);
+    // six days on, its date has eight left: under ten, so the top-up takes a date of its own
+    const undo = later(T.H, 6 * DAY);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 500, pin: '1234' });
     undo();
-    ok(dates(T.card).length === 2, 'a card topped up with under twenty days left on its money has pieces of two dates', JSON.stringify(dates(T.card)));
+    ok(dates(T.card).length === 2, 'a card topped up with under ten days left on its money has pieces of two dates', JSON.stringify(dates(T.card)));
     T.card.tap();
     T.card.sent.length = 0;
     const e = await T.R.W.cardPay(T.card, { sats: 900, pin: '1234' }).then(() => null, (x) => x);
@@ -202,7 +202,7 @@ async function world(feePpk, sats, make) {
     // the holder's own phone takes a whole card off in as many signatures as it has dates
     if (b.change && b.change.sats) { T.card.tap(); await T.R.W.cardWrite(T.card, { pin: '1234' }); }
     // topped up again when what is on it is nearly at its date: a second date once more
-    const undo2 = later(T.H, 25 * DAY);
+    const undo2 = later(T.H, 12 * DAY);
     T.card.tap();
     await T.H.W.cardAdd(T.card, { sats: 400, pin: '1234' });
     undo2();
