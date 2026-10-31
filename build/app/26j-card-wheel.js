@@ -59,14 +59,12 @@
     }
     this.fcAskPin({
       title: 'CREATE A PIN',
-      subtitle: su.other
-        ? 'This card is new. The person who holds it types the PIN they want, four to eight digits: it is their PIN, and the card stays theirs, not this phone’s.'
-        : 'Four to eight digits. The card asks for it when it pays.',
+      subtitle: '4 to 8 digits',
       warn: warn || '',
       onBack: () => { this._fcSu = null; this.fcNameAgain(); },
     }, (a) => this.fcAskPin({
       title: 'RE-ENTER PIN',
-      subtitle: su.other ? 'The person who holds the card types the same PIN again.' : 'The same PIN again.',
+      subtitle: 'Type it again',
       onBack: () => this.fcSuPin(''),
     }, (b) => {
       if (a !== b) { this.fcSuPin('Those did not match. Start again.'); return; }
@@ -601,9 +599,12 @@
       isFcPanel: welcome || limits,
       fpWelcome: welcome,
       fpLimits: limits,
-      fpDesign: this.fcDesignOf(fc),
+      // (a new card names no design yet: it is met in the one this phone will give it, upright as on the card's screen)
+      fpDesign: welcome && !(fc && fc.design) ? this.FC_SETUP_DESIGN : this.fcDesignOf(fc),
       // (the welcome's picture with more room round it, CARD LIMITS' a little wider for its rows)
       fpGap: welcome ? '40px' : '28px',
+      // (the card stands upright: as tall as the welcome leaves room for, and shorter on CARD LIMITS, whose rows sit under it)
+      fpCardH: welcome ? 'clamp(200px,calc(100vh - 470px),440px)' : 'clamp(160px,calc(100vh - 560px),300px)',
       fpSide: welcome ? '16px' : '20px',
       fpLine: line,
       fpLineShown: !!line,

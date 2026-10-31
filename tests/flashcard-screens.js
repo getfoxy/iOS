@@ -3141,7 +3141,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     // the welcome, on the card's screen: a new card, a set-up cut short, and none for a card that is not this phone's to set up
     a.setState({ fc: { key: 'k1', setUp: false, pin: 'none', hasRecord: false } });
     let v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
-    ok(v.isFcPanel && v.fpWelcome && !v.fpLimits && v.fpLine === '' && v.fpDesign === 'FL1', 'a new card on the card’s screen: WELCOME TO YOUR CASHU CARD over it, the card in its drawn design');
+    ok(v.isFcPanel && v.fpWelcome && !v.fpLimits && v.fpLine === '' && v.fpDesign === 'FX1', 'a new card on the card’s screen: WELCOME TO YOUR CASHU CARD over it, the card in the design it will be given');
     a.setState({ fc: { key: 'k1', setUp: false, pin: 'set', pinSet: true, hasRecord: false } });
     v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
     ok(v.fpWelcome && v.fpLine === 'Its set-up was cut short. Finish it to put money on it.', 'a set-up cut short is welcomed with a line saying so', v.fpLine);

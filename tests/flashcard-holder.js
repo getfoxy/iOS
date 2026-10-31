@@ -275,8 +275,8 @@ function amt(a) {
     let v = vals(holder);
     ok(v.fcNew && v.fcNewLine === 'Welcome to Foxy Card. Set it up to put money on it.' && typeof v.fcSetUp === 'function' && !('fcRestore' in v) && !v.fcGuest,
        'a new card is welcomed, with SET UP CARD and no RESTORE LOST CARD (that is home’s MENU’s)', v.fcNewLine);
-    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FL1',
-       'it lands on WELCOME TO YOUR CASHU CARD, over the card’s screen: the card’s picture, SET UP CARD and CANCEL', JSON.stringify(welcome(holder)));
+    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FX1',
+       'it lands on WELCOME TO YOUR CASHU CARD, over the card’s screen: the picture of the design it will be given, SET UP CARD and CANCEL', JSON.stringify(welcome(holder)));
     welcome(holder).press('SET UP CARD');
     let nm = named(holder);
     ok(nm && !pad(holder) && holder.state.screen === 'fcName' && nm.title === 'NAME CARD' && nm.draft === '' && nm.grey && nm.skipShown && nm.mode === 'su'
@@ -293,7 +293,7 @@ function amt(a) {
     welcome(holder).press('SET UP CARD');
     ok(named(holder) && named(holder).draft === '', 'SET UP CARD again: NAME CARD empty');
     named(holder).type('Lunch card').next();
-    ok(pad(holder) && pad(holder).title === 'CREATE A PIN' && pad(holder).sub === 'Four to eight digits. The card asks for it when it pays.' && !pad(holder).hasCancel && !named(holder),
+    ok(pad(holder) && pad(holder).title === 'CREATE A PIN' && pad(holder).sub === '4 to 8 digits' && !pad(holder).hasCancel && !named(holder),
        'NEXT with a name asks CREATE A PIN, on the card PIN pad, with the way out at the top', pad(holder) && pad(holder).title);
     pad(holder).back();
     ok(!pad(holder) && named(holder) && named(holder).draft === 'Lunch card' && holder.state.stack.slice(-1)[0] === 'flashcard',
@@ -560,11 +560,11 @@ function amt(a) {
     ok(!named(payer) && payer.state.screen === 'fcWelcome' && welcome(payer), 'whose back button is the welcome again');
     welcome(payer).press('SET UP CARD');
     named(payer).type('Mum').next();
-    ok(pad(payer) && pad(payer).title === 'CREATE A PIN' && /The person who holds it types the PIN they want/.test(pad(payer).sub) && /not this phone’s/.test(pad(payer).sub) && R.W.cardOwed().length === 0,
-       'a new card held to the phone: nothing is made for it, and the set-up begins with CREATE A PIN, saying whose PIN it is', pad(payer).sub);
+    ok(pad(payer) && pad(payer).title === 'CREATE A PIN' && pad(payer).sub === '4 to 8 digits' && R.W.cardOwed().length === 0,
+       'a new card held to the phone: nothing is made for it, and the set-up begins with CREATE A PIN, 4 to 8 digits', pad(payer).sub);
     ok(R.sheet.some((x) => x === 'end: Set up the card first'), 'the sheet ended calmly, saying the card is to be set up first', R.sheet.slice(-1)[0]);
     pad(payer).type('8642');
-    ok(pad(payer).title === 'RE-ENTER PIN' && pad(payer).sub === 'The person who holds the card types the same PIN again.', 'RE-ENTER PIN, in the same words', pad(payer).sub);
+    ok(pad(payer).title === 'RE-ENTER PIN' && pad(payer).sub === 'Type it again', 'RE-ENTER PIN, in the same words', pad(payer).sub);
     pad(payer).type('8642');
     ok(!card(payer) && amt(payer) && amt(payer).flow === 'cardSuNoPin' && payer.state.stack.slice(-1)[0] === 'fcWelcome', 'then the same two amounts: NO PIN AMOUNT? on SET AMOUNT, over the welcome', JSON.stringify(payer.state.stack));
     amt(payer).back();

@@ -730,6 +730,11 @@
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
+      /* The room under the amount holds its two warnings; where neither shows (a card's NO PIN AMOUNT? with a fresh price), most of it goes, and the
+       * space is shared above the amount and below its sats line, so the two sit in the middle of the area between the rule and the swap. */
+      amtRoom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '23px' : '78px',
+      amtRoomBottom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? 'auto' : '0',
+      keysTop: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '0' : 'auto',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
       ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),

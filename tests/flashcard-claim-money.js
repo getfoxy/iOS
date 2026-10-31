@@ -198,6 +198,39 @@ const refundsOf = (c) => c.state.slots.filter((x) => x.status === 1).map((x) => 
     ok(!app.state.fc.rekeyDue && !v.fcNotes.some((n) => /Backup moves/.test(n.text)), 'and the line is gone');
   }
 
+  /* ---- the money owed after a cut-short move goes on at the next tap, though a row for some other card waits at another
+   * mint: the first row elsewhere does not send this phone to switch while this card's own money waits here ---- */
+  {
+    const c = await holders(24, 700);
+    c.tap();
+    await G.W.cardClaim(c, { pin: '5555', refresh: true });
+    c.tap();
+    c.leaveBefore('32', 1);
+    await why(G.W.cardRekeyRun(c, { pin: '5555' }));
+    const owedHere = G.W.cardOwed().filter((r) => r.card === c.key);
+    ok(c.balance() === 0 && owedHere.length === 1, 'cut short after the money came off: the card empty, its pieces owed to it here', JSON.stringify([c.balance(), owedHere.length]));
+    const rows0 = G.storage.getItem('foxy.flashcard.owed');
+    const rows = JSON.parse(rows0 || '[]');
+    rows.push({ id: 'owed-elsewhere', card: '02' + 'ab'.repeat(32), sats: 64, kind: 'load', mint: 'https://testnut.cashu.space', at: Date.now() });
+    G.storage.setItem('foxy.flashcard.owed', JSON.stringify(rows));
+    const app = appOn(G);
+    app.price = 60000;
+    G.nfc = c;
+    c.tap();
+    app.goFlashcard();
+    await until('the card with money owed to be read', () => app.state.fc && app.state.fc.key === c.key);
+    c.tap();
+    app.fcWriteAsk({});
+    await settle();
+    if (pad(app)) { c.tap(); pad(app).type('5555'); }
+    await until('the owed money to be on the card', () => !G.W.cardOwed().some((r) => r.card === c.key) || (face(app) && face(app).title === 'A DIFFERENT MINT'));
+    await settle();
+    ok(!(face(app) && face(app).title === 'A DIFFERENT MINT') && c.balance() > 650 && !G.W.cardOwed().some((r) => r.card === c.key),
+       'TAP CARD writes it: a row at another mint for another card does not send this phone to switch', JSON.stringify([c.balance(), face(app) && face(app).title, G.W.cardOwed()]));
+    ok(G.W.cardOwed().some((r) => r.id === 'owed-elsewhere'), 'and that other row is left as it was');
+    G.storage.setItem('foxy.flashcard.owed', JSON.stringify(JSON.parse(G.storage.getItem('foxy.flashcard.owed') || '[]').filter((r) => r.id !== 'owed-elsewhere')));
+  }
+
   failed += until.failed;
   console.log(failed ? '\n' + failed + ' FAILED' : '\nall passed');
   process.exit(failed ? 1 : 0);

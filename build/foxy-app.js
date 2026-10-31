@@ -15291,6 +15291,11 @@ class Component extends DCLogic {
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
+      /* The room under the amount holds its two warnings; where neither shows (a card's NO PIN AMOUNT? with a fresh price), most of it goes, and the
+       * space is shared above the amount and below its sats line, so the two sit in the middle of the area between the rule and the swap. */
+      amtRoom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '23px' : '78px',
+      amtRoomBottom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? 'auto' : '0',
+      keysTop: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '0' : 'auto',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
       ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
@@ -24782,10 +24787,15 @@ class Component extends DCLogic {
     /* (Not what is owed at the mint of a card that has just paid this phone from there, `fcXmPay`: a card's own pieces go on it from any
      * phone, whatever mint the phone is at.) */
     const xmAt = this._fcXmAt || {};
-    const away = ((W && W.cardOwed()) || []).filter(r => r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)])[0];
+    const fc0 = this.state.fc;
+    const owedAll = (W && W.cardOwed()) || [];
+    const isAway = (r) => !!(r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)]);
+    /* Only the money this tap is for: the card on screen's own when it is known, or all of it. Money owed at this mint is written
+     * here, and a row left at another mint for some other card does not stop it (it is told of only when nothing waits here). */
+    const forThis = fc0 && fc0.key && owedAll.some(r => r.card === fc0.key) ? owedAll.filter(r => r.card === fc0.key) : owedAll;
+    const away = forThis.some(r => !isAway(r)) ? null : forThis.filter(isAway)[0];
     /* Money for the card on its own screen, at another mint (a TRANSFER's new pieces, cut off before they went on): this phone visits
      * that mint for the tap and comes back (`fcMoveWrite`), and is not sent to switch. */
-    const fc0 = this.state.fc;
     if (away && !opt.here && fc0 && away.card === fc0.key && this.state.screen === 'flashcard') { this.fcMoveWrite(away.mint); return; }
     if (away && !opt.here) {
       this.blockedCard('fc-other-mint', {
@@ -30432,14 +30442,12 @@ class Component extends DCLogic {
     }
     this.fcAskPin({
       title: 'CREATE A PIN',
-      subtitle: su.other
-        ? 'This card is new. The person who holds it types the PIN they want, four to eight digits: it is their PIN, and the card stays theirs, not this phone’s.'
-        : 'Four to eight digits. The card asks for it when it pays.',
+      subtitle: '4 to 8 digits',
       warn: warn || '',
       onBack: () => { this._fcSu = null; this.fcNameAgain(); },
     }, (a) => this.fcAskPin({
       title: 'RE-ENTER PIN',
-      subtitle: su.other ? 'The person who holds the card types the same PIN again.' : 'The same PIN again.',
+      subtitle: 'Type it again',
       onBack: () => this.fcSuPin(''),
     }, (b) => {
       if (a !== b) { this.fcSuPin('Those did not match. Start again.'); return; }
@@ -30974,9 +30982,12 @@ class Component extends DCLogic {
       isFcPanel: welcome || limits,
       fpWelcome: welcome,
       fpLimits: limits,
-      fpDesign: this.fcDesignOf(fc),
+      // (a new card names no design yet: it is met in the one this phone will give it, upright as on the card's screen)
+      fpDesign: welcome && !(fc && fc.design) ? this.FC_SETUP_DESIGN : this.fcDesignOf(fc),
       // (the welcome's picture with more room round it, CARD LIMITS' a little wider for its rows)
       fpGap: welcome ? '40px' : '28px',
+      // (the card stands upright: as tall as the welcome leaves room for, and shorter on CARD LIMITS, whose rows sit under it)
+      fpCardH: welcome ? 'clamp(200px,calc(100vh - 470px),440px)' : 'clamp(160px,calc(100vh - 560px),300px)',
       fpSide: welcome ? '16px' : '20px',
       fpLine: line,
       fpLineShown: !!line,

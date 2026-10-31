@@ -2730,10 +2730,15 @@
     /* (Not what is owed at the mint of a card that has just paid this phone from there, `fcXmPay`: a card's own pieces go on it from any
      * phone, whatever mint the phone is at.) */
     const xmAt = this._fcXmAt || {};
-    const away = ((W && W.cardOwed()) || []).filter(r => r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)])[0];
+    const fc0 = this.state.fc;
+    const owedAll = (W && W.cardOwed()) || [];
+    const isAway = (r) => !!(r.mint && here && r.mint !== here && !xmAt[this.fcMintKey(r.mint)]);
+    /* Only the money this tap is for: the card on screen's own when it is known, or all of it. Money owed at this mint is written
+     * here, and a row left at another mint for some other card does not stop it (it is told of only when nothing waits here). */
+    const forThis = fc0 && fc0.key && owedAll.some(r => r.card === fc0.key) ? owedAll.filter(r => r.card === fc0.key) : owedAll;
+    const away = forThis.some(r => !isAway(r)) ? null : forThis.filter(isAway)[0];
     /* Money for the card on its own screen, at another mint (a TRANSFER's new pieces, cut off before they went on): this phone visits
      * that mint for the tap and comes back (`fcMoveWrite`), and is not sent to switch. */
-    const fc0 = this.state.fc;
     if (away && !opt.here && fc0 && away.card === fc0.key && this.state.screen === 'flashcard') { this.fcMoveWrite(away.mint); return; }
     if (away && !opt.here) {
       this.blockedCard('fc-other-mint', {
