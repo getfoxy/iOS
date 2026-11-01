@@ -176,10 +176,10 @@
      * nothing, so a wallet is made for that mint for the asking alone, as `cardCrossQuote` makes one, and the sum the
      * payment would be refused on there (`meltNeed`: the amount, the reserve, the mint's fee for the split and again on the
      * pieces the melt spends) is held against that mint's own pile in that unit. Answers { mint, unit, amount, feeReserve,
-     * need, have, ok, why, rate, quote }. `quote` is the mint's answer without the wallet that asked: that wallet has no
-     * seed, and `pay` melts with a quote's own wallet when it is handed one, so the payment asks that mint again once the
-     * phone is there (`pay` still holds a dollar payment to the figure shown, `shownMost`). Rejects with the mint's own
-     * words where it will not quote. */
+     * need, have, ok, why, rate, quote }. `quote` is the mint's answer without the wallet that asked, and with the mint it
+     * was asked of (`mint`): that wallet has no seed, so once the phone is there `pay` melts the same quote with the
+     * phone's own wallet while the mint's expiry allows (`keptAway`), and asks that mint again after that (a dollar
+     * payment still held to the figure shown, `shownMost`). Rejects with the mint's own words where it will not quote. */
     quoteFeeAt: function (mint, bolt11, unit) {
       try { assertRoute(); } catch (e) { return Promise.reject(e); }
       var at = String(mint || '').replace(/\/+$/, '');
@@ -206,7 +206,7 @@
         var r = u === 'usd' ? rateFrom(amount, msat) : 0;
         return { mint: at, unit: u, amount: amount, feeReserve: reserve, need: mn.need, have: mn.have, ok: !!mn.ok,
                  why: mn.ok ? '' : notEnoughWords(mn, u), rate: r > 0 ? { usdPerBtc: r } : null,
-                 quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, bolt11: inv, at: Date.now() } };
+                 quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, bolt11: inv, at: Date.now(), mint: at } };
       });
     },
 

@@ -1547,7 +1547,8 @@ class Component extends DCLogic {
       // never over a home already set: that trip's home is this one's too
       if (!this._crossCameFrom) this._crossCameFrom = away.home;
     }
-    const run = away ? W.connect(away.mint, null, null, { remember: false }).then(pays) : pays();
+    // (what that mint said about itself when PAY FROM asked it is taken as said: the payment is what finds out it answers)
+    const run = away ? W.connect(away.mint, null, null, { remember: false, sessionInfo: true }).then(pays) : pays();
     this._sendRun = run;
     // and a come-home that waited for this send (`crossComeHome`), once it is over
     const settled = () => { if (this._sendRun === run) { this._sendRun = null; if (!away && this.syncHome) this.syncHome(); } };
@@ -21766,7 +21767,9 @@ class Component extends DCLogic {
      * phone banks, and it is not saved as the phone's own. */
     // a connect that throws is a move that failed, said by the caller's ending, and not a throw out of PAY
     let start;
-    try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
+    /* `sessionInfo`: what the mint the sats leave said about itself this session is taken as said, as the far mint's is in
+     * `moveRun`; the payment that follows is what finds out whether it is answering. */
+    try { start = visit ? W.connect(mine, null, null, { remember: false, sessionInfo: true }) : W.connect(mine, null, null, { sessionInfo: true }); } catch (e0) { start = Promise.reject(e0); }
     return start
       /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
        * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */

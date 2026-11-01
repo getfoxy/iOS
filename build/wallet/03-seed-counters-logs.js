@@ -1377,8 +1377,22 @@
    * marked as the spare's (`foxyWarm`): the phone keeps the connection it
    * made to the mint for the job that takes this circuit (Route.keepWarm),
    * and its diary of a return says when the spare was warmed. */
+  /* Not while a crossing has warmed the far mint's circuit for its claim
+   * (14-moving-between-mints.js `moveRun`): the phone keeps one warmed
+   * connection at a time, and a spare opened at the near mint in the middle of
+   * the melt took it from the claim it was opened for. Until the claim is made,
+   * a minute at most. */
+  var spareHeldUntil = 0, spareHeldOff = false;
+  /* Let go (0), one that was held off is opened now, for the job after the
+   * claim: the payment made at the far mint. */
+  function holdSpare(ms) {
+    spareHeldUntil = ms > 0 ? Date.now() + ms : 0;
+    if (!(ms > 0) && spareHeldOff) { spareHeldOff = false; warmSpareSoon(); }
+  }
+
   function warmSpare() {
     if (FoxyWallet._spareOff || !wallet || !routeOpen() || !bridged()) return Promise.resolve(false);
+    if (Date.now() < spareHeldUntil) { spareHeldOff = true; return Promise.resolve(false); }
     if (spareReady()) return Promise.resolve(true);
     if (sparing && !(warming && warming.taken)) return sparing;
     spare = null;
@@ -1539,15 +1553,34 @@
    * to a read with no circuit (`shareKeyBody`): a connect within five minutes
    * of the last one, a visit or a retry, takes them from there as it did and
    * asks only for the info, and so do the later reads of the mint's keys. */
+  /* And the info too, kept the same way for ten minutes (`INFO_TTL_MS`), and
+   * taken from there by a connect that asks for it (`sessionInfo`): the
+   * connects in the middle of a crossing (the mint the sats leave, the mint
+   * they land at) and a payment's visit to the mint it is paid from each asked
+   * a mint this session had just heard from what it was, 1.2 to 2.2 s over Tor
+   * apiece. Every other connect still asks, because asking is how a trip home
+   * waits for a mint that has gone quiet; what it is told is kept for the
+   * next. The wallet says how many of the three came from here
+   * (`foxyLoadCached`). A connect that fails, and a mint that does not answer,
+   * forget the info (11-routing.js `connect`, 98-mint-health.js). */
   var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
-  function loadMintOnOne(w) {
+  var INFO_READ = /\/v1\/info$/;
+  function loadMintOnOne(w, sessionInfo) {
     var mint = w && w.mint;
     if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
     var label = newCircuitLabel();
+    var fromHere = 0;
+    try { w.foxyLoadCached = 0; } catch (e0) { /* a wallet that takes no field: nothing to say */ }
     mint._request = function (o) {
       var u = String((o && o.endpoint) || '');
-      var shared = KEY_CHAIN_READ.test(u.split('?')[0]) ? cacheableKeyUrl(o.method, u, '') : '';
-      if (shared && cachedKeyBody(shared) !== null) return FoxyWallet.nativeRequest(o);
+      var path = u.split('?')[0];
+      var info = INFO_READ.test(path);
+      var shared = (info || KEY_CHAIN_READ.test(path)) ? cacheableKeyUrl(o.method, u, '') : '';
+      if (shared && (!info || sessionInfo) && cachedKeyBody(shared) !== null) {
+        fromHere += 1;
+        try { w.foxyLoadCached = fromHere; } catch (e1) { /* as above */ }
+        return FoxyWallet.nativeRequest(o);
+      }
       return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
         if (shared) shareKeyBody(u, label);
         return r;

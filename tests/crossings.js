@@ -741,6 +741,133 @@ async function run() {
        paid.err || (again ? 'mine ' + again.foxyMine + ', ' + rx.W.balanceAt(THEIR) + ' held' : 'no code, or it was taken twice'));
   }
 
+  /* ---- a crossing made the way PAY FROM makes it, and what it no longer asks (2026-11-01) --------------
+   *
+   * A 21-sat request at Minibits paid from Forge took 17.5 s from PAY to done on the 17 Pro, and about a
+   * third of it was asking again what had just been asked: Forge's fee quote for the invoice PAY FROM had
+   * quoted, each mint's /v1/info on every connect, an invoice at Minibits made once for each source, a claim
+   * asked again blind two seconds after a "not paid", and the far mint's circuit opened only after the melt. */
+  {
+    const THIRD = 'https://third.test';
+    const p = page();
+    p.mints[THIRD] = fakeMint(p.window, { p2pk: true, fill: 11, quoteFrom: 9000 });
+    await fund(p, THIRD, 2000);
+    await fund(p, HOME, 2000);
+    const W = p.W;
+    await settle();
+    const since = (n) => p.hits.slice(n);
+    const count = (list, what) => list.filter((h) => h === what).length;
+    // PAY FROM asks both sources at once, with one landing for the run
+    let at = p.hits.length;
+    const landing = {};
+    const [a, b] = await Promise.all([
+      W.transferQuote(HOME, 300, { to: THEIR, land: true, landing }),
+      W.transferQuote(THIRD, 300, { to: THEIR, land: true, landing }),
+    ]);
+    const asked = since(at);
+    ok(count(asked, 'POST ' + THEIR + '/v1/mint/quote/bolt11') === 1 && a.mintQuote.quote === b.mintQuote.quote,
+       'two sources quoted for one payment share one invoice at the far mint', count(asked, 'POST ' + THEIR + '/v1/mint/quote/bolt11') + ' invoice(s)');
+    ok(count(asked, 'POST ' + HOME + '/v1/melt/quote/bolt11') === 1 && count(asked, 'POST ' + THIRD + '/v1/melt/quote/bolt11') === 1,
+       'and each source is asked its fee once', JSON.stringify(asked.filter((h) => /melt\/quote/.test(h))));
+    const c = await W.transferQuote(HOME, 300, { to: THEIR, land: true });
+    ok(c.mintQuote.quote !== a.mintQuote.quote, 'a quote asked outside that run makes its own, as before');
+    // the crossing itself, from the source the person chose, with the far mint warmed while the melt runs
+    const said = [];
+    const log0 = p.window.console.log;
+    p.window.console.log = function () { said.push(Array.prototype.join.call(arguments, ' ')); return log0.apply(this, arguments); };
+    at = p.hits.length;
+    const done = await W.moveRun(a, () => {}, { visit: true, quoted: true, warm: true }).then((d) => d, (e) => ({ err: e.message }));
+    p.window.console.log = log0;
+    const ran = since(at);
+    ok(!done.err && W.balanceAt(THEIR) === a.moving, 'the crossing lands what was asked', done.err || W.balanceAt(THEIR) + ' of ' + a.moving);
+    ok(count(ran, 'POST ' + HOME + '/v1/melt/quote/bolt11') === 0, 'the payment melts the fee quote PAY FROM asked, and does not ask it again', JSON.stringify(ran));
+    ok(count(ran, 'GET ' + THEIR + '/v1/info') === 0 && count(ran, 'GET ' + HOME + '/v1/info') === 0,
+       'no mint is asked for its /v1/info a second time in the session', JSON.stringify(ran.filter((h) => /info/.test(h))));
+    const warmAt = ran.indexOf('GET ' + THEIR + '/v1/keysets'), meltAt = ran.indexOf('POST ' + HOME + '/v1/melt/bolt11');
+    ok(warmAt >= 0 && meltAt > warmAt, 'the far mint’s keysets are asked, on the claim’s circuit, before the melt has answered', 'keysets at ' + warmAt + ', melt at ' + meltAt);
+    ok(count(ran, 'POST ' + THEIR + '/v1/mint/bolt11') === 1 && !ran.some((h) => /GET .*\/v1\/mint\/quote\/bolt11\//.test(h)),
+       'a claim the mint takes is made once, with no state asked', JSON.stringify(ran.filter((h) => /mint\//.test(h))));
+    const line = said.filter((l) => /pay steps: crossing/.test(l))[0] || '';
+    ok(/melt quote reused/.test(line) && /info and keys from this session/.test(line) && /claim first try/.test(line) && /warmed in/.test(line),
+       'and the log says what each step was spared', line || said.slice(-4).join(' / '));
+    const infos = (m) => p.hits.filter((h) => h === 'GET ' + m + '/v1/info').length;
+    ok(infos(HOME) === 1 && infos(THEIR) === 1 && infos(THIRD) === 1, 'over the whole session, each mint’s /v1/info was fetched once',
+       [HOME, THEIR, THIRD].map(infos).join(', '));
+    // only a connect that asks for it is answered from the session: any other asks, which is how a trip home waits on a quiet mint
+    at = p.hits.length;
+    await W.connect(THEIR, null, null, { remember: false });
+    ok(count(since(at), 'GET ' + THEIR + '/v1/info') === 1, 'an ordinary connect still asks the mint what it is');
+    at = p.hits.length;
+    await W.connect(THEIR, null, null, { remember: false, sessionInfo: true });
+    ok(count(since(at), 'GET ' + THEIR + '/v1/info') === 0, 'a crossing’s connect takes it from the session');
+    W._noteMintAnswer(THEIR + '/v1/keysets', 'fail');
+    at = p.hits.length;
+    await W.connect(THEIR, null, null, { remember: false, sessionInfo: true });
+    ok(count(since(at), 'GET ' + THEIR + '/v1/info') === 1, 'and asks again once the mint has failed to answer something');
+    // a fee quote PAY FROM asked for a Lightning payment, handed in without its wallet: melted, not asked again
+    await W.connect(HOME, null, null, { remember: false });
+    const inv = await W.connect(THIRD, null, null, { remember: false }).then(() => W.invoice(50, ''));
+    await W.connect(HOME, null, null, { remember: false });
+    const q = await W.quoteFeeAt(HOME, inv.bolt11, 'sat');
+    at = p.hits.length;
+    const paid = await W.pay(inv.bolt11, () => {}, { quote: q.quote }).then((r) => r, (e) => ({ err: e.message }));
+    ok(!paid.err && count(since(at), 'POST ' + HOME + '/v1/melt/quote/bolt11') === 0 && paid.hash === q.quote.quote.quote,
+       'a quote another mint gave on PAY FROM is paid with once the phone is there', paid.err || JSON.stringify(since(at)));
+    const inv2 = await W.connect(THIRD, null, null, { remember: false }).then(() => W.invoice(50, ''));
+    await W.connect(HOME, null, null, { remember: false });
+    const old = await W.quoteFeeAt(HOME, inv2.bolt11, 'sat');
+    old.quote.at = Date.now() - 11 * 60 * 1000;
+    at = p.hits.length;
+    await W.pay(inv2.bolt11, () => {}, { quote: old.quote }).then(() => null, () => null);
+    ok(count(since(at), 'POST ' + HOME + '/v1/melt/quote/bolt11') === 1, 'one older than ten minutes is asked again');
+    const inv3 = await W.connect(THIRD, null, null, { remember: false }).then(() => W.invoice(50, ''));
+    await W.connect(HOME, null, null, { remember: false });
+    const wrong = await W.quoteFeeAt(HOME, inv3.bolt11, 'sat');
+    wrong.quote.mint = THIRD;
+    at = p.hits.length;
+    await W.pay(inv3.bolt11, () => {}, { quote: wrong.quote }).then(() => null, () => null);
+    ok(count(since(at), 'POST ' + HOME + '/v1/melt/quote/bolt11') === 1, 'and one that names another mint than the phone is on is asked again');
+    await settle();
+  }
+  /* the far mint has not heard yet: its quote's state is asked, not the claim made again blind */
+  {
+    const p = page();
+    p.mints[THEIR] = fakeMint(p.window, { p2pk: true, fill: 9, quoteFrom: 5000, quotesUnpaid: true });
+    const them = p.mints[THEIR];
+    const handle = them.handle;
+    let polls = 0, payAt = 2;
+    them.handle = (m) => {
+      const path = new URL(m.url).pathname;
+      if (m.method === 'GET' && /^\/v1\/mint\/quote\/bolt11\//.test(path)) {
+        polls += 1;
+        if (polls >= payAt) them.payQuote(path.split('/').pop());
+      }
+      return handle(m);
+    };
+    await fund(p, HOME, 2000);
+    const W = p.W;
+    W._claimPollMs = 20;
+    const plan = await W.transferQuote(HOME, 300, { to: THEIR, land: true });
+    let at = p.hits.length;
+    const done = await W.moveRun(plan, () => {}, { visit: true }).then((d) => d, (e) => ({ err: e.message }));
+    const ran = p.hits.slice(at).filter((h) => /\/v1\/mint\/(bolt11|quote\/bolt11\/)/.test(h));
+    const claim = 'POST ' + THEIR + '/v1/mint/bolt11';
+    ok(!done.err && W.balanceAt(THEIR) === plan.moving, 'a claim refused as not paid lands once the mint says paid', done.err || String(W.balanceAt(THEIR)));
+    ok(ran.length === 4 && ran[0] === claim && /^GET /.test(ran[1]) && /^GET /.test(ran[2]) && ran[3] === claim,
+       'claimed, then the quote’s state asked until it is PAID, then claimed once more', JSON.stringify(ran));
+    // never paid in the time allowed: the claim is not made again, and the crossing is said as paid and on its way
+    await W.connect(HOME, null, null, { remember: false });
+    W._claimPollMostMs = 150;
+    payAt = Infinity;
+    const plan2 = await W.transferQuote(HOME, 200, { to: THEIR, land: true });
+    at = p.hits.length;
+    const e2 = await W.moveRun(plan2, () => {}, { visit: true }).then(() => null, (e) => e);
+    const ran2 = p.hits.slice(at);
+    ok(!!e2 && e2.movePaid === true && ran2.filter((h) => h === claim).length === 1 && ran2.filter((h) => /^GET .*quote\/bolt11\//.test(h)).length >= 2 && notes(p).length === 1,
+       'a mint that never says paid in time: one claim, its state asked, and the crossing left on file as paid', e2 ? String(e2.message).slice(0, 60) + '; ' + JSON.stringify(ran2.filter((h) => /mint\//.test(h)).length) : 'it went through');
+    noBooks(p, 'a crossing left paid and unclaimed on purpose');
+  }
+
   console.log(failed ? '\n' + failed + ' crossing check(s) failed' : '\nall crossing checks pass');
   process.exit(failed ? 1 : 0);
 }

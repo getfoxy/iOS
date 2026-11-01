@@ -267,7 +267,7 @@ ok(/keepSentToken\(\{ token: token, sats: sumProofs\(split\.send\), unit: 'sat',
   ok(/if \(!opts \|\| opts\.remember !== false\) save\(K\.mint, u\);/.test(route)
      && /var how = visit \? \{ remember: false \} : undefined;/.test(move)
      && /return FoxyWallet\.connect\(terms\.from, null, null, \{ remember: false \}\)/.test(move)
-     && /W\.moveRun\(plan, \(\) => \{\}, \{ visit: true \}\)/.test(read('build/app/26d-tap.js')),
+     && /W\.moveRun\(plan, \(\) => \{\}, \{ visit: true(, quoted: true, warm: true)? \}\)/.test(read('build/app/26d-tap.js')),
      'a crossing and a carry visit the other mint without saving it as the phone\u2019s own');
   ok(/if \(opts && opts\.remember === false\) return null;\n\s+return FoxyWallet\.crossingsWaiting\(\) \? FoxyWallet\.catchUpCrossings\(\) : null;/.test(route)
      && /return \(mintUrl && FoxyWallet\.crossingsWaiting\(\)\) \? FoxyWallet\.catchUpCrossings\(\) : null;/.test(read('build/wallet/23-screen-capture.js'))

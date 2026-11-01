@@ -512,7 +512,10 @@
       return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
-    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true }).then((plan) => {
+    /* One invoice at the request's mint for every source asked (`landing`, this run's): each source's crossing used to
+     * have the request's mint make an invoice of its own, and the one chosen pays the one they share. */
+    const landing = {};
+    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true, landing: landing }).then((plan) => {
       const fee = Math.max(0, Math.round(Number(plan && plan.feeSats) || 0));
       return { cost: need + fee, fee: fee, ok: true, rank: fee, full: plan };
     });

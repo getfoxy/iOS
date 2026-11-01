@@ -57,6 +57,14 @@
    */
   var KEY_PATH = /\/v1\/(info|keysets|keys)(\/[A-Za-z0-9_%.-]+)?$/;
   var KEY_TTL_MS = 300000;
+  /* A mint's /v1/info for twice as long: it says what the mint is and what it
+   * takes, which changes with a release, not with a keyset, and every connect
+   * asked for it again — a round trip over Tor (1.2 to 2.2 s on a phone) on
+   * the way into every crossing, visit and trip home to a mint this session
+   * had heard from a minute before. A connect that fails drops it
+   * (`forgetMintInfo`), so the next one asks. */
+  var INFO_TTL_MS = 600000;
+  var INFO_PATH = /\/v1\/info\n/;
   var keyBodies = {};        // url -> { at, raw }
   var keyWaiting = {};       // url -> the request already on its way
 
@@ -135,7 +143,7 @@
   function cachedKeyBody(url) {
     var hit = keyBodies[url];
     if (!hit) return null;
-    if (Date.now() - hit.at > KEY_TTL_MS) { delete keyBodies[url]; return null; }
+    if (Date.now() - hit.at > (INFO_PATH.test(url) ? INFO_TTL_MS : KEY_TTL_MS)) { delete keyBodies[url]; return null; }
     return hit.raw;
   }
 
@@ -161,6 +169,16 @@
     var prefix = String(url || '').replace(/\/+$/, '');
     Object.keys(keyBodies).forEach(function (k) {
       if (!prefix || k.indexOf(prefix) === 0) delete keyBodies[k];
+    });
+  }
+
+  /* A mint's /v1/info, every circuit's copy of it, dropped: a connect to it
+   * that failed asks for it again next time rather than trusting what it said
+   * before (`connect`). */
+  function forgetMintInfo(url) {
+    var prefix = String(url || '').replace(/\/+$/, '') + '/v1/info\n';
+    Object.keys(keyBodies).forEach(function (k) {
+      if (k.indexOf(prefix) === 0) delete keyBodies[k];
     });
   }
 

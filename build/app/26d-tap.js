@@ -2630,7 +2630,9 @@
      * phone banks, and it is not saved as the phone's own. */
     // a connect that throws is a move that failed, said by the caller's ending, and not a throw out of PAY
     let start;
-    try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
+    /* `sessionInfo`: what the mint the sats leave said about itself this session is taken as said, as the far mint's is in
+     * `moveRun`; the payment that follows is what finds out whether it is answering. */
+    try { start = visit ? W.connect(mine, null, null, { remember: false, sessionInfo: true }) : W.connect(mine, null, null, { sessionInfo: true }); } catch (e0) { start = Promise.reject(e0); }
     return start
       /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
        * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */

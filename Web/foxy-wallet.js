@@ -1495,6 +1495,14 @@
    */
   var KEY_PATH = /\/v1\/(info|keysets|keys)(\/[A-Za-z0-9_%.-]+)?$/;
   var KEY_TTL_MS = 300000;
+  /* A mint's /v1/info for twice as long: it says what the mint is and what it
+   * takes, which changes with a release, not with a keyset, and every connect
+   * asked for it again — a round trip over Tor (1.2 to 2.2 s on a phone) on
+   * the way into every crossing, visit and trip home to a mint this session
+   * had heard from a minute before. A connect that fails drops it
+   * (`forgetMintInfo`), so the next one asks. */
+  var INFO_TTL_MS = 600000;
+  var INFO_PATH = /\/v1\/info\n/;
   var keyBodies = {};        // url -> { at, raw }
   var keyWaiting = {};       // url -> the request already on its way
 
@@ -1573,7 +1581,7 @@
   function cachedKeyBody(url) {
     var hit = keyBodies[url];
     if (!hit) return null;
-    if (Date.now() - hit.at > KEY_TTL_MS) { delete keyBodies[url]; return null; }
+    if (Date.now() - hit.at > (INFO_PATH.test(url) ? INFO_TTL_MS : KEY_TTL_MS)) { delete keyBodies[url]; return null; }
     return hit.raw;
   }
 
@@ -1599,6 +1607,16 @@
     var prefix = String(url || '').replace(/\/+$/, '');
     Object.keys(keyBodies).forEach(function (k) {
       if (!prefix || k.indexOf(prefix) === 0) delete keyBodies[k];
+    });
+  }
+
+  /* A mint's /v1/info, every circuit's copy of it, dropped: a connect to it
+   * that failed asks for it again next time rather than trusting what it said
+   * before (`connect`). */
+  function forgetMintInfo(url) {
+    var prefix = String(url || '').replace(/\/+$/, '') + '/v1/info\n';
+    Object.keys(keyBodies).forEach(function (k) {
+      if (k.indexOf(prefix) === 0) delete keyBodies[k];
     });
   }
 
@@ -4407,8 +4425,22 @@
    * marked as the spare's (`foxyWarm`): the phone keeps the connection it
    * made to the mint for the job that takes this circuit (Route.keepWarm),
    * and its diary of a return says when the spare was warmed. */
+  /* Not while a crossing has warmed the far mint's circuit for its claim
+   * (14-moving-between-mints.js `moveRun`): the phone keeps one warmed
+   * connection at a time, and a spare opened at the near mint in the middle of
+   * the melt took it from the claim it was opened for. Until the claim is made,
+   * a minute at most. */
+  var spareHeldUntil = 0, spareHeldOff = false;
+  /* Let go (0), one that was held off is opened now, for the job after the
+   * claim: the payment made at the far mint. */
+  function holdSpare(ms) {
+    spareHeldUntil = ms > 0 ? Date.now() + ms : 0;
+    if (!(ms > 0) && spareHeldOff) { spareHeldOff = false; warmSpareSoon(); }
+  }
+
   function warmSpare() {
     if (FoxyWallet._spareOff || !wallet || !routeOpen() || !bridged()) return Promise.resolve(false);
+    if (Date.now() < spareHeldUntil) { spareHeldOff = true; return Promise.resolve(false); }
     if (spareReady()) return Promise.resolve(true);
     if (sparing && !(warming && warming.taken)) return sparing;
     spare = null;
@@ -4569,15 +4601,34 @@
    * to a read with no circuit (`shareKeyBody`): a connect within five minutes
    * of the last one, a visit or a retry, takes them from there as it did and
    * asks only for the info, and so do the later reads of the mint's keys. */
+  /* And the info too, kept the same way for ten minutes (`INFO_TTL_MS`), and
+   * taken from there by a connect that asks for it (`sessionInfo`): the
+   * connects in the middle of a crossing (the mint the sats leave, the mint
+   * they land at) and a payment's visit to the mint it is paid from each asked
+   * a mint this session had just heard from what it was, 1.2 to 2.2 s over Tor
+   * apiece. Every other connect still asks, because asking is how a trip home
+   * waits for a mint that has gone quiet; what it is told is kept for the
+   * next. The wallet says how many of the three came from here
+   * (`foxyLoadCached`). A connect that fails, and a mint that does not answer,
+   * forget the info (11-routing.js `connect`, 98-mint-health.js). */
   var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
-  function loadMintOnOne(w) {
+  var INFO_READ = /\/v1\/info$/;
+  function loadMintOnOne(w, sessionInfo) {
     var mint = w && w.mint;
     if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
     var label = newCircuitLabel();
+    var fromHere = 0;
+    try { w.foxyLoadCached = 0; } catch (e0) { /* a wallet that takes no field: nothing to say */ }
     mint._request = function (o) {
       var u = String((o && o.endpoint) || '');
-      var shared = KEY_CHAIN_READ.test(u.split('?')[0]) ? cacheableKeyUrl(o.method, u, '') : '';
-      if (shared && cachedKeyBody(shared) !== null) return FoxyWallet.nativeRequest(o);
+      var path = u.split('?')[0];
+      var info = INFO_READ.test(path);
+      var shared = (info || KEY_CHAIN_READ.test(path)) ? cacheableKeyUrl(o.method, u, '') : '';
+      if (shared && (!info || sessionInfo) && cachedKeyBody(shared) !== null) {
+        fromHere += 1;
+        try { w.foxyLoadCached = fromHere; } catch (e1) { /* as above */ }
+        return FoxyWallet.nativeRequest(o);
+      }
       return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
         if (shared) shareKeyBody(u, label);
         return r;
@@ -21498,7 +21549,7 @@
        * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(loadMintOnOne(w), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo)), 30000, hostOf(u));
       return ready.then(function () {
         wallet = w;
         mintUrl = u;
@@ -21625,8 +21676,12 @@
           id: u,
           name: u.replace(/^https?:\/\//, ''),
           balanceSats: sumProofs(proofs()),
+          // how many of the mint's info, keysets and keys came from this session's answers (`loadMintOnOne`), for a crossing's log
+          fromSession: Number(w.foxyLoadCached) || 0,
         };
       }).catch(function (e) {
+        // what the mint said about itself is not trusted past a connect that failed: the next one asks (`INFO_TTL_MS`)
+        if (!cached) forgetMintInfo(u);
         wallet = before || null;
         if (before) {
           mintUrl = beforeUrl;
@@ -22850,9 +22905,37 @@
             if (pad) console.log('[foxy] transfer: padding by', pad,
                                  'so', want, 'still lands after', hostOf(to), 'takes its fee');
           }
-          return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
-            .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
-          25000, hostOf(to) + ' invoice');
+          var make = function () {
+            return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
+              .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
+            25000, hostOf(to) + ' invoice');
+          };
+          /* One invoice at the far mint for every source quoted for the same
+           * payment (`o.landing`, the caller's for one run: PAY FROM asks each
+           * of the phone's mints what the crossing would cost from there, and
+           * each made its own invoice at the request's mint, two of them in
+           * one log, 4.9 s and 1.8 s). The same mint, the same figure, the
+           * same run: the one already asked for, or on its way, is every
+           * source's, and the one chosen melts it. One that is gone, refused,
+           * or a minute from its expiry is asked for afresh. An invoice nobody
+           * paid expires at the mint on its own. */
+          var shared = (opts.landing && typeof opts.landing === 'object') ? opts.landing : null;
+          if (!shared) return make();
+          var key = to + '|' + issue;
+          var had = shared[key];
+          var mine = function () {
+            var p = make();
+            shared[key] = p;
+            p.catch(function () { if (shared[key] === p) delete shared[key]; });
+            return p;
+          };
+          if (!had) return mine();
+          return had.then(function (mq) {
+            var exp = Number(mq && mq.expiry) || 0;
+            if (exp > 0 && exp * 1000 < Date.now() + 60000) return mine();
+            console.log('[foxy] transfer: the invoice', hostOf(to), 'gave for', issue, 'in this run is this source\u2019s too');
+            return mq;
+          }, function () { return shared[key] && shared[key] !== had ? shared[key] : mine(); });
         })
         .then(function (mq) {
           return withTimeout(src.createMeltQuoteBolt11(mq.request), 25000,
@@ -22931,6 +23014,8 @@
               reserve: reserve,
               margin: 0,
               mintQuote: mq, meltQuote: xq,
+              // when the source's quote was given, for a payment that melts it rather than asking again (`moveRun`'s `quoted`)
+              quotedAt: Date.now(),
             };
           });
         });
@@ -22984,17 +23069,79 @@
       /* The far mint has to hear that its invoice was paid before it will
        * issue, and it does not always hear in the instant the near one says
        * "paid": the claim was refused "Quote not paid" with the melt already
-       * made, and the crossing reported as failed (`rev-po`). Asked again
-       * for a few seconds, which is all the lag ever is. */
-      var claimPatiently = function (left) {
-        return FoxyWallet.claimQuote(quoteId, plan.moving, plan.mintQuote.foxyLock).catch(function (e) {
-          var notYet = /not paid|unpaid|not been paid/i.test(String((e && e.message) || e));
-          if (!notYet || left <= 0) throw e;
-          return new Promise(function (r) { setTimeout(r, 2000); }).then(function () { return claimPatiently(left - 1); });
-        });
+       * made, and the crossing reported as failed (`rev-po`). It used to be
+       * asked again, blind, every two seconds; on a phone the second claim
+       * came 1.8 s after a refusal the mint had answered in 1.9 (2026-11-01).
+       * Now the claim is made once, as the melt said paid; refused as not paid,
+       * the quote's own state is asked (GET mint/quote/bolt11/{id}, on the
+       * claim's circuit) straight away and then every second until the mint
+       * says PAID, half a minute at most, and the claim is made once more.
+       * Any other refusal is the claim's answer, as before. */
+      var claimTimes = { first: true, polls: 0, ms: 0 };
+      var pollMs = Number(FoxyWallet._claimPollMs) > 0 ? Number(FoxyWallet._claimPollMs) : 1000;
+      var claimOnce = function () { return FoxyWallet.claimQuote(quoteId, plan.moving, plan.mintQuote.foxyLock); };
+      var claimWhenPaid = function () {
+        var began = Date.now();
+        return claimOnce().catch(function (e) {
+          if (!/not paid|unpaid|not been paid/i.test(String((e && e.message) || e))) throw e;
+          claimTimes.first = false;
+          var cap = Number(FoxyWallet._claimPollMostMs) > 0 ? Number(FoxyWallet._claimPollMostMs) : 30000;
+          var ask = function () {
+            claimTimes.polls += 1;
+            var w;
+            try { w = onCircuit(need(), 'quote:' + quoteId); } catch (eW) { return Promise.reject(eW); }
+            return withTimeout(w.checkMintQuoteBolt11(quoteId), 10000, 'the invoice\u2019s state').then(function (q) {
+              return String((q && q.state) || '').toUpperCase();
+            }, function () { return ''; }).then(function (state) {
+              if (state === 'PAID' || state === 'ISSUED') return claimOnce();
+              if (Date.now() - began + pollMs > cap) throw e;
+              return new Promise(function (r) { setTimeout(r, pollMs); }).then(ask);
+            });
+          };
+          console.log('[foxy] crossing: ' + hostOf(plan.to) + ' has not heard its invoice was paid; asking its state until it has');
+          return ask();
+        }).then(function (sats) { claimTimes.ms = Date.now() - began; return sats; });
       };
 
-      var moved = FoxyWallet.pay(plan.mintQuote.request, stage).then(null, function (e) {
+      /* And the far mint made ready while the melt runs (4.7 s on a phone):
+       * its info, keysets and keys put where the connect after the melt finds
+       * them (`loadMintOnOne`), and the claim's own circuit opened by asking
+       * it for its keysets on it, the connection kept for the claim (Route's
+       * warm session, as `warmSpare` keeps the spare's). The connect and the
+       * claim then leave at once, where they waited on the mint for its keysets
+       * and on Tor for a circuit, 2 to 2.4 s. The spare at the near mint is not
+       * opened meanwhile (`holdSpare`): the phone keeps one warmed connection,
+       * and that one would take it from the claim. Only for a crossing that
+       * asks (`opts.warm`), only with a route, and never in the way: a warm
+       * that fails is a claim that goes as it always went. */
+      var warmBegan = Date.now();
+      var warm = { ms: 0, done: false, before: false };
+      var meltDone = false;
+      if (opts && opts.warm && bridged() && routeOpen() && !FoxyWallet._crossWarmOff) {
+        holdSpare(60000);
+        var toBase = String(plan.to).replace(/\/+$/, '');
+        var keys = Promise.resolve().then(function () { return withTimeout(newWallet(toBase).loadMint(), 25000, hostOf(toBase)); });
+        var road = FoxyWallet.nativeRequest({ endpoint: toBase + '/v1/keysets', method: 'GET', foxyFresh: true, foxyWarm: true,
+                                              foxyCircuit: circuitFor('quote:' + quoteId) });
+        Promise.all([keys, road]).then(function () {
+          warm.done = true;
+          warm.ms = Date.now() - warmBegan;
+          warm.before = !meltDone;
+        }, function () { /* a warm that failed: the connect and the claim ask as they always did */ });
+      }
+
+      /* The melt's own quote, where the crossing's plan holds one asked a moment
+       * ago (`opts.quoted`: PAY FROM's, or the crossing card's): `pay` melts it
+       * while the mint's expiry allows (`keptAway`), and does not ask the same
+       * mint the same question again, 1.5 s on a phone. Only from the mint the
+       * plan was quoted at, which is where the phone is now. */
+      var keptQuote = (opts && opts.quoted && plan.meltQuote && plan.mintQuote && plan.from
+                       && canonicalMint(plan.from) === canonicalMint(mintUrl || ''))
+        ? { quote: plan.meltQuote, bolt11: plan.mintQuote.request, unit: 'sat', mint: plan.from, at: Number(plan.quotedAt) || 0 }
+        : null;
+      var payBegan = Date.now();
+      var meltMs = 0;
+      var moved = FoxyWallet.pay(plan.mintQuote.request, stage, keptQuote ? { quote: keptQuote } : undefined).then(null, function (e) {
         /* It did not go. If nothing is being held for it, nothing is on its
          * way, and the note would be a note of nothing: left behind, every
          * launch asked the far mint to issue a quote nobody had paid
@@ -23015,12 +23162,29 @@
           later.moveQuote = quoteId;
           throw later;
         }
+        meltDone = true;
+        meltMs = Date.now() - payBegan;
+        var reused = !!(keptQuote && paid && paid.hash === plan.meltQuote.quote);
         stage('switching');
         // Change from the unspent fee reserve stays under the old mint's key,
         // where it is still spendable if you ever switch back.
-        return FoxyWallet.connect(plan.to, null, null, how).then(function (w) {
+        var connectBegan = Date.now();
+        /* A crossing's own (`opts.quoted`, `opts.warm`): what the far mint said about itself this session is taken as said
+         * (`sessionInfo`); the claim that follows is what finds out whether it is answering. */
+        var landHow = (opts && (opts.quoted || opts.warm)) ? Object.assign({}, how || {}, { sessionInfo: true }) : how;
+        return FoxyWallet.connect(plan.to, null, null, landHow).then(function (w) {
+          var connectMs = Date.now() - connectBegan;
           stage('claiming');
-          return claimPatiently(8).then(function (sats) {
+          return claimWhenPaid().then(function (sats) {
+            /* What the crossing's steps took, and which of them were spared a
+             * round trip, for the next phone log to say what was saved. */
+            console.log('[foxy] pay steps: crossing to ' + hostOf(plan.to) + ': melt quote '
+              + (reused ? 'reused' : 'asked again') + ', melt ' + (meltMs / 1000).toFixed(1) + ' s'
+              + ' | connect ' + (connectMs / 1000).toFixed(1) + ' s, '
+              + ((w && w.fromSession) >= 3 ? 'info and keys from this session' : (w && w.fromSession) ? (w.fromSession + ' of 3 from this session') : 'asked of the mint')
+              + ' | claim ' + (claimTimes.first ? 'first try' : 'after ' + claimTimes.polls + ' state check(s)') + ', ' + (claimTimes.ms / 1000).toFixed(1) + ' s'
+              + ' | ' + (warm.done ? 'warmed in ' + (warm.ms / 1000).toFixed(1) + ' s' + (warm.before ? ', before the melt answered' : ', after the melt') : 'not warmed')
+              + ' | all ' + ((Date.now() - payBegan) / 1000).toFixed(1) + ' s');
             dropMoveNote(quoteId);
             // change from the unspent reserve, still sitting at the source mint
             var left = sumProofs(load(K.proofs + '.' + plan.from, []));
@@ -23040,6 +23204,8 @@
         });
       });
       moved.then(notLive, notLive);
+      // the spare at whatever mint the phone is on is opened again once the claim is over, however it went
+      if (opts && opts.warm) { var unhold = function () { holdSpare(0); }; moved.then(unhold, unhold); }
       return moved;
     },
 
@@ -24685,6 +24851,8 @@
      * the first is unsettled — each fetch returns a fresh invoice, so the
      * invoice alone never matches. */
     pay: function (bolt11, onStage, opts) {
+      // the longest a quote asked of another mint before the phone went there is paid with (`keptAway`, below)
+      var AWAY_QUOTE_MOST_MS = Number(FoxyWallet._awayQuoteMostMs) > 0 ? Number(FoxyWallet._awayQuoteMostMs) : 600000;
       var stage = typeof onStage === 'function' ? onStage : function () {};
       var inv = String(bolt11 || '').trim().replace(/^lightning:/i, '');
       if (!/^ln(bc|tb|bcrt)/i.test(inv)) {
@@ -24791,10 +24959,27 @@
       if (heldId && hold0 && recordUnit(hold0) !== unit) {
         return Promise.reject(unsent('This card\u2019s money is in ' + balanceWord(hold0.unit) + ', so it pays in ' + balanceWord(hold0.unit) + '. Nothing was paid.'));
       }
-      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv && keptUnit === unit
-        && (heldId || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000))
-        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + (swapId ? 10000 : 30000)));
-      if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      /* Or a quote another mint gave for this very invoice before the phone
+       * went there, handed in without the wallet that asked it (`kept.mint`,
+       * no `kept.w`): PAY FROM's question of each source (`quoteFeeAt`), or a
+       * crossing's plan (`transferQuote`, 14-moving-between-mints.js
+       * `moveRun`). That wallet had no seed, so the quote is melted by this
+       * one, the phone's, once it is at that mint; and it is the fee the person
+       * chose the source on. The mint's own expiry says how long it stands,
+       * with the same margin, ten minutes at most; a minute where it names
+       * none. Asked again, as before, once it is older, or at another mint. */
+      var keptAge = kept ? Date.now() - Number(kept.at || 0) : Infinity;
+      var keptExpiry = (kept && kept.quote && Number(kept.quote.expiry) > 0) ? Number(kept.quote.expiry) * 1000 : 0;
+      var reuseMs = Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000;
+      var keptAway = !!(kept && !kept.w && !heldId && kept.mint && canonicalMint(kept.mint) === canonicalMint(mintOf(w)));
+      var reuse = !!(kept && kept.quote && (kept.w || keptAway) && carries && kept.bolt11 === inv && keptUnit === unit
+        && (heldId || keptAge < (keptAway && keptExpiry ? AWAY_QUOTE_MOST_MS : reuseMs))
+        && (!keptExpiry || keptExpiry > Date.now() + (swapId ? 10000 : 30000)));
+      if (reuse) {
+        console.log(keptAway
+          ? '[foxy] the fee quote ' + hostOf(mintOf(w)) + ' gave ' + Math.round(keptAge / 1000) + ' s ago is still good; paying with it'
+          : '[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      }
       /* A swap pays the melt whose price it showed, or nothing: asked again,
        * the mint names a new price for the same invoice, and the person said
        * SWAP to the old one. Refused before anything moves; the screen asks
@@ -24813,8 +24998,8 @@
         ? satsOf(kept.quote.amount) + satsOf(kept.quote.fee_reserve) : 0;
       /* A card's pieces are melted on the circuit kept ready (`w`), by the wallet of their unit: a dollar card's by the dollar
        * wallet, on that same circuit. */
-      var quoted = reuse ? ((heldId && unit !== 'sat') ? unitWalletOn(w, unit).then(function (uw) { return { got: kept.quote, w: uw }; })
-                                                     : Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w }))
+      var quoted = reuse ? (((heldId || keptAway) && unit !== 'sat') ? unitWalletOn(w, unit).then(function (uw) { return { got: kept.quote, w: uw }; })
+                                                     : Promise.resolve({ got: kept.quote, w: (heldId || keptAway) ? w : kept.w }))
         : unitWalletOn(w, unit).then(function (uw) {
           return withTimeout(askedAgain(uw, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
         });
@@ -26472,10 +26657,10 @@
      * nothing, so a wallet is made for that mint for the asking alone, as `cardCrossQuote` makes one, and the sum the
      * payment would be refused on there (`meltNeed`: the amount, the reserve, the mint's fee for the split and again on the
      * pieces the melt spends) is held against that mint's own pile in that unit. Answers { mint, unit, amount, feeReserve,
-     * need, have, ok, why, rate, quote }. `quote` is the mint's answer without the wallet that asked: that wallet has no
-     * seed, and `pay` melts with a quote's own wallet when it is handed one, so the payment asks that mint again once the
-     * phone is there (`pay` still holds a dollar payment to the figure shown, `shownMost`). Rejects with the mint's own
-     * words where it will not quote. */
+     * need, have, ok, why, rate, quote }. `quote` is the mint's answer without the wallet that asked, and with the mint it
+     * was asked of (`mint`): that wallet has no seed, so once the phone is there `pay` melts the same quote with the
+     * phone's own wallet while the mint's expiry allows (`keptAway`), and asks that mint again after that (a dollar
+     * payment still held to the figure shown, `shownMost`). Rejects with the mint's own words where it will not quote. */
     quoteFeeAt: function (mint, bolt11, unit) {
       try { assertRoute(); } catch (e) { return Promise.reject(e); }
       var at = String(mint || '').replace(/\/+$/, '');
@@ -26502,7 +26687,7 @@
         var r = u === 'usd' ? rateFrom(amount, msat) : 0;
         return { mint: at, unit: u, amount: amount, feeReserve: reserve, need: mn.need, have: mn.have, ok: !!mn.ok,
                  why: mn.ok ? '' : notEnoughWords(mn, u), rate: r > 0 ? { usdPerBtc: r } : null,
-                 quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, bolt11: inv, at: Date.now() } };
+                 quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, bolt11: inv, at: Date.now(), mint: at } };
       });
     },
 
@@ -36403,6 +36588,11 @@
       var t = typeof now === 'number' ? now : Date.now();
       var mint = mintOfEndpoint(endpoint);
       if (!mint || (outcome !== 'ok' && outcome !== 'fail')) return null;
+      /* A mint that did not answer, or whose proxy said it was not there, is
+       * asked what it is on the next connect, not answered from this session's
+       * copy (`INFO_TTL_MS`): that connect is how a trip home waits for a mint
+       * that has gone quiet. */
+      if (outcome === 'fail') forgetMintInfo(mint);
       var all = load(MINT_HEALTH_KEY, {});
       if (!all || typeof all !== 'object') all = {};
       var prev = all[mint] || null;

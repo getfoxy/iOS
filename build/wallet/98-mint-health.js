@@ -72,6 +72,11 @@
       var t = typeof now === 'number' ? now : Date.now();
       var mint = mintOfEndpoint(endpoint);
       if (!mint || (outcome !== 'ok' && outcome !== 'fail')) return null;
+      /* A mint that did not answer, or whose proxy said it was not there, is
+       * asked what it is on the next connect, not answered from this session's
+       * copy (`INFO_TTL_MS`): that connect is how a trip home waits for a mint
+       * that has gone quiet. */
+      if (outcome === 'fail') forgetMintInfo(mint);
       var all = load(MINT_HEALTH_KEY, {});
       if (!all || typeof all !== 'object') all = {};
       var prev = all[mint] || null;

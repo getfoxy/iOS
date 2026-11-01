@@ -623,8 +623,8 @@
      * figures of the payment are kept for the sending screen. */
     /* From another mint than this phone's (PAY FROM, 26l-pay-from.js): a visit there, in the unit of the pile chosen, and
      * home again whichever way it ends (`crossComeHome`). The quote it was chosen on was asked with no seed, so `pay`
-     * is handed it without its wallet and asks that mint again once the phone is there; a dollar payment is still held
-     * to the figure shown (`pay`, `shownMost`). */
+     * is handed it without its wallet and melts it with the phone's own once there, while the mint's expiry allows, and
+     * asks that mint again after that; a dollar payment is still held to the figure shown (`pay`, `keptAway`, `shownMost`). */
     const away = card ? null : (this.pfAwayNow ? this.pfAwayNow() : null);
     const two = !card && !away && !!(this.twoUnitsOn && this.twoUnitsOn());
     const unit = away ? away.unit : two ? (this.walletNow('send') || 'sat') : 'sat';
@@ -669,7 +669,8 @@
       // never over a home already set: that trip's home is this one's too
       if (!this._crossCameFrom) this._crossCameFrom = away.home;
     }
-    const run = away ? W.connect(away.mint, null, null, { remember: false }).then(pays) : pays();
+    // (what that mint said about itself when PAY FROM asked it is taken as said: the payment is what finds out it answers)
+    const run = away ? W.connect(away.mint, null, null, { remember: false, sessionInfo: true }).then(pays) : pays();
     this._sendRun = run;
     // and a come-home that waited for this send (`crossComeHome`), once it is over
     const settled = () => { if (this._sendRun === run) { this._sendRun = null; if (!away && this.syncHome) this.syncHome(); } };

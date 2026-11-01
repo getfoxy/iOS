@@ -107,7 +107,7 @@ function phone(o) {
       return { mint, unit: u, amount: q.amount, feeReserve: q.feeReserve, need, have, ok: have >= need, why: have >= need ? '' : 'You hold ' + have + ' there.',
         rate: q.rate || null, quote: { unit: u, amount: q.amount, feeReserve: q.feeReserve, quote: { quote: 'x-' + mint }, bolt11: pr, at: Date.now() } };
     }); },
-    transferQuote: (from, sats, x) => { log.transfers.push({ from, sats, to: x && x.to, land: !!(x && x.land) });
+    transferQuote: (from, sats, x) => { log.transfers.push({ from, sats, to: x && x.to, land: !!(x && x.land), landing: x && x.landing });
       const a = (opts.transfers || {})[from];
       return a instanceof Error ? Promise.reject(a) : Promise.resolve({ from, to: x.to, net: sats, feeSats: a == null ? 3 : a }); },
     sendShortfall: (sats) => { const have = W.balanceAt(W.mintUrl); return { need: sats, fee: 0, have, short: have < sats, why: have < sats ? 'Short here.' : '' }; },
@@ -379,6 +379,38 @@ async function run() {
     ok('the chosen tile wears the orange look, every other grey', picked && picked.bg !== 'grey' && rows.filter((r) => r.key !== picked.key).every((r) => r.bg === 'grey'),
       JSON.stringify(rows.map((r) => [r.key, r.bg])));
     ok('each keeps its own sign', rows.every((r) => r.sym === '₿'));
+  }
+  console.log('12. a request’s crossing asks nothing twice (2026-11-01)');
+  {
+    const req = { id: 'r9', mints: [THIRD], sats: 1000, unit: 'sat', transports: ['nostr'], delivery: { kind: 'nostr', target: 'nprofile1x' } };
+    const a = phone({ piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: AWAY, unit: 'sat', amount: 3000 }, { mint: THIRD, unit: 'sat', amount: 2000 }] });
+    a.setState({ screen: 'reqOffer', stack: ['home'], req: req, balSats: 5000 });
+    a.pfRequest(req);
+    await wait(5);
+    const t = a.log.transfers;
+    ok('every source is quoted with one landing for the run, so the request’s mint makes one invoice',
+      t.length === 2 && !!t[0].landing && t[0].landing === t[1].landing && t.every((x) => x.to === THIRD && x.land), JSON.stringify(t.map((x) => x.from)));
+    ok('one fee quote per source for the payment: each source is asked once', t.filter((x) => x.from === HOME).length === 1 && t.filter((x) => x.from === AWAY).length === 1);
+    const b = phone({ piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: AWAY, unit: 'sat', amount: 3000 }, { mint: THIRD, unit: 'sat', amount: 2000 }] });
+    b.setState({ screen: 'reqOffer', stack: ['home'], req: req, balSats: 5000 });
+    b.pfRequest(req);
+    await wait(5);
+    ok('another run has a landing of its own', !!b.log.transfers[0].landing && b.log.transfers[0].landing !== t[0].landing);
+    // the crossing PAY FROM chose melts the plan's own quote and warms the far mint (26d-tap.js `crossMove`)
+    const runs = [];
+    const W = {
+      mintUrl: HOME,
+      transactions: () => Promise.resolve([]),
+      connect: (u) => { W.mintUrl = u; return Promise.resolve(); },
+      moveRun: (plan, st, x) => { runs.push(x || null); W.mintUrl = plan.to; return Promise.resolve({ sats: plan.moving }); },
+    };
+    global.window = { FoxyWallet: W };
+    const m = Object.assign(new Function('return {' + method('crossMove(plan, theirs, mine, home) {') + '}')(), {
+      hushMove() {}, showMelt() {}, hideMelt() {}, refreshBalance() {}, mintNameOf: () => 'Kashu', hushSweepEntries: () => Promise.resolve(),
+    });
+    await m.crossMove({ net: 1000, moving: 1000, to: THIRD, from: AWAY }, THIRD, AWAY, HOME);
+    ok('the crossing pays with the quote the plan holds and warms the far mint while the melt runs',
+      runs.length === 1 && runs[0] && runs[0].visit === true && runs[0].quoted === true && runs[0].warm === true, JSON.stringify(runs));
   }
   console.log('10. the choice is let go when the flow ends');
   {

@@ -315,7 +315,7 @@
        * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(loadMintOnOne(w), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo)), 30000, hostOf(u));
       return ready.then(function () {
         wallet = w;
         mintUrl = u;
@@ -442,8 +442,12 @@
           id: u,
           name: u.replace(/^https?:\/\//, ''),
           balanceSats: sumProofs(proofs()),
+          // how many of the mint's info, keysets and keys came from this session's answers (`loadMintOnOne`), for a crossing's log
+          fromSession: Number(w.foxyLoadCached) || 0,
         };
       }).catch(function (e) {
+        // what the mint said about itself is not trusted past a connect that failed: the next one asks (`INFO_TTL_MS`)
+        if (!cached) forgetMintInfo(u);
         wallet = before || null;
         if (before) {
           mintUrl = beforeUrl;

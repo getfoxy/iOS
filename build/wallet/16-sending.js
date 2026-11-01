@@ -8,6 +8,8 @@
      * the first is unsettled — each fetch returns a fresh invoice, so the
      * invoice alone never matches. */
     pay: function (bolt11, onStage, opts) {
+      // the longest a quote asked of another mint before the phone went there is paid with (`keptAway`, below)
+      var AWAY_QUOTE_MOST_MS = Number(FoxyWallet._awayQuoteMostMs) > 0 ? Number(FoxyWallet._awayQuoteMostMs) : 600000;
       var stage = typeof onStage === 'function' ? onStage : function () {};
       var inv = String(bolt11 || '').trim().replace(/^lightning:/i, '');
       if (!/^ln(bc|tb|bcrt)/i.test(inv)) {
@@ -114,10 +116,27 @@
       if (heldId && hold0 && recordUnit(hold0) !== unit) {
         return Promise.reject(unsent('This card\u2019s money is in ' + balanceWord(hold0.unit) + ', so it pays in ' + balanceWord(hold0.unit) + '. Nothing was paid.'));
       }
-      var reuse = !!(kept && kept.quote && kept.w && carries && kept.bolt11 === inv && keptUnit === unit
-        && (heldId || (Date.now() - Number(kept.at || 0)) < (Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000))
-        && (!(Number(kept.quote.expiry) > 0) || Number(kept.quote.expiry) * 1000 > Date.now() + (swapId ? 10000 : 30000)));
-      if (reuse) console.log('[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      /* Or a quote another mint gave for this very invoice before the phone
+       * went there, handed in without the wallet that asked it (`kept.mint`,
+       * no `kept.w`): PAY FROM's question of each source (`quoteFeeAt`), or a
+       * crossing's plan (`transferQuote`, 14-moving-between-mints.js
+       * `moveRun`). That wallet had no seed, so the quote is melted by this
+       * one, the phone's, once it is at that mint; and it is the fee the person
+       * chose the source on. The mint's own expiry says how long it stands,
+       * with the same margin, ten minutes at most; a minute where it names
+       * none. Asked again, as before, once it is older, or at another mint. */
+      var keptAge = kept ? Date.now() - Number(kept.at || 0) : Infinity;
+      var keptExpiry = (kept && kept.quote && Number(kept.quote.expiry) > 0) ? Number(kept.quote.expiry) * 1000 : 0;
+      var reuseMs = Number(FoxyWallet._quoteReuseMs) > 0 ? Number(FoxyWallet._quoteReuseMs) : 60000;
+      var keptAway = !!(kept && !kept.w && !heldId && kept.mint && canonicalMint(kept.mint) === canonicalMint(mintOf(w)));
+      var reuse = !!(kept && kept.quote && (kept.w || keptAway) && carries && kept.bolt11 === inv && keptUnit === unit
+        && (heldId || keptAge < (keptAway && keptExpiry ? AWAY_QUOTE_MOST_MS : reuseMs))
+        && (!keptExpiry || keptExpiry > Date.now() + (swapId ? 10000 : 30000)));
+      if (reuse) {
+        console.log(keptAway
+          ? '[foxy] the fee quote ' + hostOf(mintOf(w)) + ' gave ' + Math.round(keptAge / 1000) + ' s ago is still good; paying with it'
+          : '[foxy] the fee quote the confirmation showed is fresh; paying with it, on its circuit');
+      }
       /* A swap pays the melt whose price it showed, or nothing: asked again,
        * the mint names a new price for the same invoice, and the person said
        * SWAP to the old one. Refused before anything moves; the screen asks
@@ -136,8 +155,8 @@
         ? satsOf(kept.quote.amount) + satsOf(kept.quote.fee_reserve) : 0;
       /* A card's pieces are melted on the circuit kept ready (`w`), by the wallet of their unit: a dollar card's by the dollar
        * wallet, on that same circuit. */
-      var quoted = reuse ? ((heldId && unit !== 'sat') ? unitWalletOn(w, unit).then(function (uw) { return { got: kept.quote, w: uw }; })
-                                                     : Promise.resolve({ got: kept.quote, w: heldId ? w : kept.w }))
+      var quoted = reuse ? (((heldId || keptAway) && unit !== 'sat') ? unitWalletOn(w, unit).then(function (uw) { return { got: kept.quote, w: uw }; })
+                                                     : Promise.resolve({ got: kept.quote, w: (heldId || keptAway) ? w : kept.w }))
         : unitWalletOn(w, unit).then(function (uw) {
           return withTimeout(askedAgain(uw, 'the mint\u2019s fee quote', quoteFor), 30000, 'the mint\u2019s fee quote');
         });
