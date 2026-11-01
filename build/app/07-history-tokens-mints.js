@@ -739,9 +739,13 @@
      * again to "try again" was paid a second time while the first post was
      * still with the site, and a different request run beside it had its
      * visit pulled from under it when the first one came home. */
-    if (this._reqRun) {
+    /* A tap's other phone is told, and the toast says which payment is out
+     * and how long it has: it was two seconds of "Wait for it", and the
+     * phone that asked sat on its four digits until its own clock ran out. */
+    if (this.reqRunLive ? this.reqRunLive() : this._reqRun) {
       console.log('[foxy] request: another request payment is still being delivered; this one waits');
-      this.toast('A payment is still being delivered. Wait for it.', true);
+      if (this.refuseForRun) this.refuseForRun(!!(opts && opts.viaTap));
+      else this.toast('A payment is still being delivered. Wait for it.', true);
       return;
     }
     /* A request just opened is not one being paid.
@@ -952,12 +956,32 @@
   /* `go.overpayOk` is the person's answer to the over-pay card, threaded rather
    * than stashed: this function's work is asynchronous, so a flag on `this`
    * would be cleared before the send reads it. */
+  /* `go.req` is the request the first pass was for, carried through every
+   * pass that comes back by itself (a move collected, a crossing, the over-pay
+   * question). Each pass read `state.req` instead, which is whatever is on
+   * screen by then: a second request opened while the first one's owed move
+   * was being collected was paid with PAY never pressed, and the A DIFFERENT
+   * MINT question was skipped for it. A pass whose request is no longer the
+   * one on screen is dropped, and the phone comes home from any trip it made. */
   makeTokenForRequest(go) {
     const W = window.FoxyWallet;
-    const req = this.state.req;
-    if (!req || this.state.reqBusy) return;
+    const req = (go && go.req) || this.state.req;
+    if (!req) return;
+    if (go && go.req && this.state.req !== go.req) {
+      console.log('[foxy] request: the request on screen is not the one this pass was for; not paid');
+      if (this._reqCollect === req) { this._reqCollect = null; this.setState({ reqCollecting: false }); }
+      this._crossMovedTo = null;
+      if (this._crossCameFrom) this.crossComeHome();
+      return;
+    }
     // one request payment at a time, whatever the screens have since been told (`openRequest`)
-    if (this._reqRun) { this.toast('A payment is still being delivered. Wait for it.', true); return; }
+    if (this.reqRunLive ? this.reqRunLive() : this._reqRun) {
+      if (this.refuseForRun) this.refuseForRun(!!req.viaTap);
+      else this.toast('A payment is still being delivered. Wait for it.', true);
+      return;
+    }
+    if (this.state.reqBusy || this.state.reqCollecting) return;
+    go = Object.assign({}, go || {}, { req: req });
     /* The end of this payment, whichever way it ended: nothing moved for the
      * next payment to speak of, and home after a crossing or a visit.
      * `_crossMovedTo` was cleared on three endings of nine, so a later refusal
@@ -1079,7 +1103,13 @@
     if ((chosen || crossNow) && need > 0 && owed().length) {
       if (W.finishMove && !(go && go.collected)) {
         console.log('[foxy] request: a move to ' + want + ' is paid and not yet collected; collecting it first');
+        /* Busy on the offer while it runs (COLLECTING…), so PAY is not live
+         * under it: nothing on screen changed for up to 45 seconds, and PAY
+         * still showed and could be pressed. */
+        this._reqCollect = req;
+        this.setState({ reqCollecting: true });
         W.finishMove().then(() => null, () => null).then(() => {
+          if (this._reqCollect === req) { this._reqCollect = null; this.setState({ reqCollecting: false }); }
           this.makeTokenForRequest(Object.assign({}, go || {}, { collected: true }));
         });
         return;
@@ -1100,14 +1130,6 @@
       return;
     }
     if (crossNow) { crossing(mine); return; }
-    this.setState({ reqBusy: true });
-    /* This payment, alive until one of its endings below lets it go
-     * (`endRun`). STOP WAITING leaves its screen and not the payment, so
-     * `reqBusy` alone could not say whether one was still out (`openRequest`). */
-    const run = { id: String(req.id || ''), at: Date.now() };
-    this._reqRun = run;
-    const endRun = () => { if (this._reqRun === run) this._reqRun = null; };
-
     /* A request that says where to deliver is paid there: onion, straight to
      * the requester's phone over Tor; nostr, an encrypted message through Tor
      * (07-request-delivery.js). The token is made either way, so a delivery
@@ -1133,36 +1155,6 @@
     const usdReq = req.unit === 'usd';
     const amt = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
     const direct = !!(reachable && amt > 0);
-    /* A payment going out looks like a payment going out.
-     *
-     * Paying a request had the gold melting overlay, which is the wallet
-     * turning ecash into something else — here nothing is being melted, the
-     * money is simply leaving, and it should look the way a Lightning send
-     * looks. Making a token to show somebody keeps the
-     * overlay: that really is the wallet working, with no send to animate.
-     *
-     * The amount goes into state because the send screen reads it from there
-     * (renderContext), and `recipientKind` is deliberately not 'invoice' —
-     * that would send it looking for an amount inside a recipient there is
-     * none of. */
-    if (direct) {
-      /* What the sending screen says came from where: this payment, in its
-       * unit, and not the last Lightning payment's figures (`renderSent`). */
-      this._lastPay = null;
-      this._paying = (this.twoUnitsOn && this.twoUnitsOn())
-        ? { unit: usdReq ? 'usd' : 'sat', amount: amt, fee: 0, asked: 0 } : null;
-      this.setState(p => ({
-        screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in',
-        flow: 'send', recipientKind: 'ecash',
-        amount: usdReq ? (amt / 100).toFixed(2) : String(req.sats), unit: usdReq ? 'USD' : 'SATS',
-        /* Who this one goes to, not who the last one went to: the address of
-         * an earlier send was still in state, so a tap said it was sending to
-         * it. A tap goes to the code on both screens. */
-        recipient: (req.viaTap && p.tapCode) ? String(p.tapCode) : '',
-      }));
-    } else {
-      this.showMelt('Making the token\u2026');
-    }
     /* A visit, when the payment goes straight to them: the mint the request
      * names is where this payment is made from, not where the person banks.
      * It was connected to and remembered, so a payment refused there left
@@ -1173,11 +1165,76 @@
      * token's own mint, so it runs from home. A token made to show, with no
      * visit, stays where it is made. */
     const visit = !!(want && !here && direct);
-    /* Never over a home already set: a pass that comes back here after a
-     * crossing or a visit is still on that trip, and it used to write the
-     * mint it was visiting as the one to come home to. */
-    if (visit && !this._crossCameFrom) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
-    const ready = (want && !here) ? W.connect(want, null, null, visit ? { remember: false } : undefined) : Promise.resolve(null);
+    this.setState({ reqBusy: true });
+    /* This payment, alive until one of its endings below lets it go
+     * (`endRun`). STOP WAITING leaves its screen and not the payment, so
+     * `reqBusy` alone could not say whether one was still out (`openRequest`).
+     * With what it is and where it goes, for the words a refusal says while
+     * it is out (`refuseForRun`). */
+    const site = (req.delivery && req.delivery.kind === 'https')
+      ? String(req.delivery.target || '').replace(/^https?:\/\//i, '').split(/[/?#]/)[0] : '';
+    const run = { id: String(req.id || ''), at: Date.now(), amount: amt, unit: usdReq ? 'usd' : 'sat', to: site };
+    this._reqRun = run;
+    const endRun = () => { if (this._reqRun === run) this._reqRun = null; };
+
+    /* Everything from here to the promise chain inside a try. The wallet's
+     * connect refuses synchronously where it has no route and nothing on file
+     * for the mint (working offline, or Tor reconnecting, at a mint never
+     * used), and that throw left this function with the run token set: every
+     * later request was refused "A payment is still being delivered", every
+     * come-home waited for it, and `reqBusy` held every mint switch until the
+     * app was restarted. Let go at once here, and said by the chain's own
+     * ending below as any refusal is. */
+    let ready = Promise.resolve(null);
+    let overOk = false;
+    try {
+      /* A payment going out looks like a payment going out.
+       *
+       * Paying a request had the gold melting overlay, which is the wallet
+       * turning ecash into something else — here nothing is being melted, the
+       * money is simply leaving, and it should look the way a Lightning send
+       * looks. Making a token to show somebody keeps the
+       * overlay: that really is the wallet working, with no send to animate.
+       *
+       * The amount goes into state because the send screen reads it from there
+       * (renderContext), and `recipientKind` is deliberately not 'invoice' —
+       * that would send it looking for an amount inside a recipient there is
+       * none of. */
+      if (direct) {
+        /* What the sending screen says came from where: this payment, in its
+         * unit, and not the last Lightning payment's figures (`renderSent`). */
+        this._lastPay = null;
+        this._paying = (this.twoUnitsOn && this.twoUnitsOn())
+          ? { unit: usdReq ? 'usd' : 'sat', amount: amt, fee: 0, asked: 0 } : null;
+        this.setState(p => ({
+          screen: 'sendDone', stack: p.stack.concat([p.screen]), sendPhase: 'in',
+          flow: 'send', recipientKind: 'ecash',
+          amount: usdReq ? (amt / 100).toFixed(2) : String(req.sats), unit: usdReq ? 'USD' : 'SATS',
+          /* Who this one goes to, not who the last one went to: the address of
+           * an earlier send was still in state, so a tap said it was sending to
+           * it. A tap goes to the code on both screens. */
+          recipient: (req.viaTap && p.tapCode) ? String(p.tapCode) : '',
+        }));
+      } else {
+        this.showMelt('Making the token\u2026');
+      }
+      /* Never over a home already set: a pass that comes back here after a
+       * crossing or a visit is still on that trip, and it used to write the
+       * mint it was visiting as the one to come home to. */
+      if (visit && !this._crossCameFrom) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
+      ready = (want && !here) ? W.connect(want, null, null, visit ? { remember: false } : undefined) : Promise.resolve(null);
+      /* Agreed before it is asked, where the change comes straight back. The
+       * question was being skipped already, but only after the send had refused
+       * once for want of an answer — so the screen went to sending, back to the
+       * offer and to sending again, and where the receiver had named no address
+       * the card came up anyway, telling a payer whose change was on its way
+       * back that the other phone would keep it. */
+      overOk = !!(go && go.overpayOk) || (direct && this.changeComesBack(req));
+    } catch (e0) {
+      endRun();
+      this.setState({ reqBusy: false });
+      ready = Promise.reject(e0);
+    }
     /* Enough there on its face, and short once that mint's fee for the
      * pieces is counted: the crossing, as a tap does (26d-tap.js
      * `tapPayFromThere`). The figures are known only once there. It used to
@@ -1187,13 +1244,6 @@
       const sf = W.sendShortfall(need, { locked: !!(req.lockTo && !(this.offlineNow && this.offlineNow())) });
       return !!(sf && sf.short);
     };
-    /* Agreed before it is asked, where the change comes straight back. The
-     * question was being skipped already, but only after the send had refused
-     * once for want of an answer — so the screen went to sending, back to the
-     * offer and to sending again, and where the receiver had named no address
-     * the card came up anyway, telling a payer whose change was on its way
-     * back that the other phone would keep it. */
-    const overOk = !!(go && go.overpayOk) || (direct && this.changeComesBack(req));
     ready.then(() => {
       if (shortThere()) {
         const eShort = /** @type {any} */ (new Error('Not enough there once that mint\u2019s fee is counted.'));
@@ -1603,15 +1653,27 @@
    * said, and kept for the next route (`comeHomeOwed`). It was dropped: the
    * phone stayed at their mint for the rest of the session, and the next
    * receive was made there. */
+  /* And not under anything else being made from the mint the phone is on: a
+   * payout on chain quoted there (its confirmation, or the payout being handed
+   * over), a send, a crossing, or a tap being paid (`homeWaitsFor`). A request
+   * payment ending under an on-chain confirmation took the phone home from the
+   * mint it was quoted at, and SEND then melted that mint's quote at home and
+   * was refused. Each of those comes home itself when it ends, and anything
+   * left waiting is taken home on the next update once nothing holds it
+   * (`syncHome`). */
   crossComeHome() {
     const W = window.FoxyWallet;
-    if (this._reqRun) {
-      console.log('[foxy] a request payment is still out; the phone comes home when it ends');
+    const back = this._crossCameFrom;
+    if (!back || !W) { this._crossCameFrom = null; this._homeWaiting = false; this._homeOwed = null; return; }
+    const waits = this.homeWaitsFor ? this.homeWaitsFor() : (this._reqRun ? 'a request payment is still out' : '');
+    if (waits) {
+      console.log('[foxy] home waits: ' + waits + '; the phone comes home when it ends');
+      this._homeWaiting = true;
       return;
     }
-    const back = this._crossCameFrom;
+    this._homeWaiting = false;
     this._crossCameFrom = null;
-    if (!back || !W || String(W.mintUrl || '').replace(/\/+$/, '') === back) { this._homeOwed = null; return; }
+    if (String(W.mintUrl || '').replace(/\/+$/, '') === back) { this._homeOwed = null; return; }
     console.log('[foxy] back to ' + back + ', the mint this phone was on before the crossing');
     const go = (again) => W.connect(back).then(() => { this._homeOwed = null; this.refreshBalance(); this.loadHistory(); }, (e) => {
       console.warn('[foxy] could not get back to ' + back + (again ? ' a second time' : '') + ':', W.reason ? W.reason(e) : (e && e.message));
@@ -1619,7 +1681,9 @@
         // kept for the second try, and for anything that comes home meanwhile
         if (!this._crossCameFrom) this._crossCameFrom = back;
         setTimeout(() => {
-          if (this._crossCameFrom !== back || this._reqRun || window.FoxyWallet !== W) return;
+          if (this._crossCameFrom !== back || window.FoxyWallet !== W) return;
+          // and not under whatever has begun meanwhile: it comes home itself when it ends
+          if (this.homeWaitsFor ? this.homeWaitsFor() : this._reqRun) { this._homeWaiting = true; return; }
           this._crossCameFrom = null;
           if (String(W.mintUrl || '').replace(/\/+$/, '') === back) return;
           go(true);
@@ -1641,13 +1705,86 @@
 
   /* The trip home owed by a come-home that could not connect (`crossComeHome`),
    * made on the next route. Not under a request payment, which comes home
-   * itself when it ends. */
+   * itself when it ends, nor under anything else `crossComeHome` waits for.
+   * It runs on every privacy push with Tor up, and after NOT BACK HOME YET the
+   * person goes on working at the mint the phone is on: an on-chain
+   * confirmation quoted there was moved home under it, and its SEND melted
+   * that mint's quote at home and was refused. Kept for the next push. */
   comeHomeOwed() {
     const back = this._homeOwed;
-    if (!back || this._reqRun || this._crossCameFrom) return;
+    if (!back || this._crossCameFrom) return;
+    const waits = this.homeWaitsFor ? this.homeWaitsFor() : (this._reqRun ? 'a request payment is still out' : '');
+    if (waits) { console.log('[foxy] the trip home waits: ' + waits); return; }
     this._homeOwed = null;
     this._crossCameFrom = back;
     this.crossComeHome();
+  }
+
+  /* What the trip home waits for, in words for the diary, or '' for nothing.
+   * Each of these is being made from the mint the phone is on now, and a
+   * connect home under it points the rest of it at the wrong mint. */
+  homeWaitsFor() {
+    const s = this.state || {};
+    if (this.reqRunLive ? this.reqRunLive() : this._reqRun) return 'a request payment is still out';
+    if (this._ocVisit) return 'a payout on chain from this mint is on screen';
+    if (s.ocBusy) return 'a payout on chain is being handed over';
+    // quoted here and not yet sent (its plan is let go when it is sent or left)
+    if (s.screen === 'ocConfirm' && s.ocPlan) return 'an on-chain confirmation quoted at this mint is on screen';
+    if (this._sendRun) return 'a send is running';
+    if (s.crossBusy) return 'a crossing is moving sats';
+    if (s.screen === 'crossConfirm') return 'a crossing is being agreed';
+    if (s.req && s.req.viaTap && s.screen === 'reqOffer') return 'a tap payment is on screen';
+    return '';
+  }
+
+  /* A come-home that waited (`crossComeHome`), made once nothing holds it.
+   * Called on every update: most of what it waits for ends with a screen
+   * change, and a payout's confirmation left with BACK, or a tap's offer
+   * closed, ends with nothing else to call it. */
+  syncHome() {
+    if (!this._homeWaiting) return;
+    if (!this._crossCameFrom) { this._homeWaiting = false; return; }
+    if (this.homeWaitsFor()) return;
+    this._homeWaiting = false;
+    this.crossComeHome();
+  }
+
+  /* Whether a request payment is still out (`_reqRun`, makeTokenForRequest).
+   *
+   * One older than the longest delivery is dead, whatever kept it: a website
+   * takes about 65 seconds at most and an onion about 35, so 150 is well past
+   * either. A payment that threw before its promise chain held the token for
+   * the rest of the session, and every later request, come-home and mint
+   * switch was refused for it. Let go here with the hold it put on mint
+   * switches (`reqBusy`). */
+  reqRunLive() {
+    const run = this._reqRun;
+    if (!run) return false;
+    const age = Date.now() - (Number(run.at) || 0);
+    if (age < 150000) return true;
+    console.warn('[foxy] request: the payment begun ' + Math.round(age / 1000) + 's ago never ended; letting it go');
+    this._reqRun = null;
+    if (this.state && this.state.reqBusy) this.setState({ reqBusy: false });
+    return false;
+  }
+
+  /* Refused for a request payment still out, in words that say which one and
+   * how long. A tap's other phone is told too, so it does not sit on its four
+   * digits for a payment that is not coming. It was a two-second toast and
+   * nothing to the other phone. */
+  refuseForRun(viaTap) {
+    const W = window.FoxyWallet;
+    const run = /** @type {any} */ (this._reqRun || {});
+    const n = Math.round(Number(run.amount) || 0);
+    const what = n > 0 ? 'Your payment of ' + (run.unit === 'usd' ? this.moneyIn(n, 'usd') : this.group(n) + ' sats') : 'Your last payment';
+    const said = what + (run.to ? ' to ' + run.to : '') + ' is still being delivered. It ends within about a minute; '
+      + (viaTap ? 'tap again then.' : 'try again then.');
+    console.log('[foxy] refused: a request payment is still out (' + (run.id || '?') + ')' + (viaTap ? '; the other phone is told' : ''));
+    if (viaTap && W && W.tapQuote) {
+      W.tapQuote(JSON.stringify({ gaveUp: 'The payer is still finishing another payment.' })).catch(() => {});
+    }
+    if (viaTap && this.tapGaveNothing) this.tapGaveNothing('another payment is still going out');
+    this.toast(said, true);
   }
 
   requestDelivered(req, r) {
@@ -1739,6 +1876,10 @@
     } else if (!rUnit || website) {
       // a dollar token as well, for a website: the watch reads a token in its own unit
       this.watchToken(rUnit ? 0 : r.sats, r.hash, false);
+      /* Marked as a website's, so its amber row says it was paid and is being
+       * watched rather than "not yet claimed" beside a RECLAIM, for a site
+       * that answered yes (16-history-lists.js `bySite`). */
+      if (website && W.tag) { try { W.tag(r.hash, { site: true }); } catch (e) {} }
     }
     this.refreshBalance();
     this.loadHistory();

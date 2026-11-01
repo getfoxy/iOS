@@ -94,6 +94,11 @@
    * confirmation; without one, to the keypad. */
   payOnchain(text) {
     const W = window.FoxyWallet;
+    /* Not while a request payment is still out (STOP WAITING): it may be on a
+     * visit, and its ending takes the phone home from under a payout quoted
+     * at the mint it is on. A payout from another mint wrote the mint being
+     * visited as home, too. */
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(false); return; }
     const read = W.readAddress ? W.readAddress(text) : null;
     if (!read) { this.toast('That is not a Bitcoin address Foxy can read.', true); return; }
     this.onchainAsk();
@@ -129,6 +134,8 @@
   ocNext() {
     const sats = this.amountInSats();
     if (!(sats > 0)) { this.toast('Enter an amount first', true); return; }
+    // not while a request payment is still out (`payOnchain`)
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(false); return; }
     /* More than is here is refused at the keypad, before the mint is asked
      * for a fee: the confirmation said so only after its quote, a screen
      * later. The fee comes on top and is still
@@ -225,6 +232,8 @@
       this.setState({ ocBusy: false, ocPlan: null, ocTo: '', ocSats: 0 });
       // home from a mint visited to pay from (PAY FROM): the payout is followed from home (`onchainSendingAway`)
       if (this.pfOcHome) this.pfOcHome();
+      // and a come-home that waited for this payout (`crossComeHome`)
+      if (this.syncHome) this.syncHome();
       this.refreshBalance();
       this.loadHistory();
       this.onchainWatchLater();
@@ -244,8 +253,9 @@
       /* From a mint visited to pay from: home, and off the confirmation, whose figures were that mint's and whose TRY AGAIN
        * would ask this one. A payout whose answer was lost is followed from home. */
       if (this._ocVisit) {
-        this.pfOcHome();
+        // off the payout first: the come-home waits while a payout is being handed over (`homeWaitsFor`)
         this.setState({ ocBusy: false, ocErr: '', screen: 'home', stack: [], ocPlan: null, ocTo: '', ocSats: 0 });
+        this.pfOcHome();
         this.toast(W.reason(e), true);
         return;
       }

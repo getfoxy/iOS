@@ -633,7 +633,10 @@
     this.setState({ payMint: e.mint, payUnit: 'sat', payFromReopen: false });
     if (e.mint === here) { this.ocQuote(); return; }
     this._ocVisit = e.mint;
-    this._crossCameFrom = here;
+    /* Never over a home already set: a request payment's visit had written
+     * home, and this wrote the mint being visited over it, so the phone ended
+     * there and not home. */
+    if (!this._crossCameFrom) this._crossCameFrom = here;
     this.setState({ ocPlan: null, ocFee: null, ocErr: '' });
     console.log('[foxy] pay from: visiting ' + this.pfName(e.mint).toLowerCase() + ' for its on-chain fee');
     W.connect(e.mint, null, null, { remember: false }).then(() => {

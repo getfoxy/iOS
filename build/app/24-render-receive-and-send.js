@@ -1046,11 +1046,15 @@
        * phones are touching and the thing being done is handing it over. What
        * it must never say is GENERATE ECASH TOKEN, which is what it said while
        * showing the code of the phone it was about to send to. */
-      cta: held ? 'CHECKING…' : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
+      /* COLLECTING… while a move to that mint, paid and not yet collected, is
+       * collected first (`makeTokenForRequest`): PAY stayed live under it for
+       * up to 45 seconds, with nothing on screen to say anything was running. */
+      cta: held ? 'CHECKING…' : s.reqCollecting ? 'COLLECTING\u2026'
+        : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
         : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
-      ctaBusy: held || !!s.reqBusy,
-      go: held ? () => {} : () => this.makeTokenForRequest(),
+      ctaBusy: held || !!s.reqBusy || !!s.reqCollecting,
+      go: (held || s.reqCollecting) ? () => {} : () => this.makeTokenForRequest(),
     };
   }

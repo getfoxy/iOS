@@ -130,6 +130,8 @@
      * it needs the moment the route is up, and tells of one that does not
      * come (`syncSend`). */
     this.syncSend();
+    // a come-home that waited for a payout, a send, a crossing or a tap, once none holds it (07-history-tokens-mints.js)
+    if (this.syncHome) this.syncHome();
     // and a payment from a card is that only while its flow is on screen (26f-flashcard.js, `syncCardOut`)
     this.syncCardOut();
     this.syncUnit();

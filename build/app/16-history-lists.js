@@ -514,6 +514,8 @@
           /* This payment crossed a Bluetooth link. Its token may be shown again
            * to the same person; it may not be taken back. */
           handedByTap: meta.handed === 'tap',
+          // paid to a website that answered yes, its token kept and watched until the mint says it is spent
+          bySite: meta.site === true,
           /* The mint's word for where the money went on chain: `txid:vout` from
            * the NUT-30 melt quote, kept as the transaction id alone. Empty
            * until the mint has broadcast — it answers `outpoint: null` before

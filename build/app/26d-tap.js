@@ -1424,6 +1424,14 @@
          * Same mistake as the listening gate above, in the same afternoon. A
          * phase that has ended is not a payment in flight. */
         const now = this.state;
+        /* A request payment still out (STOP WAITING) is said, to this person
+         * and to the other phone (`refuseForRun`): this was silent, and the
+         * receiver sat on its four digits until its own clock ended. */
+        if (this.reqRunLive && this.reqRunLive()) {
+          this.hideConnecting();
+          this.refuseForRun(true);
+          return;
+        }
         if (now.sendPhase === 'in' || now.reqBusy) {
           /* This tap is over and nothing came of it, so the marks that stop the
            * next one have to come off here.
@@ -2322,6 +2330,14 @@
       this.tapWrongMint(offer);
       return;
     }
+    /* Not while a request payment is still out (`_reqRun`, STOP WAITING). A
+     * post to a website holds no proof lock, so `moneyMoving` below did not
+     * see it: the sats were moved to their mint with the routing fee paid,
+     * then the payment was refused with a toast, nothing said where the sats
+     * were, the other phone was never told, and the first payment's ending
+     * took the phone to the mint it was visiting. Refused before anything
+     * moves, and the other phone told (`refuseForRun`). */
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(true); this.back(); return; }
     /* A mint this phone has never used is named in full and connected to
      * deliberately, exactly as a scanned request at a strange mint is
      * (makeTokenForRequest). Moving money to an attacker's mint destroys it
@@ -2419,9 +2435,17 @@
    * again whichever way it ends (`crossComeHome`). */
   tapPayFromThere(offer, want, theirs, mine, there) {
     const W = window.FoxyWallet;
+    // not under a request payment still out, here or once agreed (`tapCrossMint`)
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(true); this.back(); return; }
     console.log('[foxy] tap: ' + there + ' sats of this phone\u2019s are already at ' + theirs + '; paying from there, with no move');
     this.crossMintCard({ net: want, feeSats: 0 }, theirs, mine).then(yes => {
       if (!yes) { console.log('[foxy] tap: paying from ' + theirs + ' was not accepted'); return null; }
+      if (this.reqRunLive && this.reqRunLive()) {
+        this.setState({ crossBusy: false, crossQ: null });
+        this.refuseForRun(true);
+        this.back();
+        return null;
+      }
       return W.connect(theirs, null, null, { remember: false }).then(() => {
         const sf = W.sendShortfall(want, { locked: true });
         if (sf && sf.short) {
@@ -2430,7 +2454,8 @@
           return W.connect(mine).then(() => { this.setState({ crossBusy: false, crossQ: null }); this.back(); this.tapCrossQuote(offer, want, theirs, mine); });
         }
         this._crossMovedTo = null;
-        this._crossCameFrom = mine;
+        // never over a home already set: that trip's home is this one's too
+        if (!this._crossCameFrom) this._crossCameFrom = mine;
         this.refreshBalance();
         const read = W.decodeRequest(offer.req);
         if (!read) throw new Error('Their request could not be read.');
@@ -2439,8 +2464,9 @@
         if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
         if (offer.theirTill) read.theirTill = offer.theirTill;
         if (offer.asks) read.asks = true;
-        this.setState({ req: read, reqBusy: false, crossBusy: false,
-                        crossQ: null, note: '', noteDraft: '' });
+        // (and `reqBusy` is never let go under a payment still out: it is that payment's hold on mint switches)
+        this.setState(Object.assign({ req: read, crossBusy: false, crossQ: null, note: '', noteDraft: '' },
+                                    (this.reqRunLive && this.reqRunLive()) ? {} : { reqBusy: false }));
         this.makeTokenForRequest();
         return null;
       });
@@ -2452,6 +2478,8 @@
    * comes home to `mine` all the same. */
   tapCrossQuote(offer, want, theirs, mine, from) {
     const W = window.FoxyWallet;
+    // not under a request payment still out (`tapCrossMint`): nothing is quoted or moved
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(true); this.back(); return; }
     const src = from || mine;
     /* The one asked for while they were deciding, if it is the same crossing.
      *
@@ -2502,6 +2530,15 @@
   /* `home`: the mint to come back to, where the sats cross from another than the one this phone is on (PAY FROM). */
   crossRun(plan, offer, theirs, mine, home) {
     const W = window.FoxyWallet;
+    /* And once PAY is pressed, before the move: a request payment begun while
+     * the crossing was being agreed holds the wallet as one begun before it
+     * does (`tapCrossMint`). */
+    if (this.reqRunLive && this.reqRunLive()) {
+      this.setState({ crossBusy: false, crossQ: null });
+      this.refuseForRun(true);
+      this.back();
+      return Promise.resolve(null);
+    }
     /* Asked before the move, not after it. A move is a Lightning payment
      * and its fee; made for a request that is closed, or that the receiver
      * cannot take, it left the sats at a mint the person does not use. The
@@ -2534,8 +2571,9 @@
       if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
       if (offer.theirTill) read.theirTill = offer.theirTill;
       if (offer.asks) read.asks = true;
-      this.setState({ req: read, reqBusy: false, crossBusy: false,
-                      crossQ: null, note: '', noteDraft: '' });
+      // (and `reqBusy` is never let go under a payment still out: it is that payment's hold on mint switches)
+      this.setState(Object.assign({ req: read, crossBusy: false, crossQ: null, note: '', noteDraft: '' },
+                                  (this.reqRunLive && this.reqRunLive()) ? {} : { reqBusy: false }));
       this.makeTokenForRequest();
     });
   }
@@ -2584,7 +2622,10 @@
       this._crossMovedTo = theirs;
       /* And the mint to come home to once the payment is made: the crossing is
        * Foxy's business, the mint the person banks at is theirs. */
-      this._crossCameFrom = visit ? home : mine;
+      /* Never over a home already set: a move made on another trip (a
+       * request payment's visit) wrote the mint being visited as home, and
+       * that trip's ending took the phone there and not home. */
+      if (!this._crossCameFrom) this._crossCameFrom = visit ? home : mine;
     });
   }
 
@@ -3123,6 +3164,8 @@
    */
   tapStuckAtMint(offer, stuck, sats) {
     const W = window.FoxyWallet;
+    // not under a request payment still out (`tapCrossMint`)
+    if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(true); this.back(); return; }
     const want = Math.round(Number(sats) || Number(offer.read && offer.read.sats) || 0);
     const said = Object.assign({ id: String((offer.read && offer.read.id) || ''), sats: want }, stuck);
     const seq = (this._tapQuoteSeq = (this._tapQuoteSeq || 0) + 1);
@@ -3195,8 +3238,8 @@
            * that is taken as what it is and not refused as change nobody
            * owed (15-paid-wake-keyboard.js). */
           this._carriedPay = { sats: Math.round(Number(terms.sats) || 0), hash: '', until: Date.now() + 300000 };
-          this.setState({ req: read, reqBusy: false, crossBusy: false, crossQ: null,
-                          note: '', noteDraft: '' });
+          this.setState(Object.assign({ req: read, crossBusy: false, crossQ: null, note: '', noteDraft: '' },
+                                      (this.reqRunLive && this.reqRunLive()) ? {} : { reqBusy: false }));
           this.makeTokenForRequest();
         });
       });

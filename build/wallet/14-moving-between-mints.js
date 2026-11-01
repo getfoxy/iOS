@@ -300,6 +300,16 @@
         .then(function (mq) {
           return withTimeout(src.createMeltQuoteBolt11(mq.request), 25000,
                              hostOf(from) + ' melt quote').then(function (xq) {
+            /* The invoice is the far mint's, and the near mint's quote says
+             * what it is for. Anything but the figure asked for is refused
+             * before anything moves: more is a fee the far mint chose, shown
+             * only as FEE on the crossing card, and less is a move that lands
+             * short of the payment it was for. */
+            if (satsOf(xq.amount) !== issue) {
+              console.warn('[foxy] transfer: asked', hostOf(to), 'for', issue, 'and its invoice is for', satsOf(xq.amount));
+              throw new Error(hostOf(to) + ' gave an invoice for ' + satsOf(xq.amount) + ' sats, not the ' + issue
+                + ' asked for. Nothing was moved.');
+            }
             var reserve = satsOf(xq.fee_reserve);
             /* What leaves the source: the invoice, the route's reserve, and the
              * mint's own fee for splitting the proofs. The reserve is a ceiling

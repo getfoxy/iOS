@@ -179,6 +179,10 @@
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */
+          /* A website that said yes is paid as far as it is concerned; the
+           * token is kept and watched until its mint says it is spent, which
+           * is what amber means here (07-history-tokens-mints.js `requestDelivered`). */
+          : (t.pending && t.dir === 'out' && t.bySite) ? 'PAID \u00b7 WATCHING'
           : t.pending ? (t.dir === 'in' ? 'Pending' : 'Sent \u00b7 not yet claimed') : '',
         metaTime: t.time,
         // (a card's payment waiting for the mint is amber, as a pending one is: it is in the balance, and not finished)

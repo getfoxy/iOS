@@ -666,11 +666,13 @@
                                          invQuote ? { quote: invQuote } : {}, inUnit, fromCard)));
     if (away) {
       console.log('[foxy] send: paying from ' + away.mint + ' in ' + away.unit + ', on a visit; home to ' + away.home + ' after');
-      this._crossCameFrom = away.home;
+      // never over a home already set: that trip's home is this one's too
+      if (!this._crossCameFrom) this._crossCameFrom = away.home;
     }
     const run = away ? W.connect(away.mint, null, null, { remember: false }).then(pays) : pays();
     this._sendRun = run;
-    const settled = () => { if (this._sendRun === run) this._sendRun = null; };
+    // and a come-home that waited for this send (`crossComeHome`), once it is over
+    const settled = () => { if (this._sendRun === run) { this._sendRun = null; if (!away && this.syncHome) this.syncHome(); } };
     run.then(settled, settled);
     /* From a card, and the wait below given up on as pending: a payment that then fails after all, with the card's pieces still
      * held, puts them back to the card as one that failed at once does. */
