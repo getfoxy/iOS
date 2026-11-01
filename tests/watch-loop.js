@@ -415,9 +415,12 @@ async function run() {
 
   // ---- the sweep and the archive -------------------------------------------
   /* An invoice pushed off the list is archived, and the sweep still asks about
-   * it — at the mint that made it, and only there. An archived invoice of this
+   * it — at the mint that made it, never at this one. An archived invoice of this
    * mint that was paid after it left the list is still collected; one of another
-   * mint is not asked about here, which was a 400 on every launch. */
+   * mint is asked about at that mint, from home, through the away wallet (the
+   * seventh attack round: asking this mint about it was a 400 on every launch,
+   * and not asking at all left a paid invoice uncollected), and stays in the
+   * archive, stamped as checked, while it is unpaid. */
   {
     const seen = [];
     const ctx = realPage(seen);
@@ -436,10 +439,11 @@ async function run() {
       (await W.balanceSats()) === 300, String(await W.balanceSats()));
     const left = JSON.parse(ctx.storage.getItem('foxy.cashu.quotes.old') || '[]');
     check('and it leaves the archive', !left.some((e) => e.quote === inv.hash), JSON.stringify(left.map((e) => e.quote)));
-    check('an archived invoice of another mint is not asked about here',
-      !seen.some((u) => u.indexOf(stray.quote) >= 0), seen.join(' '));
-    check('and stays in the archive, not marked as asked',
-      left.length === 1 && left[0].quote === stray.quote && !left[0].checked, JSON.stringify(left));
+    check('an archived invoice of another mint is asked about at that mint, never at this one',
+      seen.some((u) => u.indexOf('elsewhere.test') >= 0 && u.indexOf(stray.quote) >= 0)
+        && !seen.some((u) => u.indexOf(MINT) >= 0 && u.indexOf(stray.quote) >= 0), seen.join(' '));
+    check('and stays in the archive while unpaid, stamped as checked',
+      left.length === 1 && left[0].quote === stray.quote && left[0].checked > 0, JSON.stringify(left));
   }
 
   results.forEach((r) => console.log(r));
