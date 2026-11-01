@@ -415,6 +415,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "inboxClose": FoxyBridge.handleInboxClose,
         "inboxAnswer": FoxyBridge.handleInboxAnswer,
         "onionPost": FoxyBridge.handleOnionPost,
+        "httpsPost": FoxyBridge.handleHttpsPost,
         "nostrSend": FoxyBridge.handleNostrSend,
         // Tap to pay: an invoice handed between two phones over Bluetooth (FoxyBridge+Tap.swift)
         "tapReceiveStart": FoxyBridge.handleTapReceiveStart,

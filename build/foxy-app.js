@@ -16257,7 +16257,8 @@ class Component extends DCLogic {
     const held = !!(sats > 0 && this.connecting() && this.requestNeedsRoute(req));
     const to = byTap ? s.tapCode
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
-             : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND' : 'THEIR NOSTR INBOX, OVER TOR')
+             : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND'
+             : d.kind === 'https' ? 'THEIR WEBSITE, OVER TOR' : 'THEIR NOSTR INBOX, OVER TOR')
       : (req && !req.transports.length) ? 'A TOKEN TO SHOW THEM' : 'A TOKEN YOU SEND THEM';
     /* Sats for dollars they asked for, at this phone's price, which they
      * agreed to over the tap (`tapQuoteTheirDollars`): what the sats are for,

@@ -180,6 +180,7 @@ check "cross online"   1 node tests/cross-mint-online-only.js
 check "settle quiet"   1 node tests/settle-quiet.js
 check "retry/re-arm"   1 node tests/retry-and-rearm.js
 check "onion fallback" 1 node tests/onion-fallback.js
+check "https delivery" 1 node tests/https-delivery.js
 check "amountless"     1 node tests/amountless-invoice.js
 check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js

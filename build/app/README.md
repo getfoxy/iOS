@@ -30,7 +30,7 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `21-render-values.js` | 611 | `renderVals`, `renderValsBase`, `renderFieldLog`, `renderContext` |
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
 | `23-render-home-and-amount.js` | 746 | `renderHome`, `renderHomeTwo`, `goHistoryIn`, `swapStart`, `keypadLocked`, `usdKeypad`, `keypadStale`, `keypadWallet`, `torBannerVals`, `shieldVals`, `shieldWatch`, `renderAmount` |
-| `24-render-receive-and-send.js` | 1017 | `renderReceive`, `renderPaid`, `renderPaidBase`, `renderSend`, `renderSent`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
+| `24-render-receive-and-send.js` | 1018 | `renderReceive`, `renderPaid`, `renderPaidBase`, `renderSend`, `renderSent`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
 | `25-render-confirm-and-blocked.js` | 250 | `renderConfirmShell`, `renderBlocked`, `renderCurrency` |
 | `26-render-history-and-contacts.js` | 751 | `renderHistory`, `segLook`, `renderTxDetail`, `histRowTwo`, `renderContacts` |
 | `26a-transfer.js` | 197 | `goTransfer`, `trPick`, `trFromSats`, `trNext`, `quoteTransfer`, `trMoveLess`, `runTransfer`, `trCancel`, `transferSpec` |

@@ -69,19 +69,6 @@ means one pass is all a partial recovery gets (`16a-onchain.js`).
   because the link is built around a payment request and a token is not one.
   It is a real feature and the handshake would carry it unchanged.
 
-## Paying a request that names an HTTPS address
-
-A payment request's `post` transport is delivered to only when the address is
-an onion (`deliveryFor`, build/wallet). A page on the web that asks for ecash
-names an ordinary HTTPS address, so Foxy makes a token for the person to paste
-instead of paying, and the button says GENERATE ECASH TOKEN where PAY was
-expected. A POST over Tor to an HTTPS address is the same thing Foxy does to
-reach a mint, so it costs no privacy.
-
-Start: `deliveryFor` takes `post` with an `https:` target as a third kind, the
-native handler behind `onionPost` (Foxy/Bridge/FoxyBridge+Delivery.swift) takes
-it through Tor the way mint requests go, and the offer screen says PAY for it.
-
 ## Decided: not doing
 
 - **PIN length stays at four digits minimum.** Six would

@@ -2307,8 +2307,11 @@
             return Promise.reject(new Error('That phone is no longer connected,'
               + ' and it gave no other way to reach it.'));
           }
+          // an onion's 200 and a web address's 200 are the same promise
           return d.kind === 'onion'
             ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; })
+            : d.kind === 'https'
+            ? deliverOverHttps(d.target, body).then(function (r) { confirmed = true; return r; })
             : deliverOverNostr(d.target, body);
         };
         var sent;

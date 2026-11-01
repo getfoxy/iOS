@@ -321,4 +321,53 @@ extension FoxyBridge {
             }
         }
     }
+
+    /// {url, body}: a payment posted to the web address a request names (a
+    /// page on the web asking for ecash: NUT-18 `post` with an https address).
+    /// "status\nbody" from their server, or an error the page shows as it is.
+    ///
+    /// Through Tor exactly as a mint is reached (Route.start): Tor's SOCKS
+    /// session with no failover, the bland headers, no cookies, no cache, and
+    /// a circuit of its own (MintCircuit.label(nil)) so the page's server and
+    /// the mint never share one. Their server sees a Tor exit and the token.
+    /// https only, with no sign-in in the address and no fragment; an onion
+    /// address is `onionPost`'s, which has the SOCKS client an onion needs.
+    /// The person's choice of the open connection is honoured here as it is
+    /// for a mint: it is one policy, not two.
+    func handleHttpsPost(id: String, body: [String: Any]) {
+        guard let text = body["url"] as? String, text.count <= 2048, let url = URL(string: text),
+              url.scheme == "https", let host = url.host, !host.isEmpty, !OnionAddress.isHost(host),
+              url.user == nil, url.password == nil, url.fragment == nil else {
+            resolve(id: id, text: nil, error: "That is not an https address.")
+            return
+        }
+        let payment = Data((body["body"] as? String ?? "").utf8)
+        guard !payment.isEmpty, payment.count <= OnionInbox.largestPayment else {
+            resolve(id: id, text: nil, error: "That payment is too large to send.")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = payment
+        let began = Date()
+        let task = Route.start(request, circuit: MintCircuit.label(nil)) { [weak self] data, response, error in
+            let ms = Int(Date().timeIntervalSince(began) * 1000)
+            if error is AnswerTooLarge {
+                self?.resolve(id: id, text: nil, error: "The answer from \(host) was too large.")
+                return
+            }
+            if let error {
+                print("[foxy] net: POST \(host) · \(ms) ms · \(NetDiary.failure(error as NSError))")
+                self?.resolve(id: id, text: nil, error: "Their address could not be reached over Tor.")
+                return
+            }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            print("[foxy] net: POST \(host) · \(ms) ms · \(code)")
+            let answer = String(data: data ?? Data(), encoding: .utf8) ?? ""
+            self?.resolve(id: id, text: "\(code)\n" + answer, error: nil)
+        }
+        // no route, or Foxy being put away: nothing left
+        if task == nil { resolve(id: id, text: nil, error: Route.refusal) }
+    }
 }

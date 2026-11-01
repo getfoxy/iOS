@@ -10880,9 +10880,26 @@
              memo: typeof j.memo === 'string' ? j.memo.slice(0, 200) : '' };
   }
 
+  /* An ordinary web address a request is paid to, or false. A page on the web
+   * asks for ecash this way (NUT-18 `post` with an https address), and it
+   * used to be read as nowhere Foxy could pay, so the button said GENERATE
+   * ECASH TOKEN at a page that was waiting to be paid. The payment goes there
+   * through Tor on a circuit of its own, as a mint is reached, so the page
+   * sees a Tor exit and the token and nothing else. https only, no sign-in
+   * in the address, no fragment; an onion is the onion kind's. */
+  function httpsTarget(t) {
+    if (typeof t !== 'string' || t.length > 2048 || !/^https:\/\//i.test(t)) return false;
+    var u;
+    try { u = new URL(t); } catch (e) { return false; }
+    return u.protocol === 'https:' && !!u.hostname && !/\.onion$/i.test(u.hostname)
+      && !u.username && !u.password && !u.hash;
+  }
+
   /* How the payer's wallet can deliver to a request, best first: 'onion' for
-   * a POST to an onion address, 'nostr' for a NIP-17 message; null for none
-   * Foxy speaks, when the token is shown instead. */
+   * a POST to an onion address, 'https' for a POST to a web address, 'nostr'
+   * for a NIP-17 message; null for none Foxy speaks, when the token is shown
+   * instead. The web address before Nostr: its answer says whether the
+   * payment was taken, and a relay's does not. */
   function deliveryFor(transports) {
     var list = Array.isArray(transports) ? transports : [];
     for (var i = 0; i < list.length; i++) {
@@ -10890,6 +10907,10 @@
       if (t.type === 'post' && typeof t.target === 'string' && /^http:\/\/[a-z2-7]{55}d\.onion\/[0-9a-f]{16,64}$/.test(t.target)) {
         return { kind: 'onion', target: t.target };
       }
+    }
+    for (var h = 0; h < list.length; h++) {
+      var p = list[h] || {};
+      if (p.type === 'post' && httpsTarget(p.target)) return { kind: 'https', target: p.target };
     }
     for (var k = 0; k < list.length; k++) {
       var n = list[k] || {};
@@ -10968,6 +10989,26 @@
       });
     }
     return attempt();
+  }
+
+  /* A payment posted to the web address the request names, through Tor
+   * (FoxyBridge+Delivery.swift `httpsPost`), once. Never twice: a post whose
+   * answer was lost may have been taken, and a second copy of the proofs on
+   * the wire buys nothing; the token's own claim watch sees it redeemed. Their
+   * server's words are not put on screen: it is anybody's website, not
+   * another Foxy, and 200 characters of its choosing on a card is not a
+   * refusal, it is a notice board. The status is said instead. */
+  var HTTPS_REACH_MS = 45000;
+  function deliverOverHttps(target, body) {
+    return bridgeAsk('httpsPost', { url: target, body: body, timeout: HTTPS_REACH_MS },
+                     HTTPS_REACH_MS + ONION_SLACK_MS).then(function (text) {
+      var s = String(text || '');
+      var nl = s.indexOf('\n');
+      var code = Number(s.slice(0, nl)) || 0;
+      if (code === 200) return true;
+      if (code === 404 || code === 410) throw new Error('That request is no longer open at their address.');
+      throw new Error('Their address did not take the payment (' + code + ').');
+    });
   }
 
   /* A payment handed to the relays the request names, as a NIP-17 private
@@ -31798,8 +31839,11 @@
             return Promise.reject(new Error('That phone is no longer connected,'
               + ' and it gave no other way to reach it.'));
           }
+          // an onion's 200 and a web address's 200 are the same promise
           return d.kind === 'onion'
             ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; })
+            : d.kind === 'https'
+            ? deliverOverHttps(d.target, body).then(function (r) { confirmed = true; return r; })
             : deliverOverNostr(d.target, body);
         };
         var sent;
