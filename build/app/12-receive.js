@@ -27,8 +27,17 @@
   }
 
   // real invoice for the receive screen, then wait for it to be paid
+  /* Not while the phone is on its way home (`_homeGoing`, 07-history-tokens-mints.js `crossComeHome`): an invoice
+   * made at the mint being visited is one the phone is no longer on a moment later. Made once it is home, if the
+   * screen is still up. */
   openReceive() {
     const W = window.FoxyWallet;
+    if (this._homeGoing) {
+      const screen = this.state.screen;
+      const after = () => { if (this.state.screen === screen && !this._homeGoing) this.openReceive(); };
+      this._homeGoing.then(after, after);
+      return;
+    }
     this.stopReceive();
     this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
     if (!W || !W.connected) { this.setState({ invoiceErr: 'No wallet connected.' }); return; }
@@ -68,6 +77,10 @@
   railRequest(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    /* Nothing while the phone is on its way home (`_homeGoing`): a request made at the mint being visited names a mint
+     * the phone has left by the time it is paid, and the payment is refused. '' is waiting, as for the onion address;
+     * the screen asks again when the trip home lands and the balance is read. */
+    if (this._homeGoing) return '';
     const unit = arguments[3];             // 'usd' for a request in dollars (above)
     const why = purpose || 'receive';
     const inUsd = unit === 'usd';
@@ -152,6 +165,11 @@
   railRequestReady(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     const unit = arguments[3];
+    // made once the phone is home, where a trip home is out (`railRequest`)
+    if (this._homeGoing) {
+      const again = () => this.railRequestReady(sats, purpose, usdCents, unit);
+      return this._homeGoing.then(again, again);
+    }
     const now = this.railRequest(sats, purpose, usdCents, unit);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
@@ -183,6 +201,8 @@
   tapOnlyRequest(sats, purpose) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    // nor while the phone is on its way home (`railRequest`): the tap offer waits for it
+    if (this._homeGoing) return '';
     const unit = arguments[2];
     const n = Math.max(0, Math.round(Number(sats) || 0));
     const inUsd = unit === 'usd';

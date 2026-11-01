@@ -3639,6 +3639,20 @@ class Component extends DCLogic {
       else this.toast('A payment is still being delivered. Wait for it.', true);
       return;
     }
+    /* Nor over a request whose owed move is still being collected
+     * (COLLECTING…, `_reqCollect`). Its pass comes back by itself and finds
+     * another request on screen, so the one it was for was dropped with the
+     * other phone of a tap told nothing, and PAY on the new one did nothing
+     * while COLLECTING… was still set. A request left before it is opened
+     * again is not held: its pass is dropped and says so. */
+    if (this.state && this.state.reqCollecting && this._reqCollect && this.state.req === this._reqCollect) {
+      console.log('[foxy] request: an owed move is still being collected for the request on screen; this one waits');
+      if (opts && opts.viaTap && W.tapQuote) {
+        W.tapQuote(JSON.stringify({ gaveUp: 'The payer is finishing another payment. Tap again in a moment.' })).catch(() => {});
+      }
+      this.toast('Foxy is collecting an earlier move. Wait for it.', true);
+      return;
+    }
     /* A request just opened is not one being paid.
      *
      * `reqBusy` is what makes the button say PAYING…, and a route that leaves
@@ -3862,6 +3876,12 @@ class Component extends DCLogic {
       console.log('[foxy] request: the request on screen is not the one this pass was for; not paid');
       if (this._reqCollect === req) { this._reqCollect = null; this.setState({ reqCollecting: false }); }
       this._crossMovedTo = null;
+      /* A tap's other phone is told the payment is not coming. It sat on its
+       * four digits until its own clock ended. */
+      if (req.viaTap && W && W.tapQuote) {
+        W.tapQuote(JSON.stringify({ gaveUp: this.state.req ? 'The payer opened another payment.' : 'The payer stopped this payment.' }))
+          .catch(() => {});
+      }
       if (this._crossCameFrom) this.crossComeHome();
       return;
     }
@@ -3871,7 +3891,31 @@ class Component extends DCLogic {
       else this.toast('A payment is still being delivered. Wait for it.', true);
       return;
     }
-    if (this.state.reqBusy || this.state.reqCollecting) return;
+    if (this.state.reqBusy) return;
+    if (this.state.reqCollecting) {
+      // PAY on a request other than the one whose move is being collected: said, not silent
+      if (this._reqCollect && this._reqCollect !== req) this.toast('Foxy is collecting an earlier move. Wait for it.', true);
+      return;
+    }
+    /* Not while the phone is on its way home (`_homeGoing`, `crossComeHome`).
+     * The connect home lands whenever Tor brings it, and the wallet is
+     * swapped the moment it does: a tap paid at the mint being visited, begun
+     * while it was out, was made from home's pile for a request that names
+     * the visited mint. Paid once the phone is home, from there, as any
+     * request at another mint is. */
+    if (this._homeGoing) {
+      if (this._payAfterHome === req) return;
+      this._payAfterHome = req;
+      console.log('[foxy] request: the phone is on its way home; this payment follows once it is there');
+      this.toast('Foxy is getting back to your mint. The payment follows.');
+      const pass = Object.assign({}, go || {}, { req: req });
+      const after = () => {
+        if (this._payAfterHome === req) this._payAfterHome = null;
+        this.makeTokenForRequest(pass);
+      };
+      this._homeGoing.then(after, after);
+      return;
+    }
     go = Object.assign({}, go || {}, { req: req });
     /* The end of this payment, whichever way it ended: nothing moved for the
      * next payment to speak of, and home after a crossing or a visit.
@@ -3960,6 +4004,9 @@ class Component extends DCLogic {
      * their mint once home. What lands is added to what is held there, and
      * the payment is made from both. The screen still says what the receiver
      * gets and what the move costs. */
+    /* The home this payment's own crossing wrote (`crossMove` writes one only where none was set), carried to the
+     * pass that follows, so a token to show clears that and nothing another flow is holding. */
+    const wrote = (had) => ((!had && this._crossCameFrom) ? { wroteHome: this._crossCameFrom } : {});
     const crossing = (mine, sats) => {
       const moving = (sats > 0 && sats < need) ? sats : need;
       console.log('[foxy] request: it is paid at ' + want + ', where this phone holds ' + W.balanceAt(want)
@@ -3970,10 +4017,11 @@ class Component extends DCLogic {
       shown.catch(() => {});
       this.crossMintCard(shown, want, mine).then(yes => {
         if (!yes) { console.log('[foxy] request: the move to ' + want + ' was not accepted'); return null; }
+        const had = this._crossCameFrom;
         return quoting.then(plan => this.crossMove(plan, want, mine)).then(() => {
           console.log('[foxy] request: the sats are at ' + want + '; paying it now');
           this.setState({ crossBusy: false, crossQ: null });
-          this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+          this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }, wrote(had)));
         });
       }).catch(e => this.crossFailed(e, mine));
     };
@@ -4014,9 +4062,13 @@ class Component extends DCLogic {
     }
     if (chosen && this.crossMove) {
       console.log('[foxy] request: paying it from ' + chosen.from + ', moving the sats to ' + want + ' first');
+      /* Busy for the life of the move, as the crossing screen is (`crossBusy`): nothing said a crossing was out, so a
+       * trip home owed was made in the middle of it (`homeWaitsFor`). */
+      this.setState({ crossBusy: true });
+      const had = this._crossCameFrom;
       this.crossMove(chosen.plan, want, chosen.from, mine).then(() => {
         this.setState({ crossBusy: false, crossQ: null });
-        this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+        this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }, wrote(had)));
       }).catch(e => this.crossFailed(e, mine));
       return;
     }
@@ -4067,6 +4119,8 @@ class Component extends DCLogic {
     const run = { id: String(req.id || ''), at: Date.now(), amount: amt, unit: usdReq ? 'usd' : 'sat', to: site };
     this._reqRun = run;
     const endRun = () => { if (this._reqRun === run) this._reqRun = null; };
+    // let go as dead, or another payment's run in its place: nothing on screen is this one's any more
+    const gone = () => !!(/** @type {any} */ (run).dead || (this._reqRun && this._reqRun !== run));
 
     /* Everything from here to the promise chain inside a try. The wallet's
      * connect refuses synchronously where it has no route and nothing on file
@@ -4078,6 +4132,8 @@ class Component extends DCLogic {
      * ending below as any refusal is. */
     let ready = Promise.resolve(null);
     let overOk = false;
+    // the home this pass wrote for its visit, if it wrote one (a token to show clears only that)
+    let wroteHome = '';
     try {
       /* A payment going out looks like a payment going out.
        *
@@ -4112,7 +4168,10 @@ class Component extends DCLogic {
       /* Never over a home already set: a pass that comes back here after a
        * crossing or a visit is still on that trip, and it used to write the
        * mint it was visiting as the one to come home to. */
-      if (visit && !this._crossCameFrom) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
+      if (visit && !this._crossCameFrom) {
+        wroteHome = String(W.mintUrl || '').replace(/\/+$/, '');
+        this._crossCameFrom = wroteHome;
+      }
       ready = (want && !here) ? W.connect(want, null, null, visit ? { remember: false } : undefined) : Promise.resolve(null);
       /* Agreed before it is asked, where the change comes straight back. The
        * question was being skipped already, but only after the send had refused
@@ -4157,6 +4216,10 @@ class Component extends DCLogic {
           : ((this.offlineNow && this.offlineNow())
             ? { unit: req.unit || 'sat', cover: true, overpayOk: !!(go && go.overpayOk) }
             : { unit: req.unit || 'sat' }))).then(r => {
+      /* A run let go as dead (`reqRunLive`) that ends after all: the screen, `reqBusy`, `req` and the trip home are
+       * another payment's by now. Its first answer, late, cleared the hold of the payment begun after it, with that
+       * one still out. Only the books (`lateRunEnded`). */
+      if (gone()) { endRun(); if (this.lateRunEnded) this.lateRunEnded(req, r, direct, null); return; }
       endRun();
       this.hideMelt();
       /* No fee on this path, and say so.
@@ -4176,8 +4239,11 @@ class Component extends DCLogic {
         crossDone();
         return;
       }
-      // a token to show stays where it was made (see `visit`); nothing to come home from
-      this._crossCameFrom = null;
+      /* A token to show stays where it was made (see `visit`): the home this payment wrote is let go. Only that: a
+       * trip home another flow is holding (a send from here, still out) was wiped, and the phone stayed at the mint
+       * it was visiting for the rest of the session. */
+      const ours = wroteHome || (go && go.wroteHome) || '';
+      if (ours && this._crossCameFrom === ours) this._crossCameFrom = null;
       /* Nor anything moved for the next payment to speak of: a later refusal
        * said its sats "are now at" this mint, about sats that never moved. */
       this._crossMovedTo = null;
@@ -4203,6 +4269,7 @@ class Component extends DCLogic {
       this.watchToken(r.sats, r.hash, r.swapped === false);
       this.tidyChangeLater();
     }).catch(e => {
+      if (gone()) { endRun(); if (this.lateRunEnded) this.lateRunEnded(req, null, direct, e); return; }
       endRun();
       this.hideMelt();
       // off the sending animation, whichever way this ends: it is not sending
@@ -4552,10 +4619,23 @@ class Component extends DCLogic {
    * was refused. Each of those comes home itself when it ends, and anything
    * left waiting is taken home on the next update once nothing holds it
    * (`syncHome`). */
+  /* And the trip home is a hold of its own while its connect is out
+   * (`_homeGoing`, which resolves when it lands or fails). It held nothing:
+   * the connect lands whenever Tor brings it and swaps the wallet the moment
+   * it does, so a tap paid at the mint being visited, begun in those seconds,
+   * was made from home's pile. Mint switches (`moneyBusy`), request payments
+   * (`makeTokenForRequest`), a tap offer heard (26d-tap.js) and the receive
+   * screens (12-receive.js) wait for it or refuse. A second trip is never
+   * begun under one still out. */
   crossComeHome() {
     const W = window.FoxyWallet;
     const back = this._crossCameFrom;
     if (!back || !W) { this._crossCameFrom = null; this._homeWaiting = false; this._homeOwed = null; return; }
+    if (this._homeGoing) {
+      console.log('[foxy] home waits: a trip home is already on its way');
+      this._homeWaiting = true;
+      return;
+    }
     const waits = this.homeWaitsFor ? this.homeWaitsFor() : (this._reqRun ? 'a request payment is still out' : '');
     if (waits) {
       console.log('[foxy] home waits: ' + waits + '; the phone comes home when it ends');
@@ -4566,31 +4646,42 @@ class Component extends DCLogic {
     this._crossCameFrom = null;
     if (String(W.mintUrl || '').replace(/\/+$/, '') === back) { this._homeOwed = null; return; }
     console.log('[foxy] back to ' + back + ', the mint this phone was on before the crossing');
-    const go = (again) => W.connect(back).then(() => { this._homeOwed = null; this.refreshBalance(); this.loadHistory(); }, (e) => {
-      console.warn('[foxy] could not get back to ' + back + (again ? ' a second time' : '') + ':', W.reason ? W.reason(e) : (e && e.message));
-      if (!again) {
-        // kept for the second try, and for anything that comes home meanwhile
-        if (!this._crossCameFrom) this._crossCameFrom = back;
-        setTimeout(() => {
-          if (this._crossCameFrom !== back || window.FoxyWallet !== W) return;
-          // and not under whatever has begun meanwhile: it comes home itself when it ends
-          if (this.homeWaitsFor ? this.homeWaitsFor() : this._reqRun) { this._homeWaiting = true; return; }
-          this._crossCameFrom = null;
-          if (String(W.mintUrl || '').replace(/\/+$/, '') === back) return;
-          go(true);
-        }, 2000);
-        return;
-      }
-      this._homeOwed = back;
-      const here = String(W.mintUrl || '').replace(/\/+$/, '');
-      this.blockedCard('homeLost', {
-        tone: 'warn',
-        title: 'NOT BACK HOME YET',
-        reason: 'Foxy could not get back to ' + (this.mintNameOf(back) || back.replace(/^https?:\/\//, ''))
-          + '. You are on ' + (this.mintNameOf(here) || here.replace(/^https?:\/\//, '') || 'their mint')
-          + ' until the next connection.',
+    /* A connect that throws (no route and nothing on file for home) is a
+     * connect that failed, said by the same ending, and not a throw out of
+     * whatever called this (`syncHome` runs on every update). */
+    const go = (again) => {
+      let trip = null;
+      const landed = () => { if (this._homeGoing === trip) this._homeGoing = null; };
+      let connecting;
+      try { connecting = W.connect(back); } catch (e0) { connecting = Promise.reject(e0); }
+      trip = connecting.then(() => { landed(); this._homeOwed = null; this.refreshBalance(); this.loadHistory(); }, (e) => {
+        landed();
+        console.warn('[foxy] could not get back to ' + back + (again ? ' a second time' : '') + ':', W.reason ? W.reason(e) : (e && e.message));
+        if (!again) {
+          // kept for the second try, and for anything that comes home meanwhile
+          if (!this._crossCameFrom) this._crossCameFrom = back;
+          setTimeout(() => {
+            if (this._crossCameFrom !== back || window.FoxyWallet !== W) return;
+            // and not under whatever has begun meanwhile: it comes home itself when it ends
+            if (this.homeWaitsFor ? this.homeWaitsFor() : this._reqRun) { this._homeWaiting = true; return; }
+            this._crossCameFrom = null;
+            if (String(W.mintUrl || '').replace(/\/+$/, '') === back) return;
+            go(true);
+          }, 2000);
+          return;
+        }
+        this._homeOwed = back;
+        const here = String(W.mintUrl || '').replace(/\/+$/, '');
+        this.blockedCard('homeLost', {
+          tone: 'warn',
+          title: 'NOT BACK HOME YET',
+          reason: 'Foxy could not get back to ' + (this.mintNameOf(back) || back.replace(/^https?:\/\//, ''))
+            + '. You are on ' + (this.mintNameOf(here) || here.replace(/^https?:\/\//, '') || 'their mint')
+            + ' until the next connection.',
+        });
       });
-    });
+      this._homeGoing = trip;
+    };
     go(false);
   }
 
@@ -4603,7 +4694,7 @@ class Component extends DCLogic {
    * that mint's quote at home and was refused. Kept for the next push. */
   comeHomeOwed() {
     const back = this._homeOwed;
-    if (!back || this._crossCameFrom) return;
+    if (!back || this._crossCameFrom || this._homeGoing) return;
     const waits = this.homeWaitsFor ? this.homeWaitsFor() : (this._reqRun ? 'a request payment is still out' : '');
     if (waits) { console.log('[foxy] the trip home waits: ' + waits); return; }
     this._homeOwed = null;
@@ -4614,17 +4705,39 @@ class Component extends DCLogic {
   /* What the trip home waits for, in words for the diary, or '' for nothing.
    * Each of these is being made from the mint the phone is on now, and a
    * connect home under it points the rest of it at the wrong mint. */
+  /* A trip home already under way is not in this list: `crossComeHome` and
+   * `comeHomeOwed` ask `_homeGoing` themselves, and this is what that trip
+   * waits for, which is never itself. */
   homeWaitsFor() {
     const s = this.state || {};
+    const W = window.FoxyWallet;
     if (this.reqRunLive ? this.reqRunLive() : this._reqRun) return 'a request payment is still out';
     if (this._ocVisit) return 'a payout on chain from this mint is on screen';
     if (s.ocBusy) return 'a payout on chain is being handed over';
     // quoted here and not yet sent (its plan is let go when it is sent or left)
     if (s.screen === 'ocConfirm' && s.ocPlan) return 'an on-chain confirmation quoted at this mint is on screen';
     if (this._sendRun) return 'a send is running';
-    if (s.crossBusy) return 'a crossing is moving sats';
+    /* A crossing in hand by any route: the crossing screen's, PAY FROM's (`crossBusy` in `makeTokenForRequest`), and
+     * every move for the life of it (`_crossRun`, 26d-tap.js `crossMove`). PAY FROM's ran with neither, and a trip
+     * home owed was made in the middle of its move. */
+    if (s.crossBusy || this._crossRun) return 'a crossing is moving sats';
     if (s.screen === 'crossConfirm') return 'a crossing is being agreed';
     if (s.req && s.req.viaTap && s.screen === 'reqOffer') return 'a tap payment is on screen';
+    /* A request at the mint the phone is on, up to be paid (its offer, or its sending screen): it is paid from here,
+     * and a connect home under it made the payment from home's pile. */
+    const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const here = W && W.mintUrl ? canon(W.mintUrl) : '';
+    const reqAt = s.req && s.req.mints && s.req.mints.length ? canon(s.req.mints[0]) : '';
+    if (here && reqAt === here && (s.screen === 'reqOffer' || s.screen === 'sendDone')) return 'a request at this mint is on screen to be paid';
+    /* And a request of this phone's own, on show on a receive screen at the mint the phone is on: what is paid to it
+     * is ecash of this mint, and the phone refuses a payment at a mint it is no longer on. Kept by the screen
+     * (`railRequest`, `tapOnlyRequest`) and cleared when it goes. */
+    if (here && s.flow === 'receive' && s.screen !== 'home' && this._creqs) {
+      const mu = String(W.mintUrl);
+      const shown = Object.keys(this._creqs).some(k => (k.indexOf(mu + '|') === 0 || k.indexOf('tap|' + mu + '|') === 0)
+        && this._creqs[k] && this._creqs[k].text);
+      if (shown) return 'a request of this phone at this mint is on show';
+    }
     return '';
   }
 
@@ -4632,9 +4745,15 @@ class Component extends DCLogic {
    * Called on every update: most of what it waits for ends with a screen
    * change, and a payout's confirmation left with BACK, or a tap's offer
    * closed, ends with nothing else to call it. */
+  /* Nothing while a tap is live: a decision put to the person with the other
+   * phone on the link (`_tapTalking`), or this phone's four digits shown to a
+   * payer (`tapShownCode`). A connect home under either points the payment at
+   * the wrong mint, as payer or as receiver (tests/tap-held.js). */
   syncHome() {
     if (!this._homeWaiting) return;
     if (!this._crossCameFrom) { this._homeWaiting = false; return; }
+    const s = this.state || {};
+    if (this._tapTalking || (s.tapShownCode && s.screen !== 'home')) return;
     if (this.homeWaitsFor()) return;
     this._homeWaiting = false;
     this.crossComeHome();
@@ -4642,18 +4761,23 @@ class Component extends DCLogic {
 
   /* Whether a request payment is still out (`_reqRun`, makeTokenForRequest).
    *
-   * One older than the longest delivery is dead, whatever kept it: a website
-   * takes about 65 seconds at most and an onion about 35, so 150 is well past
-   * either. A payment that threw before its promise chain held the token for
-   * the rest of the session, and every later request, come-home and mint
-   * switch was refused for it. Let go here with the hold it put on mint
-   * switches (`reqBusy`). */
+   * One older than ten minutes is dead, whatever kept it, and is let go with
+   * the hold it put on mint switches (`reqBusy`). Every way a run could be
+   * left set without an ending is closed (the try around its start), so this
+   * is a backstop only, and it has to be longer than the longest a payment
+   * can take: a connect (30 s), a swap asked twice after a 429 (65 s each),
+   * the post (65 s), a refusal's wait and swap-back, and over a tap the lock
+   * keys and the link. It was 150 seconds, and the same website request
+   * scanned again was paid a second time while the first post was still out.
+   * A run let go here is marked dead, and its late ending touches nothing on
+   * screen (`lateRunEnded`). */
   reqRunLive() {
-    const run = this._reqRun;
+    const run = /** @type {any} */ (this._reqRun);
     if (!run) return false;
     const age = Date.now() - (Number(run.at) || 0);
-    if (age < 150000) return true;
+    if (age < 600000) return true;
     console.warn('[foxy] request: the payment begun ' + Math.round(age / 1000) + 's ago never ended; letting it go');
+    run.dead = true;
     this._reqRun = null;
     if (this.state && this.state.reqBusy) this.setState({ reqBusy: false });
     return false;
@@ -4667,15 +4791,54 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const run = /** @type {any} */ (this._reqRun || {});
     const n = Math.round(Number(run.amount) || 0);
-    const what = n > 0 ? 'Your payment of ' + (run.unit === 'usd' ? this.moneyIn(n, 'usd') : this.group(n) + ' sats') : 'Your last payment';
-    const said = what + (run.to ? ' to ' + run.to : '') + ' is still being delivered. It ends within about a minute; '
-      + (viaTap ? 'tap again then.' : 'try again then.');
+    /* No promise of when: a payment can take minutes (`reqRunLive`), and "within about a minute" sent the person back
+     * to scan the same code again before the first had ended. */
+    const what = n > 0 ? (run.unit === 'usd' ? this.moneyIn(n, 'usd') : this.group(n) + ' sats') : '';
+    const which = what ? what + (run.to ? ' to ' + run.to : '') : (run.to || '');
+    const said = 'A payment is still being delivered' + (which ? ' (' + which + ')' : '') + '. Wait for it to end.';
     console.log('[foxy] refused: a request payment is still out (' + (run.id || '?') + ')' + (viaTap ? '; the other phone is told' : ''));
     if (viaTap && W && W.tapQuote) {
       W.tapQuote(JSON.stringify({ gaveUp: 'The payer is still finishing another payment.' })).catch(() => {});
     }
     if (viaTap && this.tapGaveNothing) this.tapGaveNothing('another payment is still going out');
     this.toast(said, true);
+  }
+
+  /* The late ending of a run let go as dead (`reqRunLive`). Nothing on screen
+   * is its own: `reqBusy`, `req`, the sending screen and the trip home belong
+   * to whatever was begun after it, so none of them is touched, no card is
+   * raised and nothing comes home. What it made is still the person's money
+   * and is booked as `requestDelivered` and the token's ending book it: on
+   * its way no longer, settled where it cannot be taken back, watched where it
+   * can, so its history row and RECLAIM are there. A refusal's ecash was
+   * dealt with by the wallet (`afterRefusal`). */
+  lateRunEnded(req, r, direct, e) {
+    const W = window.FoxyWallet;
+    console.warn('[foxy] request: a payment let go as dead has ended late (' + String((req && req.id) || '?') + ', '
+      + (e ? 'not delivered: ' + (W && W.reason ? W.reason(e) : String((e && e.message) || e)) : 'made') + '); nothing on screen is changed for it');
+    if (W && r && r.hash) {
+      const hash = r.hash;
+      this._seenTx = this._seenTx || {};
+      this._seenTx[hash] = true;
+      if (W.tag) { try { W.tag(hash, { inflight: false }); } catch (x) {} }
+      const usd = r.unit === 'usd' || !!(req && req.unit === 'usd');
+      if (direct) {
+        if (req && req.viaTap && W.tag) { try { W.tag(hash, { handed: 'tap' }); } catch (x) {} }
+        const website = !!(r.website || (req && !req.viaTap && req.delivery && req.delivery.kind === 'https'));
+        if ((r.confirmed && !website) || r.lockedTo) {
+          W.settleTx(hash);
+          if (W.forgetClaimedToken) W.forgetClaimedToken(hash);
+          if (W.lastTokenHash && W.lastTokenHash() === hash) W.clearLastToken();
+        } else if (!usd || website) {
+          this.watchToken(usd ? 0 : r.sats, hash, false);
+          if (website && W.tag) { try { W.tag(hash, { site: true }); } catch (x) {} }
+        }
+      } else if (!usd) {
+        this.watchToken(r.sats, hash, r.swapped === false);
+      }
+    }
+    if (this.refreshBalance) this.refreshBalance();
+    if (this.loadHistory) this.loadHistory();
   }
 
   requestDelivered(req, r) {
@@ -6025,11 +6188,13 @@ class Component extends DCLogic {
    * claimed and moved home, and the change collected after that. Switching
    * mints during any of them pointed the rest of the operation at the wrong
    * mint. */
+  /* And the trip home while its connect is out (`_homeGoing`): a switch made
+   * under it is undone, or undoes it, whichever lands last. */
   moneyBusy() {
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy || this._swapRun);
+      || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own
@@ -6069,6 +6234,7 @@ class Component extends DCLogic {
     if (this.state.nmBusy) why.push('a new mint is being set up');
     if (this.state.reqBusy) why.push('a request is being paid');
     if (this._swapRun) why.push('a swap between balances is running');
+    if (this._homeGoing) why.push('the phone is on its way home');
     return why.join('; ') || 'nothing';
   }
 
@@ -8614,8 +8780,17 @@ class Component extends DCLogic {
   }
 
   // real invoice for the receive screen, then wait for it to be paid
+  /* Not while the phone is on its way home (`_homeGoing`, 07-history-tokens-mints.js `crossComeHome`): an invoice
+   * made at the mint being visited is one the phone is no longer on a moment later. Made once it is home, if the
+   * screen is still up. */
   openReceive() {
     const W = window.FoxyWallet;
+    if (this._homeGoing) {
+      const screen = this.state.screen;
+      const after = () => { if (this.state.screen === screen && !this._homeGoing) this.openReceive(); };
+      this._homeGoing.then(after, after);
+      return;
+    }
     this.stopReceive();
     this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
     if (!W || !W.connected) { this.setState({ invoiceErr: 'No wallet connected.' }); return; }
@@ -8655,6 +8830,10 @@ class Component extends DCLogic {
   railRequest(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    /* Nothing while the phone is on its way home (`_homeGoing`): a request made at the mint being visited names a mint
+     * the phone has left by the time it is paid, and the payment is refused. '' is waiting, as for the onion address;
+     * the screen asks again when the trip home lands and the balance is read. */
+    if (this._homeGoing) return '';
     const unit = arguments[3];             // 'usd' for a request in dollars (above)
     const why = purpose || 'receive';
     const inUsd = unit === 'usd';
@@ -8739,6 +8918,11 @@ class Component extends DCLogic {
   railRequestReady(sats, purpose, usdCents) {
     const W = window.FoxyWallet;
     const unit = arguments[3];
+    // made once the phone is home, where a trip home is out (`railRequest`)
+    if (this._homeGoing) {
+      const again = () => this.railRequestReady(sats, purpose, usdCents, unit);
+      return this._homeGoing.then(again, again);
+    }
     const now = this.railRequest(sats, purpose, usdCents, unit);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
@@ -8770,6 +8954,8 @@ class Component extends DCLogic {
   tapOnlyRequest(sats, purpose) {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return '';
+    // nor while the phone is on its way home (`railRequest`): the tap offer waits for it
+    if (this._homeGoing) return '';
     const unit = arguments[2];
     const n = Math.max(0, Math.round(Number(sats) || 0));
     const inUsd = unit === 'usd';
@@ -20135,6 +20321,21 @@ class Component extends DCLogic {
           this.refuseForRun(true);
           return;
         }
+        /* Nor while the phone is on its way home (`_homeGoing`,
+         * 07-history-tokens-mints.js `crossComeHome`): a payment begun at the
+         * mint being visited was made from home's pile when the connect landed
+         * under it. Refused, and said to both phones. */
+        if (this._homeGoing) {
+          const W2 = window.FoxyWallet;
+          console.log('[foxy] tap: the phone is on its way home; this tap is refused');
+          this.hideConnecting();
+          if (W2 && W2.tapQuote) {
+            W2.tapQuote(JSON.stringify({ gaveUp: 'The payer is changing mint; tap again in a moment.' })).catch(() => {});
+          }
+          this.tapGaveNothing('the phone is on its way home');
+          this.toast('Foxy is getting back to your mint. Tap again in a moment.', true);
+          return;
+        }
         if (now.sendPhase === 'in' || now.reqBusy) {
           /* This tap is over and nothing came of it, so the marks that stop the
            * next one have to come off here.
@@ -21289,9 +21490,14 @@ class Component extends DCLogic {
    * set for whatever the payment does next. */
   /* `home`, where the sats leave from another mint than the one this phone is on (PAY FROM, 26l-pay-from.js): that mint is
    * visited, not made the phone's own, and `home` is where the phone comes back to after the payment. */
+  /* Held for the life of the move (`_crossRun`), whoever started it: the trip home waits for it (`homeWaitsFor`).
+   * PAY FROM's crossing ran with nothing on record, and a trip home owed was made in the middle of it. */
   crossMove(plan, theirs, mine, home) {
     const W = window.FoxyWallet;
     const visit = !!(home && home !== mine);
+    const run = {};
+    this._crossRun = run;
+    const free = () => { if (this._crossRun === run) this._crossRun = null; };
     this.hushMove(plan);
     this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
@@ -21311,7 +21517,10 @@ class Component extends DCLogic {
     const loud = () => { this._quiet = false; };
     /* A visit: their mint is where this payment is made from, not where this
      * phone banks, and it is not saved as the phone's own. */
-    return (visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine))
+    // a connect that throws is a move that failed, said by the caller's ending, and not a throw out of PAY
+    let start;
+    try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
+    return start
       .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
@@ -21329,7 +21538,7 @@ class Component extends DCLogic {
        * request payment's visit) wrote the mint being visited as home, and
        * that trip's ending took the phone there and not home. */
       if (!this._crossCameFrom) this._crossCameFrom = visit ? home : mine;
-    });
+    }).then(() => { free(); }, (e) => { free(); throw e; });
   }
 
   /* Whatever went wrong, the wallet goes back to the mint it was on: a failed

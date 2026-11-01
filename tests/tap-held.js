@@ -165,8 +165,12 @@ const TALKING = { _tapTalking: true };
    * of a connection that does not come); it reads `screen` only to forget a
    * wait once the confirmation has gone, and touches no link. `syncCardOut`
    * reads it only to put down a payment from a card (26f-flashcard.js) once
-   * that flow is off the screen, and touches no link either. */
-  const known = ['syncAccent', 'syncAwake', 'syncCardOut', 'syncShake', 'syncFlip', 'syncClaim', 'syncHaptics', 'syncInbox',
+   * that flow is off the screen, and touches no link either. `syncHome`
+   * makes a trip home that waited (07-history-tokens-mints.js), which is a
+   * connect to another mint: under a live tap that points the payment at the
+   * wrong one, as payer or as receiver. It tears down no link, and it does
+   * nothing while a tap is live (section 6 holds it). */
+  const known = ['syncAccent', 'syncAwake', 'syncCardOut', 'syncShake', 'syncFlip', 'syncClaim', 'syncHaptics', 'syncHome', 'syncInbox',
                  'syncPreview', 'syncQueue', 'syncReqQr', 'syncSend', 'syncSlide', 'syncSnow',
                  'syncTap', 'syncTokenQr', 'syncUnit'].sort();
   ok('the passes that run on every update are the ones this file knows about',
@@ -260,6 +264,33 @@ const TALKING = { _tapTalking: true };
   const vals = app;   // the same source, already read at the top
   ok('and the hint shows the reason instead of HOLD A PHONE HERE',
     /tapNotYet \? String\(s\.tapNotYet\)/.test(vals), 'the hint ignores it');
+}
+
+// ---- 6. the trip home waits for a live tap ----------------------------------
+/* `syncHome` runs on every update and connects home once nothing holds the
+ * trip. A connect under a live tap swaps the wallet the payment is made from,
+ * or the one the receiver takes it at. So nothing is done while an answer is
+ * coming (`_tapTalking`), nor while this phone's four digits are shown to a
+ * payer, on any screen but home; and the trip is made once the tap is over. */
+{
+  const M = new Function('return {' + method('syncHome() {') + ',\n' + method('homeWaitsFor() {') + '}');
+  const trip = (state, talking) => {
+    const went = [];
+    const a = Object.assign(M(), {
+      state: state, _tapTalking: !!talking, _homeWaiting: true, _crossCameFrom: 'https://home.test',
+      crossComeHome() { went.push(this._crossCameFrom); },
+    });
+    global.window = { FoxyWallet: { mintUrl: 'https://away.test' } };
+    try { a.syncHome(); } catch (e) { went.push('threw: ' + e.message); }
+    return went;
+  };
+  ['priceConfirm', 'crossConfirm', 'home'].forEach((screen) => {
+    ok('no trip home while an answer is still coming, on ' + screen, !trip({ screen: screen }, true).length);
+  });
+  ok('nor while this phone\'s four digits are shown to a payer',
+    !trip({ screen: 'confirm', flow: 'receive', tapShownCode: '4821' }, false).length);
+  ok('and the trip is made once the tap is over',
+    JSON.stringify(trip({ screen: 'home' }, false)) === JSON.stringify(['https://home.test']));
 }
 
 console.log('\n' + (R.fail ? R.fail + ' tap-held check(s) failed' : 'all ' + R.pass + ' tap-held checks pass'));

@@ -1432,6 +1432,21 @@
           this.refuseForRun(true);
           return;
         }
+        /* Nor while the phone is on its way home (`_homeGoing`,
+         * 07-history-tokens-mints.js `crossComeHome`): a payment begun at the
+         * mint being visited was made from home's pile when the connect landed
+         * under it. Refused, and said to both phones. */
+        if (this._homeGoing) {
+          const W2 = window.FoxyWallet;
+          console.log('[foxy] tap: the phone is on its way home; this tap is refused');
+          this.hideConnecting();
+          if (W2 && W2.tapQuote) {
+            W2.tapQuote(JSON.stringify({ gaveUp: 'The payer is changing mint; tap again in a moment.' })).catch(() => {});
+          }
+          this.tapGaveNothing('the phone is on its way home');
+          this.toast('Foxy is getting back to your mint. Tap again in a moment.', true);
+          return;
+        }
         if (now.sendPhase === 'in' || now.reqBusy) {
           /* This tap is over and nothing came of it, so the marks that stop the
            * next one have to come off here.
@@ -2586,9 +2601,14 @@
    * set for whatever the payment does next. */
   /* `home`, where the sats leave from another mint than the one this phone is on (PAY FROM, 26l-pay-from.js): that mint is
    * visited, not made the phone's own, and `home` is where the phone comes back to after the payment. */
+  /* Held for the life of the move (`_crossRun`), whoever started it: the trip home waits for it (`homeWaitsFor`).
+   * PAY FROM's crossing ran with nothing on record, and a trip home owed was made in the middle of it. */
   crossMove(plan, theirs, mine, home) {
     const W = window.FoxyWallet;
     const visit = !!(home && home !== mine);
+    const run = {};
+    this._crossRun = run;
+    const free = () => { if (this._crossRun === run) this._crossRun = null; };
     this.hushMove(plan);
     this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
@@ -2608,7 +2628,10 @@
     const loud = () => { this._quiet = false; };
     /* A visit: their mint is where this payment is made from, not where this
      * phone banks, and it is not saved as the phone's own. */
-    return (visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine))
+    // a connect that throws is a move that failed, said by the caller's ending, and not a throw out of PAY
+    let start;
+    try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
+    return start
       .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
@@ -2626,7 +2649,7 @@
        * request payment's visit) wrote the mint being visited as home, and
        * that trip's ending took the phone there and not home. */
       if (!this._crossCameFrom) this._crossCameFrom = visit ? home : mine;
-    });
+    }).then(() => { free(); }, (e) => { free(); throw e; });
   }
 
   /* Whatever went wrong, the wallet goes back to the mint it was on: a failed

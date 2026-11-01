@@ -294,11 +294,13 @@
    * claimed and moved home, and the change collected after that. Switching
    * mints during any of them pointed the rest of the operation at the wrong
    * mint. */
+  /* And the trip home while its connect is out (`_homeGoing`): a switch made
+   * under it is undone, or undoes it, whichever lands last. */
   moneyBusy() {
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy || this._swapRun);
+      || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own
@@ -338,6 +340,7 @@
     if (this.state.nmBusy) why.push('a new mint is being set up');
     if (this.state.reqBusy) why.push('a request is being paid');
     if (this._swapRun) why.push('a swap between balances is running');
+    if (this._homeGoing) why.push('the phone is on its way home');
     return why.join('; ') || 'nothing';
   }
 

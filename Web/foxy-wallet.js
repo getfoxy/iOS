@@ -31795,6 +31795,15 @@
        * handed it over and was told no. Nothing was lost, but counters were
        * spent, the pile was re-split, and the person was left holding ecash to
        * get rid of. */
+      /* Whether the wallet the token will be made from is at a mint the request names: `mintUrl` is the connected
+       * wallet's, which `sendToken` binds (`needLocal`). */
+      var atTheirMintNow = function () {
+        return !req.mints || !req.mints.length
+          || req.mints.some(function (m) {
+            return String(m).replace(/\/+$/, '') === String(mintUrl || '').replace(/\/+$/, '');
+          });
+      };
+      var boundAt = String(mintUrl || '').replace(/\/+$/, '');
       var refusal = handoverRefusal({
         payerHasRoute: routeOpen(),
         /* What they said about themselves (`req.theirRoute`, from the tap
@@ -31806,10 +31815,7 @@
         receiverHasRoute: typeof req.theirRoute === 'boolean' ? req.theirRoute
           : (req.transports && req.transports.length ? true : null),
         locked: !!lockTo,
-        atTheirMint: !req.mints || !req.mints.length
-          || req.mints.some(function (m) {
-            return String(m).replace(/\/+$/, '') === String(mintUrl || '').replace(/\/+$/, '');
-          }),
+        atTheirMint: atTheirMintNow(),
       });
       if (refusal) {
         console.warn('[foxy] the payment was not made:', refusal);
@@ -31885,6 +31891,18 @@
           eNo.foxySilent = !!(a && a.silent);
           console.warn('[foxy] pay steps: asked first, and ' + (eNo.foxySilent ? 'no answer came' : 'they said no') + ': ' + eNo.message);
           throw eNo;
+        }
+        /* Asked again, now that the token is about to be made: the wallet is
+         * still the one every check above was made against. They were made
+         * before the change key was primed and before the other phone
+         * answered, and a connect can land between (a trip home: 11-routing.js
+         * `connect` swaps the wallet the moment it does), so the token was made
+         * from home's pile for a request that names the mint being visited.
+         * Nothing is made. */
+        if (String(mintUrl || '').replace(/\/+$/, '') !== boundAt) {
+          console.warn('[foxy] the payment was not made: the wallet moved to ' + String(mintUrl || 'no mint')
+            + ' while it was being made, from ' + (boundAt || 'no mint'));
+          throw new Error('Foxy changed mint while this payment was being made, so it was stopped. Nothing was sent.');
         }
         return FoxyWallet.sendToken(want, lockTo ? { unit: reqUnit, lockTo: lockTo, inflight: true }
                                                  : { unit: reqUnit, cover: !!req.viaTap,

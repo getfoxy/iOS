@@ -549,7 +549,11 @@ densityDrives();
     'one `held`');
   check('and the request\'s the same, where its route is part of how it is paid',
     /const held = !!\(sats > 0 && this\.connecting\(\) && this\.requestNeedsRoute\(req\)\);/.test(app)
-    && /go: held \? \(\) => \{\} : \(\) => this\.makeTokenForRequest\(\)/.test(app),
+    /* `held` first in the hold, which since 38205ad also holds the button
+     * while an owed move is collected (COLLECTING…); the route's hold is the
+     * one this is about, and it is still there, on the button and its busy. */
+    && /go: \(held \|\| s\.reqCollecting\) \? \(\) => \{\} : \(\) => this\.makeTokenForRequest\(\)/.test(app)
+    && /ctaBusy: held \|\| !!s\.reqBusy \|\| !!s\.reqCollecting,/.test(app),
     'requestSpec');
 }
 
