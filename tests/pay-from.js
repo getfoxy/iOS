@@ -365,6 +365,21 @@ async function run() {
     ok('a request: only its own mint, no screen', a.pfRequest({ mints: [HOME], sats: 1000, unit: 'sat' }) === false);
     ok('a tap: nothing crosses', a.pfTapCross({ mints: [AWAY] }, 1000, AWAY, HOME, 3000) === false);
   }
+  console.log('11. a test mint is never a source, and the chosen tile is the orange one');
+  {
+    const TEST = 'https://testnut.cashu.space';
+    const a = phone({ piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: AWAY, unit: 'sat', amount: 3000 }, { mint: TEST, unit: 'sat', amount: 9000 }],
+      quotes: { [HOME + '|sat']: { amount: 2000, feeReserve: 10 }, [AWAY + '|sat']: { amount: 2000, feeReserve: 2 } } });
+    onInvoice(a);
+    a.syncPayFrom();
+    await wait(5);
+    ok('testnut is not among the balances offered', a.pfList().length === 2 && !a.pfList().some((e) => /testnut/.test(e.mint)), JSON.stringify(a.pfList().map((e) => e.key)));
+    const rows = a.pfRows(LOOK, 'sh');
+    const picked = rows.filter((r) => r.key === a.state.payFromPick)[0];
+    ok('the chosen tile wears the orange look, every other grey', picked && picked.bg !== 'grey' && rows.filter((r) => r.key !== picked.key).every((r) => r.bg === 'grey'),
+      JSON.stringify(rows.map((r) => [r.key, r.bg])));
+    ok('each keeps its own sign', rows.every((r) => r.sym === '₿'));
+  }
   console.log('10. the choice is let go when the flow ends');
   {
     const a = phone({ piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: AWAY, unit: 'sat', amount: 3000 }],

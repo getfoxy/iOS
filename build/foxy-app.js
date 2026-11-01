@@ -32392,7 +32392,9 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     let all = [];
     try { all = (W && W.balances) ? W.balances() : []; } catch (e) { all = []; }
-    return (Array.isArray(all) ? all : []).filter((b) => b && (b.unit === 'sat' || b.unit === 'usd') && Number(b.amount) > 0)
+    // a test mint's ecash is worth nothing: it is never a balance to pay from (decided)
+    return (Array.isArray(all) ? all : []).filter((b) => b && (b.unit === 'sat' || b.unit === 'usd') && Number(b.amount) > 0
+      && String(b.mint || '').toLowerCase().indexOf('testnut.cashu.space') < 0)
       .map((b) => ({ mint: this.pfMint(b.mint), unit: b.unit, have: Math.round(Number(b.amount) || 0) }));
   }
 
@@ -32565,8 +32567,9 @@ class Component extends DCLogic {
     return 'Costs ' + fig + (Number(e.fee) === 0 ? ' · no fee' : '');
   }
 
-  /* The tiles, in the CURRENCY screen's looks (`renderCurrency`): frost for dollars, fur for bitcoin, grey for one that
-   * cannot pay, the one chosen ringed, and CHEAPEST on the first once every mint has answered. */
+  /* The tiles, in the CURRENCY screen's looks (`renderCurrency`): the one chosen in fur (orange), every other grey, whether
+   * it is still being asked, offered or short (decided); its own sign in the badge; CHEAPEST on the first once every mint
+   * has answered. */
   pfRows(LOOK, SHADOW) {
     const s = this.state;
     const list = this.pfList();
@@ -32575,8 +32578,8 @@ class Component extends DCLogic {
     const best = known ? offered[0].key : '';
     return list.map((e) => {
       const short = e.ok === false, asking = e.ok === null;
-      const look = Object.assign({}, LOOK[e.unit === 'usd' ? 'usd' : 'sat'], short ? LOOK.grey : {});
       const chosen = e.key === s.payFromPick && !short;
+      const look = Object.assign({}, chosen ? LOOK.sat : LOOK.grey);
       return Object.assign(look, {
         key: e.key, sym: LOOK[e.unit === 'usd' ? 'usd' : 'sat'].sym, name: this.pfName(e.mint),
         unitLine: this.unitWord(e.unit) + ' · ' + this.unitFigure(e.have, e.unit),
