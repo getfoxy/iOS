@@ -51,7 +51,11 @@ function page(script) {
         if (script.error) return reply(w, m.id, null, script.error);
         return reply(w, m.id, script.code + '\n' + (script.body || ''));
       }
-      if (m.action === 'onionPost') { script.onions = (script.onions || 0) + 1; return reply(w, m.id, '200\n{"ok":true}'); }
+      if (m.action === 'onionPost') {
+        script.onions = (script.onions || 0) + 1;
+        if (script.onionError) return reply(w, m.id, null, script.onionError);
+        return reply(w, m.id, script.onionAnswer || '200\n{"ok":true}');
+      }
       if (m.action === 'nostrSend') { script.nostrs = (script.nostrs || 0) + 1; return reply(w, m.id, '1'); }
       if (m.action === 'inboxClose') return reply(w, m.id, 'ok');
       if (m.action === 'mintRequest') return reply(w, m.id, mint.handle(m));
@@ -169,6 +173,46 @@ async function run() {
     try { await W.payRequest(W.decodeRequest(creq(ctx, [post(SITE)])), () => {}); } catch (e) { threw = e; }
     ok(threw && /could not be reached/.test(threw.message), 'unreachable is said as it is');
     ok(ctx.script.posts.length === 1, 'and not tried again: a lost answer may have been taken');
+  }
+
+  console.log('3b. an onion that cannot be reached, with a Nostr inbox beside it: the same payment goes there, once');
+  {
+    const ctx = page({ posts: [], code: 200, onionError: 'Their phone did not answer in time.' });
+    const W = ctx.W;
+    await W.seedReady();
+    await W.connect(MINT, { remember: true });
+    const inv = await W.invoice(400, '');
+    await W.claim(inv.hash);
+    const req = W.decodeRequest(creq(ctx, [post(ONION), nostr()]));
+    ok('the request reads the onion as the first road and keeps the Nostr inbox as the second', req.delivery.kind === 'onion' && req.nostrFallback === NOSTR);
+    const r = await W.payRequest(req, () => {});
+    ok('the onion was tried, then Nostr, and no token was thrown', ctx.script.onions === 1 && ctx.script.nostrs === 1 && r && r.confirmed === false,
+      JSON.stringify({ onions: ctx.script.onions, nostrs: ctx.script.nostrs, r: r && { confirmed: r.confirmed } }));
+    ok('nothing went over https', ctx.script.posts.length === 0);
+  }
+  {
+    const ctx = page({ posts: [], code: 200, onionError: 'Their phone did not answer in time.' });
+    const W = ctx.W;
+    await W.seedReady();
+    await W.connect(MINT, { remember: true });
+    const inv = await W.invoice(400, '');
+    await W.claim(inv.hash);
+    let threw = null;
+    try { await W.payRequest(W.decodeRequest(creq(ctx, [post(ONION)])), () => {}); } catch (e) { threw = e; }
+    ok('with no Nostr inbox named, an unreachable onion still ends at the token to show', threw && threw.foxyToken && !ctx.script.nostrs,
+      threw && threw.message);
+  }
+  {
+    const ctx = page({ posts: [], code: 200, onionAnswer: '410\n{"error":"closed"}' });
+    const W = ctx.W;
+    await W.seedReady();
+    await W.connect(MINT, { remember: true });
+    const inv = await W.invoice(400, '');
+    await W.claim(inv.hash);
+    let threw = null;
+    try { await W.payRequest(W.decodeRequest(creq(ctx, [post(ONION), nostr()])), () => {}); } catch (e) { threw = e; }
+    ok('an onion that answered (410: the request is closed) is an answer: Nostr is not tried', threw && /no longer open/.test(threw.message) && !ctx.script.nostrs,
+      JSON.stringify({ msg: threw && threw.message, nostrs: ctx.script.nostrs }));
   }
 
   console.log('4. the offer screen');

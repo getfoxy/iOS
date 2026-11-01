@@ -10996,6 +10996,21 @@
     return null;
   }
 
+  /* The Nostr inbox a request names beside its first road, for a payment
+   * whose onion could not be reached: null when it names none Foxy speaks. */
+  function nostrFallbackFor(transports) {
+    var list = Array.isArray(transports) ? transports : [];
+    for (var k = 0; k < list.length; k++) {
+      var n = list[k] || {};
+      var tags = Array.isArray(n.tags) ? n.tags : [];
+      var nip17 = tags.some(function (g) { return Array.isArray(g) && g[0] === 'n' && g.indexOf('17') > 0; });
+      if (n.type === 'nostr' && typeof n.target === 'string' && /^nprofile1[02-9ac-hj-np-z]+$/.test(n.target) && nip17) {
+        return n.target;
+      }
+    }
+    return null;
+  }
+
   /* An error that carries the token made for a payment it could not deliver,
    * for the token screen to show instead. */
   /** @param {any} e @param {any} made */
@@ -27929,6 +27944,11 @@
         transports: (r.transport || []).map(function (x) { return x && x.type; }).filter(Boolean),
         // how Foxy pays it straight to them, when it can (07-request-delivery.js)
         delivery: deliveryFor(r.transport),
+        /* The second road: a Nostr inbox named beside an onion, taken when
+         * the onion cannot be reached in its budget (20-helpers.js). A
+         * simulator's onion left a payer at the token screen with the
+         * receiver's Nostr key in hand and never asked. */
+        nostrFallback: nostrFallbackFor(r.transport),
         /* Set by whoever opened it, never by the request itself: paying over
          * the tap link is only safe when this request is the one that came
          * over that link. A request scanned from a screen must never be paid
@@ -32418,7 +32438,21 @@
           }
           // an onion's 200 and a web address's 200 are the same promise
           return d.kind === 'onion'
-            ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; })
+            ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; }, function (e) {
+              /* Their onion gave no answer in its budget, and the request names a
+               * Nostr inbox too: the same token goes there before anybody is shown
+               * a QR. Only for an onion that could not be reached or did not answer:
+               * a refusal, a closed request or a mint's word is an answer, and is
+               * kept. A second copy of the pieces costs nothing: the first claim
+               * wins and the other is refused by the mint. A relay taking it is no
+               * promise, so `confirmed` stays false and the claim watch goes on. */
+              var msg = String((e && e.message) || e);
+              var reach = /could not be reached|did not answer in time|timed out|unreachable/i.test(msg);
+              if (!reach || (e && e.foxyRefused) || !req.nostrFallback) throw e;
+              console.log('[foxy] pay steps: their onion could not be reached (' + msg + '); the same payment goes to their Nostr inbox');
+              over = 'onion, then nostr';
+              return deliverOverNostr(req.nostrFallback, body);
+            })
             : d.kind === 'https'
             ? deliverOverHttps(d.target, body).then(function (r) { confirmed = true; return r; })
             : deliverOverNostr(d.target, body);

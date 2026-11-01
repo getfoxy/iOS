@@ -176,6 +176,11 @@
         transports: (r.transport || []).map(function (x) { return x && x.type; }).filter(Boolean),
         // how Foxy pays it straight to them, when it can (07-request-delivery.js)
         delivery: deliveryFor(r.transport),
+        /* The second road: a Nostr inbox named beside an onion, taken when
+         * the onion cannot be reached in its budget (20-helpers.js). A
+         * simulator's onion left a payer at the token screen with the
+         * receiver's Nostr key in hand and never asked. */
+        nostrFallback: nostrFallbackFor(r.transport),
         /* Set by whoever opened it, never by the request itself: paying over
          * the tap link is only safe when this request is the one that came
          * over that link. A request scanned from a screen must never be paid

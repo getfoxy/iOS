@@ -2815,6 +2815,21 @@
     return null;
   }
 
+  /* The Nostr inbox a request names beside its first road, for a payment
+   * whose onion could not be reached: null when it names none Foxy speaks. */
+  function nostrFallbackFor(transports) {
+    var list = Array.isArray(transports) ? transports : [];
+    for (var k = 0; k < list.length; k++) {
+      var n = list[k] || {};
+      var tags = Array.isArray(n.tags) ? n.tags : [];
+      var nip17 = tags.some(function (g) { return Array.isArray(g) && g[0] === 'n' && g.indexOf('17') > 0; });
+      if (n.type === 'nostr' && typeof n.target === 'string' && /^nprofile1[02-9ac-hj-np-z]+$/.test(n.target) && nip17) {
+        return n.target;
+      }
+    }
+    return null;
+  }
+
   /* An error that carries the token made for a payment it could not deliver,
    * for the token screen to show instead. */
   /** @param {any} e @param {any} made */

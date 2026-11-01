@@ -2341,7 +2341,21 @@
           }
           // an onion's 200 and a web address's 200 are the same promise
           return d.kind === 'onion'
-            ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; })
+            ? deliverToOnion(d.target, body).then(function (r) { confirmed = true; return r; }, function (e) {
+              /* Their onion gave no answer in its budget, and the request names a
+               * Nostr inbox too: the same token goes there before anybody is shown
+               * a QR. Only for an onion that could not be reached or did not answer:
+               * a refusal, a closed request or a mint's word is an answer, and is
+               * kept. A second copy of the pieces costs nothing: the first claim
+               * wins and the other is refused by the mint. A relay taking it is no
+               * promise, so `confirmed` stays false and the claim watch goes on. */
+              var msg = String((e && e.message) || e);
+              var reach = /could not be reached|did not answer in time|timed out|unreachable/i.test(msg);
+              if (!reach || (e && e.foxyRefused) || !req.nostrFallback) throw e;
+              console.log('[foxy] pay steps: their onion could not be reached (' + msg + '); the same payment goes to their Nostr inbox');
+              over = 'onion, then nostr';
+              return deliverOverNostr(req.nostrFallback, body);
+            })
             : d.kind === 'https'
             ? deliverOverHttps(d.target, body).then(function (r) { confirmed = true; return r; })
             : deliverOverNostr(d.target, body);
